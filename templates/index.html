@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Public Transport Route Planner</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container">
+
+    <h1>Public Transport Route Planner</h1>
+
+    <form method="POST">
+
+        <label>Starting Stop</label>
+        <input
+            type="text"
+            name="start"
+            placeholder="e.g. Central Station"
+            required
+        >
+
+        <label>Destination Stop</label>
+        <input
+            type="text"
+            name="end"
+            placeholder="e.g. University"
+            required
+        >
+
+        <button type="submit">
+            Plan Route
+        </button>
+
+    </form>
+
+    {% if route %}
+
+    <div class="result">
+
+        <h2>Route Found</h2>
+
+        <p><strong>Start:</strong> {{ route.start }}</p>
+        <p><strong>Destination:</strong> {{ route.end }}</p>
+
+        <p><strong>Connections:</strong></p>
+
+        <ul>
+            {% for connection in route.connections %}
+                <li>{{ connection }}</li>
+            {% endfor %}
+        </ul>
+
+        <p><strong>Travel Time:</strong> {{ route.travel_time }}</p>
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+</body>
+</html>
