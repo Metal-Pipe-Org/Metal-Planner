@@ -2,23 +2,49 @@
 
 Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia (przystanek A → przystanek B).
 
-## Jak to działa
+## Architektura
 
-- **Dane:** oficjalny rozkład GTFS z [Otwartych Danych Wrocławia](https://open-data.cui.wroclaw.pl/hdb/metadane/13/)
-  (linie MPK: autobusy i tramwaje). `update_gtfs.py` sam wybiera z portalu
-  najnowszą paczkę, która już obowiązuje.
-- **Przechowywanie:** SQLite (`data/gtfs.sqlite`, plik ignorowany przez gita).
-  Aktualizacja buduje bazę obok i podmienia ją atomowo (`os.replace`),
-  więc działająca aplikacja nigdy nie czyta wpół zapisanego pliku.
-- **Wyszukiwanie:** algorytm CSA (Connection Scan) w `planner.py` — wszystkie
-  połączenia dnia posortowane po odjeździe, jeden liniowy skan, przesiadki
-  z buforem 2 min + przejścia między słupkami o tej samej nazwie (3 min).
-  Rozkład dnia jest cache'owany w RAM; pierwsze zapytanie trwa ~1 s, kolejne są natychmiastowe.
-- **Mapa:** Leaflet + kafelki OpenStreetMap (wymaga internetu). Kliknięcie
-  przystanku wybiera start (zielony), drugie kliknięcie cel (czerwony)
-  i od razu szuka; trasa rysowana po przystankach (tramwaj czerwony,
-  autobus niebieski, przejście przerywane). Panel z polami tekstowymi
-  chowa się przyciskiem ☰. API dla frontu: `/api/stops` i `/api/plan`.
+Trzy warstwy:
+
+### 1. Pipeline danych — `update_gtfs.py`
+
+Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
+
+1. Odpytuje [portal Otwartych Danych Wrocławia](https://open-data.cui.wroclaw.pl/hdb/metadane/13/)
+   o listę paczek GTFS i wybiera najnowszą, która **już obowiązuje**
+   (portal wystawia też paczki z przyszłą datą startu — te pomijamy).
+2. Pobiera zip (~12 MB), parsuje pliki CSV (`stops`, `routes`, `trips`,
+   `stop_times`, `calendar`…) i buduje `data/gtfs_new.sqlite`.
+3. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
+   aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
+   wczorajsza baza zostaje nietknięta.
+
+### 2. Backend — Flask
+
+- **`gtfs.py`** — dostęp do SQLite. Przy pierwszym zapytaniu danego dnia
+  wyznacza kursujące tego dnia kursy (logika `calendar.txt`), buduje w RAM
+  tablicę ~1 mln „połączeń" (pojedynczych przejazdów między sąsiednimi
+  przystankami, posortowanych po odjeździe) i cache'uje ją. Klucz cache
+  zawiera mtime pliku bazy, więc po nocnej podmianie dane przeładują się
+  same — bez restartu Flaska.
+- **`planner.py`** — algorytm CSA (Connection Scan): jeden liniowy skan
+  posortowanej tablicy, śledzący najwcześniejszy przyjazd na każdy przystanek.
+  Obsługuje przesiadki (bufor 2 min), przejścia między słupkami o tej samej
+  nazwie (3 min) i kursy po północy (24:xx). Na końcu odtwarza trasę
+  w etapy z godzinami i współrzędnymi. Pierwsze zapytanie dnia ~1 s
+  (ładowanie), kolejne natychmiastowe.
+- **`routes.py`** — trzy endpointy: `/` (strona), `/api/stops` (wszystkie
+  słupki ze współrzędnymi, pod markery) i `/api/plan?start=&end=&time=`
+  (JSON z trasą i geometrią etapów).
+
+### 3. Frontend — `templates/index.html`
+
+Jedna strona: pełnoekranowa mapa Leaflet (kafelki OpenStreetMap — wymaga
+internetu), wszystkie słupki jako markery na canvasie, chowany panel boczny
+(przycisk ☰). Klik 1 = start (zielony), klik 2 = cel (czerwony) i wyszukiwanie
+odpala się samo; etapy trasy rysowane jako polilinie (tramwaj czerwony,
+autobus niebieski, przejście przerywane). Czysty JS bez frameworka,
+gada tylko z dwoma endpointami API.
 
 ## Setup
 
