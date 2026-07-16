@@ -1,60 +1,106 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Public Transport Route Planner</title>
+    <title>Planer podróży — Wrocław</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
 <div class="container">
 
-    <h1>Public Transport Route Planner</h1>
+    <h1>Planer podróży</h1>
+
+    {% if data_error %}
+
+    <div class="error">{{ data_error }}</div>
+
+    {% else %}
 
     <form method="POST">
 
-        <label>Starting Stop</label>
+        <label for="start">Przystanek początkowy</label>
         <input
             type="text"
+            id="start"
             name="start"
-            placeholder="e.g. Central Station"
+            list="stops"
+            value="{{ form_start }}"
+            placeholder="np. Katedra"
             required
         >
 
-        <label>Destination Stop</label>
+        <label for="end">Przystanek docelowy</label>
         <input
             type="text"
+            id="end"
             name="end"
-            placeholder="e.g. University"
+            list="stops"
+            value="{{ form_end }}"
+            placeholder="np. pl. Grunwaldzki"
             required
         >
+
+        <label for="time">Odjazd o (dzisiaj)</label>
+        <input type="time" id="time" name="time" value="{{ form_time }}">
+
+        <datalist id="stops">
+            {% for name in stops %}<option value="{{ name }}">{% endfor %}
+        </datalist>
 
         <button type="submit">
-            Plan Route
+            Szukaj połączenia
         </button>
 
     </form>
 
+    {% endif %}
+
     {% if route %}
 
-    <div class="result">
+        {% if route.error %}
 
-        <h2>Route Found</h2>
+        <div class="error">
+            <p>{{ route.error }}</p>
+            {% if route.suggestions %}
+            <p>Czy chodziło o:</p>
+            <ul>
+                {% for name in route.suggestions %}
+                    <li>{{ name }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
 
-        <p><strong>Start:</strong> {{ route.start }}</p>
-        <p><strong>Destination:</strong> {{ route.end }}</p>
+        {% else %}
 
-        <p><strong>Connections:</strong></p>
+        <div class="result">
 
-        <ul>
-            {% for connection in route.connections %}
-                <li>{{ connection }}</li>
-            {% endfor %}
-        </ul>
+            <h2>{{ route.start }} → {{ route.end }}</h2>
 
-        <p><strong>Travel Time:</strong> {{ route.travel_time }}</p>
+            <p class="summary">
+                <strong>{{ route.departure }} – {{ route.arrival }}</strong>
+                &nbsp;({{ route.travel_time }})
+            </p>
 
-    </div>
+            <ol class="legs">
+                {% for leg in route.legs %}
+                    {% if leg.kind == "ride" %}
+                    <li>
+                        <strong>{{ leg.line }}</strong>
+                        {% if leg.headsign %}<span class="headsign">→ {{ leg.headsign }}</span>{% endif %}
+                        <br>
+                        {{ leg.from_time }} {{ leg.from }} &nbsp;→&nbsp; {{ leg.to_time }} {{ leg.to }}
+                    </li>
+                    {% else %}
+                    <li class="walk">{{ leg.text }}</li>
+                    {% endif %}
+                {% endfor %}
+            </ol>
+
+        </div>
+
+        {% endif %}
 
     {% endif %}
 

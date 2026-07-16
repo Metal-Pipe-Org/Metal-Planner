@@ -40,3 +40,27 @@ button {
     background: #eef7ff;
     border-radius: 8px;
 }
+
+.error {
+    margin-top: 30px;
+    padding: 15px;
+    background: #fdecea;
+    border-radius: 8px;
+}
+
+.summary {
+    font-size: 1.1em;
+}
+
+.legs li {
+    margin-bottom: 12px;
+}
+
+.legs li.walk {
+    color: #555;
+    font-style: italic;
+}
+
+.headsign {
+    color: #555;
+}
