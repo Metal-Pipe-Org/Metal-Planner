@@ -145,6 +145,167 @@ def _reconstruct(day, journey, last_stop):
     return legs
 
 
+SLOWDOWN = 1.5          # pokazujemy trasy do ~1,5x czasu najszybszej
+MIN_EXTRA_SEC = 300     # ...ale zawsze z co najmniej 5 min zapasu
+
+
+def plan_flow(start_query, end_query, when=None):
+    """Mapa przepływów ("mrówki"): wszystkie użyteczne połączenia start -> cel.
+
+    Zamiast jednej trasy zwraca każdy przejazd między sąsiednimi przystankami,
+    którym da się jechać w stronę celu i zdążyć przed deadline
+    (1,5x czasu najszybszej trasy). Intensywność krawędzi mówi, jak blisko
+    optimum jest najlepsza podróż przez nią przechodząca.
+    """
+    when = when or datetime.now()
+
+    try:
+        day = gtfs.load_day(when.date())
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+
+    start_name, source_stops, start_hints = gtfs.match_stop(start_query, day)
+    if start_name is None:
+        return _unknown_stop(start_query, start_hints)
+    end_name, target_stops, end_hints = gtfs.match_stop(end_query, day)
+    if end_name is None:
+        return _unknown_stop(end_query, end_hints)
+    if start_name == end_name:
+        return {"error": "Przystanek początkowy i końcowy są takie same."}
+
+    dep_sec = when.hour * 3600 + when.minute * 60 + when.second
+
+    # Najszybsza trasa wyznacza skalę ("większość mrówek").
+    best_stop, best_arr, _ = _scan(day, source_stops, target_stops, dep_sec)
+    if best_stop is None:
+        return {
+            "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
+                     f"po {_fmt_time(dep_sec)} tego dnia."
+        }
+    duration = best_arr - dep_sec
+    deadline = dep_sec + max(int(duration * SLOWDOWN), duration + MIN_EXTRA_SEC)
+
+    earliest = _forward(day, source_stops, dep_sec, deadline)
+    latest = _backward(day, set(target_stops), dep_sec, deadline)
+
+    # Zapas czasowy trasy optymalnej = pełna jasność.
+    span = max(deadline - best_arr, 1)
+
+    edges = {}
+    conns = day.conns
+    for i in range(
+        bisect_left(day.dep_times, dep_sec),
+        bisect_left(day.dep_times, deadline),
+    ):
+        dep_t, arr_t, dep_s, arr_s, trip = conns[i]
+        reached = earliest.get(dep_s)
+        if reached is None or reached > dep_t:
+            continue
+        leave_by = latest.get(arr_s)
+        if leave_by is None or arr_t > leave_by:
+            continue
+        # Najwcześniejszy możliwy przyjazd do celu podróżą przez tę krawędź:
+        # (deadline - latest[arr_s]) to minimalny czas potrzebny z arr_s do celu.
+        best_via = arr_t + (deadline - leave_by)
+        # (deadline - latest) to czas pozostały dla NAJPÓŹNIEJSZEGO odjazdu,
+        # nie dla arr_t - przy częstych kursach bywa zaniżony, stąd przycięcie.
+        quality = max(0.0, min(1.0, (deadline - best_via) / span))
+        label, _ = day.trip_info[trip]
+        key = (label, dep_s, arr_s)
+        previous = edges.get(key)
+        if previous is None or quality > previous:
+            edges[key] = quality
+
+    kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
+    edge_list = [
+        {
+            "from": day.stop_coords[dep_s],
+            "to": day.stop_coords[arr_s],
+            "num": label.split(" ", 1)[1] if " " in label else label,
+            "kind": kind_map.get(label.split(" ", 1)[0], "other"),
+            "w": round(q, 3),
+        }
+        for (label, dep_s, arr_s), q in edges.items()
+    ]
+    edge_list.sort(key=lambda e: e["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
+
+    return {
+        "start": start_name,
+        "end": end_name,
+        "departure": _fmt_time(dep_sec),
+        "best_arrival": _fmt_time(best_arr),
+        "deadline": _fmt_time(deadline),
+        "edges": edge_list,
+    }
+
+
+def _forward(day, source_stops, dep_sec, deadline):
+    """Jak _scan, ale bez celu: najwcześniejsze przyjazdy wszędzie do deadline."""
+    conns = day.conns
+    earliest = {}
+    arrived_by = {}     # 'origin' | 'ride' | 'walk' - do bufora przesiadki
+    trip_board = set()
+
+    for stop in source_stops:
+        earliest[stop] = dep_sec
+        arrived_by[stop] = "origin"
+
+    for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
+        dep_t, arr_t, dep_s, arr_s, trip = conns[i]
+        if dep_t > deadline:
+            break
+        if trip not in trip_board:
+            reached = earliest.get(dep_s)
+            if reached is None:
+                continue
+            buffer = TRANSFER_SEC if arrived_by[dep_s] == "ride" else 0
+            if reached + buffer > dep_t:
+                continue
+            trip_board.add(trip)
+        if arr_t < earliest.get(arr_s, INF):
+            earliest[arr_s] = arr_t
+            arrived_by[arr_s] = "ride"
+            for sibling in day.siblings.get(arr_s, ()):
+                walk_arr = arr_t + WALK_SEC
+                if walk_arr < earliest.get(sibling, INF):
+                    earliest[sibling] = walk_arr
+                    arrived_by[sibling] = "walk"
+    return earliest
+
+
+def _backward(day, target_set, dep_sec, deadline):
+    """Skan wstecz: najpóźniejszy moment na każdym przystanku, z którego
+    da się jeszcze dotrzeć do celu przed deadline.
+
+    Połączenia przetwarzamy malejąco po odjeździe - wszystko, co wpływa na
+    latest[przystanek] po czasie t, jest już policzone, zanim do t dojdziemy.
+    """
+    conns = day.conns
+    latest = {stop: deadline for stop in target_set}
+    trip_ok = set()
+
+    for i in range(bisect_left(day.dep_times, deadline) - 1, -1, -1):
+        dep_t, arr_t, dep_s, arr_s, trip = conns[i]
+        if dep_t < dep_sec:
+            break
+        if trip not in trip_ok:
+            leave_by = latest.get(arr_s)
+            if leave_by is None:
+                continue
+            # Na przystanku końcowym nie ma przesiadki, więc bez bufora.
+            buffer = 0 if arr_s in target_set else TRANSFER_SEC
+            if arr_t + buffer > leave_by:
+                continue
+            trip_ok.add(trip)
+        if dep_t > latest.get(dep_s, -1):
+            latest[dep_s] = dep_t
+            for sibling in day.siblings.get(dep_s, ()):
+                walk_dep = dep_t - WALK_SEC
+                if walk_dep > latest.get(sibling, -1):
+                    latest[sibling] = walk_dep
+    return latest
+
+
 def _unknown_stop(query, hints):
     result = {"error": f"Nie znam przystanku „{query.strip()}”."}
     if hints:

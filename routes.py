@@ -3,7 +3,7 @@ from datetime import datetime
 from flask import jsonify, render_template, request
 
 import gtfs
-from planner import plan_route
+from planner import plan_flow, plan_route
 
 
 def _parse_when(time_str):
@@ -47,6 +47,14 @@ def init_routes(app):
     @app.route("/api/plan")
     def api_plan():
         return jsonify(plan_route(
+            request.args.get("start", ""),
+            request.args.get("end", ""),
+            _parse_when(request.args.get("time")),
+        ))
+
+    @app.route("/api/flow")
+    def api_flow():
+        return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),

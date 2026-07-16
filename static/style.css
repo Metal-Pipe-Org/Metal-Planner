@@ -120,3 +120,33 @@ input {
 .headsign {
     color: #555;
 }
+
+.line-badge {
+    background: #fff;
+    border: 1.5px solid #444;
+    border-radius: 8px;
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 14px;
+    width: auto !important;
+    height: auto !important;
+    white-space: nowrap;
+    text-align: center;
+    box-shadow: 0 0 3px rgba(0, 0, 0, 0.35);
+}
+
+.line-badge.tram {
+    color: #c62828;
+    border-color: #c62828;
+}
+
+.line-badge.bus {
+    color: #1565c0;
+    border-color: #1565c0;
+}
+
+.line-badge.other {
+    color: #6a1b9a;
+    border-color: #6a1b9a;
+}

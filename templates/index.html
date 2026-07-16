@@ -78,13 +78,26 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 
     const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
                         fillColor: '#42a5f5', fillOpacity: 0.8};
+    // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
+    const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
+                       fillColor: '#90a4ae', fillOpacity: 0.25};
+    let baseDimmed = false;
 
     function styleFor(name) {
         if (name === sel.start) return {radius: 8, weight: 2, color: '#1b5e20',
                                         fillColor: '#4caf50', fillOpacity: 1};
         if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
                                       fillColor: '#ef5350', fillOpacity: 1};
-        return BASE_STYLE;
+        return baseDimmed ? DIM_STYLE : BASE_STYLE;
+    }
+
+    function setBaseDim(dim) {
+        if (baseDimmed === dim) return;
+        baseDimmed = dim;
+        for (const [name, markers] of markersByName) {
+            const style = styleFor(name);
+            for (const m of markers) m.setStyle(style);
+        }
     }
 
     function restyle(...names) {
@@ -96,6 +109,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 
     function clearRoute() {
         if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+        setBaseDim(false);
         resultBox.innerHTML = '';
     }
 
@@ -142,49 +156,69 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         resultBox.innerHTML = html + '</div>';
     }
 
-    function drawRoute(route) {
+    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', other: '#6a1b9a'};
+
+    // Mapa przepływów: każda użyteczna krawędź osobno; jasność i grubość
+    // linii = jak blisko optimum jest najlepsza podróż przez tę krawędź.
+    function drawFlow(flow) {
+        setBaseDim(true);
         const layers = [];
-        const points = [];
-        for (const leg of route.legs) {
-            if (!leg.path || leg.path.length < 2) continue;
-            points.push(...leg.path);
-            if (leg.kind === 'walk') {
-                layers.push(L.polyline(leg.path,
-                    {color: '#616161', weight: 3, dashArray: '4 8'}));
-            } else {
-                const color = leg.line.startsWith('Tramwaj') ? '#c62828' : '#1565c0';
-                layers.push(L.polyline(leg.path, {color, weight: 5, opacity: 0.85}));
-                for (const p of leg.path) {
-                    layers.push(L.circleMarker(p, {radius: 3, weight: 1, color,
-                        fillColor: '#fff', fillOpacity: 1, interactive: false}));
-                }
+        const byLine = new Map();  // "num|kind" -> [krawędzie] do plakietek
+
+        for (const e of flow.edges) {           // posortowane po w rosnąco
+            const color = FLOW_COLORS[e.kind] || FLOW_COLORS.other;
+            layers.push(L.polyline([e.from, e.to], {
+                color,
+                opacity: 0.10 + 0.80 * e.w,
+                weight: 1.5 + 4.5 * e.w,
+                interactive: false,
+            }));
+            const key = e.num + '|' + e.kind;
+            if (!byLine.has(key)) byLine.set(key, []);
+            byLine.get(key).push(e);
+        }
+
+        // Plakietki z numerem linii - tylko dla linii, które mają sensowny
+        // udział w przepływie; zawsze na najjaśniejszym odcinku, dłuższe
+        // linie dostają dodatkowe plakietki wzdłuż trasy.
+        for (const [key, edges] of byLine) {
+            const best = edges[edges.length - 1];
+            if (best.w < 0.35) continue;
+            const [num, kind] = key.split('|');
+            const picks = new Set([edges.length - 1]);
+            if (edges.length >= 10) picks.add(Math.floor(edges.length / 2));
+            if (edges.length >= 20) picks.add(Math.floor(edges.length / 4));
+            for (const i of picks) {
+                const e = edges[i];
+                const mid = [(e.from[0] + e.to[0]) / 2, (e.from[1] + e.to[1]) / 2];
+                layers.push(L.marker(mid, {
+                    icon: L.divIcon({
+                        className: `line-badge ${kind}`,
+                        html: esc(num),
+                        iconSize: null,
+                    }),
+                    interactive: false,
+                    opacity: 0.45 + 0.55 * e.w,
+                }));
             }
         }
+
         routeLayer = L.layerGroup(layers).addTo(map);
+
+        // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać
+        // do widoku całego województwa przez jedną bladą nitkę.
+        let points = [];
+        for (const threshold of [0.75, 0.5, 0]) {
+            points = flow.edges.filter(e => e.w >= threshold)
+                               .flatMap(e => [e.from, e.to]);
+            if (points.length >= 4) break;
+        }
         if (points.length) {
             map.fitBounds(L.latLngBounds(points), {
                 paddingTopLeft: [400, 30],     // miejsce na panel z lewej
                 paddingBottomRight: [30, 30],
             });
         }
-    }
-
-    function renderLegs(route) {
-        let html = `<div class="result">
-            <h2>${esc(route.start)} → ${esc(route.end)}</h2>
-            <p class="summary"><strong>${esc(route.departure)} – ${esc(route.arrival)}</strong>
-            (${esc(route.travel_time)})</p><ol class="legs">`;
-        for (const leg of route.legs) {
-            if (leg.kind === 'ride') {
-                html += `<li><strong>${esc(leg.line)}</strong>` +
-                    (leg.headsign ? ` <span class="headsign">→ ${esc(leg.headsign)}</span>` : '') +
-                    `<br>${esc(leg.from_time)} ${esc(leg.from)}
-                     &nbsp;→&nbsp; ${esc(leg.to_time)} ${esc(leg.to)}</li>`;
-            } else {
-                html += `<li class="walk">${esc(leg.text)}</li>`;
-            }
-        }
-        resultBox.innerHTML = html + '</ol></div>';
     }
 
     function search() {
@@ -195,12 +229,12 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         });
         clearRoute();
         resultBox.innerHTML = '<p class="hint">Szukam…</p>';
-        fetch('/api/plan?' + params)
+        fetch('/api/flow?' + params)
             .then(r => r.json())
-            .then(route => {
-                if (route.error) { showError(route.error, route.suggestions); return; }
-                renderLegs(route);
-                drawRoute(route);
+            .then(flow => {
+                if (flow.error) { showError(flow.error, flow.suggestions); return; }
+                resultBox.innerHTML = '';      // wynik jest tylko na mapie
+                drawFlow(flow);
             })
             .catch(() => showError('Nie udało się połączyć z serwerem.'));
     }
