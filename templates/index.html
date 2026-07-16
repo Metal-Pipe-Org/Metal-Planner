@@ -2,12 +2,18 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Planer podróży — Wrocław</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
-<div class="container">
+<div id="map"></div>
+
+<button id="panel-toggle" title="Pokaż/ukryj panel">☰</button>
+
+<div id="panel">
 
     <h1>Planer podróży</h1>
 
@@ -17,94 +23,215 @@
 
     {% else %}
 
-    <form method="POST">
+    <p class="hint">
+        Kliknij na mapie przystanek startowy, potem docelowy —
+        albo wpisz nazwy ręcznie.
+    </p>
 
-        <label for="start">Przystanek początkowy</label>
-        <input
-            type="text"
-            id="start"
-            name="start"
-            list="stops"
-            value="{{ form_start }}"
-            placeholder="np. Katedra"
-            required
-        >
+    <label for="start">Przystanek początkowy</label>
+    <input type="text" id="start" list="stops" placeholder="np. Katedra">
 
-        <label for="end">Przystanek docelowy</label>
-        <input
-            type="text"
-            id="end"
-            name="end"
-            list="stops"
-            value="{{ form_end }}"
-            placeholder="np. pl. Grunwaldzki"
-            required
-        >
+    <label for="end">Przystanek docelowy</label>
+    <input type="text" id="end" list="stops" placeholder="np. pl. Grunwaldzki">
 
-        <label for="time">Odjazd o (dzisiaj)</label>
-        <input type="time" id="time" name="time" value="{{ form_time }}">
+    <label for="time">Odjazd o (dzisiaj)</label>
+    <input type="time" id="time" value="{{ form_time }}">
 
-        <datalist id="stops">
-            {% for name in stops %}<option value="{{ name }}">{% endfor %}
-        </datalist>
+    <datalist id="stops">
+        {% for name in stops %}<option value="{{ name }}">{% endfor %}
+    </datalist>
 
-        <button type="submit">
-            Szukaj połączenia
-        </button>
+    <div class="buttons">
+        <button id="search">Szukaj połączenia</button>
+        <button id="clear">Wyczyść</button>
+    </div>
 
-    </form>
-
-    {% endif %}
-
-    {% if route %}
-
-        {% if route.error %}
-
-        <div class="error">
-            <p>{{ route.error }}</p>
-            {% if route.suggestions %}
-            <p>Czy chodziło o:</p>
-            <ul>
-                {% for name in route.suggestions %}
-                    <li>{{ name }}</li>
-                {% endfor %}
-            </ul>
-            {% endif %}
-        </div>
-
-        {% else %}
-
-        <div class="result">
-
-            <h2>{{ route.start }} → {{ route.end }}</h2>
-
-            <p class="summary">
-                <strong>{{ route.departure }} – {{ route.arrival }}</strong>
-                &nbsp;({{ route.travel_time }})
-            </p>
-
-            <ol class="legs">
-                {% for leg in route.legs %}
-                    {% if leg.kind == "ride" %}
-                    <li>
-                        <strong>{{ leg.line }}</strong>
-                        {% if leg.headsign %}<span class="headsign">→ {{ leg.headsign }}</span>{% endif %}
-                        <br>
-                        {{ leg.from_time }} {{ leg.from }} &nbsp;→&nbsp; {{ leg.to_time }} {{ leg.to }}
-                    </li>
-                    {% else %}
-                    <li class="walk">{{ leg.text }}</li>
-                    {% endif %}
-                {% endfor %}
-            </ol>
-
-        </div>
-
-        {% endif %}
+    <div id="result"></div>
 
     {% endif %}
 
 </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', {preferCanvas: true, zoomControl: false})
+    .setView([51.107, 17.038], 13);
+L.control.zoom({position: 'topright'}).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap',
+}).addTo(map);
+
+document.getElementById('panel-toggle').addEventListener('click', () => {
+    document.getElementById('panel').classList.toggle('hidden');
+});
+
+const startInput = document.getElementById('start');
+const endInput = document.getElementById('end');
+const resultBox = document.getElementById('result');
+
+if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje błąd)
+
+    const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
+    let sel = {start: null, end: null};       // przystanki wybrane kliknięciem
+    let routeLayer = null;
+
+    const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
+                        fillColor: '#42a5f5', fillOpacity: 0.8};
+
+    function styleFor(name) {
+        if (name === sel.start) return {radius: 8, weight: 2, color: '#1b5e20',
+                                        fillColor: '#4caf50', fillOpacity: 1};
+        if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
+                                      fillColor: '#ef5350', fillOpacity: 1};
+        return BASE_STYLE;
+    }
+
+    function restyle(...names) {
+        for (const name of names) {
+            if (!name) continue;
+            for (const m of markersByName.get(name) || []) m.setStyle(styleFor(name));
+        }
+    }
+
+    function clearRoute() {
+        if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+        resultBox.innerHTML = '';
+    }
+
+    function pickStop(name) {
+        const previous = [sel.start, sel.end];
+        if (!sel.start || (sel.start && sel.end)) {
+            sel = {start: name, end: null};   // kolejne kliknięcie zaczyna od nowa
+            clearRoute();
+        } else if (name !== sel.start) {
+            sel.end = name;
+        }
+        startInput.value = sel.start || '';
+        endInput.value = sel.end || '';
+        restyle(...previous, sel.start, sel.end);
+        if (sel.start && sel.end) search();
+    }
+
+    fetch('/api/stops')
+        .then(r => r.json())
+        .then(stops => {
+            if (stops.error) { showError(stops.error); return; }
+            for (const s of stops) {
+                const m = L.circleMarker([s.lat, s.lon], BASE_STYLE).addTo(map);
+                m.bindTooltip(s.name);
+                m.on('click', () => pickStop(s.name));
+                if (!markersByName.has(s.name)) markersByName.set(s.name, []);
+                markersByName.get(s.name).push(m);
+            }
+        });
+
+    function esc(text) {
+        const div = document.createElement('div');
+        div.textContent = text ?? '';
+        return div.innerHTML;
+    }
+
+    function showError(message, suggestions) {
+        let html = `<div class="error"><p>${esc(message)}</p>`;
+        if (suggestions && suggestions.length) {
+            html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(name =>
+                `<li><a href="#" data-name="${esc(name)}">${esc(name)}</a></li>`
+            ).join('') + '</ul>';
+        }
+        resultBox.innerHTML = html + '</div>';
+    }
+
+    function drawRoute(route) {
+        const layers = [];
+        const points = [];
+        for (const leg of route.legs) {
+            if (!leg.path || leg.path.length < 2) continue;
+            points.push(...leg.path);
+            if (leg.kind === 'walk') {
+                layers.push(L.polyline(leg.path,
+                    {color: '#616161', weight: 3, dashArray: '4 8'}));
+            } else {
+                const color = leg.line.startsWith('Tramwaj') ? '#c62828' : '#1565c0';
+                layers.push(L.polyline(leg.path, {color, weight: 5, opacity: 0.85}));
+                for (const p of leg.path) {
+                    layers.push(L.circleMarker(p, {radius: 3, weight: 1, color,
+                        fillColor: '#fff', fillOpacity: 1, interactive: false}));
+                }
+            }
+        }
+        routeLayer = L.layerGroup(layers).addTo(map);
+        if (points.length) {
+            map.fitBounds(L.latLngBounds(points), {
+                paddingTopLeft: [400, 30],     // miejsce na panel z lewej
+                paddingBottomRight: [30, 30],
+            });
+        }
+    }
+
+    function renderLegs(route) {
+        let html = `<div class="result">
+            <h2>${esc(route.start)} → ${esc(route.end)}</h2>
+            <p class="summary"><strong>${esc(route.departure)} – ${esc(route.arrival)}</strong>
+            (${esc(route.travel_time)})</p><ol class="legs">`;
+        for (const leg of route.legs) {
+            if (leg.kind === 'ride') {
+                html += `<li><strong>${esc(leg.line)}</strong>` +
+                    (leg.headsign ? ` <span class="headsign">→ ${esc(leg.headsign)}</span>` : '') +
+                    `<br>${esc(leg.from_time)} ${esc(leg.from)}
+                     &nbsp;→&nbsp; ${esc(leg.to_time)} ${esc(leg.to)}</li>`;
+            } else {
+                html += `<li class="walk">${esc(leg.text)}</li>`;
+            }
+        }
+        resultBox.innerHTML = html + '</ol></div>';
+    }
+
+    function search() {
+        const params = new URLSearchParams({
+            start: startInput.value,
+            end: endInput.value,
+            time: document.getElementById('time').value,
+        });
+        clearRoute();
+        resultBox.innerHTML = '<p class="hint">Szukam…</p>';
+        fetch('/api/plan?' + params)
+            .then(r => r.json())
+            .then(route => {
+                if (route.error) { showError(route.error, route.suggestions); return; }
+                renderLegs(route);
+                drawRoute(route);
+            })
+            .catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }
+
+    document.getElementById('search').addEventListener('click', search);
+
+    document.getElementById('clear').addEventListener('click', () => {
+        const previous = [sel.start, sel.end];
+        sel = {start: null, end: null};
+        startInput.value = '';
+        endInput.value = '';
+        clearRoute();
+        restyle(...previous);
+    });
+
+    // Kliknięcie podpowiedzi wstawia nazwę w pierwsze niepasujące pole.
+    const knownNames = () => new Set([...markersByName.keys()].map(n => n.toLowerCase()));
+    resultBox.addEventListener('click', event => {
+        const name = event.target.dataset && event.target.dataset.name;
+        if (!name) return;
+        event.preventDefault();
+        const known = knownNames();
+        if (!known.has(startInput.value.trim().toLowerCase())) {
+            startInput.value = name;
+        } else {
+            endInput.value = name;
+        }
+        if (startInput.value && endInput.value) search();
+    });
+}
+</script>
 
 </body>
 </html>

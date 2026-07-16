@@ -1,17 +1,28 @@
 from datetime import datetime
 
-from flask import render_template, request
+from flask import jsonify, render_template, request
 
 import gtfs
 from planner import plan_route
 
 
+def _parse_when(time_str):
+    """Godzina 'HH:MM' z formularza -> datetime dzisiaj o tej porze (domyślnie teraz)."""
+    when = datetime.now()
+    time_str = (time_str or "").strip()
+    if time_str:
+        try:
+            hours, minutes = time_str.split(":")
+            when = when.replace(hour=int(hours), minute=int(minutes), second=0)
+        except ValueError:
+            pass
+    return when
+
+
 def init_routes(app):
 
-    @app.route("/", methods=["GET", "POST"])
+    @app.route("/")
     def index():
-        route = None
-
         try:
             stops = gtfs.all_stop_names()
             data_error = None
@@ -19,32 +30,24 @@ def init_routes(app):
             stops = []
             data_error = str(e)
 
-        now = datetime.now()
-        form_time = now.strftime("%H:%M")
-
-        if request.method == "POST" and data_error is None:
-            when = now
-            time_str = request.form.get("time", "").strip()
-            if time_str:
-                try:
-                    hours, minutes = time_str.split(":")
-                    when = now.replace(hour=int(hours), minute=int(minutes), second=0)
-                    form_time = time_str
-                except ValueError:
-                    pass
-
-            route = plan_route(
-                request.form.get("start", ""),
-                request.form.get("end", ""),
-                when,
-            )
-
         return render_template(
             "index.html",
-            route=route,
             stops=stops,
             data_error=data_error,
-            form_time=form_time,
-            form_start=request.form.get("start", ""),
-            form_end=request.form.get("end", ""),
+            form_time=datetime.now().strftime("%H:%M"),
         )
+
+    @app.route("/api/stops")
+    def api_stops():
+        try:
+            return jsonify(gtfs.all_stops_geo())
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+
+    @app.route("/api/plan")
+    def api_plan():
+        return jsonify(plan_route(
+            request.args.get("start", ""),
+            request.args.get("end", ""),
+            _parse_when(request.args.get("time")),
+        ))

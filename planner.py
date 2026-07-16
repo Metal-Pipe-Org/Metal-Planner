@@ -116,12 +116,18 @@ def _reconstruct(day, journey, last_stop):
                 "text": f"Zmiana stanowiska na przystanku "
                         f"{day.stop_names[stop]} (ok. {WALK_SEC // 60} min)",
                 "dep_sec": 0,
+                "path": [day.stop_coords[from_stop], day.stop_coords[stop]],
             })
             stop = from_stop
         else:
             _, board_i, exit_i = entry
             board = day.conns[board_i]
-            line, headsign = day.trip_info[board[4]]
+            trip = board[4]
+            line, headsign = day.trip_info[trip]
+            # Pełna lista przystanków etapu - do narysowania linii na mapie.
+            path_rows = gtfs.trip_path(
+                trip, board[2], board[0], stop, day.conns[exit_i][1]
+            )
             legs.append({
                 "kind": "ride",
                 "line": line,
@@ -131,6 +137,8 @@ def _reconstruct(day, journey, last_stop):
                 "to": day.stop_names[stop],
                 "to_time": _fmt_time(day.conns[exit_i][1]),
                 "dep_sec": board[0],
+                "stops": [day.stop_names[s] for s, _, _ in path_rows],
+                "path": [day.stop_coords[s] for s, _, _ in path_rows],
             })
             stop = board[2]
     legs.reverse()

@@ -14,6 +14,11 @@ Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia (przystanek A �
   połączenia dnia posortowane po odjeździe, jeden liniowy skan, przesiadki
   z buforem 2 min + przejścia między słupkami o tej samej nazwie (3 min).
   Rozkład dnia jest cache'owany w RAM; pierwsze zapytanie trwa ~1 s, kolejne są natychmiastowe.
+- **Mapa:** Leaflet + kafelki OpenStreetMap (wymaga internetu). Kliknięcie
+  przystanku wybiera start (zielony), drugie kliknięcie cel (czerwony)
+  i od razu szuka; trasa rysowana po przystankach (tramwaj czerwony,
+  autobus niebieski, przejście przerywane). Panel z polami tekstowymi
+  chowa się przyciskiem ☰. API dla frontu: `/api/stops` i `/api/plan`.
 
 ## Setup
 
@@ -48,3 +53,5 @@ działa dalej na wczorajszych danych.
   końcówek wczorajszych kursów.
 - Brak tras pieszych po mieście — przesiadka możliwa tylko między słupkami
   o identycznej nazwie przystanku.
+- Linia trasy na mapie łączy przystanki po prostej (nie po torach/ulicach) —
+  dokładna geometria wymagałaby wczytania `shapes.txt`.

@@ -24,8 +24,8 @@ class DayData:
     """Rozkład jednego dnia przygotowany pod algorytm wyszukiwania."""
 
     __slots__ = (
-        "conns", "dep_times", "stop_names", "stops_by_key", "display_name",
-        "siblings", "trip_info",
+        "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
+        "display_name", "siblings", "trip_info",
     )
 
     def __init__(self):
@@ -35,6 +35,7 @@ class DayData:
         self.conns = []
         self.dep_times = []          # równoległa lista odjazdów do bisect
         self.stop_names = {}         # stop_id -> nazwa
+        self.stop_coords = {}        # stop_id -> (lat, lon)
         self.stops_by_key = {}       # nazwa.casefold() -> [stop_id, ...]
         self.display_name = {}       # nazwa.casefold() -> oryginalna pisownia
         self.siblings = {}           # stop_id -> inne słupki o tej samej nazwie
@@ -100,9 +101,12 @@ def load_day(day):
             active_trips.add(trip_id)
             data.trip_info[trip_id] = (route_names.get(route_id, "Linia ?"), headsign or "")
 
-    for stop_id, stop_name in db.execute("SELECT stop_id, stop_name FROM stops"):
+    for stop_id, stop_name, lat, lon in db.execute(
+        "SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops"
+    ):
         stop_id = sys.intern(stop_id)
         data.stop_names[stop_id] = stop_name
+        data.stop_coords[stop_id] = (lat, lon)
         name_key = stop_name.casefold()
         data.stops_by_key.setdefault(name_key, []).append(stop_id)
         data.display_name.setdefault(name_key, stop_name)
@@ -170,3 +174,36 @@ def all_stop_names():
     )]
     db.close()
     return names
+
+
+def all_stops_geo():
+    """Wszystkie słupki z współrzędnymi - do narysowania na mapie."""
+    db = _connect()
+    stops = [
+        {"name": name, "lat": lat, "lon": lon}
+        for name, lat, lon in db.execute(
+            "SELECT stop_name, stop_lat, stop_lon FROM stops"
+        )
+    ]
+    db.close()
+    return stops
+
+
+def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr):
+    """Kolejne przystanki kursu od wsiadania do wysiadania (stop_id, przyjazd, odjazd)."""
+    db = _connect()
+    rows = db.execute(
+        "SELECT stop_id, arrival_sec, departure_sec FROM stop_times "
+        "WHERE trip_id = ? ORDER BY stop_sequence",
+        (trip_id,),
+    ).fetchall()
+    db.close()
+
+    start_i = None
+    for i, (stop_id, arrival_sec, departure_sec) in enumerate(rows):
+        if start_i is None:
+            if stop_id == board_stop and departure_sec == board_dep:
+                start_i = i
+        elif stop_id == exit_stop and arrival_sec == exit_arr:
+            return rows[start_i:i + 1]
+    return []
