@@ -150,12 +150,14 @@ MIN_EXTRA_SEC = 300     # ...ale zawsze z co najmniej 5 min zapasu
 
 
 def plan_flow(start_query, end_query, when=None):
-    """Mapa przepływów ("mrówki"): wszystkie użyteczne połączenia start -> cel.
+    """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
-    Zamiast jednej trasy zwraca każdy przejazd między sąsiednimi przystankami,
-    którym da się jechać w stronę celu i zdążyć przed deadline
-    (1,5x czasu najszybszej trasy). Intensywność krawędzi mówi, jak blisko
-    optimum jest najlepsza podróż przez nią przechodząca.
+    Jednostką jest KURS, nie pojedynczy przeskok: dla każdego kursu, do którego
+    realnie da się wsiąść (skan w przód), rysujemy jeden ciągły segment od
+    przystanku wsiadania do ostatniego przystanku, z którego jeszcze da się
+    dojechać do celu przed deadline (skan wstecz). Kursy bez takiego wyjścia
+    nie są rysowane wcale. Intensywność jest jedna na cały segment - zapas
+    czasu najlepszego wyjścia względem deadline (1,5x czasu najszybszej trasy).
     """
     when = when or datetime.now()
 
@@ -185,49 +187,64 @@ def plan_flow(start_query, end_query, when=None):
     duration = best_arr - dep_sec
     deadline = dep_sec + max(int(duration * SLOWDOWN), duration + MIN_EXTRA_SEC)
 
-    earliest = _forward(day, source_stops, dep_sec, deadline)
+    earliest, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, set(target_stops), dep_sec, deadline)
 
     # Zapas czasowy trasy optymalnej = pełna jasność.
     span = max(deadline - best_arr, 1)
 
-    edges = {}
+    # Połączenia okna pogrupowane per kurs, od miejsca wsiadania.
+    # Tablica jest posortowana po odjeździe, więc w ramach jednego kursu
+    # indeksy idą zgodnie z kolejnością jazdy.
     conns = day.conns
+    trip_conns = {}
     for i in range(
         bisect_left(day.dep_times, dep_sec),
         bisect_left(day.dep_times, deadline),
     ):
-        dep_t, arr_t, dep_s, arr_s, trip = conns[i]
-        reached = earliest.get(dep_s)
-        if reached is None or reached > dep_t:
+        trip = conns[i][4]
+        board_i = trip_board.get(trip)
+        if board_i is None or i < board_i:
             continue
-        leave_by = latest.get(arr_s)
-        if leave_by is None or arr_t > leave_by:
-            continue
-        # Najwcześniejszy możliwy przyjazd do celu podróżą przez tę krawędź:
-        # (deadline - latest[arr_s]) to minimalny czas potrzebny z arr_s do celu.
-        best_via = arr_t + (deadline - leave_by)
-        # (deadline - latest) to czas pozostały dla NAJPÓŹNIEJSZEGO odjazdu,
-        # nie dla arr_t - przy częstych kursach bywa zaniżony, stąd przycięcie.
-        quality = max(0.0, min(1.0, (deadline - best_via) / span))
+        trip_conns.setdefault(trip, []).append(i)
+
+    segments = {}
+    for trip, idxs in trip_conns.items():
+        stops_seq = [conns[idxs[0]][2]]     # przystanek wsiadania
+        cut = 0          # długość ścieżki do ostatniego użytecznego wyjścia
+        best_q = -1.0
+        for i in idxs:
+            dep_t, arr_t, dep_s, arr_s, _ = conns[i]
+            if dep_s != stops_seq[-1]:
+                break                        # przerwany łańcuch - utnij
+            stops_seq.append(arr_s)
+            leave_by = latest.get(arr_s)
+            if leave_by is not None and arr_t <= leave_by:
+                # Stąd wciąż da się dojechać do celu przed deadline;
+                # zapas (leave_by - arr_t) mówi, jak wygodnie.
+                cut = len(stops_seq)
+                q = (leave_by - arr_t) / span
+                if q > best_q:
+                    best_q = q
+        if cut < 2:
+            continue     # kurs bez użytecznego wyjścia - nie rysujemy go wcale
         label, _ = day.trip_info[trip]
-        key = (label, dep_s, arr_s)
-        previous = edges.get(key)
-        if previous is None or quality > previous:
-            edges[key] = quality
+        key = (label, tuple(stops_seq[:cut]))
+        q = max(0.0, min(1.0, best_q))
+        if q > segments.get(key, -1.0):
+            segments[key] = q
 
     kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
-    edge_list = [
+    seg_list = [
         {
-            "from": day.stop_coords[dep_s],
-            "to": day.stop_coords[arr_s],
+            "path": [day.stop_coords[s] for s in stops_seq],
             "num": label.split(" ", 1)[1] if " " in label else label,
             "kind": kind_map.get(label.split(" ", 1)[0], "other"),
             "w": round(q, 3),
         }
-        for (label, dep_s, arr_s), q in edges.items()
+        for (label, stops_seq), q in segments.items()
     ]
-    edge_list.sort(key=lambda e: e["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
+    seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
 
     return {
         "start": start_name,
@@ -235,16 +252,20 @@ def plan_flow(start_query, end_query, when=None):
         "departure": _fmt_time(dep_sec),
         "best_arrival": _fmt_time(best_arr),
         "deadline": _fmt_time(deadline),
-        "edges": edge_list,
+        "segments": seg_list,
     }
 
 
 def _forward(day, source_stops, dep_sec, deadline):
-    """Jak _scan, ale bez celu: najwcześniejsze przyjazdy wszędzie do deadline."""
+    """Jak _scan, ale bez celu: najwcześniejsze przyjazdy wszędzie do deadline.
+
+    Zwraca (earliest, trip_board), gdzie trip_board[kurs] to indeks połączenia,
+    na którym najwcześniej da się do niego wsiąść - początek segmentu na mapie.
+    """
     conns = day.conns
     earliest = {}
     arrived_by = {}     # 'origin' | 'ride' | 'walk' - do bufora przesiadki
-    trip_board = set()
+    trip_board = {}
 
     for stop in source_stops:
         earliest[stop] = dep_sec
@@ -261,7 +282,7 @@ def _forward(day, source_stops, dep_sec, deadline):
             buffer = TRANSFER_SEC if arrived_by[dep_s] == "ride" else 0
             if reached + buffer > dep_t:
                 continue
-            trip_board.add(trip)
+            trip_board[trip] = i
         if arr_t < earliest.get(arr_s, INF):
             earliest[arr_s] = arr_t
             arrived_by[arr_s] = "ride"
@@ -270,7 +291,7 @@ def _forward(day, source_stops, dep_sec, deadline):
                 if walk_arr < earliest.get(sibling, INF):
                     earliest[sibling] = walk_arr
                     arrived_by[sibling] = "walk"
-    return earliest
+    return earliest, trip_board
 
 
 def _backward(day, target_set, dep_sec, deadline):

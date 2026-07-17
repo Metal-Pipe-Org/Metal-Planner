@@ -85,19 +85,29 @@ ten sam efekt daje analiza dwóch skanów:
 3. **Skan wstecz** od celu: najpóźniejszy moment `latest[s]`, w którym można
    być na przystanku `s` i jeszcze zdążyć do celu przed deadline
    (połączenia przetwarzane malejąco po odjeździe).
-4. Połączenie (przejazd A→B kursu o odjeździe `dep` i przyjeździe `arr`)
-   jest **użyteczne**, gdy `earliest[A] ≤ dep` (da się na nie zdążyć)
-   i `arr ≤ latest[B]` (po nim da się jeszcze dojechać do celu).
-   To dokładnie zbiór krawędzi wszystkich podróży mieszczących się w limicie —
-   „każdy autobus, który wiezie choć trochę w moim kierunku".
-5. **Intensywność**: najlepszy możliwy przyjazd do celu podróżą przez tę
-   krawędź to `arr + (deadline − latest[B])`. Jakość = ile zapasu do deadline
-   zostaje, znormalizowane tak, że trasa optymalna ma 1,0, a wariant na styk
-   0,0. (To przybliżenie: `deadline − latest` to czas pozostały dla
-   najpóźniejszego odjazdu, nie dla `arr` — przy częstych kursach bywa
-   zaniżony, więc wynik przycinamy do [0, 1].)
-6. **Agregacja**: krawędzie zliczamy per (linia, para przystanków), biorąc
-   maksimum jakości z wszystkich kursów w oknie.
+4. **Jednostką rysowania jest kurs, nie pojedynczy przeskok.** Dla każdego
+   kursu, do którego skan w przód znalazł wsiadanie (`trip_board[kurs]` =
+   pierwsze połączenie, na które zdążymy z naszego startu, z buforem
+   przesiadki), idziemy wzdłuż kursu i szukamy **wyjść**: przystanków `s`
+   o przyjeździe `arr`, gdzie `latest[s]` istnieje i `arr ≤ latest[s]`
+   (stąd wciąż da się dojechać do celu przed deadline).
+5. Rysujemy **jeden ciągły segment** od przystanku wsiadania do OSTATNIEGO
+   użytecznego wyjścia — nic przed miejscem, gdzie realnie można wsiąść,
+   nic za miejscem, za którym kurs przestaje pomagać. Kurs bez żadnego
+   użytecznego wyjścia nie jest rysowany wcale.
+6. **Intensywność** jest jedna na cały segment: największy zapas
+   `latest[s] − arr` po wszystkich wyjściach, znormalizowany tak, że trasa
+   optymalna ma 1,0, a wariant „na styk przed deadline" 0,0.
+7. **Agregacja**: segmenty o tej samej linii i identycznej ścieżce
+   (kolejne kursy w oknie) sklejamy, biorąc maksimum jakości.
+
+Dlaczego nie per przeskok? Pierwsza wersja filtrowała każdy przeskok A→B
+niezależnie (`earliest[A] ≤ dep` i `arr ≤ latest[B]`). Problem: `latest[]`
+nie jest monotoniczne wzdłuż linii (przystanek przed węzłem ma ciasny limit,
+sam węzeł luźny), więc środkowe przeskoki kursu potrafiły wypaść z warunku,
+choć wcześniejsze i późniejsze przechodziły — linia „mrugała" (dziury na
+mostach, konfetti krótkich kresek), a fragmenty pojawiały się w miejscach,
+do których nie dało się realnie dojechać z naszego startu.
 
 Rendering (frontend):
 
@@ -119,9 +129,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
 - `GET /api/flow?start=&end=&time=HH:MM` — mapa przepływów:
-  `{start, end, departure, best_arrival, deadline, edges: [{from: [lat,lon],
-  to: [lat,lon], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …]}`,
-  krawędzie posortowane rosnąco po `w` (kolejność rysowania).
+  `{start, end, departure, best_arrival, deadline, segments: [{path:
+  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …]}`,
+  segmenty posortowane rosnąco po `w` (kolejność rysowania); `path` to
+  kolejne przystanki od wsiadania do ostatniego użytecznego wyjścia.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -140,6 +151,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-07-17** — przepływy per kurs zamiast per przeskok: ciągłe segmenty
+  od wsiadania do ostatniego użytecznego wyjścia (koniec „mrugających" linii
+  i fragmentów nieosiągalnych ze startu); jedna intensywność na segment;
+  podświetlenie startu/celu działa też przy ręcznym wpisaniu nazw.
 - **2026-07-16** — tryb „mrówkowy": mapa przepływów zastępuje pojedynczą
   trasę; skan wstecz, `/api/flow`, plakietki linii, przygaszanie przystanków.
 - **2026-07-16** — interaktywna mapa (Leaflet): wybór przystanków
@@ -152,8 +167,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Znane ograniczenia
 
-- Intensywność w trybie przepływów to przybliżenie (patrz punkt 5 wyżej) —
-  bywa, że rzadko kursująca, ale dobra linia wyjdzie bledsza, niż powinna.
+- Intensywność w trybie przepływów to przybliżenie (zapas czasu najlepszego
+  wyjścia względem deadline) — bywa, że rzadko kursująca, ale dobra linia
+  wyjdzie bledsza, niż powinna.
+- Segment pokazuje też objazdy „w bok", jeśli mieszczą się w limicie 1,5× —
+  to celowe (niszowe opcje mają być widoczne), ale przy szerokim limicie
+  bywa tego sporo; ewentualny suwak zakresu jest na liście pomysłów.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
 - Wyszukiwanie działa w ramach jednej doby rozkładowej: zapytanie o 0:30
