@@ -24,7 +24,8 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
    o listę paczek GTFS i wybiera najnowszą, która **już obowiązuje**
    (portal wystawia też paczki z przyszłą datą startu — te pomijamy).
 2. Pobiera zip (~12 MB), parsuje pliki CSV (`stops`, `routes`, `trips`,
-   `stop_times`, `calendar`…) i buduje `data/gtfs_new.sqlite`.
+   `stop_times`, `calendar`, `shapes` — geometria tras po ulicach/torach…)
+   i buduje `data/gtfs_new.sqlite`.
 3. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
    aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
    wczorajsza baza zostaje nietknięta.
@@ -79,9 +80,10 @@ od najlepszych do ledwo sensownych. Nie symulujemy dosłownie agentów —
 ten sam efekt daje analiza dwóch skanów:
 
 1. **Skan w przód** od przystanku startowego: najwcześniejszy możliwy
-   przyjazd `earliest[s]` na każdy przystanek.
-2. **Deadline**: czas najszybszej trasy × 1,5 (min. +5 minut). Wszystko,
-   co dociera do celu po deadline, uznajemy za bezużyteczne.
+   przyjazd `earliest[s]` na każdy przystanek + dla każdego kursu miejsce,
+   w którym najwcześniej da się do niego wsiąść.
+2. **Deadline**: najlepszy przyjazd + 30% czasu podróży (min. 5, maks.
+   15 minut). Wszystko, co dociera do celu po deadline, jest bezużyteczne.
 3. **Skan wstecz** od celu: najpóźniejszy moment `latest[s]`, w którym można
    być na przystanku `s` i jeszcze zdążyć do celu przed deadline
    (połączenia przetwarzane malejąco po odjeździe).
@@ -91,15 +93,24 @@ ten sam efekt daje analiza dwóch skanów:
    przesiadki), idziemy wzdłuż kursu i szukamy **wyjść**: przystanków `s`
    o przyjeździe `arr`, gdzie `latest[s]` istnieje i `arr ≤ latest[s]`
    (stąd wciąż da się dojechać do celu przed deadline).
-5. Rysujemy **jeden ciągły segment** od przystanku wsiadania do OSTATNIEGO
-   użytecznego wyjścia — nic przed miejscem, gdzie realnie można wsiąść,
-   nic za miejscem, za którym kurs przestaje pomagać. Kurs bez żadnego
-   użytecznego wyjścia nie jest rysowany wcale.
-6. **Intensywność** jest jedna na cały segment: największy zapas
-   `latest[s] − arr` po wszystkich wyjściach, znormalizowany tak, że trasa
-   optymalna ma 1,0, a wariant „na styk przed deadline" 0,0.
+5. Rysujemy **jeden ciągły segment** od przystanku wsiadania do końca,
+   który wyznacza pierwsza z reguł: (a) kurs dojechał do **celu** — cięcie
+   dokładnie na celu (koniec z rysowaniem „za punkt docelowy i z powrotem");
+   (b) jazda dalej pogarsza najlepszy możliwy przyjazd o ponad 3 minuty —
+   cięcie ogona. Kurs bez żadnego użytecznego wyjścia nie jest rysowany wcale.
+6. **Intensywność** jest jedna na cały segment: `deadline − bound` dla
+   najlepszego wyjścia (`bound = przyjazd + czas stąd do celu`),
+   znormalizowane: trasa optymalna 1,0, wariant na styk 0,0. Segmenty
+   poniżej 0,05 odpadają; odpowiedź jest ograniczona do 150 najjaśniejszych.
 7. **Agregacja**: segmenty o tej samej linii i identycznej ścieżce
    (kolejne kursy w oknie) sklejamy, biorąc maksimum jakości.
+8. **Geometria**: ścieżka segmentu to fragment `shapes.txt` (realne ulice
+   i tory) wycięty między przystankiem wsiadania a wysiadania — kolejne
+   przystanki rzutowane monotonicznie na łamaną shape'a, potem uproszczenie
+   ~11 m. Dopasowanie jest walidowane (końce wycinka ≤ ~280 m od
+   przystanków, długość w granicach 0,85–3× łamanej po przystankach);
+   przy niewiarygodnym dopasowaniu i przy braku shape'a fallbackiem jest
+   łamana po przystankach. Wycinki są cache'owane w RAM per wersja bazy.
 
 Dlaczego nie per przeskok? Pierwsza wersja filtrowała każdy przeskok A→B
 niezależnie (`earliest[A] ≤ dep` i `arr ≤ latest[B]`). Problem: `latest[]`
@@ -111,13 +122,18 @@ do których nie dało się realnie dojechać z naszego startu.
 
 Rendering (frontend):
 
-- przezroczystość `0,10 + 0,80·w` i grubość `1,5 + 4,5·w` px — główne
+- przezroczystość `0,10 + 0,85·w` i grubość `1 + 3,5·w` px — główne
   korytarze jaskrawe i grube, niszowe ledwo widoczne;
-- kolor: tramwaj czerwony, autobus niebieski;
-- plakietki z numerem linii na najjaśniejszym odcinku każdej linii
-  (dłuższe linie dostają 2–3 plakietki), tylko dla linii z jakością ≥ 0,35;
+- kolor: tramwaj czerwony, autobus niebieski; segmenty z `w ≥ 0,45`
+  dostają białą otoczkę (styl mapy tramwajowej), kolejność rysowania:
+  blade → otoczki → jaskrawe;
+- **hover na linii** podświetla ją i pokazuje dymek „Tramwaj 3" — tak
+  rozróżnia się linie nachodzące na siebie w jednym korytarzu;
+- plakietki z numerem linii na najjaśniejszym segmencie każdej linii
+  (długie segmenty 2–3 plakietki), tylko dla linii z jakością ≥ 0,4;
 - zwykłe markery przystanków są przygaszane na czas pokazywania przepływu;
-- kadr dopasowuje się do najjaśniejszych krawędzi (próg 0,75 → 0,5 → wszystko).
+- kadr: najjaśniejsze segmenty (próg 0,7 → 0,45 → wszystko) + zawsze
+  start i cel.
 
 Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 ~30 ms na cache'owanym dniu, odpowiedź to zwykle kilkaset–2000 krawędzi.
@@ -151,6 +167,18 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-07-18** — poprawka dopasowania geometrii (znaleziona przez przegląd
+  agentowy): przy wsiadaniu w środku kursu skan z wczesnym cięciem potrafił
+  utknąć w fałszywym minimum (~4% wycinków z końcami setki metrów od
+  przystanków); teraz podejrzane minimum wymusza doskanowanie do końca,
+  a wynik przechodzi walidację końców i długości z fallbackiem na łamaną
+  po przystankach. Do tego higiena cache (czyszczenie po podmianie bazy,
+  częściowa ewikcja) i jedno połączenie DB na zapytanie o przepływy.
+- **2026-07-17** — czytelność mapy przepływów: geometria z `shapes.txt`
+  (linie po realnych ulicach/torach), ciaśniejszy limit (30%, 5–15 min),
+  segment linii jadącej do celu ucinany dokładnie na celu, cięcie ogonów
+  pogarszających wynik o >3 min, maks. 150 segmentów, biała otoczka
+  jaskrawych linii, hover z numerem linii, kadr zawsze ze startem i celem.
 - **2026-07-17** — przepływy per kurs zamiast per przeskok: ciągłe segmenty
   od wsiadania do ostatniego użytecznego wyjścia (koniec „mrugających" linii
   i fragmentów nieosiągalnych ze startu); jedna intensywność na segment;
@@ -179,13 +207,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
 - Brak tras pieszych po mieście — przesiadka tylko między słupkami
   o identycznej nazwie przystanku.
-- Linie rysowane po prostej między przystankami (nie po torach/ulicach) —
-  dokładna geometria wymagałaby wczytania `shapes.txt`.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
 
 ## Pomysły na dalej
 
-- Geometria tras z `shapes.txt` (linie po torach/ulicach).
 - Dymki na węzłach przesiadkowych: „w co mogę się tu przesiąść i o której".
 - Powrót klasycznego widoku jednej trasy jako przełącznika obok przepływów.
 - Suwak zakresu (1,5× / 2× / 3×) w panelu.

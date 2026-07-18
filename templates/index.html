@@ -161,33 +161,56 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     // Mapa przepływów: każdy kurs to jeden ciągły segment od przystanku
     // wsiadania do ostatniego sensownego wyjścia; jasność i grubość linii
     // = zapas czasu najlepszego wyjścia (jednakowa na całym segmencie).
+    // Czytelność przy nachodzeniu: jaskrawe segmenty mają białą otoczkę
+    // (styl mapy tramwajowej), a najechanie na linię podświetla ją
+    // i pokazuje numer - widać, "która co gdzie", nawet w wiązce.
+    const BRIGHT_W = 0.45;
+    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', other: 'Linia'};
+
     function drawFlow(flow) {
         setBaseDim(true);
-        const layers = [];
+        const faint = [], casings = [], bright = [];
         const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
 
         for (const s of flow.segments) {        // posortowane po w rosnąco
-            const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
-            layers.push(L.polyline(s.path, {
-                color,
-                opacity: 0.10 + 0.80 * s.w,
-                weight: 1.5 + 4.5 * s.w,
-                interactive: false,
-            }));
             const key = s.num + '|' + s.kind;
+            const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
+            const weight = 1 + 3.5 * s.w;
+            const opacity = 0.10 + 0.85 * s.w;
+            const line = L.polyline(s.path, {color, opacity, weight});
+            line.bindTooltip(
+                `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
+                {sticky: true},
+            );
+            line.on('mouseover', () => line.setStyle({opacity: 1, weight: weight + 2.5}));
+            line.on('mouseout', () => line.setStyle({opacity, weight}));
+            if (s.w >= BRIGHT_W) {
+                casings.push(L.polyline(s.path, {
+                    color: '#fff',
+                    opacity: 0.9,
+                    weight: weight + 2.5,
+                    interactive: false,
+                }));
+                bright.push(line);
+            } else {
+                faint.push(line);
+            }
             if (!byLine.has(key)) byLine.set(key, []);
             byLine.get(key).push(s);
         }
+
+        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
+        const layers = [...faint, ...casings, ...bright];
 
         // Plakietki z numerem linii - tylko dla linii, które mają sensowny
         // udział w przepływie; na najjaśniejszym segmencie linii, dłuższe
         // segmenty dostają dodatkowe plakietki w 1/4 i 3/4 trasy.
         for (const [key, segs] of byLine) {
             const best = segs[segs.length - 1];
-            if (best.w < 0.35) continue;
+            if (best.w < 0.4) continue;
             const [num, kind] = key.split('|');
             const positions = new Set([Math.floor(best.path.length / 2)]);
-            if (best.path.length >= 10) {
+            if (best.path.length >= 20) {
                 positions.add(Math.floor(best.path.length / 4));
                 positions.add(Math.floor(3 * best.path.length / 4));
             }
@@ -207,12 +230,19 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         routeLayer = L.layerGroup(layers).addTo(map);
 
         // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać
-        // do widoku całego województwa przez jedną bladą nitkę.
+        // do widoku całego województwa przez jedną bladą nitkę...
         let points = [];
-        for (const threshold of [0.75, 0.5, 0]) {
+        for (const threshold of [0.7, BRIGHT_W, 0]) {
             points = flow.segments.filter(s => s.w >= threshold)
                                   .flatMap(s => s.path);
             if (points.length >= 4) break;
+        }
+        // ...ale start i cel muszą być w kadrze zawsze.
+        for (const name of [sel.start, sel.end]) {
+            for (const m of markersByName.get(name) || []) {
+                const p = m.getLatLng();
+                points.push([p.lat, p.lng]);
+            }
         }
         if (points.length) {
             map.fitBounds(L.latLngBounds(points), {

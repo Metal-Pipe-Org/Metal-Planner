@@ -46,7 +46,14 @@ CREATE TABLE trips (
     trip_id       TEXT PRIMARY KEY,
     route_id      TEXT NOT NULL,
     service_id    TEXT NOT NULL,
-    trip_headsign TEXT
+    trip_headsign TEXT,
+    shape_id      TEXT
+);
+CREATE TABLE shapes (
+    shape_id TEXT NOT NULL,
+    seq      INTEGER NOT NULL,
+    lat      REAL NOT NULL,
+    lon      REAL NOT NULL
 );
 CREATE TABLE stop_times (
     trip_id        TEXT NOT NULL,
@@ -174,13 +181,31 @@ def build_database(zip_path, db_path):
 
         n = batched_insert(
             db,
-            "INSERT OR REPLACE INTO trips VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO trips VALUES (?, ?, ?, ?, ?)",
             (
-                (r["trip_id"], r["route_id"], r["service_id"], r.get("trip_headsign", ""))
+                (
+                    r["trip_id"], r["route_id"], r["service_id"],
+                    r.get("trip_headsign", ""), r.get("shape_id", ""),
+                )
                 for r in read_csv(zf, "trips.txt")
             ),
         )
         print(f"  trips: {n}")
+
+        n = batched_insert(
+            db,
+            "INSERT INTO shapes VALUES (?, ?, ?, ?)",
+            (
+                (
+                    r["shape_id"],
+                    int(r["shape_pt_sequence"]),
+                    float(r["shape_pt_lat"]),
+                    float(r["shape_pt_lon"]),
+                )
+                for r in read_csv(zf, "shapes.txt")
+            ),
+        )
+        print(f"  shapes: {n}")
 
         n = batched_insert(
             db,
@@ -230,6 +255,7 @@ def build_database(zip_path, db_path):
         """
         CREATE INDEX idx_stop_times_trip ON stop_times (trip_id, stop_sequence);
         CREATE INDEX idx_trips_service ON trips (service_id);
+        CREATE INDEX idx_shapes ON shapes (shape_id, seq);
         """
     )
     db.commit()

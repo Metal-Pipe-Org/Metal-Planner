@@ -145,8 +145,13 @@ def _reconstruct(day, journey, last_stop):
     return legs
 
 
-SLOWDOWN = 1.5          # pokazujemy trasy do ~1,5x czasu najszybszej
-MIN_EXTRA_SEC = 300     # ...ale zawsze z co najmniej 5 min zapasu
+SLOWDOWN = 1.3          # pokazujemy trasy do ~1,3x czasu najszybszej...
+MIN_EXTRA_SEC = 300     # ...ale zawsze z co najmniej 5 min zapasu...
+MAX_EXTRA_SEC = 900     # ...i nigdy więcej niż 15 min (długie trasy)
+BOUND_TOL_SEC = 180     # ogon segmentu ucinamy, gdy jazda dalej pogarsza
+                        # najlepszy możliwy przyjazd o ponad 3 min
+Q_MIN = 0.05            # segmenty praktycznie niewidoczne odrzucamy
+MAX_SEGMENTS = 150      # twardy limit liczby segmentów w odpowiedzi
 
 
 def plan_flow(start_query, end_query, when=None):
@@ -185,7 +190,8 @@ def plan_flow(start_query, end_query, when=None):
                      f"po {_fmt_time(dep_sec)} tego dnia."
         }
     duration = best_arr - dep_sec
-    deadline = dep_sec + max(int(duration * SLOWDOWN), duration + MIN_EXTRA_SEC)
+    extra = min(max(int(duration * (SLOWDOWN - 1)), MIN_EXTRA_SEC), MAX_EXTRA_SEC)
+    deadline = best_arr + extra
 
     earliest, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, set(target_stops), dep_sec, deadline)
@@ -208,11 +214,11 @@ def plan_flow(start_query, end_query, when=None):
             continue
         trip_conns.setdefault(trip, []).append(i)
 
+    target_set = set(target_stops)
     segments = {}
     for trip, idxs in trip_conns.items():
         stops_seq = [conns[idxs[0]][2]]     # przystanek wsiadania
-        cut = 0          # długość ścieżki do ostatniego użytecznego wyjścia
-        best_q = -1.0
+        exits = []       # (pozycja w stops_seq, bound = najlepszy przyjazd do celu)
         for i in idxs:
             dep_t, arr_t, dep_s, arr_s, _ = conns[i]
             if dep_s != stops_seq[-1]:
@@ -220,30 +226,50 @@ def plan_flow(start_query, end_query, when=None):
             stops_seq.append(arr_s)
             leave_by = latest.get(arr_s)
             if leave_by is not None and arr_t <= leave_by:
-                # Stąd wciąż da się dojechać do celu przed deadline;
-                # zapas (leave_by - arr_t) mówi, jak wygodnie.
-                cut = len(stops_seq)
-                q = (leave_by - arr_t) / span
-                if q > best_q:
-                    best_q = q
-        if cut < 2:
+                # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
+                # wysiądziemy tutaj ((deadline - leave_by) = czas stąd do celu).
+                exits.append((len(stops_seq), arr_t + (deadline - leave_by)))
+                if arr_s in target_set:
+                    break    # dojechaliśmy do celu - dalej nie rysujemy
+        if not exits:
             continue     # kurs bez użytecznego wyjścia - nie rysujemy go wcale
+        best_bound = min(bound for _, bound in exits)
+        q = max(0.0, min(1.0, (deadline - best_bound) / span))
+        if q < Q_MIN:
+            continue
+        if stops_seq[exits[-1][0] - 1] in target_set:
+            cut = exits[-1][0]      # linia jadąca do celu: rysuj dokładnie do celu
+        else:
+            # Utnij ogon: jedź dalej tylko dopóki to nie psuje wyniku o >3 min
+            # (koniec z jasnym rysowaniem "za punkt docelowy i z powrotem").
+            cut = max(pos for pos, bound in exits
+                      if bound <= best_bound + BOUND_TOL_SEC)
         label, _ = day.trip_info[trip]
         key = (label, tuple(stops_seq[:cut]))
-        q = max(0.0, min(1.0, best_q))
-        if q > segments.get(key, -1.0):
-            segments[key] = q
+        entry = segments.get(key)
+        if entry is None or q > entry[0]:
+            segments[key] = (q, day.trip_shape.get(trip))
 
     kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
-    seg_list = [
-        {
-            "path": [day.stop_coords[s] for s in stops_seq],
-            "num": label.split(" ", 1)[1] if " " in label else label,
-            "kind": kind_map.get(label.split(" ", 1)[0], "other"),
-            "w": round(q, 3),
-        }
-        for (label, stops_seq), q in segments.items()
-    ]
+    brightest = sorted(
+        segments.items(), key=lambda kv: kv[1][0], reverse=True,
+    )[:MAX_SEGMENTS]
+    seg_list = []
+    gtfs.geo_generation()           # jeden stat na zapytanie; czyści cache po podmianie bazy
+    geo_db = gtfs.open_db()         # jedno połączenie na wszystkie wycinki geometrii
+    try:
+        for (label, stops_seq), (q, shape_id) in brightest:
+            path = gtfs.shape_slice(
+                shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
+            )
+            seg_list.append({
+                "path": [[round(lat, 5), round(lon, 5)] for lat, lon in path],
+                "num": label.split(" ", 1)[1] if " " in label else label,
+                "kind": kind_map.get(label.split(" ", 1)[0], "other"),
+                "w": round(q, 3),
+            })
+    finally:
+        geo_db.close()
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
 
     return {
