@@ -82,17 +82,22 @@ ten sam efekt daje analiza dwóch skanów:
 1. **Skan w przód** od przystanku startowego: najwcześniejszy możliwy
    przyjazd `earliest[s]` na każdy przystanek + dla każdego kursu miejsce,
    w którym najwcześniej da się do niego wsiąść.
-2. **Deadline**: najlepszy przyjazd + 30% czasu podróży (min. 5, maks.
-   15 minut). Wszystko, co dociera do celu po deadline, jest bezużyteczne.
+2. **Deadline**: najlepszy przyjazd + 50% czasu podróży (min. 5, maks.
+   30 minut). Wszystko, co dociera do celu po deadline, jest bezużyteczne.
 3. **Skan wstecz** od celu: najpóźniejszy moment `latest[s]`, w którym można
    być na przystanku `s` i jeszcze zdążyć do celu przed deadline
    (połączenia przetwarzane malejąco po odjeździe).
-4. **Jednostką rysowania jest kurs, nie pojedynczy przeskok.** Dla każdego
-   kursu, do którego skan w przód znalazł wsiadanie (`trip_board[kurs]` =
-   pierwsze połączenie, na które zdążymy z naszego startu, z buforem
-   przesiadki), idziemy wzdłuż kursu i szukamy **wyjść**: przystanków `s`
-   o przyjeździe `arr`, gdzie `latest[s]` istnieje i `arr ≤ latest[s]`
-   (stąd wciąż da się dojechać do celu przed deadline).
+4. **Jednostką rysowania jest kurs, nie pojedynczy przeskok.** Miejsce
+   wsiadania to pierwszy przystanek kursu, na który zdążymy (z buforem
+   przesiadki) i którego osiągnięcie **nie wymaga cofnięcia się** —
+   oddalenia od celu o więcej niż 2 min (mierzone spadkiem `latest`
+   względem startu). To ucina scenariusze "podjedź na pętlę i wracaj tym
+   samym wozem". Od wsiadania idziemy wzdłuż kursu i szukamy **wyjść**:
+   przystanków `s` o przyjeździe `arr`, gdzie `latest[s]` istnieje,
+   `arr ≤ latest[s]` i jazda **przybliżyła** do celu
+   (`latest[wyjście] > latest[wsiadanie]` — inaczej kurs jadący w złą
+   stronę świeciłby pełną jasnością, bo powrót tym samym wozem daje
+   ten sam czas co czekanie).
 5. Rysujemy **jeden ciągły segment** od przystanku wsiadania do końca,
    który wyznacza pierwsza z reguł: (a) kurs dojechał do **celu** — cięcie
    dokładnie na celu (koniec z rysowaniem „za punkt docelowy i z powrotem");
@@ -101,7 +106,7 @@ ten sam efekt daje analiza dwóch skanów:
 6. **Intensywność** jest jedna na cały segment: `deadline − bound` dla
    najlepszego wyjścia (`bound = przyjazd + czas stąd do celu`),
    znormalizowane: trasa optymalna 1,0, wariant na styk 0,0. Segmenty
-   poniżej 0,05 odpadają; odpowiedź jest ograniczona do 150 najjaśniejszych.
+   poniżej 0,20 odpadają; odpowiedź jest ograniczona do 150 najjaśniejszych.
 7. **Agregacja**: segmenty o tej samej linii i identycznej ścieżce
    (kolejne kursy w oknie) sklejamy, biorąc maksimum jakości.
 8. **Geometria**: ścieżka segmentu to fragment `shapes.txt` (realne ulice
@@ -127,8 +132,9 @@ Rendering (frontend):
 - kolor: tramwaj czerwony, autobus niebieski; segmenty z `w ≥ 0,45`
   dostają białą otoczkę (styl mapy tramwajowej), kolejność rysowania:
   blade → otoczki → jaskrawe;
-- **hover na linii** podświetla ją i pokazuje dymek „Tramwaj 3" — tak
-  rozróżnia się linie nachodzące na siebie w jednym korytarzu;
+- **hover na linii** podświetla ją, wyciąga na wierzch wiązki
+  (`bringToFront`) i pokazuje dymek „Tramwaj 3" — tak rozróżnia się
+  linie nachodzące na siebie w jednym korytarzu;
 - plakietki z numerem linii na najjaśniejszym segmencie każdej linii
   (długie segmenty 2–3 plakietki), tylko dla linii z jakością ≥ 0,4;
 - zwykłe markery przystanków są przygaszane na czas pokazywania przepływu;
@@ -167,6 +173,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-07-18** — reguły postępu: wsiadanie nie może wymagać cofnięcia się
+  o >2 min, a wyjście liczy się tylko, gdy jazda przybliża do celu (koniec
+  z "podjedź na pętlę i wracaj"); limit z powrotem 1,5× (maks. +30 min),
+  za to segmenty poniżej 20% jasności odpadają; hover wyciąga linię na
+  wierzch wiązki.
 - **2026-07-18** — poprawka dopasowania geometrii (znaleziona przez przegląd
   agentowy): przy wsiadaniu w środku kursu skan z wczesnym cięciem potrafił
   utknąć w fałszywym minimum (~4% wycinków z końcami setki metrów od

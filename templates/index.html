@@ -182,7 +182,10 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
                 {sticky: true},
             );
-            line.on('mouseover', () => line.setStyle({opacity: 1, weight: weight + 2.5}));
+            line.on('mouseover', () => {
+                line.setStyle({opacity: 1, weight: weight + 2.5});
+                line.bringToFront();       // spod wiązki na wierzch
+            });
             line.on('mouseout', () => line.setStyle({opacity, weight}));
             if (s.w >= BRIGHT_W) {
                 casings.push(L.polyline(s.path, {

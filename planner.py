@@ -145,12 +145,14 @@ def _reconstruct(day, journey, last_stop):
     return legs
 
 
-SLOWDOWN = 1.3          # pokazujemy trasy do ~1,3x czasu najszybszej...
+SLOWDOWN = 1.5          # pokazujemy trasy do ~1,5x czasu najszybszej...
 MIN_EXTRA_SEC = 300     # ...ale zawsze z co najmniej 5 min zapasu...
-MAX_EXTRA_SEC = 900     # ...i nigdy więcej niż 15 min (długie trasy)
+MAX_EXTRA_SEC = 1800    # ...i nigdy więcej niż 30 min (sufit rozsądku)
 BOUND_TOL_SEC = 180     # ogon segmentu ucinamy, gdy jazda dalej pogarsza
                         # najlepszy możliwy przyjazd o ponad 3 min
-Q_MIN = 0.05            # segmenty praktycznie niewidoczne odrzucamy
+BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
+                        # (cofnięcia) o więcej niż 2 min
+Q_MIN = 0.20            # segmenty poniżej 20% jasności odrzucamy
 MAX_SEGMENTS = 150      # twardy limit liczby segmentów w odpowiedzi
 
 
@@ -193,15 +195,19 @@ def plan_flow(start_query, end_query, when=None):
     extra = min(max(int(duration * (SLOWDOWN - 1)), MIN_EXTRA_SEC), MAX_EXTRA_SEC)
     deadline = best_arr + extra
 
-    earliest, trip_board = _forward(day, source_stops, dep_sec, deadline)
+    earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, set(target_stops), dep_sec, deadline)
 
     # Zapas czasowy trasy optymalnej = pełna jasność.
     span = max(deadline - best_arr, 1)
+    # Punkt odniesienia reguły postępu: im później można być na przystanku
+    # i wciąż zdążyć (latest), tym bliżej celu się jest.
+    origin_latest = max(
+        (latest[s] for s in source_stops if s in latest), default=None,
+    )
 
-    # Połączenia okna pogrupowane per kurs, od miejsca wsiadania.
-    # Tablica jest posortowana po odjeździe, więc w ramach jednego kursu
-    # indeksy idą zgodnie z kolejnością jazdy.
+    # Połączenia okna pogrupowane per kurs (tablica jest posortowana po
+    # odjeździe, więc w ramach kursu indeksy idą w kolejności jazdy).
     conns = day.conns
     trip_conns = {}
     for i in range(
@@ -209,28 +215,50 @@ def plan_flow(start_query, end_query, when=None):
         bisect_left(day.dep_times, deadline),
     ):
         trip = conns[i][4]
-        board_i = trip_board.get(trip)
-        if board_i is None or i < board_i:
-            continue
-        trip_conns.setdefault(trip, []).append(i)
+        if trip in trip_board:
+            trip_conns.setdefault(trip, []).append(i)
 
     target_set = set(target_stops)
     segments = {}
     for trip, idxs in trip_conns.items():
-        stops_seq = [conns[idxs[0]][2]]     # przystanek wsiadania
+        stops_seq = None
+        board_latest = None
         exits = []       # (pozycja w stops_seq, bound = najlepszy przyjazd do celu)
         for i in idxs:
             dep_t, arr_t, dep_s, arr_s, _ = conns[i]
-            if dep_s != stops_seq[-1]:
+            if stops_seq is None:
+                # Wybór miejsca wsiadania: pierwszy przystanek kursu, na
+                # który zdążymy i którego osiągnięcie nie wymaga cofnięcia
+                # się (oddalenia od celu) o więcej niż BACKTRACK_TOL_SEC.
+                # To ucina np. "podjedź na pętlę i wracaj tym samym wozem".
+                reached = earliest.get(dep_s)
+                if reached is None:
+                    continue
+                buffer = TRANSFER_SEC if arrived_by[dep_s] == "ride" else 0
+                if reached + buffer > dep_t:
+                    continue
+                stop_latest = latest.get(dep_s)
+                if (origin_latest is not None and stop_latest is not None
+                        and stop_latest < origin_latest - BACKTRACK_TOL_SEC):
+                    continue
+                stops_seq = [dep_s]
+                board_latest = stop_latest
+            elif dep_s != stops_seq[-1]:
                 break                        # przerwany łańcuch - utnij
             stops_seq.append(arr_s)
             leave_by = latest.get(arr_s)
-            if leave_by is not None and arr_t <= leave_by:
-                # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
-                # wysiądziemy tutaj ((deadline - leave_by) = czas stąd do celu).
-                exits.append((len(stops_seq), arr_t + (deadline - leave_by)))
-                if arr_s in target_set:
-                    break    # dojechaliśmy do celu - dalej nie rysujemy
+            if leave_by is None or arr_t > leave_by:
+                continue
+            # Wyjście liczy się tylko, gdy jazda PRZYBLIŻYŁA do celu
+            # (latest rośnie wzdłuż każdej sensownej trasy) - inaczej
+            # kurs "w drugą stronę" świeciłby pełną jasnością.
+            if board_latest is not None and leave_by <= board_latest:
+                continue
+            # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
+            # wysiądziemy tutaj ((deadline - leave_by) = czas stąd do celu).
+            exits.append((len(stops_seq), arr_t + (deadline - leave_by)))
+            if arr_s in target_set:
+                break    # dojechaliśmy do celu - dalej nie rysujemy
         if not exits:
             continue     # kurs bez użytecznego wyjścia - nie rysujemy go wcale
         best_bound = min(bound for _, bound in exits)
@@ -285,8 +313,9 @@ def plan_flow(start_query, end_query, when=None):
 def _forward(day, source_stops, dep_sec, deadline):
     """Jak _scan, ale bez celu: najwcześniejsze przyjazdy wszędzie do deadline.
 
-    Zwraca (earliest, trip_board), gdzie trip_board[kurs] to indeks połączenia,
-    na którym najwcześniej da się do niego wsiąść - początek segmentu na mapie.
+    Zwraca (earliest, arrived_by, trip_board); trip_board[kurs] to indeks
+    pierwszego połączenia, na które w ogóle da się zdążyć (właściwe miejsce
+    wsiadania, z regułą postępu, wybiera dopiero plan_flow).
     """
     conns = day.conns
     earliest = {}
@@ -317,7 +346,7 @@ def _forward(day, source_stops, dep_sec, deadline):
                 if walk_arr < earliest.get(sibling, INF):
                     earliest[sibling] = walk_arr
                     arrived_by[sibling] = "walk"
-    return earliest, trip_board
+    return earliest, arrived_by, trip_board
 
 
 def _backward(day, target_set, dep_sec, deadline):
