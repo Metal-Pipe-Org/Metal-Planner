@@ -152,7 +152,7 @@ BOUND_TOL_SEC = 180     # ogon segmentu ucinamy, gdy jazda dalej pogarsza
                         # najlepszy możliwy przyjazd o ponad 3 min
 BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
                         # (cofnięcia) o więcej niż 2 min
-Q_MIN = 0.20            # segmenty poniżej 20% jasności odrzucamy
+Q_MIN = 0.50            # segmenty poniżej 50% jasności odrzucamy
 MAX_SEGMENTS = 150      # twardy limit liczby segmentów w odpowiedzi
 
 

@@ -106,7 +106,8 @@ ten sam efekt daje analiza dwóch skanów:
 6. **Intensywność** jest jedna na cały segment: `deadline − bound` dla
    najlepszego wyjścia (`bound = przyjazd + czas stąd do celu`),
    znormalizowane: trasa optymalna 1,0, wariant na styk 0,0. Segmenty
-   poniżej 0,20 odpadają; odpowiedź jest ograniczona do 150 najjaśniejszych.
+   poniżej 0,50 odpadają (pokazujemy tylko opcje realnie konkurencyjne);
+   odpowiedź jest ograniczona do 150 najjaśniejszych.
 7. **Agregacja**: segmenty o tej samej linii i identycznej ścieżce
    (kolejne kursy w oknie) sklejamy, biorąc maksimum jakości.
 8. **Geometria**: ścieżka segmentu to fragment `shapes.txt` (realne ulice
