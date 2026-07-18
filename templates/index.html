@@ -37,6 +37,11 @@
     <label for="time">Odjazd o (dzisiaj)</label>
     <input type="time" id="time" value="{{ form_time }}">
 
+    <label for="qmin">
+        Czułość: opcje o jasności ≥ <span id="qmin-value">60</span>%
+    </label>
+    <input type="range" id="qmin" min="30" max="90" step="5" value="60">
+
     <datalist id="stops">
         {% for name in stops %}<option value="{{ name }}">{% endfor %}
     </datalist>
@@ -260,6 +265,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             start: startInput.value,
             end: endInput.value,
             time: document.getElementById('time').value,
+            qmin: (Number(document.getElementById('qmin').value) / 100).toFixed(2),
         });
         clearRoute();
         resultBox.innerHTML = '<p class="hint">Szukam…</p>';
@@ -280,6 +286,18 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     }
 
     document.getElementById('search').addEventListener('click', search);
+
+    // Suwak czułości: etykieta od razu, mapa po krótkim debounce
+    // (odpowiedź z ciepłym cache to ~10 ms, więc działa "na żywo").
+    const qminInput = document.getElementById('qmin');
+    let qminTimer = null;
+    qminInput.addEventListener('input', () => {
+        document.getElementById('qmin-value').textContent = qminInput.value;
+        clearTimeout(qminTimer);
+        qminTimer = setTimeout(() => {
+            if (startInput.value && endInput.value) search();
+        }, 200);
+    });
 
     document.getElementById('clear').addEventListener('click', () => {
         const previous = [sel.start, sel.end];

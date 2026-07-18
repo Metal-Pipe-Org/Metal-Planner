@@ -103,14 +103,28 @@ ten sam efekt daje analiza dwóch skanów:
    dokładnie na celu (koniec z rysowaniem „za punkt docelowy i z powrotem");
    (b) jazda dalej pogarsza najlepszy możliwy przyjazd o ponad 3 minuty —
    cięcie ogona. Kurs bez żadnego użytecznego wyjścia nie jest rysowany wcale.
-6. **Intensywność** jest jedna na cały segment: `deadline − bound` dla
-   najlepszego wyjścia (`bound = przyjazd + czas stąd do celu`),
-   znormalizowane: trasa optymalna 1,0, wariant na styk 0,0. Segmenty
-   poniżej 0,50 odpadają (pokazujemy tylko opcje realnie konkurencyjne);
-   odpowiedź jest ograniczona do 150 najjaśniejszych.
+6. **Intensywność** jest jedna na cały segment i liczona per wyjście:
+   wartość wyjścia to najlepszy osiągalny przyjazd do celu. Dla wyjścia
+   na cel to po prostu przyjazd (dokładne); dla pozostałych liczymy przez
+   KONKRETNE kontynuacje — najbliższy zdążalny odjazd segmentu, w który
+   da się wskoczyć, plus najlepsze z jego wyjść ZA punktem wskoczenia
+   (sufiks; wyjść sprzed dołączenia nie da się użyć). Punkt stały tej
+   rekurencji startuje od segmentów kończących na celu. To omija błąd
+   aproksymacji `deadline − latest`, która dla rzadko kursujących linii
+   wlicza czekanie „do ostatniego kursu" i zaniżała jasność dowozów.
+   Normalizacja: trasa optymalna 1,0, wariant na styk deadline 0,0.
+7. **Próg jasności** (suwak w UI, 30–90%, domyślnie 60%): segmenty poniżej
+   progu nie są wysyłane; odpowiedź ograniczona do 150 najjaśniejszych.
+8. **Spójność sieci**: po odsianiu progiem każdy segment jest przycinany
+   z obu stron do zakotwiczonych punktów — początek to start relacji albo
+   miejsce, gdzie dołącza inny narysowany segment; koniec to cel albo
+   ostatnia przesiadka w porównywalnie jasny (tolerancja 0,1) narysowany
+   segment. Segment bez kotwic odpada; punkt stały iteruje, aż nic nie
+   wypada. Efekt: żadna linia nie zaczyna się „znikąd" ani nie prowadzi
+   „w powietrze", niezależnie od ustawienia suwaka.
 7. **Agregacja**: segmenty o tej samej linii i identycznej ścieżce
    (kolejne kursy w oknie) sklejamy, biorąc maksimum jakości.
-8. **Geometria**: ścieżka segmentu to fragment `shapes.txt` (realne ulice
+9. **Geometria**: ścieżka segmentu to fragment `shapes.txt` (realne ulice
    i tory) wycięty między przystankiem wsiadania a wysiadania — kolejne
    przystanki rzutowane monotonicznie na łamaną shape'a, potem uproszczenie
    ~11 m. Dopasowanie jest walidowane (końce wycinka ≤ ~280 m od
@@ -151,7 +165,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
-- `GET /api/flow?start=&end=&time=HH:MM` — mapa przepływów:
+- `GET /api/flow?start=&end=&time=HH:MM&qmin=0.60` — mapa przepływów:
   `{start, end, departure, best_arrival, deadline, segments: [{path:
   [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …]}`,
   segmenty posortowane rosnąco po `w` (kolejność rysowania); `path` to
@@ -174,6 +188,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-07-18** — spójna sieć przepływów + suwak czułości: jasność liczona
+  per wyjście przez konkretne kontynuacje (sufiksy, punkt stały) zamiast
+  samej aproksymacji `deadline − latest`; segmenty kotwiczone z obu stron
+  (start relacji / widoczna przesiadka), więc nic nie wisi w powietrzu;
+  luz 3 min w regule postępu (metryka latest bywa zaszumiona); suwak
+  30–90% z przeładowaniem na żywo (`qmin` w API).
 - **2026-07-18** — reguły postępu: wsiadanie nie może wymagać cofnięcia się
   o >2 min, a wyjście liczy się tylko, gdy jazda przybliża do celu (koniec
   z "podjedź na pętlę i wracaj"); limit z powrotem 1,5× (maks. +30 min),

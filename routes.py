@@ -54,8 +54,13 @@ def init_routes(app):
 
     @app.route("/api/flow")
     def api_flow():
+        try:
+            q_min = float(request.args.get("qmin", ""))
+        except ValueError:
+            q_min = None
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
+            q_min,
         ))

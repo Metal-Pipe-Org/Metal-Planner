@@ -6,7 +6,7 @@ Połączenie jest "osiągalne", jeśli jesteśmy już w tym kursie albo zdążym
 na jego odjazd na przystanku startowym.
 """
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from datetime import datetime
 
 import gtfs
@@ -148,25 +148,31 @@ def _reconstruct(day, journey, last_stop):
 SLOWDOWN = 1.5          # pokazujemy trasy do ~1,5x czasu najszybszej...
 MIN_EXTRA_SEC = 300     # ...ale zawsze z co najmniej 5 min zapasu...
 MAX_EXTRA_SEC = 1800    # ...i nigdy więcej niż 30 min (sufit rozsądku)
-BOUND_TOL_SEC = 180     # ogon segmentu ucinamy, gdy jazda dalej pogarsza
-                        # najlepszy możliwy przyjazd o ponad 3 min
+Q_ANCHOR_TOL = 0.10     # ogon rysujemy tylko do przesiadki w kontynuację
+                        # niewiele ciemniejszą od segmentu (tolerancja jasności)
 BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
                         # (cofnięcia) o więcej niż 2 min
-Q_MIN = 0.50            # segmenty poniżej 50% jasności odrzucamy
+PROGRESS_TOL_SEC = 180  # luz reguły postępu dla wyjść - metryka latest bywa
+                        # zaszumiona o 1-2 min między sąsiednimi węzłami
+WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
+DEFAULT_Q_MIN = 0.60    # domyślny próg jasności (suwak w UI go nadpisuje)
 MAX_SEGMENTS = 150      # twardy limit liczby segmentów w odpowiedzi
 
 
-def plan_flow(start_query, end_query, when=None):
+def plan_flow(start_query, end_query, when=None, q_min=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką jest KURS, nie pojedynczy przeskok: dla każdego kursu, do którego
     realnie da się wsiąść (skan w przód), rysujemy jeden ciągły segment od
-    przystanku wsiadania do ostatniego przystanku, z którego jeszcze da się
-    dojechać do celu przed deadline (skan wstecz). Kursy bez takiego wyjścia
-    nie są rysowane wcale. Intensywność jest jedna na cały segment - zapas
-    czasu najlepszego wyjścia względem deadline (1,5x czasu najszybszej trasy).
+    przystanku wsiadania do celu albo do ostatniego wyjścia z WIDOCZNĄ
+    kontynuacją (przesiadką na segment, który też jest narysowany). Jasność
+    propaguje się wstecz przez przesiadki: dowóz nigdy nie jest ciemniejszy
+    niż to, do czego dowozi - narysowana sieć jest spójna od startu do celu.
+
+    q_min (0..1) to próg jasności; poniżej niego segmenty nie są wysyłane.
     """
     when = when or datetime.now()
+    q_min = DEFAULT_Q_MIN if q_min is None else max(0.2, min(0.95, q_min))
 
     try:
         day = gtfs.load_day(when.date())
@@ -219,11 +225,12 @@ def plan_flow(start_query, end_query, when=None):
             trip_conns.setdefault(trip, []).append(i)
 
     target_set = set(target_stops)
-    segments = {}
+    raw = {}     # (linia, pełna trasa) -> dane segmentu
     for trip, idxs in trip_conns.items():
         stops_seq = None
         board_latest = None
-        exits = []       # (pozycja w stops_seq, bound = najlepszy przyjazd do celu)
+        departures = []   # (przystanek, odjazd) wzdłuż kursu - do przesiadek
+        exits = []   # (pozycja w stops_seq, bound, przyjazd, przystanek)
         for i in idxs:
             dep_t, arr_t, dep_s, arr_s, _ = conns[i]
             if stops_seq is None:
@@ -245,6 +252,7 @@ def plan_flow(start_query, end_query, when=None):
                 board_latest = stop_latest
             elif dep_s != stops_seq[-1]:
                 break                        # przerwany łańcuch - utnij
+            departures.append((dep_s, dep_t))
             stops_seq.append(arr_s)
             leave_by = latest.get(arr_s)
             if leave_by is None or arr_t > leave_by:
@@ -252,31 +260,209 @@ def plan_flow(start_query, end_query, when=None):
             # Wyjście liczy się tylko, gdy jazda PRZYBLIŻYŁA do celu
             # (latest rośnie wzdłuż każdej sensownej trasy) - inaczej
             # kurs "w drugą stronę" świeciłby pełną jasnością.
-            if board_latest is not None and leave_by <= board_latest:
+            if (board_latest is not None
+                    and leave_by <= board_latest - PROGRESS_TOL_SEC):
                 continue
             # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
             # wysiądziemy tutaj ((deadline - leave_by) = czas stąd do celu).
-            exits.append((len(stops_seq), arr_t + (deadline - leave_by)))
+            exits.append((len(stops_seq), arr_t + (deadline - leave_by), arr_t, arr_s))
             if arr_s in target_set:
                 break    # dojechaliśmy do celu - dalej nie rysujemy
         if not exits:
             continue     # kurs bez użytecznego wyjścia - nie rysujemy go wcale
-        best_bound = min(bound for _, bound in exits)
+        best_bound = min(e[1] for e in exits)
         q = max(0.0, min(1.0, (deadline - best_bound) / span))
-        if q < Q_MIN:
-            continue
-        if stops_seq[exits[-1][0] - 1] in target_set:
-            cut = exits[-1][0]      # linia jadąca do celu: rysuj dokładnie do celu
-        else:
-            # Utnij ogon: jedź dalej tylko dopóki to nie psuje wyniku o >3 min
-            # (koniec z jasnym rysowaniem "za punkt docelowy i z powrotem").
-            cut = max(pos for pos, bound in exits
-                      if bound <= best_bound + BOUND_TOL_SEC)
         label, _ = day.trip_info[trip]
-        key = (label, tuple(stops_seq[:cut]))
+        key = (label, tuple(stops_seq))
+        entry = raw.get(key)
+        if entry is None:
+            entry = raw[key] = {
+                "label": label,
+                "q": q,
+                "stops": stops_seq,
+                "pos_of": {s: p for p, s in enumerate(stops_seq)},
+                "exits": exits,
+                "best_deps": dict(departures),   # odjazdy najlepszego kursu
+                "dep_times": {},   # przystanek -> odjazdy wszystkich kursów
+                "shape": day.trip_shape.get(trip),
+            }
+        elif q > entry["q"]:
+            entry["q"] = q
+            entry["exits"] = exits
+            entry["best_deps"] = dict(departures)
+        for stop, dep in departures:
+            entry["dep_times"].setdefault(stop, []).append(dep)
+
+    stop_names = day.stop_names
+    segs = list(raw.values())
+
+    for seg in segs:
+        for times in seg["dep_times"].values():
+            times.sort()
+
+    def catchable(arr_t, buffer, dep_list):
+        i = bisect_left(dep_list, arr_t + buffer)
+        return i < len(dep_list) and dep_list[i] <= arr_t + WAIT_CAP_SEC
+
+    def joins(arr_t, stop, other, drawn=None):
+        """Czy z przyjazdu (arr_t, stop) da się wskoczyć w segment `other`
+        (na tym samym słupku lub sąsiednim o tej samej nazwie), opcjonalnie
+        tylko w jego narysowanej części `drawn`."""
+        for stop2 in (stop, *day.siblings.get(stop, ())):
+            times = other["dep_times"].get(stop2)
+            if times is None or (drawn is not None and stop2 not in drawn):
+                continue
+            buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+            if catchable(arr_t, buffer, times):
+                return True
+        return False
+
+    passing_index = {}   # nazwa przystanku -> segmenty przez niego przejeżdżające
+    for seg in segs:
+        for stop in seg["dep_times"]:
+            passing_index.setdefault(stop_names[stop], []).append(seg)
+
+    # Doprecyzowanie jasności: aproksymacja (deadline - latest) wlicza dla
+    # rzadkich linii czekanie "do ostatniego kursu" i przekłamuje jasność.
+    # Liczymy więc wartość każdego WYJŚCIA przez konkretne kontynuacje:
+    # najbliższy odjazd segmentu, w który da się wskoczyć, plus najlepsze
+    # z jego DALSZYCH wyjść (sufiks - wyjść sprzed punktu wskoczenia nie
+    # da się już użyć). Wyjścia na cel są dokładne (wartość = przyjazd).
+    for seg in segs:
+        seg["exit_vals"] = [e[1] for e in seg["exits"]]
+
+    def refresh_suffixes():
+        for seg in segs:
+            suffix = list(seg["exit_vals"])
+            for j in range(len(suffix) - 2, -1, -1):
+                suffix[j] = min(suffix[j], suffix[j + 1])
+            seg["suffix"] = suffix
+            seg["exit_pos"] = [e[0] for e in seg["exits"]]
+
+    def join_value(arr_t, stop, other):
+        """Przyjazd do celu, gdy z (arr_t, stop) wskakujemy w `other`
+        i korzystamy z jego wyjść ZA punktem wskoczenia."""
+        best = None
+        for stop2 in (stop, *day.siblings.get(stop, ())):
+            times = other["dep_times"].get(stop2)
+            position = other["pos_of"].get(stop2)
+            if times is None or position is None:
+                continue
+            buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+            i = bisect_left(times, arr_t + buffer)
+            if i == len(times):
+                continue
+            j = bisect_right(other["exit_pos"], position)
+            if j == len(other["suffix"]):
+                continue          # za punktem wskoczenia nie ma już wyjść
+            shift = max(0, times[i] - other["best_deps"].get(stop2, times[i]))
+            candidate = other["suffix"][j] + shift
+            if best is None or candidate < best:
+                best = candidate
+        return best
+
+    for iteration in range(8):        # punkt stały; zbiega w 2-4 obiegach
+        refresh_suffixes()
+        changed = False
+        for seg in segs:
+            for j, (pos, raw_bound, arr_t, stop) in enumerate(seg["exits"]):
+                if stop in target_set:
+                    continue          # wartość = przyjazd, już dokładna
+                best = None
+                for other in passing_index.get(stop_names[stop], ()):
+                    if other is seg:
+                        continue
+                    value = join_value(arr_t, stop, other)
+                    if value is not None and (best is None or value < best):
+                        best = value
+                # bez widocznej kontynuacji zostaje surowa aproksymacja
+                new_value = raw_bound if best is None else best
+                if new_value != seg["exit_vals"][j]:
+                    seg["exit_vals"][j] = new_value
+                    changed = True
+        if not changed:
+            break
+
+    for seg in segs:
+        seg["bound"] = min(seg["exit_vals"])
+        seg["q"] = max(0.0, min(1.0, (deadline - seg["bound"]) / span))
+
+    # Próg jasności + spójność narysowanej sieci. Segment jest przycinany
+    # z OBU stron do zakotwiczonych punktów:
+    # - początek: start relacji albo miejsce, gdzie dołącza (zdążalnie)
+    #   inny narysowany segment - żaden segment nie zaczyna się "znikąd";
+    # - koniec: cel albo ostatnia przesiadka w porównywalnie jasny
+    #   narysowany segment - żaden ogon nie prowadzi "w powietrze".
+    # Punkt stały: zakresy mogą tylko się kurczyć, więc iteracja zbiega.
+    kept = [seg for seg in segs if seg["q"] >= q_min]
+    ranges = {id(seg): (0, len(seg["stops"])) for seg in kept}
+    while True:
+        drawn_stops = {
+            id(seg): set(seg["stops"][ranges[id(seg)][0]:ranges[id(seg)][1]])
+            for seg in kept
+        }
+        survivors = []
+        new_ranges = {}
+        for seg in kept:
+            # --- kotwica początku ---
+            if stop_names[seg["stops"][0]] == start_name:
+                start_pos = 0
+            else:
+                start_pos = None
+                for other in kept:
+                    if other is seg:
+                        continue
+                    o_start, o_cut = ranges[id(other)]
+                    for pos, _, arr_t, stop in other["exits"]:
+                        if not (o_start < pos <= o_cut):
+                            continue         # wyjście poza narysowaną częścią
+                        for stop2 in (stop, *day.siblings.get(stop, ())):
+                            p = seg["pos_of"].get(stop2)
+                            times = seg["dep_times"].get(stop2)
+                            if p is None or times is None:
+                                continue
+                            if p >= len(seg["stops"]) - 1:
+                                continue     # dołączenie na samym końcu - puste
+                            buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+                            if catchable(arr_t, buffer, times):
+                                if start_pos is None or p < start_pos:
+                                    start_pos = p
+                if start_pos is None:
+                    continue                 # nie da się tu dojechać widocznie
+            # --- kotwica końca ---
+            cut = 0
+            for pos, _, arr_t, stop in seg["exits"]:
+                if pos <= start_pos + 1:
+                    continue                 # wyjście przed/na starcie segmentu
+                if stop in target_set:
+                    cut = max(cut, pos)      # cel jest "widoczny" z definicji
+                    continue
+                for other in passing_index.get(stop_names[stop], ()):
+                    if other is seg or id(other) not in drawn_stops:
+                        continue
+                    # Kontynuacja musi być zdążalna i porównywalnie jasna -
+                    # jasny korytarz nie ciągnie ogona do bladej niszy.
+                    if (other["q"] + Q_ANCHOR_TOL >= seg["q"]
+                            and joins(arr_t, stop, other,
+                                      drawn_stops[id(other)])):
+                        cut = max(cut, pos)
+                        break
+            if cut >= start_pos + 2:
+                survivors.append(seg)
+                new_ranges[id(seg)] = (start_pos, cut)
+        if len(survivors) == len(kept) and \
+                new_ranges == {k: ranges[k] for k in new_ranges}:
+            break
+        kept = survivors
+        ranges = new_ranges
+
+    segments = {}
+    for seg in kept:
+        start_pos, cut = ranges[id(seg)]
+        key = (seg["label"], tuple(seg["stops"][start_pos:cut]))
         entry = segments.get(key)
-        if entry is None or q > entry[0]:
-            segments[key] = (q, day.trip_shape.get(trip))
+        if entry is None or seg["q"] > entry[0]:
+            segments[key] = (seg["q"], seg["shape"])
 
     kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
     brightest = sorted(

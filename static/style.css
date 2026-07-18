@@ -68,6 +68,12 @@ input {
     box-sizing: border-box;
 }
 
+input[type="range"] {
+    padding: 0;
+    margin-top: 8px;
+    accent-color: #1565c0;
+}
+
 .buttons {
     display: flex;
     gap: 8px;
