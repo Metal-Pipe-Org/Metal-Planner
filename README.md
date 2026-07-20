@@ -31,3 +31,8 @@ Cron na serwerze, np. o 3:00:
 
 Gdy pobieranie się nie powiedzie, stara baza zostaje nietknięta — aplikacja
 działa dalej na wczorajszych danych i przeładuje nowe sama, bez restartu.
+
+## For devs
+- venv `python -m venv myenv`
+- installing python requirements `pip install -r requirements.txt`
+- run `python app.py`
