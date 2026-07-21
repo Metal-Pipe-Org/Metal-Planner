@@ -35,9 +35,12 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 - **`gtfs.py`** — dostęp do SQLite. Przy pierwszym zapytaniu danego dnia
   wyznacza kursujące tego dnia kursy (logika `calendar.txt`), buduje w RAM
   tablicę ~1 mln „połączeń" (pojedynczych przejazdów między sąsiednimi
-  przystankami, posortowanych po odjeździe) i cache'uje ją. Klucz cache
-  zawiera mtime pliku bazy, więc po nocnej podmianie dane przeładują się
-  same — bez restartu Flaska.
+  przystankami, posortowanych po odjeździe) i cache'uje ją. Tam samo liczy
+  piesich sąsiadów każdego przystanku (patrz „Piesi sąsiedzi przystanku"
+  w Algorytmach) - kubełkowanie zamiast pełnego porównania każdy-z-każdym,
+  bo przy ~2500 słupkach to byłoby ~6 mln par. Klucz cache zawiera mtime
+  pliku bazy, więc po nocnej podmianie dane przeładują się same — bez
+  restartu Flaska.
 - **`planner.py`** — dwa algorytmy na tej samej tablicy połączeń:
   `plan_route` (jedna najszybsza trasa, CSA) i `plan_flow` (mapa przepływów) —
   opis niżej.
@@ -66,8 +69,14 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
 - do połączenia można „wsiąść", jeśli już siedzimy w tym kursie, albo jesteśmy
   na jego przystanku odpowiednio wcześnie (bufor przesiadki 2 min; start
   i dojście piesze bez bufora);
-- słupki o tej samej nazwie przystanku traktujemy jak jeden węzeł połączony
-  przejściem 3 min;
+- **piesi sąsiedzi przystanku** (`gtfs.py`, `data.siblings`) - dwa źródła
+  scalone w jedną relację `stop_id -> [(sąsiad, sek_dojścia), …]`: słupki
+  o tej samej nazwie (stały bufor 3 min - to więcej niż geometria, bo
+  zwykle trzeba przejść na drugą stronę torów/ulicy) oraz DOWOLNE inne
+  przystanki w promieniu 400 m (haversine / ~4,7 km/h, min. 60 s) - „po
+  prostu idź" zamiast tylko przesiadki między bliźniaczymi słupkami.
+  Jeden skok pieszy na raz (bez łańcuchów A→pieszo→B→pieszo→C), stosowany
+  identycznie na starcie, w środku trasy i na końcu;
 - kursy po północy mają w GTFS godziny 24:xx+ i „po prostu działają";
 - trasę odtwarzamy wstecz po zapisanych wskaźnikach (które połączenie
   poprawiło który przystanek).
@@ -118,17 +127,22 @@ ten sam efekt daje analiza dwóch skanów:
 7. **Próg jasności** (suwak w UI, 30–90%, domyślnie 60%): segmenty poniżej
    progu nie są wysyłane; odpowiedź ograniczona do 150 najjaśniejszych.
 8. **Spójność sieci**: po odsianiu progiem każdy segment jest przycinany
-   z obu stron do zakotwiczonych punktów — początek to start relacji albo
-   miejsce, gdzie dołącza inny narysowany segment; koniec to cel albo
-   ostatnia przesiadka w porównywalnie jasny (tolerancja 0,1) narysowany
-   segment. Segment bez kotwic odpada; punkt stały iteruje, aż nic nie
-   wypada. Efekt: żadna linia nie zaczyna się „znikąd" ani nie prowadzi
-   „w powietrze", niezależnie od ustawienia suwaka.
+   z obu stron do zakotwiczonych punktów — początek to start relacji **albo
+   jego pieszy sąsiad** (`start_walkable` - dojście na piechotę z punktu
+   startowego liczy się jak bycie na miejscu), albo miejsce, gdzie dołącza
+   inny narysowany segment; koniec to cel **lub jego pieszy sąsiad**
+   (`target_walkable`, symetrycznie) albo ostatnia przesiadka w porównywalnie
+   jasny (tolerancja 0,1) narysowany segment. Segment bez kotwic odpada;
+   punkt stały iteruje, aż nic nie wypada. Efekt: żadna linia nie zaczyna
+   się „znikąd" ani nie prowadzi „w powietrze", niezależnie od ustawienia
+   suwaka — i trasy, które wymagają dojścia pieszo do/od prawdziwego
+   punktu startu/celu, też się pokazują.
 9. **Margines przesiadki**: przy każdej kotwicy początku, która jest
    realną przesiadką (nie startem trasy), zapamiętujemy też zapas czasu
-   ponad wymagany bufor (`TRANSFER_SEC` na tym samym słupku, `WALK_SEC`
-   na sąsiednim) do najwcześniejszego odjazdu, w który jeszcze da się
-   wskoczyć — `transfer_margin` w sekundach w odpowiedzi API (`null` przy
+   ponad wymagany bufor (`TRANSFER_SEC` na tym samym słupku, indywidualny
+   czas dojścia na sąsiedni - patrz „Piesi sąsiedzi przystanku" wyżej) do
+   najwcześniejszego odjazdu, w który jeszcze da się wskoczyć —
+   `transfer_margin` w sekundach w odpowiedzi API (`null` przy
    starcie trasy, gdzie bufor nie ma zastosowania; przy remisie pozycji
    wsiadania wygrywa przesiadka z większym zapasem). Na razie to czysto
    rozkładowy zapas — dopiero dane GTFS-RT o opóźnieniach (patrz „Plan
@@ -254,6 +268,20 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 
 ## Changelog
 
+- **2026-07-21** — chodzenie pieszo jako samodzielna opcja: `gtfs.py`
+  liczy piesich sąsiadów każdego przystanku - ta sama nazwa (bufor stały,
+  jak dotąd) ORAZ dowolny inny przystanek w promieniu 400 m (haversine +
+  ~4,7 km/h, kubełkowanie zamiast n² porównań, ~2500 słupków). `siblings`
+  niesie teraz `(sąsiad, sek_dojścia)` zamiast samego stop_id - `_scan`,
+  `_forward`, `_backward`, `plan_flow` (`joins`/`join_value`/kotwice
+  segmentów) czytają czas z krotki zamiast stałej `WALK_SEC`. Dodano
+  jawną relaksację pieszą ze startu i do celu (poprzednio działała tylko
+  "za darmo" dla tej samej nazwy, bo `match_stop` zwraca od razu wszystkie
+  jej słupki) oraz `start_walkable`/`target_walkable` przy kotwiczeniu
+  segmentów, żeby trasa wymagająca dojścia pieszo do/od prawdziwego
+  punktu startu/celu nie odpadała jako "nieprzycumowana". Zweryfikowane:
+  przypadek Katedra→pl. Grunwaldzki (dawniej 0 segmentów) teraz pokazuje
+  realną opcję; czas odpowiedzi bez zmian (~30 ms na cache'owanym dniu).
 - **2026-07-21** — tablica odjazdów per przystanek: `stop_departures` w
   `planner.py` (skan `day.conns` od podanej godziny, filtr po `stop_id`),
   endpoint `/api/departures`, prawy klik na przystanek otwiera dymek
@@ -321,8 +349,12 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   nieco ostrożniej niż w skanie w przód.
 - Wyszukiwanie działa w ramach jednej doby rozkładowej: zapytanie o 0:30
   nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
-- Brak tras pieszych po mieście — przesiadka tylko między słupkami
-  o identycznej nazwie przystanku.
+- Dojście pieszo (patrz „Piesi sąsiedzi przystanku" w Algorytmach) to
+  jeden skok naraz, prosta linia (haversine), stała prędkość marszu —
+  nie prawdziwa sieć ulic pieszych (chodniki, przejścia, zakazy). Dobre
+  jako "czy w ogóle warto rozważyć dojście", nie jako dokładna nawigacja.
+  Promień 400 m / ~4,7 km/h to arbitralne, rozsądne wartości - nie z badania
+  zachowań użytkowników.
 - Margines przesiadki (kropka na mapie) jest czysto rozkładowy — nie
   wie nic o bieżących opóźnieniach, więc "12 min zapasu" to zapas wg
   rozkładu, nie licząc np. spóźnionego pierwszego kursu.
@@ -357,10 +389,12 @@ między sesjami (mogą dzielić je dni).
       bez konfliktu) otwiera dymek z najbliższymi odjazdami (`stop_times`
       już w bazie, nic nowego nie trzeba było pobierać). Status „na
       czas/opóźniony” zostaje na później — patrz „Znane ograniczenia”.
-- [ ] **Chodzenie pieszo jako samodzielna opcja**, nie tylko przesiadka
-      między słupkami o tej samej nazwie (`WALK_SEC`) — dojście między
-      dowolnymi bliskimi punktami, ograniczone promieniem (żeby nie
-      rozsadzić liczby połączeń rozważanych przez CSA).
+- [x] **Chodzenie pieszo jako samodzielna opcja** — zrobione 2026-07-21:
+      `gtfs.py` liczy piesich sąsiadów każdego przystanku (ta sama nazwa +
+      dowolny inny w promieniu 400 m, kubełkowanie zamiast n² porównań);
+      cały CSA (`_scan`/`_forward`/`_backward`/`plan_flow`) czyta czas
+      dojścia z tej samej relacji zamiast stałej `WALK_SEC`, więc "po
+      prostu idź" działa jednolicie na starcie, w środku trasy i na końcu.
 - [ ] **Rzeczywista lokalizacja użytkownika** (`navigator.geolocation`) +
       „ostatnia mila” piesza do/ze stacji/przystanku (haversine + założona
       prędkość marszu, bez zewnętrznego routingu na start).
