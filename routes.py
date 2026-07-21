@@ -73,9 +73,18 @@ def init_routes(app):
             q_min = float(request.args.get("qmin", ""))
         except ValueError:
             q_min = None
+        start_point = None
+        if "start_lat" in request.args and "start_lon" in request.args:
+            try:
+                start_point = (
+                    float(request.args["start_lat"]), float(request.args["start_lon"]),
+                )
+            except ValueError:
+                pass
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
             q_min,
+            start_point,
         ))

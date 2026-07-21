@@ -38,9 +38,11 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
   przystankami, posortowanych po odjeździe) i cache'uje ją. Tam samo liczy
   piesich sąsiadów każdego przystanku (patrz „Piesi sąsiedzi przystanku"
   w Algorytmach) - kubełkowanie zamiast pełnego porównania każdy-z-każdym,
-  bo przy ~2500 słupkach to byłoby ~6 mln par. Klucz cache zawiera mtime
-  pliku bazy, więc po nocnej podmianie dane przeładują się same — bez
-  restartu Flaska.
+  bo przy ~2500 słupkach to byłoby ~6 mln par. `nearest_stops(lat, lon, …)`
+  robi to samo dla DOWOLNEGO punktu (np. lokalizacji użytkownika) - liniowy
+  skan, bo to jedno zapytanie naraz, nie wszystkie pary. Klucz cache
+  zawiera mtime pliku bazy, więc po nocnej podmianie dane przeładują się
+  same — bez restartu Flaska.
 - **`planner.py`** — dwa algorytmy na tej samej tablicy połączeń:
   `plan_route` (jedna najszybsza trasa, CSA) i `plan_flow` (mapa przepływów) —
   opis niżej.
@@ -56,6 +58,17 @@ internetu), wszystkie słupki jako markery na canvasie, chowany panel boczny
 (przycisk ☰). Klik 1 = start (zielony), klik 2 = cel (czerwony) i wyszukiwanie
 odpala się samo. Wynik jest **wyłącznie graficzny** — mapa przepływów, bez
 tekstowej listy etapów. Czysty JS bez frameworka.
+
+Przycisk „Użyj mojej lokalizacji" (`navigator.geolocation.getCurrentPosition`,
+jednorazowo — to jednorazowe wyszukiwanie, nie ciągłe śledzenie, więc
+`watchPosition` nie jest potrzebny) ustawia prawdziwy punkt GPS jako start
+zamiast nazwy przystanku: fioletowy marker na mapie, pole „Przystanek
+początkowy" pokazuje „Twoja lokalizacja", zapytanie idzie do `/api/flow`
+jako `start_lat`/`start_lon` zamiast `start`. Wymaga zgody przeglądarki
+(i HTTPS na produkcji — `localhost` jest zwolniony z tego wymogu, patrz
+„Znane ograniczenia"); odmowa/brak/timeout pokazują czytelny komunikat
+zamiast się wywalać. Ręczne wpisanie nazwy albo klik w przystanek na
+mapie czyści lokalizację i wraca do zwykłego wyszukiwania po nazwie.
 
 ## Algorytmy
 
@@ -129,7 +142,9 @@ ten sam efekt daje analiza dwóch skanów:
 8. **Spójność sieci**: po odsianiu progiem każdy segment jest przycinany
    z obu stron do zakotwiczonych punktów — początek to start relacji **albo
    jego pieszy sąsiad** (`start_walkable` - dojście na piechotę z punktu
-   startowego liczy się jak bycie na miejscu), albo miejsce, gdzie dołącza
+   startowego liczy się jak bycie na miejscu; przy starcie z prawdziwej
+   lokalizacji, patrz Frontend, to najbliższe przystanki z
+   `gtfs.nearest_stops`, nie słupki dopasowanej nazwy), albo miejsce, gdzie dołącza
    inny narysowany segment; koniec to cel **lub jego pieszy sąsiad**
    (`target_walkable`, symetrycznie) albo ostatnia przesiadka w porównywalnie
    jasny (tolerancja 0,1) narysowany segment. Segment bez kotwic odpada;
@@ -248,7 +263,10 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   ostatniego użytecznego wyjścia; `transfer_margin` to sekundy zapasu
   ponad wymagany bufor przesiadki przy wsiadaniu w ten segment, `null`
   gdy segment zaczyna się od startu trasy (patrz „Margines przesiadki”
-  w sekcji Algorytmy).
+  w sekcji Algorytmy). Zamiast `start=` można podać `start_lat=&start_lon=`
+  (prawdziwa lokalizacja zamiast nazwy przystanku - patrz Frontend); wtedy
+  `start` w odpowiedzi to zawsze „Twoja lokalizacja”. Błąd, gdy w promieniu
+  1 km nie ma żadnego przystanku: `{error: "…"}`.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -268,6 +286,17 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 
 ## Changelog
 
+- **2026-07-21** — prawdziwa lokalizacja użytkownika jako start: przycisk
+  „Użyj mojej lokalizacji” (`navigator.geolocation.getCurrentPosition`,
+  jednorazowo) + `gtfs.nearest_stops(lat, lon, …)` na „ostatnią milę” (do 5
+  najbliższych przystanków w promieniu 1 km, haversine + prędkość marszu).
+  `_scan`/`_forward`/`plan_flow` przyjmują teraz opcjonalny `source_walk`
+  (lista `(stop_id, sek)` zamiast/obok nazwanych `source_stops`) - ten sam
+  mechanizm co „ostatnia mila” między przystankami z poprzedniego kroku,
+  tylko z punktu ad hoc zamiast z prekomputowanego `day.siblings`.
+  `/api/flow` przyjmuje `start_lat`/`start_lon` zamiast `start`. Fioletowy
+  marker na mapie; ręczne wpisanie nazwy albo klik w przystanek czyści
+  lokalizację. Tylko start (patrz „Plan rozwoju” - cel świadomie pominięty).
 - **2026-07-21** — chodzenie pieszo jako samodzielna opcja: `gtfs.py`
   liczy piesich sąsiadów każdego przystanku - ta sama nazwa (bufor stały,
   jak dotąd) ORAZ dowolny inny przystanek w promieniu 400 m (haversine +
@@ -354,7 +383,12 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   nie prawdziwa sieć ulic pieszych (chodniki, przejścia, zakazy). Dobre
   jako "czy w ogóle warto rozważyć dojście", nie jako dokładna nawigacja.
   Promień 400 m / ~4,7 km/h to arbitralne, rozsądne wartości - nie z badania
-  zachowań użytkowników.
+  zachowań użytkowników. To samo ograniczenie dotyczy „ostatniej mili"
+  z prawdziwej lokalizacji (promień 1 km).
+- „Użyj mojej lokalizacji" wymaga bezpiecznego kontekstu przeglądarki
+  (HTTPS) na produkcji — na `localhost` działa bez tego (zwolnione ze
+  specyfikacji), ale wdrożenie na zwykłym HTTP straciłoby tę funkcję
+  (przeglądarka po cichu odrzuci `getCurrentPosition`).
 - Margines przesiadki (kropka na mapie) jest czysto rozkładowy — nie
   wie nic o bieżących opóźnieniach, więc "12 min zapasu" to zapas wg
   rozkładu, nie licząc np. spóźnionego pierwszego kursu.
@@ -395,9 +429,13 @@ między sesjami (mogą dzielić je dni).
       cały CSA (`_scan`/`_forward`/`_backward`/`plan_flow`) czyta czas
       dojścia z tej samej relacji zamiast stałej `WALK_SEC`, więc "po
       prostu idź" działa jednolicie na starcie, w środku trasy i na końcu.
-- [ ] **Rzeczywista lokalizacja użytkownika** (`navigator.geolocation`) +
-      „ostatnia mila” piesza do/ze stacji/przystanku (haversine + założona
-      prędkość marszu, bez zewnętrznego routingu na start).
+- [x] **Rzeczywista lokalizacja użytkownika** — zrobione 2026-07-21:
+      przycisk „Użyj mojej lokalizacji" (`navigator.geolocation`,
+      jednorazowo) + `gtfs.nearest_stops` na „ostatnią milę” (haversine +
+      założona prędkość marszu, bez zewnętrznego routingu). Tylko start,
+      nie cel - "gdzie stoję → cel" było jedynym artykułowanym przypadkiem
+      użycia; geolokalizacja celu (dokąd idę → gdzie akurat jestem) to
+      rzadki, odwrotny scenariusz, świadomie pominięty.
 - [ ] **Rower jako krawędź w CSA** (głęboka integracja) — `plan_flow` /
       `plan_route` proponują „idź do stacji X, jedź rowerem do Y” jako
       opcję obok tramwaju/autobusu. Nowy, czasowo zmienny typ połączenia

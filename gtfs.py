@@ -124,6 +124,30 @@ def _nearby_walks(stop_coords):
     return result
 
 
+LAST_MILE_RADIUS_M = 1000   # dalej niż WALK_RADIUS_M - to punkt startowy, nie przesiadka
+LAST_MILE_MAX_STOPS = 5     # ile najbliższych przystanków bierzemy pod uwagę
+
+
+def nearest_stops(lat, lon, day, n=LAST_MILE_MAX_STOPS, radius_m=LAST_MILE_RADIUS_M):
+    """Najbliższe przystanki do dowolnego punktu (np. lokalizacji użytkownika),
+    z czasem dojścia pieszo: [(stop_id, sek), ...] posortowane rosnąco po
+    odległości, tylko w promieniu radius_m.
+
+    Pojedyncze zapytanie na punkt - liniowy skan po wszystkich słupkach
+    (bez kubełkowania z _nearby_walks, bo to nie jest przeliczane dla
+    każdej pary naraz, tylko raz na żądanie).
+    """
+    candidates = sorted(
+        (_haversine_m(lat, lon, slat, slon), stop_id)
+        for stop_id, (slat, slon) in day.stop_coords.items()
+    )
+    return [
+        (stop_id, max(WALK_MIN_SEC, round(dist / WALK_SPEED_MPS)))
+        for dist, stop_id in candidates[:n]
+        if dist <= radius_m
+    ]
+
+
 def load_day(day):
     """Zwraca DayData dla podanej daty (datetime.date), z cache."""
     key = (day.isoformat(), DB_PATH.stat().st_mtime if DB_PATH.exists() else 0)

@@ -102,11 +102,16 @@ def stop_departures(stop_query, when=None, limit=DEPARTURES_LIMIT):
     return {"stop": name, "departures": departures}
 
 
-def _scan(day, source_stops, target_stops, dep_sec):
-    """Connection Scan: najwcześniejszy przyjazd do celu, ze śladem do rekonstrukcji."""
+def _scan(day, source_stops, target_stops, dep_sec, source_walk=None):
+    """Connection Scan: najwcześniejszy przyjazd do celu, ze śladem do rekonstrukcji.
+
+    `source_walk` to opcjonalna „ostatnia mila” z dowolnego punktu (np.
+    prawdziwej lokalizacji użytkownika) - [(stop_id, sek_dojścia), ...]
+    z gtfs.nearest_stops, zamiast/obok nazwanych source_stops.
+    """
     conns = day.conns
     earliest = {}
-    journey = {}      # stop_id -> ("origin",) | ("ride", idx_wsiadania, idx_wysiadania) | ("walk", skad)
+    journey = {}      # stop_id -> ("origin",) | ("ride", idx_wsiadania, idx_wysiadania) | ("walk", skad, sek)
     trip_board = {}   # trip_id -> indeks połączenia, na którym wsiedliśmy do kursu
 
     # Użytkownik podaje nazwę przystanku, więc startuje ze wszystkich jego słupków.
@@ -123,6 +128,14 @@ def _scan(day, source_stops, target_stops, dep_sec):
             if walk_arr < earliest.get(sibling, INF):
                 earliest[sibling] = walk_arr
                 journey[sibling] = ("walk", stop, walk_sec)
+    # Dojście z dowolnego punktu (np. prawdziwej lokalizacji) do najbliższych
+    # przystanków - ten sam mechanizm, jednorazowo, bez dalszej relaksacji
+    # (jeden skok pieszy naraz, patrz gtfs.py).
+    for stop, walk_sec in (source_walk or ()):
+        walk_arr = dep_sec + walk_sec
+        if walk_arr < earliest.get(stop, INF):
+            earliest[stop] = walk_arr
+            journey[stop] = ("walk", None, walk_sec)
 
     targets = set(target_stops)
     best_arr = INF
@@ -220,7 +233,7 @@ DEFAULT_Q_MIN = 0.60    # domyślny próg jasności (suwak w UI go nadpisuje)
 MAX_SEGMENTS = 150      # twardy limit liczby segmentów w odpowiedzi
 
 
-def plan_flow(start_query, end_query, when=None, q_min=None):
+def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką jest KURS, nie pojedynczy przeskok: dla każdego kursu, do którego
@@ -231,6 +244,8 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     niż to, do czego dowozi - narysowana sieć jest spójna od startu do celu.
 
     q_min (0..1) to próg jasności; poniżej niego segmenty nie są wysyłane.
+    start_point (lat, lon) - opcjonalnie, zamiast start_query: prawdziwa
+    lokalizacja zamiast nazwy przystanku (patrz gtfs.nearest_stops).
     """
     when = when or datetime.now()
     q_min = DEFAULT_Q_MIN if q_min is None else max(0.2, min(0.95, q_min))
@@ -240,9 +255,16 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     except FileNotFoundError as e:
         return {"error": str(e)}
 
-    start_name, source_stops, start_hints = gtfs.match_stop(start_query, day)
-    if start_name is None:
-        return _unknown_stop(start_query, start_hints)
+    if start_point is not None:
+        source_walk = gtfs.nearest_stops(start_point[0], start_point[1], day)
+        if not source_walk:
+            return {"error": "Brak przystanków w rozsądnym zasięgu marszu od Twojej lokalizacji."}
+        source_stops, start_name = [], "Twoja lokalizacja"
+    else:
+        start_name, source_stops, start_hints = gtfs.match_stop(start_query, day)
+        if start_name is None:
+            return _unknown_stop(start_query, start_hints)
+        source_walk = None
     end_name, target_stops, end_hints = gtfs.match_stop(end_query, day)
     if end_name is None:
         return _unknown_stop(end_query, end_hints)
@@ -252,7 +274,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     dep_sec = when.hour * 3600 + when.minute * 60 + when.second
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek").
-    best_stop, best_arr, _ = _scan(day, source_stops, target_stops, dep_sec)
+    best_stop, best_arr, _ = _scan(day, source_stops, target_stops, dep_sec, source_walk)
     if best_stop is None:
         return {
             "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
@@ -262,15 +284,17 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     extra = min(max(int(duration * (SLOWDOWN - 1)), MIN_EXTRA_SEC), MAX_EXTRA_SEC)
     deadline = best_arr + extra
 
-    earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
+    earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline, source_walk)
     latest = _backward(day, set(target_stops), dep_sec, deadline)
 
     # Zapas czasowy trasy optymalnej = pełna jasność.
     span = max(deadline - best_arr, 1)
     # Punkt odniesienia reguły postępu: im później można być na przystanku
-    # i wciąż zdążyć (latest), tym bliżej celu się jest.
+    # i wciąż zdążyć (latest), tym bliżej celu się jest. Przy starcie z punktu
+    # (source_walk) liczy się tak samo, jak nazwane source_stops.
+    origin_stops = list(source_stops) + [s for s, _ in (source_walk or ())]
     origin_latest = max(
-        (latest[s] for s in source_stops if s in latest), default=None,
+        (latest[s] for s in origin_stops if s in latest), default=None,
     )
 
     # Połączenia okna pogrupowane per kurs (tablica jest posortowana po
@@ -292,6 +316,8 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     start_walkable = set(source_stops)
     for s in source_stops:
         start_walkable.update(sib for sib, _ in day.siblings.get(s, ()))
+    if source_walk:
+        start_walkable.update(s for s, _ in source_walk)
     target_walkable = set(target_stops)
     for s in target_stops:
         target_walkable.update(sib for sib, _ in day.siblings.get(s, ()))
@@ -587,12 +613,13 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     }
 
 
-def _forward(day, source_stops, dep_sec, deadline):
+def _forward(day, source_stops, dep_sec, deadline, source_walk=None):
     """Jak _scan, ale bez celu: najwcześniejsze przyjazdy wszędzie do deadline.
 
     Zwraca (earliest, arrived_by, trip_board); trip_board[kurs] to indeks
     pierwszego połączenia, na które w ogóle da się zdążyć (właściwe miejsce
-    wsiadania, z regułą postępu, wybiera dopiero plan_flow).
+    wsiadania, z regułą postępu, wybiera dopiero plan_flow). `source_walk`
+    jak w _scan.
     """
     conns = day.conns
     earliest = {}
@@ -610,6 +637,11 @@ def _forward(day, source_stops, dep_sec, deadline):
             if walk_arr < earliest.get(sibling, INF):
                 earliest[sibling] = walk_arr
                 arrived_by[sibling] = "walk"
+    for stop, walk_sec in (source_walk or ()):
+        walk_arr = dep_sec + walk_sec
+        if walk_arr < earliest.get(stop, INF):
+            earliest[stop] = walk_arr
+            arrived_by[stop] = "walk"
 
     for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
         dep_t, arr_t, dep_s, arr_s, trip = conns[i]
