@@ -42,6 +42,14 @@
     </label>
     <input type="range" id="qmin" min="30" max="90" step="5" value="60">
 
+    <label class="switch-row" for="traficar">
+        <span>Samochody Traficar <span id="traficar-spinner" class="spinner" hidden></span></span>
+        <span class="switch">
+            <input type="checkbox" id="traficar" checked>
+            <span class="slider"></span>
+        </span>
+    </label>
+
     <datalist id="stops">
         {% for name in stops %}<option value="{{ name }}">{% endfor %}
     </datalist>
@@ -322,6 +330,59 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         }
         if (startInput.value && endInput.value) search();
     });
+}
+
+// Warstwa samochodów Traficar (car-sharing): fioletowe punkty włączane
+// przełącznikiem w panelu. Pozycje pobieramy przy pierwszym włączeniu,
+// potem tylko dodajemy/zdejmujemy gotową warstwę z mapy.
+const traficarToggle = document.getElementById('traficar');
+if (traficarToggle) {
+    const spinner = document.getElementById('traficar-spinner');
+    const TRAFICAR_STYLE = {radius: 5, weight: 1.5, color: '#4a148c',
+                            fillColor: '#9c27b0', fillOpacity: 0.9};
+    let traficarLayer = null;
+    let loading = false;
+
+    const esc = text => {
+        const div = document.createElement('div');
+        div.textContent = text ?? '';
+        return div.innerHTML;
+    };
+
+    function loadTraficar() {
+        loading = true;
+        if (spinner) spinner.hidden = false;
+        fetch('/api/traficar')
+            .then(r => r.json())
+            .then(cars => {
+                const markers = (cars || []).map(car => {
+                    const m = L.circleMarker([car.lat, car.lon], TRAFICAR_STYLE);
+                    const bits = [];
+                    if (car.fuel != null) bits.push(`${Math.round(car.fuel)}% paliwa`);
+                    if (car.range != null) bits.push(`~${car.range} km`);
+                    const meta = bits.length ? `<br>${bits.join(' · ')}` : '';
+                    const where = car.location ? `<br>${esc(car.location)}` : '';
+                    const plate = car.plate ? ` · ${esc(car.plate)}` : '';
+                    m.bindTooltip(`🚗 <b>${esc(car.model)}</b>${plate}${meta}${where}`);
+                    return m;
+                });
+                traficarLayer = L.layerGroup(markers);
+                if (traficarToggle.checked) traficarLayer.addTo(map);
+            })
+            .catch(() => { traficarToggle.checked = false; })
+            .finally(() => { loading = false; if (spinner) spinner.hidden = true; });
+    }
+
+    traficarToggle.addEventListener('change', () => {
+        if (traficarToggle.checked) {
+            if (traficarLayer) traficarLayer.addTo(map);
+            else if (!loading) loadTraficar();
+        } else if (traficarLayer) {
+            map.removeLayer(traficarLayer);
+        }
+    });
+
+    if (traficarToggle.checked) loadTraficar();   // warstwa włączona domyślnie
 }
 </script>
 

@@ -3,6 +3,7 @@ from datetime import datetime
 from flask import jsonify, render_template, request
 
 import gtfs
+import traficar
 from planner import plan_flow, plan_route
 
 
@@ -51,6 +52,10 @@ def init_routes(app):
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
         ))
+
+    @app.route("/api/traficar")
+    def api_traficar():
+        return jsonify(traficar.positions())
 
     @app.route("/api/flow")
     def api_flow():
