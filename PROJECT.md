@@ -44,7 +44,7 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 - **`bikes.py`** — analogiczny cache dla stacji roweru miejskiego WRM
   (feed GBFS zamiast SQLite) — patrz sekcja „Warstwa rowerowa (WRM)” niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/bikes`,
-  `/api/plan`, `/api/flow` (szczegóły w sekcji API).
+  `/api/departures`, `/api/plan`, `/api/flow` (szczegóły w sekcji API).
 
 ### 3. Frontend — `templates/index.html`
 
@@ -218,6 +218,11 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   `[{name, lat, lon, bikes, electric}, …]` (`electric` = liczba dostępnych
   rowerów elektrycznych, podzbiór `bikes`). Błąd (feed GBFS niedostępny
   i cache jeszcze pusty) → `{error: "…"}` z kodem 503.
+- `GET /api/departures?stop=&time=HH:MM` — tablica odjazdów: najbliższe
+  odjazdy z przystanku (wszystkich jego słupków) od podanej godziny,
+  `{stop, departures: [{time, line, kind, headsign}, …]}` (maks. 24,
+  najbliższy pierwszy). Czysto rozkładowe - bez statusu „na czas/opóźniony”
+  (patrz „Znane ograniczenia”).
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
@@ -249,6 +254,11 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 
 ## Changelog
 
+- **2026-07-21** — tablica odjazdów per przystanek: `stop_departures` w
+  `planner.py` (skan `day.conns` od podanej godziny, filtr po `stop_id`),
+  endpoint `/api/departures`, prawy klik na przystanek otwiera dymek
+  z najbliższymi 24 odjazdami (godzina, linia, kierunek). Niezależne od
+  lewego kliknięcia (start/cel) - osobne zdarzenie Leaflet (`contextmenu`).
 - **2026-07-21** — margines przesiadki jako gradient (wersja rozkładowa):
   `plan_flow` zapamiętuje przy każdej realnej przesiadce zapas czasu ponad
   wymagany bufor (`transfer_margin` w `/api/flow`, sekundy, `null` na
@@ -316,6 +326,9 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 - Margines przesiadki (kropka na mapie) jest czysto rozkładowy — nie
   wie nic o bieżących opóźnieniach, więc "12 min zapasu" to zapas wg
   rozkładu, nie licząc np. spóźnionego pierwszego kursu.
+- Tablica odjazdów per przystanek pokazuje tylko rozkład — bez statusu
+  „na czas / X min opóźnienia” (to samo ograniczenie co wyżej: wymaga
+  danych GTFS-RT, których na razie nie ma).
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN) — a od
   warstwy WRM także **backend** potrzebuje internetu (feed GBFS nextbike);
   wcześniej tylko frontend zależał od sieci.
@@ -339,9 +352,11 @@ między sesjami (mogą dzielić je dni).
       pokazywałby realny zapas na żywo, nie tylko teoretyczny z rozkładu —
       to zostaje jako naturalne rozszerzenie, gdy/jeśli feed RT się
       potwierdzi.
-- [ ] **Tablica odjazdów per przystanek** — klik w przystanek pokazuje
-      też „co i kiedy stąd odjeżdża najbliżej”, nie tylko ustawia
-      start/cel. Dane (`stop_times` per `stop_id`) już są w bazie.
+- [x] **Tablica odjazdów per przystanek** — zrobione 2026-07-21: prawy
+      klik na przystanek (lewy nadal ustawia start/cel — osobne akcje,
+      bez konfliktu) otwiera dymek z najbliższymi odjazdami (`stop_times`
+      już w bazie, nic nowego nie trzeba było pobierać). Status „na
+      czas/opóźniony” zostaje na później — patrz „Znane ograniczenia”.
 - [ ] **Chodzenie pieszo jako samodzielna opcja**, nie tylko przesiadka
       między słupkami o tej samej nazwie (`WALK_SEC`) — dojście między
       dowolnymi bliskimi punktami, ograniczone promieniem (żeby nie

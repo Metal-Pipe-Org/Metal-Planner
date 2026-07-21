@@ -55,6 +55,49 @@ def plan_route(start_query, end_query, when=None):
     }
 
 
+DEPARTURES_LIMIT = 24   # ile najbliższych odjazdów zwracamy (klasyczna tablica ma tyle miejsca)
+KIND_MAP = {"Tramwaj": "tram", "Autobus": "bus"}
+
+
+def stop_departures(stop_query, when=None, limit=DEPARTURES_LIMIT):
+    """Najbliższe odjazdy z przystanku (wszystkich jego słupków) od danej chwili.
+
+    Zwraca {"stop": nazwa, "departures": [{time, line, kind, headsign}, ...]}
+    (najbliższe pierwsze) albo dict z kluczem "error".
+    """
+    when = when or datetime.now()
+
+    try:
+        day = gtfs.load_day(when.date())
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+
+    name, stop_ids, hints = gtfs.match_stop(stop_query, day)
+    if name is None:
+        return _unknown_stop(stop_query, hints)
+
+    stop_set = set(stop_ids)
+    from_sec = when.hour * 3600 + when.minute * 60 + when.second
+    conns = day.conns
+
+    departures = []
+    for i in range(bisect_left(day.dep_times, from_sec), len(conns)):
+        dep_t, _, dep_s, _, trip = conns[i]
+        if dep_s not in stop_set:
+            continue
+        label, headsign = day.trip_info[trip]
+        departures.append({
+            "time": _fmt_time(dep_t),
+            "line": label.split(" ", 1)[1] if " " in label else label,
+            "kind": KIND_MAP.get(label.split(" ", 1)[0], "other"),
+            "headsign": headsign,
+        })
+        if len(departures) >= limit:
+            break
+
+    return {"stop": name, "departures": departures}
+
+
 def _scan(day, source_stops, target_stops, dep_sec):
     """Connection Scan: najwcześniejszy przyjazd do celu, ze śladem do rekonstrukcji."""
     conns = day.conns
@@ -477,7 +520,6 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
         if entry is None or seg["q"] > entry[0]:
             segments[key] = (seg["q"], seg["shape"], margins[id(seg)])
 
-    kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
     brightest = sorted(
         segments.items(), key=lambda kv: kv[1][0], reverse=True,
     )[:MAX_SEGMENTS]
@@ -492,7 +534,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
             seg_list.append({
                 "path": [[round(lat, 5), round(lon, 5)] for lat, lon in path],
                 "num": label.split(" ", 1)[1] if " " in label else label,
-                "kind": kind_map.get(label.split(" ", 1)[0], "other"),
+                "kind": KIND_MAP.get(label.split(" ", 1)[0], "other"),
                 "w": round(q, 3),
                 "transfer_margin": margin,
             })

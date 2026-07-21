@@ -25,7 +25,8 @@
 
     <p class="hint">
         Kliknij na mapie przystanek startowy, potem docelowy —
-        albo wpisz nazwy ręcznie.
+        albo wpisz nazwy ręcznie. Kliknij prawym przyciskiem na przystanek,
+        żeby zobaczyć tablicę odjazdów.
     </p>
 
     <label class="checkbox-row">
@@ -137,6 +138,35 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         if (sel.start && sel.end) search();
     }
 
+    // Tablica odjazdów: prawy klik na przystanek, osobno od lewego (który
+    // wybiera start/cel) - dymek z najbliższymi odjazdami, bez wpływu na
+    // wyszukiwanie połączeń.
+    function showDepartures(name, latlng) {
+        const popup = L.popup({maxWidth: 260})
+            .setLatLng(latlng)
+            .setContent('<p class="hint">Wczytuję odjazdy…</p>')
+            .openOn(map);
+        const params = new URLSearchParams({stop: name, time: document.getElementById('time').value});
+        fetch('/api/departures?' + params)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    popup.setContent(`<b>${esc(name)}</b><p class="hint">${esc(data.error)}</p>`);
+                    return;
+                }
+                if (!data.departures.length) {
+                    popup.setContent(`<b>${esc(data.stop)}</b><p class="hint">Brak odjazdów do końca dnia.</p>`);
+                    return;
+                }
+                const rows = data.departures.map(d =>
+                    `<li><b>${esc(d.time)}</b> ${esc(KIND_LABEL[d.kind] || KIND_LABEL.other)} ${esc(d.line)}`
+                    + `<span class="headsign"> → ${esc(d.headsign)}</span></li>`
+                ).join('');
+                popup.setContent(`<b>${esc(data.stop)}</b><ul class="legs">${rows}</ul>`);
+            })
+            .catch(() => popup.setContent(`<b>${esc(name)}</b><p class="hint">Nie udało się pobrać odjazdów.</p>`));
+    }
+
     fetch('/api/stops')
         .then(r => r.json())
         .then(stops => {
@@ -145,6 +175,10 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 const m = L.circleMarker([s.lat, s.lon], BASE_STYLE).addTo(map);
                 m.bindTooltip(s.name);
                 m.on('click', () => pickStop(s.name));
+                m.on('contextmenu', e => {
+                    L.DomEvent.preventDefault(e.originalEvent);
+                    showDepartures(s.name, e.latlng);
+                });
                 if (!markersByName.has(s.name)) markersByName.set(s.name, []);
                 markersByName.get(s.name).push(m);
             }
