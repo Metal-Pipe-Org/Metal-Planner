@@ -153,6 +153,16 @@ input[type="range"] {
     color: #555;
 }
 
+.margin-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
 .line-badge {
     background: #fff;
     border: 1.5px solid #444;

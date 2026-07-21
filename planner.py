@@ -313,14 +313,25 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     # Start/cel "widoczne bez przesiadki" przy kotwiczeniu segmentów (niżej):
     # słupek startu/celu wprost ALBO jego pieszy sąsiad (patrz gtfs.py) -
     # dojście na piechotę z/do trasy liczy się tak samo jak bycie na miejscu.
-    start_walkable = set(source_stops)
+    # *_walk_info: stop_id -> None (to dosłowny start/cel, bez dojścia) albo
+    # (współrzędne drugiego końca, sek) - do narysowania samego dojścia
+    # pieszo na mapie (patrz `add_walk` niżej), nie tylko do algorytmu.
+    start_walk_info = {s: None for s in source_stops}
     for s in source_stops:
-        start_walkable.update(sib for sib, _ in day.siblings.get(s, ()))
+        for sib, sec in day.siblings.get(s, ()):
+            if sib not in start_walk_info:
+                start_walk_info[sib] = (day.stop_coords[s], sec)
     if source_walk:
-        start_walkable.update(s for s, _ in source_walk)
-    target_walkable = set(target_stops)
+        for sib, sec in source_walk:
+            start_walk_info.setdefault(sib, (start_point, sec))
+    start_walkable = set(start_walk_info)
+
+    target_walk_info = {s: None for s in target_stops}
     for s in target_stops:
-        target_walkable.update(sib for sib, _ in day.siblings.get(s, ()))
+        for sib, sec in day.siblings.get(s, ()):
+            if sib not in target_walk_info:
+                target_walk_info[sib] = (day.stop_coords[s], sec)
+    target_walkable = set(target_walk_info)
 
     raw = {}     # (linia, pełna trasa) -> dane segmentu
     for trip, idxs in trip_conns.items():
@@ -501,7 +512,11 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     # Punkt stały: zakresy mogą tylko się kurczyć, więc iteracja zbiega.
     kept = [seg for seg in segs if seg["q"] >= q_min]
     ranges = {id(seg): (0, len(seg["stops"])) for seg in kept}
-    margins = {}    # id(seg) -> zapas na wsiadanie w niego (s) albo None na starcie trasy
+    # id(seg) -> {"margin", "board_time", "start_walk", "end_walk"}; margin/
+    # board_time None = start trasy (bufor/przesiadka nie dotyczy). *_walk to
+    # (skąd, dokąd, sek) dla dojścia pieszo, które trzeba narysować, albo
+    # None, gdy segment zaczyna/kończy się dokładnie na słupku (bez dojścia).
+    info = {}
     while True:
         drawn_stops = {
             id(seg): set(seg["stops"][ranges[id(seg)][0]:ranges[id(seg)][1]])
@@ -509,15 +524,21 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
         }
         survivors = []
         new_ranges = {}
-        new_margins = {}
+        new_info = {}
         for seg in kept:
             # --- kotwica początku ---
+            start_walk = None
             if seg["stops"][0] in start_walkable:
                 start_pos = 0
                 start_margin = None     # start trasy (wprost albo pieszo) - bufor nie dotyczy
+                start_board_time = None
+                walk_info = start_walk_info[seg["stops"][0]]
+                if walk_info is not None:
+                    start_walk = (walk_info[0], day.stop_coords[seg["stops"][0]], walk_info[1])
             else:
                 start_pos = None
                 start_margin = None
+                start_board_time = None
                 for other in kept:
                     if other is seg:
                         continue
@@ -541,15 +562,26 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                                         or (p == start_pos and margin > start_margin)):
                                     start_pos = p
                                     start_margin = margin
+                                    start_board_time = times[i]
+                                    start_walk = (
+                                        (day.stop_coords[stop], day.stop_coords[stop2], buffer)
+                                        if stop2 != stop else None
+                                    )
                 if start_pos is None:
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
             cut = 0
+            end_walk = None
             for pos, _, arr_t, stop in seg["exits"]:
                 if pos <= start_pos + 1:
                     continue                 # wyjście przed/na starcie segmentu
                 if stop in target_walkable:
-                    cut = max(cut, pos)      # cel jest "widoczny" z definicji (wprost albo pieszo)
+                    cut = pos                # cel jest "widoczny" z definicji (wprost albo pieszo)
+                    walk_info = target_walk_info.get(stop)
+                    end_walk = (
+                        (day.stop_coords[stop], walk_info[0], walk_info[1])
+                        if walk_info is not None else None
+                    )
                     continue
                 for other in candidates_at(stop):
                     if other is seg or id(other) not in drawn_stops:
@@ -559,19 +591,23 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                     if (other["q"] + Q_ANCHOR_TOL >= seg["q"]
                             and joins(arr_t, stop, other,
                                       drawn_stops[id(other)])):
-                        cut = max(cut, pos)
+                        cut = pos
+                        end_walk = None      # przesiadka na inny narysowany segment, nie "prawie cel"
                         break
             if cut >= start_pos + 2:
                 survivors.append(seg)
                 new_ranges[id(seg)] = (start_pos, cut)
-                new_margins[id(seg)] = start_margin
+                new_info[id(seg)] = {
+                    "margin": start_margin, "board_time": start_board_time,
+                    "start_walk": start_walk, "end_walk": end_walk,
+                }
         if len(survivors) == len(kept) and \
                 new_ranges == {k: ranges[k] for k in new_ranges}:
-            margins = new_margins
+            info = new_info
             break
         kept = survivors
         ranges = new_ranges
-        margins = new_margins
+        info = new_info
 
     segments = {}
     for seg in kept:
@@ -579,28 +615,63 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
         key = (seg["label"], tuple(seg["stops"][start_pos:cut]))
         entry = segments.get(key)
         if entry is None or seg["q"] > entry[0]:
-            segments[key] = (seg["q"], seg["shape"], margins[id(seg)])
+            segments[key] = (seg["q"], seg["shape"], info[id(seg)])
 
     brightest = sorted(
         segments.items(), key=lambda kv: kv[1][0], reverse=True,
     )[:MAX_SEGMENTS]
     seg_list = []
+    # Dojścia pieszo doklejone do pokazanych segmentów (start/przesiadka/cel -
+    # patrz *_walk w pętli kotwiczenia wyżej) - narysowane jako osobne segmenty
+    # `kind:"walk"`, nie tylko domyślnie "gdzieś między liniami". Klucz to same
+    # współrzędne końców: to samo dojście używane przez kilka segmentów rysuje
+    # się raz, jasnością najjaśniejszego z nich (patrz add_walk).
+    walk_segments = {}
+
+    def add_walk(from_coord, to_coord, walk_sec, q):
+        if from_coord == to_coord:
+            return
+        key = (from_coord, to_coord)
+        entry = walk_segments.get(key)
+        if entry is None or q > entry["w"]:
+            walk_segments[key] = {"path": (from_coord, to_coord), "sec": walk_sec, "w": q}
+
     gtfs.geo_generation()           # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()         # jedno połączenie na wszystkie wycinki geometrii
     try:
-        for (label, stops_seq), (q, shape_id, margin) in brightest:
+        for (label, stops_seq), (q, shape_id, seg_info) in brightest:
             path = gtfs.shape_slice(
                 shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
             )
+            board_time = seg_info["board_time"]
             seg_list.append({
                 "path": [[round(lat, 5), round(lon, 5)] for lat, lon in path],
                 "num": label.split(" ", 1)[1] if " " in label else label,
                 "kind": KIND_MAP.get(label.split(" ", 1)[0], "other"),
                 "w": round(q, 3),
-                "transfer_margin": margin,
+                "transfer_margin": seg_info["margin"],
+                "board_time": _fmt_time(board_time) if board_time is not None else None,
+                "board_stop": day.stop_names[stops_seq[0]] if seg_info["margin"] is not None else None,
+                "walk_sec": None,
             })
+            if seg_info["start_walk"] is not None:
+                add_walk(*seg_info["start_walk"], q)
+            if seg_info["end_walk"] is not None:
+                add_walk(*seg_info["end_walk"], q)
     finally:
         geo_db.close()
+
+    for w in walk_segments.values():
+        seg_list.append({
+            "path": [[round(lat, 5), round(lon, 5)] for lat, lon in w["path"]],
+            "num": "",
+            "kind": "walk",
+            "w": round(w["w"], 3),
+            "transfer_margin": None,
+            "board_time": None,
+            "board_stop": None,
+            "walk_sec": w["sec"],
+        })
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
 
     return {

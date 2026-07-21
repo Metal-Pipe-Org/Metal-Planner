@@ -36,7 +36,7 @@
 
     <label for="start">Przystanek początkowy</label>
     <input type="text" id="start" list="stops" placeholder="np. Katedra">
-    <button type="button" id="use-location" class="location-button">📍 Użyj mojej lokalizacji</button>
+    <button type="button" id="use-location" class="location-button" style="display: none">📍 Użyj mojej lokalizacji</button>
 
     <label for="end">Przystanek docelowy</label>
     <input type="text" id="end" list="stops" placeholder="np. pl. Grunwaldzki">
@@ -271,7 +271,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         resultBox.innerHTML = html + '</div>';
     }
 
-    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', other: '#6a1b9a'};
+    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', walk: '#616161', other: '#6a1b9a'};
 
     // Mapa przepływów: każdy kurs to jeden ciągły segment od przystanku
     // wsiadania do ostatniego sensownego wyjścia; jasność i grubość linii
@@ -280,34 +280,43 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     // (styl mapy tramwajowej), a najechanie na linię podświetla ją
     // i pokazuje numer - widać, "która co gdzie", nawet w wiązce.
     const BRIGHT_W = 0.45;
-    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', other: 'Linia'};
+    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', walk: 'Pieszo', other: 'Linia'};
 
-    // Zapas na przesiadkę wsiadania w segment - czerwony (ciasno, blisko
-    // ustawowego bufora) do zielonego (luz); brak kropki = start trasy,
-    // gdzie bufor przesiadki nie ma zastosowania (patrz PROJECT.md).
+    // Zapas na przesiadkę wsiadania w segment - bursztynowy (ciasno, blisko
+    // ustawowego bufora) do zielonego (luz); NIE czerwony - czerwony miesza
+    // się z kolorem linii tramwajowej. Brak kropki = start trasy, gdzie
+    // bufor przesiadki nie ma zastosowania (patrz PROJECT.md).
     const MARGIN_CAP_SEC = 600;   // 10 min i więcej = w pełni "zielono"
+    const MARGIN_HUE_MIN = 35;    // bursztyn/pomarańcz, nie czerwień
+    const MARGIN_HUE_MAX = 135;
     function marginColor(sec) {
-        const hue = Math.min(sec, MARGIN_CAP_SEC) / MARGIN_CAP_SEC * 120;
-        return `hsl(${hue}, 85%, 42%)`;
+        const t = Math.min(sec, MARGIN_CAP_SEC) / MARGIN_CAP_SEC;
+        return `hsl(${MARGIN_HUE_MIN + t * (MARGIN_HUE_MAX - MARGIN_HUE_MIN)}, 90%, 40%)`;
     }
     function marginText(sec) {
         const min = Math.round(sec / 60);
-        return (min < 1 ? '<1 min' : `${min} min`) + ' zapasu na przesiadkę';
+        return (min < 1 ? '<1 min' : `${min} min`) + ' zapasu';
     }
 
     function drawFlow(flow) {
         setBaseDim(true);
-        const faint = [], casings = [], bright = [], marginDots = [];
-        const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
+        const faint = [], casings = [], bright = [];
+        const byLine = new Map();        // "num|kind" -> [segmenty] do plakietek
+        const transferGroups = new Map(); // board_stop -> {pos, entries: [segmenty]}
 
         for (const s of flow.segments) {        // posortowane po w rosnąco
             const key = s.num + '|' + s.kind;
             const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
             const weight = 1 + 3.5 * s.w;
             const opacity = 0.10 + 0.85 * s.w;
-            const line = L.polyline(s.path, {color, opacity, weight});
+            // Pieszo to linia prosta (haversine), nie prawdziwa trasa uliczna -
+            // przerywana kreska od razu to sygnalizuje (patrz PROJECT.md).
+            const dashArray = s.kind === 'walk' ? '4, 6' : null;
+            const line = L.polyline(s.path, {color, opacity, weight, dashArray});
             line.bindTooltip(
-                `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
+                s.kind === 'walk'
+                    ? `Pieszo, ok. ${Math.max(1, Math.round(s.walk_sec / 60))} min`
+                    : `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
                 {sticky: true},
             );
             line.on('mouseover', () => {
@@ -326,14 +335,38 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             } else {
                 faint.push(line);
             }
-            if (!byLine.has(key)) byLine.set(key, []);
-            byLine.get(key).push(s);
-            if (s.transfer_margin !== null) {
-                marginDots.push(L.circleMarker(s.path[0], {
-                    radius: 5, weight: 1.5, color: '#fff',
-                    fillColor: marginColor(s.transfer_margin), fillOpacity: 1,
-                }).bindTooltip(marginText(s.transfer_margin)));
+            if (s.kind !== 'walk') {          // plakietka z pustym numerem wyglądałaby źle
+                if (!byLine.has(key)) byLine.set(key, []);
+                byLine.get(key).push(s);
             }
+            if (s.transfer_margin !== null) {
+                if (!transferGroups.has(s.board_stop)) {
+                    transferGroups.set(s.board_stop, {pos: s.path[0], entries: []});
+                }
+                transferGroups.get(s.board_stop).entries.push(s);
+            }
+        }
+
+        // Kropka zapasu na przesiadkę - jedna PER PRZYSTANEK (nie per linia):
+        // gdy z tego samego węzła odjeżdża kilka linii z aktualnej mapy,
+        // dymek po najechaniu wylicza wszystkie razem z godziną i zapasem,
+        // zamiast pokazywać tylko jedną z nich. Kolor kropki = najlepsza
+        // (najbardziej komfortowa) z dostępnych opcji.
+        const marginDots = [];
+        for (const [stopName, group] of transferGroups) {
+            const bestMargin = Math.max(...group.entries.map(e => e.transfer_margin));
+            const rows = group.entries
+                .slice()
+                .sort((a, b) => (a.board_time || '').localeCompare(b.board_time || ''))
+                .map(e => `<li><b>${esc(e.board_time || '?')}</b> `
+                    + `${esc(KIND_LABEL[e.kind] || KIND_LABEL.other)} ${esc(e.num)} `
+                    + `<span class="margin-chip" style="background:${marginColor(e.transfer_margin)}">`
+                    + `${marginText(e.transfer_margin)}</span></li>`)
+                .join('');
+            marginDots.push(L.circleMarker(group.pos, {
+                radius: 8, weight: 2, color: '#fff',
+                fillColor: marginColor(bestMargin), fillOpacity: 1,
+            }).bindTooltip(`<b>${esc(stopName)}</b><ul class="legs">${rows}</ul>`, {sticky: true}));
         }
 
         // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze -> kropki zapasu na wierzchu.

@@ -70,6 +70,10 @@ jako `start_lat`/`start_lon` zamiast `start`. Wymaga zgody przeglądarki
 zamiast się wywalać. Ręczne wpisanie nazwy albo klik w przystanek na
 mapie czyści lokalizację i wraca do zwykłego wyszukiwania po nazwie.
 
+Przycisk **ukryty w UI** (`display:none`) od 2026-07-21 — funkcjonalność
+zostaje w kodzie, ale czeka na pomysł „tryb planowania vs tryb podróży"
+(patrz „Plan rozwoju”), zanim wróci widoczny.
+
 ## Algorytmy
 
 ### CSA — Connection Scan Algorithm (`plan_route`)
@@ -157,12 +161,23 @@ ten sam efekt daje analiza dwóch skanów:
    ponad wymagany bufor (`TRANSFER_SEC` na tym samym słupku, indywidualny
    czas dojścia na sąsiedni - patrz „Piesi sąsiedzi przystanku" wyżej) do
    najwcześniejszego odjazdu, w który jeszcze da się wskoczyć —
-   `transfer_margin` w sekundach w odpowiedzi API (`null` przy
-   starcie trasy, gdzie bufor nie ma zastosowania; przy remisie pozycji
-   wsiadania wygrywa przesiadka z większym zapasem). Na razie to czysto
-   rozkładowy zapas — dopiero dane GTFS-RT o opóźnieniach (patrz „Plan
-   rozwoju” niżej) pokazałyby realny margines na żywo, a nie tylko
-   teoretyczny z rozkładu.
+   `transfer_margin` w sekundach w odpowiedzi API, plus `board_time`
+   (godzina tego odjazdu) i `board_stop` (nazwa przystanku przesiadki) -
+   frontend grupuje po `board_stop`, żeby jedna kropka pokazywała WSZYSTKIE
+   linie odjeżdżające z tego węzła w bieżącej mapie przepływów, nie tylko tę
+   jedną (patrz Rendering niżej). Wszystkie trzy pola `null` przy starcie
+   trasy, gdzie bufor nie ma zastosowania; przy remisie pozycji wsiadania
+   wygrywa przesiadka z większym zapasem. Na razie to czysto rozkładowy
+   zapas — dopiero dane GTFS-RT o opóźnieniach (patrz „Plan rozwoju” niżej)
+   pokazałyby realny margines na żywo, a nie tylko teoretyczny z rozkładu.
+10. **Piesze odcinki jako segmenty**: dojście pieszo, które kotwiczy
+    start/koniec segmentu (do/od prawdziwego startu, celu, albo między
+    dwoma segmentami przy przesiadce - wszystkie trzy przypadki z punktów
+    8/9) jest teraz NARYSOWANE, nie tylko policzone wewnętrznie - osobny
+    segment `kind:"walk"` z własną ścieżką (`path`, dwa punkty: skąd, dokąd)
+    i `walk_sec`. Bez tego linia transportu, do której trzeba dojść pieszo,
+    „zaczynała się znikąd" na mapie. Zduplikowane dojścia (używane przez
+    kilka segmentów) rysowane raz, jasnością najjaśniejszego z nich.
 7. **Agregacja**: segmenty o tej samej linii i identycznej ścieżce
    (kolejne kursy w oknie) sklejamy, biorąc maksimum jakości.
 9. **Geometria**: ścieżka segmentu to fragment `shapes.txt` (realne ulice
@@ -185,18 +200,25 @@ Rendering (frontend):
 
 - przezroczystość `0,10 + 0,85·w` i grubość `1 + 3,5·w` px — główne
   korytarze jaskrawe i grube, niszowe ledwo widoczne;
-- kolor: tramwaj czerwony, autobus niebieski; segmenty z `w ≥ 0,45`
-  dostają białą otoczkę (styl mapy tramwajowej), kolejność rysowania:
-  blade → otoczki → jaskrawe;
+- kolor: tramwaj czerwony, autobus niebieski, pieszo szary, przerywana
+  kreska (linia prosta, nie prawdziwa trasa uliczna - przerywanie od razu
+  to sygnalizuje); segmenty z `w ≥ 0,45` dostają białą otoczkę (styl mapy
+  tramwajowej), kolejność rysowania: blade → otoczki → jaskrawe;
 - **hover na linii** podświetla ją, wyciąga na wierzch wiązki
-  (`bringToFront`) i pokazuje dymek „Tramwaj 3" — tak rozróżnia się
-  linie nachodzące na siebie w jednym korytarzu;
+  (`bringToFront`) i pokazuje dymek „Tramwaj 3" (albo „Pieszo, ok. X min"
+  dla dojścia) — tak rozróżnia się linie nachodzące na siebie w jednym
+  korytarzu;
 - plakietki z numerem linii na najjaśniejszym segmencie każdej linii
   (długie segmenty 2–3 plakietki), tylko dla linii z jakością ≥ 0,4;
+  segmenty piesze nie dostają plakietki (pusty `num`);
 - zwykłe markery przystanków są przygaszane na czas pokazywania przepływu;
-- **margines przesiadki**: mała kropka na przystanku wsiadania w segment
-  (gdy to realna przesiadka, nie start trasy) — kolor czerwony → zielony
-  wg zapasu czasu (0 → 10 min), dymek „X min zapasu na przesiadkę”;
+- **margines przesiadki**: jedna kropka PER PRZYSTANEK przesiadkowy (nie
+  per linia — segmenty z tym samym `board_stop` grupowane w jedną),
+  większa niż zwykły marker i kolorowana bursztyn → zielony wg zapasu
+  czasu (0 → 10 min) — **celowo nie czerwono-zielony**, bo czerwień miesza
+  się z kolorem linii tramwajowej. Dymek po najechaniu to mini-tablica
+  odjazdów ograniczona do linii faktycznie widocznych na aktualnej mapie:
+  godzina + numer linii + własny kolorowy „chip” z zapasem dla każdej;
 - kadr: najjaśniejsze segmenty (próg 0,7 → 0,45 → wszystko) + zawsze
   start i cel.
 
@@ -257,16 +279,21 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
 - `GET /api/flow?start=&end=&time=HH:MM&qmin=0.60` — mapa przepływów:
   `{start, end, departure, best_arrival, deadline, segments: [{path:
-  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1,
-  transfer_margin: 120|null}, …]}`, segmenty posortowane rosnąco po `w`
-  (kolejność rysowania); `path` to kolejne przystanki od wsiadania do
-  ostatniego użytecznego wyjścia; `transfer_margin` to sekundy zapasu
-  ponad wymagany bufor przesiadki przy wsiadaniu w ten segment, `null`
-  gdy segment zaczyna się od startu trasy (patrz „Margines przesiadki”
-  w sekcji Algorytmy). Zamiast `start=` można podać `start_lat=&start_lon=`
-  (prawdziwa lokalizacja zamiast nazwy przystanku - patrz Frontend); wtedy
-  `start` w odpowiedzi to zawsze „Twoja lokalizacja”. Błąd, gdy w promieniu
-  1 km nie ma żadnego przystanku: `{error: "…"}`.
+  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"walk"|"other", w: 0..1,
+  transfer_margin: 120|null, board_time: "18:36"|null, board_stop:
+  "Pułaskiego"|null, walk_sec: 180|null}, …]}`, segmenty posortowane
+  rosnąco po `w` (kolejność rysowania); `path` to kolejne przystanki od
+  wsiadania do ostatniego użytecznego wyjścia (dla `kind:"walk"` - tylko
+  dwa punkty, skąd i dokąd). `transfer_margin`/`board_time`/`board_stop`
+  to razem: ile sekund zapasu, o której odjeżdża connection, i nazwa
+  przystanku przesiadki - wszystkie `null`, gdy segment zaczyna się od
+  startu trasy (patrz „Margines przesiadki” w Algorytmach). `walk_sec`
+  to czas dojścia w sekundach, tylko dla `kind:"walk"` (patrz „Piesze
+  odcinki jako segmenty”). Zamiast `start=` można podać
+  `start_lat=&start_lon=` (prawdziwa lokalizacja zamiast nazwy przystanku
+  - patrz Frontend); wtedy `start` w odpowiedzi to zawsze „Twoja
+  lokalizacja”. Błąd, gdy w promieniu 1 km nie ma żadnego przystanku:
+  `{error: "…"}`.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -286,6 +313,21 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 
 ## Changelog
 
+- **2026-07-21** — dwie poprawki po przeglądzie na żywo: (1) dojście pieszo,
+  które kotwiczy segment (start/koniec trasy albo przesiadka - patrz punkty
+  8/9/10 w Algorytmach), jest teraz RYSOWANE jako osobny segment `kind:
+  "walk"`, nie tylko liczone wewnętrznie - wcześniej linia transportu,
+  do której trzeba było dojść pieszo, „zaczynała się znikąd" na mapie;
+  (2) kropki marginesu przesiadki zgrupowane PER PRZYSTANEK (jedna kropka
+  na węzeł, nie jedna na linię), większe, i przekolorowane z czerwono-
+  zielonego na bursztynowo-zielony (czerwień myliła się z kolorem linii
+  tramwajowej) - dymek to teraz mini-tablica odjazdów ograniczona do linii
+  widocznych na aktualnej mapie, z godziną i własnym zapasem dla każdej.
+  `/api/flow` zyskało pola `board_time`/`board_stop`/`walk_sec`. Przy
+  okazji: pierwsza wersja „rower jako krawędź w CSA" (prosty most start→
+  cel) została zaimplementowana, ale COFNIĘTA (`git stash`) po przeglądzie
+  - użytkownik chce szerszego zakresu (rower jako pełny transfer, nie
+  tylko most), patrz „Plan rozwoju”.
 - **2026-07-21** — prawdziwa lokalizacja użytkownika jako start: przycisk
   „Użyj mojej lokalizacji” (`navigator.geolocation.getCurrentPosition`,
   jednorazowo) + `gtfs.nearest_stops(lat, lon, …)` na „ostatnią milę” (do 5
@@ -439,7 +481,12 @@ między sesjami (mogą dzielić je dni).
 - [ ] **Rower jako krawędź w CSA** (głęboka integracja) — `plan_flow` /
       `plan_route` proponują „idź do stacji X, jedź rowerem do Y” jako
       opcję obok tramwaju/autobusu. Nowy, czasowo zmienny typ połączenia
-      w skanie — trudność wyższa niż reszta.
+      w skanie — trudność wyższa niż reszta. Pierwsza wersja (prosty most
+      start→cel, sprawdzany na żywo) była zaimplementowana 2026-07-21, ale
+      COFNIĘTA po przeglądzie — użytkownik chce roweru jako pełnego
+      transferu (jak piesi sąsiedzi), nie tylko mostu na końcach trasy;
+      wymaga przemyślenia, jak wpleźć zmienną w czasie dostępność w
+      cache'owany dzień, zanim ruszy kolejna próba.
 - [ ] **Car-sharing (Traficar) jako warstwa** — auta Traficar na mapie
       (pozycja, paliwo/zasięg, dostępność), ten sam wzorzec co warstwa WRM
       (poller + `L.layerGroup`). Traficar sam nie ma publicznego API, ale
