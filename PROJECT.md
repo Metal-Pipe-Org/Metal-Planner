@@ -120,7 +120,10 @@ ten sam efekt daje analiza dwóch skanów:
    przesiadki) i którego osiągnięcie **nie wymaga cofnięcia się** —
    oddalenia od celu o więcej niż 2 min (mierzone spadkiem `latest`
    względem startu). To ucina scenariusze "podjedź na pętlę i wracaj tym
-   samym wozem". Od wsiadania idziemy wzdłuż kursu i szukamy **wyjść**:
+   samym wozem" - ale NIE dotyczy słupków samego punktu startowego (patrz
+   Changelog 2026-07-21): tam nie ma z czego się cofać, tylko wybór między
+   kilkoma słupkami tego samego miejsca. Od wsiadania idziemy wzdłuż kursu
+   i szukamy **wyjść**:
    przystanków `s` o przyjeździe `arr`, gdzie `latest[s]` istnieje,
    `arr ≤ latest[s]` i jazda **przybliżyła** do celu
    (`latest[wyjście] > latest[wsiadanie]` — inaczej kurs jadący w złą
@@ -313,6 +316,86 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 
 ## Changelog
 
+- **2026-07-21** — poważniejszy, osobny błąd znaleziony przy weryfikacji
+  poprawek niżej: reguła "bez cofania się" (`BACKTRACK_TOL_SEC`) potrafiła
+  wyciąć z mapy przepływów CAŁĄ, poprawną, bezpośrednią trasę - nie tylko
+  osłabić jej jasność. `origin_latest` to MAKSIMUM `latest[]` po WSZYSTKICH
+  słupkach przystanku startowego, ale każdy kurs wsiada z JEDNEGO, konkretnego
+  słupka - gdy ten akurat miał `latest[]` gorszy o >2 min od NAJLEPSZEGO
+  słupka startu (typowe przy węźle z kilkoma niezależnymi liniami, patrz
+  przykład niżej), reguła traktowała to jak "cofnięcie się" i odrzucała kurs
+  w całości, mimo że to dosłownie pierwszy przystanek - nie ma z czego się
+  cofać. Znalezione przez przypadek przy teście regresji: zapytanie
+  Broniewskiego → FAT zwracało **0 segmentów** mimo poprawnego
+  `best_arrival` (14:34, `/api/plan` znajdował trasę 129→607 przez Kwiskę
+  bez trudu) - okazało się, że kurs 129 wsiada ze słupka o `latest[]`=14:06,
+  a najlepszy słupek Broniewskiego (inna, niepowiązana linia) ma
+  `latest[]`=14:09 - różnica 3 min > próg 2 min, więc CAŁY kurs 129 (a z nim
+  cała trasa) znikał z wyników. Naprawiono: reguła nie dotyczy już słupków
+  należących do prawdziwego punktu startowego (`origin_stops` - nazwane
+  przystanki i/lub „ostatnia mila" z prawdziwej lokalizacji) - tam nie ma
+  pojęcia cofania się, tylko wybór MIĘDZY słupkami tego samego miejsca.
+  Zweryfikowane: to samo zapytanie teraz zwraca 14 segmentów z pełną trasą
+  129→607 (jasność 1,0); dodatkowo automatyczny test 30 losowych par
+  przystanek→przystanek (dwie różne pory dnia) nie znalazł ani jednego
+  przypadku "poprawny `best_arrival`, zero pasujących segmentów" - wcześniej
+  nie sprawdzone systematycznie, więc nieznana skala problemu, ale biorąc
+  pod uwagę, że dotyczy KAŻDEGO węzła z ≥2 niezależnymi liniami i realnie
+  różnym `latest[]` między słupkami, było to prawdopodobnie częste.
+- **2026-07-21** — dwa błędy w kotwiczeniu segmentów mapy przepływów,
+  zgłoszone po żywym użyciu ("każe wysiąść wcześniej i iść pieszo, choć
+  dało się dojechać wprost", "chodzenie z przypadkowych, niepowiązanych
+  punktów", "kropki przesiadek czasem nie pokazują się wcale"). Oba miały
+  ten sam kształt: pętla kotwicząca segment WYBIERAŁA KANDYDATA PO KOLEJNOŚCI
+  ITERACJI zamiast po jakości, więc gorszy kandydat znaleziony później
+  bezwarunkowo nadpisywał lepszego znalezionego wcześniej:
+  1. **Kotwica POCZĄTKU** (gdzie realnie wsiada się w segment) wybierała
+     najwcześniejszą pozycję w trasie (`p < start_pos`) NIEZALEŻNIE OD TEGO,
+     czy wymagała chodzenia. Efekt: gdy dało się dojechać WPROST (bez
+     chodzenia) do przystanku, na którym dany kurs i tak się zatrzymuje,
+     algorytm i tak potrafił wybrać wcześniejszą, ale pieszą alternatywę,
+     bo to dawało formalnie "więcej narysowanego odcinka". Naprawiono:
+     priorytet najpierw brak chodzenia, dopiero POTEM najwcześniejsza
+     pozycja, dopiero potem zapas czasu.
+  2. **Kotwica KOŃCA** (gdzie segment przestaje być rysowany) nadpisywała
+     punkt cięcia i dojście pieszo do celu przy KAŻDYM kolejnym pasującym
+     wyjściu, bez porównania jakości - kto ostatni w pętli po wyjściach
+     kursu, ten wygrywał. Kurs, który dojechał DOKŁADNIE do celu, potrafił
+     zostać "przedłużony" za cel do gorszej, dalszej przesiadki albo do
+     przypadkowego pieszego sąsiada celu napotkanego później na trasie -
+     to właśnie wyglądało jak "dojście z przypadkowego, niepowiązanego
+     punktu". Naprawiono systemem priorytetów (tier): dotarcie na cel BEZ
+     chodzenia > dotarcie na cel PIESZO > przesiadka na inny narysowany
+     segment; w obrębie tego samego priorytetu wygrywa dalsza pozycja (jak
+     dotąd - więcej odcinka pokazane).
+  Przy okazji (3): dojścia pieszo do rysowania grupowane teraz PO NAZWACH
+  przystanków, nie po dokładnych współrzędnych słupków - duży węzeł (patrz
+  „8 Maja” niżej, węzeł z 6 słupkami) potrafił wygenerować 2-3 prawie
+  równoległe kreski między tymi samymi dwoma miejscami (różne słupki tej
+  samej nazwy na obu końcach); teraz rysuje się jedna, najjaśniejsza.
+  Zweryfikowane na żywych przykładach (serwer deweloperski, zapytania przez
+  `/api/flow`): Leśnica-Hermes→Psie Pole spadło z 82 do 27 segmentów pieszych
+  (206→113 segmentów łącznie), Dworzec Główny (MDK)→8 Maja z 17 do 11
+  (44→32 łącznie) - w obu przypadkach `best_arrival`/`deadline` (a więc sama
+  najszybsza trasa) bez zmian, zmieniła się tylko jakość dodatkowych
+  segmentów mapy przepływów. Sprawdzone też wizualnie w przeglądarce - linie
+  i kropki przesiadek renderują się poprawnie, bez błędów w konsoli.
+- **2026-07-21** — poprawka reguły postępu (`PROGRESS_TOL_SEC`) w kotwicy
+  końca: dotąd sprawdzana tylko względem NATURALNEGO wsiadania kursu
+  (ustalonego przy budowie `raw[]`), więc gdy segment kotwiczono gdzie
+  indziej (np. przez pieszy "most" od innego segmentu), późniejsze wyjścia
+  mogły jechać w złą stronę bez wykrycia - żaden z nich nie był
+  rewalidowany względem FAKTYCZNEGO miejsca wsiadania. Teraz `latest[]`
+  każdego kandydata na cięcie jest porównywane z `latest[]` rzeczywistego
+  punktu startu segmentu, nie tylko z jego oryginalnym. Znaleziono i
+  zweryfikowano na żywym przykładzie (przystanek "8 Maja", węzeł z 6
+  słupkami): kurs jadący w przeciwną stronę (Autobus 133 → BROCHÓW) był
+  kotwiczony piechotą z zupełnie innego autobusu, mimo że w miejscu
+  dojścia dostępny był bezpośrednio (bez chodzenia) kurs 133 w PRAWIDŁOWĄ
+  stronę. Poprawka to zawęża, ale (patrz „Znane ograniczenia” niżej) nie
+  usuwa w pełni na bardzo gęstych węzłach — potrzebna głębsza poprawka,
+  która porównywałaby wariant pieszy z prostszą alternatywą "poczekaj w
+  miejscu", nie tylko sprawdzała kierunek.
 - **2026-07-21** — dwie poprawki po przeglądzie na żywo: (1) dojście pieszo,
   które kotwiczy segment (start/koniec trasy albo przesiadka - patrz punkty
   8/9/10 w Algorytmach), jest teraz RYSOWANE jako osobny segment `kind:
@@ -418,6 +501,16 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   bywa tego sporo; ewentualny suwak zakresu jest na liście pomysłów.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
+- Na bardzo gęstych węzłach (przystanek z wieloma słupkami i dziesiątkami
+  linii, np. duże skrzyżowanie/pętla) algorytm czasem i tak pokazuje
+  przejście piesze na kurs, który wymaga więcej zachodu niż prostsza
+  alternatywa "poczekaj w TYM SAMYM miejscu na kolejny, późniejszy odjazd
+  tej czy innej linii" — poprawki kotwiczenia wyżej (2026-07-21) eliminują
+  chodzenie tam, gdzie dało się dojechać wprost (bez wysiadania) do tego
+  samego przystanku, ale nie porównują wariantu pieszego z „w ogóle nie
+  ruszaj się, poczekaj" - to inny, trudniejszy przypadek (wymaga wiedzieć,
+  co jeszcze odjeżdża z miejsca, w którym się już jest, nie tylko co da się
+  osiągnąć pieszo) i zostaje odłożony na później.
 - Wyszukiwanie działa w ramach jednej doby rozkładowej: zapytanie o 0:30
   nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
 - Dojście pieszo (patrz „Piesi sąsiedzi przystanku" w Algorytmach) to

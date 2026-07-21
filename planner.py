@@ -292,7 +292,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     # Punkt odniesienia reguły postępu: im później można być na przystanku
     # i wciąż zdążyć (latest), tym bliżej celu się jest. Przy starcie z punktu
     # (source_walk) liczy się tak samo, jak nazwane source_stops.
-    origin_stops = list(source_stops) + [s for s, _ in (source_walk or ())]
+    origin_stops = set(source_stops) | {s for s, _ in (source_walk or ())}
     origin_latest = max(
         (latest[s] for s in origin_stops if s in latest), default=None,
     )
@@ -346,6 +346,14 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 # który zdążymy i którego osiągnięcie nie wymaga cofnięcia
                 # się (oddalenia od celu) o więcej niż BACKTRACK_TOL_SEC.
                 # To ucina np. "podjedź na pętlę i wracaj tym samym wozem".
+                # NIE dotyczy to samego punktu startowego (`dep_s` w
+                # `origin_stops`) - tam nie ma z czego "się cofać", a
+                # `origin_latest` to MAKSIMUM po wszystkich słupkach startu,
+                # więc słupek z dosłownie tego samego przystanku, ale
+                # akurat obsługiwany przez inną, niepowiązaną linię o
+                # odrobinę gorszym `latest[]`, odpadał tu jako fałszywe
+                # "cofnięcie" - potrafiło to całkiem wyciąć bezpośredni,
+                # poprawny kurs z prawdziwego startu (patrz PROJECT.md).
                 reached = earliest.get(dep_s)
                 if reached is None:
                     continue
@@ -353,7 +361,8 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 if reached + buffer > dep_t:
                     continue
                 stop_latest = latest.get(dep_s)
-                if (origin_latest is not None and stop_latest is not None
+                if (dep_s not in origin_stops and origin_latest is not None
+                        and stop_latest is not None
                         and stop_latest < origin_latest - BACKTRACK_TOL_SEC):
                     continue
                 stops_seq = [dep_s]
@@ -539,6 +548,9 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 start_pos = None
                 start_margin = None
                 start_board_time = None
+                # (czy_wymaga_chodzenia, pozycja, -zapas) - klucz do wyboru
+                # NAJLEPSZEGO kandydata, nie pierwszego czy najwcześniejszego.
+                start_key = None
                 for other in kept:
                     if other is seg:
                         continue
@@ -556,10 +568,19 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                             if catchable(arr_t, buffer, times):
                                 i = bisect_left(times, arr_t + buffer)
                                 margin = times[i] - arr_t - buffer
-                                # Najwcześniejsze wsiadanie wygrywa; przy remisie -
-                                # ta przesiadka, która daje więcej luzu.
-                                if (start_pos is None or p < start_pos
-                                        or (p == start_pos and margin > start_margin)):
+                                # Priorytet: (1) BEZ CHODZENIA bije chodzenie,
+                                # niezależnie od pozycji - jechać dalej do
+                                # przystanku, na którym `seg` i tak się
+                                # zatrzymuje, jest zawsze lepsze niż wysiąść
+                                # wcześniej i iść pieszo (to była przyczyna
+                                # "każe wysiąść wcześniej i iść, choć można
+                                # dojechać wprost do przesiadki" - patrz
+                                # PROJECT.md); (2) przy remisie najwcześniejsza
+                                # pozycja (więcej odcinka `seg` do narysowania);
+                                # (3) przy remisie obu - większy zapas.
+                                key = (0 if stop2 == stop else 1, p, -margin)
+                                if start_key is None or key < start_key:
+                                    start_key = key
                                     start_pos = p
                                     start_margin = margin
                                     start_board_time = times[i]
@@ -570,18 +591,50 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 if start_pos is None:
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
+            # Wyjścia w seg["exits"] przeszły regułę postępu (PROGRESS_TOL_SEC)
+            # względem NATURALNEGO wsiadania tego kursu (patrz budowa raw[]
+            # wyżej) - ale gdy start_pos wskazuje na inne miejsce (dołączenie
+            # przez kogoś innego, czasem pieszo), ten punkt odniesienia jest
+            # nieaktualny. Bez ponownej walidacji kurs jadący od miejsca
+            # dołączenia W ZŁĄ STRONĘ (np. zahaczony piechotą o przystanek,
+            # który akurat ma dobre latest[] z zupełnie INNEGO powodu) mógłby
+            # świecić pełną jasnością przez kilka przystanków, zanim faktyczna
+            # trasa go dogoni - patrz PROJECT.md, ten sam mechanizm co reguła
+            # postępu przy budowie wyjść, tylko przeliczony względem
+            # rzeczywistego (a nie domyślnego) miejsca wsiadania.
+            effective_board_latest = latest.get(seg["stops"][start_pos])
             cut = 0
             end_walk = None
+            # (tier, -pozycja) - najniższy tier wygrywa; w nim najdalsza
+            # pozycja (więcej odcinka narysowane). Bez tego kolejne wyjścia
+            # nadpisywały cut/end_walk bezwarunkowo (kto ostatni w pętli, ten
+            # wygrywał) - kurs, który już dojechał DOKŁADNIE do celu, potrafił
+            # zostać przedłużony za cel do dalszej, gorszej przesiadki albo
+            # przypadkowego pieszego sąsiada napotkanego później na trasie
+            # (patrz PROJECT.md - "chodzenie z przypadkowych, niepowiązanych
+            # punktów"). Tier 0 = dotarcie DOKŁADNIE na cel (bez chodzenia),
+            # tier 1 = cel osiągalny pieszo z tego przystanku, tier 2 =
+            # przesiadka na inny narysowany segment - w tej kolejności, bo
+            # dotarcie na miejsce zawsze bije jazdę dalej w poszukiwaniu
+            # przesiadki.
+            end_key = None
             for pos, _, arr_t, stop in seg["exits"]:
                 if pos <= start_pos + 1:
                     continue                 # wyjście przed/na starcie segmentu
+                leave_by = latest.get(stop)
+                if (effective_board_latest is not None and leave_by is not None
+                        and leave_by <= effective_board_latest - PROGRESS_TOL_SEC):
+                    continue                 # stąd dalej to jazda w złą stronę
                 if stop in target_walkable:
-                    cut = pos                # cel jest "widoczny" z definicji (wprost albo pieszo)
                     walk_info = target_walk_info.get(stop)
-                    end_walk = (
-                        (day.stop_coords[stop], walk_info[0], walk_info[1])
-                        if walk_info is not None else None
-                    )
+                    key = (0 if walk_info is None else 1, -pos)
+                    if end_key is None or key < end_key:
+                        end_key = key
+                        cut = pos            # cel jest "widoczny" z definicji (wprost albo pieszo)
+                        end_walk = (
+                            (day.stop_coords[stop], walk_info[0], walk_info[1])
+                            if walk_info is not None else None
+                        )
                     continue
                 for other in candidates_at(stop):
                     if other is seg or id(other) not in drawn_stops:
@@ -591,8 +644,11 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                     if (other["q"] + Q_ANCHOR_TOL >= seg["q"]
                             and joins(arr_t, stop, other,
                                       drawn_stops[id(other)])):
-                        cut = pos
-                        end_walk = None      # przesiadka na inny narysowany segment, nie "prawie cel"
+                        key = (2, -pos)      # tier 2: przesiadka - gorsza niż dotarcie na cel
+                        if end_key is None or key < end_key:
+                            end_key = key
+                            cut = pos
+                            end_walk = None  # przesiadka na inny narysowany segment, nie "prawie cel"
                         break
             if cut >= start_pos + 2:
                 survivors.append(seg)
@@ -623,15 +679,22 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     seg_list = []
     # Dojścia pieszo doklejone do pokazanych segmentów (start/przesiadka/cel -
     # patrz *_walk w pętli kotwiczenia wyżej) - narysowane jako osobne segmenty
-    # `kind:"walk"`, nie tylko domyślnie "gdzieś między liniami". Klucz to same
-    # współrzędne końców: to samo dojście używane przez kilka segmentów rysuje
-    # się raz, jasnością najjaśniejszego z nich (patrz add_walk).
+    # `kind:"walk"`, nie tylko domyślnie "gdzieś między liniami". Klucz to
+    # NAZWY końców (nie dokładne współrzędne): duży węzeł (patrz PROJECT.md -
+    # "8 Maja" ma 6 słupków) potrafi dać kilka osobnych dojść pieszo między
+    # różnymi słupkami tych samych dwóch przystanków, prawie równoległych na
+    # mapie - to samo dojście "w sensie użytkownika" rysuje się więc raz,
+    # jasnością najjaśniejszego z konkurujących wariantów (patrz add_walk).
+    # Punkt z prawdziwej lokalizacji (patrz Frontend) nie ma nazwy - zostaje
+    # kluczowany współrzędnymi, jak dawniej (nie ma z czym go grupować).
+    stop_name_by_coord = {coord: day.stop_names[sid] for sid, coord in day.stop_coords.items()}
     walk_segments = {}
 
     def add_walk(from_coord, to_coord, walk_sec, q):
         if from_coord == to_coord:
             return
-        key = (from_coord, to_coord)
+        key = (stop_name_by_coord.get(from_coord, from_coord),
+               stop_name_by_coord.get(to_coord, to_coord))
         entry = walk_segments.get(key)
         if entry is None or q > entry["w"]:
             walk_segments[key] = {"path": (from_coord, to_coord), "sec": walk_sec, "w": q}
