@@ -396,6 +396,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     # Punkt stały: zakresy mogą tylko się kurczyć, więc iteracja zbiega.
     kept = [seg for seg in segs if seg["q"] >= q_min]
     ranges = {id(seg): (0, len(seg["stops"])) for seg in kept}
+    margins = {}    # id(seg) -> zapas na wsiadanie w niego (s) albo None na starcie trasy
     while True:
         drawn_stops = {
             id(seg): set(seg["stops"][ranges[id(seg)][0]:ranges[id(seg)][1]])
@@ -403,12 +404,15 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
         }
         survivors = []
         new_ranges = {}
+        new_margins = {}
         for seg in kept:
             # --- kotwica początku ---
             if stop_names[seg["stops"][0]] == start_name:
                 start_pos = 0
+                start_margin = None     # start trasy - nie przesiadka, bufor nie dotyczy
             else:
                 start_pos = None
+                start_margin = None
                 for other in kept:
                     if other is seg:
                         continue
@@ -425,8 +429,14 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
                                 continue     # dołączenie na samym końcu - puste
                             buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
                             if catchable(arr_t, buffer, times):
-                                if start_pos is None or p < start_pos:
+                                i = bisect_left(times, arr_t + buffer)
+                                margin = times[i] - arr_t - buffer
+                                # Najwcześniejsze wsiadanie wygrywa; przy remisie -
+                                # ta przesiadka, która daje więcej luzu.
+                                if (start_pos is None or p < start_pos
+                                        or (p == start_pos and margin > start_margin)):
                                     start_pos = p
+                                    start_margin = margin
                 if start_pos is None:
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
@@ -450,11 +460,14 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
             if cut >= start_pos + 2:
                 survivors.append(seg)
                 new_ranges[id(seg)] = (start_pos, cut)
+                new_margins[id(seg)] = start_margin
         if len(survivors) == len(kept) and \
                 new_ranges == {k: ranges[k] for k in new_ranges}:
+            margins = new_margins
             break
         kept = survivors
         ranges = new_ranges
+        margins = new_margins
 
     segments = {}
     for seg in kept:
@@ -462,7 +475,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
         key = (seg["label"], tuple(seg["stops"][start_pos:cut]))
         entry = segments.get(key)
         if entry is None or seg["q"] > entry[0]:
-            segments[key] = (seg["q"], seg["shape"])
+            segments[key] = (seg["q"], seg["shape"], margins[id(seg)])
 
     kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
     brightest = sorted(
@@ -472,7 +485,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
     gtfs.geo_generation()           # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()         # jedno połączenie na wszystkie wycinki geometrii
     try:
-        for (label, stops_seq), (q, shape_id) in brightest:
+        for (label, stops_seq), (q, shape_id, margin) in brightest:
             path = gtfs.shape_slice(
                 shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
             )
@@ -481,6 +494,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None):
                 "num": label.split(" ", 1)[1] if " " in label else label,
                 "kind": kind_map.get(label.split(" ", 1)[0], "other"),
                 "w": round(q, 3),
+                "transfer_margin": margin,
             })
     finally:
         geo_db.close()

@@ -172,14 +172,13 @@ input[type="range"] {
 }
 
 .bike-electric-badge {
-    width: 14px !important;
-    height: 14px !important;
-    background: #fff;
-    border: 1.5px solid #f9a825;
-    border-radius: 50%;
-    font-size: 9px;
-    line-height: 13px;
-    text-align: center;
-    box-shadow: 0 0 2px rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #bf360c;
     pointer-events: none;
+}
+
+.bike-electric-badge span {
+    line-height: 1;
 }

@@ -178,9 +178,8 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             if (stations.error) { console.warn('Stacje WRM:', stations.error); return; }
             const markers = [];
             for (const s of stations) {
-                const style = s.bikes > 0
-                    ? {...BIKE_STYLE, radius: 4 + Math.min(s.bikes, 16) * 0.4}
-                    : BIKE_EMPTY_STYLE;
+                const radius = s.bikes > 0 ? 4 + Math.min(s.bikes, 16) * 0.4 : 4;
+                const style = s.bikes > 0 ? {...BIKE_STYLE, radius} : BIKE_EMPTY_STYLE;
                 const m = L.circleMarker([s.lat, s.lon], style);
                 let tooltip = `${esc(s.name)}<br>${s.bikes} ${plural(s.bikes, 'rower', 'rowery', 'rowerów')}`;
                 if (s.electric > 0) {
@@ -190,8 +189,15 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 m.bindTooltip(tooltip);
                 markers.push(m);
                 if (s.electric > 0) {
+                    // Skaluje się z promieniem stacji, więc nigdy nie wystaje poza kółko.
+                    const size = Math.round(radius * 1.3);
                     markers.push(L.marker([s.lat, s.lon], {
-                        icon: L.divIcon({className: 'bike-electric-badge', html: '⚡', iconSize: null}),
+                        icon: L.divIcon({
+                            className: 'bike-electric-badge',
+                            html: `<span style="font-size:${size}px">⚡︎</span>`,
+                            iconSize: [size, size],
+                            iconAnchor: [size / 2, size / 2],
+                        }),
                         interactive: false,
                     }));
                 }
@@ -228,9 +234,22 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     const BRIGHT_W = 0.45;
     const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', other: 'Linia'};
 
+    // Zapas na przesiadkę wsiadania w segment - czerwony (ciasno, blisko
+    // ustawowego bufora) do zielonego (luz); brak kropki = start trasy,
+    // gdzie bufor przesiadki nie ma zastosowania (patrz PROJECT.md).
+    const MARGIN_CAP_SEC = 600;   // 10 min i więcej = w pełni "zielono"
+    function marginColor(sec) {
+        const hue = Math.min(sec, MARGIN_CAP_SEC) / MARGIN_CAP_SEC * 120;
+        return `hsl(${hue}, 85%, 42%)`;
+    }
+    function marginText(sec) {
+        const min = Math.round(sec / 60);
+        return (min < 1 ? '<1 min' : `${min} min`) + ' zapasu na przesiadkę';
+    }
+
     function drawFlow(flow) {
         setBaseDim(true);
-        const faint = [], casings = [], bright = [];
+        const faint = [], casings = [], bright = [], marginDots = [];
         const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
 
         for (const s of flow.segments) {        // posortowane po w rosnąco
@@ -261,10 +280,16 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             }
             if (!byLine.has(key)) byLine.set(key, []);
             byLine.get(key).push(s);
+            if (s.transfer_margin !== null) {
+                marginDots.push(L.circleMarker(s.path[0], {
+                    radius: 5, weight: 1.5, color: '#fff',
+                    fillColor: marginColor(s.transfer_margin), fillOpacity: 1,
+                }).bindTooltip(marginText(s.transfer_margin)));
+            }
         }
 
-        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
-        const layers = [...faint, ...casings, ...bright];
+        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze -> kropki zapasu na wierzchu.
+        const layers = [...faint, ...casings, ...bright, ...marginDots];
 
         // Plakietki z numerem linii - tylko dla linii, które mają sensowny
         // udział w przepływie; na najjaśniejszym segmencie linii, dłuższe

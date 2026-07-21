@@ -124,6 +124,16 @@ ten sam efekt daje analiza dwóch skanów:
    segment. Segment bez kotwic odpada; punkt stały iteruje, aż nic nie
    wypada. Efekt: żadna linia nie zaczyna się „znikąd" ani nie prowadzi
    „w powietrze", niezależnie od ustawienia suwaka.
+9. **Margines przesiadki**: przy każdej kotwicy początku, która jest
+   realną przesiadką (nie startem trasy), zapamiętujemy też zapas czasu
+   ponad wymagany bufor (`TRANSFER_SEC` na tym samym słupku, `WALK_SEC`
+   na sąsiednim) do najwcześniejszego odjazdu, w który jeszcze da się
+   wskoczyć — `transfer_margin` w sekundach w odpowiedzi API (`null` przy
+   starcie trasy, gdzie bufor nie ma zastosowania; przy remisie pozycji
+   wsiadania wygrywa przesiadka z większym zapasem). Na razie to czysto
+   rozkładowy zapas — dopiero dane GTFS-RT o opóźnieniach (patrz „Plan
+   rozwoju” niżej) pokazałyby realny margines na żywo, a nie tylko
+   teoretyczny z rozkładu.
 7. **Agregacja**: segmenty o tej samej linii i identycznej ścieżce
    (kolejne kursy w oknie) sklejamy, biorąc maksimum jakości.
 9. **Geometria**: ścieżka segmentu to fragment `shapes.txt` (realne ulice
@@ -155,6 +165,9 @@ Rendering (frontend):
 - plakietki z numerem linii na najjaśniejszym segmencie każdej linii
   (długie segmenty 2–3 plakietki), tylko dla linii z jakością ≥ 0,4;
 - zwykłe markery przystanków są przygaszane na czas pokazywania przepływu;
+- **margines przesiadki**: mała kropka na przystanku wsiadania w segment
+  (gdy to realna przesiadka, nie start trasy) — kolor czerwony → zielony
+  wg zapasu czasu (0 → 10 min), dymek „X min zapasu na przesiadkę”;
 - kadr: najjaśniejsze segmenty (próg 0,7 → 0,45 → wszystko) + zawsze
   start i cel.
 
@@ -210,9 +223,13 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
 - `GET /api/flow?start=&end=&time=HH:MM&qmin=0.60` — mapa przepływów:
   `{start, end, departure, best_arrival, deadline, segments: [{path:
-  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …]}`,
-  segmenty posortowane rosnąco po `w` (kolejność rysowania); `path` to
-  kolejne przystanki od wsiadania do ostatniego użytecznego wyjścia.
+  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1,
+  transfer_margin: 120|null}, …]}`, segmenty posortowane rosnąco po `w`
+  (kolejność rysowania); `path` to kolejne przystanki od wsiadania do
+  ostatniego użytecznego wyjścia; `transfer_margin` to sekundy zapasu
+  ponad wymagany bufor przesiadki przy wsiadaniu w ten segment, `null`
+  gdy segment zaczyna się od startu trasy (patrz „Margines przesiadki”
+  w sekcji Algorytmy).
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -232,6 +249,12 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 
 ## Changelog
 
+- **2026-07-21** — margines przesiadki jako gradient (wersja rozkładowa):
+  `plan_flow` zapamiętuje przy każdej realnej przesiadce zapas czasu ponad
+  wymagany bufor (`transfer_margin` w `/api/flow`, sekundy, `null` na
+  starcie trasy); frontend rysuje kolorową kropkę (czerwona → zielona,
+  0–10 min) na przystanku wsiadania w segment, z tooltipem „X min zapasu”.
+  Czysto rozkładowe na razie — nie uwzględnia bieżących opóźnień.
 - **2026-07-21** — warstwa stacji WRM (rower miejski) na mapie: nowy moduł
   `bikes.py` (cache feedu GBFS `nextbike_pl` — `station_information.json`,
   `station_status.json`, `vehicle_types.json` do rozpoznania rowerów
@@ -290,27 +313,32 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
 - Brak tras pieszych po mieście — przesiadka tylko między słupkami
   o identycznej nazwie przystanku.
+- Margines przesiadki (kropka na mapie) jest czysto rozkładowy — nie
+  wie nic o bieżących opóźnieniach, więc "12 min zapasu" to zapas wg
+  rozkładu, nie licząc np. spóźnionego pierwszego kursu.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN) — a od
   warstwy WRM także **backend** potrzebuje internetu (feed GBFS nextbike);
   wcześniej tylko frontend zależał od sieci.
 
 ## Plan rozwoju (uzgodniona kolejność)
 
-Sześć rozszerzeń, do zrobienia po kolei, jedno na raz — każde kończone
+Rozszerzenia do zrobienia po kolei, jedno na raz — każde kończone
 w całości (i zweryfikowane w przeglądarce) zanim zaczyna się kolejne.
-Kolejność ustalona z użytkownikiem 2026-07-21, celowo niezależna od
-trudności zadania. Po zrobieniu kroku: odhaczyć tutaj i dopisać wpis
-w Changelogu, żeby plan został aktualny między sesjami (mogą dzielić je dni).
+Kolejność ustalona z użytkownikiem 2026-07-21 (kolejność wklejenia pomysłu,
+niezależna od trudności zadania czy numerków przy nim). Po zrobieniu kroku:
+odhaczyć tutaj i dopisać wpis w Changelogu, żeby plan został aktualny
+między sesjami (mogą dzielić je dni).
 
 - [x] **Warstwa stacji WRM na mapie** — informacyjna, bez wpływu na
       wyszukiwanie. Zrobione 2026-07-21 (patrz Changelog i sekcja
       „Warstwa rowerowa (WRM)” wyżej).
-- [ ] **Margines przesiadki jako gradient**, nie próg zero-jedynkowy —
-      zamiast tylko pokazywać/ukrywać opcję przy `TRANSFER_SEC`, pokazać
-      zapas czasu (kolor segmentu / liczba w tooltipie: „2 min zapasu” vs
-      „12 min zapasu”). Sensowne na żywo dopiero z danymi o opóźnieniach
-      (GTFS-RT) — bez nich to tylko rozkładowy bufor, co częściowo już
-      robi `_scan`.
+- [x] **Margines przesiadki jako gradient**, nie próg zero-jedynkowy —
+      zrobione 2026-07-21 jako wersja **rozkładowa** (statyczna): kropka
+      na przystanku wsiadania, kolor + tooltip „X min zapasu”. Docelowo
+      (z danymi GTFS-RT o opóźnieniach — patrz punkt niżej) margines
+      pokazywałby realny zapas na żywo, nie tylko teoretyczny z rozkładu —
+      to zostaje jako naturalne rozszerzenie, gdy/jeśli feed RT się
+      potwierdzi.
 - [ ] **Tablica odjazdów per przystanek** — klik w przystanek pokazuje
       też „co i kiedy stąd odjeżdża najbliżej”, nie tylko ustawia
       start/cel. Dane (`stop_times` per `stop_id`) już są w bazie.
@@ -324,11 +352,32 @@ w Changelogu, żeby plan został aktualny między sesjami (mogą dzielić je dni
 - [ ] **Rower jako krawędź w CSA** (głęboka integracja) — `plan_flow` /
       `plan_route` proponują „idź do stacji X, jedź rowerem do Y” jako
       opcję obok tramwaju/autobusu. Nowy, czasowo zmienny typ połączenia
-      w skanie — największa trudność z całej szóstki.
+      w skanie — trudność wyższa niż reszta.
+- [ ] **Car-sharing (Traficar) jako warstwa** — auta Traficar na mapie
+      (pozycja, paliwo/zasięg, dostępność), ten sam wzorzec co warstwa WRM
+      (poller + `L.layerGroup`). Traficar sam nie ma publicznego API, ale
+      `fioletowe.live` (open source, GitHub `divadsn/traficar-map`, GPLv3)
+      republikuje jego wewnętrzne API jako udokumentowany REST/JSON bez
+      klucza (`/docs/`, `/api/openapi.json`): `GET /api/v1/zones`
+      (Wrocław = zoneId 3), `GET /api/v1/cars?zoneId=3`, `GET
+      /api/v1/cars/nearby?lat=&lng=&radius=` (promień od razu w API —
+      przydatne pod „najbliższy Traficar do celu”). Zastrzeżenie: to
+      strona trzecia, nie sam Traficar — może zniknąć bez ostrzeżenia,
+      jak feed niżej.
+- [ ] **Prawdziwy GTFS-Realtime (opóźnienia na żywo) dla MPK** — feed
+      protobuf `https://mapadlugoleka.klosok.eu/vehicle_positions.pb`,
+      zarejestrowany w oficjalnym rejestrze odt.org.pl jako GTFS-RT dla
+      MPK Wrocław (dodany 19.09.2025). To **nie** jest portal miejski —
+      strona trzeciej osoby (wygląda na projekt jednoosobowy — realne
+      ryzyko, że zniknie bez ostrzeżenia). Poszlaka, że feed działa i ma
+      opóźnienia: `czynaczas.pl` pokazuje po WebSocket payload zgodny
+      1:1 z GTFS-RT (`current_status`, `delay`, `trip_id`, `stop_id`…).
+      Gdyby się potwierdziło, odblokowuje krok „Margines przesiadki jako
+      gradient” wyżej — bez opóźnień na żywo margines jest tylko
+      rozkładowy, statyczny.
 
 ## Pomysły na dalej
 
 - Dymki na węzłach przesiadkowych: „w co mogę się tu przesiąść i o której".
 - Powrót klasycznego widoku jednej trasy jako przełącznika obok przepływów.
 - Suwak zakresu (1,5× / 2× / 3×) w panelu.
-- GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
