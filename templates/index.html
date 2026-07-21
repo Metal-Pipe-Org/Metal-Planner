@@ -271,7 +271,10 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         resultBox.innerHTML = html + '</div>';
     }
 
-    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', walk: '#616161', other: '#6a1b9a'};
+    // Rower: ten sam pomarańcz co warstwa stacji WRM (BIKE_STYLE niżej) -
+    // spójny kolor "to jest rower" niezależnie, czy patrzysz na stację czy
+    // na sugestię trasy.
+    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', walk: '#616161', bike: '#e65100', other: '#6a1b9a'};
 
     // Mapa przepływów: każdy kurs to jeden ciągły segment od przystanku
     // wsiadania do ostatniego sensownego wyjścia; jasność i grubość linii
@@ -280,7 +283,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     // (styl mapy tramwajowej), a najechanie na linię podświetla ją
     // i pokazuje numer - widać, "która co gdzie", nawet w wiązce.
     const BRIGHT_W = 0.45;
-    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', walk: 'Pieszo', other: 'Linia'};
+    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', walk: 'Pieszo', bike: 'Rower WRM', other: 'Linia'};
 
     // Zapas na przesiadkę wsiadania w segment - bursztynowy (ciasno, blisko
     // ustawowego bufora) do zielonego (luz); NIE czerwony - czerwony miesza
@@ -309,16 +312,23 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
             const weight = 1 + 3.5 * s.w;
             const opacity = 0.10 + 0.85 * s.w;
-            // Pieszo to linia prosta (haversine), nie prawdziwa trasa uliczna -
-            // przerywana kreska od razu to sygnalizuje (patrz PROJECT.md).
-            const dashArray = s.kind === 'walk' ? '4, 6' : null;
+            // Pieszo i rower to linia prosta (haversine / przez stacje), nie
+            // prawdziwa trasa uliczna - przerywana kreska od razu to
+            // sygnalizuje (patrz PROJECT.md); rower kropkowany, żeby dało
+            // się odróżnić od pieszego nawet bez najeżdżania (kolor + wzór).
+            const dashArray = s.kind === 'walk' ? '4, 6' : s.kind === 'bike' ? '1, 6' : null;
             const line = L.polyline(s.path, {color, opacity, weight, dashArray});
-            line.bindTooltip(
-                s.kind === 'walk'
-                    ? `Pieszo, ok. ${Math.max(1, Math.round(s.walk_sec / 60))} min`
-                    : `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
-                {sticky: true},
-            );
+            let tooltip;
+            if (s.kind === 'walk') {
+                tooltip = `Pieszo, ok. ${Math.max(1, Math.round(s.walk_sec / 60))} min`;
+            } else if (s.kind === 'bike') {
+                const [st1, st2] = s.bike_stations;
+                tooltip = `Rower WRM: ${esc(st1)} → ${esc(st2)} `
+                    + `(w sumie ok. ${Math.max(1, Math.round(s.walk_sec / 60))} min z dojściem)`;
+            } else {
+                tooltip = `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`;
+            }
+            line.bindTooltip(tooltip, {sticky: true});
             line.on('mouseover', () => {
                 line.setStyle({opacity: 1, weight: weight + 2.5});
                 line.bringToFront();       // spod wiązki na wierzch
@@ -335,7 +345,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             } else {
                 faint.push(line);
             }
-            if (s.kind !== 'walk') {          // plakietka z pustym numerem wyglądałaby źle
+            if (s.kind !== 'walk' && s.kind !== 'bike') {   // pusty numer wyglądałby źle
                 if (!byLine.has(key)) byLine.set(key, []);
                 byLine.get(key).push(s);
             }

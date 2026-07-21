@@ -108,3 +108,41 @@ def station_list():
             "electric": electric,
         })
     return stations
+
+
+def station_positions():
+    """Stacje WRM: station_id -> {name, lat, lon} - tylko lokalizacja, bez
+    dostępności (zmienia się rzadko, patrz INFO_TTL_SEC). Do prekomputacji
+    statycznej łączności pieszej/rowerowej stacji w `bike_transfer.py` -
+    w odróżnieniu od `station_availability()` (świeże, cache 60 s), to
+    można bezpiecznie cache'ować po stronie wołającego."""
+    _refresh(_info_cache, INFO_URL, INFO_TTL_SEC)
+    return {
+        sid: {"name": info["name"], "lat": info["lat"], "lon": info["lon"]}
+        for sid, info in _info_cache["by_id"].items()
+    }
+
+
+def station_availability():
+    """Stacje WRM: station_id -> (rowery dostępne, wolne doki), TERAZ (cache
+    60 s - tyle co feed status). `is_renting`/`is_returning` na False
+    (stacja czasowo wyłączona z wypożyczeń/zwrotów) liczy się jak zero -
+    do sprawdzania na żywo, czy konkretny transfer rowerem jest w tej
+    chwili możliwy (patrz `bike_transfer.py`)."""
+    _refresh(_status_cache, STATUS_URL, STATUS_TTL_SEC)
+    return {
+        sid: (
+            status["num_bikes_available"] if status.get("is_renting", True) else 0,
+            status["num_docks_available"] if status.get("is_returning", True) else 0,
+        )
+        for sid, status in _status_cache["by_id"].items()
+        if status.get("is_installed", True)
+    }
+
+
+def stations_generation():
+    """Znacznik ważności `station_positions()` (mtime-jak `gtfs.geo_generation`) -
+    do cache'owania w `bike_transfer.py` pochodnej, statycznej łączności
+    stacji, żeby nie przeliczać jej przy każdym zapytaniu o trasę."""
+    _refresh(_info_cache, INFO_URL, INFO_TTL_SEC)
+    return _info_cache["at"]

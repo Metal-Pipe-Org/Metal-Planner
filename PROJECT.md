@@ -48,6 +48,10 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
   opis niżej.
 - **`bikes.py`** — analogiczny cache dla stacji roweru miejskiego WRM
   (feed GBFS zamiast SQLite) — patrz sekcja „Warstwa rowerowa (WRM)” niżej.
+- **`bike_transfer.py`** — rower WRM jako transfer w `plan_flow` (nie tylko
+  warstwa informacyjna) - statyczna geometria (przystanek↔stacja,
+  stacja↔stacja) cache'owana jak `day.siblings`, dostępność sprawdzana na
+  żywo per zapytanie; patrz „Warstwa rowerowa (WRM)” niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/bikes`,
   `/api/departures`, `/api/plan`, `/api/flow` (szczegóły w sekcji API).
 
@@ -199,18 +203,69 @@ choć wcześniejsze i późniejsze przechodziły — linia „mrugała" (dziury 
 mostach, konfetti krótkich kresek), a fragmenty pojawiały się w miejscach,
 do których nie dało się realnie dojechać z naszego startu.
 
+### Rower WRM jako transfer (`bike_transfer.py`)
+
+Rower jest teraz PEŁNOPRAWNYM transferem w `plan_flow` - jak piesi sąsiedzi
+(patrz CSA wyżej), nie tylko informacyjną warstwą na mapie (patrz „Warstwa
+rowerowa (WRM)” niżej). Różnica od pieszych sąsiadów: dostępność (rower na
+stacji startowej, wolny dok na docelowej) zmienia się z minuty na minutę,
+więc nie da się jej prekomputować raz razem z dniem rozkładu jak
+`day.siblings`. Rozwiązanie - dwie warstwy cache'owania:
+
+1. **Geometria (statyczna, cache'owana)**: dla każdego przystanku - do 2
+   najbliższych stacji WRM (promień 400 m, jak piesi sąsiedzi); dla każdej
+   stacji - do 6 najbliższych INNYCH stacji w rozsądnym zasięgu roweru
+   (4 km, ~15 km/h) i do 3 najbliższych przystanków. Liczone raz i
+   cache'owane, dopóki pozycje stacji się nie zmienią (`bikes.
+   stations_generation()`, ta sama koncepcja co `gtfs.geo_generation()`).
+2. **Dostępność (żywa, cache 60 s)**: `bikes.station_availability()` -
+   `num_bikes_available`/`num_docks_available` z feedu GBFS (`is_renting`/
+   `is_returning` na False liczy się jak zero). Dopiero WYNIK tego
+   sprawdzenia, scalony z geometrią, daje gotowe krawędzie przystanek→
+   przystanek (`build_bike_edges`) w kształcie identycznym jak
+   `day.siblings` - `plan_flow` scala je (`merge_siblings`) w jedną relację
+   i przekazuje do `_scan`/`_forward`/`_backward` przez opcjonalny parametr
+   `siblings` (domyślnie `None` = czysto piesza `day.siblings`, więc
+   `plan_route` i istniejące wywołania bez roweru zachowują się identycznie).
+
+**Kierunkowość** - kluczowa różnica od pieszych sąsiadów, którzy są zawsze
+symetryczni (blisko A ⇔ blisko B): dostępność roweru NIE jest symetryczna
+(stacja A ma rower ≠ stacja B ma rower). `build_bike_edges` zwraca więc
+DWIE relacje - `edges` („dokąd stąd można dojechać”, dla `_scan`/`_forward`
+i kotwicy początku segmentu) i `reverse_edges` („kto stąd dotrze do celu”,
+dla `_backward` i dojścia DO celu) - użycie tej samej relacji w obu
+miejscach dawałoby błędny kierunek dla asymetrycznych krawędzi rowerowych
+(dla pieszych siblings to bez różnicy, bo są symetryczne).
+
+**Wydajność**: doprecyzowanie jasności (`join_value`/`candidates_at`,
+wołane setki tysięcy razy w typowym zapytaniu) i kotwica końca segmentu
+(przesiadka na inny narysowany segment) celowo NIE widzą roweru - używają
+czystej `day.siblings`. Rower ma dużo szerszy zasięg (4 km vs 400 m), więc
+wpuszczenie go tam powiększało koszt kombinatorycznie (zmierzone: ~3× na
+typowym zapytaniu) bez odpowiadającej korzyści - to tylko doprecyzowanie
+JUŻ narysowanych segmentów, nie decyzja, czy dana trasa w ogóle się pokaże
+(o tym decydują `_scan`/`_forward`/`_backward` i kotwica POCZĄTKU, które
+znają rower). Rendering: dojście stop→stacja→stacja→stop rysowane jak
+dojście pieszo (prosta linia, nie prawdziwa trasa rowerowa), ale osobnym
+`kind:"bike"` (pomarańcz, kropkowana kreska) z dymkiem „Rower WRM: stacja
+X → stacja Y”; to samo uproszczenie co przy pieszych dojściach (patrz
+„Znane ograniczenia”).
+
 Rendering (frontend):
 
 - przezroczystość `0,10 + 0,85·w` i grubość `1 + 3,5·w` px — główne
   korytarze jaskrawe i grube, niszowe ledwo widoczne;
-- kolor: tramwaj czerwony, autobus niebieski, pieszo szary, przerywana
-  kreska (linia prosta, nie prawdziwa trasa uliczna - przerywanie od razu
-  to sygnalizuje); segmenty z `w ≥ 0,45` dostają białą otoczkę (styl mapy
-  tramwajowej), kolejność rysowania: blade → otoczki → jaskrawe;
+- kolor: tramwaj czerwony, autobus niebieski, pieszo szary, rower
+  pomarańcz (ten sam co warstwa stacji WRM - spójność „to jest rower”
+  niezależnie od warstwy); pieszo i rower przerywaną kreską (linia prosta,
+  nie prawdziwa trasa uliczna/rowerowa - przerywanie od razu to
+  sygnalizuje), różny wzór (pieszo `4,6`, rower kropkowane `1,6`) - odróżnia
+  się nawet bez najeżdżania; segmenty z `w ≥ 0,45` dostają białą otoczkę
+  (styl mapy tramwajowej), kolejność rysowania: blade → otoczki → jaskrawe;
 - **hover na linii** podświetla ją, wyciąga na wierzch wiązki
-  (`bringToFront`) i pokazuje dymek „Tramwaj 3" (albo „Pieszo, ok. X min"
-  dla dojścia) — tak rozróżnia się linie nachodzące na siebie w jednym
-  korytarzu;
+  (`bringToFront`) i pokazuje dymek „Tramwaj 3” (albo „Pieszo, ok. X min”
+  dla dojścia, albo „Rower WRM: stacja X → stacja Y” dla przejazdu) — tak
+  rozróżnia się linie nachodzące na siebie w jednym korytarzu;
 - plakietki z numerem linii na najjaśniejszym segmencie każdej linii
   (długie segmenty 2–3 plakietki), tylko dla linii z jakością ≥ 0,4;
   segmenty piesze nie dostają plakietki (pusty `num`);
@@ -227,14 +282,23 @@ Rendering (frontend):
 
 Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 ~30 ms na cache'owanym dniu, odpowiedź to zwykle kilkaset–2000 krawędzi.
+Dla słabo skomunikowanego celu (bardzo rzadkie kursy) okno `[dep_sec,
+deadline]` potrafi rozciągnąć się na godziny, a z nim liczba segmentów w
+tysiące - `KEPT_CAP` (400) ucina wtedy do najjaśniejszych PRZED drogimi
+pętlami (doprecyzowanie jasności, spójność sieci), żeby zapytanie nie
+liczyło się dziesiątkami sekund (patrz Changelog i „Znane ograniczenia”).
 
 ## Warstwa rowerowa (WRM)
 
-Stacje Wrocławskiego Roweru Miejskiego pokazane są na mapie jako osobna,
-czysto informacyjna warstwa (checkbox w panelu, domyślnie zaznaczony) —
-**nie wpływają na wyszukiwanie połączeń**, `planner.py` w ogóle o nich nie
-wie. To celowo płytka integracja: pierwszy krok przed docelowym pomysłem,
-w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”).
+Stacje Wrocławskiego Roweru Miejskiego pokazane są na mapie jako osobna
+warstwa (checkbox w panelu, domyślnie zaznaczony) - czysto wizualna, ale
+od 2026-07-22 **rower jest też pełnoprawnym transferem w `plan_flow`**
+(patrz „Rower WRM jako transfer” w Algorytmach) - `planner.py` bierze pod
+uwagę tę samą dostępność, którą widać na tej warstwie, przy wyszukiwaniu
+połączeń, nie tylko przy rysowaniu stacji. Włączenie/wyłączenie checkboxa
+zmienia wyłącznie WIDOCZNOŚĆ warstwy stacji - nie wyłącza roweru jako
+transferu w wynikach wyszukiwania (to świadome rozdzielenie: warstwa to
+podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 - **Źródło danych**: WRM korzysta z systemu nextbike, który publikuje stan
   sieci jako feed [GBFS](https://gbfs.org/) (General Bikeshare Feed
@@ -264,6 +328,12 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   z dostępnym rowerem elektrycznym dostają dodatkową małą plakietkę „⚡”.
   Podpowiedź na hover: „nazwa / X rowerów (w tym Y elektrycznych)”.
   Checkbox chowa/pokazuje warstwę bez ponownego pobierania danych.
+- **Transfer** (`bike_transfer.py`, wołany z `plan_flow`): `bikes.
+  station_positions()`/`station_availability()` (ID, lokalizacja, wolne
+  rowery/doki - osobno od `station_list()` używanego przez warstwę
+  wyżej, bo transfer potrzebuje ID i doków, warstwa tylko nazwy/liczb
+  do wyświetlenia) zasilają statyczną geometrię i żywe sprawdzenie
+  dostępności - szczegóły w „Rower WRM jako transfer” w Algorytmach.
 
 ## API
 
@@ -282,21 +352,23 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
 - `GET /api/flow?start=&end=&time=HH:MM&qmin=0.60` — mapa przepływów:
   `{start, end, departure, best_arrival, deadline, segments: [{path:
-  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"walk"|"other", w: 0..1,
-  transfer_margin: 120|null, board_time: "18:36"|null, board_stop:
-  "Pułaskiego"|null, walk_sec: 180|null}, …]}`, segmenty posortowane
-  rosnąco po `w` (kolejność rysowania); `path` to kolejne przystanki od
-  wsiadania do ostatniego użytecznego wyjścia (dla `kind:"walk"` - tylko
-  dwa punkty, skąd i dokąd). `transfer_margin`/`board_time`/`board_stop`
-  to razem: ile sekund zapasu, o której odjeżdża connection, i nazwa
-  przystanku przesiadki - wszystkie `null`, gdy segment zaczyna się od
-  startu trasy (patrz „Margines przesiadki” w Algorytmach). `walk_sec`
-  to czas dojścia w sekundach, tylko dla `kind:"walk"` (patrz „Piesze
-  odcinki jako segmenty”). Zamiast `start=` można podać
-  `start_lat=&start_lon=` (prawdziwa lokalizacja zamiast nazwy przystanku
-  - patrz Frontend); wtedy `start` w odpowiedzi to zawsze „Twoja
-  lokalizacja”. Błąd, gdy w promieniu 1 km nie ma żadnego przystanku:
-  `{error: "…"}`.
+  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"walk"|"bike"|"other",
+  w: 0..1, transfer_margin: 120|null, board_time: "18:36"|null, board_stop:
+  "Pułaskiego"|null, walk_sec: 180|null, bike_stations: ["Stacja A",
+  "Stacja B"]|null}, …]}`, segmenty posortowane rosnąco po `w` (kolejność
+  rysowania); `path` to kolejne przystanki od wsiadania do ostatniego
+  użytecznego wyjścia (dla `kind:"walk"`/`"bike"` - tylko dwa punkty, skąd
+  i dokąd). `transfer_margin`/`board_time`/`board_stop` to razem: ile
+  sekund zapasu, o której odjeżdża connection, i nazwa przystanku
+  przesiadki - wszystkie `null`, gdy segment zaczyna się od startu trasy
+  (patrz „Margines przesiadki” w Algorytmach). `walk_sec` to czas dojścia
+  w sekundach dla `kind:"walk"` ALBO całkowity czas (dojście+rower+dojście)
+  dla `kind:"bike"` (patrz „Piesze odcinki jako segmenty” i „Rower WRM jako
+  transfer”); `bike_stations` to nazwy stacji początkowej/końcowej, tylko
+  dla `kind:"bike"`. Zamiast `start=` można podać `start_lat=&start_lon=`
+  (prawdziwa lokalizacja zamiast nazwy przystanku - patrz Frontend); wtedy
+  `start` w odpowiedzi to zawsze „Twoja lokalizacja”. Błąd, gdy w promieniu
+  1 km nie ma żadnego przystanku: `{error: "…"}`.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -308,6 +380,7 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
 | `planner.py` | CSA (`plan_route`) + mapa przepływów (`plan_flow`) |
 | `bikes.py` | cache stacji WRM (GBFS) |
+| `bike_transfer.py` | rower WRM jako transfer w `plan_flow` (geometria statyczna + dostępność na żywo) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | mapa Leaflet + panel + cały frontendowy JS |
@@ -316,6 +389,56 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 
 ## Changelog
 
+- **2026-07-22** — rower WRM jako pełnoprawny transfer w `plan_flow` (item 6
+  „Planu rozwoju”, przeprojektowany po cofnięciu pierwszej wersji-mostu
+  2026-07-21 - patrz ten wpis niżej). Nowy moduł `bike_transfer.py`: statyczna
+  geometria (przystanek↔stacja, stacja↔stacja) cache'owana jak
+  `day.siblings`, dostępność (`bikes.station_availability()` - nowa funkcja,
+  zwraca ID/doki, w odróżnieniu od `station_list()` dla warstwy
+  informacyjnej) sprawdzana na żywo (cache 60 s) przy KAŻDYM zapytaniu i
+  scalana z pieszymi sąsiadami w jedną relację, przekazywaną do
+  `_scan`/`_forward`/`_backward` przez nowy opcjonalny parametr `siblings`
+  (domyślnie `None` = bez zmian, `plan_route` nieporuszony). Dostępność
+  roweru jest KIERUNKOWA (stacja A ma rower ≠ stacja B ma rower) - w
+  odróżnieniu od zawsze symetrycznych pieszych sąsiadów - stąd osobna
+  relacja odwrotna (`reverse_siblings`) dla `_backward`/dojścia do celu, żeby
+  nie pomylić kierunku (patrz „Rower WRM jako transfer” w Algorytmach).
+  Rendering: nowy `kind:"bike"` (pomarańcz, kropkowana kreska), dymek ze
+  stacjami. Feed GBFS niedostępny → zwykli piesi sąsiedzi, wyszukiwanie nie
+  pada (zweryfikowane: symulacja padniętego feedu nadal zwraca poprawną
+  trasę, tylko bez segmentów rowerowych).
+
+  **Przy okazji, dwa poważne błędy znalezione podczas weryfikacji:**
+  1. Doprecyzowanie jasności (`join_value`/`candidates_at`, setki tysięcy
+     wywołań na typowe zapytanie) spowalniało się ~3× przy włączeniu roweru
+     do tej samej relacji sąsiedztwa - rower ma dużo szerszy zasięg (4 km)
+     niż piesi sąsiedzi (400 m), więc rozgałęzienie rosło kombinatorycznie
+     bez odpowiadającej korzyści (to tylko doprecyzowanie JUŻ narysowanych
+     segmentów). Naprawiono: te dwie funkcje i kotwica końca segmentu celowo
+     zostały przy czystej `day.siblings` - tylko `_scan`/`_forward`/
+     `_backward` i kotwica POCZĄTKU (gdzie decyduje się, czy dana trasa
+     w ogóle się pokaże) znają rower.
+  2. Znacznie poważniejszy, PRZEDISTNIEJĄCY (niezwiązany z rowerem) błąd
+     wydajności znaleziony przy okazji testów regresji: kotwica początku
+     segmentu robiła pełny skan wszystkich wyjść wszystkich innych segmentów
+     OSOBNO dla każdego segmentu - O(liczba segmentów²) × wyjścia × sąsiedzi.
+     Dla dobrze skomunikowanych par przystanków (mało segmentów) niezauważalne,
+     ale dla słabo skomunikowanego celu (bardzo rzadkie kursy → okno czasu
+     `[dep_sec, deadline]` na GODZINY → tysiące segmentów) zapytanie
+     `Chińska → Biskupice Podg. DSC Poland/Top Run Poland` (17:30) liczyło
+     się **33 sekundy** (z rowerem: nie skończyło się w rozsądnym czasie w
+     ogóle). Naprawiono dwiema poprawkami: (a) indeks „skąd da się dojść do
+     stopu X” budowany RAZ na iterację pętli spójności, nie osobno dla
+     każdego segmentu - usuwa czynnik kwadratowy; (b) `KEPT_CAP` (400) -
+     twardy limit liczby segmentów wchodzących w drogie pętle
+     (doprecyzowanie + spójność), ucinający do najjaśniejszych PRZED nimi,
+     nie po. Efekt: ten sam przykład **4,3 s** zamiast 33 s+ - wciąż wolniej
+     niż typowe zapytanie (~30–200 ms), ale ograniczone, nie rozjeżdżające
+     się bez końca; `best_arrival` (z osobnego, nieograniczonego skanu)
+     pozostaje dokładny niezależnie od cięcia. Test regresji: >60 zapytań
+     (ustalony zestaw + losowe próbki, różne pory dnia) - zero przypadków
+     "poprawny best_arrival, zero segmentów" i zero zapytań wolniejszych niż
+     kilka sekund poza tym jednym, ekstremalnym przykładem.
 - **2026-07-21** — poważniejszy, osobny błąd znaleziony przy weryfikacji
   poprawek niżej: reguła "bez cofania się" (`BACKTRACK_TOL_SEC`) potrafiła
   wyciąć z mapy przepływów CAŁĄ, poprawną, bezpośrednią trasę - nie tylko
@@ -533,6 +656,26 @@ w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN) — a od
   warstwy WRM także **backend** potrzebuje internetu (feed GBFS nextbike);
   wcześniej tylko frontend zależał od sieci.
+- Rower jako transfer (patrz „Rower WRM jako transfer” w Algorytmach) sprawdza
+  tylko TOP-K najbliższych stacji/sąsiadów na każdym poziomie (2 stacje per
+  przystanek, 6 sąsiednich stacji per stacja, 3 przystanki per stacja) - to
+  nie jest wyczerpujące przeszukanie wszystkich możliwych kombinacji, więc
+  teoretycznie może pominąć jakiś rzadki, ale lepszy wariant. Dostępność ma
+  do 60 s opóźnienia (cache feedu) - rower pokazany jako dostępny mógł już
+  zniknąć. Cięcie na 4 km jazdy - dłuższe przejazdy rowerem między stacjami
+  nie są brane pod uwagę (założenie: powyżej tego dystansu transport
+  publiczny prawie zawsze wygrywa). Rysowanie to prosta linia
+  przystanek→przystanek (jak piesze dojścia), nie prawdziwa trasa uliczna
+  ani sieć dróg rowerowych - to samo uproszczenie i ta sama motywacja co
+  przy pieszych dojściach.
+- Zapytania o cel bardzo słabo skomunikowany transportem publicznym (bardzo
+  rzadkie kursy, okno czasu na godziny) są ograniczone przez `KEPT_CAP`
+  (patrz Changelog 2026-07-22) - mogą liczyć się do kilku sekund zamiast
+  typowych dziesiątek/setek milisekund, i w skrajnym przypadku mapa
+  przepływów może pominąć jakiś marginalny wariant, który przy pełnym
+  (nieograniczonym) przeliczeniu zmieściłby się w progu jasności.
+  `best_arrival`/`deadline` (najszybsza trasa) są zawsze dokładne, niezależnie
+  od tego ograniczenia - dotyczy tylko DODATKOWYCH segmentów mapy przepływów.
 
 ## Plan rozwoju (uzgodniona kolejność)
 
@@ -571,15 +714,14 @@ między sesjami (mogą dzielić je dni).
       nie cel - "gdzie stoję → cel" było jedynym artykułowanym przypadkiem
       użycia; geolokalizacja celu (dokąd idę → gdzie akurat jestem) to
       rzadki, odwrotny scenariusz, świadomie pominięty.
-- [ ] **Rower jako krawędź w CSA** (głęboka integracja) — `plan_flow` /
-      `plan_route` proponują „idź do stacji X, jedź rowerem do Y” jako
-      opcję obok tramwaju/autobusu. Nowy, czasowo zmienny typ połączenia
-      w skanie — trudność wyższa niż reszta. Pierwsza wersja (prosty most
-      start→cel, sprawdzany na żywo) była zaimplementowana 2026-07-21, ale
-      COFNIĘTA po przeglądzie — użytkownik chce roweru jako pełnego
-      transferu (jak piesi sąsiedzi), nie tylko mostu na końcach trasy;
-      wymaga przemyślenia, jak wpleźć zmienną w czasie dostępność w
-      cache'owany dzień, zanim ruszy kolejna próba.
+- [x] **Rower jako krawędź w CSA** (głęboka integracja) — zrobione
+      2026-07-22 jako pełny transfer w `plan_flow` (nie tylko most
+      start→cel jak pierwsza, cofnięta wersja z 2026-07-21): statyczna
+      geometria cache'owana, dostępność sprawdzana na żywo (patrz „Rower
+      WRM jako transfer” w Algorytmach i sekcja „Warstwa rowerowa (WRM)”).
+      `plan_route` świadomie NIE dostał tej integracji (narzędzie debug,
+      nieużywane przez UI - patrz API) - zakres ograniczony do `plan_flow`,
+      który jest jedyną ścieżką faktycznie widoczną dla użytkownika.
 - [ ] **Car-sharing (Traficar) jako warstwa** — auta Traficar na mapie
       (pozycja, paliwo/zasięg, dostępność), ten sam wzorzec co warstwa WRM
       (poller + `L.layerGroup`). Traficar sam nie ma publicznego API, ale

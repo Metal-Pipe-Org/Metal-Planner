@@ -9,6 +9,7 @@ na jego odjazd na przystanku startowym.
 from bisect import bisect_left, bisect_right
 from datetime import datetime
 
+import bike_transfer
 import gtfs
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
@@ -102,13 +103,17 @@ def stop_departures(stop_query, when=None, limit=DEPARTURES_LIMIT):
     return {"stop": name, "departures": departures}
 
 
-def _scan(day, source_stops, target_stops, dep_sec, source_walk=None):
+def _scan(day, source_stops, target_stops, dep_sec, source_walk=None, siblings=None):
     """Connection Scan: najwcześniejszy przyjazd do celu, ze śladem do rekonstrukcji.
 
     `source_walk` to opcjonalna „ostatnia mila” z dowolnego punktu (np.
     prawdziwej lokalizacji użytkownika) - [(stop_id, sek_dojścia), ...]
-    z gtfs.nearest_stops, zamiast/obok nazwanych source_stops.
+    z gtfs.nearest_stops, zamiast/obok nazwanych source_stops. `siblings`
+    to opcjonalna relacja SĄSIEDZTWA do użycia zamiast `day.siblings` -
+    tym mechanizmem `plan_flow` wpina rower WRM jako dodatkowy transfer
+    (patrz `bike_transfer.py`); domyślnie (None) czysto piesza `day.siblings`.
     """
+    sib = day.siblings if siblings is None else siblings
     conns = day.conns
     earliest = {}
     journey = {}      # stop_id -> ("origin",) | ("ride", idx_wsiadania, idx_wysiadania) | ("walk", skad, sek)
@@ -123,7 +128,7 @@ def _scan(day, source_stops, target_stops, dep_sec, source_walk=None):
     # czekania na kurs z dokładnie tego słupka. Osobny przebieg PO seedowaniu
     # źródeł, żeby nie zależał od kolejności iteracji po source_stops.
     for stop in source_stops:
-        for sibling, walk_sec in day.siblings.get(stop, ()):
+        for sibling, walk_sec in sib.get(stop, ()):
             walk_arr = dep_sec + walk_sec
             if walk_arr < earliest.get(sibling, INF):
                 earliest[sibling] = walk_arr
@@ -163,8 +168,9 @@ def _scan(day, source_stops, target_stops, dep_sec, source_walk=None):
             if arr_s in targets and arr_t < best_arr:
                 best_arr = arr_t
                 best_stop = arr_s
-            # Relaksacja pieszo na sąsiednie przystanki (patrz gtfs.py).
-            for sibling, walk_sec in day.siblings.get(arr_s, ()):
+            # Relaksacja pieszo (i rowerem, gdy `siblings` je niesie) na
+            # sąsiednie przystanki (patrz gtfs.py / bike_transfer.py).
+            for sibling, walk_sec in sib.get(arr_s, ()):
                 walk_arr = arr_t + walk_sec
                 if walk_arr < earliest.get(sibling, INF):
                     earliest[sibling] = walk_arr
@@ -231,6 +237,13 @@ PROGRESS_TOL_SEC = 180  # luz reguły postępu dla wyjść - metryka latest bywa
 WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
 DEFAULT_Q_MIN = 0.60    # domyślny próg jasności (suwak w UI go nadpisuje)
 MAX_SEGMENTS = 150      # twardy limit liczby segmentów w odpowiedzi
+KEPT_CAP = 400          # twardy limit WEJŚCIA do pętli spójności (patrz niżej -
+                        # ta pętla jest O(kept² x wyjścia), więc dla słabo
+                        # skomunikowanego celu (rzadkie kursy -> godziny
+                        # okna czasu -> tysiące wpisów w kept) potrafiła bez
+                        # tego limitu liczyć się MINUTAMI zamiast milisekund;
+                        # 400 to duży zapas nad MAX_SEGMENTS - dla zwykłych
+                        # zapytań (kept dużo mniejsze) ten limit nic nie ucina
 
 
 def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
@@ -255,6 +268,27 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     except FileNotFoundError as e:
         return {"error": str(e)}
 
+    # Rower WRM jako dodatkowy transfer, scalony z pieszymi sąsiadami w JEDNĄ
+    # relację - _scan/_forward/_backward i cała reszta tej funkcji nie
+    # rozróżniają dalej "sąsiad pieszy" od "sąsiad rowerem", liczy się tylko
+    # czas (patrz bike_transfer.py). `day.siblings` samo w sobie zostaje
+    # nietknięte (dzielony cache dnia), więc dostępność rowerów - inaczej niż
+    # piesi sąsiedzi - sprawdza się na żywo przy KAŻDYM zapytaniu, nigdy nie
+    # jest "zamrożona" w cache'u dnia. Feed niedostępny -> zwykli piesi
+    # sąsiedzi, bez wywalania wyszukiwania (patrz build_bike_edges).
+    #
+    # DWIE wersje relacji, nie jedna: piesi sąsiedzi są symetryczni (blisko
+    # A <=> blisko B), ale dostępność roweru jest KIERUNKOWA (stacja A ma
+    # rower ≠ stacja B ma rower) - `siblings` ("dokąd stąd można dojechać")
+    # i `reverse_siblings` ("kto stąd może dojechać") to różne relacje przy
+    # rowerze. Wszystko, co pyta "gdzie mogę się stąd dostać" (_scan,
+    # _forward, kotwica początku, joins/join_value) używa `siblings`;
+    # wszystko, co propaguje wstecz "kto dotrze DO tego miejsca" (_backward,
+    # dojście DO celu) używa `reverse_siblings`.
+    bike_edges, bike_reverse_edges, bike_hints = bike_transfer.build_bike_edges(day)
+    siblings = bike_transfer.merge_siblings(day.siblings, bike_edges)
+    reverse_siblings = bike_transfer.merge_siblings(day.siblings, bike_reverse_edges)
+
     if start_point is not None:
         source_walk = gtfs.nearest_stops(start_point[0], start_point[1], day)
         if not source_walk:
@@ -274,7 +308,9 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     dep_sec = when.hour * 3600 + when.minute * 60 + when.second
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek").
-    best_stop, best_arr, _ = _scan(day, source_stops, target_stops, dep_sec, source_walk)
+    best_stop, best_arr, _ = _scan(
+        day, source_stops, target_stops, dep_sec, source_walk, siblings,
+    )
     if best_stop is None:
         return {
             "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
@@ -284,8 +320,10 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     extra = min(max(int(duration * (SLOWDOWN - 1)), MIN_EXTRA_SEC), MAX_EXTRA_SEC)
     deadline = best_arr + extra
 
-    earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline, source_walk)
-    latest = _backward(day, set(target_stops), dep_sec, deadline)
+    earliest, arrived_by, trip_board = _forward(
+        day, source_stops, dep_sec, deadline, source_walk, siblings,
+    )
+    latest = _backward(day, set(target_stops), dep_sec, deadline, reverse_siblings)
 
     # Zapas czasowy trasy optymalnej = pełna jasność.
     span = max(deadline - best_arr, 1)
@@ -311,26 +349,31 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
 
     target_set = set(target_stops)
     # Start/cel "widoczne bez przesiadki" przy kotwiczeniu segmentów (niżej):
-    # słupek startu/celu wprost ALBO jego pieszy sąsiad (patrz gtfs.py) -
-    # dojście na piechotę z/do trasy liczy się tak samo jak bycie na miejscu.
-    # *_walk_info: stop_id -> None (to dosłowny start/cel, bez dojścia) albo
-    # (współrzędne drugiego końca, sek) - do narysowania samego dojścia
-    # pieszo na mapie (patrz `add_walk` niżej), nie tylko do algorytmu.
+    # słupek startu/celu wprost ALBO jego pieszy/rowerowy sąsiad (patrz
+    # gtfs.py, bike_transfer.py) - dojście z/do trasy liczy się tak samo jak
+    # bycie na miejscu. *_walk_info: stop_id -> None (to dosłowny start/cel,
+    # bez dojścia) albo (współrzędne drugiego końca, sek, hint_roweru) - do
+    # narysowania samego dojścia na mapie (patrz `add_walk` niżej), nie tylko
+    # do algorytmu; `hint_roweru` to None (zwykłe dojście pieszo) albo krotka
+    # z bike_hints (patrz build_bike_edges) - odróżnia kind:"bike" od "walk"
+    # przy rysowaniu. Kierunek: do celu trzeba użyć `reverse_siblings` (kto
+    # dotrze DO celu), nie `siblings` (dokąd z celu można dojechać) - patrz
+    # komentarz przy merge_siblings wyżej.
     start_walk_info = {s: None for s in source_stops}
     for s in source_stops:
-        for sib, sec in day.siblings.get(s, ()):
+        for sib, sec in siblings.get(s, ()):
             if sib not in start_walk_info:
-                start_walk_info[sib] = (day.stop_coords[s], sec)
+                start_walk_info[sib] = (day.stop_coords[s], sec, bike_hints.get((s, sib)))
     if source_walk:
         for sib, sec in source_walk:
-            start_walk_info.setdefault(sib, (start_point, sec))
+            start_walk_info.setdefault(sib, (start_point, sec, None))
     start_walkable = set(start_walk_info)
 
     target_walk_info = {s: None for s in target_stops}
     for s in target_stops:
-        for sib, sec in day.siblings.get(s, ()):
+        for sib, sec in reverse_siblings.get(s, ()):
             if sib not in target_walk_info:
-                target_walk_info[sib] = (day.stop_coords[s], sec)
+                target_walk_info[sib] = (day.stop_coords[s], sec, bike_hints.get((sib, s)))
     target_walkable = set(target_walk_info)
 
     raw = {}     # (linia, pełna trasa) -> dane segmentu
@@ -411,6 +454,21 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
             entry["dep_times"].setdefault(stop, []).append(dep)
 
     segs = list(raw.values())
+    if len(segs) > KEPT_CAP:
+        # Słabo skomunikowany cel (rzadkie kursy) potrafi rozciągnąć okno
+        # [dep_sec, deadline] na GODZINY (deadline zależy od best_arr, który
+        # dla takiego celu bywa daleko) - a z nim liczbę wpisów tutaj w
+        # tysiące. Doprecyzowanie jasności niżej i pętla spójności dalej są
+        # w najgorszym razie kwadratowe względem len(segs)/len(kept), więc
+        # bez tego limitu potrafiły liczyć się dziesiątkami sekund zamiast
+        # milisekund (zmierzone: 33 s na przykładzie ze skrajnie rzadkim
+        # połączeniem). Ucinamy tu, PRZED drogimi pętlami, do najjaśniejszych
+        # wg surowego przybliżenia - to i tak jedyne, co finalnie przejdzie
+        # próg MAX_SEGMENTS niżej; best_arrival/deadline (z osobnego,
+        # nieograniczonego _scan wyżej) zostają dokładne niezależnie od tego
+        # cięcia.
+        segs.sort(key=lambda seg: seg["q"], reverse=True)
+        segs = segs[:KEPT_CAP]
 
     for seg in segs:
         for times in seg["dep_times"].values():
@@ -420,6 +478,17 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
         i = bisect_left(dep_list, arr_t + buffer)
         return i < len(dep_list) and dep_list[i] <= arr_t + WAIT_CAP_SEC
 
+    # joins/candidates_at/join_value celowo używają CZYSTO PIESZYCH sąsiadów
+    # (day.siblings), nie `siblings` (z rowerem) - to doprecyzowanie jasności
+    # (refresh_suffixes/join_value niżej) i szukanie "z czym się to jeszcze
+    # łączy" wołane są setki tysięcy razy (segment x wyjście x kandydat x do
+    # 8 iteracji punktu stałego); rower ma dużo szerszy zasięg niż piesi
+    # sąsiedzi (do 4 km, nie 400 m), więc wpuszczenie go tutaj powiększa
+    # rozgałęzienie kombinatorycznie - zmierzone: ~3x wolniej na typowym
+    # zapytaniu, bez odpowiadającej korzyści (to tylko DOPRECYZOWANIE
+    # jasności już narysowanych segmentów, nie decyzja, czy segment w ogóle
+    # da się narysować - tę decyzję podejmują _scan/_forward/_backward i
+    # kotwica początku niżej, które JUŻ znają rower przez `siblings`).
     def joins(arr_t, stop, other, drawn=None):
         """Czy z przyjazdu (arr_t, stop) da się wskoczyć w segment `other`
         (na tym samym słupku albo pieszo na sąsiedni - patrz gtfs.py),
@@ -531,6 +600,23 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
             id(seg): set(seg["stops"][ranges[id(seg)][0]:ranges[id(seg)][1]])
             for seg in kept
         }
+        # Indeks "z czego (i skąd, o której) da się dojść/dojechać do stopu
+        # X" - budowany RAZ na iterację całego punktu stałego, NIE per
+        # segment. Poprzednia wersja robiła to skanowanie (wszystkie wyjścia
+        # wszystkich `other`) OSOBNO dla każdego `seg` w kotwicy początku
+        # niżej - O(kept²) x wyjścia x sąsiedzi. Dla słabo skomunikowanego
+        # celu (rzadkie kursy -> okno czasu na godziny -> setki/tysiące
+        # segmentów) to potrafiło liczyć się dziesiątkami sekund zamiast
+        # milisekund (patrz PROJECT.md). Ten sam zestaw kandydatów, policzony
+        # raz i wykorzystany przez wszystkie segmenty tej iteracji.
+        reachable = {}   # stop2 -> [(other, arr_t, buffer, stop_wyjścia), ...]
+        for other in kept:
+            o_start, o_cut = ranges[id(other)]
+            for pos, _, arr_t, stop in other["exits"]:
+                if not (o_start < pos <= o_cut):
+                    continue         # wyjście poza narysowaną częścią
+                for stop2, buffer in ((stop, TRANSFER_SEC), *siblings.get(stop, ())):
+                    reachable.setdefault(stop2, []).append((other, arr_t, buffer, stop))
         survivors = []
         new_ranges = {}
         new_info = {}
@@ -543,7 +629,9 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 start_board_time = None
                 walk_info = start_walk_info[seg["stops"][0]]
                 if walk_info is not None:
-                    start_walk = (walk_info[0], day.stop_coords[seg["stops"][0]], walk_info[1])
+                    start_walk = (
+                        walk_info[0], day.stop_coords[seg["stops"][0]], walk_info[1], walk_info[2],
+                    )
             else:
                 start_pos = None
                 start_margin = None
@@ -551,43 +639,41 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 # (czy_wymaga_chodzenia, pozycja, -zapas) - klucz do wyboru
                 # NAJLEPSZEGO kandydata, nie pierwszego czy najwcześniejszego.
                 start_key = None
-                for other in kept:
-                    if other is seg:
+                # Tylko WŁASNE przystanki `seg` (ostatni wyłączony - dołączenie
+                # tam byłoby puste) - dla każdego patrzymy w indeks wyżej,
+                # zamiast skanować wszystkich innych od nowa.
+                for stop2 in seg["stops"][:-1]:
+                    times = seg["dep_times"].get(stop2)
+                    if times is None:
                         continue
-                    o_start, o_cut = ranges[id(other)]
-                    for pos, _, arr_t, stop in other["exits"]:
-                        if not (o_start < pos <= o_cut):
-                            continue         # wyjście poza narysowaną częścią
-                        for stop2, buffer in ((stop, TRANSFER_SEC), *day.siblings.get(stop, ())):
-                            p = seg["pos_of"].get(stop2)
-                            times = seg["dep_times"].get(stop2)
-                            if p is None or times is None:
-                                continue
-                            if p >= len(seg["stops"]) - 1:
-                                continue     # dołączenie na samym końcu - puste
-                            if catchable(arr_t, buffer, times):
-                                i = bisect_left(times, arr_t + buffer)
-                                margin = times[i] - arr_t - buffer
-                                # Priorytet: (1) BEZ CHODZENIA bije chodzenie,
-                                # niezależnie od pozycji - jechać dalej do
-                                # przystanku, na którym `seg` i tak się
-                                # zatrzymuje, jest zawsze lepsze niż wysiąść
-                                # wcześniej i iść pieszo (to była przyczyna
-                                # "każe wysiąść wcześniej i iść, choć można
-                                # dojechać wprost do przesiadki" - patrz
-                                # PROJECT.md); (2) przy remisie najwcześniejsza
-                                # pozycja (więcej odcinka `seg` do narysowania);
-                                # (3) przy remisie obu - większy zapas.
-                                key = (0 if stop2 == stop else 1, p, -margin)
-                                if start_key is None or key < start_key:
-                                    start_key = key
-                                    start_pos = p
-                                    start_margin = margin
-                                    start_board_time = times[i]
-                                    start_walk = (
-                                        (day.stop_coords[stop], day.stop_coords[stop2], buffer)
-                                        if stop2 != stop else None
-                                    )
+                    p = seg["pos_of"][stop2]
+                    for other, arr_t, buffer, stop in reachable.get(stop2, ()):
+                        if other is seg:
+                            continue
+                        if catchable(arr_t, buffer, times):
+                            i = bisect_left(times, arr_t + buffer)
+                            margin = times[i] - arr_t - buffer
+                            # Priorytet: (1) BEZ CHODZENIA bije chodzenie,
+                            # niezależnie od pozycji - jechać dalej do
+                            # przystanku, na którym `seg` i tak się
+                            # zatrzymuje, jest zawsze lepsze niż wysiąść
+                            # wcześniej i iść pieszo (to była przyczyna
+                            # "każe wysiąść wcześniej i iść, choć można
+                            # dojechać wprost do przesiadki" - patrz
+                            # PROJECT.md); (2) przy remisie najwcześniejsza
+                            # pozycja (więcej odcinka `seg` do narysowania);
+                            # (3) przy remisie obu - większy zapas.
+                            key = (0 if stop2 == stop else 1, p, -margin)
+                            if start_key is None or key < start_key:
+                                start_key = key
+                                start_pos = p
+                                start_margin = margin
+                                start_board_time = times[i]
+                                start_walk = (
+                                    (day.stop_coords[stop], day.stop_coords[stop2], buffer,
+                                     bike_hints.get((stop, stop2)))
+                                    if stop2 != stop else None
+                                )
                 if start_pos is None:
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
@@ -632,7 +718,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                         end_key = key
                         cut = pos            # cel jest "widoczny" z definicji (wprost albo pieszo)
                         end_walk = (
-                            (day.stop_coords[stop], walk_info[0], walk_info[1])
+                            (day.stop_coords[stop], walk_info[0], walk_info[1], walk_info[2])
                             if walk_info is not None else None
                         )
                     continue
@@ -690,14 +776,20 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     stop_name_by_coord = {coord: day.stop_names[sid] for sid, coord in day.stop_coords.items()}
     walk_segments = {}
 
-    def add_walk(from_coord, to_coord, walk_sec, q):
+    def add_walk(from_coord, to_coord, walk_sec, q, bike_hint=None):
         if from_coord == to_coord:
             return
+        # `bike_hint` (patrz build_bike_edges) odróżnia rower od zwykłego
+        # dojścia pieszo - osobny wpis w kluczu, żeby nie sklejać dwóch
+        # różnych typów transferu między tymi samymi nazwami w jeden wariant.
         key = (stop_name_by_coord.get(from_coord, from_coord),
-               stop_name_by_coord.get(to_coord, to_coord))
+               stop_name_by_coord.get(to_coord, to_coord),
+               bike_hint is not None)
         entry = walk_segments.get(key)
         if entry is None or q > entry["w"]:
-            walk_segments[key] = {"path": (from_coord, to_coord), "sec": walk_sec, "w": q}
+            walk_segments[key] = {
+                "path": (from_coord, to_coord), "sec": walk_sec, "w": q, "bike_hint": bike_hint,
+            }
 
     gtfs.geo_generation()           # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()         # jedno połączenie na wszystkie wycinki geometrii
@@ -718,22 +810,26 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 "walk_sec": None,
             })
             if seg_info["start_walk"] is not None:
-                add_walk(*seg_info["start_walk"], q)
+                s_from, s_to, s_sec, s_hint = seg_info["start_walk"]
+                add_walk(s_from, s_to, s_sec, q, s_hint)
             if seg_info["end_walk"] is not None:
-                add_walk(*seg_info["end_walk"], q)
+                e_from, e_to, e_sec, e_hint = seg_info["end_walk"]
+                add_walk(e_from, e_to, e_sec, q, e_hint)
     finally:
         geo_db.close()
 
     for w in walk_segments.values():
+        hint = w["bike_hint"]   # None (pieszo) albo (stacja1, stacja2, sek_dojscia1, sek_roweru, sek_dojscia2)
         seg_list.append({
             "path": [[round(lat, 5), round(lon, 5)] for lat, lon in w["path"]],
             "num": "",
-            "kind": "walk",
+            "kind": "bike" if hint is not None else "walk",
             "w": round(w["w"], 3),
             "transfer_margin": None,
             "board_time": None,
             "board_stop": None,
             "walk_sec": w["sec"],
+            "bike_stations": [hint[0], hint[1]] if hint is not None else None,
         })
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
 
@@ -747,14 +843,15 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     }
 
 
-def _forward(day, source_stops, dep_sec, deadline, source_walk=None):
+def _forward(day, source_stops, dep_sec, deadline, source_walk=None, siblings=None):
     """Jak _scan, ale bez celu: najwcześniejsze przyjazdy wszędzie do deadline.
 
     Zwraca (earliest, arrived_by, trip_board); trip_board[kurs] to indeks
     pierwszego połączenia, na które w ogóle da się zdążyć (właściwe miejsce
     wsiadania, z regułą postępu, wybiera dopiero plan_flow). `source_walk`
-    jak w _scan.
+    jak w _scan. `siblings` jak w _scan (domyślnie `day.siblings`).
     """
+    sib = day.siblings if siblings is None else siblings
     conns = day.conns
     earliest = {}
     arrived_by = {}     # 'origin' | 'ride' | 'walk' - do bufora przesiadki
@@ -766,7 +863,7 @@ def _forward(day, source_stops, dep_sec, deadline, source_walk=None):
     # Piesza "ostatnia mila" na starcie (patrz _scan) - osobny przebieg
     # po pełnym zasiedleniu source_stops.
     for stop in source_stops:
-        for sibling, walk_sec in day.siblings.get(stop, ()):
+        for sibling, walk_sec in sib.get(stop, ()):
             walk_arr = dep_sec + walk_sec
             if walk_arr < earliest.get(sibling, INF):
                 earliest[sibling] = walk_arr
@@ -792,7 +889,7 @@ def _forward(day, source_stops, dep_sec, deadline, source_walk=None):
         if arr_t < earliest.get(arr_s, INF):
             earliest[arr_s] = arr_t
             arrived_by[arr_s] = "ride"
-            for sibling, walk_sec in day.siblings.get(arr_s, ()):
+            for sibling, walk_sec in sib.get(arr_s, ()):
                 walk_arr = arr_t + walk_sec
                 if walk_arr < earliest.get(sibling, INF):
                     earliest[sibling] = walk_arr
@@ -800,19 +897,21 @@ def _forward(day, source_stops, dep_sec, deadline, source_walk=None):
     return earliest, arrived_by, trip_board
 
 
-def _backward(day, target_set, dep_sec, deadline):
+def _backward(day, target_set, dep_sec, deadline, siblings=None):
     """Skan wstecz: najpóźniejszy moment na każdym przystanku, z którego
     da się jeszcze dotrzeć do celu przed deadline.
 
     Połączenia przetwarzamy malejąco po odjeździe - wszystko, co wpływa na
     latest[przystanek] po czasie t, jest już policzone, zanim do t dojdziemy.
+    `siblings` jak w _scan (domyślnie `day.siblings`).
     """
+    sib = day.siblings if siblings is None else siblings
     conns = day.conns
     latest = {stop: deadline for stop in target_set}
     # Piesza "ostatnia mila" do celu - symetria do _forward: dotrzeć na
     # sąsiedni słupek i dojść stamtąd pieszo do celu też się liczy.
     for stop in target_set:
-        for sibling, walk_sec in day.siblings.get(stop, ()):
+        for sibling, walk_sec in sib.get(stop, ()):
             walk_dep = deadline - walk_sec
             if walk_dep > latest.get(sibling, -1):
                 latest[sibling] = walk_dep
@@ -833,7 +932,7 @@ def _backward(day, target_set, dep_sec, deadline):
             trip_ok.add(trip)
         if dep_t > latest.get(dep_s, -1):
             latest[dep_s] = dep_t
-            for sibling, walk_sec in day.siblings.get(dep_s, ()):
+            for sibling, walk_sec in sib.get(dep_s, ()):
                 walk_dep = dep_t - walk_sec
                 if walk_dep > latest.get(sibling, -1):
                     latest[sibling] = walk_dep
