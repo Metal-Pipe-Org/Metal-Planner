@@ -4,6 +4,7 @@ from flask import jsonify, render_template, request
 
 import bikes
 import gtfs
+import traficar
 from planner import plan_flow, plan_route, stop_departures
 
 
@@ -50,6 +51,13 @@ def init_routes(app):
         try:
             return jsonify(bikes.station_list())
         except bikes.BikeDataError as e:
+            return jsonify({"error": str(e)}), 503
+
+    @app.route("/api/traficar")
+    def api_traficar():
+        try:
+            return jsonify(traficar.car_list())
+        except traficar.TraficarDataError as e:
             return jsonify({"error": str(e)}), 503
 
     @app.route("/api/departures")

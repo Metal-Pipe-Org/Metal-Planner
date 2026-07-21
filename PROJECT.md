@@ -335,6 +335,38 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   do wyświetlenia) zasilają statyczną geometrię i żywe sprawdzenie
   dostępności - szczegóły w „Rower WRM jako transfer” w Algorytmach.
 
+## Warstwa car-sharing (Traficar)
+
+Auta Traficar na mapie - **czysto informacyjna warstwa**, ten sam wzorzec co
+WRM wyżej (checkbox w panelu, domyślnie zaznaczony, `L.layerGroup` kółek,
+chowanie bez ponownego pobierania). W odróżnieniu od WRM **nie jest** (i nie
+jest planowana jako) transfer w `plan_flow` - to celowo płytka integracja,
+bo Traficar to auta na minuty/kilometry (nie stacje z siecią pieszych/
+rowerowych dojść jak WRM), więc sensowna integracja z CSA wymagałaby zupełnie
+innego modelu (koszt, nie tylko czas) - poza obecnym zakresem.
+
+- **Źródło danych**: Traficar sam nie publikuje żadnego oficjalnego API.
+  [`fioletowe.live`](https://fioletowe.live) (open source, GitHub
+  `divadsn/traficar-map`, licencja GPLv3) republikuje jego wewnętrzne API
+  jako udokumentowany REST/JSON bez klucza (`/docs/`, `/api/openapi.json`).
+  **To strona trzecia, nie sam Traficar** - może zniknąć albo zmienić
+  kształt bez ostrzeżenia (to samo zastrzeżenie co przy GTFS-Realtime niżej).
+  Potwierdzone na żywo przed implementacją: `GET /api/v1/zones` zwraca
+  Wrocław jako `zoneId=3`; `GET /api/v1/cars?zoneId=3` zwraca ~90-100 aut
+  z polami `lat`/`lng` (stringi!), `location`, `regPlate`, `fuel` (% baku),
+  `range` (km), `available` (bool). Feed deklaruje `Cache-Control:
+  max-age=12` (własny cache po stronie fioletowe.live) - `traficar.py`
+  odpytuje rzadziej (cache 20 s), żeby nie nadużywać cudzego serwisu.
+- **`traficar.py`**: ten sam styl cache'owania co `bikes.py` - błąd sieci
+  zostawia stare dane, wyjątek (`TraficarDataError`) propaguje się tylko przy
+  zupełnie pustym cache'u (pierwsze zapytanie po starcie serwera).
+- **Frontend**: `GET /api/traficar` zwraca listę aut, rysowaną jako
+  `L.layerGroup` kółek w fiolecie marki (kolor z nazwy źródła danych);
+  wynajęte auto (`available: false`) ma przygaszony, szary styl - nie da się
+  go pomylić z wolnym, ten sam pomysł co puste stacje WRM. Dymek: numer
+  rejestracyjny + (dla wolnych) % paliwa i zasięg w km, albo „obecnie
+  wynajęte” dla zajętych.
+
 ## API
 
 - `GET /api/stops` — wszystkie słupki: `[{name, lat, lon}, …]`.
@@ -342,6 +374,11 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   `[{name, lat, lon, bikes, electric}, …]` (`electric` = liczba dostępnych
   rowerów elektrycznych, podzbiór `bikes`). Błąd (feed GBFS niedostępny
   i cache jeszcze pusty) → `{error: "…"}` z kodem 503.
+- `GET /api/traficar` — auta Traficar we Wrocławiu:
+  `[{lat, lon, fuel, range, plate, available}, …]` (`fuel` = % baku,
+  `range` = zasięg w km, `available` = czy wolne do wynajęcia). Błąd (API
+  fioletowe.live niedostępne i cache jeszcze pusty) → `{error: "…"}`
+  z kodem 503.
 - `GET /api/departures?stop=&time=HH:MM` — tablica odjazdów: najbliższe
   odjazdy z przystanku (wszystkich jego słupków) od podanej godziny,
   `{stop, departures: [{time, line, kind, headsign}, …]}` (maks. 24,
@@ -381,6 +418,7 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 | `planner.py` | CSA (`plan_route`) + mapa przepływów (`plan_flow`) |
 | `bikes.py` | cache stacji WRM (GBFS) |
 | `bike_transfer.py` | rower WRM jako transfer w `plan_flow` (geometria statyczna + dostępność na żywo) |
+| `traficar.py` | cache aut car-sharing Traficar (przez fioletowe.live) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | mapa Leaflet + panel + cały frontendowy JS |
@@ -389,6 +427,16 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 ## Changelog
 
+- **2026-07-22** — warstwa car-sharing Traficar na mapie: nowy moduł
+  `traficar.py` (cache aut z `fioletowe.live`, republikującego wewnętrzne
+  API Traficara - strona trzecia, zweryfikowana na żywo przed
+  implementacją: Wrocław to `zoneId=3`, ~90-100 aut na raz), endpoint
+  `/api/traficar`, checkbox warstwy w panelu (domyślnie zaznaczony); auta
+  wynajęte (`available: false`) mają przygaszony styl, ten sam pomysł co
+  puste stacje WRM. Czysto informacyjne, jak WRM przed integracją z
+  `plan_flow` - `planner.py` o autach nie wie i nie będzie (Traficar to
+  koszt za minutę/km, nie sieć stacji z dojściami jak WRM, więc sensowna
+  integracja z CSA wymagałaby innego modelu niż transfer czasowy).
 - **2026-07-22** — rower WRM jako pełnoprawny transfer w `plan_flow` (item 6
   „Planu rozwoju”, przeprojektowany po cofnięciu pierwszej wersji-mostu
   2026-07-21 - patrz ten wpis niżej). Nowy moduł `bike_transfer.py`: statyczna
@@ -722,17 +770,13 @@ między sesjami (mogą dzielić je dni).
       `plan_route` świadomie NIE dostał tej integracji (narzędzie debug,
       nieużywane przez UI - patrz API) - zakres ograniczony do `plan_flow`,
       który jest jedyną ścieżką faktycznie widoczną dla użytkownika.
-- [ ] **Car-sharing (Traficar) jako warstwa** — auta Traficar na mapie
-      (pozycja, paliwo/zasięg, dostępność), ten sam wzorzec co warstwa WRM
-      (poller + `L.layerGroup`). Traficar sam nie ma publicznego API, ale
-      `fioletowe.live` (open source, GitHub `divadsn/traficar-map`, GPLv3)
-      republikuje jego wewnętrzne API jako udokumentowany REST/JSON bez
-      klucza (`/docs/`, `/api/openapi.json`): `GET /api/v1/zones`
-      (Wrocław = zoneId 3), `GET /api/v1/cars?zoneId=3`, `GET
-      /api/v1/cars/nearby?lat=&lng=&radius=` (promień od razu w API —
-      przydatne pod „najbliższy Traficar do celu”). Zastrzeżenie: to
-      strona trzecia, nie sam Traficar — może zniknąć bez ostrzeżenia,
-      jak feed niżej.
+- [x] **Car-sharing (Traficar) jako warstwa** — zrobione 2026-07-22: auta
+      Traficar na mapie (pozycja, paliwo/zasięg, dostępność) przez
+      `fioletowe.live` (patrz „Warstwa car-sharing (Traficar)” wyżej),
+      ten sam wzorzec co warstwa WRM. `GET /api/v1/cars/nearby?lat=&lng=
+      &radius=` (promień od razu w API) NIE wykorzystane - niepotrzebne
+      przy obecnym zakresie (cała lista Wrocławia to tylko ~100 aut,
+      filtrowanie po stronie klienta by starczyło, gdyby było potrzebne).
 - [ ] **Prawdziwy GTFS-Realtime (opóźnienia na żywo) dla MPK** — feed
       protobuf `https://mapadlugoleka.klosok.eu/vehicle_positions.pb`,
       zarejestrowany w oficjalnym rejestrze odt.org.pl jako GTFS-RT dla
