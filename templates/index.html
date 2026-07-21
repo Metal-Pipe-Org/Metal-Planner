@@ -28,6 +28,11 @@
         albo wpisz nazwy ręcznie.
     </p>
 
+    <label class="checkbox-row">
+        <input type="checkbox" id="bikes-toggle" checked>
+        Stacje roweru miejskiego (WRM)
+    </label>
+
     <label for="start">Przystanek początkowy</label>
     <input type="text" id="start" list="stops" placeholder="np. Katedra">
 
@@ -150,6 +155,57 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         div.textContent = text ?? '';
         return div.innerHTML;
     }
+
+    // Warstwa stacji WRM (rower miejski) — czysto informacyjna, nie wpływa
+    // na wyszukiwanie połączeń. Ładowana raz przy starcie, chowana checkboxem.
+    function plural(n, one, few, many) {
+        if (n === 1) return one;
+        const mod10 = n % 10, mod100 = n % 100;
+        if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return few;
+        return many;
+    }
+
+    let bikesLayer = null;
+    const bikesToggle = document.getElementById('bikes-toggle');
+    // Puste stacje mają celowo zupełnie inny styl (szara "obwódka" zamiast
+    // pełnej pomarańczowej kropki) - nie da się ich pomylić ze stacją z rowerami.
+    const BIKE_STYLE = {weight: 1, color: '#e65100', fillColor: '#ffb74d', fillOpacity: 0.9};
+    const BIKE_EMPTY_STYLE = {radius: 4, weight: 1.5, color: '#9e9e9e', fillColor: '#fff', fillOpacity: 0.35};
+
+    fetch('/api/bikes')
+        .then(r => r.json())
+        .then(stations => {
+            if (stations.error) { console.warn('Stacje WRM:', stations.error); return; }
+            const markers = [];
+            for (const s of stations) {
+                const style = s.bikes > 0
+                    ? {...BIKE_STYLE, radius: 4 + Math.min(s.bikes, 16) * 0.4}
+                    : BIKE_EMPTY_STYLE;
+                const m = L.circleMarker([s.lat, s.lon], style);
+                let tooltip = `${esc(s.name)}<br>${s.bikes} ${plural(s.bikes, 'rower', 'rowery', 'rowerów')}`;
+                if (s.electric > 0) {
+                    tooltip += ` (w tym ${s.electric} `
+                        + `${plural(s.electric, 'elektryczny', 'elektryczne', 'elektrycznych')})`;
+                }
+                m.bindTooltip(tooltip);
+                markers.push(m);
+                if (s.electric > 0) {
+                    markers.push(L.marker([s.lat, s.lon], {
+                        icon: L.divIcon({className: 'bike-electric-badge', html: '⚡', iconSize: null}),
+                        interactive: false,
+                    }));
+                }
+            }
+            bikesLayer = L.layerGroup(markers);
+            if (bikesToggle.checked) bikesLayer.addTo(map);
+        })
+        .catch(() => console.warn('Nie udało się pobrać stacji WRM.'));
+
+    bikesToggle.addEventListener('change', () => {
+        if (!bikesLayer) return;
+        if (bikesToggle.checked) bikesLayer.addTo(map);
+        else map.removeLayer(bikesLayer);
+    });
 
     function showError(message, suggestions) {
         let html = `<div class="error"><p>${esc(message)}</p>`;

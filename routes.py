@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import jsonify, render_template, request
 
+import bikes
 import gtfs
 from planner import plan_flow, plan_route
 
@@ -42,6 +43,13 @@ def init_routes(app):
         try:
             return jsonify(gtfs.all_stops_geo())
         except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+
+    @app.route("/api/bikes")
+    def api_bikes():
+        try:
+            return jsonify(bikes.station_list())
+        except bikes.BikeDataError as e:
             return jsonify({"error": str(e)}), 503
 
     @app.route("/api/plan")

@@ -41,8 +41,10 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 - **`planner.py`** — dwa algorytmy na tej samej tablicy połączeń:
   `plan_route` (jedna najszybsza trasa, CSA) i `plan_flow` (mapa przepływów) —
   opis niżej.
-- **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
-  `/api/flow` (szczegóły w sekcji API).
+- **`bikes.py`** — analogiczny cache dla stacji roweru miejskiego WRM
+  (feed GBFS zamiast SQLite) — patrz sekcja „Warstwa rowerowa (WRM)” niżej.
+- **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/bikes`,
+  `/api/plan`, `/api/flow` (szczegóły w sekcji API).
 
 ### 3. Frontend — `templates/index.html`
 
@@ -159,9 +161,50 @@ Rendering (frontend):
 Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 ~30 ms na cache'owanym dniu, odpowiedź to zwykle kilkaset–2000 krawędzi.
 
+## Warstwa rowerowa (WRM)
+
+Stacje Wrocławskiego Roweru Miejskiego pokazane są na mapie jako osobna,
+czysto informacyjna warstwa (checkbox w panelu, domyślnie zaznaczony) —
+**nie wpływają na wyszukiwanie połączeń**, `planner.py` w ogóle o nich nie
+wie. To celowo płytka integracja: pierwszy krok przed docelowym pomysłem,
+w którym rower byłby pełnoprawną krawędzią w CSA (patrz „Plan rozwoju”).
+
+- **Źródło danych**: WRM korzysta z systemu nextbike, który publikuje stan
+  sieci jako feed [GBFS](https://gbfs.org/) (General Bikeshare Feed
+  Specification) pod system-id `nextbike_pl` (potwierdzone przez
+  `systems.csv` z oficjalnego repo GBFS). Ten jeden system obejmuje
+  Wrocław **i** gminy ościenne włączone do tej samej sieci (Kobierzyce,
+  Wisznia, Kąty Wrocławskie, Siechnice, Czernica) — wszystkie 272 stacje
+  należą do WRM, więc nic nie trzeba filtrować po regionie.
+- **Trzy pliki GBFS**, łączone w `bikes.py`: `station_information.json`
+  (nazwa, współrzędne — zmienia się rzadko, cache 1 h), `station_status.json`
+  (liczba wolnych rowerów + rozbicie na typy pojazdów, cache 60 s — tyle
+  deklaruje sam feed w polu `ttl`) i `vehicle_types.json` (słownik typów
+  pojazdów, cache 1 h) — ten ostatni służy wyłącznie do rozpoznania, które
+  `vehicle_type_id` to rower elektryczny (`propulsion_type ==
+  "electric_assist"`); nextbike ma kilka różnych modeli e-bike naraz,
+  więc ID nie da się zahardkodować jedną liczbą.
+- **Cache w pamięci procesu**, ten sam styl co `gtfs.py`: przy wygaśnięciu
+  próbujemy odświeżyć, a błąd sieci zostawia stare dane (stacja
+  „zestarzeje się” o ~1 min zamiast zniknąć); wyjątek propaguje się dalej
+  tylko wtedy, gdy cache stacji/statusów jest jeszcze zupełnie pusty
+  (pierwsze zapytanie po starcie serwera) — błąd samego `vehicle_types.json`
+  nigdy nie jest fatalny, po prostu żadna stacja nie pokaże elektryków.
+- **Frontend**: `GET /api/bikes` zwraca listę stacji, rysowaną jako
+  `L.layerGroup` kółek — promień rośnie z liczbą dostępnych rowerów; stacja
+  bez rowerów ma celowo inny styl (mała szara obwódka zamiast pełnej
+  pomarańczowej kropki), żeby nie dało się jej pomylić z zajętą. Stacje
+  z dostępnym rowerem elektrycznym dostają dodatkową małą plakietkę „⚡”.
+  Podpowiedź na hover: „nazwa / X rowerów (w tym Y elektrycznych)”.
+  Checkbox chowa/pokazuje warstwę bez ponownego pobierania danych.
+
 ## API
 
 - `GET /api/stops` — wszystkie słupki: `[{name, lat, lon}, …]`.
+- `GET /api/bikes` — stacje WRM z aktualną dostępnością:
+  `[{name, lat, lon, bikes, electric}, …]` (`electric` = liczba dostępnych
+  rowerów elektrycznych, podzbiór `bikes`). Błąd (feed GBFS niedostępny
+  i cache jeszcze pusty) → `{error: "…"}` z kodem 503.
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
@@ -180,6 +223,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
 | `planner.py` | CSA (`plan_route`) + mapa przepływów (`plan_flow`) |
+| `bikes.py` | cache stacji WRM (GBFS) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | mapa Leaflet + panel + cały frontendowy JS |
@@ -188,6 +232,13 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-07-21** — warstwa stacji WRM (rower miejski) na mapie: nowy moduł
+  `bikes.py` (cache feedu GBFS `nextbike_pl` — `station_information.json`,
+  `station_status.json`, `vehicle_types.json` do rozpoznania rowerów
+  elektrycznych), endpoint `/api/bikes`, checkbox warstwy w panelu; puste
+  stacje mają odrębny styl (szara obwódka), stacje z dostępnym e-bikiem
+  dostają plakietkę „⚡”. Czysto informacyjne, `planner.py`/`gtfs.py` bez
+  zmian. Pierwszy krok „Planu rozwoju” niżej.
 - **2026-07-18** — spójna sieć przepływów + suwak czułości: jasność liczona
   per wyjście przez konkretne kontynuacje (sufiksy, punkt stały) zamiast
   samej aproksymacji `deadline − latest`; segmenty kotwiczone z obu stron
@@ -239,7 +290,41 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
 - Brak tras pieszych po mieście — przesiadka tylko między słupkami
   o identycznej nazwie przystanku.
-- Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
+- Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN) — a od
+  warstwy WRM także **backend** potrzebuje internetu (feed GBFS nextbike);
+  wcześniej tylko frontend zależał od sieci.
+
+## Plan rozwoju (uzgodniona kolejność)
+
+Sześć rozszerzeń, do zrobienia po kolei, jedno na raz — każde kończone
+w całości (i zweryfikowane w przeglądarce) zanim zaczyna się kolejne.
+Kolejność ustalona z użytkownikiem 2026-07-21, celowo niezależna od
+trudności zadania. Po zrobieniu kroku: odhaczyć tutaj i dopisać wpis
+w Changelogu, żeby plan został aktualny między sesjami (mogą dzielić je dni).
+
+- [x] **Warstwa stacji WRM na mapie** — informacyjna, bez wpływu na
+      wyszukiwanie. Zrobione 2026-07-21 (patrz Changelog i sekcja
+      „Warstwa rowerowa (WRM)” wyżej).
+- [ ] **Margines przesiadki jako gradient**, nie próg zero-jedynkowy —
+      zamiast tylko pokazywać/ukrywać opcję przy `TRANSFER_SEC`, pokazać
+      zapas czasu (kolor segmentu / liczba w tooltipie: „2 min zapasu” vs
+      „12 min zapasu”). Sensowne na żywo dopiero z danymi o opóźnieniach
+      (GTFS-RT) — bez nich to tylko rozkładowy bufor, co częściowo już
+      robi `_scan`.
+- [ ] **Tablica odjazdów per przystanek** — klik w przystanek pokazuje
+      też „co i kiedy stąd odjeżdża najbliżej”, nie tylko ustawia
+      start/cel. Dane (`stop_times` per `stop_id`) już są w bazie.
+- [ ] **Chodzenie pieszo jako samodzielna opcja**, nie tylko przesiadka
+      między słupkami o tej samej nazwie (`WALK_SEC`) — dojście między
+      dowolnymi bliskimi punktami, ograniczone promieniem (żeby nie
+      rozsadzić liczby połączeń rozważanych przez CSA).
+- [ ] **Rzeczywista lokalizacja użytkownika** (`navigator.geolocation`) +
+      „ostatnia mila” piesza do/ze stacji/przystanku (haversine + założona
+      prędkość marszu, bez zewnętrznego routingu na start).
+- [ ] **Rower jako krawędź w CSA** (głęboka integracja) — `plan_flow` /
+      `plan_route` proponują „idź do stacji X, jedź rowerem do Y” jako
+      opcję obok tramwaju/autobusu. Nowy, czasowo zmienny typ połączenia
+      w skanie — największa trudność z całej szóstki.
 
 ## Pomysły na dalej
 
