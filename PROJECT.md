@@ -427,6 +427,18 @@ innego modelu (koszt, nie tylko czas) - poza obecnym zakresem.
 
 ## Changelog
 
+- **2026-07-22** — zweryfikowany i ODRZUCONY pomysł „prawdziwy GTFS-Realtime
+  dla MPK” (ostatni punkt „Planu rozwoju”): feed
+  `mapadlugoleka.klosok.eu/vehicle_positions.pb` jest żywy i ma poprawny
+  kształt GTFS-RT (sparsowany biblioteką `gtfs-realtime-bindings`), ale
+  0/8 aktualizacji kursu ma `trip_id`, 0/8 ma pole `delay`, 0/8 ma
+  prawdziwy `stop_id` (wszystkie: placeholder „Niewybrany przystanek”) -
+  bezużyteczny do dopasowania z naszym rozkładem i policzenia opóźnienia,
+  mimo poprawnej struktury. Do tego certyfikat TLS serwera jest źle
+  skonfigurowany (brak pośredniego certyfikatu). Szczegóły i uzasadnienie
+  w „Plan rozwoju” niżej - zapisane, żeby nikt nie sprawdzał tego samego
+  od zera. Biblioteka `gtfs-realtime-bindings` (instalowana do weryfikacji)
+  odinstalowana z powrotem - nieużywana w kodzie.
 - **2026-07-22** — warstwa car-sharing Traficar na mapie: nowy moduł
   `traficar.py` (cache aut z `fioletowe.live`, republikującego wewnętrzne
   API Traficara - strona trzecia, zweryfikowana na żywo przed
@@ -777,17 +789,46 @@ między sesjami (mogą dzielić je dni).
       &radius=` (promień od razu w API) NIE wykorzystane - niepotrzebne
       przy obecnym zakresie (cała lista Wrocławia to tylko ~100 aut,
       filtrowanie po stronie klienta by starczyło, gdyby było potrzebne).
-- [ ] **Prawdziwy GTFS-Realtime (opóźnienia na żywo) dla MPK** — feed
-      protobuf `https://mapadlugoleka.klosok.eu/vehicle_positions.pb`,
-      zarejestrowany w oficjalnym rejestrze odt.org.pl jako GTFS-RT dla
-      MPK Wrocław (dodany 19.09.2025). To **nie** jest portal miejski —
-      strona trzeciej osoby (wygląda na projekt jednoosobowy — realne
-      ryzyko, że zniknie bez ostrzeżenia). Poszlaka, że feed działa i ma
-      opóźnienia: `czynaczas.pl` pokazuje po WebSocket payload zgodny
-      1:1 z GTFS-RT (`current_status`, `delay`, `trip_id`, `stop_id`…).
-      Gdyby się potwierdziło, odblokowuje krok „Margines przesiadki jako
-      gradient” wyżej — bez opóźnień na żywo margines jest tylko
-      rozkładowy, statyczny.
+- [x] **Prawdziwy GTFS-Realtime (opóźnienia na żywo) dla MPK** —
+      ZWERYFIKOWANE i ODRZUCONE 2026-07-22 (item nie zniknął z listy, bo
+      to wciąż wartościowy wynik - żeby nikt później nie sprawdzał tego
+      samego od zera). Feed protobuf
+      `https://mapadlugoleka.klosok.eu/vehicle_positions.pb` (strona
+      trzeciej osoby, **nie** portal miejski - wygląda na projekt
+      jednoosobowy) faktycznie ODPOWIADA i faktycznie jest ŻYWY (znacznik
+      czasu w nagłówku ~2 min od chwili sprawdzenia) - ale po pobraniu
+      i sparsowaniu (biblioteka `gtfs-realtime-bindings`, poprawny
+      protobuf `FeedMessage`) okazuje się bezużyteczny do celu, dla
+      którego był rozważany:
+      - **0 z 8** aktualizacji kursu (`trip_update`) ma wypełnione
+        `trip.trip_id` - bez tego nie da się dopasować wpisu z feedu do
+        KONKRETNEGO kursu w naszym rozkładzie GTFS (statycznym), czyli
+        nie da się policzyć, o ile kurs jest spóźniony względem rozkładu;
+      - **0 z 8** ma jakiekolwiek pole `delay` (ani `arrival.delay`, ani
+        `departure.delay`) - feed nie publikuje opóźnień, mimo że pole
+        istnieje w schemacie GTFS-RT;
+      - **0 z 8** ma prawdziwy `stop_id` - wszystkie mają dosłowny tekst
+        `"Niewybrany przystanek"` („nie wybrano przystanku") - stub/
+        placeholder, nie prawdziwe dane;
+      - tylko **8 pojazdów** widocznych na raz (całe MPK Wrocław ma w
+        ruchu w danej chwili setki), a prędkości pojazdów wyglądają na
+        niewiarygodne (4 różne pojazdy z DOKŁADNIE tą samą prędkością
+        „18”, jeden z prędkością „59893” - fizycznie niemożliwe dla
+        autobusu/tramwaju);
+      - do tego: certyfikat TLS serwera jest źle skonfigurowany (brak
+        pośredniego certyfikatu w łańcuchu - `openssl s_client` zwraca
+        `unable to verify the first certificate` niezależnie od klienta) -
+        kolejna, niezależna poszlaka niskiej jakości utrzymania tego
+        źródła, zgodna z podejrzeniem „projekt jednoosobowy, realne
+        ryzyko zniknięcia” wyżej.
+      Wniosek: feed ma POPRAWNY KSZTAŁT GTFS-RT, ale w praktyce nie niesie
+      żadnej z informacji (opóźnienie, dopasowanie do kursu), których
+      potrzebowałby krok „Margines przesiadki jako gradient” do przejścia
+      z wersji rozkładowej na żywą - inwestowanie w integrację byłoby
+      pracą bez efektu na obecnym stanie tego źródła. Gdyby kiedyś
+      pojawił się INNY, faktycznie działający feed GTFS-RT dla MPK
+      Wrocław, ta ocena dotyczy tylko TEGO konkretnego adresu, nie
+      pomysłu jako takiego.
 
 ## Pomysły na dalej
 
