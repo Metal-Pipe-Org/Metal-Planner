@@ -104,7 +104,10 @@ def route_many(requests, max_fetch=None):
     with ThreadPoolExecutor(max_workers=min(8, len(misses))) as executor:
         futures = {executor.submit(_fetch_route, *requests[i]): i for i in misses}
         for future in futures:
-            results[futures[future]] = future.result()
+            try:
+                results[futures[future]] = future.result()
+            except Exception:
+                results[futures[future]] = None    # nieoczekiwany błąd wątku = prosta, nie crash
     return results
 
 
