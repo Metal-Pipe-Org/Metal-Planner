@@ -36,9 +36,13 @@ VEHICLE_TYPES_TTL_SEC = 3600    # modele rowerów w systemie zmieniają się rza
 
 ELECTRIC_PROPULSION = {"electric_assist", "electric"}
 
-_info_cache = {"at": 0.0, "by_id": {}}
-_status_cache = {"at": 0.0, "by_id": {}}
-_vehicle_types_cache = {"at": 0.0, "electric_ids": set()}
+# "at": None znaczy "jeszcze nigdy nie pobrano". Nie 0.0 - time.monotonic()
+# liczy się od startu systemu (w kontenerze: hosta), a nie od startu procesu,
+# więc 0.0 wyglądałoby jak pobranie sprzed `uptime` sekund i przez pierwszą
+# godzinę po bootcie hosta strażnik TTL blokowałby pierwsze pobranie.
+_info_cache = {"at": None, "by_id": {}}
+_status_cache = {"at": None, "by_id": {}}
+_vehicle_types_cache = {"at": None, "electric_ids": set()}
 
 
 class BikeDataError(Exception):
@@ -56,7 +60,7 @@ def _refresh(cache, url, ttl):
     danych (stacja WRM padnie na chwilę rzadziej niż nasz odczyt); tylko gdy
     cache jest jeszcze zupełnie pusty (pierwsze zapytanie po starcie), błąd
     propaguje się dalej jako BikeDataError."""
-    if time.monotonic() - cache["at"] < ttl:
+    if cache["at"] is not None and time.monotonic() - cache["at"] < ttl:
         return
     try:
         data = _fetch(url)
@@ -71,7 +75,8 @@ def _refresh_vehicle_types():
     """Jak _refresh, ale dla listy typów pojazdów - to tylko wzbogacenie
     (liczba elektryków), więc błąd sieci nigdy nie podnosi wyjątku: po
     prostu żadna stacja nie pokaże elektryków, dopóki się nie odświeży."""
-    if time.monotonic() - _vehicle_types_cache["at"] < VEHICLE_TYPES_TTL_SEC:
+    if (_vehicle_types_cache["at"] is not None
+            and time.monotonic() - _vehicle_types_cache["at"] < VEHICLE_TYPES_TTL_SEC):
         return
     try:
         data = _fetch(VEHICLE_TYPES_URL)
