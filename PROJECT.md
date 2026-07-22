@@ -288,6 +288,41 @@ tysiące - `KEPT_CAP` (400) ucina wtedy do najjaśniejszych PRZED drogimi
 pętlami (doprecyzowanie jasności, spójność sieci), żeby zapytanie nie
 liczyło się dziesiątkami sekund (patrz Changelog i „Znane ograniczenia”).
 
+### Pozycje pojazdów i szacowane opóźnienia (`realtime.py`)
+
+Feed `mpk.wroc.pl/bus_position` (wewnętrzny endpoint AJAX przewoźnika,
+POST z listą linii, zwraca `[{name, type, x=lat, y=lon, k}, …]`) daje
+POZYCJE ~490 pojazdów, ale ani `trip_id`, ani `delay`. Opóźnienie
+liczymy sami przez dopasowanie pozycji do rozkładu:
+
+1. **Topologia dnia (cache)**: dla każdego kursu budujemy łamaną
+   (współrzędne kolejnych przystanków) z rozkładowymi czasami przyjazdu
+   oraz indeks kursów po linii (`(rodzaj, numer) → [trip_id]`). Liczone
+   raz na dzień, jak geometria w `gtfs.py`.
+2. **Dopasowanie pojazdu**: spośród kursów jego linii bierzemy tylko te
+   „w trasie" (okno [pierwszy odjazd, ostatni przyjazd] ± 40 min wokół
+   teraz). Pozycję pojazdu rzutujemy na łamaną każdego kandydata
+   (najbliższy punkt odcinka, metryka planarna ze skalowaniem długości
+   przez cos(lat)); w punkcie rzutu interpolujemy czas rozkładowy i liczymy
+   `opóźnienie = teraz − rozkład`. Odrzucamy kursy, na których łamanej
+   pojazd nie leży (> 250 m) i absurdalne opóźnienia (> 30 min).
+3. **Wybór biegu**: bez `trip_id` nie da się rozróżnić dwóch kolejnych
+   kursów tej samej linii inaczej niż po czasie - bierzemy więc kurs o
+   najmniejszym |opóźnieniu| (przypisanie najbardziej prawdopodobne). To
+   przesuwa oszacowanie ku zeru dla bardzo częstych linii (gdy takt <
+   2× opóźnienie, można trafić w sąsiedni bieg) - patrz „Znane ograniczenia".
+   Uwzględniamy `teraz` i `teraz + 24 h`, żeby kursy „po północy" (24:xx
+   w GTFS) dopasowały się tuż po północy.
+4. **Agregacja**: mediana opóźnień per linia i per (linia, kierunek);
+   mediana (nie średnia) tłumi wyjątki - np. pojazd stojący na pętli przed
+   odjazdem wychodzi „mocno przed czasem" i zafałszowałby średnią.
+
+Feed cache'owany 15 s (tyle deklaruje), wynik dopasowania 12 s; błąd sieci
+z backoffem, żeby padnięty feed nie spowalniał zapytań (zwraca się wtedy
+wersja czysto rozkładowa). Zastosowania: warstwa „Pojazdy na żywo" na mapie,
+kolumna opóźnień w tablicy odjazdów, korekta marginesu przesiadki w
+`plan_flow` (patrz „Margines przesiadki" i API).
+
 ## Warstwa rowerowa (WRM)
 
 Stacje Wrocławskiego Roweru Miejskiego pokazane są na mapie jako osobna
@@ -342,11 +377,20 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   `[{name, lat, lon, bikes, electric}, …]` (`electric` = liczba dostępnych
   rowerów elektrycznych, podzbiór `bikes`). Błąd (feed GBFS niedostępny
   i cache jeszcze pusty) → `{error: "…"}` z kodem 503.
+- `GET /api/vehicles` — pojazdy MPK na żywo z oszacowanym opóźnieniem:
+  `[{kind: "tram"|"bus", num, lat, lon, k, delay, headsign}, …]` (`delay`
+  w sekundach, dodatnie = spóźniony, ujemne = przed czasem, `null` = brak
+  wiarygodnego dopasowania do rozkładu; `k` to stabilne ID pojazdu z feedu;
+  patrz `realtime.py`). Błąd (feed `mpk.wroc.pl` niedostępny i cache pusty)
+  → `{error: "…"}` z kodem 503.
 - `GET /api/departures?stop=&time=HH:MM` — tablica odjazdów: najbliższe
   odjazdy z przystanku (wszystkich jego słupków) od podanej godziny,
-  `{stop, departures: [{time, line, kind, headsign}, …]}` (maks. 24,
-  najbliższy pierwszy). Czysto rozkładowe - bez statusu „na czas/opóźniony”
-  (patrz „Znane ograniczenia”).
+  `{stop, departures: [{time, line, kind, headsign, delay}, …]}` (maks. 24,
+  najbliższy pierwszy). `delay` (sekundy, `null`) to SZACOWANE opóźnienie
+  linii na żywo (patrz `realtime.py`) - `null`, gdy feed niedostępny albo
+  odjazd jest zbyt daleko w przyszłości, by dane bieżących pojazdów coś
+  znaczyły. To przybliżenie z dopasowania pozycji do rozkładu, nie
+  autorytatywny status z pojazdu (patrz „Znane ograniczenia”).
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
@@ -354,14 +398,18 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   `{start, end, departure, best_arrival, deadline, segments: [{path:
   [[lat,lon], …], num: "10", kind: "tram"|"bus"|"walk"|"bike"|"other",
   w: 0..1, transfer_margin: 120|null, board_time: "18:36"|null, board_stop:
-  "Pułaskiego"|null, walk_sec: 180|null, bike_stations: ["Stacja A",
-  "Stacja B"]|null}, …]}`, segmenty posortowane rosnąco po `w` (kolejność
+  "Pułaskiego"|null, board_delay: 60|null, walk_sec: 180|null, bike_stations:
+  ["Stacja A", "Stacja B"]|null}, …]}`, segmenty posortowane rosnąco po `w` (kolejność
   rysowania); `path` to kolejne przystanki od wsiadania do ostatniego
   użytecznego wyjścia (dla `kind:"walk"`/`"bike"` - tylko dwa punkty, skąd
   i dokąd). `transfer_margin`/`board_time`/`board_stop` to razem: ile
   sekund zapasu, o której odjeżdża connection, i nazwa przystanku
   przesiadki - wszystkie `null`, gdy segment zaczyna się od startu trasy
-  (patrz „Margines przesiadki” w Algorytmach). `walk_sec` to czas dojścia
+  (patrz „Margines przesiadki” w Algorytmach). `board_delay` (sekundy,
+  `null`) to SZACOWANE opóźnienie linii, w którą się TU wsiada (patrz
+  `realtime.py`) - frontend liczy realny zapas jako `transfer_margin +
+  board_delay`; `null`, gdy start trasy, feed niedostępny albo odjazd jest
+  poza oknem świeżości danych na żywo. `walk_sec` to czas dojścia
   w sekundach dla `kind:"walk"` ALBO całkowity czas (dojście+rower+dojście)
   dla `kind:"bike"` (patrz „Piesze odcinki jako segmenty” i „Rower WRM jako
   transfer”); `bike_stations` to nazwy stacji początkowej/końcowej, tylko
@@ -381,6 +429,7 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 | `planner.py` | CSA (`plan_route`) + mapa przepływów (`plan_flow`) |
 | `bikes.py` | cache stacji WRM (GBFS) |
 | `bike_transfer.py` | rower WRM jako transfer w `plan_flow` (geometria statyczna + dostępność na żywo) |
+| `realtime.py` | pozycje pojazdów MPK na żywo (`mpk.wroc.pl/bus_position`) + szacowane opóźnienia (map-matching do rozkładu) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | mapa Leaflet + panel + cały frontendowy JS |
@@ -389,6 +438,32 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 ## Changelog
 
+- **2026-07-22** — **pozycje pojazdów MPK na żywo + szacowane opóźnienia**
+  (item „Prawdziwy GTFS-Realtime" z Planu rozwoju - zrealizowany z INNEGO
+  źródła niż odrzucone wcześniej tego dnia, patrz wpis niżej i „Znane
+  ograniczenia"). Nowy moduł `realtime.py` odpytuje `mpk.wroc.pl/bus_position`
+  (wewnętrzny endpoint AJAX samego przewoźnika, nie portal Otwartych Danych
+  za WAF-em) - ~490 pojazdów całego miasta z prawdziwym GPS-em, w
+  przeciwieństwie do martwego feedu GTFS-RT. Feed daje pozycje, ale NIE
+  `trip_id`/`delay`, więc opóźnienie SZACUJEMY: rzut pozycji pojazdu na
+  łamaną każdego aktywnego kursu jego linii, odczyt czasu rozkładowego w
+  punkcie rzutu, `opóźnienie = teraz - rozkład`, wybór kursu o najmniejszym
+  |opóźnieniu| (najlepsze przypisanie biegu bez trip_id). ~91% pojazdów się
+  dopasowuje; mediana per linia tłumi wyjątki (pojazd na pętli). Trzy
+  zastosowania: (1) warstwa „Pojazdy na żywo" na mapie - kropki kolorowane
+  opóźnieniem (zielony na czas, bursztyn/czerwony spóźniony, morski przed
+  czasem, szary bez dopasowania), odświeżane co 15 s, `/api/vehicles`;
+  (2) tablica odjazdów (`/api/departures`) - plakietka „+X′ / na czas" przy
+  każdym odjeździe w oknie świeżości; (3) margines przesiadki w `plan_flow`
+  (`board_delay` w `/api/flow`) - realny zapas = rozkładowy + opóźnienie
+  linii, w którą się wsiada (spóźniony kurs = więcej czasu; kurs przed
+  czasem może dać UJEMNY zapas - „brak zapasu", ostrzeżenie zamiast fałszywie
+  komfortowej rozkładowej wartości). Feed niedostępny -> wszystko schodzi do
+  wersji czysto rozkładowej (backoff, żeby padnięty feed nie spowalniał
+  zapytań); zweryfikowane: symulacja padniętego feedu zwraca poprawne
+  odjazdy/trasy w 0 ms. Dev `launch.json` ma `TZ=Europe/Warsaw`, żeby serwer
+  deweloperski liczył opóźnienia w czasie wrocławskim niezależnie od zegara
+  hosta (no-op na maszynie w Polsce).
 - **2026-07-22** — zweryfikowany i ODRZUCONY pomysł „prawdziwy GTFS-Realtime
   dla MPK” (ostatni punkt „Planu rozwoju”): feed
   `mapadlugoleka.klosok.eu/vehicle_positions.pb` jest żywy i ma poprawny
@@ -679,12 +754,30 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   (HTTPS) na produkcji — na `localhost` działa bez tego (zwolnione ze
   specyfikacji), ale wdrożenie na zwykłym HTTP straciłoby tę funkcję
   (przeglądarka po cichu odrzuci `getCurrentPosition`).
-- Margines przesiadki (kropka na mapie) jest czysto rozkładowy — nie
-  wie nic o bieżących opóźnieniach, więc "12 min zapasu" to zapas wg
-  rozkładu, nie licząc np. spóźnionego pierwszego kursu.
-- Tablica odjazdów per przystanek pokazuje tylko rozkład — bez statusu
-  „na czas / X min opóźnienia” (to samo ograniczenie co wyżej: wymaga
-  danych GTFS-RT, których na razie nie ma).
+- Opóźnienia są SZACOWANE z dopasowania pozycji pojazdu do rozkładu
+  (`realtime.py`), nie odczytywane z pojazdu - feed `mpk.wroc.pl` nie
+  podaje `delay` ani `trip_id`. Główne konsekwencje: (a) dla bardzo
+  częstych linii (takt < ~2× opóźnienie) można trafić w sąsiedni bieg i
+  zaniżyć oszacowanie ku zeru - reguła „najmniejsze |opóźnienie|" jest
+  poprawnym przypisaniem tylko, gdy takt > 2× opóźnienie; (b) pojazd
+  między wariantami trasy albo tuż przy pętli bywa niedopasowany (`delay:
+  null`) albo dopasowany do złego wariantu; (c) mediana per linia gubi
+  różnice między konkretnymi kursami. Dobre jako „linia jedzie +5 min",
+  nie jako gwarancja co do minutę.
+- Margines przesiadki na żywo uwzględnia opóźnienie linii, w którą się
+  WSIADA (`board_delay`), ale NIE opóźnienia kursu, którym się DOJEŻDŻA do
+  przesiadki - jeśli spóźniony jest dowóz, realny zapas jest mniejszy, niż
+  pokazuje kropka. Świadome uproszczenie (dowóz to często kilka segmentów
+  wcześniej, propagacja opóźnienia przez łańcuch przesiadek to osobny,
+  trudniejszy temat - odłożony na później).
+- Opóźnienia stosują się tylko do odjazdów w oknie ~[teraz − 10 min,
+  teraz + 45 min] (`FRESH_WINDOW_SEC`) - dla zapytań o daleką przyszłość
+  dane bieżących pojazdów nie mają sensu, więc wynik jest czysto rozkładowy.
+- Warstwa „pojazdy na żywo" pokazuje ~490 kropek naraz - razem ze słupkami
+  i stacjami WRM mapa bywa gęsta; to świadomy koszt „pokaż wszystko na
+  żywo". Feed `mpk.wroc.pl` bywa niedostępny spoza Polski / z adresów
+  chmurowych (odrębny host `www.wroclaw.pl/open-data` stoi za WAF-em
+  FortiADC i zwraca 403), ale z maszyny w Polsce działa.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN) — a od
   warstwy WRM także **backend** potrzebuje internetu (feed GBFS nextbike);
   wcześniej tylko frontend zależał od sieci.
@@ -723,11 +816,11 @@ między sesjami (mogą dzielić je dni).
       „Warstwa rowerowa (WRM)” wyżej).
 - [x] **Margines przesiadki jako gradient**, nie próg zero-jedynkowy —
       zrobione 2026-07-21 jako wersja **rozkładowa** (statyczna): kropka
-      na przystanku wsiadania, kolor + tooltip „X min zapasu”. Docelowo
-      (z danymi GTFS-RT o opóźnieniach — patrz punkt niżej) margines
-      pokazywałby realny zapas na żywo, nie tylko teoretyczny z rozkładu —
-      to zostaje jako naturalne rozszerzenie, gdy/jeśli feed RT się
-      potwierdzi.
+      na przystanku wsiadania, kolor + tooltip „X min zapasu”. **Wersja na
+      żywo dodana 2026-07-22** (patrz Changelog): realny zapas = rozkładowy
+      + opóźnienie linii, w którą się wsiada (`board_delay`), z oszacowań
+      z `realtime.py` - kropka koloruje się i ostrzega („brak zapasu"), gdy
+      kurs jedzie przed czasem i można go nie złapać.
 - [x] **Tablica odjazdów per przystanek** — zrobione 2026-07-21: prawy
       klik na przystanek (lewy nadal ustawia start/cel — osobne akcje,
       bez konfliktu) otwiera dymek z najbliższymi odjazdami (`stop_times`
@@ -760,10 +853,15 @@ między sesjami (mogą dzielić je dni).
       użytkownika (patrz Changelog). Gotowy kod czeka na gałęzi
       `archive/traficar-layer` - przywrócenie to `git checkout` tej gałęzi
       + scalenie, nie pisanie od nowa, gdyby ktoś jednak tego zechciał.
-- [x] **Prawdziwy GTFS-Realtime (opóźnienia na żywo) dla MPK** —
-      ZWERYFIKOWANE i ODRZUCONE 2026-07-22 (item nie zniknął z listy, bo
-      to wciąż wartościowy wynik - żeby nikt później nie sprawdzał tego
-      samego od zera). Feed protobuf
+- [x] **Opóźnienia na żywo dla MPK** — ZREALIZOWANE 2026-07-22, ale z
+      INNEGO źródła (`mpk.wroc.pl/bus_position` - pozycje pojazdów, z
+      których opóźnienie liczymy sami przez map-matching; patrz `realtime.py`,
+      sekcja „Pozycje pojazdów i szacowane opóźnienia" w Algorytmach i
+      Changelog na górze). Poniżej zostaje ORYGINALNY zapis odrzucenia
+      pomysłu „gotowy GTFS-RT" - dotyczy on wyłącznie feedu
+      `mapadlugoleka.klosok.eu`, nie idei opóźnień na żywo (tę zrealizowano
+      inaczej), i zostaje, żeby nikt nie sprawdzał TAMTEGO źródła od zera.
+      Feed protobuf
       `https://mapadlugoleka.klosok.eu/vehicle_positions.pb` (strona
       trzeciej osoby, **nie** portal miejski - wygląda na projekt
       jednoosobowy) faktycznie ODPOWIADA i faktycznie jest ŻYWY (znacznik
