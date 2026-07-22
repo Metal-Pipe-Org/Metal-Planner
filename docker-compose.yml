@@ -55,3 +55,9 @@ services:
       #   ./data/dev_token.txt    - token menu deweloperskiego
       # Kopia zapasowa = skopiowanie tego folderu.
       - ./data:/app/data
+    networks:
+      - reverse_proxy
+networks:
+  reverse_proxy:
+    driver: bridge
+    external: true
