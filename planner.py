@@ -6,15 +6,40 @@ Połączenie jest "osiągalne", jeśli jesteśmy już w tym kursie albo zdążym
 na jego odjazd na przystanku startowym.
 """
 
+import math
 from bisect import bisect_left, bisect_right
 from datetime import datetime
 
 import bike_transfer
 import gtfs
 import realtime
+import traficar
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
 INF = float("inf")
+
+# --- Traficar jako opcja dojazdu (patrz traficar.py i plan_flow) ---
+CAR_SPEED_MPS = 7.5           # ~27 km/h - miejska jazda ze światłami/korkami (bez modelu ruchu na żywo)
+DRIVE_DETOUR = 1.4            # mnożnik prostej -> droga (do czasu prawdziwego routingu ulicami, patrz roadmap)
+CAR_UNLOCK_SEC = 60          # otwarcie auta, zapięcie pasów - narzut przed jazdą
+MIN_CAR_TRIP_M = 1000        # poniżej ~1 km auto nie ma sensu (piechota/tramwaj wygrywa) - opcji nie pokazujemy
+TRAFICAR_MIN_W = 0.35        # dolna podłoga jasności - użytkownik chce ZAWSZE widzieć opcję Traficar,
+                             #   nawet gdy transport publiczny jest lepszy (kolor/dymek mówią, czy się opłaca)
+TRAFICAR_PER_MIN_PLN = 0.80  # przybliżone stawki Traficara - patrz „Znane ograniczenia" (koszt to SZACUNEK,
+TRAFICAR_PER_KM_PLN = 0.80   #   nie optymalizujemy pod niego, tylko pokazujemy orientacyjnie)
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    r = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _centroid(coords):
+    n = len(coords)
+    return (sum(c[0] for c in coords) / n, sum(c[1] for c in coords) / n)
 
 # Piesi sąsiedzi przystanku (dzień.siblings) - patrz WALK_SEC/WALK_RADIUS_M
 # w gtfs.py: ta sama nazwa (bufor stały) i/lub inny bliski przystanek
@@ -858,6 +883,18 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
             "walk_sec": w["sec"],
             "bike_stations": [hint[0], hint[1]] if hint is not None else None,
         })
+
+    # Traficar jako całościowa alternatywa (patrz _traficar_option) - liczona
+    # niezależnie od mapy przepływów, zawsze dołączana, jeśli jest wolne auto
+    # i trasa jest dość długa. Punkt startu/celu to prawdziwa lokalizacja
+    # (start_point) albo środek słupków danego przystanku.
+    start_coord = start_point if start_point is not None else (
+        _centroid([day.stop_coords[s] for s in source_stops]) if source_stops else None
+    )
+    dest_coord = _centroid([day.stop_coords[s] for s in target_stops]) if target_stops else None
+    if start_coord and dest_coord:
+        seg_list.extend(_traficar_option(dep_sec, start_coord, dest_coord, deadline, span))
+
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
 
     return {
@@ -964,6 +1001,63 @@ def _backward(day, target_set, dep_sec, deadline, siblings=None):
                 if walk_dep > latest.get(sibling, -1):
                     latest[sibling] = walk_dep
     return latest
+
+
+def _traficar_option(dep_sec, start_coord, dest_coord, deadline, span):
+    """Opcja Traficar „od drzwi do drzwi": dojście do najbliższego wolnego
+    auta, przejazd do celu (albo do najbliższego punktu STREFY ZWROTU, gdy
+    cel jest poza nią - np. w strefie pieszej) i ewentualne dojście resztą.
+
+    Zwraca listę segmentów (walk do auta, car, opcjonalnie walk do celu) albo
+    [] gdy: brak wolnego auta (feed padł/pusty) albo trasa jest za krótka na
+    sensowną jazdę autem (MIN_CAR_TRIP_M). Poza tymi przypadkami pokazujemy ją
+    ZAWSZE - użytkownik chce zawsze widzieć co najmniej jedną opcję Traficar;
+    jasność (z podłogą TRAFICAR_MIN_W, żeby nie znikła przy dobrym transporcie)
+    i dymek z czasem/kosztem mówią, czy się opłaca. Nie odsiewamy jej progiem
+    q_min ani limitem MAX_SEGMENTS - to osobna, całościowa alternatywa dla
+    mapy przepływów, nie jeden z jej segmentów.
+
+    Koszt to SZACUNEK (patrz „Znane ograniczenia") - pokazujemy orientacyjnie,
+    świadomie NIE optymalizujemy pod niego (założenie użytkownika)."""
+    if _haversine_m(start_coord[0], start_coord[1], dest_coord[0], dest_coord[1]) < MIN_CAR_TRIP_M:
+        return []
+    car, access_m = traficar.nearest_available(start_coord[0], start_coord[1])
+    if car is None:
+        return []
+    rlat, rlon, egress_m = traficar.nearest_return_point(dest_coord[0], dest_coord[1])
+    car_coord = (car["lat"], car["lon"])
+    return_coord = (rlat, rlon)
+
+    drive_m = _haversine_m(car_coord[0], car_coord[1], return_coord[0], return_coord[1]) * DRIVE_DETOUR
+    walk_to_sec = max(1, round(access_m / gtfs.WALK_SPEED_MPS))
+    drive_sec = CAR_UNLOCK_SEC + round(drive_m / CAR_SPEED_MPS)
+    walk_from_sec = round(egress_m / gtfs.WALK_SPEED_MPS)
+    arrival = dep_sec + walk_to_sec + drive_sec + walk_from_sec
+
+    honest_w = max(0.0, min(1.0, (deadline - arrival) / span))
+    w = max(honest_w, TRAFICAR_MIN_W)
+    drive_km = drive_m / 1000
+    cost = round(drive_sec / 60 * TRAFICAR_PER_MIN_PLN + drive_km * TRAFICAR_PER_KM_PLN, 1)
+
+    def seg(path, kind, **extra):
+        base = {
+            "path": [[round(la, 5), round(lo, 5)] for la, lo in path],
+            "num": "", "kind": kind, "w": round(w, 3),
+            "transfer_margin": None, "board_time": None, "board_stop": None,
+            "board_delay": None, "walk_sec": None,
+        }
+        base.update(extra)
+        return base
+
+    segs = [seg([start_coord, car_coord], "walk", walk_sec=walk_to_sec)]
+    segs.append(seg(
+        [car_coord, return_coord], "car",
+        car_sec=drive_sec, car_km=round(drive_km, 1), car_cost=cost,
+        car_plate=car["plate"], car_eta=_fmt_time(arrival),
+    ))
+    if egress_m > 1:
+        segs.append(seg([return_coord, dest_coord], "walk", walk_sec=walk_from_sec))
+    return segs
 
 
 def _unknown_stop(query, hints):

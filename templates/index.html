@@ -363,7 +363,8 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     // Rower: ten sam pomarańcz co warstwa stacji WRM (BIKE_STYLE niżej) -
     // spójny kolor "to jest rower" niezależnie, czy patrzysz na stację czy
     // na sugestię trasy.
-    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', walk: '#616161', bike: '#e65100', other: '#6a1b9a'};
+    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', walk: '#616161', bike: '#e65100',
+                         car: '#7b1fa2', other: '#6a1b9a'};
 
     // Mapa przepływów: każdy kurs to jeden ciągły segment od przystanku
     // wsiadania do ostatniego sensownego wyjścia; jasność i grubość linii
@@ -372,7 +373,8 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     // (styl mapy tramwajowej), a najechanie na linię podświetla ją
     // i pokazuje numer - widać, "która co gdzie", nawet w wiązce.
     const BRIGHT_W = 0.45;
-    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', walk: 'Pieszo', bike: 'Rower WRM', other: 'Linia'};
+    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', walk: 'Pieszo', bike: 'Rower WRM',
+                        car: 'Traficar', other: 'Linia'};
 
     // Zapas na przesiadkę wsiadania w segment - bursztynowy (ciasno, blisko
     // ustawowego bufora) do zielonego (luz); NIE czerwony - czerwony miesza
@@ -396,6 +398,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         const faint = [], casings = [], bright = [];
         const byLine = new Map();        // "num|kind" -> [segmenty] do plakietek
         const transferGroups = new Map(); // board_stop -> {pos, entries: [segmenty]}
+        const carPickups = [];            // segmenty jazdy autem - do znacznika „odbierz auto tu"
 
         for (const s of flow.segments) {        // posortowane po w rosnąco
             const key = s.num + '|' + s.kind;
@@ -406,7 +409,8 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             // prawdziwa trasa uliczna - przerywana kreska od razu to
             // sygnalizuje (patrz PROJECT.md); rower kropkowany, żeby dało
             // się odróżnić od pieszego nawet bez najeżdżania (kolor + wzór).
-            const dashArray = s.kind === 'walk' ? '4, 6' : s.kind === 'bike' ? '1, 6' : null;
+            const dashArray = s.kind === 'walk' ? '4, 6' : s.kind === 'bike' ? '1, 6'
+                : s.kind === 'car' ? '10, 6' : null;
             const line = L.polyline(s.path, {color, opacity, weight, dashArray});
             let tooltip;
             if (s.kind === 'walk') {
@@ -415,6 +419,10 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 const [st1, st2] = s.bike_stations;
                 tooltip = `Rower WRM: ${esc(st1)} → ${esc(st2)} `
                     + `(w sumie ok. ${Math.max(1, Math.round(s.walk_sec / 60))} min z dojściem)`;
+            } else if (s.kind === 'car') {
+                tooltip = `<b>Traficar ${esc(s.car_plate || '')}</b><br>`
+                    + `~${Math.round(s.car_sec / 60)} min jazdy, ${s.car_km} km`
+                    + `<br>koszt ok. ${s.car_cost} zł (szacunek), na miejscu ~${esc(s.car_eta || '')}`;
             } else {
                 tooltip = `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`;
             }
@@ -435,9 +443,12 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             } else {
                 faint.push(line);
             }
-            if (s.kind !== 'walk' && s.kind !== 'bike') {   // pusty numer wyglądałby źle
+            if (s.kind !== 'walk' && s.kind !== 'bike' && s.kind !== 'car') {   // pusty numer wyglądałby źle
                 if (!byLine.has(key)) byLine.set(key, []);
                 byLine.get(key).push(s);
+            }
+            if (s.kind === 'car') {   // znacznik miejsca odbioru auta (początek segmentu jazdy)
+                carPickups.push(s);
             }
             if (s.transfer_margin !== null) {
                 if (!transferGroups.has(s.board_stop)) {
@@ -475,8 +486,14 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             }).bindTooltip(`<b>${esc(stopName)}</b><ul class="legs">${rows}</ul>`, {sticky: true}));
         }
 
-        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze -> kropki zapasu na wierzchu.
-        const layers = [...faint, ...casings, ...bright, ...marginDots];
+        // Znacznik „odbierz auto tu" na początku segmentu jazdy Traficarem.
+        const carMarkers = carPickups.map(s => L.marker(s.path[0], {
+            icon: L.divIcon({className: 'car-pickup', html: '🚗',
+                             iconSize: [22, 22], iconAnchor: [11, 11]}),
+        }).bindTooltip(`<b>Traficar ${esc(s.car_plate || '')}</b> — odbierz tu`, {direction: 'top'}));
+
+        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze -> kropki zapasu -> auta na wierzchu.
+        const layers = [...faint, ...casings, ...bright, ...marginDots, ...carMarkers];
 
         // Plakietki z numerem linii - tylko dla linii, które mają sensowny
         // udział w przepływie; na najjaśniejszym segmencie linii, dłuższe

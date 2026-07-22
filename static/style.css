@@ -204,3 +204,13 @@ input[type="range"] {
 .bike-electric-badge span {
     line-height: 1;
 }
+
+/* Znacznik odbioru auta Traficar (emoji w divIcon) */
+.car-pickup {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 2px #fff);
+}
