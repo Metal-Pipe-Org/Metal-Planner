@@ -405,12 +405,12 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
             const weight = 1 + 3.5 * s.w;
             const opacity = 0.10 + 0.85 * s.w;
-            // Pieszo i rower to linia prosta (haversine / przez stacje), nie
-            // prawdziwa trasa uliczna - przerywana kreska od razu to
-            // sygnalizuje (patrz PROJECT.md); rower kropkowany, żeby dało
-            // się odróżnić od pieszego nawet bez najeżdżania (kolor + wzór).
-            const dashArray = s.kind === 'walk' ? '4, 6' : s.kind === 'bike' ? '1, 6'
-                : s.kind === 'car' ? '10, 6' : null;
+            // Pieszo/rower/auto jadą teraz PO ULICACH (roads.py, profil
+            // foot/bike/car), nie po linii prostej - ale wzorem kreski wciąż
+            // odróżniamy „własny środek" od linii transportu publicznego:
+            // pieszo kropkowane (konwencja map), rower kreskowane, auto
+            // (Traficar) pełną linią - to konkretna, przejezdna trasa.
+            const dashArray = s.kind === 'walk' ? '4, 6' : s.kind === 'bike' ? '6, 5' : null;
             const line = L.polyline(s.path, {color, opacity, weight, dashArray});
             let tooltip;
             if (s.kind === 'walk') {

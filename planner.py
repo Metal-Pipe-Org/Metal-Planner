@@ -13,6 +13,7 @@ from datetime import datetime
 import bike_transfer
 import gtfs
 import realtime
+import roads
 import traficar
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
@@ -27,6 +28,9 @@ TRAFICAR_MIN_W = 0.35        # dolna podłoga jasności - użytkownik chce ZAWSZ
                              #   nawet gdy transport publiczny jest lepszy (kolor/dymek mówią, czy się opłaca)
 TRAFICAR_PER_MIN_PLN = 0.80  # przybliżone stawki Traficara - patrz „Znane ograniczenia" (koszt to SZACUNEK,
 TRAFICAR_PER_KM_PLN = 0.80   #   nie optymalizujemy pod niego, tylko pokazujemy orientacyjnie)
+
+MAX_ROUTE_FETCHES = 16       # limit NOWYCH zapytań do OSRM na jedno wyszukiwanie (odcinki z cache'u
+                             #   są darmowe) - ogranicza opóźnienie „zimnego" zapytania; patrz roads.py
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):
@@ -895,6 +899,9 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     if start_coord and dest_coord:
         seg_list.extend(_traficar_option(dep_sec, start_coord, dest_coord, deadline, span))
 
+    # Prawdziwe trasy ulicami dla pieszo/rowerem (auto już otrasowane wyżej).
+    _route_flow_segments(seg_list)
+
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
 
     return {
@@ -1028,12 +1035,34 @@ def _traficar_option(dep_sec, start_coord, dest_coord, deadline, span):
     car_coord = (car["lat"], car["lon"])
     return_coord = (rlat, rlon)
 
-    drive_m = _haversine_m(car_coord[0], car_coord[1], return_coord[0], return_coord[1]) * DRIVE_DETOUR
-    walk_to_sec = max(1, round(access_m / gtfs.WALK_SPEED_MPS))
-    drive_sec = CAR_UNLOCK_SEC + round(drive_m / CAR_SPEED_MPS)
-    walk_from_sec = round(egress_m / gtfs.WALK_SPEED_MPS)
-    arrival = dep_sec + walk_to_sec + drive_sec + walk_from_sec
+    # Prawdziwe trasy ulicami (roads.py): jazda profilem samochodowym, dojścia
+    # pieszym; z nich bierzemy geometrię ORAZ dokładniejszy czas/dystans
+    # (auto liczone jest osobno od CSA, więc można je bez obaw doprecyzować).
+    # Fallback na linię prostą + prędkości stałe, gdy routing niedostępny.
+    drive_route = roads.route("car", car_coord, return_coord)
+    if drive_route:
+        drive_path, drive_m, drive_seconds = roads.simplify(drive_route[0]), drive_route[1], drive_route[2]
+        drive_sec = CAR_UNLOCK_SEC + round(drive_seconds)
+    else:
+        drive_m = _haversine_m(car_coord[0], car_coord[1], return_coord[0], return_coord[1]) * DRIVE_DETOUR
+        drive_path = [list(car_coord), list(return_coord)]
+        drive_sec = CAR_UNLOCK_SEC + round(drive_m / CAR_SPEED_MPS)
 
+    access_route = roads.route("foot", start_coord, car_coord)
+    if access_route:
+        access_path, walk_to_sec = roads.simplify(access_route[0]), max(1, round(access_route[2]))
+    else:
+        access_path, walk_to_sec = [list(start_coord), list(car_coord)], max(1, round(access_m / gtfs.WALK_SPEED_MPS))
+
+    egress_route = roads.route("foot", return_coord, dest_coord) if egress_m > 1 else None
+    if egress_route:
+        egress_path, walk_from_sec = roads.simplify(egress_route[0]), round(egress_route[2])
+    elif egress_m > 1:
+        egress_path, walk_from_sec = [list(return_coord), list(dest_coord)], round(egress_m / gtfs.WALK_SPEED_MPS)
+    else:
+        egress_path, walk_from_sec = None, 0
+
+    arrival = dep_sec + walk_to_sec + drive_sec + walk_from_sec
     honest_w = max(0.0, min(1.0, (deadline - arrival) / span))
     w = max(honest_w, TRAFICAR_MIN_W)
     drive_km = drive_m / 1000
@@ -1049,15 +1078,45 @@ def _traficar_option(dep_sec, start_coord, dest_coord, deadline, span):
         base.update(extra)
         return base
 
-    segs = [seg([start_coord, car_coord], "walk", walk_sec=walk_to_sec)]
+    segs = [seg(access_path, "walk", walk_sec=walk_to_sec)]
     segs.append(seg(
-        [car_coord, return_coord], "car",
+        drive_path, "car",
         car_sec=drive_sec, car_km=round(drive_km, 1), car_cost=cost,
         car_plate=car["plate"], car_eta=_fmt_time(arrival),
     ))
-    if egress_m > 1:
-        segs.append(seg([return_coord, dest_coord], "walk", walk_sec=walk_from_sec))
+    if egress_path is not None:
+        segs.append(seg(egress_path, "walk", walk_sec=walk_from_sec))
     return segs
+
+
+_ROUTE_PROFILE = {"walk": "foot", "bike": "bike"}
+
+
+def _route_flow_segments(seg_list):
+    """Zamienia PROSTĄ geometrię odcinków pieszo/rowerem na trasę po ulicach
+    (roads.py). Tylko GEOMETRIA - czasy (walk_sec) zostają te, których użył
+    CSA. Odcinki już z geometrią uliczną (auto Traficara i jego dojścia,
+    path > 2 punkty) pomija filtr `len == 2`. Najjaśniejsze pierwsze i limit
+    NOWYCH zapytań (MAX_ROUTE_FETCHES) - odcinki z cache'u są darmowe, więc
+    „rozgrzane" zapytanie trasuje wszystko, a „zimne" - najważniejsze; reszta
+    zostaje prostą (jak dotąd). OSRM niedostępny -> bezpiecznik, wszystko prostą."""
+    candidates = [
+        s for s in seg_list
+        if s["kind"] in _ROUTE_PROFILE and len(s["path"]) == 2
+    ]
+    candidates.sort(key=lambda s: s["w"], reverse=True)
+    fetches = 0
+    for s in candidates:
+        profile = _ROUTE_PROFILE[s["kind"]]
+        a, b = s["path"][0], s["path"][-1]
+        result = roads.route(profile, a, b, allow_fetch=False)     # najpierw cache
+        if result is None:
+            if fetches >= MAX_ROUTE_FETCHES:
+                continue
+            result = roads.route(profile, a, b, allow_fetch=True)
+            fetches += 1
+        if result:
+            s["path"] = [[round(la, 5), round(lo, 5)] for la, lo in roads.simplify(result[0])]
 
 
 def _unknown_stop(query, hints):
