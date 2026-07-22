@@ -21,6 +21,14 @@ python3.11 -m venv .venv
 Port to domyślnie 5001 (5000 zajmuje AirPlay na macOS); można zmienić
 zmienną `PORT`.
 
+Serwer nasłuchuje na `0.0.0.0`, więc jest też dostępny z telefonu/innego
+urządzenia w TEJ SAMEJ sieci Wi-Fi co komputer, na którym działa - pod adresem
+LAN tego komputera zamiast `localhost` (np. `http://192.168.1.23:5001`; adres
+sprawdzisz przez System Settings → Wi-Fi → Details, albo `ipconfig getifaddr
+en0` w terminalu na macOS). To też oznacza, że interaktywny debugger Flaska
+(`debug=True`) jest wystawiony na całą sieć lokalną, nie tylko na ten
+komputer - akceptowalne w domowej sieci, ale nie wystawiać tak na internet.
+
 ## Codzienna aktualizacja rozkładu
 
 Cron na serwerze, np. o 3:00:

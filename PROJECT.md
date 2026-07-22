@@ -389,6 +389,10 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 ## Changelog
 
+- **2026-07-22** — serwer nasłuchuje na `0.0.0.0` zamiast domyślnego
+  `127.0.0.1` (`app.py`), żeby dało się otworzyć aplikację z telefonu w tej
+  samej sieci Wi-Fi pod adresem LAN komputera - patrz README i „Znane
+  ograniczenia” (uwaga o debuggerze Werkzeuga wystawionym na sieć lokalną).
 - **2026-07-22** — zweryfikowany i ODRZUCONY pomysł „prawdziwy GTFS-Realtime
   dla MPK” (ostatni punkt „Planu rozwoju”): feed
   `mapadlugoleka.klosok.eu/vehicle_positions.pb` jest żywy i ma poprawny
@@ -688,6 +692,11 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN) — a od
   warstwy WRM także **backend** potrzebuje internetu (feed GBFS nextbike);
   wcześniej tylko frontend zależał od sieci.
+- Serwer nasłuchuje na `0.0.0.0` (patrz README) - dostępny z telefonu/innego
+  urządzenia w tej samej sieci Wi-Fi pod adresem LAN, ale to też wystawia
+  interaktywny debugger Werkzeuga (`debug=True`) na całą sieć lokalną, nie
+  tylko na `localhost`. W porządku w zaufanej sieci domowej - nie wystawiać
+  tak dalej (np. przez port forwarding na routerze) na internet.
 - Rower jako transfer (patrz „Rower WRM jako transfer” w Algorytmach) sprawdza
   tylko TOP-K najbliższych stacji/sąsiadów na każdym poziomie (2 stacje per
   przystanek, 6 sąsiednich stacji per stacja, 3 przystanki per stacja) - to
