@@ -24,6 +24,7 @@ uda - fallback na linię prostą, wyszukiwanie nigdy nie pada przez routing.
 import json
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 OSRM_HOSTS = {
     "foot": "https://routing.openstreetmap.de/routed-foot",
@@ -53,12 +54,18 @@ def route(profile, a, b, allow_fetch=True):
 
     Wynik cache'owany; przy błędzie sieci włącza się bezpiecznik i przez
     COOLDOWN_SEC route() od razu zwraca cache-albo-None, nie dotykając sieci."""
-    global _disabled_until
     key = _key(profile, a, b)
     if key in _cache:
         return _cache[key]
     if not allow_fetch or time.monotonic() < _disabled_until:
         return None                       # tylko cache / bezpiecznik czynny - bez sieci
+    return _fetch_route(profile, a, b, key)
+
+
+def _fetch_route(profile, a, b, key=None):
+    """Faktyczne zapytanie do OSRM (bez sprawdzania cache/bezpiecznika -
+    to robi wołający). Sukces cache'uje; błąd włącza bezpiecznik i zwraca None."""
+    global _disabled_until
     host = OSRM_HOSTS.get(profile)
     if host is None:
         return None
@@ -71,11 +78,34 @@ def route(profile, a, b, allow_fetch=True):
         rt = data["routes"][0]
         polyline = [[lat, lon] for lon, lat in rt["geometry"]["coordinates"]]
         result = (polyline, rt["distance"], rt["duration"])
-        _cache[key] = result              # cache'ujemy tylko sukcesy
+        _cache[key if key is not None else _key(profile, a, b)] = result   # tylko sukcesy
         return result
     except (OSError, ValueError, KeyError, IndexError):
         _disabled_until = time.monotonic() + COOLDOWN_SEC     # bezpiecznik
         return None
+
+
+def route_many(requests, max_fetch=None):
+    """Trasuje listę [(profil, a, b), ...] RÓWNOLEGLE, zwraca wyniki w tej
+    samej kolejności (result | None). Odcinki z cache'u są darmowe; braki
+    dociągane wątkami (jedno OSRM to głównie czekanie na sieć, więc wątki
+    pomagają - „zimne" zapytanie z kilkoma odcinkami schodzi z ~sekund do
+    ~jednego round-tripu). `max_fetch` ogranicza liczbę NOWYCH pobrań (braki
+    ponad limit zostają None); wołający podaje `requests` od najważniejszych.
+    Bezpiecznik: gdy czynny, nie dotykamy sieci."""
+    results = [_cache.get(_key(*r)) for r in requests]
+    if time.monotonic() < _disabled_until:
+        return results
+    misses = [i for i, res in enumerate(results) if res is None]
+    if max_fetch is not None:
+        misses = misses[:max_fetch]
+    if not misses:
+        return results
+    with ThreadPoolExecutor(max_workers=min(8, len(misses))) as executor:
+        futures = {executor.submit(_fetch_route, *requests[i]): i for i in misses}
+        for future in futures:
+            results[futures[future]] = future.result()
+    return results
 
 
 def simplify(polyline, tol_deg=0.00008):

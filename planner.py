@@ -1038,8 +1038,15 @@ def _traficar_option(dep_sec, start_coord, dest_coord, deadline, span):
     # Prawdziwe trasy ulicami (roads.py): jazda profilem samochodowym, dojścia
     # pieszym; z nich bierzemy geometrię ORAZ dokładniejszy czas/dystans
     # (auto liczone jest osobno od CSA, więc można je bez obaw doprecyzować).
-    # Fallback na linię prostą + prędkości stałe, gdy routing niedostępny.
-    drive_route = roads.route("car", car_coord, return_coord)
+    # Trzy odcinki naraz (równolegle) - jedno round-tripowe opóźnienie zamiast
+    # trzech. Fallback na linię prostą + prędkości stałe, gdy routing padnie.
+    reqs = [("car", car_coord, return_coord), ("foot", start_coord, car_coord)]
+    if egress_m > 1:
+        reqs.append(("foot", return_coord, dest_coord))
+    routed = roads.route_many(reqs)
+    drive_route, access_route = routed[0], routed[1]
+    egress_route = routed[2] if egress_m > 1 else None
+
     if drive_route:
         drive_path, drive_m, drive_seconds = roads.simplify(drive_route[0]), drive_route[1], drive_route[2]
         drive_sec = CAR_UNLOCK_SEC + round(drive_seconds)
@@ -1048,13 +1055,11 @@ def _traficar_option(dep_sec, start_coord, dest_coord, deadline, span):
         drive_path = [list(car_coord), list(return_coord)]
         drive_sec = CAR_UNLOCK_SEC + round(drive_m / CAR_SPEED_MPS)
 
-    access_route = roads.route("foot", start_coord, car_coord)
     if access_route:
         access_path, walk_to_sec = roads.simplify(access_route[0]), max(1, round(access_route[2]))
     else:
         access_path, walk_to_sec = [list(start_coord), list(car_coord)], max(1, round(access_m / gtfs.WALK_SPEED_MPS))
 
-    egress_route = roads.route("foot", return_coord, dest_coord) if egress_m > 1 else None
     if egress_route:
         egress_path, walk_from_sec = roads.simplify(egress_route[0]), round(egress_route[2])
     elif egress_m > 1:
@@ -1104,17 +1109,10 @@ def _route_flow_segments(seg_list):
         s for s in seg_list
         if s["kind"] in _ROUTE_PROFILE and len(s["path"]) == 2
     ]
-    candidates.sort(key=lambda s: s["w"], reverse=True)
-    fetches = 0
-    for s in candidates:
-        profile = _ROUTE_PROFILE[s["kind"]]
-        a, b = s["path"][0], s["path"][-1]
-        result = roads.route(profile, a, b, allow_fetch=False)     # najpierw cache
-        if result is None:
-            if fetches >= MAX_ROUTE_FETCHES:
-                continue
-            result = roads.route(profile, a, b, allow_fetch=True)
-            fetches += 1
+    candidates.sort(key=lambda s: s["w"], reverse=True)   # najjaśniejsze pierwsze - one łapią limit
+    reqs = [(_ROUTE_PROFILE[s["kind"]], s["path"][0], s["path"][-1]) for s in candidates]
+    results = roads.route_many(reqs, max_fetch=MAX_ROUTE_FETCHES)
+    for s, result in zip(candidates, results):
         if result:
             s["path"] = [[round(la, 5), round(lo, 5)] for la, lo in roads.simplify(result[0])]
 
