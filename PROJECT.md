@@ -257,10 +257,11 @@ Rendering (frontend):
   korytarze jaskrawe i grube, niszowe ledwo widoczne;
 - kolor: tramwaj czerwony, autobus niebieski, pieszo szary, rower
   pomarańcz (ten sam co warstwa stacji WRM - spójność „to jest rower”
-  niezależnie od warstwy); pieszo i rower przerywaną kreską (linia prosta,
-  nie prawdziwa trasa uliczna/rowerowa - przerywanie od razu to
-  sygnalizuje), różny wzór (pieszo `4,6`, rower kropkowane `1,6`) - odróżnia
-  się nawet bez najeżdżania; segmenty z `w ≥ 0,45` dostają białą otoczkę
+  niezależnie od warstwy), Traficar fioletowy; odcinki „własnym środkiem"
+  (pieszo/rower/auto) jadą po ulicach (`roads.py`), ale wzorem kreski wciąż
+  odróżniają się od linii transportu: pieszo kropkowane (`4,6`), rower
+  kreskowane (`6,5`), auto PEŁNĄ linią (konkretna, przejezdna trasa); segmenty
+  z `w ≥ 0,45` dostają białą otoczkę
   (styl mapy tramwajowej), kolejność rysowania: blade → otoczki → jaskrawe;
 - **hover na linii** podświetla ją, wyciąga na wierzch wiązki
   (`bringToFront`) i pokazuje dymek „Tramwaj 3” (albo „Pieszo, ok. X min”
@@ -322,6 +323,52 @@ z backoffem, żeby padnięty feed nie spowalniał zapytań (zwraca się wtedy
 wersja czysto rozkładowa). Zastosowania: warstwa „Pojazdy na żywo" na mapie,
 kolumna opóźnień w tablicy odjazdów, korekta marginesu przesiadki w
 `plan_flow` (patrz „Margines przesiadki" i API).
+
+### Traficar jako opcja dojazdu (`traficar.py` + `plan_flow`)
+
+Car-sharing jest inny niż transport publiczny (auto jedzie punkt-punkt,
+płatne za czas/km, nie sieć stacji z rozkładem) - modelujemy go więc jako
+CAŁOŚCIOWĄ alternatywę „od drzwi do drzwi", liczoną osobno od mapy przepływów
+i zawsze do niej doklejaną:
+
+1. dojście do NAJBLIŻSZEGO wolnego auta od startu (`nearest_available`);
+2. jazda profilem samochodowym (`roads.py`) do celu - albo, gdy w celu nie
+   wolno zakończyć najmu, do najbliższego punktu STREFY ZWROTU
+   (`nearest_return_point`), a resztę pieszo. Strefa zwrotu to punkt-w-
+   wielokącie po poligonach `END_RESERVATION_ENABLE` minus `END_RESERVATION_
+   DISABLE` z `/api/v1/zones/3/shapes` (np. Rynek jest w ENABLE, ale też w
+   DISABLE jako strefa piesza -> nie wolno tam oddać auta);
+3. czas dojazdu = dojście + jazda + ewentualne dojście; koszt to SZACUNEK
+   (stawka za minutę + za km, patrz „Znane ograniczenia") - pokazujemy
+   orientacyjnie, świadomie NIE optymalizujemy pod niego (założenie
+   użytkownika: „pokaż koszt, ale nie o to gra").
+
+Opcję dołączamy ZAWSZE, gdy jest wolne auto i trasa > 1 km (poniżej auto nie
+ma sensu) - użytkownik chce zawsze widzieć co najmniej jedną opcję Traficar.
+Jasność liczymy uczciwie (czas dojazdu vs deadline mapy przepływów), ale z
+PODŁOGĄ (`TRAFICAR_MIN_W`), żeby opcja nie znikła, gdy transport publiczny
+jest lepszy - kolor/dymek mówią wtedy, że się nie opłaca. Nie przechodzi
+przez próg `q_min` ani limit `MAX_SEGMENTS` (to osobna alternatywa, nie
+segment przepływu). Rendering: `kind:"car"` (fioletowy, pełna linia),
+znacznik 🚗 na aucie, dymek z czasem/km/kosztem/ETA.
+
+### Trasowanie po ulicach (`roads.py`)
+
+Dojścia pieszo, przejazdy rowerem i jazda Traficarem były linią prostą
+(haversine) - „mniej więcej tędy". Teraz jadą po realnej sieci dróg
+(jak Google Maps), przez publiczne serwery OSRM FOSSGIS, osobno per profil
+(`routed-foot`/`routed-bike`/`routed-car`; demo `router.project-osrm.org`
+zna tylko auto). Z odpowiedzi bierzemy geometrię, a dla auta też dokładny
+dystans i czas. Odporność: cache w pamięci (punkty stałe - przystanki,
+stacje - powtarzają się, więc po rozgrzaniu prawie wszystko trafia w cache)
+oraz BEZPIECZNIK - po błędzie sieci routing wyłącza się na 120 s, więc
+padnięty/wolny OSRM nie spowalnia każdego zapytania; cokolwiek się nie uda,
+fallback na linię prostą (wyszukiwanie nigdy nie pada przez routing). Liczbę
+NOWYCH zapytań na jedno wyszukiwanie ogranicza `MAX_ROUTE_FETCHES` (odcinki
+z cache'u darmowe), najjaśniejsze pierwsze - zimne zapytanie trasuje
+najważniejsze, ciepłe wszystko. Uwaga: dla odcinków pieszo/rowerem zmieniamy
+tylko GEOMETRIĘ; czas (`walk_sec`) zostaje ten, którego użył CSA - inaczej
+trzeba by przeliczać całą wykonalność trasy (patrz „Znane ograniczenia").
 
 ## Warstwa rowerowa (WRM)
 
@@ -396,7 +443,7 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
 - `GET /api/flow?start=&end=&time=HH:MM&qmin=0.60` — mapa przepływów:
   `{start, end, departure, best_arrival, deadline, segments: [{path:
-  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"walk"|"bike"|"other",
+  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"walk"|"bike"|"car"|"other",
   w: 0..1, transfer_margin: 120|null, board_time: "18:36"|null, board_stop:
   "Pułaskiego"|null, board_delay: 60|null, walk_sec: 180|null, bike_stations:
   ["Stacja A", "Stacja B"]|null}, …]}`, segmenty posortowane rosnąco po `w` (kolejność
@@ -413,7 +460,12 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   w sekundach dla `kind:"walk"` ALBO całkowity czas (dojście+rower+dojście)
   dla `kind:"bike"` (patrz „Piesze odcinki jako segmenty” i „Rower WRM jako
   transfer”); `bike_stations` to nazwy stacji początkowej/końcowej, tylko
-  dla `kind:"bike"`. Zamiast `start=` można podać `start_lat=&start_lon=`
+  dla `kind:"bike"`. Segment `kind:"car"` (opcja Traficar - patrz „Traficar
+  jako opcja dojazdu”) niesie dodatkowo `car_sec` (czas jazdy), `car_km`,
+  `car_cost` (szacunkowy koszt w zł), `car_plate` (nr rej.) i `car_eta`
+  (godzina na miejscu). Ścieżki `kind:"walk"/"bike"/"car"` idą teraz po
+  ulicach (`roads.py`), nie po linii prostej - path ma wiele punktów, chyba że
+  routing był niedostępny (fallback: dwa punkty). Zamiast `start=` można podać `start_lat=&start_lon=`
   (prawdziwa lokalizacja zamiast nazwy przystanku - patrz Frontend); wtedy
   `start` w odpowiedzi to zawsze „Twoja lokalizacja”. Błąd, gdy w promieniu
   1 km nie ma żadnego przystanku: `{error: "…"}`.
@@ -430,6 +482,8 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 | `bikes.py` | cache stacji WRM (GBFS) |
 | `bike_transfer.py` | rower WRM jako transfer w `plan_flow` (geometria statyczna + dostępność na żywo) |
 | `realtime.py` | pozycje pojazdów MPK na żywo (`mpk.wroc.pl/bus_position`) + szacowane opóźnienia (map-matching do rozkładu) |
+| `traficar.py` | auta Traficar (`fioletowe.live`): warstwa na mapie, wolne auta i strefa zwrotu dla opcji dojazdu w `plan_flow` |
+| `roads.py` | trasowanie po ulicach (OSRM FOSSGIS) dla odcinków pieszo/rowerem/autem - geometria + dystans/czas, cache + bezpiecznik |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | mapa Leaflet + panel + cały frontendowy JS |
@@ -438,6 +492,32 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 ## Changelog
 
+- **2026-07-22** — **trasowanie po ulicach dla pieszo/rowerem/autem**
+  (`roads.py`). Dotąd te odcinki były linią prostą (haversine); teraz jadą
+  po realnej sieci dróg (jak Google Maps), przez publiczne serwery OSRM
+  FOSSGIS - osobno profil `routed-foot`, `routed-bike`, `routed-car` (demo
+  `router.project-osrm.org` zna tylko auto, więc nie nadawał się). Cache w
+  pamięci (punkty stałe powtarzają się między zapytaniami) + BEZPIECZNIK
+  (po błędzie sieci routing wyłącza się na 120 s, żeby padnięty OSRM nie
+  spowalniał każdego zapytania) + fallback na prostą. Jazda Traficarem bierze
+  z profilu car realną geometrię, dystans i czas (dokładniejszy koszt/ETA);
+  pozostałe odcinki pieszo/rowerem trasowane tylko geometrycznie (czasy
+  zostają te z CSA), najjaśniejsze pierwsze, limit 16 nowych zapytań/trasę.
+  Zimne zapytanie ~5 s (pierwsze trasowanie), ciepłe ~0,3 s (cache). Auto
+  rysowane pełną linią (przejezdna trasa), pieszo kropkowane, rower kreskowane.
+- **2026-07-22** — **Traficar jako opcja dojazdu „od drzwi do drzwi"**
+  w `plan_flow` (nie tylko warstwa na mapie, którą wcześniej usunięto).
+  `traficar.py` zyskał: `available_cars`/`nearest_available` (wolne auta) i
+  STREFĘ ZWROTU z `/api/v1/zones/3/shapes` (`can_end`/`nearest_return_point` -
+  punkt-w-wielokącie po `END_RESERVATION_ENABLE` minus `END_RESERVATION_DISABLE`;
+  zweryfikowane: 71/74 zaparkowanych aut leży w legalnej strefie zwrotu, Rynek
+  słusznie odrzucony jako strefa piesza). `plan_flow` dokleja opcję Traficar
+  ZAWSZE, gdy jest wolne auto i trasa > 1 km: dojście do najbliższego auta,
+  jazda do celu (albo do najbliższego punktu strefy zwrotu + reszta pieszo).
+  Jasność wg czasu dojazdu vs deadline, z podłogą (użytkownik chce zawsze
+  widzieć ≥1 opcję); koszt pokazany jako SZACUNEK, świadomie nieoptymalizowany.
+  Nowy `kind:"car"` (fioletowy), znacznik 🚗 „odbierz tu", dymek z czasem/km/
+  kosztem/ETA. Krótkie trasy (< 1 km) auta nie dostają.
 - **2026-07-22** — **pozycje pojazdów MPK na żywo + szacowane opóźnienia**
   (item „Prawdziwy GTFS-Realtime" z Planu rozwoju - zrealizowany z INNEGO
   źródła niż odrzucone wcześniej tego dnia, patrz wpis niżej i „Znane
@@ -743,13 +823,14 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   osiągnąć pieszo) i zostaje odłożony na później.
 - Wyszukiwanie działa w ramach jednej doby rozkładowej: zapytanie o 0:30
   nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
-- Dojście pieszo (patrz „Piesi sąsiedzi przystanku" w Algorytmach) to
-  jeden skok naraz, prosta linia (haversine), stała prędkość marszu —
-  nie prawdziwa sieć ulic pieszych (chodniki, przejścia, zakazy). Dobre
-  jako "czy w ogóle warto rozważyć dojście", nie jako dokładna nawigacja.
-  Promień 400 m / ~4,7 km/h to arbitralne, rozsądne wartości - nie z badania
-  zachowań użytkowników. To samo ograniczenie dotyczy „ostatniej mili"
-  z prawdziwej lokalizacji (promień 1 km).
+- Dojście pieszo (patrz „Piesi sąsiedzi przystanku" w Algorytmach) to jeden
+  skok naraz, a jego CZAS i wykonalność liczymy haversine + stała prędkość
+  marszu (promień 400 m / ~4,7 km/h - arbitralne, rozsądne wartości, nie
+  z badania zachowań). GEOMETRIA rysowana idzie już po ulicach (`roads.py`),
+  ale sam czas/zasięg - nie, więc „czy warto rozważyć dojście" jest liczone
+  po prostej, choć narysowane po drogach (rzadka rozbieżność przy krętych
+  dojściach). To samo dotyczy „ostatniej mili" z prawdziwej lokalizacji
+  (promień 1 km).
 - „Użyj mojej lokalizacji" wymaga bezpiecznego kontekstu przeglądarki
   (HTTPS) na produkcji — na `localhost` działa bez tego (zwolnione ze
   specyfikacji), ale wdrożenie na zwykłym HTTP straciłoby tę funkcję
@@ -789,10 +870,26 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   do 60 s opóźnienia (cache feedu) - rower pokazany jako dostępny mógł już
   zniknąć. Cięcie na 4 km jazdy - dłuższe przejazdy rowerem między stacjami
   nie są brane pod uwagę (założenie: powyżej tego dystansu transport
-  publiczny prawie zawsze wygrywa). Rysowanie to prosta linia
-  przystanek→przystanek (jak piesze dojścia), nie prawdziwa trasa uliczna
-  ani sieć dróg rowerowych - to samo uproszczenie i ta sama motywacja co
-  przy pieszych dojściach.
+  publiczny prawie zawsze wygrywa). Geometria rysowana idzie po sieci dróg
+  (`roads.py`, profil bike), ale czas przejazdu wciąż liczymy haversine +
+  stała prędkość (jak przy pieszych: GEOMETRIA po drogach, CZAS po prostej).
+- Koszt Traficara to SZACUNEK (stawka za minutę + za km w `planner.py`) - nie
+  realny cennik (który zależy od modelu auta, pakietów, promocji) i świadomie
+  NIE jest kryterium wyboru (założenie użytkownika: pokazać koszt, ale nie
+  optymalizować pod niego). Traktować orientacyjnie.
+- Opcja Traficar pokazuje NAJBLIŻSZE wolne auto od startu, nawet jeśli jest
+  daleko (użytkownik chce zawsze widzieć ≥1 opcję) - przy dużym oddaleniu
+  dojście piechotą do auta bywa nierealne, ale opcja i tak się pokaże (blada).
+  Strefa zwrotu jest sprawdzana dokładnie, ale dla celu POZA nią „najbliższy
+  punkt zwrotu" to najbliższy WIERZCHOŁEK granicy strefy (przybliżenie) -
+  rzadkie, bo strefa obejmuje całe miasto.
+- Trasowanie po ulicach (`roads.py`) zależy od publicznych serwerów OSRM
+  FOSSGIS (`routing.openstreetmap.de`) - to grzecznościowy zasób wspólnoty,
+  nie gwarantowana usługa. Przy niedostępności włącza się bezpiecznik i
+  odcinki wracają do linii prostej. Pierwsze („zimne") zapytanie płaci za
+  trasowanie (~5 s przy wielu nowych odcinkach), kolejne idą z cache'u (~0,3 s).
+  Trasy są bez modelu ruchu na żywo - to geometria + rozkładowy czas profilu,
+  nie bieżące korki (świadomie poza zakresem).
 - Zapytania o cel bardzo słabo skomunikowany transportem publicznym (bardzo
   rzadkie kursy, okno czasu na godziny) są ograniczone przez `KEPT_CAP`
   (patrz Changelog 2026-07-22) - mogą liczyć się do kilku sekund zamiast
@@ -847,12 +944,17 @@ między sesjami (mogą dzielić je dni).
       `plan_route` świadomie NIE dostał tej integracji (narzędzie debug,
       nieużywane przez UI - patrz API) - zakres ograniczony do `plan_flow`,
       który jest jedyną ścieżką faktycznie widoczną dla użytkownika.
-- [ ] **Car-sharing (Traficar) jako warstwa** — zbudowane i zweryfikowane
-      2026-07-22 (auta na mapie przez `fioletowe.live`, ten sam wzorzec co
-      WRM), ale USUNIĘTE z aktywnego kodu tego samego dnia na prośbę
-      użytkownika (patrz Changelog). Gotowy kod czeka na gałęzi
-      `archive/traficar-layer` - przywrócenie to `git checkout` tej gałęzi
-      + scalenie, nie pisanie od nowa, gdyby ktoś jednak tego zechciał.
+- [x] **Car-sharing (Traficar)** — najpierw zbudowane jako warstwa i USUNIĘTE
+      2026-07-22 na prośbę użytkownika (kod zarchiwizowany na
+      `archive/traficar-layer`), potem tego samego dnia zrobione SZERZEJ:
+      Traficar jako opcja dojazdu „od drzwi do drzwi" w `plan_flow`, nie tylko
+      warstwa (patrz Changelog i „Traficar jako opcja dojazdu" w Algorytmach).
+      Z auta liczy się realny dojazd (roads.py), strefa zwrotu i szacunkowy
+      koszt.
+- [x] **Trasy pieszo/rowerem/autem po prawdziwych ulicach** (nie było osobnym
+      punktem planu, ale usuwa wcześniejsze ograniczenie „linia prosta") —
+      2026-07-22, `roads.py` przez OSRM FOSSGIS. Geometria po drogach; czas
+      pieszo/rowerem wciąż rozkładowo-haversine'owy (patrz „Znane ograniczenia").
 - [x] **Opóźnienia na żywo dla MPK** — ZREALIZOWANE 2026-07-22, ale z
       INNEGO źródła (`mpk.wroc.pl/bus_position` - pozycje pojazdów, z
       których opóźnienie liczymy sami przez map-matching; patrz `realtime.py`,
