@@ -79,6 +79,25 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap',
 }).addTo(map);
 
+// Legenda środków transportu i pojazdów na żywo (kolory jak FLOW_COLORS
+// / delayColor niżej - trzymać spójne przy zmianach).
+const legend = L.control({position: 'bottomleft'});
+legend.onAdd = () => {
+    const div = L.DomUtil.create('div', 'map-legend');
+    div.innerHTML =
+        '<b>Legenda</b>' +
+        '<div class="row"><span class="sw" style="border-top-color:#c62828"></span>Tramwaj</div>' +
+        '<div class="row"><span class="sw" style="border-top-color:#1565c0"></span>Autobus</div>' +
+        '<div class="row"><span class="sw dash" style="border-top-color:#e65100"></span>Rower WRM</div>' +
+        '<div class="row"><span class="sw dot" style="border-top-color:#616161"></span>Pieszo</div>' +
+        '<div class="row"><span class="sw" style="border-top-color:#7b1fa2"></span>Traficar (auto)</div>' +
+        '<div class="muted">Pojazdy na żywo — ' +
+        '<span class="dot-swatch" style="background:#2e7d32"></span> na czas ' +
+        '<span class="dot-swatch" style="background:#c62828"></span> spóźniony</div>';
+    return div;
+};
+legend.addTo(map);
+
 document.getElementById('panel-toggle').addEventListener('click', () => {
     document.getElementById('panel').classList.toggle('hidden');
 });

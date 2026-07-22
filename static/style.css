@@ -205,6 +205,50 @@ input[type="range"] {
     line-height: 1;
 }
 
+/* Legenda kolorów/środków na mapie (kontrolka Leaflet, dół-lewo) */
+.map-legend {
+    background: rgba(255, 255, 255, 0.92);
+    padding: 7px 10px;
+    border-radius: 8px;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+    font-size: 12px;
+    line-height: 1.5;
+    color: #222;
+    max-width: 190px;
+}
+.map-legend b {
+    display: block;
+    margin-bottom: 3px;
+}
+.map-legend .row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.map-legend .sw {
+    display: inline-block;
+    width: 20px;
+    height: 0;
+    border-top-width: 3px;
+    border-top-style: solid;
+    flex: none;
+}
+.map-legend .sw.dash { border-top-style: dashed; }
+.map-legend .sw.dot { border-top-style: dotted; border-top-width: 4px; }
+.map-legend .dot-swatch {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    flex: none;
+}
+.map-legend .muted {
+    color: #666;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
 /* Znacznik odbioru auta Traficar (emoji w divIcon) */
 .car-pickup {
     display: flex;
