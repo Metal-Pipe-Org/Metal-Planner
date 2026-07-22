@@ -11,6 +11,7 @@ from datetime import datetime
 
 import bike_transfer
 import gtfs
+import realtime
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
 INF = float("inf")
@@ -85,17 +86,26 @@ def stop_departures(stop_query, when=None, limit=DEPARTURES_LIMIT):
     from_sec = when.hour * 3600 + when.minute * 60 + when.second
     conns = day.conns
 
+    # Opóźnienia na żywo (patrz realtime.py) - None, gdy feed niedostępny albo
+    # dany odjazd jest zbyt daleko w przyszłości, by dane bieżących pojazdów
+    # coś znaczyły (delay_for pilnuje okna świeżości).
+    delays = realtime.live_delays(day)
+
     departures = []
     for i in range(bisect_left(day.dep_times, from_sec), len(conns)):
         dep_t, _, dep_s, _, trip = conns[i]
         if dep_s not in stop_set:
             continue
         label, headsign = day.trip_info[trip]
+        line = label.split(" ", 1)[1] if " " in label else label
+        kind = KIND_MAP.get(label.split(" ", 1)[0], "other")
+        delay = delays.delay_for(kind, line, headsign, dep_t) if delays else None
         departures.append({
             "time": _fmt_time(dep_t),
-            "line": label.split(" ", 1)[1] if " " in label else label,
-            "kind": KIND_MAP.get(label.split(" ", 1)[0], "other"),
+            "line": line,
+            "kind": kind,
             "headsign": headsign,
+            "delay": None if delay is None else round(delay),
         })
         if len(departures) >= limit:
             break
@@ -288,6 +298,12 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     bike_edges, bike_reverse_edges, bike_hints = bike_transfer.build_bike_edges(day)
     siblings = bike_transfer.merge_siblings(day.siblings, bike_edges)
     reverse_siblings = bike_transfer.merge_siblings(day.siblings, bike_reverse_edges)
+
+    # Opóźnienia na żywo (patrz realtime.py) - liczone względem REALNEGO „teraz",
+    # nie `when`: dane bieżących pojazdów dotyczą tego, co jedzie w tej chwili.
+    # Dla zapytań o przyszłość `delay_for` i tak zwróci None (okno świeżości),
+    # więc rozkładowy margines przesiadki zostaje nietknięty. None = feed padł.
+    delays = realtime.live_delays(day)
 
     if start_point is not None:
         source_walk = gtfs.nearest_stops(start_point[0], start_point[1], day)
@@ -799,14 +815,24 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
             )
             board_time = seg_info["board_time"]
+            num = label.split(" ", 1)[1] if " " in label else label
+            kind = KIND_MAP.get(label.split(" ", 1)[0], "other")
+            # Opóźnienie na żywo linii, w którą się TU wsiada (patrz realtime.py):
+            # spóźniony kurs odjeżdża później, więc realny zapas na przesiadkę =
+            # rozkładowy + to opóźnienie. None, gdy to start trasy (bez przesiadki),
+            # feed padł albo odjazd jest zbyt daleko w przyszłości.
+            board_delay = None
+            if delays is not None and board_time is not None and seg_info["margin"] is not None:
+                board_delay = delays.delay_for(kind, num, sched_sec=board_time)
             seg_list.append({
                 "path": [[round(lat, 5), round(lon, 5)] for lat, lon in path],
-                "num": label.split(" ", 1)[1] if " " in label else label,
-                "kind": KIND_MAP.get(label.split(" ", 1)[0], "other"),
+                "num": num,
+                "kind": kind,
                 "w": round(q, 3),
                 "transfer_margin": seg_info["margin"],
                 "board_time": _fmt_time(board_time) if board_time is not None else None,
                 "board_stop": day.stop_names[stops_seq[0]] if seg_info["margin"] is not None else None,
+                "board_delay": None if board_delay is None else round(board_delay),
                 "walk_sec": None,
             })
             if seg_info["start_walk"] is not None:
@@ -828,6 +854,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
             "transfer_margin": None,
             "board_time": None,
             "board_stop": None,
+            "board_delay": None,
             "walk_sec": w["sec"],
             "bike_stations": [hint[0], hint[1]] if hint is not None else None,
         })

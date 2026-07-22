@@ -126,7 +126,7 @@ def _fetch_positions(line_names):
             "User-Agent": "Metal-Planner/0.1",
         },
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=6) as response:
         data = json.load(response)
     vehicles = []
     for v in data:
@@ -145,17 +145,24 @@ def _fetch_positions(line_names):
 
 def vehicle_positions(day):
     """Surowe pozycje pojazdów (cache POSITIONS_TTL_SEC). Błąd sieci przy
-    pustym cache'u -> RealtimeError; przy niepustym - stare dane (jak bikes.py)."""
-    if time.monotonic() - _pos_cache["at"] < POSITIONS_TTL_SEC and _pos_cache["vehicles"]:
+    pustym cache'u -> RealtimeError; przy niepustym - stare dane (jak bikes.py).
+
+    Znacznik `at` jest ustawiany także PO nieudanej próbie - to backoff: gdy
+    feed padnie, kolejne zapytania (o trasę, odjazdy) przez TTL sekund
+    dostają cache zamiast czekać na kolejny timeout. Bez tego padnięty feed
+    spowalniałby KAŻDE zapytanie o ~timeout sekund, bo pusty cache nie
+    zaliczałby warunku TTL i wymuszał ponowną próbę za każdym razem."""
+    if time.monotonic() - _pos_cache["at"] < POSITIONS_TTL_SEC:
         return _pos_cache["vehicles"]
     topo = _topology(day)
     try:
-        vehicles = _fetch_positions(topo.line_names)
-        _pos_cache["vehicles"] = vehicles
-        _pos_cache["at"] = time.monotonic()
+        _pos_cache["vehicles"] = _fetch_positions(topo.line_names)
     except (OSError, ValueError, KeyError) as e:
+        _pos_cache["at"] = time.monotonic()           # backoff nawet po błędzie
         if not _pos_cache["vehicles"]:
             raise RealtimeError(f"Nie udało się pobrać pozycji pojazdów z {POSITIONS_URL}") from e
+    else:
+        _pos_cache["at"] = time.monotonic()
     return _pos_cache["vehicles"]
 
 
