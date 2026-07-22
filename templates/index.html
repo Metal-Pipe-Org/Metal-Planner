@@ -65,6 +65,37 @@
 
 </div>
 
+{% if dev_enabled %}
+<button id="dev-toggle" title="Menu deweloperskie">⚙</button>
+
+<div id="dev-panel" hidden>
+
+    <h2>Menu deweloperskie</h2>
+
+    <div id="dev-auth">
+        <label for="dev-token">Token deweloperski</label>
+        <input type="password" id="dev-token" autocomplete="off">
+        <p class="hint">
+            Losowany przy pierwszym starcie, leży na serwerze w
+            <code>data/dev_token.txt</code> obok <code>docker-compose.yml</code>.
+        </p>
+        <div class="buttons"><button id="dev-login">Odblokuj</button></div>
+    </div>
+
+    <div id="dev-body" hidden>
+        <table id="dev-status"></table>
+        <div class="buttons">
+            <button id="dev-update">Aktualizuj rozkłady</button>
+            <button id="dev-clear">Wyczyść cache</button>
+        </div>
+        <pre id="dev-log" hidden></pre>
+    </div>
+
+    <div id="dev-msg"></div>
+
+</div>
+{% endif %}
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const map = L.map('map', {preferCanvas: true, zoomControl: false})
@@ -383,6 +414,146 @@ if (traficarToggle) {
     });
 
     if (traficarToggle.checked) loadTraficar();   // warstwa włączona domyślnie
+}
+
+// Menu deweloperskie: aktualizacja rozkładu, stan danych, zrzut cache.
+// Token trzymamy w sessionStorage - wystarcza na jedną kartę, nie zostaje
+// na dysku i nie wchodzi w nagłówek żadnego innego zapytania.
+const devToggle = document.getElementById('dev-toggle');
+if (devToggle) {
+    const panel = document.getElementById('dev-panel');
+    const auth = document.getElementById('dev-auth');
+    const body = document.getElementById('dev-body');
+    const tokenInput = document.getElementById('dev-token');
+    const statusTable = document.getElementById('dev-status');
+    const logBox = document.getElementById('dev-log');
+    const msgBox = document.getElementById('dev-msg');
+    let pollTimer = null;
+
+    const esc = text => {
+        const div = document.createElement('div');
+        div.textContent = text ?? '';
+        return div.innerHTML;
+    };
+
+    const token = () => sessionStorage.getItem('devToken') || '';
+
+    function devFetch(path, options = {}) {
+        return fetch(path, {
+            ...options,
+            headers: {...(options.headers || {}), 'X-Dev-Token': token()},
+        });
+    }
+
+    function say(message, kind = 'hint') {
+        msgBox.innerHTML = message ? `<p class="${kind}">${esc(message)}</p>` : '';
+    }
+
+    function lock() {                    // zły/brak tokenu - z powrotem do logowania
+        sessionStorage.removeItem('devToken');
+        body.hidden = true;
+        auth.hidden = false;
+        clearTimeout(pollTimer);
+    }
+
+    const STATUS_ROWS = [
+        ['modified', 'Baza zbudowana'],
+        ['size_mb', 'Rozmiar', v => `${v} MB`],
+        ['stops', 'Przystanki (słupki)'],
+        ['routes', 'Linie'],
+        ['trips', 'Kursy'],
+        ['calendar_from', 'Rozkład od'],
+        ['calendar_to', 'Rozkład do'],
+        ['services_today', 'Kalendarze na dziś'],
+    ];
+
+    function renderStatus(data) {
+        if (!data.exists) {
+            statusTable.innerHTML =
+                '<tr><td colspan="2" class="bad">Brak bazy rozkładów — uruchom aktualizację.</td></tr>';
+            return;
+        }
+        const rows = STATUS_ROWS
+            .filter(([key]) => data[key] !== undefined && data[key] !== null)
+            .map(([key, label, format]) =>
+                `<tr><th>${esc(label)}</th><td>${esc(format ? format(data[key]) : data[key])}</td></tr>`);
+        // Rozkład bywa nieaktualny mimo istniejącej bazy - wtedy dzisiaj nic nie kursuje.
+        if (data.services_today === 0) {
+            rows.push('<tr><td colspan="2" class="bad">Żaden kalendarz nie obejmuje dzisiejszej daty '
+                    + '— rozkład jest przeterminowany.</td></tr>');
+        }
+        if (data.error) {
+            rows.push(`<tr><td colspan="2" class="bad">${esc(data.error)}</td></tr>`);
+        }
+        statusTable.innerHTML = rows.join('');
+    }
+
+    const JOB_LABEL = {
+        running: 'Aktualizacja w toku…',
+        ok: 'Ostatnia aktualizacja: zakończona powodzeniem.',
+        error: 'Ostatnia aktualizacja: nieudana.',
+    };
+
+    function renderJob(job) {
+        const running = job.status === 'running';
+        document.getElementById('dev-update').disabled = running;
+        logBox.hidden = job.log.length === 0;
+        if (job.log.length) {
+            logBox.textContent = job.log.join('\n');
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+        say(JOB_LABEL[job.status] || '', job.status === 'error' ? 'bad' : 'hint');
+        return running;
+    }
+
+    function refresh() {
+        clearTimeout(pollTimer);
+        return devFetch('/api/dev/status')
+            .then(r => {
+                if (r.status === 401) { lock(); say('Zły token.', 'bad'); return null; }
+                return r.json();
+            })
+            .then(state => {
+                if (!state) return;
+                auth.hidden = true;
+                body.hidden = false;
+                renderStatus(state.data);
+                // Póki update trwa, dociągamy log co sekundę - stąd "na żywo".
+                if (renderJob(state.job) && !panel.hidden) {
+                    pollTimer = setTimeout(refresh, 1000);
+                }
+            })
+            .catch(() => say('Brak łączności z serwerem.', 'bad'));
+    }
+
+    devToggle.addEventListener('click', () => {
+        panel.hidden = !panel.hidden;
+        if (panel.hidden) { clearTimeout(pollTimer); return; }
+        if (token()) refresh();
+        else { auth.hidden = false; body.hidden = true; tokenInput.focus(); }
+    });
+
+    document.getElementById('dev-login').addEventListener('click', () => {
+        sessionStorage.setItem('devToken', tokenInput.value);
+        tokenInput.value = '';
+        refresh();
+    });
+
+    tokenInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') document.getElementById('dev-login').click();
+    });
+
+    document.getElementById('dev-update').addEventListener('click', () => {
+        say('Uruchamiam aktualizację…');
+        devFetch('/api/dev/update', {method: 'POST'})
+            .then(r => (r.status === 401 ? lock() : refresh()));
+    });
+
+    document.getElementById('dev-clear').addEventListener('click', () => {
+        devFetch('/api/dev/clear-cache', {method: 'POST'})
+            .then(r => (r.status === 401 ? lock() : r.json()))
+            .then(result => result && say(result.message));
+    });
 }
 </script>
 

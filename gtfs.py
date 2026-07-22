@@ -217,6 +217,19 @@ def geo_generation():
     return mtime
 
 
+def clear_caches():
+    """Zrzuca z pamięci rozkłady dni i geometrię - następne zapytanie wczyta je z bazy.
+
+    Normalnie niepotrzebne (oba cache same wietrzą się po mtime bazy), ale
+    po ręcznej aktualizacji z menu deweloperskiego zwalnia RAM od razu.
+    """
+    global _geo_generation
+    _day_cache.clear()
+    _shape_cache.clear()
+    _slice_cache.clear()
+    _geo_generation = None
+
+
 def open_db():
     """Połączenie dla wywołującego, np. na czas jednego zapytania o przepływy."""
     return _connect()

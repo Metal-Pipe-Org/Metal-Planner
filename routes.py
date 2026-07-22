@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import jsonify, render_template, request
 
+import dev
 import gtfs
 import traficar
 from planner import plan_flow, plan_route
@@ -21,6 +22,7 @@ def _parse_when(time_str):
 
 
 def init_routes(app):
+    dev.init_dev_routes(app)
 
     @app.route("/")
     def index():
@@ -35,8 +37,14 @@ def init_routes(app):
             "index.html",
             stops=stops,
             data_error=data_error,
+            dev_enabled=dev.enabled(),
             form_time=datetime.now().strftime("%H:%M"),
         )
+
+    @app.route("/healthz")
+    def healthz():
+        """Sonda dla dockerowego HEALTHCHECK - żyje też bez bazy rozkładów."""
+        return jsonify({"status": "ok"})
 
     @app.route("/api/stops")
     def api_stops():

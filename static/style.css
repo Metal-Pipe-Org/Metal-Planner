@@ -45,6 +45,107 @@ body {
     pointer-events: none;
 }
 
+/* Menu deweloperskie - lewy dolny róg, żeby nie kolidowało z panelem planera. */
+#dev-toggle {
+    position: fixed;
+    left: 10px;
+    bottom: 10px;
+    z-index: 1100;
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 8px;
+    background: white;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+    font-size: 16px;
+    opacity: 0.75;
+    cursor: pointer;
+}
+
+#dev-toggle:hover {
+    opacity: 1;
+}
+
+#dev-panel {
+    position: fixed;
+    left: 56px;
+    bottom: 10px;
+    z-index: 1100;
+    width: 380px;
+    max-width: calc(100vw - 70px);
+    max-height: 75vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    background: white;
+    padding: 16px;
+    border-radius: 10px;
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+
+#dev-panel[hidden] {
+    display: none;
+}
+
+#dev-panel h2 {
+    font-size: 1.1em;
+    margin: 0 0 8px;
+}
+
+#dev-status {
+    width: 100%;
+    margin-top: 4px;
+    border-collapse: collapse;
+    font-size: 0.85em;
+}
+
+#dev-status th,
+#dev-status td {
+    padding: 3px 0;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+#dev-status th {
+    font-weight: normal;
+    color: #555;
+}
+
+#dev-status td {
+    text-align: right;
+}
+
+#dev-status td[colspan] {
+    text-align: left;
+}
+
+#dev-panel code {
+    display: inline-block;
+    margin-top: 2px;
+    padding: 1px 4px;
+    background: #eceff1;
+    border-radius: 3px;
+    font-size: 11px;
+    word-break: break-all;
+}
+
+#dev-log {
+    max-height: 220px;
+    margin: 12px 0 0;
+    padding: 8px;
+    overflow: auto;
+    background: #263238;
+    color: #cfd8dc;
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.bad {
+    color: #b71c1c;
+}
+
 h1 {
     font-size: 1.3em;
     margin: 0 0 6px;

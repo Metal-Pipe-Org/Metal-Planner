@@ -1,0 +1,72 @@
+# Wdrożenie na serwer po zmergowaniu do testing - wersja NORMALNA (domyślna).
+#
+# Trigger to push na gałąź, a nie pull_request - i to jest istotne. Push na
+# testing powstaje dopiero wtedy, gdy merge naprawdę się zakończył; PR-a
+# z konfliktem nie da się zmergować, więc nie ma czego wdrażać. Trigger
+# pull_request odpalałby się na podglądowym commicie merge'a, który bywa
+# pokonfliktowany - dlatego go tu nie ma.
+#
+# Runner loguje się po SSH i czeka na koniec wdrożenia, przepisując log
+# z serwera do konsoli Actions. Czerwony przebieg = wdrożenie się nie udało,
+# i widać dlaczego, bez logowania się na serwer.
+#
+# Runner i tak nie buduje obrazu - robi to Docker na serwerze - ale przez ten
+# czas czeka, więc jedno wdrożenie kosztuje kilka minut czasu Actions.
+#
+# Wariant oszczędny leży obok jako deploy-eco.yml.disabled. Ma być aktywny
+# dokładnie jeden z nich - jak przełączyć, opisuje README.
+
+name: Deploy
+
+on:
+  push:
+    branches: [testing]
+    # Zmiany w samej dokumentacji nie wymagają przebudowy.
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:      # ręczne uruchomienie z zakładki Actions
+
+# Kilka pushy pod rząd = jedno wdrożenie.
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Pierwsza instalacja buduje obraz i bazę rozkładów; na 1 vCPU to kilka
+    # minut. Limit chroni przed wiszącym połączeniem, nie przed wolną budową.
+    timeout-minutes: 20
+
+    steps:
+      - name: Wdrożenie przez SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          REPO: ${{ github.repository }}
+          # Gałąź, która wywołała przebieg - wdrażamy dokładnie ją, więc
+          # nazwa "testing" nie jest tu nigdzie zaszyta na sztywno.
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Klucz hosta z sekretu, a nie ze ssh-keyscan przy każdym przebiegu -
+          # inaczej podmiana serwera pod adresem przeszłaby niezauważona.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
+              "$SSH_USER@$SSH_HOST" "REPO='$REPO' BRANCH='$BRANCH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          APP_DIR="${APP_DIR:-$HOME/metal-planner}"
+          mkdir -p "$APP_DIR"
+
+          curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/docker/deploy.sh" \
+               -o "$APP_DIR/deploy.sh"
+
+          # Bez odczepiania: wyjście leci przez SSH wprost do logu Actions,
+          # a kod wyjścia skryptu staje się wynikiem przebiegu.
+          bash "$APP_DIR/deploy.sh"
+          REMOTE

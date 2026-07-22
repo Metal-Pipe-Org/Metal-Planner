@@ -1,0 +1,3 @@
+# Skrypt startowy kontenera musi mieć końce linii LF - z CRLF Linux odmawia
+# uruchomienia ENTRYPOINT-a ("no such file or directory").
+*.sh text eol=lf

@@ -1,0 +1,75 @@
+# Wdrożenie na serwer po zmergowaniu do testing - wersja ECO. NIEAKTYWNA.
+#
+# GitHub uruchamia tylko pliki .yml i .yaml z tego katalogu, więc końcówka
+# .disabled sprawia, że ten plik po prostu tu leży. Żeby go włączyć, zamień
+# końcówki miejscami (aktywny ma być dokładnie jeden):
+#
+#     cd .github/workflows
+#     git mv deploy.yml deploy.yml.disabled
+#     git mv deploy-eco.yml.disabled deploy-eco.yml
+#
+# Różnica względem deploy.yml jest jedna: runner nie czeka. Pobiera na serwerze
+# skrypt, odpala go w tle i kończy po kilku sekundach. Budowa obrazu leci dalej
+# bez udziału GitHuba, więc przebieg kosztuje sekundy zamiast minut.
+#
+# Cena: zielony przebieg oznacza "wdrożenie wystartowało", a nie "udało się".
+# Wynik zostaje na serwerze w deploy.status i deploy.log.
+
+name: Deploy (eco)
+
+on:
+  push:
+    branches: [testing]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Limit dotyczy samego SSH, które powinno zejść w sekundy.
+    timeout-minutes: 5
+
+    steps:
+      - name: Wystartuj wdrożenie przez SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          REPO: ${{ github.repository }}
+          # Gałąź, która wywołała przebieg - wdrażamy dokładnie ją.
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
+              "$SSH_USER@$SSH_HOST" "REPO='$REPO' BRANCH='$BRANCH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          APP_DIR="${APP_DIR:-$HOME/metal-planner}"
+          mkdir -p "$APP_DIR"
+
+          # Pobranie skryptu zostawiamy synchroniczne - jest natychmiastowe,
+          # a dzięki temu literówka w adresie albo padnięty GitHub zapalają
+          # czerwone światło, zamiast po cichu nic nie zrobić.
+          curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/docker/deploy.sh" \
+               -o "$APP_DIR/deploy.sh"
+
+          # setsid odcina proces od sesji SSH (inaczej zginąłby z SIGHUP przy
+          # rozłączeniu), a przekierowanie WSZYSTKICH trzech strumieni jest
+          # konieczne - dopóki potomek trzyma otwarte stdout/stderr, ssh nie
+          # zamknie połączenia i runner czeka mimo odczepienia.
+          nohup setsid bash "$APP_DIR/deploy.sh" \
+                >"$APP_DIR/deploy.log" 2>&1 </dev/null &
+
+          echo "Wdrożenie ruszyło w tle."
+          echo "Postęp:  tail -f $APP_DIR/deploy.log"
+          echo "Wynik:   cat $APP_DIR/deploy.status"
+          REMOTE

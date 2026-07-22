@@ -1,0 +1,57 @@
+# Metal-Planner - cały deployment z jednego pliku.
+#
+# Obraz buduje się prosto z GitHuba, więc repo nie musi być sklonowane na
+# serwerze - wystarczy ten plik. Pierwszy start pobiera rozkład GTFS (~12 MB)
+# i buduje bazę, więc trwa ok. minuty; kolejne wstają od razu.
+#
+# Aktualizacja aplikacji do najnowszego commita:  docker compose up -d --build
+#
+# Opcjonalnie to samo da się zautomatyzować: docker/deploy.sh w repozytorium
+# jest napisany pod GitHub Actions (wdrożenie po pushu do main). To dodatek -
+# ten plik i powyższa komenda wystarczają same z siebie.
+
+services:
+  planner:
+    build:
+      # Po znaku # jest gałąź, z której Docker sklonuje kod. testing jest
+      # gałęzią wdrożeniową - musi zgadzać się z gałęzią, z której pobrano
+      # ten plik (deploy.sh to sprawdza i przerywa przy rozjeździe).
+      context: https://github.com/Metal-Pipe-Org/Metal-Planner.git#testing
+    image: metal-planner:latest
+    container_name: metal-planner
+    restart: unless-stopped
+
+    ports:
+      # <port na serwerze>:<port w kontenerze - tego nie zmieniaj>
+      - "5001:8000"
+
+    environment:
+      # Godzina codziennej automatycznej aktualizacji rozkładu.
+      # Puste = tylko ręczna, z menu deweloperskiego.
+      GTFS_AUTO_UPDATE_HOUR: "3"
+
+      # Rozkład jest liczony wg zegara kontenera.
+      TZ: "Europe/Warsaw"
+
+      # Liczba procesów roboczych. Każdy trzyma własną kopię rozkładu w RAM
+      # (~60 MB na dzień, cache do 2 dni), więc każdy kolejny to ok. +150 MB.
+      # Szczegóły w gunicorn.conf.py. Podnoś świadomie.
+      WEB_CONCURRENCY: "1"
+
+      # Menu deweloperskie (⚙ w lewym dolnym rogu) chroni token losowany przy
+      # pierwszym starcie. Podejrzysz go na serwerze:  cat data/dev_token.txt
+      #
+      # Nic nie musisz tu ustawiać. Odkomentuj tylko, jeśli chcesz narzucić
+      # własny token zamiast losowanego:
+      # DEV_TOKEN: "moj-wlasny-sekret"
+      #
+      # ...albo wyłączyć menu deweloperskie w całości:
+      # DEV_MENU: "off"
+
+    volumes:
+      # Zwykły folder obok tego pliku, tworzony przy pierwszym starcie.
+      # Wszystkie dane aplikacji są w nim widoczne wprost z serwera:
+      #   ./data/gtfs.sqlite      - baza rozkładów (~80 MB)
+      #   ./data/dev_token.txt    - token menu deweloperskiego
+      # Kopia zapasowa = skopiowanie tego folderu.
+      - ./data:/app/data
