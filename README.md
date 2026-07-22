@@ -28,11 +28,22 @@ buduje się prosto z GitHuba, repo nie musi być sklonowane:
 
 ```bash
 curl -O https://raw.githubusercontent.com/Metal-Pipe-Org/Metal-Planner/testing/docker-compose.yml
-docker compose up -d --build
+docker network create reverse_proxy      # jeśli jeszcze nie istnieje
+docker compose build --no-cache --pull
+docker compose up -d
 ```
 
-Aplikacja stoi na `http://serwer:5001`. Pierwszy start pobiera rozkład GTFS
-i buduje bazę (~1 min) — postęp widać w `docker compose logs -f`.
+Pierwszy start pobiera rozkład GTFS i buduje bazę (~1 min) — postęp widać
+w `docker compose logs -f`. Sprawdzenie z serwera:
+
+```bash
+curl -I http://127.0.0.1:5002/
+```
+
+Aplikacja jest wystawiona na świat przez nginxa (patrz niżej), a port 5002
+słucha wyłącznie na pętli zwrotnej. Bez reverse proxy zmień publikację portu
+w `docker-compose.yml` na `"5002:8000"` — wtedy odpowie na `http://serwer:5002`,
+ale po nieszyfrowanym HTTP.
 
 ### Folder z danymi
 
@@ -48,11 +59,27 @@ data/
 
 Kopia zapasowa to skopiowanie tego folderu, a przeniesienie aplikacji na inny
 serwer — przeniesienie go razem z `docker-compose.yml`. Przebudowy obrazu
-(`up -d --build`) i restarty go nie ruszają; usunięcie `data/` powoduje tylko
-ponowne pobranie rozkładu i wylosowanie nowego tokenu.
+i restarty go nie ruszają; usunięcie `data/` powoduje tylko ponowne pobranie
+rozkładu i wylosowanie nowego tokenu.
 
 Folder należy do użytkownika o UID 10001 (kontener nie działa jako root),
 więc do podejrzenia go z hosta może być potrzebne `sudo`.
+
+### Za reverse proxy (nginx)
+
+Gotowy blok `server` do skopiowania:
+[docker/nginx.conf.example](docker/nginx.conf.example). Zakłada nginxa
+w kontenerze, w tej samej sieci `reverse_proxy` co aplikacja — ruch idzie
+wtedy po sieci dockerowej wprost na `metal-planner:8000`.
+
+Dlatego port 5002 jest publikowany **tylko na pętli zwrotnej**
+(`127.0.0.1:5002:8000`): działa z samego serwera — do `curl`a, diagnostyki
+czy tunelu SSH — ale z internetu jest niedostępny i nie da się nim ominąć
+TLS-a.
+
+Numer 5002, a nie 5001, bo ten drugi jest na serwerze zajęty przez inną
+usługę. Lokalne uruchomienie przez `python app.py` nadal używa 5001 — to
+niezależne rzeczy.
 
 ### Zmienne środowiskowe
 
@@ -67,7 +94,17 @@ nic nie musisz ustawiać.
 | `DEV_TOKEN` | *losowany* | Narzuca własny token menu zamiast losowanego. |
 | `DEV_MENU` | `on` | `off` wyłącza menu deweloperskie i jego endpointy. |
 
-Aktualizacja aplikacji do najnowszego commita — `docker compose up -d --build`.
+Aktualizacja aplikacji do najnowszego commita:
+
+```bash
+docker compose build --no-cache --pull
+docker compose up -d
+```
+
+`--no-cache` wymusza budowę od zera, a `--pull` dociąga świeży obraz bazowy.
+Samo `up -d --build` też by zadziałało (BuildKit sprawdza, na którym commicie
+stoi gałąź), ale kosztem zaufania do cache'u — przy wdrożeniu raz na jakiś
+czas nie warto oszczędzać tych dwóch minut.
 
 ## Menu deweloperskie
 
@@ -107,8 +144,8 @@ działa dalej na wczorajszych danych i przeładuje nowe sama, bez restartu.
 
 ## Automatyczne wdrożenia (GitHub Actions) — opcjonalnie
 
-**To dodatek, nie wymóg.** Opisany wyżej `docker compose up -d --build`
-w zupełności wystarcza do postawienia i aktualizowania aplikacji ręcznie.
+**To dodatek, nie wymóg.** Opisane wyżej `docker compose build` + `up -d`
+w zupełności wystarczają do postawienia i aktualizowania aplikacji ręcznie.
 Ta sekcja przydaje się tylko wtedy, gdy chcesz, żeby wdrożenie działo się samo.
 
 Sercem jest [docker/deploy.sh](docker/deploy.sh) — skrypt na serwerze. Rola

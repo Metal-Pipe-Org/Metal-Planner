@@ -20,7 +20,7 @@ REPO="${REPO:-Metal-Pipe-Org/Metal-Planner}"
 BRANCH="${BRANCH:-testing}"
 APP_DIR="${APP_DIR:-$HOME/metal-planner}"
 COMPOSE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH/docker-compose.yml"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:5001/healthz}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:5002/healthz}"
 # Pierwsza instalacja buduje obraz i bazę rozkładów - na słabym vCPU
 # potrafi to zająć kilka minut, stąd hojny limit.
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-420}"
@@ -87,11 +87,24 @@ fi
 mv docker-compose.yml.new docker-compose.yml
 
 # --- 3. budowa i start ------------------------------------------------------
-# --build klonuje repo z GitHuba i buduje obraz od nowa; folder ./data
-# z bazą rozkładów i tokenem zostaje nietknięty.
+# Budowa klonuje repo z GitHuba; folder ./data z bazą i tokenem zostaje
+# nietknięty. Domyślnie z cache'em: BuildKit i tak sprawdza przy każdym
+# przebiegu, na którym commicie stoi gałąź, więc nowy kod zawsze się przebuduje.
+#
+# NO_CACHE=1 wymusza budowę od zera. Warto raz na jakiś czas, bo warstwa
+# z apt-get upgrade leży PRZED kopiowaniem kodu - nowy commit jej nie
+# unieważnia i łatki bezpieczeństwa obrazu bazowego by się nie doinstalowały.
 
-log "Buduję obraz i uruchamiam (to może potrwać kilka minut)"
-docker compose up -d --build
+if [ -n "${NO_CACHE:-}" ]; then
+    log "Buduję obraz od zera (NO_CACHE=1, to potrwa dłużej)"
+    docker compose build --no-cache --pull
+else
+    log "Buduję obraz (to może potrwać kilka minut)"
+    docker compose build
+fi
+
+log "Uruchamiam kontener"
+docker compose up -d
 
 # --- 4. sprzątanie ----------------------------------------------------------
 # Każda przebudowa zostawia poprzedni obraz jako <none>. Na 50 GB dysku

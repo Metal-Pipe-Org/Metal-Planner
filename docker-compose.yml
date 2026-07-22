@@ -1,57 +1,83 @@
-# Metal-Planner - cały deployment z jednego pliku.
+# Metal-Planner - caly deployment z jednego pliku.
 #
-# Obraz buduje się prosto z GitHuba, więc repo nie musi być sklonowane na
-# serwerze - wystarczy ten plik. Pierwszy start pobiera rozkład GTFS (~12 MB)
-# i buduje bazę, więc trwa ok. minuty; kolejne wstają od razu.
+# Komentarze sa bez polskich znakow celowo: ten plik kopiuje sie recznie na
+# serwery, a przejscie przez schowek albo edytor z inna strona kodowa psuje
+# UTF-8 i Compose odmawia go wczytac.
 #
-# Aktualizacja aplikacji do najnowszego commita:  docker compose up -d --build
+# Obraz buduje sie prosto z GitHuba, wiec repo nie musi byc sklonowane na
+# serwerze - wystarczy ten plik. Pierwszy start pobiera rozklad GTFS (~12 MB)
+# i buduje baze, wiec trwa ok. minuty; kolejne wstaja od razu.
 #
-# Opcjonalnie to samo da się zautomatyzować: docker/deploy.sh w repozytorium
-# jest napisany pod GitHub Actions (wdrożenie po pushu do main). To dodatek -
-# ten plik i powyższa komenda wystarczają same z siebie.
+# Aktualizacja aplikacji do najnowszego commita:
+#     docker compose build --no-cache --pull
+#     docker compose up -d
+#
+# Opcjonalnie to samo da sie zautomatyzowac: docker/deploy.sh w repozytorium
+# jest napisany pod GitHub Actions (wdrozenie po zmergowaniu do testing).
+# To dodatek - ten plik i powyzsza komenda wystarczaja same z siebie.
 
 services:
   planner:
     build:
-      # Po znaku # jest gałąź, z której Docker sklonuje kod. testing jest
-      # gałęzią wdrożeniową - musi zgadzać się z gałęzią, z której pobrano
-      # ten plik (deploy.sh to sprawdza i przerywa przy rozjeździe).
+      # Po znaku # jest galaz, z ktorej Docker sklonuje kod. testing jest
+      # galezia wdrozeniowa - musi zgadzac sie z galezia, z ktorej pobrano
+      # ten plik (deploy.sh to sprawdza i przerywa przy rozjezdzie).
       context: https://github.com/Metal-Pipe-Org/Metal-Planner.git#testing
     image: metal-planner:latest
     container_name: metal-planner
     restart: unless-stopped
 
     ports:
-      # <port na serwerze>:<port w kontenerze - tego nie zmieniaj>
-      - "5001:8000"
+      # 127.0.0.1 na poczatku ogranicza port do petli zwrotnej: 5002 dziala
+      # z samego serwera (curl, diagnostyka, tunel SSH), ale z zewnatrz jest
+      # niedostepny. Ruch z internetu ma isc przez nginxa po sieci
+      # reverse_proxy - inaczej ten port omijalby TLS.
+      #
+      # 5002, a nie 5001, bo tamten jest na serwerze zajety. Lokalny start
+      # przez `python app.py` dalej uzywa 5001 - to niezalezne rzeczy.
+      # <adres>:<port na serwerze>:<port w kontenerze - tego nie zmieniaj>
+      - "127.0.0.1:5002:8000"
 
     environment:
-      # Godzina codziennej automatycznej aktualizacji rozkładu.
-      # Puste = tylko ręczna, z menu deweloperskiego.
+      # Godzina codziennej automatycznej aktualizacji rozkladu.
+      # Puste = tylko reczna, z menu deweloperskiego.
       GTFS_AUTO_UPDATE_HOUR: "3"
 
-      # Rozkład jest liczony wg zegara kontenera.
+      # Rozklad jest liczony wg zegara kontenera.
       TZ: "Europe/Warsaw"
 
-      # Liczba procesów roboczych. Każdy trzyma własną kopię rozkładu w RAM
-      # (~60 MB na dzień, cache do 2 dni), więc każdy kolejny to ok. +150 MB.
-      # Szczegóły w gunicorn.conf.py. Podnoś świadomie.
+      # Liczba procesow roboczych. Kazdy trzyma wlasna kopie rozkladu w RAM
+      # (~60 MB na dzien, cache do 2 dni), wiec kazdy kolejny to ok. +150 MB.
+      # Szczegoly w gunicorn.conf.py. Podnos swiadomie.
       WEB_CONCURRENCY: "1"
 
-      # Menu deweloperskie (⚙ w lewym dolnym rogu) chroni token losowany przy
-      # pierwszym starcie. Podejrzysz go na serwerze:  cat data/dev_token.txt
+      # Menu deweloperskie (ikona zebatki w lewym dolnym rogu) chroni token
+      # losowany przy pierwszym starcie. Podejrzysz go na serwerze:
+      #     cat data/dev_token.txt
       #
-      # Nic nie musisz tu ustawiać. Odkomentuj tylko, jeśli chcesz narzucić
-      # własny token zamiast losowanego:
+      # Nic nie musisz tu ustawiac. Odkomentuj tylko, jesli chcesz narzucic
+      # wlasny token zamiast losowanego:
       # DEV_TOKEN: "moj-wlasny-sekret"
       #
-      # ...albo wyłączyć menu deweloperskie w całości:
+      # ...albo wylaczyc menu deweloperskie w calosci:
       # DEV_MENU: "off"
 
     volumes:
-      # Zwykły folder obok tego pliku, tworzony przy pierwszym starcie.
-      # Wszystkie dane aplikacji są w nim widoczne wprost z serwera:
-      #   ./data/gtfs.sqlite      - baza rozkładów (~80 MB)
+      # Zwykly folder obok tego pliku, tworzony przy pierwszym starcie.
+      # Wszystkie dane aplikacji sa w nim widoczne wprost z serwera:
+      #   ./data/gtfs.sqlite      - baza rozkladow (~80 MB)
       #   ./data/dev_token.txt    - token menu deweloperskiego
       # Kopia zapasowa = skopiowanie tego folderu.
       - ./data:/app/data
+
+    networks:
+      - reverse_proxy
+
+networks:
+  # Wspolna siec z kontenerem nginxa - to po niej idzie ruch z internetu
+  # (patrz docker/nginx.conf.example). external znaczy "ta siec juz istnieje,
+  # nie tworz jej"; gdy jej nie ma, `up` konczy sie bledem. Jesli nie masz
+  # jeszcze takiej sieci:
+  #     docker network create reverse_proxy
+  reverse_proxy:
+    external: true
