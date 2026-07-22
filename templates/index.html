@@ -34,11 +34,6 @@
         Stacje roweru miejskiego (WRM)
     </label>
 
-    <label class="checkbox-row">
-        <input type="checkbox" id="traficar-toggle" checked>
-        Auta Traficar (car-sharing)
-    </label>
-
     <label for="start">Przystanek początkowy</label>
     <input type="text" id="start" list="stops" placeholder="np. Katedra">
     <button type="button" id="use-location" class="location-button" style="display: none">📍 Użyj mojej lokalizacji</button>
@@ -264,37 +259,6 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         if (!bikesLayer) return;
         if (bikesToggle.checked) bikesLayer.addTo(map);
         else map.removeLayer(bikesLayer);
-    });
-
-    // Warstwa aut Traficar (car-sharing) — ten sam wzorzec co WRM wyżej:
-    // czysto informacyjna, ładowana raz, chowana checkboxem. Fiolet to
-    // kolor marki (stąd nazwa źródła danych, fioletowe.live - patrz
-    // PROJECT.md); wynajęte auto (available: false) przygaszone, żeby nie
-    // dało się go pomylić z wolnym.
-    let traficarLayer = null;
-    const traficarToggle = document.getElementById('traficar-toggle');
-    const CAR_STYLE = {radius: 5, weight: 1, color: '#6a1b9a', fillColor: '#ab47bc', fillOpacity: 0.9};
-    const CAR_RENTED_STYLE = {radius: 4, weight: 1.5, color: '#9e9e9e', fillColor: '#fff', fillOpacity: 0.35};
-
-    fetch('/api/traficar')
-        .then(r => r.json())
-        .then(cars => {
-            if (cars.error) { console.warn('Traficar:', cars.error); return; }
-            const markers = cars.map(c => {
-                const m = L.circleMarker([c.lat, c.lon], c.available ? CAR_STYLE : CAR_RENTED_STYLE);
-                const status = c.available ? `${c.fuel}% paliwa, zasięg ${c.range} km` : 'obecnie wynajęte';
-                m.bindTooltip(`Traficar ${esc(c.plate)}<br>${esc(status)}`);
-                return m;
-            });
-            traficarLayer = L.layerGroup(markers);
-            if (traficarToggle.checked) traficarLayer.addTo(map);
-        })
-        .catch(() => console.warn('Nie udało się pobrać aut Traficar.'));
-
-    traficarToggle.addEventListener('change', () => {
-        if (!traficarLayer) return;
-        if (traficarToggle.checked) traficarLayer.addTo(map);
-        else map.removeLayer(traficarLayer);
     });
 
     function showError(message, suggestions) {

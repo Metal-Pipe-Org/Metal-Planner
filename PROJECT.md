@@ -335,38 +335,6 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
   do wyświetlenia) zasilają statyczną geometrię i żywe sprawdzenie
   dostępności - szczegóły w „Rower WRM jako transfer” w Algorytmach.
 
-## Warstwa car-sharing (Traficar)
-
-Auta Traficar na mapie - **czysto informacyjna warstwa**, ten sam wzorzec co
-WRM wyżej (checkbox w panelu, domyślnie zaznaczony, `L.layerGroup` kółek,
-chowanie bez ponownego pobierania). W odróżnieniu od WRM **nie jest** (i nie
-jest planowana jako) transfer w `plan_flow` - to celowo płytka integracja,
-bo Traficar to auta na minuty/kilometry (nie stacje z siecią pieszych/
-rowerowych dojść jak WRM), więc sensowna integracja z CSA wymagałaby zupełnie
-innego modelu (koszt, nie tylko czas) - poza obecnym zakresem.
-
-- **Źródło danych**: Traficar sam nie publikuje żadnego oficjalnego API.
-  [`fioletowe.live`](https://fioletowe.live) (open source, GitHub
-  `divadsn/traficar-map`, licencja GPLv3) republikuje jego wewnętrzne API
-  jako udokumentowany REST/JSON bez klucza (`/docs/`, `/api/openapi.json`).
-  **To strona trzecia, nie sam Traficar** - może zniknąć albo zmienić
-  kształt bez ostrzeżenia (to samo zastrzeżenie co przy GTFS-Realtime niżej).
-  Potwierdzone na żywo przed implementacją: `GET /api/v1/zones` zwraca
-  Wrocław jako `zoneId=3`; `GET /api/v1/cars?zoneId=3` zwraca ~90-100 aut
-  z polami `lat`/`lng` (stringi!), `location`, `regPlate`, `fuel` (% baku),
-  `range` (km), `available` (bool). Feed deklaruje `Cache-Control:
-  max-age=12` (własny cache po stronie fioletowe.live) - `traficar.py`
-  odpytuje rzadziej (cache 20 s), żeby nie nadużywać cudzego serwisu.
-- **`traficar.py`**: ten sam styl cache'owania co `bikes.py` - błąd sieci
-  zostawia stare dane, wyjątek (`TraficarDataError`) propaguje się tylko przy
-  zupełnie pustym cache'u (pierwsze zapytanie po starcie serwera).
-- **Frontend**: `GET /api/traficar` zwraca listę aut, rysowaną jako
-  `L.layerGroup` kółek w fiolecie marki (kolor z nazwy źródła danych);
-  wynajęte auto (`available: false`) ma przygaszony, szary styl - nie da się
-  go pomylić z wolnym, ten sam pomysł co puste stacje WRM. Dymek: numer
-  rejestracyjny + (dla wolnych) % paliwa i zasięg w km, albo „obecnie
-  wynajęte” dla zajętych.
-
 ## API
 
 - `GET /api/stops` — wszystkie słupki: `[{name, lat, lon}, …]`.
@@ -374,11 +342,6 @@ innego modelu (koszt, nie tylko czas) - poza obecnym zakresem.
   `[{name, lat, lon, bikes, electric}, …]` (`electric` = liczba dostępnych
   rowerów elektrycznych, podzbiór `bikes`). Błąd (feed GBFS niedostępny
   i cache jeszcze pusty) → `{error: "…"}` z kodem 503.
-- `GET /api/traficar` — auta Traficar we Wrocławiu:
-  `[{lat, lon, fuel, range, plate, available}, …]` (`fuel` = % baku,
-  `range` = zasięg w km, `available` = czy wolne do wynajęcia). Błąd (API
-  fioletowe.live niedostępne i cache jeszcze pusty) → `{error: "…"}`
-  z kodem 503.
 - `GET /api/departures?stop=&time=HH:MM` — tablica odjazdów: najbliższe
   odjazdy z przystanku (wszystkich jego słupków) od podanej godziny,
   `{stop, departures: [{time, line, kind, headsign}, …]}` (maks. 24,
@@ -418,7 +381,6 @@ innego modelu (koszt, nie tylko czas) - poza obecnym zakresem.
 | `planner.py` | CSA (`plan_route`) + mapa przepływów (`plan_flow`) |
 | `bikes.py` | cache stacji WRM (GBFS) |
 | `bike_transfer.py` | rower WRM jako transfer w `plan_flow` (geometria statyczna + dostępność na żywo) |
-| `traficar.py` | cache aut car-sharing Traficar (przez fioletowe.live) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | mapa Leaflet + panel + cały frontendowy JS |
@@ -439,6 +401,16 @@ innego modelu (koszt, nie tylko czas) - poza obecnym zakresem.
   w „Plan rozwoju” niżej - zapisane, żeby nikt nie sprawdzał tego samego
   od zera. Biblioteka `gtfs-realtime-bindings` (instalowana do weryfikacji)
   odinstalowana z powrotem - nieużywana w kodzie.
+- **2026-07-22** — warstwa car-sharing Traficar USUNIĘTA z aktywnego kodu na
+  prośbę użytkownika (krótko po dodaniu, patrz wpis niżej) - `traficar.py`,
+  endpoint `/api/traficar`, checkbox i warstwa na mapie wycięte z
+  `routes.py`/`templates/index.html`. Kod **nie skasowany, tylko
+  zarchiwizowany** - gałąź `archive/traficar-layer` (odgałęziona tuż przed
+  usunięciem) ma go w całości, razem z resztą stanu repo na ten moment;
+  `git show archive/traficar-layer:traficar.py` albo `git checkout
+  archive/traficar-layer` przywraca. Ten punkt „Planu rozwoju” niżej
+  odznaczony z powrotem - jeśli ktoś zechce warstwę wrócić, kod czeka
+  gotowy na tej gałęzi, nie trzeba pisać od nowa.
 - **2026-07-22** — warstwa car-sharing Traficar na mapie: nowy moduł
   `traficar.py` (cache aut z `fioletowe.live`, republikującego wewnętrzne
   API Traficara - strona trzecia, zweryfikowana na żywo przed
@@ -782,13 +754,12 @@ między sesjami (mogą dzielić je dni).
       `plan_route` świadomie NIE dostał tej integracji (narzędzie debug,
       nieużywane przez UI - patrz API) - zakres ograniczony do `plan_flow`,
       który jest jedyną ścieżką faktycznie widoczną dla użytkownika.
-- [x] **Car-sharing (Traficar) jako warstwa** — zrobione 2026-07-22: auta
-      Traficar na mapie (pozycja, paliwo/zasięg, dostępność) przez
-      `fioletowe.live` (patrz „Warstwa car-sharing (Traficar)” wyżej),
-      ten sam wzorzec co warstwa WRM. `GET /api/v1/cars/nearby?lat=&lng=
-      &radius=` (promień od razu w API) NIE wykorzystane - niepotrzebne
-      przy obecnym zakresie (cała lista Wrocławia to tylko ~100 aut,
-      filtrowanie po stronie klienta by starczyło, gdyby było potrzebne).
+- [ ] **Car-sharing (Traficar) jako warstwa** — zbudowane i zweryfikowane
+      2026-07-22 (auta na mapie przez `fioletowe.live`, ten sam wzorzec co
+      WRM), ale USUNIĘTE z aktywnego kodu tego samego dnia na prośbę
+      użytkownika (patrz Changelog). Gotowy kod czeka na gałęzi
+      `archive/traficar-layer` - przywrócenie to `git checkout` tej gałęzi
+      + scalenie, nie pisanie od nowa, gdyby ktoś jednak tego zechciał.
 - [x] **Prawdziwy GTFS-Realtime (opóźnienia na żywo) dla MPK** —
       ZWERYFIKOWANE i ODRZUCONE 2026-07-22 (item nie zniknął z listy, bo
       to wciąż wartościowy wynik - żeby nikt później nie sprawdzał tego
