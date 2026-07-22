@@ -34,6 +34,11 @@
         Stacje roweru miejskiego (WRM)
     </label>
 
+    <label class="checkbox-row">
+        <input type="checkbox" id="vehicles-toggle" checked>
+        Pojazdy na żywo (opóźnienia)
+    </label>
+
     <label for="start">Przystanek początkowy</label>
     <input type="text" id="start" list="stops" placeholder="np. Katedra">
     <button type="button" id="use-location" class="location-button" style="display: none">📍 Użyj mojej lokalizacji</button>
@@ -259,6 +264,81 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         if (!bikesLayer) return;
         if (bikesToggle.checked) bikesLayer.addTo(map);
         else map.removeLayer(bikesLayer);
+    });
+
+    // Pojazdy MPK na żywo (pozycja + oszacowane opóźnienie) — feed
+    // mpk.wroc.pl/bus_position, dopasowany do rozkładu po stronie serwera
+    // (patrz realtime.py). Kolor kropki = opóźnienie: zielony na czas,
+    // bursztyn/czerwony spóźniony, niebieski przed czasem, szary bez
+    // dopasowania. Odświeżane co ~15 s (tyle deklaruje feed).
+    let vehiclesLayer = null;
+    let vehiclesTimer = null;
+    const vehiclesToggle = document.getElementById('vehicles-toggle');
+    const VEHICLE_REFRESH_MS = 15000;
+
+    // Skala jak margines przesiadki, ale to opóźnienie (nie zapas), więc
+    // odwrotnie: 0 = zielono, rośnie do czerwieni; przed czasem = niebiesko.
+    function delayColor(sec) {
+        if (sec === null) return '#9e9e9e';           // brak dopasowania
+        if (sec < -90) return '#00838f';              // wyraźnie przed czasem (teal - nie myli się ze słupkiem)
+        if (sec <= 90) return '#2e7d32';              // na czas (±1,5 min)
+        if (sec <= 240) return '#f9a825';             // do 4 min
+        if (sec <= 480) return '#ef6c00';             // do 8 min
+        return '#c62828';                             // ponad 8 min
+    }
+    function delayText(sec) {
+        if (sec === null) return 'brak danych o opóźnieniu';
+        const min = Math.round(sec / 60);
+        if (sec < -90) return `${Math.abs(min)} min przed czasem`;
+        if (sec <= 90) return 'na czas';
+        return `+${min} min opóźnienia`;
+    }
+
+    function drawVehicles(vehicles) {
+        const markers = vehicles.map(v => {
+            const m = L.circleMarker([v.lat, v.lon], {
+                radius: 5, weight: 1.5, color: '#fff',
+                fillColor: delayColor(v.delay), fillOpacity: 0.95,
+            });
+            const dir = v.headsign ? ` → ${esc(v.headsign)}` : '';
+            const label = (v.kind === 'tram' ? 'Tramwaj' : 'Autobus') + ' ' + esc(v.num);
+            m.bindTooltip(`<b>${label}</b>${dir}<br>${esc(delayText(v.delay))}`);
+            return m;
+        });
+        const layer = L.layerGroup(markers);
+        if (vehiclesLayer) map.removeLayer(vehiclesLayer);
+        vehiclesLayer = layer;
+        if (vehiclesToggle.checked) vehiclesLayer.addTo(map);
+    }
+
+    function loadVehicles() {
+        fetch('/api/vehicles')
+            .then(r => r.json())
+            .then(vehicles => {
+                if (vehicles.error) { console.warn('Pojazdy na żywo:', vehicles.error); return; }
+                drawVehicles(vehicles);
+            })
+            .catch(() => console.warn('Nie udało się pobrać pozycji pojazdów.'));
+    }
+
+    function startVehicles() {
+        loadVehicles();
+        clearInterval(vehiclesTimer);
+        // Odświeżamy tylko, gdy karta jest widoczna - w tle nie ma sensu bić po feedzie.
+        vehiclesTimer = setInterval(() => {
+            if (vehiclesToggle.checked && !document.hidden) loadVehicles();
+        }, VEHICLE_REFRESH_MS);
+    }
+
+    if (vehiclesToggle.checked) startVehicles();
+    vehiclesToggle.addEventListener('change', () => {
+        if (vehiclesToggle.checked) {
+            if (!vehiclesLayer) { startVehicles(); return; }
+            vehiclesLayer.addTo(map);
+            loadVehicles();
+        } else if (vehiclesLayer) {
+            map.removeLayer(vehiclesLayer);
+        }
     });
 
     function showError(message, suggestions) {

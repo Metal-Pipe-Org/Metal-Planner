@@ -4,6 +4,7 @@ from flask import jsonify, render_template, request
 
 import bikes
 import gtfs
+import realtime
 from planner import plan_flow, plan_route, stop_departures
 
 
@@ -50,6 +51,16 @@ def init_routes(app):
         try:
             return jsonify(bikes.station_list())
         except bikes.BikeDataError as e:
+            return jsonify({"error": str(e)}), 503
+
+    @app.route("/api/vehicles")
+    def api_vehicles():
+        try:
+            day = gtfs.load_day(datetime.now().date())
+            return jsonify(realtime.live_vehicles(day))
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+        except realtime.RealtimeError as e:
             return jsonify({"error": str(e)}), 503
 
     @app.route("/api/departures")

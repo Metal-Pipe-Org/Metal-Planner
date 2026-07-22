@@ -5,6 +5,7 @@
       "name": "flask-app",
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["app.py"],
+      "env": { "TZ": "Europe/Warsaw" },
       "port": 5001,
       "autoPort": true
     }
