@@ -25,11 +25,18 @@
 
     <p class="hint">
         Kliknij na mapie przystanek startowy, potem docelowy —
-        albo wpisz nazwy ręcznie.
+        albo wpisz nazwy ręcznie. Kliknij prawym przyciskiem na przystanek,
+        żeby zobaczyć tablicę odjazdów.
     </p>
+
+    <label class="checkbox-row">
+        <input type="checkbox" id="bikes-toggle" checked>
+        Stacje roweru miejskiego (WRM)
+    </label>
 
     <label for="start">Przystanek początkowy</label>
     <input type="text" id="start" list="stops" placeholder="np. Katedra">
+    <button type="button" id="use-location" class="location-button" style="display: none">📍 Użyj mojej lokalizacji</button>
 
     <label for="end">Przystanek docelowy</label>
     <input type="text" id="end" list="stops" placeholder="np. pl. Grunwaldzki">
@@ -119,6 +126,14 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
     let sel = {start: null, end: null};       // przystanki wybrane kliknięciem
     let routeLayer = null;
+    let myLocation = null;         // {lat, lon} prawdziwej lokalizacji jako start, albo null
+    let myLocationMarker = null;
+
+    function clearMyLocation() {
+        if (!myLocation) return;
+        myLocation = null;
+        if (myLocationMarker) { map.removeLayer(myLocationMarker); myLocationMarker = null; }
+    }
 
     const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
                         fillColor: '#42a5f5', fillOpacity: 0.8};
@@ -162,6 +177,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         if (!sel.start || (sel.start && sel.end)) {
             sel = {start: name, end: null};   // kolejne kliknięcie zaczyna od nowa
             clearRoute();
+            clearMyLocation();                // klik na mapie zastępuje ewentualną lokalizację
         } else if (name !== sel.start) {
             sel.end = name;
         }
@@ -169,6 +185,39 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         endInput.value = sel.end || '';
         restyle(...previous, sel.start, sel.end);
         if (sel.start && sel.end) search();
+    }
+
+    // Ręczne wpisanie startu też zastępuje lokalizację - .value ustawiane z JS
+    // (pickStop, search) nie odpala 'input', więc to nie gryzie się z powyższym.
+    startInput.addEventListener('input', clearMyLocation);
+
+    // Tablica odjazdów: prawy klik na przystanek, osobno od lewego (który
+    // wybiera start/cel) - dymek z najbliższymi odjazdami, bez wpływu na
+    // wyszukiwanie połączeń.
+    function showDepartures(name, latlng) {
+        const popup = L.popup({maxWidth: 260})
+            .setLatLng(latlng)
+            .setContent('<p class="hint">Wczytuję odjazdy…</p>')
+            .openOn(map);
+        const params = new URLSearchParams({stop: name, time: document.getElementById('time').value});
+        fetch('/api/departures?' + params)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    popup.setContent(`<b>${esc(name)}</b><p class="hint">${esc(data.error)}</p>`);
+                    return;
+                }
+                if (!data.departures.length) {
+                    popup.setContent(`<b>${esc(data.stop)}</b><p class="hint">Brak odjazdów do końca dnia.</p>`);
+                    return;
+                }
+                const rows = data.departures.map(d =>
+                    `<li><b>${esc(d.time)}</b> ${esc(KIND_LABEL[d.kind] || KIND_LABEL.other)} ${esc(d.line)}`
+                    + `<span class="headsign"> → ${esc(d.headsign)}</span></li>`
+                ).join('');
+                popup.setContent(`<b>${esc(data.stop)}</b><ul class="legs">${rows}</ul>`);
+            })
+            .catch(() => popup.setContent(`<b>${esc(name)}</b><p class="hint">Nie udało się pobrać odjazdów.</p>`));
     }
 
     fetch('/api/stops')
@@ -179,6 +228,10 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 const m = L.circleMarker([s.lat, s.lon], BASE_STYLE).addTo(map);
                 m.bindTooltip(s.name);
                 m.on('click', () => pickStop(s.name));
+                m.on('contextmenu', e => {
+                    L.DomEvent.preventDefault(e.originalEvent);
+                    showDepartures(s.name, e.latlng);
+                });
                 if (!markersByName.has(s.name)) markersByName.set(s.name, []);
                 markersByName.get(s.name).push(m);
             }
@@ -190,6 +243,63 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         return div.innerHTML;
     }
 
+    // Warstwa stacji WRM (rower miejski) — czysto informacyjna, nie wpływa
+    // na wyszukiwanie połączeń. Ładowana raz przy starcie, chowana checkboxem.
+    function plural(n, one, few, many) {
+        if (n === 1) return one;
+        const mod10 = n % 10, mod100 = n % 100;
+        if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return few;
+        return many;
+    }
+
+    let bikesLayer = null;
+    const bikesToggle = document.getElementById('bikes-toggle');
+    // Puste stacje mają celowo zupełnie inny styl (szara "obwódka" zamiast
+    // pełnej pomarańczowej kropki) - nie da się ich pomylić ze stacją z rowerami.
+    const BIKE_STYLE = {weight: 1, color: '#e65100', fillColor: '#ffb74d', fillOpacity: 0.9};
+    const BIKE_EMPTY_STYLE = {radius: 4, weight: 1.5, color: '#9e9e9e', fillColor: '#fff', fillOpacity: 0.35};
+
+    fetch('/api/bikes')
+        .then(r => r.json())
+        .then(stations => {
+            if (stations.error) { console.warn('Stacje WRM:', stations.error); return; }
+            const markers = [];
+            for (const s of stations) {
+                const radius = s.bikes > 0 ? 4 + Math.min(s.bikes, 16) * 0.4 : 4;
+                const style = s.bikes > 0 ? {...BIKE_STYLE, radius} : BIKE_EMPTY_STYLE;
+                const m = L.circleMarker([s.lat, s.lon], style);
+                let tooltip = `${esc(s.name)}<br>${s.bikes} ${plural(s.bikes, 'rower', 'rowery', 'rowerów')}`;
+                if (s.electric > 0) {
+                    tooltip += ` (w tym ${s.electric} `
+                        + `${plural(s.electric, 'elektryczny', 'elektryczne', 'elektrycznych')})`;
+                }
+                m.bindTooltip(tooltip);
+                markers.push(m);
+                if (s.electric > 0) {
+                    // Skaluje się z promieniem stacji, więc nigdy nie wystaje poza kółko.
+                    const size = Math.round(radius * 1.3);
+                    markers.push(L.marker([s.lat, s.lon], {
+                        icon: L.divIcon({
+                            className: 'bike-electric-badge',
+                            html: `<span style="font-size:${size}px">⚡︎</span>`,
+                            iconSize: [size, size],
+                            iconAnchor: [size / 2, size / 2],
+                        }),
+                        interactive: false,
+                    }));
+                }
+            }
+            bikesLayer = L.layerGroup(markers);
+            if (bikesToggle.checked) bikesLayer.addTo(map);
+        })
+        .catch(() => console.warn('Nie udało się pobrać stacji WRM.'));
+
+    bikesToggle.addEventListener('change', () => {
+        if (!bikesLayer) return;
+        if (bikesToggle.checked) bikesLayer.addTo(map);
+        else map.removeLayer(bikesLayer);
+    });
+
     function showError(message, suggestions) {
         let html = `<div class="error"><p>${esc(message)}</p>`;
         if (suggestions && suggestions.length) {
@@ -200,7 +310,10 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         resultBox.innerHTML = html + '</div>';
     }
 
-    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', other: '#6a1b9a'};
+    // Rower: ten sam pomarańcz co warstwa stacji WRM (BIKE_STYLE niżej) -
+    // spójny kolor "to jest rower" niezależnie, czy patrzysz na stację czy
+    // na sugestię trasy.
+    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', walk: '#616161', bike: '#e65100', other: '#6a1b9a'};
 
     // Mapa przepływów: każdy kurs to jeden ciągły segment od przystanku
     // wsiadania do ostatniego sensownego wyjścia; jasność i grubość linii
@@ -209,23 +322,52 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     // (styl mapy tramwajowej), a najechanie na linię podświetla ją
     // i pokazuje numer - widać, "która co gdzie", nawet w wiązce.
     const BRIGHT_W = 0.45;
-    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', other: 'Linia'};
+    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', walk: 'Pieszo', bike: 'Rower WRM', other: 'Linia'};
+
+    // Zapas na przesiadkę wsiadania w segment - bursztynowy (ciasno, blisko
+    // ustawowego bufora) do zielonego (luz); NIE czerwony - czerwony miesza
+    // się z kolorem linii tramwajowej. Brak kropki = start trasy, gdzie
+    // bufor przesiadki nie ma zastosowania (patrz PROJECT.md).
+    const MARGIN_CAP_SEC = 600;   // 10 min i więcej = w pełni "zielono"
+    const MARGIN_HUE_MIN = 35;    // bursztyn/pomarańcz, nie czerwień
+    const MARGIN_HUE_MAX = 135;
+    function marginColor(sec) {
+        const t = Math.min(sec, MARGIN_CAP_SEC) / MARGIN_CAP_SEC;
+        return `hsl(${MARGIN_HUE_MIN + t * (MARGIN_HUE_MAX - MARGIN_HUE_MIN)}, 90%, 40%)`;
+    }
+    function marginText(sec) {
+        const min = Math.round(sec / 60);
+        return (min < 1 ? '<1 min' : `${min} min`) + ' zapasu';
+    }
 
     function drawFlow(flow) {
         setBaseDim(true);
         const faint = [], casings = [], bright = [];
-        const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
+        const byLine = new Map();        // "num|kind" -> [segmenty] do plakietek
+        const transferGroups = new Map(); // board_stop -> {pos, entries: [segmenty]}
 
         for (const s of flow.segments) {        // posortowane po w rosnąco
             const key = s.num + '|' + s.kind;
             const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
             const weight = 1 + 3.5 * s.w;
             const opacity = 0.10 + 0.85 * s.w;
-            const line = L.polyline(s.path, {color, opacity, weight});
-            line.bindTooltip(
-                `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
-                {sticky: true},
-            );
+            // Pieszo i rower to linia prosta (haversine / przez stacje), nie
+            // prawdziwa trasa uliczna - przerywana kreska od razu to
+            // sygnalizuje (patrz PROJECT.md); rower kropkowany, żeby dało
+            // się odróżnić od pieszego nawet bez najeżdżania (kolor + wzór).
+            const dashArray = s.kind === 'walk' ? '4, 6' : s.kind === 'bike' ? '1, 6' : null;
+            const line = L.polyline(s.path, {color, opacity, weight, dashArray});
+            let tooltip;
+            if (s.kind === 'walk') {
+                tooltip = `Pieszo, ok. ${Math.max(1, Math.round(s.walk_sec / 60))} min`;
+            } else if (s.kind === 'bike') {
+                const [st1, st2] = s.bike_stations;
+                tooltip = `Rower WRM: ${esc(st1)} → ${esc(st2)} `
+                    + `(w sumie ok. ${Math.max(1, Math.round(s.walk_sec / 60))} min z dojściem)`;
+            } else {
+                tooltip = `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`;
+            }
+            line.bindTooltip(tooltip, {sticky: true});
             line.on('mouseover', () => {
                 line.setStyle({opacity: 1, weight: weight + 2.5});
                 line.bringToFront();       // spod wiązki na wierzch
@@ -242,12 +384,42 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             } else {
                 faint.push(line);
             }
-            if (!byLine.has(key)) byLine.set(key, []);
-            byLine.get(key).push(s);
+            if (s.kind !== 'walk' && s.kind !== 'bike') {   // pusty numer wyglądałby źle
+                if (!byLine.has(key)) byLine.set(key, []);
+                byLine.get(key).push(s);
+            }
+            if (s.transfer_margin !== null) {
+                if (!transferGroups.has(s.board_stop)) {
+                    transferGroups.set(s.board_stop, {pos: s.path[0], entries: []});
+                }
+                transferGroups.get(s.board_stop).entries.push(s);
+            }
         }
 
-        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
-        const layers = [...faint, ...casings, ...bright];
+        // Kropka zapasu na przesiadkę - jedna PER PRZYSTANEK (nie per linia):
+        // gdy z tego samego węzła odjeżdża kilka linii z aktualnej mapy,
+        // dymek po najechaniu wylicza wszystkie razem z godziną i zapasem,
+        // zamiast pokazywać tylko jedną z nich. Kolor kropki = najlepsza
+        // (najbardziej komfortowa) z dostępnych opcji.
+        const marginDots = [];
+        for (const [stopName, group] of transferGroups) {
+            const bestMargin = Math.max(...group.entries.map(e => e.transfer_margin));
+            const rows = group.entries
+                .slice()
+                .sort((a, b) => (a.board_time || '').localeCompare(b.board_time || ''))
+                .map(e => `<li><b>${esc(e.board_time || '?')}</b> `
+                    + `${esc(KIND_LABEL[e.kind] || KIND_LABEL.other)} ${esc(e.num)} `
+                    + `<span class="margin-chip" style="background:${marginColor(e.transfer_margin)}">`
+                    + `${marginText(e.transfer_margin)}</span></li>`)
+                .join('');
+            marginDots.push(L.circleMarker(group.pos, {
+                radius: 8, weight: 2, color: '#fff',
+                fillColor: marginColor(bestMargin), fillOpacity: 1,
+            }).bindTooltip(`<b>${esc(stopName)}</b><ul class="legs">${rows}</ul>`, {sticky: true}));
+        }
+
+        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze -> kropki zapasu na wierzchu.
+        const layers = [...faint, ...casings, ...bright, ...marginDots];
 
         // Plakietki z numerem linii - tylko dla linii, które mają sensowny
         // udział w przepływie; na najjaśniejszym segmencie linii, dłuższe
@@ -301,11 +473,16 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 
     function search() {
         const params = new URLSearchParams({
-            start: startInput.value,
             end: endInput.value,
             time: document.getElementById('time').value,
             qmin: (Number(document.getElementById('qmin').value) / 100).toFixed(2),
         });
+        if (myLocation) {
+            params.set('start_lat', myLocation.lat);
+            params.set('start_lon', myLocation.lon);
+        } else {
+            params.set('start', startInput.value);
+        }
         clearRoute();
         resultBox.innerHTML = '<p class="hint">Szukam…</p>';
         fetch('/api/flow?' + params)
@@ -344,7 +521,47 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         startInput.value = '';
         endInput.value = '';
         clearRoute();
+        clearMyLocation();
         restyle(...previous);
+    });
+
+    // Prawdziwa lokalizacja jako start - jednorazowy odczyt (nie watchPosition,
+    // wyszukiwanie to jednorazowa akcja, nie potrzeba śledzenia na żywo).
+    const MY_LOCATION_STYLE = {radius: 8, weight: 2, color: '#fff', fillColor: '#6200ea', fillOpacity: 1};
+
+    function geoErrorMessage(err) {
+        switch (err.code) {
+            case err.PERMISSION_DENIED: return 'Brak zgody na dostęp do lokalizacji.';
+            case err.POSITION_UNAVAILABLE: return 'Nie udało się ustalić lokalizacji.';
+            case err.TIMEOUT: return 'Upłynął czas oczekiwania na lokalizację.';
+            default: return 'Nie udało się pobrać lokalizacji.';
+        }
+    }
+
+    document.getElementById('use-location').addEventListener('click', () => {
+        if (!navigator.geolocation) {
+            showError('Ta przeglądarka nie obsługuje geolokalizacji.');
+            return;
+        }
+        resultBox.innerHTML = '<p class="hint">Ustalam lokalizację…</p>';
+        navigator.geolocation.getCurrentPosition(
+            pos => {
+                const previous = [sel.start, sel.end];
+                myLocation = {lat: pos.coords.latitude, lon: pos.coords.longitude};
+                sel = {start: null, end: sel.end};
+                if (myLocationMarker) map.removeLayer(myLocationMarker);
+                myLocationMarker = L.circleMarker([myLocation.lat, myLocation.lon], MY_LOCATION_STYLE)
+                    .bindTooltip('Twoja lokalizacja')
+                    .addTo(map);
+                startInput.value = 'Twoja lokalizacja';
+                resultBox.innerHTML = '';
+                restyle(...previous);
+                map.setView([myLocation.lat, myLocation.lon], 15);
+                if (endInput.value) search();
+            },
+            err => showError(geoErrorMessage(err)),
+            {timeout: 10000},
+        );
     });
 
     // Kliknięcie podpowiedzi wstawia nazwę w pierwsze niepasujące pole.

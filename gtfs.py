@@ -18,6 +18,12 @@ WEEKDAY_COLUMNS = [
 
 ROUTE_TYPE_LABELS = {0: "Tramwaj", 3: "Autobus"}
 
+WALK_SEC = 180           # zmiana stanowiska na tym samym przystanku (ta sama nazwa)
+WALK_SPEED_MPS = 1.3     # ~4,7 km/h - tempo dojścia pieszo do pobliskiego przystanku
+WALK_RADIUS_M = 400      # promień, w którym "po prostu idź" ma sens
+WALK_MIN_SEC = 60        # dolny próg czasu dojścia - nawet bardzo bliski sąsiad to nie 0 s
+_GRID_DEG = WALK_RADIUS_M / 111_000   # siatka do kubełkowania (~promień = bok komórki)
+
 _day_cache = {}
 
 
@@ -39,7 +45,9 @@ class DayData:
         self.stop_coords = {}        # stop_id -> (lat, lon)
         self.stops_by_key = {}       # nazwa.casefold() -> [stop_id, ...]
         self.display_name = {}       # nazwa.casefold() -> oryginalna pisownia
-        self.siblings = {}           # stop_id -> inne słupki o tej samej nazwie
+        self.siblings = {}           # stop_id -> [(sąsiad_pieszy, sek_dojścia), ...]:
+                                      # ta sama nazwa (WALK_SEC) i/lub inny bliski
+                                      # przystanek w promieniu WALK_RADIUS_M (haversine)
         self.trip_info = {}          # trip_id -> (etykieta linii, kierunek)
         self.trip_shape = {}         # trip_id -> shape_id (geometria z shapes.txt)
 
@@ -74,6 +82,70 @@ def active_service_ids(db, day):
         else:
             active.discard(service_id)
     return active
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    """Odległość po powierzchni Ziemi w metrach."""
+    r = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _nearby_walks(stop_coords):
+    """Dla każdego przystanku - inne przystanki (dowolna nazwa) w promieniu
+    WALK_RADIUS_M, z czasem dojścia pieszo: {stop_id: [(sąsiad, sek), ...]}.
+
+    Porównanie każdy-z-każdym byłoby ~n² (przy ~2500 słupkach to ~6 mln par) -
+    zamiast tego słupki trafiają do siatki (kubełki o boku ~promień), a dla
+    każdego sprawdzamy tylko 3x3 sąsiednie komórki (gwarantowanie obejmują
+    cały promień, bo bok komórki = promień).
+    """
+    buckets = {}
+    for stop_id, (lat, lon) in stop_coords.items():
+        key = (round(lat / _GRID_DEG), round(lon / _GRID_DEG))
+        buckets.setdefault(key, []).append(stop_id)
+
+    result = {}
+    for stop_id, (lat, lon) in stop_coords.items():
+        cx, cy = round(lat / _GRID_DEG), round(lon / _GRID_DEG)
+        near = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for other in buckets.get((cx + dx, cy + dy), ()):
+                    if other == stop_id:
+                        continue
+                    dist = _haversine_m(lat, lon, *stop_coords[other])
+                    if dist <= WALK_RADIUS_M:
+                        near.append((other, max(WALK_MIN_SEC, round(dist / WALK_SPEED_MPS))))
+        if near:
+            result[stop_id] = near
+    return result
+
+
+LAST_MILE_RADIUS_M = 1000   # dalej niż WALK_RADIUS_M - to punkt startowy, nie przesiadka
+LAST_MILE_MAX_STOPS = 5     # ile najbliższych przystanków bierzemy pod uwagę
+
+
+def nearest_stops(lat, lon, day, n=LAST_MILE_MAX_STOPS, radius_m=LAST_MILE_RADIUS_M):
+    """Najbliższe przystanki do dowolnego punktu (np. lokalizacji użytkownika),
+    z czasem dojścia pieszo: [(stop_id, sek), ...] posortowane rosnąco po
+    odległości, tylko w promieniu radius_m.
+
+    Pojedyncze zapytanie na punkt - liniowy skan po wszystkich słupkach
+    (bez kubełkowania z _nearby_walks, bo to nie jest przeliczane dla
+    każdej pary naraz, tylko raz na żądanie).
+    """
+    candidates = sorted(
+        (_haversine_m(lat, lon, slat, slon), stop_id)
+        for stop_id, (slat, slon) in day.stop_coords.items()
+    )
+    return [
+        (stop_id, max(WALK_MIN_SEC, round(dist / WALK_SPEED_MPS)))
+        for dist, stop_id in candidates[:n]
+        if dist <= radius_m
+    ]
 
 
 def load_day(day):
@@ -115,12 +187,27 @@ def load_day(day):
         data.stops_by_key.setdefault(name_key, []).append(stop_id)
         data.display_name.setdefault(name_key, stop_name)
 
-    # Słupki o tej samej nazwie traktujemy jako jeden węzeł przesiadkowy
-    # połączony krótkim przejściem pieszym (patrz WALK_SEC w planner.py).
+    # Piesi sąsiedzi każdego przystanku - dwa źródła, scalone w jedną relację:
+    # (a) słupki o TEJ SAMEJ nazwie = jeden węzeł przesiadkowy, stały bufor
+    #     WALK_SEC (to więcej niż czysta geometria - przejście na drugą stronę
+    #     torów/ulicy, nie tylko odległość w linii prostej);
+    # (b) DOWOLNE inne przystanki w promieniu WALK_RADIUS_M - czas z haversine
+    #     i założonej prędkości marszu (tzw. "po prostu idź", patrz PROJECT.md).
+    # Gdy oba się pokrywają (bliski sąsiad ma akurat tę samą nazwę), (a) wygrywa -
+    # to świadomy wybór, nie tylko geometria.
+    same_name = {}
     for group in data.stops_by_key.values():
         if len(group) > 1:
             for stop_id in group:
-                data.siblings[stop_id] = tuple(s for s in group if s != stop_id)
+                same_name[stop_id] = [(s, WALK_SEC) for s in group if s != stop_id]
+
+    for stop_id, near in _nearby_walks(data.stop_coords).items():
+        merged = dict(near)
+        merged.update(same_name.get(stop_id, ()))
+        data.siblings[stop_id] = tuple(merged.items())
+    for stop_id, pairs in same_name.items():
+        if stop_id not in data.siblings:
+            data.siblings[stop_id] = tuple(pairs)
 
     # stop_times czytamy w kolejności (trip_id, stop_sequence) - to indeks,
     # więc bez sortowania - i sklejamy sąsiednie przystanki kursu w połączenia.

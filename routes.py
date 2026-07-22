@@ -2,10 +2,11 @@ from datetime import datetime
 
 from flask import jsonify, render_template, request
 
+import bikes
 import dev
 import gtfs
 import traficar
-from planner import plan_flow, plan_route
+from planner import plan_flow, plan_route, stop_departures
 
 
 def _parse_when(time_str):
@@ -53,6 +54,20 @@ def init_routes(app):
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
 
+    @app.route("/api/bikes")
+    def api_bikes():
+        try:
+            return jsonify(bikes.station_list())
+        except bikes.BikeDataError as e:
+            return jsonify({"error": str(e)}), 503
+
+    @app.route("/api/departures")
+    def api_departures():
+        return jsonify(stop_departures(
+            request.args.get("stop", ""),
+            _parse_when(request.args.get("time")),
+        ))
+
     @app.route("/api/plan")
     def api_plan():
         return jsonify(plan_route(
@@ -71,9 +86,18 @@ def init_routes(app):
             q_min = float(request.args.get("qmin", ""))
         except ValueError:
             q_min = None
+        start_point = None
+        if "start_lat" in request.args and "start_lon" in request.args:
+            try:
+                start_point = (
+                    float(request.args["start_lat"]), float(request.args["start_lon"]),
+                )
+            except ValueError:
+                pass
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
             q_min,
+            start_point,
         ))

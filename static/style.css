@@ -175,6 +175,32 @@ input[type="range"] {
     accent-color: #1565c0;
 }
 
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    cursor: pointer;
+}
+
+.checkbox-row input {
+    width: auto;
+    margin: 0;
+    accent-color: #e65100;
+}
+
+.location-button {
+    width: 100%;
+    margin-top: 6px;
+    padding: 6px 10px;
+    font-size: 0.85em;
+    background: #eef7ff;
+    color: #1565c0;
+    border: 1px solid #90caf9;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
 .switch-row {
     display: flex;
     align-items: center;
@@ -304,6 +330,16 @@ input[type="range"] {
     color: #555;
 }
 
+.margin-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
 .line-badge {
     background: #fff;
     border: 1.5px solid #444;
@@ -332,4 +368,16 @@ input[type="range"] {
 .line-badge.other {
     color: #6a1b9a;
     border-color: #6a1b9a;
+}
+
+.bike-electric-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #bf360c;
+    pointer-events: none;
+}
+
+.bike-electric-badge span {
+    line-height: 1;
 }
