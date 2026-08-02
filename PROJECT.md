@@ -376,6 +376,7 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 | Plik | Rola |
 |---|---|
+| `run.py` | lokalny odpowiednik Dockera: odświeża rozkład, gdy trzeba, i dopiero potem startuje `app.py` |
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
 | `planner.py` | CSA (`plan_route`) + mapa przepływów (`plan_flow`) |
