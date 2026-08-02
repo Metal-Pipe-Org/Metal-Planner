@@ -568,14 +568,30 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
                 if stop in target_set:
                     continue          # wartość = przyjazd, już dokładna
                 best = None
+                # Wyjście o krok pieszo od celu (patrz kotwica końca niżej) -
+                # dorzucamy dojście na piechotę jako jednego z kandydatów.
+                # Bez tego `candidates_at`/`join_value` (które znają tylko
+                # przesiadki NA INNE narysowane kursy, nie "po prostu dojdź
+                # do celu") potrafiły podmienić dobrą aproksymację na gorszą
+                # wartość przypadkowego kursu przejeżdżającego przez ten sam
+                # przystanek - zobacz PROJECT.md, przykład Księże Małe/Katedra
+                # -> Pl. Grunwaldzki.
+                walk_info = target_walk_info.get(stop)
+                if walk_info is not None:
+                    best = arr_t + walk_info[1]
                 for other in candidates_at(stop):
                     if other is seg:
                         continue
                     value = join_value(arr_t, stop, other)
                     if value is not None and (best is None or value < best):
                         best = value
-                # bez widocznej kontynuacji zostaje surowa aproksymacja
-                new_value = raw_bound if best is None else best
+                # Żaden kandydat nie może POGORSZYĆ aproksymację (patrz
+                # Algorytmy - `deadline - latest` bywa zbyt pesymistyczna dla
+                # rzadkich linii), tylko poprawić - `join_value`/dojście
+                # pieszo widzą JEDNĄ konkretną kontynuację, a `raw_bound` to
+                # bezpieczne ograniczenie z pełnego skanu wstecznego
+                # (`latest[]`) po WSZYSTKICH kursach i sąsiadach.
+                new_value = raw_bound if best is None else min(raw_bound, best)
                 if new_value != seg["exit_vals"][j]:
                     seg["exit_vals"][j] = new_value
                     changed = True
