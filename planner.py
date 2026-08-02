@@ -794,7 +794,16 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     # jasnością najjaśniejszego z konkurujących wariantów (patrz add_walk).
     # Punkt z prawdziwej lokalizacji (patrz Frontend) nie ma nazwy - zostaje
     # kluczowany współrzędnymi, jak dawniej (nie ma z czym go grupować).
-    stop_name_by_coord = {coord: day.stop_names[sid] for sid, coord in day.stop_coords.items()}
+    # Kanoniczna nazwa (bez sufiksu peronu, patrz gtfs.canonical_stop_name) -
+    # węzeł typu Pl. Grunwaldzki ma kilkanaście stop_id na osobne perony
+    # ("PL. GRUNWALDZKI Z/a", "Pn/a", ...); bez kanonizacji każdy dawałby
+    # własne, prawie równoległe dojście pieszo na mapie (patrz PROJECT.md,
+    # "8 Maja" - to samo zjawisko, tu dodatkowo nasilone różnymi NAZWAMI
+    # peronów, nie tylko współrzędnymi).
+    stop_name_by_coord = {
+        coord: gtfs.canonical_stop_name(day.stop_names[sid])
+        for sid, coord in day.stop_coords.items()
+    }
     walk_segments = {}
 
     def add_walk(from_coord, to_coord, walk_sec, q, bike_hint=None):

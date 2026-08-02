@@ -33,7 +33,12 @@ _day_cache = {}
 _SUBSTATION_SUFFIX_RE = re.compile(r"\s+(?:Pn|Pd|Z|W)/[at]$")
 
 
-def _canonical_stop_name(name):
+def canonical_stop_name(name):
+    """Nazwa stacji bez sufiksu peronu - patrz _SUBSTATION_SUFFIX_RE.
+
+    Publiczna (używana też przez planner.py do grupowania dojść pieszo
+    między peronami tej samej stacji - patrz PROJECT.md, dojście do celu).
+    """
     return _SUBSTATION_SUFFIX_RE.sub("", name)
 
 
@@ -41,7 +46,7 @@ def _dedupe_stations(names):
     """Zwraca posortowane nazwy stacji bez peronów-duplikatów tej samej stacji."""
     by_canonical = {}
     for name in names:
-        base = _canonical_stop_name(name)
+        base = canonical_stop_name(name)
         if base not in by_canonical or name == base:
             by_canonical[base] = name
     return sorted(by_canonical.values())
