@@ -390,6 +390,49 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 ## Changelog
 
+- **2026-08-02** — zgłoszenie: wyszukiwarka nie znajdowała połączenia
+  Księże Małe/Księże Wielkie → Pl. Grunwaldzki, mimo że w rzeczywistości
+  istnieje. Śledztwo znalazło TRZY osobne przyczyny (branch `testing-fixes`):
+  1. **Baza rozkładów była przeterminowana** (`calendar.txt` obejmował tylko
+     2026-07-13 do 2026-07-26, a data „dziś" to 2026-08-02) - `data/gtfs.sqlite`
+     miała zero aktywnych kursów DLA KAŻDEJ pary przystanków, nie tylko tej.
+     `calendar.txt` w paczce GTFS obejmuje tylko ok. 2 tygodnie, a lokalne
+     środowisko dev nie ma odpowiednika `GTFS_AUTO_UPDATE_HOUR`/entrypointu
+     Dockera - trzeba pamiętać o ręcznym `update_gtfs.py`. Naprawiono ręcznym
+     odświeżeniem bazy, a na przyszłość dodano `run.py` (patrz „Szybki start"
+     w README) - sprawdza świeżość i aktualizuje sam przed startem.
+  2. **Prawdziwy błąd w `_scan`** (CSA, `plan_route`/`/api/plan`): relaksacja
+     piesza (dojście z sąsiedniego przystanku, `day.siblings`) aktualizowała
+     `earliest[]`/`journey[]`, ale NIGDY nie sprawdzała, czy przystanek, do
+     którego doszliśmy pieszo, jest celem - w odróżnieniu od relaksacji przez
+     PRZEJAZD, która to sprawdzała. Gdy cel był osiągalny wcześniej pieszo
+     (z sąsiedniego słupka) niż jakimkolwiek bezpośrednim kursem, ten wpis
+     pieszy „zajmował" `earliest[cel]`, blokując późniejsze (poprawne)
+     aktualizacje przez przejazd - a że nigdy nie przechodził przez sprawdzenie
+     celu, `_scan` zwracał "brak połączenia" mimo że w `journey[]` już
+     bezpiecznie siedziała trasa. Naprawiono: cały kod zapisujący
+     `earliest[]`/`journey[]` (start, „ostatnia mila", relaksacja po
+     przejeździe I po dojściu pieszym) przechodzi teraz przez jedną funkcję
+     pomocniczą (`_reach`), która zawsze sprawdza trafienie w cel.
+  3. **Prawdziwy błąd w `plan_flow`** (mapa przepływów - to, co faktycznie
+     rysuje UI): doprecyzowanie jasności wyjścia (`join_value`/`candidates_at`,
+     patrz Algorytmy) szukało WYŁĄCZNIE przesiadek na inne narysowane kursy -
+     nie znało opcji „po prostu dojdź do celu pieszo" z przystanku będącego
+     pieszym sąsiadem celu (np. „PL. GRUNWALDZKI W/t" obok „PL. GRUNWALDZKI").
+     Gdy trafiało na taki przystanek, i tak próbowało doprecyzować go przez
+     `join_value`, a znaleziony (niepowiązany, gorszy) kurs BEZWARUNKOWO
+     nadpisywał bezpieczną aproksymację z pełnego skanu wstecznego (`latest[]`)
+     - segment stawał się sztucznie ciemny i wypadał poniżej progu jasności
+     (`q_min`), więc mapa pokazywała **zero segmentów mimo poprawnego
+     `best_arrival`**. Naprawiono dwiema poprawkami: (a) dojście pieszo do celu
+     z takiego przystanku liczy się teraz jako jeden z kandydatów obok
+     przesiadek na inne kursy; (b) żaden kandydat (przesiadka ani dojście) nie
+     może już POGORSZYĆ aproksymacji z `latest[]` - tylko ją poprawić
+     (`min(raw_bound, best)` zamiast bezwarunkowego nadpisania). Zweryfikowane
+     na 30 losowych parach przystanek→przystanek: przed poprawką (b)/(a)
+     6/30 dawało "poprawny `best_arrival`, zero segmentów", po poprawce 2/30 -
+     pozostałe dwa mają INNĄ, głębszą przyczynę (patrz „Znane ograniczenia"
+     niżej), nienaprawioną w tym przebiegu.
 - **2026-07-22** — zweryfikowany i ODRZUCONY pomysł „prawdziwy GTFS-Realtime
   dla MPK” (ostatni punkt „Planu rozwoju”): feed
   `mapadlugoleka.klosok.eu/vehicle_positions.pb` jest żywy i ma poprawny
@@ -649,6 +692,20 @@ podgląd stanu sieci, transfer to osobna decyzja algorytmu).
 
 ## Znane ograniczenia
 
+- **`plan_flow` czasem nadal pokazuje zero segmentów mimo poprawnego
+  `best_arrival`** (patrz Changelog 2026-08-02, punkt 3 - tam naprawiono
+  jeden konkretny wariant) - pozostały, nienaprawiony przypadek to trasy
+  wymagające KILKU przesiadek "tą samą nazwą" pod rząd (np. dwa razy
+  „ten sam przystanek, inny słupek" w jednej trasie, jak Smolec →
+  OPORÓW → KROMERA → Bąków, znalezione przy weryfikacji poprawki wyżej -
+  30 losowych par, 2/30). `_backward` (skan wsteczny `latest[]`) robi
+  tylko JEDEN skok pieszy na raz z każdego przystanku (świadome
+  uproszczenie, patrz Algorytmy), więc `latest[]` czasem nie dociera z
+  powrotem aż do prawdziwego startu, gdy trasa wymaga takiego skoku
+  wielokrotnie - `_scan`/plan_route wciąż znajduje trasę (`best_arrival`
+  poprawny), ale `plan_flow` nie ma z czego zbudować segmentu. Głębsza
+  poprawka wymagałaby przemyślenia całego mechanizmu skanu wstecznego dla
+  łańcuchów przesiadek, nie punktowej łatki - odłożone na później.
 - Intensywność w trybie przepływów to przybliżenie (zapas czasu najlepszego
   wyjścia względem deadline) — bywa, że rzadko kursująca, ale dobra linia
   wyjdzie bledsza, niż powinna.
