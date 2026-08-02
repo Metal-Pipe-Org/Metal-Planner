@@ -6,6 +6,7 @@ przez update_gtfs.py dane przeładują się same przy pierwszym zapytaniu.
 """
 
 import math
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -25,6 +26,30 @@ WALK_MIN_SEC = 60        # dolny próg czasu dojścia - nawet bardzo bliski sąs
 _GRID_DEG = WALK_RADIUS_M / 111_000   # siatka do kubełkowania (~promień = bok komórki)
 
 _day_cache = {}
+
+# Niektóre węzły przesiadkowe (np. Pl. Grunwaldzki) mają osobny stop_id na
+# każdy peron, z sufiksem kierunku/trybu w nazwie ("PL. GRUNWALDZKI Z/a",
+# "PL. GRUNWALDZKI Pn/t"...) - do wyszukiwania liczy się tylko nazwa główna.
+_SUBSTATION_SUFFIX_RE = re.compile(r"\s+(?:Pn|Pd|Z|W)/[at]$")
+
+
+def canonical_stop_name(name):
+    """Nazwa stacji bez sufiksu peronu - patrz _SUBSTATION_SUFFIX_RE.
+
+    Publiczna (używana też przez planner.py do grupowania dojść pieszo
+    między peronami tej samej stacji - patrz PROJECT.md, dojście do celu).
+    """
+    return _SUBSTATION_SUFFIX_RE.sub("", name)
+
+
+def _dedupe_stations(names):
+    """Zwraca posortowane nazwy stacji bez peronów-duplikatów tej samej stacji."""
+    by_canonical = {}
+    for name in names:
+        base = canonical_stop_name(name)
+        if base not in by_canonical or name == base:
+            by_canonical[base] = name
+    return sorted(by_canonical.values())
 
 
 class DayData:
@@ -124,6 +149,48 @@ def _nearby_walks(stop_coords):
     return result
 
 
+CHAIN_WALK_CAP_SEC = 600   # limit łańcucha 2 dojść pieszo pod rząd (patrz _close_siblings)
+
+
+def _close_siblings(siblings, cap_sec=CHAIN_WALK_CAP_SEC):
+    """Domyka relację sąsiedztwa o jeden dodatkowy skok: jeśli B jest
+    bezpośrednim sąsiadem A, a C jest bezpośrednim sąsiadem B, to C staje
+    się też bezpośrednim sąsiadem A (czas = suma obu odcinków), o ile suma
+    mieści się w `cap_sec` i C nie jest już bezpośrednim sąsiadem A (wtedy
+    już policzona bezpośrednia krawędź wygrywa - jest krótsza albo równa).
+
+    Bez tego `_scan`/`_forward`/`_backward` widzą tylko JEDEN skok pieszo
+    na raz (patrz komentarze przy relaksacji sąsiadów w planner.py) - przy
+    stacji o kilku peronach rozstawionych w łańcuch (dalszy niż promień
+    WALK_RADIUS_M od skrajnych do siebie, ale blisko sąsiadowi) trasa mogła
+    mieć poprawny `best_arrival`, ale nie dało się jej w ogóle narysować w
+    `plan_flow`, bo `_backward` gubił ją po drugim skoku pieszo pod rząd
+    (patrz PROJECT.md, „Znane ograniczenia” - chained same-name transfers).
+    Jeden dodatkowy skok (nie pełny fixed point) wystarcza w praktyce - dwa
+    dojścia pieszo pod rząd bez żadnej jazdy między nimi to już rzadki
+    przypadek, trzy byłyby nierealistyczne.
+    """
+    extra = {}
+    for a, near_a in siblings.items():
+        direct = {s for s, _ in near_a}
+        for b, t_ab in near_a:
+            for c, t_bc in siblings.get(b, ()):
+                if c == a or c in direct:
+                    continue
+                total = t_ab + t_bc
+                if total > cap_sec:
+                    continue
+                best = extra.setdefault(a, {})
+                if c not in best or total < best[c]:
+                    best[c] = total
+    if not extra:
+        return siblings
+    result = dict(siblings)
+    for stop_id, add in extra.items():
+        result[stop_id] = tuple(siblings.get(stop_id, ())) + tuple(add.items())
+    return result
+
+
 LAST_MILE_RADIUS_M = 1000   # dalej niż WALK_RADIUS_M - to punkt startowy, nie przesiadka
 LAST_MILE_MAX_STOPS = 5     # ile najbliższych przystanków bierzemy pod uwagę
 
@@ -208,6 +275,11 @@ def load_day(day):
     for stop_id, pairs in same_name.items():
         if stop_id not in data.siblings:
             data.siblings[stop_id] = tuple(pairs)
+    # Domknięcie o jeden dodatkowy skok pieszo (patrz _close_siblings) -
+    # _scan/_forward/_backward dostają gotowo połączone dwuskokowe dojścia
+    # jako zwykłe bezpośrednie krawędzie, więc nie trzeba zmieniać ICH
+    # kodu (ten sam trik co przy dopinaniu roweru WRM - patrz bike_transfer.py).
+    data.siblings = _close_siblings(data.siblings)
 
     # stop_times czytamy w kolejności (trip_id, stop_sequence) - to indeks,
     # więc bez sortowania - i sklejamy sąsiednie przystanki kursu w połączenia.
@@ -254,17 +326,17 @@ def match_stop(query, data):
     if len(candidates) == 1:
         k = candidates[0]
         return data.display_name[k], data.stops_by_key[k], None
-    return None, None, sorted(data.display_name[k] for k in candidates)[:8]
+    return None, None, _dedupe_stations(data.display_name[k] for k in candidates)[:8]
 
 
 def all_stop_names():
-    """Posortowane nazwy przystanków do podpowiadania w formularzu."""
+    """Posortowane nazwy przystanków (stacji) do podpowiadania w formularzu."""
     db = _connect()
     names = [row[0] for row in db.execute(
         "SELECT DISTINCT stop_name FROM stops ORDER BY stop_name"
     )]
     db.close()
-    return names
+    return _dedupe_stations(names)
 
 
 def all_stops_geo():

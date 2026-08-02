@@ -21,6 +21,21 @@ python3.11 -m venv .venv
 Port to domyślnie 5001 (5000 zajmuje AirPlay na macOS); można zmienić
 zmienną `PORT`.
 
+### `run.py` - jak Docker, ale lokalnie
+
+`calendar.txt` w paczce GTFS obejmuje tylko ok. 2 tygodnie - baza sprzed
+dłuższej przerwy jest przeterminowana i wyszukiwarka nie znajdzie ŻADNEGO
+połączenia, dla żadnej pary przystanków (patrz PROJECT.md, Changelog). W
+Dockerze o świeżość dba `docker/entrypoint.sh` (pobranie przy braku bazy) i
+`GTFS_AUTO_UPDATE_HOUR` (codzienne odświeżanie); przy zwykłym `python app.py`
+żaden z tych mechanizmów nie działa - trzeba pamiętać o ręcznym
+`update_gtfs.py`. `run.py` sprawdza świeżość bazy i w razie potrzeby
+aktualizuje ją sam, PRZED startem serwera:
+
+```bash
+.venv/bin/python run.py           # zamiast update_gtfs.py + app.py
+```
+
 ## Deployment na serwerze (Docker)
 
 Na serwerze potrzebny jest **wyłącznie plik `docker-compose.yml`** — obraz
