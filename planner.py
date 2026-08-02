@@ -119,32 +119,45 @@ def _scan(day, source_stops, target_stops, dep_sec, source_walk=None, siblings=N
     journey = {}      # stop_id -> ("origin",) | ("ride", idx_wsiadania, idx_wysiadania) | ("walk", skad, sek)
     trip_board = {}   # trip_id -> indeks połączenia, na którym wsiedliśmy do kursu
 
+    targets = set(target_stops)
+    best_arr = INF
+    best_stop = None
+
+    def _reach(stop, arr, entry):
+        """Zapisuje przyjazd na `stop`, jeśli jest lepszy niż dotychczasowy.
+
+        Uwzględnia też trafienie w cel - potrzebne, bo dojście PIESZO do celu
+        (np. z sąsiedniego przystanku) jest równie ważnym "przyjazdem" jak
+        przejazd kursem, a wcześniej sprawdzały to tylko relaksacje po
+        przejeździe, nie po chodzeniu - przez co pieszy "ostatni odcinek" do
+        celu potrafił po cichu ustawić `earliest[cel]` bez nigdy nie
+        zaliczenia się jako znaleziona trasa (patrz Changelog).
+        """
+        nonlocal best_arr, best_stop
+        if arr < earliest.get(stop, INF):
+            earliest[stop] = arr
+            journey[stop] = entry
+            if stop in targets and arr < best_arr:
+                best_arr = arr
+                best_stop = stop
+            return True
+        return False
+
     # Użytkownik podaje nazwę przystanku, więc startuje ze wszystkich jego słupków.
     for stop in source_stops:
-        earliest[stop] = dep_sec
-        journey[stop] = ("origin",)
+        _reach(stop, dep_sec, ("origin",))
     # Piesza "ostatnia mila" na starcie: dojście do sąsiedniego przystanku
     # (ta sama nazwa - patrz gtfs.py - albo inny bliski) jako alternatywa dla
     # czekania na kurs z dokładnie tego słupka. Osobny przebieg PO seedowaniu
     # źródeł, żeby nie zależał od kolejności iteracji po source_stops.
     for stop in source_stops:
         for sibling, walk_sec in sib.get(stop, ()):
-            walk_arr = dep_sec + walk_sec
-            if walk_arr < earliest.get(sibling, INF):
-                earliest[sibling] = walk_arr
-                journey[sibling] = ("walk", stop, walk_sec)
+            _reach(sibling, dep_sec + walk_sec, ("walk", stop, walk_sec))
     # Dojście z dowolnego punktu (np. prawdziwej lokalizacji) do najbliższych
     # przystanków - ten sam mechanizm, jednorazowo, bez dalszej relaksacji
     # (jeden skok pieszy naraz, patrz gtfs.py).
     for stop, walk_sec in (source_walk or ()):
-        walk_arr = dep_sec + walk_sec
-        if walk_arr < earliest.get(stop, INF):
-            earliest[stop] = walk_arr
-            journey[stop] = ("walk", None, walk_sec)
-
-    targets = set(target_stops)
-    best_arr = INF
-    best_stop = None
+        _reach(stop, dep_sec + walk_sec, ("walk", None, walk_sec))
 
     for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
         dep_t, arr_t, dep_s, arr_s, trip = conns[i]
@@ -162,19 +175,11 @@ def _scan(day, source_stops, target_stops, dep_sec, source_walk=None, siblings=N
                 continue
             trip_board[trip] = i
 
-        if arr_t < earliest.get(arr_s, INF):
-            earliest[arr_s] = arr_t
-            journey[arr_s] = ("ride", trip_board[trip], i)
-            if arr_s in targets and arr_t < best_arr:
-                best_arr = arr_t
-                best_stop = arr_s
+        if _reach(arr_s, arr_t, ("ride", trip_board[trip], i)):
             # Relaksacja pieszo (i rowerem, gdy `siblings` je niesie) na
             # sąsiednie przystanki (patrz gtfs.py / bike_transfer.py).
             for sibling, walk_sec in sib.get(arr_s, ()):
-                walk_arr = arr_t + walk_sec
-                if walk_arr < earliest.get(sibling, INF):
-                    earliest[sibling] = walk_arr
-                    journey[sibling] = ("walk", arr_s, walk_sec)
+                _reach(sibling, arr_t + walk_sec, ("walk", arr_s, walk_sec))
 
     return best_stop, best_arr, journey
 
