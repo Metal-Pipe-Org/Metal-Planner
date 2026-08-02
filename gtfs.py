@@ -6,6 +6,7 @@ przez update_gtfs.py dane przeładują się same przy pierwszym zapytaniu.
 """
 
 import math
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -25,6 +26,25 @@ WALK_MIN_SEC = 60        # dolny próg czasu dojścia - nawet bardzo bliski sąs
 _GRID_DEG = WALK_RADIUS_M / 111_000   # siatka do kubełkowania (~promień = bok komórki)
 
 _day_cache = {}
+
+# Niektóre węzły przesiadkowe (np. Pl. Grunwaldzki) mają osobny stop_id na
+# każdy peron, z sufiksem kierunku/trybu w nazwie ("PL. GRUNWALDZKI Z/a",
+# "PL. GRUNWALDZKI Pn/t"...) - do wyszukiwania liczy się tylko nazwa główna.
+_SUBSTATION_SUFFIX_RE = re.compile(r"\s+(?:Pn|Pd|Z|W)/[at]$")
+
+
+def _canonical_stop_name(name):
+    return _SUBSTATION_SUFFIX_RE.sub("", name)
+
+
+def _dedupe_stations(names):
+    """Zwraca posortowane nazwy stacji bez peronów-duplikatów tej samej stacji."""
+    by_canonical = {}
+    for name in names:
+        base = _canonical_stop_name(name)
+        if base not in by_canonical or name == base:
+            by_canonical[base] = name
+    return sorted(by_canonical.values())
 
 
 class DayData:
@@ -254,17 +274,17 @@ def match_stop(query, data):
     if len(candidates) == 1:
         k = candidates[0]
         return data.display_name[k], data.stops_by_key[k], None
-    return None, None, sorted(data.display_name[k] for k in candidates)[:8]
+    return None, None, _dedupe_stations(data.display_name[k] for k in candidates)[:8]
 
 
 def all_stop_names():
-    """Posortowane nazwy przystanków do podpowiadania w formularzu."""
+    """Posortowane nazwy przystanków (stacji) do podpowiadania w formularzu."""
     db = _connect()
     names = [row[0] for row in db.execute(
         "SELECT DISTINCT stop_name FROM stops ORDER BY stop_name"
     )]
     db.close()
-    return names
+    return _dedupe_stations(names)
 
 
 def all_stops_geo():
