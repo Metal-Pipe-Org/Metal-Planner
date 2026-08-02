@@ -251,7 +251,7 @@ KEPT_CAP = 400          # twardy limit WEJŚCIA do pętli spójności (patrz ni�
                         # zapytań (kept dużo mniejsze) ten limit nic nie ucina
 
 
-def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
+def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None, allow_bike=True):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką jest KURS, nie pojedynczy przeskok: dla każdego kursu, do którego
@@ -264,6 +264,11 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     q_min (0..1) to próg jasności; poniżej niego segmenty nie są wysyłane.
     start_point (lat, lon) - opcjonalnie, zamiast start_query: prawdziwa
     lokalizacja zamiast nazwy przystanku (patrz gtfs.nearest_stops).
+    allow_bike=False wyłącza rower WRM jako transfer CAŁKOWICIE (nie tylko
+    z rysowania - z samego wyszukiwania), więc best_arrival/deadline też
+    przeliczają się na czysto pieszej bazie - inaczej trasa piesza wolniejsza
+    niż najszybsza (rowerowa) trasa nigdy nie mieściłaby się w oknie czasowym
+    i nie dałoby się jej pokazać nawet po wyłączeniu roweru (patrz PROJECT.md).
     """
     when = when or datetime.now()
     q_min = DEFAULT_Q_MIN if q_min is None else max(0.2, min(0.95, q_min))
@@ -290,9 +295,13 @@ def plan_flow(start_query, end_query, when=None, q_min=None, start_point=None):
     # _forward, kotwica początku, joins/join_value) używa `siblings`;
     # wszystko, co propaguje wstecz "kto dotrze DO tego miejsca" (_backward,
     # dojście DO celu) używa `reverse_siblings`.
-    bike_edges, bike_reverse_edges, bike_hints = bike_transfer.build_bike_edges(day)
-    siblings = bike_transfer.merge_siblings(day.siblings, bike_edges)
-    reverse_siblings = bike_transfer.merge_siblings(day.siblings, bike_reverse_edges)
+    if allow_bike:
+        bike_edges, bike_reverse_edges, bike_hints = bike_transfer.build_bike_edges(day)
+        siblings = bike_transfer.merge_siblings(day.siblings, bike_edges)
+        reverse_siblings = bike_transfer.merge_siblings(day.siblings, bike_reverse_edges)
+    else:
+        siblings = reverse_siblings = day.siblings
+        bike_hints = {}
 
     if start_point is not None:
         source_walk = gtfs.nearest_stops(start_point[0], start_point[1], day)

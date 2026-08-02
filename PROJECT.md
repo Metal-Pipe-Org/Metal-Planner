@@ -291,14 +291,24 @@ liczyło się dziesiątkami sekund (patrz Changelog i „Znane ograniczenia”).
 ## Warstwa rowerowa (WRM)
 
 Stacje Wrocławskiego Roweru Miejskiego pokazane są na mapie jako osobna
-warstwa (checkbox w panelu, domyślnie zaznaczony) - czysto wizualna, ale
-od 2026-07-22 **rower jest też pełnoprawnym transferem w `plan_flow`**
-(patrz „Rower WRM jako transfer” w Algorytmach) - `planner.py` bierze pod
-uwagę tę samą dostępność, którą widać na tej warstwie, przy wyszukiwaniu
-połączeń, nie tylko przy rysowaniu stacji. Włączenie/wyłączenie checkboxa
-zmienia wyłącznie WIDOCZNOŚĆ warstwy stacji - nie wyłącza roweru jako
-transferu w wynikach wyszukiwania (to świadome rozdzielenie: warstwa to
-podgląd stanu sieci, transfer to osobna decyzja algorytmu).
+warstwa (checkbox w panelu, domyślnie zaznaczony) - od 2026-07-22 **rower
+jest też pełnoprawnym transferem w `plan_flow`** (patrz „Rower WRM jako
+transfer” w Algorytmach) - `planner.py` bierze pod uwagę tę samą
+dostępność, którą widać na tej warstwie, przy wyszukiwaniu połączeń, nie
+tylko przy rysowaniu stacji.
+
+Do 2026-08-02 checkbox zmieniał wyłącznie WIDOCZNOŚĆ warstwy stacji -
+świadomie NIE wyłączał roweru jako transferu w wynikach wyszukiwania
+(warstwa jako podgląd stanu sieci, transfer jako osobna decyzja
+algorytmu). To rozdzielenie okazało się mylące w praktyce: przy trasach,
+gdzie rower jest wyraźnie najszybszy, `deadline` (najszybszy czas × 1,5,
+patrz „Mapa przepływów”) wypadał ciaśniej niż czysto piesza alternatywa -
+więc wyłączenie warstwy w UI nie dawało żadnej innej trasy, mimo że
+działanie wyglądało, jakby powinno. Od 2026-08-02 checkbox gasi rower
+CAŁKOWICIE - `/api/flow` dostaje `bike=0` i `plan_flow(..., allow_bike=False)`
+pomija `bike_transfer` od razu przy budowie `siblings`/`reverse_siblings`,
+więc `best_arrival`/`deadline` też przeliczają się na czysto pieszej bazie
+(patrz `planner.py:plan_flow`, docstring `allow_bike`).
 
 - **Źródło danych**: WRM korzysta z systemu nextbike, który publikuje stan
   sieci jako feed [GBFS](https://gbfs.org/) (General Bikeshare Feed

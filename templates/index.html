@@ -295,9 +295,13 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         .catch(() => console.warn('Nie udało się pobrać stacji WRM.'));
 
     bikesToggle.addEventListener('change', () => {
-        if (!bikesLayer) return;
-        if (bikesToggle.checked) bikesLayer.addTo(map);
-        else map.removeLayer(bikesLayer);
+        if (bikesLayer) {
+            if (bikesToggle.checked) bikesLayer.addTo(map);
+            else map.removeLayer(bikesLayer);
+        }
+        // Rower jako transfer w wyszukiwaniu, nie tylko widoczność warstwy
+        // stacji - patrz search() (parametr `bike`) i planner.plan_flow.
+        if (startInput.value && endInput.value) search();
     });
 
     function showError(message, suggestions) {
@@ -476,6 +480,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             end: endInput.value,
             time: document.getElementById('time').value,
             qmin: (Number(document.getElementById('qmin').value) / 100).toFixed(2),
+            bike: bikesToggle.checked ? '1' : '0',
         });
         if (myLocation) {
             params.set('start_lat', myLocation.lat);

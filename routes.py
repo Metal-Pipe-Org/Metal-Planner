@@ -94,10 +94,12 @@ def init_routes(app):
                 )
             except ValueError:
                 pass
+        allow_bike = request.args.get("bike", "1") != "0"
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
             q_min,
             start_point,
+            allow_bike,
         ))
