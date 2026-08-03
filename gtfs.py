@@ -6,6 +6,7 @@ przez update_gtfs.py dane przeładują się same przy pierwszym zapytaniu.
 """
 
 import math
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -18,7 +19,93 @@ WEEKDAY_COLUMNS = [
 
 ROUTE_TYPE_LABELS = {0: "Tramwaj", 3: "Autobus"}
 
+# Duże węzły przesiadkowe bywają w GTFS rozbite na kilka nazwanych peronów
+# kierunkowych ("PL. GRUNWALDZKI W/t", "... Z/a", ...) - dla pasażera to
+# wciąż jedno miejsce. _platform_base_name ucina taki sufiks, żeby dociągnąć
+# peron do miejsca o nazwie bazowej (patrz _build_places).
+_PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
+PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
+
 _day_cache = {}
+
+
+def _platform_base_name(stop_name):
+    """Nazwa bazowa węzła, jeśli `stop_name` wygląda na kierunkowy peron
+    (np. 'PL. GRUNWALDZKI W/t' -> 'PL. GRUNWALDZKI'), inaczej None."""
+    m = _PLATFORM_SUFFIX.match(stop_name.casefold())
+    return stop_name[:m.end(1)] if m else None
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    r = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _build_places(stop_names, stop_coords, stops_by_key):
+    """Grupuje słupki w kanoniczne 'miejsca' - jednostkę, o którą pyta reszta
+    systemu (dojechaliśmy? można się tu przesiąść?), zamiast surowej nazwy
+    GTFS. Baza to dotychczasowe grupy "identyczna nazwa" (zaufane, bez
+    sprawdzania odległości - tak działało to już wcześniej). Do nich
+    dolepiamy perony kierunkowe o nazwie bazowej pasującej do istniejącego
+    miejsca, o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
+    zabezpieczenie przed przypadkową kolizją nazw gdzie indziej w mieście.
+    """
+    places = {key: list(ids) for key, ids in stops_by_key.items()}
+    for stop_id, name in stop_names.items():
+        base = _platform_base_name(name)
+        if base is None:
+            continue
+        base_key = base.casefold()
+        target = places.get(base_key)
+        if not target or stop_id in target:
+            continue
+        lat, lon = stop_coords[stop_id]
+        if not all(_haversine_m(lat, lon, *stop_coords[t]) <= PLACE_MAX_SPAN_M for t in target):
+            continue
+        places[base_key] = target + [stop_id]
+        # Usuwamy własną grupę "dokładna nazwa" tego peronu - inaczej
+        # zostaje osierocona w `places` obok scalonego miejsca, i który
+        # klucz "wygra" dla tego słupka w `place_of` zależy od przypadkowej
+        # kolejności iteracji zamiast od tego, że właśnie go scaliliśmy.
+        own_key = name.casefold()
+        if own_key != base_key:
+            own_group = places.get(own_key)
+            if own_group == [stop_id]:
+                del places[own_key]
+            elif own_group and stop_id in own_group:
+                places[own_key] = [s for s in own_group if s != stop_id]
+    return places
+
+
+def _walking_bridges(place_groups):
+    """Krawędzie 'przejście pieszym' między słupkami tego samego miejsca.
+
+    To jest most (bridge): kształt stop_id -> (sąsiad, ...) jest ogólnym
+    kontraktem transferu w tym systemie, nie czymś specyficznym dla chodzenia
+    - każdy przyszły typ transferu (rower, hulajnoga, ...) dostarcza własne
+    krawędzie w tym samym kształcie i scala się z resztą przez _merge_bridges,
+    bez zmiany logiki skanowania w planner.py.
+    """
+    bridges = {}
+    for group in place_groups:
+        if len(group) > 1:
+            for stop_id in group:
+                bridges[stop_id] = tuple(s for s in group if s != stop_id)
+    return bridges
+
+
+def _merge_bridges(*bridge_maps):
+    """Scala mosty z kilku dostawców (na razie tylko chodzenie) w jedną
+    relację. Kolejny typ transferu dokłada się tu, a nie osobną ścieżką."""
+    merged = {}
+    for bridges in bridge_maps:
+        for stop_id, neighbors in bridges.items():
+            existing = merged.get(stop_id, ())
+            merged[stop_id] = existing + tuple(n for n in neighbors if n not in existing)
+    return merged
 
 
 class DayData:
@@ -27,6 +114,7 @@ class DayData:
     __slots__ = (
         "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
         "display_name", "siblings", "trip_info", "trip_shape",
+        "stops_by_place", "place_of",
     )
 
     def __init__(self):
@@ -39,9 +127,11 @@ class DayData:
         self.stop_coords = {}        # stop_id -> (lat, lon)
         self.stops_by_key = {}       # nazwa.casefold() -> [stop_id, ...]
         self.display_name = {}       # nazwa.casefold() -> oryginalna pisownia
-        self.siblings = {}           # stop_id -> inne słupki o tej samej nazwie
+        self.siblings = {}           # stop_id -> inne słupki tego samego miejsca
         self.trip_info = {}          # trip_id -> (etykieta linii, kierunek)
         self.trip_shape = {}         # trip_id -> shape_id (geometria z shapes.txt)
+        self.stops_by_place = {}     # klucz miejsca -> [stop_id, ...] (patrz _build_places)
+        self.place_of = {}           # stop_id -> klucz miejsca
 
 
 def _connect():
@@ -115,12 +205,14 @@ def load_day(day):
         data.stops_by_key.setdefault(name_key, []).append(stop_id)
         data.display_name.setdefault(name_key, stop_name)
 
-    # Słupki o tej samej nazwie traktujemy jako jeden węzeł przesiadkowy
-    # połączony krótkim przejściem pieszym (patrz WALK_SEC w planner.py).
-    for group in data.stops_by_key.values():
-        if len(group) > 1:
-            for stop_id in group:
-                data.siblings[stop_id] = tuple(s for s in group if s != stop_id)
+    # Kanoniczne miejsce (patrz _build_places) i most pieszy między jego
+    # słupkami (patrz _walking_bridges) - _merge_bridges scala go tu z
+    # dowolnymi innymi dostawcami transferu, gdyby doszły.
+    data.stops_by_place = _build_places(data.stop_names, data.stop_coords, data.stops_by_key)
+    data.place_of = {
+        sid: key for key, ids in data.stops_by_place.items() for sid in ids
+    }
+    data.siblings = _merge_bridges(_walking_bridges(data.stops_by_place.values()))
 
     # stop_times czytamy w kolejności (trip_id, stop_sequence) - to indeks,
     # więc bez sortowania - i sklejamy sąsiednie przystanki kursu w połączenia.
@@ -151,22 +243,37 @@ def load_day(day):
     return data
 
 
+def _expand_to_places(data, stop_ids):
+    """Dokłada do dopasowania resztę słupków tego samego miejsca (patrz
+    _build_places) - np. wyszukanie "PL. GRUNWALDZKI" ma rozpoznawać
+    dojazd/wsiadanie także na peronach kierunkowych tego placu, nie tylko
+    na słupkach o dokładnie tej nazwie."""
+    expanded = set(stop_ids)
+    for stop_id in stop_ids:
+        place_key = data.place_of.get(stop_id)
+        if place_key is not None:
+            expanded.update(data.stops_by_place[place_key])
+    return list(expanded)
+
+
 def match_stop(query, data):
     """Dopasowuje wpisaną nazwę do przystanku.
 
-    Zwraca (nazwa, [stop_id, ...], None) przy trafieniu
-    albo (None, None, [podpowiedzi]) gdy nazwa jest nieznana/niejednoznaczna.
+    Zwraca (nazwa, [stop_id, ...], None) przy trafieniu - lista obejmuje
+    całe kanoniczne miejsce, nie tylko słupki o dokładnie wpisanej nazwie
+    (patrz _expand_to_places) - albo (None, None, [podpowiedzi]) gdy nazwa
+    jest nieznana/niejednoznaczna.
     """
     key = " ".join(query.split()).casefold()
     if not key:
         return None, None, []
     if key in data.stops_by_key:
-        return data.display_name[key], data.stops_by_key[key], None
+        return data.display_name[key], _expand_to_places(data, data.stops_by_key[key]), None
 
     candidates = [k for k in data.stops_by_key if key in k]
     if len(candidates) == 1:
         k = candidates[0]
-        return data.display_name[k], data.stops_by_key[k], None
+        return data.display_name[k], _expand_to_places(data, data.stops_by_key[k]), None
     return None, None, sorted(data.display_name[k] for k in candidates)[:8]
 
 
