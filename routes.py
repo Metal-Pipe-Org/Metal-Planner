@@ -62,10 +62,27 @@ def init_routes(app):
             progress_tol_sec = float(request.args.get("tol", ""))
         except ValueError:
             progress_tol_sec = None
+        try:
+            range_m = float(request.args.get("range_m", ""))
+        except ValueError:
+            range_m = None
+
+        def _point(prefix):
+            try:
+                return (
+                    float(request.args[f"{prefix}_lat"]),
+                    float(request.args[f"{prefix}_lon"]),
+                )
+            except (KeyError, ValueError):
+                return None
+
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
             q_min,
             progress_tol_sec,
+            _point("start"),
+            _point("end"),
+            range_m,
         ))

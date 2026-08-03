@@ -24,8 +24,8 @@
     {% else %}
 
     <p class="hint">
-        Kliknij na mapie przystanek startowy, potem docelowy —
-        albo wpisz nazwy ręcznie.
+        Kliknij na mapie przystanek (albo dowolny punkt) startowy, potem
+        docelowy — albo wpisz nazwy ręcznie.
     </p>
 
     <label for="start">Przystanek początkowy</label>
@@ -74,6 +74,17 @@
         </label>
         <input type="range" id="tol" min="0" max="300" step="15" value="0">
     </div>
+
+    <div class="field">
+        <label for="range">
+            Zasięg szukania punktu: <span id="range-value">1000</span> m
+        </label>
+        <input type="range" id="range" min="200" max="1500" step="100" value="1000">
+        <p class="field-hint">
+            Przy kliknięciu na dowolny punkt mapy (nie tylko przystanek) -
+            jak daleko szukać słupków, z których można wsiąść/wysiąść.
+        </p>
+    </div>
 </div>
 {% endif %}
 
@@ -98,8 +109,40 @@ const resultBox = document.getElementById('result');
 if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje błąd)
 
     const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
-    let sel = {start: null, end: null};       // przystanki wybrane kliknięciem
+    // sel.start/end: nazwa przystanku (string) ALBO dowolny punkt mapy
+    // ({lat, lon}) - obie strony niezależnie, dowolna kombinacja.
+    let sel = {start: null, end: null};
     let routeLayer = null;
+
+    const isPoint = v => v !== null && typeof v === 'object';
+    const samePlace = (a, b) => isPoint(a) || isPoint(b)
+        ? isPoint(a) === isPoint(b) && a.lat === b.lat && a.lon === b.lon
+        : a === b;
+    const displayValue = v => !v ? ''
+        : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : v;
+
+    // Markery klikniętych punktów (poza markersByName - nie są prawdziwym
+    // przystankiem). Ten sam kolor co podświetlenie start/cel, ale
+    // przerywana obwódka - łatwo odróżnić od słupka.
+    const pointMarkers = {start: null, end: null};
+    const POINT_STYLE = {
+        start: {radius: 9, weight: 3, dashArray: '2,4', color: '#1b5e20',
+                fillColor: '#4caf50', fillOpacity: 0.9},
+        end: {radius: 9, weight: 3, dashArray: '2,4', color: '#b71c1c',
+              fillColor: '#ef5350', fillOpacity: 0.9},
+    };
+
+    function updatePointMarker(slot, value) {
+        if (pointMarkers[slot]) {
+            map.removeLayer(pointMarkers[slot]);
+            pointMarkers[slot] = null;
+        }
+        if (isPoint(value)) {
+            pointMarkers[slot] = L.circleMarker(
+                [value.lat, value.lon], POINT_STYLE[slot],
+            ).addTo(map);
+        }
+    }
 
     const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
                         fillColor: '#42a5f5', fillOpacity: 0.8};
@@ -138,19 +181,23 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         resultBox.innerHTML = '';
     }
 
-    function pickStop(name) {
+    function pickEndpoint(value) {
         const previous = [sel.start, sel.end];
         if (!sel.start || (sel.start && sel.end)) {
-            sel = {start: name, end: null};   // kolejne kliknięcie zaczyna od nowa
+            sel = {start: value, end: null};  // kolejne kliknięcie zaczyna od nowa
             clearRoute();
-        } else if (name !== sel.start) {
-            sel.end = name;
+        } else if (!samePlace(value, sel.start)) {
+            sel.end = value;
         }
-        startInput.value = sel.start || '';
-        endInput.value = sel.end || '';
+        startInput.value = displayValue(sel.start);
+        endInput.value = displayValue(sel.end);
+        updatePointMarker('start', sel.start);
+        updatePointMarker('end', sel.end);
         restyle(...previous, sel.start, sel.end);
         if (sel.start && sel.end) search();
     }
+
+    map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
 
     fetch('/api/stops')
         .then(r => r.json())
@@ -159,7 +206,9 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             for (const s of stops) {
                 const m = L.circleMarker([s.lat, s.lon], BASE_STYLE).addTo(map);
                 m.bindTooltip(s.name);
-                m.on('click', () => pickStop(s.name));
+                // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby
+                // też do map.on('click') i nadpisał wybór punktem.
+                m.on('click', e => { L.DomEvent.stop(e); pickEndpoint(s.name); });
                 if (!markersByName.has(s.name)) markersByName.set(s.name, []);
                 markersByName.get(s.name).push(m);
             }
@@ -277,8 +326,12 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             if (points.length >= 4) break;
         }
         // ...ale start i cel muszą być w kadrze zawsze.
-        for (const name of [sel.start, sel.end]) {
-            for (const m of markersByName.get(name) || []) {
+        for (const endpoint of [sel.start, sel.end]) {
+            if (isPoint(endpoint)) {
+                points.push([endpoint.lat, endpoint.lon]);
+                continue;
+            }
+            for (const m of markersByName.get(endpoint) || []) {
                 const p = m.getLatLng();
                 points.push([p.lat, p.lng]);
             }
@@ -293,12 +346,23 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 
     function search() {
         const params = new URLSearchParams({
-            start: startInput.value,
-            end: endInput.value,
             time: document.getElementById('time').value,
             qmin: (Number(document.getElementById('qmin').value) / 100).toFixed(2),
             tol: document.getElementById('tol').value,
+            range_m: document.getElementById('range').value,
         });
+        if (isPoint(sel.start)) {
+            params.set('start_lat', sel.start.lat);
+            params.set('start_lon', sel.start.lon);
+        } else {
+            params.set('start', startInput.value);
+        }
+        if (isPoint(sel.end)) {
+            params.set('end_lat', sel.end.lat);
+            params.set('end_lon', sel.end.lon);
+        } else {
+            params.set('end', endInput.value);
+        }
         clearRoute();
         resultBox.innerHTML = '<p class="hint">Szukam…</p>';
         fetch('/api/flow?' + params)
@@ -307,10 +371,10 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 if (flow.error) { showError(flow.error, flow.suggestions); return; }
                 // Kanoniczne nazwy z API: podświetlenie startu/celu działa
                 // też przy ręcznym wpisaniu, nie tylko przy klikaniu w mapę
-                // (drawFlow przemalowuje wszystkie markery wg nowego sel).
-                sel = {start: flow.start, end: flow.end};
-                startInput.value = flow.start;
-                endInput.value = flow.end;
+                // (drawFlow przemalowuje wszystkie markery wg nowego sel) -
+                // ale klikniętego punktu nie nadpisujemy nazwą z odpowiedzi.
+                if (!isPoint(sel.start)) { sel.start = flow.start; startInput.value = flow.start; }
+                if (!isPoint(sel.end)) { sel.end = flow.end; endInput.value = flow.end; }
                 resultBox.innerHTML = '';      // wynik jest tylko na mapie
                 drawFlow(flow);
             })
@@ -336,12 +400,24 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
     }
     liveSlider('qmin', 'qmin-value');
     liveSlider('tol', 'tol-value');
+    liveSlider('range', 'range-value');
+
+    // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" -
+    // dalej liczy się to, co user wpisał, jak przy zwykłym wyszukiwaniu.
+    startInput.addEventListener('input', () => {
+        if (isPoint(sel.start)) { sel.start = null; updatePointMarker('start', null); }
+    });
+    endInput.addEventListener('input', () => {
+        if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
+    });
 
     document.getElementById('clear').addEventListener('click', () => {
         const previous = [sel.start, sel.end];
         sel = {start: null, end: null};
         startInput.value = '';
         endInput.value = '';
+        updatePointMarker('start', null);
+        updatePointMarker('end', null);
         clearRoute();
         restyle(...previous);
     });
@@ -353,10 +429,14 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         if (!name) return;
         event.preventDefault();
         const known = knownNames();
-        if (!known.has(startInput.value.trim().toLowerCase())) {
+        if (!isPoint(sel.start) && !known.has(startInput.value.trim().toLowerCase())) {
             startInput.value = name;
+            sel.start = null;
+            updatePointMarker('start', null);
         } else {
             endInput.value = name;
+            sel.end = null;
+            updatePointMarker('end', null);
         }
         if (startInput.value && endInput.value) search();
     });

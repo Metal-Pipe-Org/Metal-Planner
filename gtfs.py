@@ -256,6 +256,27 @@ def _expand_to_places(data, stop_ids):
     return list(expanded)
 
 
+LAST_MILE_MAX_STOPS = 5  # ile najbliższych słupków bierzemy pod uwagę jako "wyzwalacze" miejsca
+
+
+def nearby_stops(lat, lon, day, radius_m, max_n=LAST_MILE_MAX_STOPS):
+    """Słupki w promieniu `radius_m` od dowolnego punktu (klik na mapie) -
+    dla wybranych `max_n` najbliższych dociąga też resztę ich miejsca
+    (patrz _expand_to_places), tak samo jak przy wyszukiwaniu po nazwie.
+
+    Brak modelowania czasu dojścia - słupek w zasięgu liczy się jako
+    od razu dostępny, tak jak przy starcie/celu z nazwy.
+    """
+    in_range = []
+    for stop_id, (slat, slon) in day.stop_coords.items():
+        dist = _haversine_m(lat, lon, slat, slon)
+        if dist <= radius_m:
+            in_range.append((dist, stop_id))
+    in_range.sort()
+    triggers = [stop_id for _, stop_id in in_range[:max_n]]
+    return set(_expand_to_places(day, triggers))
+
+
 def match_stop(query, data):
     """Dopasowuje wpisaną nazwę do przystanku.
 

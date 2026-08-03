@@ -160,8 +160,13 @@ MAX_PROGRESS_TOL_SEC = 600
 WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
 DEFAULT_Q_MIN = 0.60    # domyślny próg jasności (suwak w UI go nadpisuje)
 
+MIN_RANGE_M = 200       # zasięg szukania słupków wokół klikniętego punktu
+MAX_RANGE_M = 1500      # (suwak w UI go nadpisuje) - patrz gtfs.nearby_stops
+DEFAULT_RANGE_M = 1000
 
-def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=None):
+
+def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=None,
+              start_point=None, end_point=None, range_m=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką jest KURS, nie pojedynczy przeskok: dla każdego kursu, do którego
@@ -187,18 +192,40 @@ def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=No
         PROGRESS_TOL_SEC if progress_tol_sec is None
         else max(MIN_PROGRESS_TOL_SEC, min(MAX_PROGRESS_TOL_SEC, progress_tol_sec))
     )
+    range_m = (
+        DEFAULT_RANGE_M if range_m is None
+        else max(MIN_RANGE_M, min(MAX_RANGE_M, range_m))
+    )
 
     try:
         day = gtfs.load_day(when.date())
     except FileNotFoundError as e:
         return {"error": str(e)}
 
-    start_name, source_stops, start_hints = gtfs.match_stop(start_query, day)
-    if start_name is None:
-        return _unknown_stop(start_query, start_hints)
-    end_name, target_stops, end_hints = gtfs.match_stop(end_query, day)
-    if end_name is None:
-        return _unknown_stop(end_query, end_hints)
+    if start_point is not None:
+        lat, lon = start_point
+        start_name = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
+        source_stops = gtfs.nearby_stops(lat, lon, day, range_m)
+        if not source_stops:
+            return {"error": "Brak przystanków w zasięgu wybranego punktu startowego."}
+    else:
+        start_name, source_stops, start_hints = gtfs.match_stop(start_query, day)
+        if start_name is None:
+            return _unknown_stop(start_query, start_hints)
+        source_stops = set(source_stops)
+
+    if end_point is not None:
+        lat, lon = end_point
+        end_name = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
+        target_stops = gtfs.nearby_stops(lat, lon, day, range_m)
+        if not target_stops:
+            return {"error": "Brak przystanków w zasięgu wybranego punktu docelowego."}
+    else:
+        end_name, target_stops, end_hints = gtfs.match_stop(end_query, day)
+        if end_name is None:
+            return _unknown_stop(end_query, end_hints)
+        target_stops = set(target_stops)
+
     if start_name == end_name:
         return {"error": "Przystanek początkowy i końcowy są takie same."}
 
@@ -216,7 +243,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=No
     deadline = best_arr + extra
 
     earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
-    latest = _backward(day, set(target_stops), dep_sec, deadline)
+    latest = _backward(day, target_stops, dep_sec, deadline)
 
     # Zapas czasowy trasy optymalnej = pełna jasność.
     span = max(deadline - best_arr, 1)
@@ -225,14 +252,14 @@ def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=No
     origin_latest = max(
         (latest[s] for s in source_stops if s in latest), default=None,
     )
-    target_set = set(target_stops)
+    target_set = target_stops
 
     segs = _discover_segments(
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
         latest, origin_latest, target_set, progress_tol_sec,
     )
     _refine_brightness(day, segs, target_set, deadline, span)
-    kept, ranges = _select_and_anchor(day, segs, q_min, start_name, target_set)
+    kept, ranges = _select_and_anchor(day, segs, q_min, source_stops, target_set)
     seg_list = _finalize_segments(day, kept, ranges)
 
     return {
@@ -435,7 +462,7 @@ def _refine_brightness(day, segs, target_set, deadline, span):
         seg["q"] = max(0.0, min(1.0, (deadline - seg["bound"]) / span))
 
 
-def _select_and_anchor(day, segs, q_min, start_name, target_set):
+def _select_and_anchor(day, segs, q_min, source_stops, target_set):
     """Krok 3: próg jasności + spójność narysowanej sieci. Segment jest
     przycinany z OBU stron do zakotwiczonych punktów:
     - początek: start relacji albo miejsce, gdzie dołącza (zdążalnie) inny
@@ -445,7 +472,6 @@ def _select_and_anchor(day, segs, q_min, start_name, target_set):
     Punkt stały: zakresy mogą tylko się kurczyć, więc iteracja zbiega.
     Zwraca (kept, ranges) - listę segmentów i ich (start_pos, cut).
     """
-    stop_names = day.stop_names
 
     def catchable(arr_t, buffer, dep_list):
         i = bisect_left(dep_list, arr_t + buffer)
@@ -489,7 +515,7 @@ def _select_and_anchor(day, segs, q_min, start_name, target_set):
         new_ranges = {}
         for seg in kept:
             # --- kotwica początku ---
-            if stop_names[seg["stops"][0]] == start_name:
+            if seg["stops"][0] in source_stops:
                 start_pos = 0
             else:
                 start_pos = None
