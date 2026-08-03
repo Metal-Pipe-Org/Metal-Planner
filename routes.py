@@ -58,9 +58,14 @@ def init_routes(app):
             q_min = float(request.args.get("qmin", ""))
         except ValueError:
             q_min = None
+        try:
+            progress_tol_sec = float(request.args.get("tol", ""))
+        except ValueError:
+            progress_tol_sec = None
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
             q_min,
+            progress_tol_sec,
         ))
