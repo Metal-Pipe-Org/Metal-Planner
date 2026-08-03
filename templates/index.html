@@ -58,12 +58,13 @@
 
     <div class="field">
         <label for="qmin">
-            Czułość: opcje o jasności ≥ <span id="qmin-value">60</span>%
+            Próg jasności: przyciemniaj poniżej <span id="qmin-value">60</span>%
         </label>
         <input type="range" id="qmin" min="0" max="100" step="5" value="60">
         <p class="field-hint">
             0% pokazuje wszystko, co algorytm znalazł; 100% pokazuje tylko
-            pojedynczą, obiektywnie najlepszą trasę.
+            pojedynczą, obiektywnie najlepszą trasę. Opcje tuż nad progiem
+            są rysowane bardzo blado, najlepsza - w pełnej jasności.
         </p>
     </div>
 
@@ -202,11 +203,22 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         const faint = [], casings = [], bright = [];
         const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
 
+        // Jasność segmentów rysujemy WZGLĘDEM progu (qmin), nie w skali
+        // bezwzględnej 0..1: tuż nad progiem ma być prawie niewidoczne,
+        // pełna jasność zostaje tylko dla najlepszej opcji.
+        const qMinFrac = Number(document.getElementById('qmin').value) / 100;
+        function relBrightness(w) {
+            return qMinFrac < 1
+                ? Math.max(0, Math.min(1, (w - qMinFrac) / (1 - qMinFrac)))
+                : 1;
+        }
+
         for (const s of flow.segments) {        // posortowane po w rosnąco
             const key = s.num + '|' + s.kind;
+            const rel = relBrightness(s.w);
             const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
-            const weight = 1 + 3.5 * s.w;
-            const opacity = 0.10 + 0.85 * s.w;
+            const weight = 1 + 3.5 * rel;
+            const opacity = 0.10 + 0.85 * rel;
             const line = L.polyline(s.path, {color, opacity, weight});
             line.bindTooltip(
                 `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
@@ -217,7 +229,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 line.bringToFront();       // spod wiązki na wierzch
             });
             line.on('mouseout', () => line.setStyle({opacity, weight}));
-            if (s.w >= BRIGHT_W) {
+            if (rel >= BRIGHT_W) {
                 casings.push(L.polyline(s.path, {
                     color: '#fff',
                     opacity: 0.9,
@@ -229,7 +241,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                 faint.push(line);
             }
             if (!byLine.has(key)) byLine.set(key, []);
-            byLine.get(key).push(s);
+            byLine.get(key).push({...s, rel});
         }
 
         // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
@@ -240,7 +252,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         // segmenty dostają dodatkowe plakietki w 1/4 i 3/4 trasy.
         for (const [key, segs] of byLine) {
             const best = segs[segs.length - 1];
-            if (best.w < 0.4) continue;
+            if (best.rel < 0.4) continue;
             const [num, kind] = key.split('|');
             const positions = new Set([Math.floor(best.path.length / 2)]);
             if (best.path.length >= 20) {
@@ -255,7 +267,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
                         iconSize: null,
                     }),
                     interactive: false,
-                    opacity: 0.45 + 0.55 * best.w,
+                    opacity: 0.45 + 0.55 * best.rel,
                 }));
             }
         }
@@ -266,7 +278,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
         // do widoku całego województwa przez jedną bladą nitkę...
         let points = [];
         for (const threshold of [0.7, BRIGHT_W, 0]) {
-            points = flow.segments.filter(s => s.w >= threshold)
+            points = flow.segments.filter(s => relBrightness(s.w) >= threshold)
                                   .flatMap(s => s.path);
             if (points.length >= 4) break;
         }
