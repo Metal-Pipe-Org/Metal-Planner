@@ -159,7 +159,6 @@ MIN_PROGRESS_TOL_SEC = 0
 MAX_PROGRESS_TOL_SEC = 600
 WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
 DEFAULT_Q_MIN = 0.60    # domyślny próg jasności (suwak w UI go nadpisuje)
-MAX_SEGMENTS = 150      # twardy limit liczby segmentów w odpowiedzi
 
 
 def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=None):
@@ -552,7 +551,7 @@ def _finalize_segments(day, kept, ranges):
     kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
     brightest = sorted(
         segments.items(), key=lambda kv: kv[1][0], reverse=True,
-    )[:MAX_SEGMENTS]
+    )
     seg_list = []
     gtfs.geo_generation()           # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()         # jedno połączenie na wszystkie wycinki geometrii

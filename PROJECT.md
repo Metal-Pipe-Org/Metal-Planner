@@ -114,7 +114,7 @@ ten sam efekt daje analiza dwóch skanów:
    wlicza czekanie „do ostatniego kursu" i zaniżała jasność dowozów.
    Normalizacja: trasa optymalna 1,0, wariant na styk deadline 0,0.
 7. **Próg jasności** (suwak w UI, 0–100%, domyślnie 60%): segmenty poniżej
-   progu nie są wysyłane; odpowiedź ograniczona do 150 najjaśniejszych.
+   progu nie są wysyłane.
 8. **Spójność sieci**: po odsianiu progiem każdy segment jest przycinany
    z obu stron do zakotwiczonych punktów — początek to start relacji albo
    miejsce, gdzie dołącza inny narysowany segment; koniec to cel albo
