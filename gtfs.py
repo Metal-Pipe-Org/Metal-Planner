@@ -278,13 +278,18 @@ def match_stop(query, data):
 
 
 def all_stop_names():
-    """Posortowane nazwy przystanków do podpowiadania w formularzu."""
+    """Posortowane nazwy przystanków do podpowiadania w formularzu.
+
+    Perony kierunkowe (patrz _platform_base_name) pokazujemy jako jedną
+    nazwę bazową - użytkownik nie musi wybierać, który z 9 identycznych
+    w praktyce wariantów miał na myśli, skoro match_stop i tak dociąga
+    całe miejsce niezależnie od tego, który wpisze (patrz _expand_to_places).
+    """
     db = _connect()
-    names = [row[0] for row in db.execute(
-        "SELECT DISTINCT stop_name FROM stops ORDER BY stop_name"
-    )]
+    names = {row[0] for row in db.execute("SELECT DISTINCT stop_name FROM stops")}
     db.close()
-    return names
+    display = {_platform_base_name(name) or name for name in names}
+    return sorted(display)
 
 
 def all_stops_geo():
