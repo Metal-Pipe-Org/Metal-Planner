@@ -342,6 +342,26 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
     return list(raw.values())
 
 
+def _sibling_places(day, stop):
+    """Ten sam przystanek plus jego siblingi - dosłownie ten sam słupek albo
+    sąsiedni w tym samym miejscu (patrz gtfs._walking_bridges). Jedyne
+    miejsce, które rozwija "przystanek -> te same fizyczne miejsce", żeby
+    _refine_brightness i _select_and_anchor nie robiły tego niezależnie."""
+    return (stop, *day.siblings.get(stop, ()))
+
+
+def _board_index(day, segs):
+    """Przystanek (+ siblingi) -> segmenty, w które da się tam wskoczyć (mają
+    tam zapisany odjazd). Współdzielone przez _refine_brightness (szukanie
+    kontynuacji) i _select_and_anchor (kotwica końca)."""
+    index = {}
+    for seg in segs:
+        for stop in seg["dep_times"]:
+            for anchor in _sibling_places(day, stop):
+                index.setdefault(anchor, []).append(seg)
+    return index
+
+
 def _refine_brightness(day, segs, target_set, deadline, span):
     """Krok 2: aproksymacja (deadline - latest) wlicza dla rzadkich linii
     czekanie "do ostatniego kursu" i przekłamuje jasność. Liczymy więc
@@ -350,16 +370,11 @@ def _refine_brightness(day, segs, target_set, deadline, span):
     (sufiks - wyjść sprzed punktu wskoczenia nie da się już użyć). Wyjścia
     na cel są dokładne (wartość = przyjazd). Ustawia seg['bound']/seg['q'].
     """
-    stop_names = day.stop_names
-
     for seg in segs:
         for times in seg["dep_times"].values():
             times.sort()
 
-    passing_index = {}   # nazwa przystanku -> segmenty przez niego przejeżdżające
-    for seg in segs:
-        for stop in seg["dep_times"]:
-            passing_index.setdefault(stop_names[stop], []).append(seg)
+    passing_index = _board_index(day, segs)
 
     for seg in segs:
         seg["exit_vals"] = [e[1] for e in seg["exits"]]
@@ -376,7 +391,7 @@ def _refine_brightness(day, segs, target_set, deadline, span):
         """Przyjazd do celu, gdy z (arr_t, stop) wskakujemy w `other`
         i korzystamy z jego wyjść ZA punktem wskoczenia."""
         best = None
-        for stop2 in (stop, *day.siblings.get(stop, ())):
+        for stop2 in _sibling_places(day, stop):
             times = other["dep_times"].get(stop2)
             position = other["pos_of"].get(stop2)
             if times is None or position is None:
@@ -402,7 +417,7 @@ def _refine_brightness(day, segs, target_set, deadline, span):
                 if stop in target_set:
                     continue          # wartość = przyjazd, już dokładna
                 best = None
-                for other in passing_index.get(stop_names[stop], ()):
+                for other in passing_index.get(stop, ()):
                     if other is seg:
                         continue
                     value = join_value(arr_t, stop, other)
@@ -441,7 +456,7 @@ def _select_and_anchor(day, segs, q_min, start_name, target_set):
         """Czy z przyjazdu (arr_t, stop) da się wskoczyć w segment `other`
         (na tym samym słupku lub sąsiednim tego samego miejsca), opcjonalnie
         tylko w jego narysowanej części `drawn`."""
-        for stop2 in (stop, *day.siblings.get(stop, ())):
+        for stop2 in _sibling_places(day, stop):
             times = other["dep_times"].get(stop2)
             if times is None or (drawn is not None and stop2 not in drawn):
                 continue
@@ -450,10 +465,7 @@ def _select_and_anchor(day, segs, q_min, start_name, target_set):
                 return True
         return False
 
-    passing_index = {}
-    for seg in segs:
-        for stop in seg["dep_times"]:
-            passing_index.setdefault(stop_names[stop], []).append(seg)
+    passing_index = _board_index(day, segs)
 
     kept = [seg for seg in segs if seg["q"] >= q_min]
     ranges = {id(seg): (0, len(seg["stops"])) for seg in kept}
@@ -462,6 +474,18 @@ def _select_and_anchor(day, segs, q_min, start_name, target_set):
             id(seg): set(seg["stops"][ranges[id(seg)][0]:ranges[id(seg)][1]])
             for seg in kept
         }
+        # przystanek (+ siblingi) -> (segment, pozycja, arr_t, przystanek
+        # wyjścia) - tylko wyjścia w aktualnie narysowanej części; ten sam
+        # sibling-indeks co _board_index, tylko od strony wyjść zamiast
+        # wsiadania.
+        exit_index = {}
+        for other in kept:
+            o_start, o_cut = ranges[id(other)]
+            for pos, _, arr_t, stop in other["exits"]:
+                if not (o_start < pos <= o_cut):
+                    continue         # wyjście poza narysowaną częścią
+                for anchor in _sibling_places(day, stop):
+                    exit_index.setdefault(anchor, []).append((other, pos, arr_t, stop))
         survivors = []
         new_ranges = {}
         for seg in kept:
@@ -470,24 +494,19 @@ def _select_and_anchor(day, segs, q_min, start_name, target_set):
                 start_pos = 0
             else:
                 start_pos = None
-                for other in kept:
-                    if other is seg:
+                for stop2, p in seg["pos_of"].items():
+                    if p >= len(seg["stops"]) - 1:
+                        continue         # dołączenie na samym końcu - puste
+                    times = seg["dep_times"].get(stop2)
+                    if times is None:
                         continue
-                    o_start, o_cut = ranges[id(other)]
-                    for pos, _, arr_t, stop in other["exits"]:
-                        if not (o_start < pos <= o_cut):
-                            continue         # wyjście poza narysowaną częścią
-                        for stop2 in (stop, *day.siblings.get(stop, ())):
-                            p = seg["pos_of"].get(stop2)
-                            times = seg["dep_times"].get(stop2)
-                            if p is None or times is None:
-                                continue
-                            if p >= len(seg["stops"]) - 1:
-                                continue     # dołączenie na samym końcu - puste
-                            buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
-                            if catchable(arr_t, buffer, times):
-                                if start_pos is None or p < start_pos:
-                                    start_pos = p
+                    for other, _, arr_t, stop in exit_index.get(stop2, ()):
+                        if other is seg:
+                            continue
+                        buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+                        if catchable(arr_t, buffer, times):
+                            if start_pos is None or p < start_pos:
+                                start_pos = p
                 if start_pos is None:
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
@@ -498,7 +517,7 @@ def _select_and_anchor(day, segs, q_min, start_name, target_set):
                 if stop in target_set:
                     cut = max(cut, pos)      # cel jest "widoczny" z definicji
                     continue
-                for other in passing_index.get(stop_names[stop], ()):
+                for other in passing_index.get(stop, ()):
                     if other is seg or id(other) not in drawn_stops:
                         continue
                     # Kontynuacja musi być zdążalna i porównywalnie jasna -
