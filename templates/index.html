@@ -70,15 +70,9 @@
 
     <div class="field">
         <label for="tol">
-            Tolerancja regresji: <span id="tol-value">180</span> s
+            Tolerancja regresji: <span id="tol-value">0</span> s
         </label>
-        <input type="range" id="tol" min="0" max="300" step="15" value="180">
-        <p class="field-hint">
-            O ile latest[] wolno spaść poniżej najlepszego dotąd punktu
-            kursu, zanim przystanek przestaje liczyć się jako wyjście.
-            Niżej = ostrzej wobec cofania się, ale i mniej opcji na mapie
-            (latest bywa zaszumione o 1-2 min nawet na dobrej trasie).
-        </p>
+        <input type="range" id="tol" min="0" max="300" step="15" value="0">
     </div>
 </div>
 {% endif %}

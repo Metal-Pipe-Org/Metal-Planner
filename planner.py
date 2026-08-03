@@ -152,7 +152,7 @@ Q_ANCHOR_TOL = 0.10     # ogon rysujemy tylko do przesiadki w kontynuację
                         # niewiele ciemniejszą od segmentu (tolerancja jasności)
 BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
                         # (cofnięcia) o więcej niż 2 min
-PROGRESS_TOL_SEC = 180  # domyślny luz reguły postępu (suwak w UI go nadpisuje) -
+PROGRESS_TOL_SEC = 0    # domyślny luz reguły postępu (suwak w UI go nadpisuje) -
                         # metryka latest bywa zaszumiona o 1-2 min między
                         # sąsiednimi węzłami, nawet na dobrej trasie
 MIN_PROGRESS_TOL_SEC = 0
