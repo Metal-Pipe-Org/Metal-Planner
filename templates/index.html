@@ -60,7 +60,11 @@
         <label for="qmin">
             Czułość: opcje o jasności ≥ <span id="qmin-value">60</span>%
         </label>
-        <input type="range" id="qmin" min="30" max="90" step="5" value="60">
+        <input type="range" id="qmin" min="0" max="100" step="5" value="60">
+        <p class="field-hint">
+            0% pokazuje wszystko, co algorytm znalazł; 100% pokazuje tylko
+            pojedynczą, obiektywnie najlepszą trasę.
+        </p>
     </div>
 
     <div class="field">

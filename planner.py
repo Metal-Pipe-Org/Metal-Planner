@@ -183,7 +183,7 @@ def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=No
     None = domyślne PROGRESS_TOL_SEC.
     """
     when = when or datetime.now()
-    q_min = DEFAULT_Q_MIN if q_min is None else max(0.2, min(0.95, q_min))
+    q_min = DEFAULT_Q_MIN if q_min is None else max(0.0, min(1.0, q_min))
     progress_tol_sec = (
         PROGRESS_TOL_SEC if progress_tol_sec is None
         else max(MIN_PROGRESS_TOL_SEC, min(MAX_PROGRESS_TOL_SEC, progress_tol_sec))
