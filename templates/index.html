@@ -37,11 +37,6 @@
     <label for="time">Odjazd o (dzisiaj)</label>
     <input type="time" id="time" value="{{ form_time }}">
 
-    <label for="qmin">
-        Czułość: opcje o jasności ≥ <span id="qmin-value">60</span>%
-    </label>
-    <input type="range" id="qmin" min="30" max="90" step="5" value="60">
-
     <datalist id="stops">
         {% for name in stops %}<option value="{{ name }}">{% endfor %}
     </datalist>
@@ -56,6 +51,32 @@
     {% endif %}
 
 </div>
+
+{% if not data_error %}
+<div id="debug-panel">
+    <h2>Debug: strojenie algorytmu</h2>
+
+    <div class="field">
+        <label for="qmin">
+            Czułość: opcje o jasności ≥ <span id="qmin-value">60</span>%
+        </label>
+        <input type="range" id="qmin" min="30" max="90" step="5" value="60">
+    </div>
+
+    <div class="field">
+        <label for="tol">
+            Tolerancja regresji: <span id="tol-value">180</span> s
+        </label>
+        <input type="range" id="tol" min="0" max="300" step="15" value="180">
+        <p class="field-hint">
+            O ile latest[] wolno spaść poniżej najlepszego dotąd punktu
+            kursu, zanim przystanek przestaje liczyć się jako wyjście.
+            Niżej = ostrzej wobec cofania się, ale i mniej opcji na mapie
+            (latest bywa zaszumione o 1-2 min nawet na dobrej trasie).
+        </p>
+    </div>
+</div>
+{% endif %}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -266,6 +287,7 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
             end: endInput.value,
             time: document.getElementById('time').value,
             qmin: (Number(document.getElementById('qmin').value) / 100).toFixed(2),
+            tol: document.getElementById('tol').value,
         });
         clearRoute();
         resultBox.innerHTML = '<p class="hint">Szukam…</p>';
@@ -287,17 +309,23 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 
     document.getElementById('search').addEventListener('click', search);
 
-    // Suwak czułości: etykieta od razu, mapa po krótkim debounce
+    // Suwaki w panelu debug: etykieta od razu, mapa po krótkim debounce
     // (odpowiedź z ciepłym cache to ~10 ms, więc działa "na żywo").
-    const qminInput = document.getElementById('qmin');
-    let qminTimer = null;
-    qminInput.addEventListener('input', () => {
-        document.getElementById('qmin-value').textContent = qminInput.value;
-        clearTimeout(qminTimer);
-        qminTimer = setTimeout(() => {
-            if (startInput.value && endInput.value) search();
-        }, 200);
-    });
+    function liveSlider(inputId, valueId, onChange) {
+        const input = document.getElementById(inputId);
+        const valueEl = document.getElementById(valueId);
+        let timer = null;
+        input.addEventListener('input', () => {
+            valueEl.textContent = input.value;
+            if (onChange) onChange(input.value);
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                if (startInput.value && endInput.value) search();
+            }, 200);
+        });
+    }
+    liveSlider('qmin', 'qmin-value');
+    liveSlider('tol', 'tol-value');
 
     document.getElementById('clear').addEventListener('click', () => {
         const previous = [sel.start, sel.end];

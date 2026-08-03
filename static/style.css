@@ -45,6 +45,52 @@ body {
     pointer-events: none;
 }
 
+#debug-panel {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    width: 260px;
+    box-sizing: border-box;
+    background: white;
+    padding: 14px 16px;
+    border-radius: 10px;
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.3);
+    transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+#debug-panel.hidden {
+    transform: translateX(320px);
+    opacity: 0;
+    pointer-events: none;
+}
+
+#debug-panel h2 {
+    font-size: 0.95em;
+    margin: 0 0 8px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#debug-panel .field {
+    margin-top: 14px;
+}
+
+#debug-panel .field:first-of-type {
+    margin-top: 0;
+}
+
+#debug-panel label {
+    margin-top: 0;
+}
+
+#debug-panel .field-hint {
+    color: #777;
+    font-size: 0.78em;
+    margin-top: 3px;
+}
+
 h1 {
     font-size: 1.3em;
     margin: 0 0 6px;
