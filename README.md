@@ -2,8 +2,10 @@
 
 Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej
 wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz** —
-główne korytarze jaskrawo, niszowe objazdy ledwo widocznie — a użytkownik
-sam wybiera.
+główne korytarze jaskrawo, niszowe objazdy ledwo widocznie — a obok, w panelu,
+**listę gotowych propozycji** z godzinami, liniami i przesiadkami. Wybór
+propozycji podświetla ją na mapie, a kliknięcie linii na mapie otwiera
+propozycję, która nią jedzie.
 
 Pełny opis projektu, architektury i algorytmów: **[PROJECT.md](PROJECT.md)**.
 

@@ -55,8 +55,14 @@ def plan_route(start_query, end_query, when=None):
     }
 
 
-def _scan(day, source_stops, target_stops, dep_sec):
-    """Connection Scan: najwcześniejszy przyjazd do celu, ze śladem do rekonstrukcji."""
+def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline=None):
+    """Connection Scan: najwcześniejszy przyjazd do celu, ze śladem do rekonstrukcji.
+
+    banned_labels to zbiór etykiet linii ("Tramwaj 17"), których skan ma nie
+    używać - tak `plan_journeys` wymusza warianty strukturalnie inne od
+    najszybszego. deadline ucina skan, gdy przy takim zakazie nie ma już
+    czego szukać (inaczej skan jechałby do końca doby).
+    """
     conns = day.conns
     earliest = {}
     journey = {}      # stop_id -> ("origin",) | ("ride", idx_wsiadania, idx_wysiadania) | ("walk", skad)
@@ -70,11 +76,14 @@ def _scan(day, source_stops, target_stops, dep_sec):
     targets = set(target_stops)
     best_arr = INF
     best_stop = None
+    limit = INF if deadline is None else deadline
 
     for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
         dep_t, arr_t, dep_s, arr_s, trip = conns[i]
-        if dep_t > best_arr:
+        if dep_t > best_arr or dep_t > limit:
             break                     # dalsze odjazdy nie mogą już poprawić wyniku
+        if banned_labels and day.trip_info[trip][0] in banned_labels:
+            continue
 
         if trip not in trip_board:
             reached = earliest.get(dep_s, INF)
@@ -103,8 +112,13 @@ def _scan(day, source_stops, target_stops, dep_sec):
     return best_stop, best_arr, journey
 
 
-def _reconstruct(day, journey, last_stop):
-    """Odtwarza trasę od celu do startu i skleja ją w czytelne etapy."""
+def _reconstruct(day, journey, last_stop, geo_db=None):
+    """Odtwarza trasę od celu do startu i skleja ją w czytelne etapy.
+
+    Z otwartym `geo_db` ścieżka etapu jest wycinkiem geometrii kursu (realne
+    ulice i tory, tak jak na mapie przepływów); bez niego - łamaną po
+    przystankach.
+    """
     legs = []
     stop = last_stop
     while journey[stop][0] != "origin":
@@ -115,8 +129,11 @@ def _reconstruct(day, journey, last_stop):
                 "kind": "walk",
                 "text": f"Zmiana stanowiska na przystanku "
                         f"{day.stop_names[stop]} (ok. {WALK_SEC // 60} min)",
+                "minutes": WALK_SEC // 60,
+                "from": day.stop_names[from_stop],
+                "to": day.stop_names[stop],
                 "dep_sec": 0,
-                "path": [day.stop_coords[from_stop], day.stop_coords[stop]],
+                "path": _round_path([day.stop_coords[from_stop], day.stop_coords[stop]]),
             })
             stop = from_stop
         else:
@@ -124,25 +141,47 @@ def _reconstruct(day, journey, last_stop):
             board = day.conns[board_i]
             trip = board[4]
             line, headsign = day.trip_info[trip]
+            exit_arr = day.conns[exit_i][1]
             # Pełna lista przystanków etapu - do narysowania linii na mapie.
             path_rows = gtfs.trip_path(
-                trip, board[2], board[0], stop, day.conns[exit_i][1]
+                trip, board[2], board[0], stop, exit_arr, geo_db
             )
+            coords = [day.stop_coords[s] for s, _, _ in path_rows]
+            if geo_db is not None and len(coords) >= 2:
+                coords = gtfs.shape_slice(day.trip_shape.get(trip), coords, geo_db)
+            num, mode = _line_parts(line)
             legs.append({
                 "kind": "ride",
                 "line": line,
+                "num": num,
+                "mode": mode,
                 "headsign": headsign,
                 "from": day.stop_names[board[2]],
                 "from_time": _fmt_time(board[0]),
                 "to": day.stop_names[stop],
-                "to_time": _fmt_time(day.conns[exit_i][1]),
+                "to_time": _fmt_time(exit_arr),
                 "dep_sec": board[0],
+                "minutes": round((exit_arr - board[0]) / 60),
                 "stops": [day.stop_names[s] for s, _, _ in path_rows],
-                "path": [day.stop_coords[s] for s, _, _ in path_rows],
+                "stops_count": max(len(path_rows) - 1, 1),
+                "path": _round_path(coords),
             })
             stop = board[2]
     legs.reverse()
     return legs
+
+
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus"}
+
+
+def _line_parts(label):
+    """'Tramwaj 17' -> ('17', 'tram') - numer na plakietkę i rodzaj do koloru."""
+    kind, _, num = label.partition(" ")
+    return (num or label), MODE_OF_LABEL.get(kind, "other")
+
+
+def _round_path(coords):
+    return [[round(lat, 5), round(lon, 5)] for lat, lon in coords]
 
 
 SLOWDOWN = 1.5          # pokazujemy trasy do ~1,5x czasu najszybszej...
@@ -163,6 +202,158 @@ DEFAULT_Q_MIN = 0.60    # domyślny próg jasności (suwak w UI go nadpisuje)
 MIN_RANGE_M = 200       # zasięg szukania słupków wokół klikniętego punktu
 MAX_RANGE_M = 1500      # (suwak w UI go nadpisuje) - patrz gtfs.nearby_stops
 DEFAULT_RANGE_M = 1000
+
+
+MAX_JOURNEYS = 6          # ile propozycji tras pokazujemy na liście
+MAX_JOURNEY_SCANS = 14    # sufit kosztu: tyle skanów CSA na jedno zapytanie
+
+
+def _resolve_endpoints(day, start_query, end_query, start_point, end_point, range_m):
+    """Start i cel -> nazwy do pokazania + zbiory słupków do skanowania.
+
+    Każda strona niezależnie: nazwa przystanku (match_stop, całe kanoniczne
+    miejsce) albo dowolny punkt z mapy (słupki w zasięgu). Wspólne dla mapy
+    przepływów i listy propozycji - obie muszą rozumieć endpointy tak samo.
+    """
+    resolved = {}
+    for side, query, point, missing in (
+        ("start", start_query, start_point, "startowego"),
+        ("end", end_query, end_point, "docelowego"),
+    ):
+        stops_key = "source_stops" if side == "start" else "target_stops"
+        if point is not None:
+            lat, lon = point
+            stops = gtfs.nearby_stops(lat, lon, day, range_m)
+            if not stops:
+                return {"error": f"Brak przystanków w zasięgu wybranego punktu {missing}."}
+            resolved[side] = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
+            resolved[stops_key] = stops
+        else:
+            name, stops, hints = gtfs.match_stop(query, day)
+            if name is None:
+                return _unknown_stop(query, hints)
+            resolved[side] = name
+            resolved[stops_key] = set(stops)
+
+    if resolved["start"] == resolved["end"]:
+        return {"error": "Przystanek początkowy i końcowy są takie same."}
+    return resolved
+
+
+def _deadline(best_arr, dep_sec):
+    """Granica sensowności: najlepszy przyjazd + ~50% czasu podróży (5-30 min)."""
+    extra = min(
+        max(int((best_arr - dep_sec) * (SLOWDOWN - 1)), MIN_EXTRA_SEC), MAX_EXTRA_SEC,
+    )
+    return best_arr + extra
+
+
+def _no_connection(start_name, end_name, dep_sec):
+    return {
+        "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
+                 f"po {_fmt_time(dep_sec)} tego dnia."
+    }
+
+
+def plan_journeys(start_query, end_query, when=None, start_point=None, end_point=None,
+                  range_m=None, limit=MAX_JOURNEYS):
+    """Lista konkretnych propozycji tras (godziny, linie, przesiadki).
+
+    Mapa przepływów pokazuje CAŁY wachlarz możliwości; ta lista nazywa
+    z niego kilka gotowych wariantów - to samo okno czasowe (`_deadline`),
+    więc lista i mapa mówią o tym samym.
+
+    Warianty powstają metodą zakazów: najszybsza trasa z CSA, potem ten sam
+    skan z zakazem każdej użytej linii po kolei (i par linii, jeśli trzeba) -
+    dostajemy trasy strukturalnie inne, a nie ten sam korytarz o minutę
+    później. Odpada wszystko, co dociera po deadline albo powtarza układ
+    (te same linie i te same przystanki przesiadek).
+    """
+    when = when or datetime.now()
+    range_m = (
+        DEFAULT_RANGE_M if range_m is None
+        else max(MIN_RANGE_M, min(MAX_RANGE_M, range_m))
+    )
+
+    try:
+        day = gtfs.load_day(when.date())
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+
+    ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point, range_m)
+    if "error" in ends:
+        return ends
+    source_stops, target_stops = ends["source_stops"], ends["target_stops"]
+
+    dep_sec = when.hour * 3600 + when.minute * 60 + when.second
+    best_stop, best_arr, _ = _scan(day, source_stops, target_stops, dep_sec)
+    if best_stop is None:
+        return _no_connection(ends["start"], ends["end"], dep_sec)
+    deadline = _deadline(best_arr, dep_sec)
+
+    journeys = []
+    seen = set()
+    queue = [frozenset()]        # kolejka zbiorów zakazanych linii (BFS: najpierw pojedyncze)
+    tried = {frozenset()}
+    scans = 0
+
+    gtfs.geo_generation()        # jak w _finalize_segments: jeden stat na zapytanie
+    geo_db = gtfs.open_db()
+    try:
+        while queue and len(journeys) < limit and scans < MAX_JOURNEY_SCANS:
+            banned = queue.pop(0)
+            scans += 1
+            stop, arrival, trace = _scan(
+                day, source_stops, target_stops, dep_sec, banned, deadline,
+            )
+            if stop is None or arrival > deadline:
+                continue
+            legs = _reconstruct(day, trace, stop, geo_db)
+            rides = [leg for leg in legs if leg["kind"] == "ride"]
+            if not rides:
+                continue
+            signature = tuple((leg["line"], leg["from"]) for leg in rides)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            # Klucz sortowania: najpierw kto jest wcześniej na miejscu, przy
+            # remisie mniej przesiadek i późniejszy odjazd (mniej czekania).
+            # Po sekundach, nie po "HH:MM" - po północy rozkład ma 24:xx,
+            # które _fmt_time pokazuje jako 00:xx i tekstowo wypadłoby przed
+            # wieczornymi kursami.
+            journeys.append((
+                arrival, len(rides) - 1, -rides[0]["dep_sec"],
+                _summarize_journey(legs, rides, arrival, dep_sec),
+            ))
+            for leg in rides:
+                extra_ban = banned | {leg["line"]}
+                if len(extra_ban) <= 2 and extra_ban not in tried:
+                    tried.add(extra_ban)
+                    queue.append(extra_ban)
+    finally:
+        geo_db.close()
+
+    journeys.sort(key=lambda item: item[:3])   # klucz bez dicta na końcu
+    return {
+        "start": ends["start"],
+        "end": ends["end"],
+        "departure": _fmt_time(dep_sec),
+        "deadline": _fmt_time(deadline),
+        "journeys": [summary for *_, summary in journeys],
+    }
+
+
+def _summarize_journey(legs, rides, arrival, dep_sec):
+    """Nagłówek karty: odjazd, przyjazd, czas w drodze, czekanie, przesiadki."""
+    first_dep = rides[0]["dep_sec"]
+    return {
+        "departure": _fmt_time(first_dep),
+        "arrival": _fmt_time(arrival),
+        "duration_min": round((arrival - first_dep) / 60),
+        "wait_min": round((first_dep - dep_sec) / 60),
+        "transfers": len(rides) - 1,
+        "legs": legs,
+    }
 
 
 def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=None,
@@ -202,45 +393,19 @@ def plan_flow(start_query, end_query, when=None, q_min=None, progress_tol_sec=No
     except FileNotFoundError as e:
         return {"error": str(e)}
 
-    if start_point is not None:
-        lat, lon = start_point
-        start_name = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
-        source_stops = gtfs.nearby_stops(lat, lon, day, range_m)
-        if not source_stops:
-            return {"error": "Brak przystanków w zasięgu wybranego punktu startowego."}
-    else:
-        start_name, source_stops, start_hints = gtfs.match_stop(start_query, day)
-        if start_name is None:
-            return _unknown_stop(start_query, start_hints)
-        source_stops = set(source_stops)
-
-    if end_point is not None:
-        lat, lon = end_point
-        end_name = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
-        target_stops = gtfs.nearby_stops(lat, lon, day, range_m)
-        if not target_stops:
-            return {"error": "Brak przystanków w zasięgu wybranego punktu docelowego."}
-    else:
-        end_name, target_stops, end_hints = gtfs.match_stop(end_query, day)
-        if end_name is None:
-            return _unknown_stop(end_query, end_hints)
-        target_stops = set(target_stops)
-
-    if start_name == end_name:
-        return {"error": "Przystanek początkowy i końcowy są takie same."}
+    ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point, range_m)
+    if "error" in ends:
+        return ends
+    start_name, source_stops = ends["start"], ends["source_stops"]
+    end_name, target_stops = ends["end"], ends["target_stops"]
 
     dep_sec = when.hour * 3600 + when.minute * 60 + when.second
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek").
     best_stop, best_arr, _ = _scan(day, source_stops, target_stops, dep_sec)
     if best_stop is None:
-        return {
-            "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
-                     f"po {_fmt_time(dep_sec)} tego dnia."
-        }
-    duration = best_arr - dep_sec
-    extra = min(max(int(duration * (SLOWDOWN - 1)), MIN_EXTRA_SEC), MAX_EXTRA_SEC)
-    deadline = best_arr + extra
+        return _no_connection(start_name, end_name, dep_sec)
+    deadline = _deadline(best_arr, dep_sec)
 
     earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, target_stops, dep_sec, deadline)
@@ -574,7 +739,6 @@ def _finalize_segments(day, kept, ranges):
         if entry is None or seg["q"] > entry[0]:
             segments[key] = (seg["q"], seg["shape"])
 
-    kind_map = {"Tramwaj": "tram", "Autobus": "bus"}
     brightest = sorted(
         segments.items(), key=lambda kv: kv[1][0], reverse=True,
     )
@@ -586,10 +750,11 @@ def _finalize_segments(day, kept, ranges):
             path = gtfs.shape_slice(
                 shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
             )
+            num, mode = _line_parts(label)
             seg_list.append({
-                "path": [[round(lat, 5), round(lon, 5)] for lat, lon in path],
-                "num": label.split(" ", 1)[1] if " " in label else label,
-                "kind": kind_map.get(label.split(" ", 1)[0], "other"),
+                "path": _round_path(path),
+                "num": num,
+                "kind": mode,
                 "w": round(q, 3),
             })
     finally:

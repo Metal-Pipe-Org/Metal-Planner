@@ -38,19 +38,40 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
   przystankami, posortowanych po odjeździe) i cache'uje ją. Klucz cache
   zawiera mtime pliku bazy, więc po nocnej podmianie dane przeładują się
   same — bez restartu Flaska.
-- **`planner.py`** — dwa algorytmy na tej samej tablicy połączeń:
-  `plan_route` (jedna najszybsza trasa, CSA) i `plan_flow` (mapa przepływów) —
-  opis niżej.
+- **`planner.py`** — trzy algorytmy na tej samej tablicy połączeń:
+  `plan_route` (jedna najszybsza trasa, CSA), `plan_flow` (mapa przepływów)
+  i `plan_journeys` (lista propozycji tras) — opis niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
-  `/api/flow` (szczegóły w sekcji API).
+  `/api/flow`, `/api/journeys` (szczegóły w sekcji API).
 
-### 3. Frontend — `templates/index.html`
+### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 
 Jedna strona: pełnoekranowa mapa Leaflet (kafelki OpenStreetMap — wymaga
-internetu), wszystkie słupki jako markery na canvasie, chowany panel boczny
-(przycisk ☰). Klik 1 = start (zielony), klik 2 = cel (czerwony) i wyszukiwanie
-odpala się samo. Wynik jest **wyłącznie graficzny** — mapa przepływów, bez
-tekstowej listy etapów. Czysty JS bez frameworka.
+internetu), wszystkie słupki jako markery na canvasie, panel boczny z lewej
+(chowany przyciskiem ☰). Klik 1 = start (zielony), klik 2 = cel (czerwony)
+i wyszukiwanie odpala się samo; można też wpisać nazwy ręcznie.
+
+Wynik ma **dwie warstwy tej samej odpowiedzi**:
+
+- na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;
+- w panelu — lista **propozycji tras** w stylu klasycznej wyszukiwarki:
+  godziny odjazd–przyjazd, czas przejazdu, plakietki linii, liczba
+  przesiadek. Kliknięcie propozycji rozwija oś czasu etapów (przystanki,
+  kierunki, przejścia między stanowiskami), rysuje ją grubo na mapie
+  i przygasza resztę przepływu; ponowne kliknięcie wraca do całego
+  wachlarza. Najechanie na propozycję pokazuje ją na mapie w podglądzie.
+
+Działa to też w drugą stronę: **kliknięcie linii na mapie otwiera
+propozycję**, która nią jedzie (spośród kilku — tę najbliższą klikniętemu
+miejscu, przy remisie najlepszą z listy). Karta rozwija się i przewija do
+widoku, a kadr zostaje na miejscu, o ile trasa się w nim mieści — klik
+w mapę nie ma wyrywać widoku spod kursora. Linia, do której nie ma
+propozycji, nie przechwytuje kliknięcia: leci ono dalej do wyboru punktu
+start/cel, więc „klikaj gdziekolwiek" działa jak wcześniej (podpowiedź pod
+kursorem mówi, która linia jest klikalna).
+
+Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
+⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
 
 ## Algorytmy
 
@@ -72,6 +93,30 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
 
 Pierwsze zapytanie dnia kosztuje ~1 s (ładowanie tablicy do RAM),
 kolejne są natychmiastowe (~30 ms).
+
+### Lista propozycji tras (`plan_journeys`)
+
+Mapa przepływów pokazuje, **czym w ogóle da się dojechać**; lista nazywa
+z tego kilka gotowych wariantów z godzinami. Oba widoki liczą to samo okno
+czasowe (`_deadline`: najlepszy przyjazd + ~50% czasu podróży, 5–30 min),
+więc nie mogą się rozjechać.
+
+Warianty powstają **metodą zakazów** (plateau/via-banning), bez osobnego
+algorytmu wielokryterialnego:
+
+1. Najszybsza trasa to zwykłe CSA (`_scan`) + rekonstrukcja etapów.
+2. Potem ten sam skan powtarzamy z **zakazem każdej użytej linii** po kolei
+   (BFS po zbiorach zakazów, do dwóch linii naraz) — dostajemy trasy
+   strukturalnie inne, a nie ten sam korytarz kwadrans później.
+3. Odpada wszystko, co dociera po deadline albo powtarza układ (te same
+   linie wsiadane na tych samych przystankach).
+4. Sufity kosztu: maks. 14 skanów i 6 propozycji na zapytanie; każdy skan
+   z zakazem jest ucinany deadline'em, żeby przy nieosiągalnym celu nie
+   przeglądać reszty doby. Realnie 15–45 ms na cache'owanym dniu.
+
+Etapy dostają geometrię z `shapes.txt` (ten sam `gtfs.shape_slice` co
+przepływy, jedno połączenie do bazy na zapytanie), więc wybrana propozycja
+rysuje się po realnych ulicach i torach.
 
 ### Mapa przepływów / „symulacja mrówek" (`plan_flow`)
 
@@ -165,6 +210,13 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
+- `GET /api/journeys?start=&end=&time=HH:MM` (albo `start_lat`/`start_lon`,
+  `end_lat`/`end_lon` i `range_m` — jak w `/api/flow`) — lista propozycji:
+  `{start, end, departure, deadline, journeys: [{departure, arrival,
+  duration_min, wait_min, transfers, legs: [...]}, …]}`, posortowana po
+  godzinie przyjazdu. Etap przejazdu: `{kind: "ride", line, num, mode,
+  headsign, from, from_time, to, to_time, minutes, stops, stops_count,
+  path}`; etap pieszy: `{kind: "walk", text, minutes, from, to, path}`.
 - `GET /api/flow?start=&end=&time=HH:MM&qmin=0.60` — mapa przepływów:
   `{start, end, departure, best_arrival, deadline, segments: [{path:
   [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …]}`,
@@ -179,15 +231,25 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 |---|---|
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
-| `planner.py` | CSA (`plan_route`) + mapa przepływów (`plan_flow`) |
+| `planner.py` | CSA (`plan_route`), mapa przepływów (`plan_flow`), lista propozycji (`plan_journeys`) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
-| `templates/index.html` | mapa Leaflet + panel + cały frontendowy JS |
-| `static/style.css` | style panelu, plakietek linii itd. |
+| `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
+| `static/app.js` | cały frontend: mapa, wyszukiwanie, lista propozycji |
+| `static/style.css` | style panelu, kart tras, plakietek linii itd. |
 | `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
 
 ## Changelog
 
+- **2026-08-04** — lista propozycji tras obok mapy przepływów: nowy
+  `plan_journeys` (warianty metodą zakazu użytych linii, wspólne okno
+  czasowe z przepływami) i `/api/journeys`; karty tras w stylu klasycznej
+  wyszukiwarki, z rozwijaną osią czasu etapów i podświetleniem wybranej
+  trasy na mapie. Kliknięcie linii na mapie otwiera propozycję, która nią
+  jedzie (linia bez propozycji nadal przepuszcza klik do wyboru punktu).
+  Do tego przebudowa UI: panel z lewej (nagłówek, karta wyszukiwania
+  „skąd/dokąd" z zamianą stron, lista wyników), suwaki deweloperskie
+  schowane pod przyciskiem ⚙, cały JS przeniesiony do `static/app.js`.
 - **2026-07-18** — spójna sieć przepływów + suwak czułości: jasność liczona
   per wyjście przez konkretne kontynuacje (sufiksy, punkt stały) zamiast
   samej aproksymacji `deadline − latest`; segmenty kotwiczone z obu stron
@@ -244,6 +306,6 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 ## Pomysły na dalej
 
 - Dymki na węzłach przesiadkowych: „w co mogę się tu przesiąść i o której".
-- Powrót klasycznego widoku jednej trasy jako przełącznika obok przepływów.
+- Więcej odjazdów tej samej trasy na liście („następny kurs o…").
 - Suwak zakresu (1,5× / 2× / 3×) w panelu.
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
