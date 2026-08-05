@@ -3,7 +3,26 @@ from datetime import datetime
 from flask import jsonify, render_template, request
 
 import gtfs
-from planner import plan_flow, plan_route
+from planner import plan_flow, plan_journeys, plan_route
+
+
+def _float_arg(name):
+    """Liczba z query stringa albo None (planner podstawi wtedy domyślną)."""
+    try:
+        return float(request.args.get(name, ""))
+    except ValueError:
+        return None
+
+
+def _point_arg(prefix):
+    """Para (lat, lon) z `<prefix>_lat`/`<prefix>_lon` - klik w dowolny punkt mapy."""
+    try:
+        return (
+            float(request.args[f"{prefix}_lat"]),
+            float(request.args[f"{prefix}_lon"]),
+        )
+    except (KeyError, ValueError):
+        return None
 
 
 def _parse_when(time_str):
@@ -54,35 +73,24 @@ def init_routes(app):
 
     @app.route("/api/flow")
     def api_flow():
-        try:
-            q_min = float(request.args.get("qmin", ""))
-        except ValueError:
-            q_min = None
-        try:
-            progress_tol_sec = float(request.args.get("tol", ""))
-        except ValueError:
-            progress_tol_sec = None
-        try:
-            range_m = float(request.args.get("range_m", ""))
-        except ValueError:
-            range_m = None
-
-        def _point(prefix):
-            try:
-                return (
-                    float(request.args[f"{prefix}_lat"]),
-                    float(request.args[f"{prefix}_lon"]),
-                )
-            except (KeyError, ValueError):
-                return None
-
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
-            q_min,
-            progress_tol_sec,
-            _point("start"),
-            _point("end"),
-            range_m,
+            _float_arg("qmin"),
+            _float_arg("tol"),
+            _point_arg("start"),
+            _point_arg("end"),
+            _float_arg("range_m"),
+        ))
+
+    @app.route("/api/journeys")
+    def api_journeys():
+        return jsonify(plan_journeys(
+            request.args.get("start", ""),
+            request.args.get("end", ""),
+            _parse_when(request.args.get("time")),
+            _point_arg("start"),
+            _point_arg("end"),
+            _float_arg("range_m"),
         ))

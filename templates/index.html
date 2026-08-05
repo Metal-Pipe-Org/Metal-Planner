@@ -11,437 +11,135 @@
 
 <div id="map"></div>
 
-<button id="panel-toggle" title="Pokaż/ukryj panel">☰</button>
+<button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
+        aria-label="Pokaż/ukryj panel">☰</button>
 
-<div id="panel">
+<aside id="sidebar">
 
-    <h1>Planer podróży</h1>
+    <header class="app-bar">
+        <div class="brand">
+            <h1>Planer podróży</h1>
+            <p>Wrocław · tramwaje i autobusy</p>
+        </div>
+        <button id="dev-toggle" class="icon-button" title="Ustawienia deweloperskie"
+                aria-label="Ustawienia deweloperskie" aria-expanded="false">⚙</button>
+    </header>
 
     {% if data_error %}
 
-    <div class="error">{{ data_error }}</div>
+    <div class="card"><div class="notice error">{{ data_error }}</div></div>
 
     {% else %}
 
-    <p class="hint">
-        Kliknij na mapie przystanek (albo dowolny punkt) startowy, potem
-        docelowy — albo wpisz nazwy ręcznie.
-    </p>
+    <div class="card search-card">
 
-    <label for="start">Przystanek początkowy</label>
-    <input type="text" id="start" list="stops" placeholder="np. Katedra">
+        <div class="endpoints">
+            <div class="rail" aria-hidden="true">
+                <span class="rail-dot start"></span>
+                <span class="rail-line"></span>
+                <span class="rail-dot end"></span>
+            </div>
+            <div class="endpoint-fields">
+                <div class="ac-field">
+                    <input type="text" id="start" autocomplete="off" role="combobox"
+                           aria-label="Przystanek początkowy" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="start-list"
+                           placeholder="Skąd? np. Katedra">
+                    <ul class="ac-list" id="start-list" role="listbox" hidden
+                        aria-label="Podpowiedzi przystanków"></ul>
+                </div>
+                <div class="ac-field">
+                    <input type="text" id="end" autocomplete="off" role="combobox"
+                           aria-label="Przystanek docelowy" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="end-list"
+                           placeholder="Dokąd? np. pl. Grunwaldzki">
+                    <ul class="ac-list" id="end-list" role="listbox" hidden
+                        aria-label="Podpowiedzi przystanków"></ul>
+                </div>
+            </div>
+            <button id="swap" class="icon-button" title="Zamień miejscami"
+                    aria-label="Zamień początek z celem">⇅</button>
+        </div>
 
-    <label for="end">Przystanek docelowy</label>
-    <input type="text" id="end" list="stops" placeholder="np. pl. Grunwaldzki">
+        <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
 
-    <label for="time">Odjazd o (dzisiaj)</label>
-    <input type="time" id="time" value="{{ form_time }}">
+        <div class="search-row">
+            <label class="time-field">
+                <span>Odjazd</span>
+                <input type="time" id="time" value="{{ form_time }}">
+            </label>
+            <button id="search" class="button primary">Szukaj</button>
+            <button id="clear" class="icon-button" title="Wyczyść"
+                    aria-label="Wyczyść wybór">✕</button>
+        </div>
 
-    <datalist id="stops">
-        {% for name in stops %}<option value="{{ name }}">{% endfor %}
-    </datalist>
+        <p class="hint">
+            Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
+            potem cel. Inną relację zacznij od ✕.
+        </p>
 
-    <div class="buttons">
-        <button id="search">Szukaj połączenia</button>
-        <button id="clear">Wyczyść</button>
     </div>
 
-    <div id="result"></div>
+    <div id="results" class="results" aria-live="polite"></div>
 
     {% endif %}
 
-</div>
+</aside>
 
 {% if not data_error %}
-<div id="debug-panel">
-    <h2>Debug: strojenie algorytmu</h2>
+<nav id="view-tabs" aria-label="Widok">
+    <button class="tab active" data-view="map" aria-pressed="true">Mapa</button>
+    <button class="tab" data-view="list" aria-pressed="false">
+        Trasy <span id="tab-count" class="tab-count" hidden>0</span>
+    </button>
+</nav>
+
+<div id="dev-panel" class="card hidden">
+
+    <header class="dev-head">
+        <h2>Strojenie algorytmu</h2>
+        <button id="dev-close" class="icon-button" title="Zamknij"
+                aria-label="Zamknij panel deweloperski">✕</button>
+    </header>
 
     <div class="field">
         <label for="qmin">
-            Próg jasności: przyciemniaj poniżej <span id="qmin-value">60</span>%
+            Próg jasności <output id="qmin-value">60</output>%
         </label>
         <input type="range" id="qmin" min="0" max="100" step="5" value="60">
         <p class="field-hint">
-            0% pokazuje wszystko, co algorytm znalazł; 100% pokazuje tylko
-            pojedynczą, obiektywnie najlepszą trasę. Opcje tuż nad progiem
-            są rysowane bardzo blado, najlepsza - w pełnej jasności.
+            Poniżej progu segmenty znikają z mapy. 0% pokazuje wszystko, co
+            algorytm znalazł; 100% tylko obiektywnie najlepszą trasę.
         </p>
     </div>
 
     <div class="field">
         <label for="tol">
-            Tolerancja regresji: <span id="tol-value">0</span> s
+            Tolerancja regresji <output id="tol-value">0</output> s
         </label>
         <input type="range" id="tol" min="0" max="300" step="15" value="0">
+        <p class="field-hint">
+            Luz reguły postępu — metryka <code>latest</code> bywa zaszumiona
+            o minutę–dwie nawet na dobrej trasie.
+        </p>
     </div>
 
     <div class="field">
         <label for="range">
-            Zasięg szukania punktu: <span id="range-value">1000</span> m
+            Zasięg szukania punktu <output id="range-value">1000</output> m
         </label>
         <input type="range" id="range" min="200" max="1500" step="100" value="1000">
         <p class="field-hint">
-            Przy kliknięciu na dowolny punkt mapy (nie tylko przystanek) -
-            jak daleko szukać słupków, z których można wsiąść/wysiąść.
+            Przy kliknięciu w dowolny punkt mapy — jak daleko szukać słupków,
+            z których można wsiąść lub wysiąść.
         </p>
     </div>
+
 </div>
 {% endif %}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-const map = L.map('map', {preferCanvas: true, zoomControl: false})
-    .setView([51.107, 17.038], 13);
-L.control.zoom({position: 'topright'}).addTo(map);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap',
-}).addTo(map);
-
-document.getElementById('panel-toggle').addEventListener('click', () => {
-    document.getElementById('panel').classList.toggle('hidden');
-});
-
-const startInput = document.getElementById('start');
-const endInput = document.getElementById('end');
-const resultBox = document.getElementById('result');
-
-if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje błąd)
-
-    const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
-    // sel.start/end: nazwa przystanku (string) ALBO dowolny punkt mapy
-    // ({lat, lon}) - obie strony niezależnie, dowolna kombinacja.
-    let sel = {start: null, end: null};
-    let routeLayer = null;
-
-    const isPoint = v => v !== null && typeof v === 'object';
-    const samePlace = (a, b) => isPoint(a) || isPoint(b)
-        ? isPoint(a) === isPoint(b) && a.lat === b.lat && a.lon === b.lon
-        : a === b;
-    const displayValue = v => !v ? ''
-        : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : v;
-
-    // Markery klikniętych punktów (poza markersByName - nie są prawdziwym
-    // przystankiem). Ten sam kolor co podświetlenie start/cel, ale
-    // przerywana obwódka - łatwo odróżnić od słupka.
-    const pointMarkers = {start: null, end: null};
-    const POINT_STYLE = {
-        start: {radius: 9, weight: 3, dashArray: '2,4', color: '#1b5e20',
-                fillColor: '#4caf50', fillOpacity: 0.9},
-        end: {radius: 9, weight: 3, dashArray: '2,4', color: '#b71c1c',
-              fillColor: '#ef5350', fillOpacity: 0.9},
-    };
-
-    function updatePointMarker(slot, value) {
-        if (pointMarkers[slot]) {
-            map.removeLayer(pointMarkers[slot]);
-            pointMarkers[slot] = null;
-        }
-        if (isPoint(value)) {
-            pointMarkers[slot] = L.circleMarker(
-                [value.lat, value.lon], POINT_STYLE[slot],
-            ).addTo(map);
-        }
-    }
-
-    const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
-                        fillColor: '#42a5f5', fillOpacity: 0.8};
-    // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
-    const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
-                       fillColor: '#90a4ae', fillOpacity: 0.25};
-    let baseDimmed = false;
-
-    function styleFor(name) {
-        if (name === sel.start) return {radius: 8, weight: 2, color: '#1b5e20',
-                                        fillColor: '#4caf50', fillOpacity: 1};
-        if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
-                                      fillColor: '#ef5350', fillOpacity: 1};
-        return baseDimmed ? DIM_STYLE : BASE_STYLE;
-    }
-
-    function setBaseDim(dim) {
-        if (baseDimmed === dim) return;
-        baseDimmed = dim;
-        for (const [name, markers] of markersByName) {
-            const style = styleFor(name);
-            for (const m of markers) m.setStyle(style);
-        }
-    }
-
-    function restyle(...names) {
-        for (const name of names) {
-            if (!name) continue;
-            for (const m of markersByName.get(name) || []) m.setStyle(styleFor(name));
-        }
-    }
-
-    function clearRoute() {
-        if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
-        setBaseDim(false);
-        resultBox.innerHTML = '';
-    }
-
-    function pickEndpoint(value) {
-        const previous = [sel.start, sel.end];
-        if (!sel.start || (sel.start && sel.end)) {
-            sel = {start: value, end: null};  // kolejne kliknięcie zaczyna od nowa
-            clearRoute();
-        } else if (!samePlace(value, sel.start)) {
-            sel.end = value;
-        }
-        startInput.value = displayValue(sel.start);
-        endInput.value = displayValue(sel.end);
-        updatePointMarker('start', sel.start);
-        updatePointMarker('end', sel.end);
-        restyle(...previous, sel.start, sel.end);
-        if (sel.start && sel.end) search();
-    }
-
-    map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
-
-    fetch('/api/stops')
-        .then(r => r.json())
-        .then(stops => {
-            if (stops.error) { showError(stops.error); return; }
-            for (const s of stops) {
-                const m = L.circleMarker([s.lat, s.lon], BASE_STYLE).addTo(map);
-                m.bindTooltip(s.name);
-                // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby
-                // też do map.on('click') i nadpisał wybór punktem.
-                m.on('click', e => { L.DomEvent.stop(e); pickEndpoint(s.name); });
-                if (!markersByName.has(s.name)) markersByName.set(s.name, []);
-                markersByName.get(s.name).push(m);
-            }
-        });
-
-    function esc(text) {
-        const div = document.createElement('div');
-        div.textContent = text ?? '';
-        return div.innerHTML;
-    }
-
-    function showError(message, suggestions) {
-        let html = `<div class="error"><p>${esc(message)}</p>`;
-        if (suggestions && suggestions.length) {
-            html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(name =>
-                `<li><a href="#" data-name="${esc(name)}">${esc(name)}</a></li>`
-            ).join('') + '</ul>';
-        }
-        resultBox.innerHTML = html + '</div>';
-    }
-
-    const FLOW_COLORS = {tram: '#c62828', bus: '#1565c0', other: '#6a1b9a'};
-
-    // Mapa przepływów: każdy kurs to jeden ciągły segment od przystanku
-    // wsiadania do ostatniego sensownego wyjścia; jasność i grubość linii
-    // = zapas czasu najlepszego wyjścia (jednakowa na całym segmencie).
-    // Czytelność przy nachodzeniu: jaskrawe segmenty mają białą otoczkę
-    // (styl mapy tramwajowej), a najechanie na linię podświetla ją
-    // i pokazuje numer - widać, "która co gdzie", nawet w wiązce.
-    const BRIGHT_W = 0.45;
-    const KIND_LABEL = {tram: 'Tramwaj', bus: 'Autobus', other: 'Linia'};
-
-    function drawFlow(flow) {
-        setBaseDim(true);
-        const faint = [], casings = [], bright = [];
-        const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
-
-        // Jasność segmentów rysujemy WZGLĘDEM progu (qmin), nie w skali
-        // bezwzględnej 0..1: tuż nad progiem ma być prawie niewidoczne,
-        // pełna jasność zostaje tylko dla najlepszej opcji.
-        const qMinFrac = Number(document.getElementById('qmin').value) / 100;
-        function relBrightness(w) {
-            return qMinFrac < 1
-                ? Math.max(0, Math.min(1, (w - qMinFrac) / (1 - qMinFrac)))
-                : 1;
-        }
-
-        for (const s of flow.segments) {        // posortowane po w rosnąco
-            const key = s.num + '|' + s.kind;
-            const rel = relBrightness(s.w);
-            const color = FLOW_COLORS[s.kind] || FLOW_COLORS.other;
-            const weight = 1 + 3.5 * rel;
-            const opacity = 0.10 + 0.85 * rel;
-            const line = L.polyline(s.path, {color, opacity, weight});
-            line.bindTooltip(
-                `${KIND_LABEL[s.kind] || KIND_LABEL.other} ${s.num}`,
-                {sticky: true},
-            );
-            line.on('mouseover', () => {
-                line.setStyle({opacity: 1, weight: weight + 2.5});
-                line.bringToFront();       // spod wiązki na wierzch
-            });
-            line.on('mouseout', () => line.setStyle({opacity, weight}));
-            if (rel >= BRIGHT_W) {
-                casings.push(L.polyline(s.path, {
-                    color: '#fff',
-                    opacity: 0.9,
-                    weight: weight + 2.5,
-                    interactive: false,
-                }));
-                bright.push(line);
-            } else {
-                faint.push(line);
-            }
-            if (!byLine.has(key)) byLine.set(key, []);
-            byLine.get(key).push({...s, rel});
-        }
-
-        // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
-        const layers = [...faint, ...casings, ...bright];
-
-        // Plakietki z numerem linii - tylko dla linii, które mają sensowny
-        // udział w przepływie; na najjaśniejszym segmencie linii, dłuższe
-        // segmenty dostają dodatkowe plakietki w 1/4 i 3/4 trasy.
-        for (const [key, segs] of byLine) {
-            const best = segs[segs.length - 1];
-            if (best.rel < 0.4) continue;
-            const [num, kind] = key.split('|');
-            const positions = new Set([Math.floor(best.path.length / 2)]);
-            if (best.path.length >= 20) {
-                positions.add(Math.floor(best.path.length / 4));
-                positions.add(Math.floor(3 * best.path.length / 4));
-            }
-            for (const p of positions) {
-                layers.push(L.marker(best.path[p], {
-                    icon: L.divIcon({
-                        className: `line-badge ${kind}`,
-                        html: esc(num),
-                        iconSize: null,
-                    }),
-                    interactive: false,
-                    opacity: 0.45 + 0.55 * best.rel,
-                }));
-            }
-        }
-
-        routeLayer = L.layerGroup(layers).addTo(map);
-
-        // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać
-        // do widoku całego województwa przez jedną bladą nitkę...
-        let points = [];
-        for (const threshold of [0.7, BRIGHT_W, 0]) {
-            points = flow.segments.filter(s => relBrightness(s.w) >= threshold)
-                                  .flatMap(s => s.path);
-            if (points.length >= 4) break;
-        }
-        // ...ale start i cel muszą być w kadrze zawsze.
-        for (const endpoint of [sel.start, sel.end]) {
-            if (isPoint(endpoint)) {
-                points.push([endpoint.lat, endpoint.lon]);
-                continue;
-            }
-            for (const m of markersByName.get(endpoint) || []) {
-                const p = m.getLatLng();
-                points.push([p.lat, p.lng]);
-            }
-        }
-        if (points.length) {
-            map.fitBounds(L.latLngBounds(points), {
-                paddingTopLeft: [400, 30],     // miejsce na panel z lewej
-                paddingBottomRight: [30, 30],
-            });
-        }
-    }
-
-    function search() {
-        const params = new URLSearchParams({
-            time: document.getElementById('time').value,
-            qmin: (Number(document.getElementById('qmin').value) / 100).toFixed(2),
-            tol: document.getElementById('tol').value,
-            range_m: document.getElementById('range').value,
-        });
-        if (isPoint(sel.start)) {
-            params.set('start_lat', sel.start.lat);
-            params.set('start_lon', sel.start.lon);
-        } else {
-            params.set('start', startInput.value);
-        }
-        if (isPoint(sel.end)) {
-            params.set('end_lat', sel.end.lat);
-            params.set('end_lon', sel.end.lon);
-        } else {
-            params.set('end', endInput.value);
-        }
-        clearRoute();
-        resultBox.innerHTML = '<p class="hint">Szukam…</p>';
-        fetch('/api/flow?' + params)
-            .then(r => r.json())
-            .then(flow => {
-                if (flow.error) { showError(flow.error, flow.suggestions); return; }
-                // Kanoniczne nazwy z API: podświetlenie startu/celu działa
-                // też przy ręcznym wpisaniu, nie tylko przy klikaniu w mapę
-                // (drawFlow przemalowuje wszystkie markery wg nowego sel) -
-                // ale klikniętego punktu nie nadpisujemy nazwą z odpowiedzi.
-                if (!isPoint(sel.start)) { sel.start = flow.start; startInput.value = flow.start; }
-                if (!isPoint(sel.end)) { sel.end = flow.end; endInput.value = flow.end; }
-                resultBox.innerHTML = '';      // wynik jest tylko na mapie
-                drawFlow(flow);
-            })
-            .catch(() => showError('Nie udało się połączyć z serwerem.'));
-    }
-
-    document.getElementById('search').addEventListener('click', search);
-
-    // Suwaki w panelu debug: etykieta od razu, mapa po krótkim debounce
-    // (odpowiedź z ciepłym cache to ~10 ms, więc działa "na żywo").
-    function liveSlider(inputId, valueId, onChange) {
-        const input = document.getElementById(inputId);
-        const valueEl = document.getElementById(valueId);
-        let timer = null;
-        input.addEventListener('input', () => {
-            valueEl.textContent = input.value;
-            if (onChange) onChange(input.value);
-            clearTimeout(timer);
-            timer = setTimeout(() => {
-                if (startInput.value && endInput.value) search();
-            }, 200);
-        });
-    }
-    liveSlider('qmin', 'qmin-value');
-    liveSlider('tol', 'tol-value');
-    liveSlider('range', 'range-value');
-
-    // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" -
-    // dalej liczy się to, co user wpisał, jak przy zwykłym wyszukiwaniu.
-    startInput.addEventListener('input', () => {
-        if (isPoint(sel.start)) { sel.start = null; updatePointMarker('start', null); }
-    });
-    endInput.addEventListener('input', () => {
-        if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
-    });
-
-    document.getElementById('clear').addEventListener('click', () => {
-        const previous = [sel.start, sel.end];
-        sel = {start: null, end: null};
-        startInput.value = '';
-        endInput.value = '';
-        updatePointMarker('start', null);
-        updatePointMarker('end', null);
-        clearRoute();
-        restyle(...previous);
-    });
-
-    // Kliknięcie podpowiedzi wstawia nazwę w pierwsze niepasujące pole.
-    const knownNames = () => new Set([...markersByName.keys()].map(n => n.toLowerCase()));
-    resultBox.addEventListener('click', event => {
-        const name = event.target.dataset && event.target.dataset.name;
-        if (!name) return;
-        event.preventDefault();
-        const known = knownNames();
-        if (!isPoint(sel.start) && !known.has(startInput.value.trim().toLowerCase())) {
-            startInput.value = name;
-            sel.start = null;
-            updatePointMarker('start', null);
-        } else {
-            endInput.value = name;
-            sel.end = null;
-            updatePointMarker('end', null);
-        }
-        if (startInput.value && endInput.value) search();
-    });
-}
-</script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 
 </body>
 </html>

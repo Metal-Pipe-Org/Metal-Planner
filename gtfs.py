@@ -467,15 +467,23 @@ def _simplify(points):
     return kept
 
 
-def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr):
-    """Kolejne przystanki kursu od wsiadania do wysiadania (stop_id, przyjazd, odjazd)."""
-    db = _connect()
-    rows = db.execute(
-        "SELECT stop_id, arrival_sec, departure_sec FROM stop_times "
-        "WHERE trip_id = ? ORDER BY stop_sequence",
-        (trip_id,),
-    ).fetchall()
-    db.close()
+def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None):
+    """Kolejne przystanki kursu od wsiadania do wysiadania (stop_id, przyjazd, odjazd).
+
+    Z podanym `db` korzysta z cudzego połączenia (jedno na całe zapytanie);
+    bez niego otwiera i zamyka własne.
+    """
+    own_db = db is None
+    db = db or _connect()
+    try:
+        rows = db.execute(
+            "SELECT stop_id, arrival_sec, departure_sec FROM stop_times "
+            "WHERE trip_id = ? ORDER BY stop_sequence",
+            (trip_id,),
+        ).fetchall()
+    finally:
+        if own_db:
+            db.close()
 
     start_i = None
     for i, (stop_id, arrival_sec, departure_sec) in enumerate(rows):
