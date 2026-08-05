@@ -56,6 +56,11 @@ def init_routes(app):
             form_time=datetime.now().strftime("%H:%M"),
         )
 
+    @app.route("/healthz")
+    def healthz():
+        """Sonda dla dockerowego HEALTHCHECK - żyje też bez bazy rozkładów."""
+        return jsonify({"status": "ok"})
+
     @app.route("/api/stops")
     def api_stops():
         try:
