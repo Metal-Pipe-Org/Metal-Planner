@@ -233,6 +233,54 @@ body.panel-hidden #sidebar {
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
+/* Własna lista podpowiedzi nazw przystanków (zamiast <datalist>). */
+.ac-field {
+    position: relative;
+}
+
+.ac-list {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 246px;
+    margin: 0;
+    padding: 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+    background: var(--surface);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+}
+
+.ac-list[hidden] { display: none; }
+
+.ac-item {
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+/* Gdy podświetleniem steruje klawiatura, hover się nie wtrąca - inaczej
+   widać dwa "wybrane" wiersze naraz. */
+.ac-list:not(.kb) .ac-item:hover,
+.ac-item.active {
+    background: var(--surface-alt);
+}
+
+.ac-item mark {
+    background: none;
+    color: var(--accent);
+    font-weight: 700;
+}
+
 .search-row {
     display: flex;
     align-items: center;

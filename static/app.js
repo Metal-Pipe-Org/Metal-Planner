@@ -714,10 +714,6 @@ function search() {
 
 $('search').addEventListener('click', search);
 
-for (const input of [startInput, endInput]) {
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
-}
-
 // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" - dalej
 // liczy się to, co user wpisał, jak przy zwykłym wyszukiwaniu.
 startInput.addEventListener('input', () => {
@@ -725,6 +721,138 @@ startInput.addEventListener('input', () => {
 });
 endInput.addEventListener('input', () => {
     if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
+});
+
+// -------------------------------------------- podpowiedzi nazw przystanków ----
+
+// Własna lista zamiast <datalist>: natywna wygląda inaczej w każdej
+// przeglądarce, nie da się jej ostylować ani sterować kolejnością trafień,
+// a do tego wymaga dokładnych ogonków - "lesnica" nie znajdowało "LEŚNICA".
+const STOP_NAMES = JSON.parse($('stop-names').textContent);
+const MAX_SUGGESTIONS = 8;
+
+// Składanie nazwy: bez ogonków i wielkości liter, ale ZNAK W ZNAK - długość
+// się nie zmienia, więc pozycja trafienia w wersji złożonej wskazuje ten sam
+// fragment oryginalnej nazwy (do podświetlenia).
+const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                         .toLowerCase().replace(/ł/g, 'l');
+const FOLDED_NAMES = STOP_NAMES.map(fold);
+
+/** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
+    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
+function suggestionsFor(query) {
+    const needle = fold(query.trim());
+    if (!needle) return [];
+    const prefix = [], inside = [];
+    STOP_NAMES.forEach((name, i) => {
+        const at = FOLDED_NAMES[i].indexOf(needle);
+        if (at === 0) prefix.push({name, at, len: needle.length});
+        else if (at > 0) inside.push({name, at, len: needle.length});
+    });
+    return [...prefix, ...inside].slice(0, MAX_SUGGESTIONS);
+}
+
+function attachAutocomplete(input, onPick) {
+    const list = $(input.id + '-list');
+    let items = [];
+    let active = -1;          // -1 = nic nie wybrane klawiaturą
+
+    function close() {
+        list.hidden = true;
+        list.innerHTML = '';
+        list.classList.remove('kb');
+        items = [];
+        active = -1;
+        input.setAttribute('aria-expanded', 'false');
+        input.removeAttribute('aria-activedescendant');
+    }
+
+    function open() {
+        items = suggestionsFor(input.value);
+        active = -1;
+        if (!items.length) { close(); return; }
+        list.innerHTML = items.map((item, i) => {
+            const hit = esc(item.name.slice(item.at, item.at + item.len));
+            return `<li class="ac-item" role="option" aria-selected="false"
+                        id="${list.id}-${i}" data-index="${i}">` +
+                   `${esc(item.name.slice(0, item.at))}<mark>${hit}</mark>` +
+                   `${esc(item.name.slice(item.at + item.len))}</li>`;
+        }).join('');
+        list.hidden = false;
+        list.classList.remove('kb');
+        input.setAttribute('aria-expanded', 'true');
+        input.removeAttribute('aria-activedescendant');
+    }
+
+    function setActive(index) {
+        const previous = list.children[active];
+        if (previous) {
+            previous.classList.remove('active');
+            previous.setAttribute('aria-selected', 'false');
+        }
+        active = index;
+        const current = list.children[active];
+        if (!current) return;
+        current.classList.add('active');
+        current.setAttribute('aria-selected', 'true');
+        current.scrollIntoView({block: 'nearest'});
+        list.classList.add('kb');       // klawiatura przejmuje podświetlenie
+        input.setAttribute('aria-activedescendant', current.id);
+    }
+
+    function move(step) {
+        if (list.hidden) open();
+        if (!items.length) return;
+        setActive(active < 0
+            ? (step > 0 ? 0 : items.length - 1)
+            : (active + step + items.length) % items.length);
+    }
+
+    function choose(index) {
+        const item = items[index];
+        if (!item) return;
+        input.value = item.name;
+        close();
+        onPick();
+    }
+
+    input.addEventListener('input', open);
+    input.addEventListener('focus', () => { if (input.value) open(); });
+    // Wybór myszą leci przez mousedown z preventDefault, więc blur nigdy nie
+    // zamknie listy sprzed kliknięcia.
+    input.addEventListener('blur', close);
+
+    input.addEventListener('keydown', event => {
+        switch (event.key) {
+        case 'ArrowDown': event.preventDefault(); move(1); break;
+        case 'ArrowUp': event.preventDefault(); move(-1); break;
+        case 'Escape': close(); break;
+        case 'Tab': close(); break;
+        case 'Enter':
+            event.preventDefault();
+            if (active >= 0) choose(active);
+            else { close(); search(); }
+            break;
+        }
+    });
+
+    list.addEventListener('mousedown', event => {
+        const option = event.target.closest('.ac-item');
+        if (!option) return;
+        event.preventDefault();         // pole ma zostać z fokusem
+        choose(Number(option.dataset.index));
+    });
+}
+
+// Wybór podpowiedzi kończy tryb "wybrany punkt" i - gdy relacja jest
+// kompletna - od razu szuka, tak samo jak klik w mapę.
+attachAutocomplete(startInput, () => {
+    if (isPoint(sel.start)) { sel.start = null; updatePointMarker('start', null); }
+    if (endInput.value) search();
+});
+attachAutocomplete(endInput, () => {
+    if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
+    if (startInput.value) search();
 });
 
 $('swap').addEventListener('click', () => {

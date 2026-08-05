@@ -40,18 +40,28 @@
                 <span class="rail-dot end"></span>
             </div>
             <div class="endpoint-fields">
-                <input type="text" id="start" list="stops" autocomplete="off"
-                       placeholder="Skąd? np. Katedra" aria-label="Przystanek początkowy">
-                <input type="text" id="end" list="stops" autocomplete="off"
-                       placeholder="Dokąd? np. pl. Grunwaldzki" aria-label="Przystanek docelowy">
+                <div class="ac-field">
+                    <input type="text" id="start" autocomplete="off" role="combobox"
+                           aria-label="Przystanek początkowy" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="start-list"
+                           placeholder="Skąd? np. Katedra">
+                    <ul class="ac-list" id="start-list" role="listbox" hidden
+                        aria-label="Podpowiedzi przystanków"></ul>
+                </div>
+                <div class="ac-field">
+                    <input type="text" id="end" autocomplete="off" role="combobox"
+                           aria-label="Przystanek docelowy" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="end-list"
+                           placeholder="Dokąd? np. pl. Grunwaldzki">
+                    <ul class="ac-list" id="end-list" role="listbox" hidden
+                        aria-label="Podpowiedzi przystanków"></ul>
+                </div>
             </div>
             <button id="swap" class="icon-button" title="Zamień miejscami"
                     aria-label="Zamień początek z celem">⇅</button>
         </div>
 
-        <datalist id="stops">
-            {% for name in stops %}<option value="{{ name }}">{% endfor %}
-        </datalist>
+        <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
 
         <div class="search-row">
             <label class="time-field">

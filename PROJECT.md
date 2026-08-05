@@ -73,6 +73,17 @@ w mapę nie ma wyrywać widoku spod kursora. Linia, do której nie ma
 propozycji, nie przechwytuje kliknięcia: leci ono dalej do zwykłej obsługi
 kliknięcia w mapę (podpowiedź pod kursorem mówi, która linia jest klikalna).
 
+Nazwy przystanków podpowiada **własna lista** (`attachAutocomplete`), nie
+`<datalist>`: natywnej nie da się ostylować, wygląda inaczej w każdej
+przeglądarce i wymaga dokładnych ogonków. Własna szuka po nazwie złożonej
+(bez ogonków i wielkości liter, ale znak w znak — dzięki temu pozycja
+trafienia wskazuje ten sam fragment oryginału i da się go podświetlić),
+trafienia od początku nazwy pokazuje przed trafieniami w środku, obsługuje
+↑/↓/Enter/Esc i po wyborze od razu szuka, jeśli druga strona relacji jest
+już wypełniona. Lista nazw jedzie w stronie jako JSON (`#stop-names`) —
+to ta sama lista, którą wcześniej dostawał `<datalist>`, bez dodatkowego
+zapytania.
+
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
 
@@ -250,9 +261,13 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   wyszukiwarki, z rozwijaną osią czasu etapów i podświetleniem wybranej
   trasy na mapie. Kliknięcie linii na mapie otwiera propozycję, która nią
   jedzie (linia bez propozycji nadal przepuszcza klik do wyboru punktu).
-  Do tego przebudowa UI: panel z lewej (nagłówek, karta wyszukiwania
-  „skąd/dokąd" z zamianą stron, lista wyników), suwaki deweloperskie
-  schowane pod przyciskiem ⚙, cały JS przeniesiony do `static/app.js`.
+  Klik w mapę nie kasuje już gotowego wyszukiwania — uzupełnia tylko
+  brakujący koniec relacji, a przy wybranej trasie odznacza ją; czyści
+  wyłącznie przycisk ✕. Podpowiedzi nazw przystanków to własna lista
+  zamiast `<datalist>` (szukanie bez ogonków, podświetlanie trafienia,
+  obsługa klawiatury). Do tego przebudowa UI: panel z lewej (nagłówek,
+  karta wyszukiwania „skąd/dokąd" z zamianą stron, lista wyników), suwaki
+  deweloperskie schowane pod przyciskiem ⚙, cały JS w `static/app.js`.
 - **2026-07-18** — spójna sieć przepływów + suwak czułości: jasność liczona
   per wyjście przez konkretne kontynuacje (sufiksy, punkt stały) zamiast
   samej aproksymacji `deadline − latest`; segmenty kotwiczone z obu stron
