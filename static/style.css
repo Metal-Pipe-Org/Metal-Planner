@@ -657,26 +657,87 @@ body.panel-hidden #sidebar {
     border-radius: 3px;
 }
 
+/* ------------------------------------------- zakładki (tylko telefon) --- */
+
+#view-tabs {
+    display: none;               /* na szerokim ekranie widać oba widoki naraz */
+    position: fixed;
+    z-index: 1200;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    gap: 4px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line);
+}
+
+.tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    height: 44px;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--ink-soft);
+    cursor: pointer;
+    user-select: none;                       /* stuknięcie nie ma zaznaczać etykiety */
+    -webkit-tap-highlight-color: transparent;
+}
+
+.tab.active {
+    background: var(--surface-alt);
+    color: var(--accent);
+}
+
+.tab-count {
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+}
+
+.tab-count[hidden] { display: none; }
+
 /* --------------------------------------------------------------- RWD --- */
 
 @media (max-width: 760px) {
+    #view-tabs { display: flex; }
+
     #sidebar {
-        top: auto;
+        top: 8px;
         left: 8px;
         right: 8px;
-        bottom: 8px;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
         width: auto;
-        max-height: 68vh;
     }
+
+    /* Widok mapy: z panelu zostaje sama karta wyszukiwania, reszta ekranu
+       to mapa. Widok listy: panel na cały ekran nad zakładkami. */
+    body.view-map #sidebar { bottom: auto; }
+    body.view-map .app-bar,
+    body.view-map .hint,
+    body.view-map .results { display: none; }
+
+    /* Zakładki zastępują ☰ - dwa mechanizmy chowania panelu naraz tylko by
+       myliły, a przy schowanym ☰ nie byłoby czym go odsłonić. */
+    .icon-button.floating { display: none; }
 
     body.panel-hidden #sidebar {
-        transform: translateY(calc(100% + 16px));
-    }
-
-    .icon-button.floating,
-    body.panel-hidden .icon-button.floating {
-        top: 12px;
-        left: 12px;
+        transform: none;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
     }
 
     #dev-panel {

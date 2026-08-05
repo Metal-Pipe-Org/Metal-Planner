@@ -37,6 +37,32 @@ if (devPanel) {
     $('dev-close').addEventListener('click', () => setDev(false));
 }
 
+// Na telefonie panel i mapa nie mieszczą się naraz, więc zamiast nachodzić
+// na siebie przełączają się zakładkami (na szerokim ekranie klasy widoku
+// nic nie robią - tam widać jedno i drugie). Karta wyszukiwania zostaje
+// widoczna w obu widokach; zakładki przełączają to, co pod nią.
+const viewTabs = $('view-tabs');
+const tabCount = $('tab-count');
+
+function setView(view) {
+    if (!viewTabs) return;
+    document.body.classList.toggle('view-list', view === 'list');
+    document.body.classList.toggle('view-map', view !== 'list');
+    for (const tab of viewTabs.querySelectorAll('.tab')) {
+        const on = tab.dataset.view === view;
+        tab.classList.toggle('active', on);
+        tab.setAttribute('aria-pressed', String(on));
+    }
+}
+
+if (viewTabs) {
+    viewTabs.addEventListener('click', event => {
+        const tab = event.target.closest('.tab');
+        if (tab) setView(tab.dataset.view);
+    });
+    setView('map');
+}
+
 const startInput = $('start');
 const endInput = $('end');
 const resultsBox = $('results');
@@ -172,15 +198,26 @@ function fitTo(points) {
     const wide = window.matchMedia('(min-width: 761px)').matches;
     const panelVisible = !document.body.classList.contains('panel-hidden');
     const gutter = 40;
-    const left = wide && panelVisible ? sidebar.offsetWidth + gutter : gutter;
-    const bottom = !wide && panelVisible
-        ? Math.min(sidebar.offsetHeight + gutter, window.innerHeight * 0.6)
-        : gutter;
-    map.fitBounds(L.latLngBounds(points), {
-        paddingTopLeft: [left, gutter],
-        paddingBottomRight: [gutter, bottom],
-        maxZoom: 16,     // krótka trasa nie ma wjeżdżać w widok pojedynczej ulicy
-    });
+    // maxZoom: krótka trasa nie ma wjeżdżać w widok pojedynczej ulicy.
+    const options = {maxZoom: 16};
+    if (wide) {
+        options.paddingTopLeft = [panelVisible ? sidebar.offsetWidth + gutter : gutter, gutter];
+        options.paddingBottomRight = [gutter, gutter];
+    } else {
+        // Telefon: kadrujemy zawsze pod widok mapy (nad kartą wyszukiwania,
+        // nad zakładkami) - także wtedy, gdy akurat patrzymy na listę, bo to
+        // ten kadr zobaczymy po przełączeniu zakładki.
+        // Karta bywa wysoka (dwa pola + godzina), a przy dosłownym odsunięciu
+        // się od niej na kadr zostaje pasek na dole ekranu - stąd sufit.
+        const card = document.querySelector('.search-card');
+        const top = panelVisible && card
+            ? Math.min(card.getBoundingClientRect().bottom + 12,
+                       window.innerHeight * 0.35)
+            : gutter;
+        options.paddingTopLeft = [gutter, top];
+        options.paddingBottomRight = [gutter, (viewTabs ? viewTabs.offsetHeight : 0) + 12];
+    }
+    map.fitBounds(L.latLngBounds(points), options);
 }
 
 function endpointPoints() {
@@ -575,7 +612,14 @@ function renderJourneys() {
             zobaczyć całą trasę.
         </p>`;
 
+    setTabCount(journeys.length);
     scrollToSelected();
+}
+
+function setTabCount(count) {
+    if (!tabCount) return;
+    tabCount.textContent = count;
+    tabCount.hidden = !count;
 }
 
 function scrollToSelected() {
@@ -629,6 +673,7 @@ function resetResults() {
     clearPreview();
     clearFlow();
     resultsBox.innerHTML = '';
+    setTabCount(0);
 }
 
 function showError(message, suggestions) {
@@ -709,6 +754,9 @@ function search() {
     clearPreview();
     resultsBox.innerHTML = '<div class="notice">Szukam połączeń…</div>';
     Promise.all([loadFlow(token, true), loadJourneys(token)])
+        // Wyniki są tym, po co się przyszło - na telefonie pokazujemy je od
+        // razu (na szerokim ekranie i tak widać wszystko naraz).
+        .then(() => { if (token === requestToken && journeys.length) setView('list'); })
         .catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
@@ -874,6 +922,7 @@ $('clear').addEventListener('click', () => {
     updatePointMarker('end', null);
     resetResults();
     restyle(...previous);
+    setView('map');       // nową relację wybiera się na mapie
 });
 
 // Suwaki panelu deweloperskiego: etykieta od razu, mapa po krótkim debounce

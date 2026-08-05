@@ -87,6 +87,13 @@
 </aside>
 
 {% if not data_error %}
+<nav id="view-tabs" aria-label="Widok">
+    <button class="tab active" data-view="map" aria-pressed="true">Mapa</button>
+    <button class="tab" data-view="list" aria-pressed="false">
+        Trasy <span id="tab-count" class="tab-count" hidden>0</span>
+    </button>
+</nav>
+
 <div id="dev-panel" class="card hidden">
 
     <header class="dev-head">

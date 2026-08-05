@@ -84,6 +84,17 @@ już wypełniona. Lista nazw jedzie w stronie jako JSON (`#stop-names`) —
 to ta sama lista, którą wcześniej dostawał `<datalist>`, bez dodatkowego
 zapytania.
 
+**Telefon (≤ 760 px) dostaje zakładki** zamiast panelu nachodzącego na mapę:
+dolny pasek „Mapa / Trasy (n)" przełącza to, co pod kartą wyszukiwania —
+albo lista propozycji na cały ekran, albo sama mapa (wtedy z panelu zostaje
+tylko karta „skąd/dokąd", bez nagłówka i podpowiedzi, żeby nie zjadały
+ekranu). Po znalezieniu połączeń widok przeskakuje na listę, a ✕ wraca na
+mapę, bo tam wybiera się nową relację. Zakładki zastępują ☰ (dwa mechanizmy
+chowania panelu naraz tylko by myliły). Klasy `view-map`/`view-list` na
+`<body>` na szerokim ekranie nie robią nic — tam widać oba widoki naraz.
+Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
+ten kadr zobaczymy po przełączeniu zakładki.
+
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
 
@@ -265,9 +276,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   brakujący koniec relacji, a przy wybranej trasie odznacza ją; czyści
   wyłącznie przycisk ✕. Podpowiedzi nazw przystanków to własna lista
   zamiast `<datalist>` (szukanie bez ogonków, podświetlanie trafienia,
-  obsługa klawiatury). Do tego przebudowa UI: panel z lewej (nagłówek,
-  karta wyszukiwania „skąd/dokąd" z zamianą stron, lista wyników), suwaki
-  deweloperskie schowane pod przyciskiem ⚙, cały JS w `static/app.js`.
+  obsługa klawiatury). Na telefonie dolne zakładki „Mapa / Trasy" zamiast
+  panelu nachodzącego na mapę. Do tego przebudowa UI: panel z lewej
+  (nagłówek, karta wyszukiwania „skąd/dokąd" z zamianą stron, lista
+  wyników), suwaki deweloperskie schowane pod przyciskiem ⚙, cały JS
+  w `static/app.js`.
 - **2026-07-18** — spójna sieć przepływów + suwak czułości: jasność liczona
   per wyjście przez konkretne kontynuacje (sufiksy, punkt stały) zamiast
   samej aproksymacji `deadline − latest`; segmenty kotwiczone z obu stron
