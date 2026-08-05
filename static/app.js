@@ -143,11 +143,15 @@ const stopsReady = fetch('/api/stops')
         }
     });
 
+/** Klik w mapę (pusty punkt albo słupek) uzupełnia brakujący koniec relacji.
+    Nigdy nie kasuje gotowego wyszukiwania - od tego jest przycisk ✕; przy
+    wybranej trasie pierwszy taki klik po prostu ją odznacza. */
 function pickEndpoint(value) {
+    if (selectedJourney !== null) { deselectJourney(); return; }
+    if (sel.start && sel.end) return;
     const previous = [sel.start, sel.end];
-    if (!sel.start || (sel.start && sel.end)) {
-        sel = {start: value, end: null};  // kolejne kliknięcie zaczyna od nowa
-        resetResults();
+    if (!sel.start) {
+        sel.start = value;
     } else if (!samePlace(value, sel.start)) {
         sel.end = value;
     }
@@ -421,14 +425,18 @@ function clearPreview() {
 
 function selectJourney(index) {              // klik w kartę na liście
     if (selectedJourney === index) {         // ponowny klik = pokaż znów cały wachlarz
-        clearPreview();
-        selectedJourney = null;
-        clearJourney();
-        dimFlow(false);
-        renderJourneys();
+        deselectJourney();
         return;
     }
     openJourney(index);
+}
+
+function deselectJourney() {
+    clearPreview();
+    selectedJourney = null;
+    clearJourney();
+    dimFlow(false);
+    renderJourneys();
 }
 
 /** Otwiera propozycję (z listy albo z mapy) - w przeciwieństwie do kliknięcia
@@ -520,7 +528,10 @@ function detailHtml(journey) {
     });
 
     return `<ol class="timeline">${rows.join('')}</ol>
-        <p class="j-collapse">Kliknij ponownie, żeby wrócić do wszystkich wariantów.</p>`;
+        <p class="j-collapse">
+            Kliknij ponownie — albo w mapę obok trasy — żeby wrócić do
+            wszystkich wariantów.
+        </p>`;
 }
 
 function renderJourneys() {

@@ -49,7 +49,10 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 Jedna strona: pełnoekranowa mapa Leaflet (kafelki OpenStreetMap — wymaga
 internetu), wszystkie słupki jako markery na canvasie, panel boczny z lewej
 (chowany przyciskiem ☰). Klik 1 = start (zielony), klik 2 = cel (czerwony)
-i wyszukiwanie odpala się samo; można też wpisać nazwy ręcznie.
+i wyszukiwanie odpala się samo; można też wpisać nazwy ręcznie. Klikanie
+uzupełnia tylko brakujący koniec relacji — **gotowego wyszukiwania nie
+kasuje żaden klik w mapę, tylko przycisk ✕**, żeby przypadkowe kliknięcie
+nie zabrało wyników sprzed chwili.
 
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
@@ -58,17 +61,17 @@ Wynik ma **dwie warstwy tej samej odpowiedzi**:
   godziny odjazd–przyjazd, czas przejazdu, plakietki linii, liczba
   przesiadek. Kliknięcie propozycji rozwija oś czasu etapów (przystanki,
   kierunki, przejścia między stanowiskami), rysuje ją grubo na mapie
-  i przygasza resztę przepływu; ponowne kliknięcie wraca do całego
-  wachlarza. Najechanie na propozycję pokazuje ją na mapie w podglądzie.
+  i przygasza resztę przepływu; ponowne kliknięcie — albo klik w mapę obok
+  trasy — wraca do całego wachlarza. Najechanie na propozycję pokazuje ją
+  na mapie w podglądzie.
 
 Działa to też w drugą stronę: **kliknięcie linii na mapie otwiera
 propozycję**, która nią jedzie (spośród kilku — tę najbliższą klikniętemu
 miejscu, przy remisie najlepszą z listy). Karta rozwija się i przewija do
 widoku, a kadr zostaje na miejscu, o ile trasa się w nim mieści — klik
 w mapę nie ma wyrywać widoku spod kursora. Linia, do której nie ma
-propozycji, nie przechwytuje kliknięcia: leci ono dalej do wyboru punktu
-start/cel, więc „klikaj gdziekolwiek" działa jak wcześniej (podpowiedź pod
-kursorem mówi, która linia jest klikalna).
+propozycji, nie przechwytuje kliknięcia: leci ono dalej do zwykłej obsługi
+kliknięcia w mapę (podpowiedź pod kursorem mówi, która linia jest klikalna).
 
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
