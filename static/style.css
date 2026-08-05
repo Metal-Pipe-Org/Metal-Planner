@@ -13,6 +13,7 @@
     --line: #e3e8ee;
     --surface: #fff;
     --surface-alt: #f5f7fa;
+    --sheet: #e9edf2;                /* tło listy tras na telefonie */
     --radius: 14px;
     --shadow: 0 6px 24px rgba(16, 32, 48, 0.14), 0 1px 3px rgba(16, 32, 48, 0.10);
     --sidebar-w: 380px;
@@ -723,11 +724,29 @@ body.panel-hidden #sidebar {
     }
 
     /* Widok mapy: z panelu zostaje sama karta wyszukiwania, reszta ekranu
-       to mapa. Widok listy: panel na cały ekran nad zakładkami. */
+       to mapa. */
     body.view-map #sidebar { bottom: auto; }
     body.view-map .app-bar,
     body.view-map .hint,
     body.view-map .results { display: none; }
+
+    /* Widok listy: panel na cały ekran, na własnym tle - mapa pod spodem
+       zostaje w DOM (Leaflet musi znać rozmiar kontenera, żeby poprawnie
+       kadrować także wtedy, gdy patrzymy na listę), ale nie prześwituje
+       między kartami. */
+    body.view-list #sidebar {
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+        padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
+        background: var(--sheet);
+    }
+
+    /* Poświata pod tekstem była na czytelność nad mapą - na jednolitym tle
+       tylko brudzi. */
+    body.view-list .results-head h2,
+    body.view-list .results-foot { text-shadow: none; }
 
     /* Zakładki zastępują ☰ - dwa mechanizmy chowania panelu naraz tylko by
        myliły, a przy schowanym ☰ nie byłoby czym go odsłonić. */

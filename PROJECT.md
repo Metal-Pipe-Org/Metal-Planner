@@ -88,7 +88,10 @@ zapytania.
 dolny pasek „Mapa / Trasy (n)" przełącza to, co pod kartą wyszukiwania —
 albo lista propozycji na cały ekran, albo sama mapa (wtedy z panelu zostaje
 tylko karta „skąd/dokąd", bez nagłówka i podpowiedzi, żeby nie zjadały
-ekranu). Po znalezieniu połączeń widok przeskakuje na listę, a ✕ wraca na
+ekranu). Lista leży na własnym, jednolitym tle — mapa **zostaje pod spodem
+w DOM**, bo Leaflet musi znać rozmiar swojego kontenera, żeby poprawnie
+kadrować także wtedy, gdy patrzymy na listę (przy `display: none` dostałby
+zerowy kontener i policzył bezsensowny kadr); po prostu jej nie widać. Po znalezieniu połączeń widok przeskakuje na listę, a ✕ wraca na
 mapę, bo tam wybiera się nową relację. Zakładki zastępują ☰ (dwa mechanizmy
 chowania panelu naraz tylko by myliły). Klasy `view-map`/`view-list` na
 `<body>` na szerokim ekranie nie robią nic — tam widać oba widoki naraz.
