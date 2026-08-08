@@ -710,8 +710,15 @@ function queryParams() {
     wpisaniu, nie tylko przy klikaniu w mapę - ale klikniętego punktu nie
     nadpisujemy nazwą z odpowiedzi. */
 function adoptNames(data) {
+    const previous = [sel.start, sel.end];
     if (!isPoint(sel.start)) { sel.start = data.start; startInput.value = data.start; }
     if (!isPoint(sel.end)) { sel.end = data.end; endInput.value = data.end; }
+    // Poprzednie końce muszą wrócić do zwykłego stylu. Przemalowanie tylko
+    // nowych wystarczało przy PIERWSZYM wyszukiwaniu, bo setBaseDim(true)
+    // przechodził wtedy przez wszystkie słupki - przy kolejnych mapa jest
+    // już przygaszona, setBaseDim wychodzi od razu i stare podświetlenie
+    // zostawało na mapie na zawsze.
+    restyle(...previous, sel.start, sel.end);
 }
 
 function loadFlow(token, refit) {
@@ -723,7 +730,6 @@ function loadFlow(token, refit) {
             if (token !== requestToken) return;
             if (flow.error) { clearFlow(); showError(flow.error, flow.suggestions); return; }
             adoptNames(flow);
-            restyle(sel.start, sel.end);
             drawFlow(flow, refit);
         });
 }
