@@ -353,6 +353,18 @@ body.panel-hidden #sidebar {
     color: var(--ink-soft);
 }
 
+.results-head .icon-button {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+    margin-left: auto;
+}
+
+#results.collapsed .journeys,
+#results.collapsed .results-foot {
+    display: none;
+}
+
 .journeys {
     list-style: none;
     margin: 0;

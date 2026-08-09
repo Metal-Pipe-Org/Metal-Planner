@@ -18,9 +18,35 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 const $ = id => document.getElementById(id);
 
+// Stan paneli (schowany/rozwinięty) i ostatnie wyszukiwanie zapisujemy
+// w localStorage pod wspólnym kluczem - przeżywa odświeżenie strony i nowe
+// wizyty. Jeden mały odczyt/zapis JSON-a na zmianę, nie warto osobnych kluczy
+// na każde pole.
+const UI_STATE_KEY = 'metal-planner:ui-state';
+
+function loadUiState() {
+    try {
+        return JSON.parse(localStorage.getItem(UI_STATE_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+function saveUiState(patch) {
+    try {
+        localStorage.setItem(UI_STATE_KEY, JSON.stringify({...loadUiState(), ...patch}));
+    } catch {
+        // localStorage niedostępny (tryb prywatny) - panel działa dalej, po prostu się nie zapamięta
+    }
+}
+
+const uiState = loadUiState();
+
 const sidebar = $('sidebar');
+document.body.classList.toggle('panel-hidden', !!uiState.sidebarHidden);
 $('sidebar-toggle').addEventListener('click', () => {
-    document.body.classList.toggle('panel-hidden');
+    const hidden = document.body.classList.toggle('panel-hidden');
+    saveUiState({sidebarHidden: hidden});
 });
 
 // Panel deweloperski jest schowany za przyciskiem - normalny użytkownik
@@ -28,11 +54,13 @@ $('sidebar-toggle').addEventListener('click', () => {
 const devPanel = $('dev-panel');
 const devToggle = $('dev-toggle');
 if (devPanel) {
-    const setDev = open => {
+    const setDev = (open, persist = true) => {
         devPanel.classList.toggle('hidden', !open);
         devToggle.classList.toggle('active', open);
         devToggle.setAttribute('aria-expanded', String(open));
+        if (persist) saveUiState({devOpen: open});
     };
+    setDev(!!uiState.devOpen, false);
     devToggle.addEventListener('click', () => setDev(devPanel.classList.contains('hidden')));
     $('dev-close').addEventListener('click', () => setDev(false));
 }
@@ -77,6 +105,7 @@ let sel = {start: null, end: null};
 let journeys = [];
 let selectedJourney = null;   // indeks pozycji z listy albo null
 let requestToken = 0;         // odsiewa odpowiedzi na nieaktualne zapytania
+let resultsCollapsed = !!uiState.resultsCollapsed; // ukrywa samą listę propozycji (nie cały panel)
 
 const isPoint = v => v !== null && typeof v === 'object';
 const samePlace = (a, b) => isPoint(a) || isPoint(b)
@@ -597,6 +626,10 @@ function renderJourneys() {
         <div class="results-head">
             <h2>Propozycje tras</h2>
             <span class="results-count">${journeys.length}</span>
+            <button id="results-toggle" class="icon-button"
+                    title="${resultsCollapsed ? 'Pokaż' : 'Ukryj'} propozycje tras"
+                    aria-label="${resultsCollapsed ? 'Pokaż' : 'Ukryj'} propozycje tras"
+                    aria-expanded="${String(!resultsCollapsed)}">${resultsCollapsed ? '▸' : '▾'}</button>
         </div>
         <ol class="journeys">${cards}</ol>
         <p class="results-foot">
@@ -604,6 +637,7 @@ function renderJourneys() {
             tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
             zobaczyć całą trasę.
         </p>`;
+    resultsBox.classList.toggle('collapsed', resultsCollapsed);
 
     setTabCount(journeys.length);
     scrollToSelected();
@@ -621,6 +655,13 @@ function scrollToSelected() {
 }
 
 resultsBox.addEventListener('click', event => {
+    if (event.target.closest('#results-toggle')) {
+        resultsCollapsed = !resultsCollapsed;
+        saveUiState({resultsCollapsed});
+        renderJourneys();
+        return;
+    }
+
     const card = event.target.closest('.journey');
     if (card) { selectJourney(Number(card.dataset.index)); return; }
 
@@ -746,12 +787,48 @@ function loadPlan(token, refit) {
         });
 }
 
+const LAST_SEARCH_KEY = 'metal-planner:last-search';
+
+function saveLastSearch() {
+    try {
+        localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
+            start: sel.start, end: sel.end, time: $('time').value,
+        }));
+    } catch {
+        // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
+    }
+}
+
+/** Ostatnie wyszukiwanie (skąd/dokąd/godzina) wraca po odświeżeniu strony -
+    tylko gdy pola są jeszcze puste (nie nadpisujemy tego, co user już
+    zdążył wpisać, zanim ten kod się uruchomił). */
+function restoreLastSearch() {
+    if (startInput.value || endInput.value) return;
+    let saved;
+    try {
+        saved = JSON.parse(localStorage.getItem(LAST_SEARCH_KEY));
+    } catch {
+        return;
+    }
+    if (!saved || !saved.start || !saved.end) return;
+    sel.start = saved.start;
+    sel.end = saved.end;
+    startInput.value = displayValue(sel.start);
+    endInput.value = displayValue(sel.end);
+    if (saved.time) $('time').value = saved.time;
+    updatePointMarker('start', sel.start);
+    updatePointMarker('end', sel.end);
+    restyle(sel.start, sel.end);
+    search();
+}
+
 function search() {
     if (!startInput.value || !endInput.value) return;
     const token = ++requestToken;
     clearJourney();
     clearPreview();
     resultsBox.innerHTML = '<div class="notice">Szukam połączeń…</div>';
+    saveLastSearch();
     loadPlan(token, true)
         // Wyniki są tym, po co się przyszło - na telefonie pokazujemy je od
         // razu (na szerokim ekranie i tak widać wszystko naraz).
@@ -760,6 +837,7 @@ function search() {
 }
 
 $('search').addEventListener('click', search);
+stopsReady.then(restoreLastSearch);
 
 // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" - dalej
 // liczy się to, co user wpisał, jak przy zwykłym wyszukiwaniu.
@@ -929,12 +1007,50 @@ $('clear').addEventListener('click', () => {
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
 // więc każdy suwak siłą rzeczy odświeża i mapę, i listę - nie ma już
 // suwaków "tylko dla mapy".
+//
+// Wartości suwaków zapamiętujemy w localStorage (jeden klucz, mały JSON) -
+// przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
+// preferencji od nowa za każdym razem.
+const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
+const DEV_SLIDER_IDS = ['tol', 'range', 'extra', 'count'];
+
+function loadDevPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(DEV_PREFS_KEY)) || {};
+    } catch {
+        return {};       // localStorage niedostępny (tryb prywatny) albo zepsuty JSON
+    }
+}
+
+function saveDevPref(id, value) {
+    const prefs = loadDevPrefs();
+    prefs[id] = value;
+    try {
+        localStorage.setItem(DEV_PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+        // localStorage niedostępny - suwak działa dalej, po prostu się nie zapamięta
+    }
+}
+
+function applyStoredDevPrefs() {
+    const prefs = loadDevPrefs();
+    for (const id of DEV_SLIDER_IDS) {
+        if (prefs[id] === undefined) continue;
+        const input = $(id);
+        const valueEl = $(id + '-value');
+        if (!input) continue;
+        input.value = prefs[id];
+        if (valueEl) valueEl.textContent = prefs[id];
+    }
+}
+
 function liveSlider(inputId, valueId) {
     const input = $(inputId);
     const valueEl = $(valueId);
     let timer = null;
     input.addEventListener('input', () => {
         valueEl.textContent = input.value;
+        saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
             if (!startInput.value || !endInput.value) return;
@@ -943,6 +1059,7 @@ function liveSlider(inputId, valueId) {
         }, 200);
     });
 }
+applyStoredDevPrefs();
 liveSlider('tol', 'tol-value');
 liveSlider('range', 'range-value');
 liveSlider('extra', 'extra-value');
