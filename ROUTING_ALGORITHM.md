@@ -269,10 +269,12 @@ directly into line opacity.
 
 ## Step 7 — One more honesty pass before drawing
 
-Even after all that, a segment could technically pass the brightness
-threshold while starting from a stop nobody can actually reach, or trailing
-off somewhere that isn't the destination and isn't a real transfer point.
-Before anything is drawn, every kept segment is trimmed on both ends:
+Even after all that, a segment could technically start from a stop nobody
+can actually reach, or trail off somewhere that isn't the destination and
+isn't a real transfer point. Every segment discovered within the deadline
+window gets trimmed on both ends before anything is drawn — there's no
+separate brightness cutoff at this stage, every segment goes through this
+same honesty pass regardless of its score:
 
 - **Start**: either it's the real origin (Rynek), or there's another
   currently-drawn segment you could catchably transfer onto that lands you
@@ -283,7 +285,21 @@ Before anything is drawn, every kept segment is trimmed on both ends:
   some barely-relevant side street.
 
 Net result: nothing on the map starts from nowhere, and nothing trails off
-into thin air, no matter where the brightness slider is set.
+into thin air, regardless of how wide the time window is set.
+
+One subtlety this trimming had to get right: the "start" check above only
+makes sense for a boarding stop reached *during* the journey — it must never
+apply to your own starting stop(s). A point clicked on the map can expand to
+several physically distinct nearby stops, all equally valid, zero-cost
+places to begin from. An earlier version of this rule compared every
+candidate boarding stop's slack against the *single best* slack among all of
+those starting stops, which wrongly rejected boarding at a perfectly good
+starting stop whenever a different, physically separate starting stop
+happened to have better onward prospects — even though being at any of your
+own starting points is never "backtracking." The rule now only ever
+compares a stop against that same standard when the stop was reached by
+riding or walking *during* the journey, never when it's one of the starting
+stops themselves.
 
 ---
 
@@ -296,3 +312,54 @@ destination than when you boarded. If you find at least one such stop,
 draw one line from boarding to the best of them, score it by how much real
 margin it leaves before the deadline, and only keep the ones bright enough
 and connected enough to belong on the map.
+
+---
+
+## Step 8 — Reading the sidebar's proposal list off the same map
+
+Everything above describes one thing: the cloud of segments the map draws.
+The ranked list of named proposals next to it ("18:45 → 19:22, 1 transfer")
+is not a second algorithm — it's a direct reading of the exact same segment
+cloud, taken *after* Step 7's trimming has already decided what's actually
+drawn.
+
+Think of the kept, trimmed segments as a small map of "corridors" connected
+by real transfer points — the same transfer points Step 7 already checked
+when it decided a segment's tail was allowed to reach that far. Producing a
+proposal is then just: start at any corridor that begins at the true origin,
+and walk forward through it, at every real transfer point either (a) you've
+reached the destination — that's a complete proposal — or (b) you hop into
+whichever next corridor is reachable there, exactly the way Step 7 already
+verified was legitimate (same "comparably bright" test — a corridor never
+hands off to something distinctly dimmer than itself). Explore the
+brightest branches first, stop once enough distinct proposals are found or
+the search has spent its (small) budget, then rank what's left by arrival
+time, then by fewest transfers, then by least waiting.
+
+The payoff of doing it this way instead of running a separate search: a
+proposal can *never* name a transfer that isn't actually drawn on the map,
+because it's built from nothing but the map's own already-decided shape.
+Move the one time-window slider ("show routes up to N minutes slower than
+the fastest") and the list shrinks or grows in lockstep with the map,
+automatically, for free — there's no separate brightness threshold anymore
+that the two could disagree about.
+
+One invariant is worth stating outright: the single fastest route scores
+`1.0` by definition (Step 6) — it's exactly as good as "the best possible,"
+zero slack burned. That means widening or narrowing the time window will
+never filter the fastest route out of the list; a narrower window only ever
+prunes the *slower* alternatives underneath it, on the list exactly as it
+does on the map.
+
+Step 7's trimming answers a slightly different question than "is this route
+fast" — it's "is this segment anchored to something real on both ends" —
+and an earlier version of that anchoring rule could, in a specific
+situation, disagree with "is this route fast": a starting-point cluster
+with several physically distinct nearby stops could see the genuinely
+fastest route's own boarding stop rejected, purely because a *different*
+stop in that same cluster had better prospects (see the note at the end of
+Step 7 — that's now fixed at the source, not patched around here). As a
+last-resort safety net for whatever's left unanticipated, if the anchoring
+step ever throws away literally every segment despite a connection
+provably existing, the map and list both fall back to drawing that one
+proven-fastest route directly, so neither one is ever left showing nothing.

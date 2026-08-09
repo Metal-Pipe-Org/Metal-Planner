@@ -103,13 +103,15 @@
     </header>
 
     <div class="field">
-        <label for="qmin">
-            Próg jasności <output id="qmin-value">60</output>%
+        <label for="extra">
+            Ile dłużej niż najszybsza trasa <output id="extra-value">30</output> min
         </label>
-        <input type="range" id="qmin" min="0" max="100" step="5" value="60">
+        <input type="range" id="extra" min="0" max="60" step="1" value="30">
         <p class="field-hint">
-            Poniżej progu segmenty znikają z mapy. 0% pokazuje wszystko, co
-            algorytm znalazł; 100% tylko obiektywnie najlepszą trasę.
+            Jedyny suwak okna czasowego — pokazuje trasy i propozycje do tylu
+            minut wolniejsze niż najszybsza. Zastąpił dawny próg jasności +
+            trzy suwaki wydłużenia: ich efekt zawsze sprowadzał się do jednej
+            liczby, więc zostaje jedna.
         </p>
     </div>
 
@@ -121,6 +123,18 @@
         <p class="field-hint">
             Luz reguły postępu — metryka <code>latest</code> bywa zaszumiona
             o minutę–dwie nawet na dobrej trasie.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="count">
+            Ile propozycji tras szukać <output id="count-value">6</output>
+        </label>
+        <input type="range" id="count" min="1" max="20" step="1" value="6">
+        <p class="field-hint">
+            Do bruteforcowania: każe algorytmowi przeszukać graf głębiej
+            i wypisać do tylu wariantów. Jeśli tylu naprawdę nie ma, lista
+            będzie krótsza — nic tu się nie zmyśla.
         </p>
     </div>
 

@@ -253,13 +253,6 @@ function clearFlow() {
     setBaseDim(false);
 }
 
-function relBrightness(w) {
-    const qMinFrac = Number($('qmin').value) / 100;
-    return qMinFrac < 1
-        ? Math.max(0, Math.min(1, (w - qMinFrac) / (1 - qMinFrac)))
-        : 1;
-}
-
 function drawFlow(flow, refit) {
     if (flowLayer) map.removeLayer(flowLayer);   // bez clearFlow: przemalowanie
     flowParts = [];                              // wszystkich słupków tam i z powrotem
@@ -269,7 +262,7 @@ function drawFlow(flow, refit) {
 
     for (const s of flow.segments) {        // posortowane po w rosnąco
         const key = s.num + '|' + s.kind;
-        const rel = relBrightness(s.w);
+        const rel = s.w;
         const color = LINE_COLORS[s.kind] || LINE_COLORS.other;
         const weight = 1 + 3.5 * rel;
         const opacity = 0.10 + 0.85 * rel;
@@ -339,7 +332,7 @@ function drawFlow(flow, refit) {
     // całego województwa przez jedną bladą nitkę...
     let points = [];
     for (const threshold of [0.7, BRIGHT_W, 0]) {
-        points = flow.segments.filter(s => relBrightness(s.w) >= threshold)
+        points = flow.segments.filter(s => s.w >= threshold)
                               .flatMap(s => s.path);
         if (points.length >= 4) break;
     }
@@ -690,6 +683,7 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         range_m: $('range').value,
+        extra_sec: (Number($('extra').value) * 60).toFixed(0),
     });
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
@@ -721,25 +715,24 @@ function adoptNames(data) {
     restyle(...previous, sel.start, sel.end);
 }
 
-function loadFlow(token, refit) {
+/** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
+    propozycji (journeys) - to ta sama, współdzielona odpowiedź, więc obie
+    nie mogą już się rozjechać (patrz planner.plan_flow). */
+function loadPlan(token, refit) {
     const params = queryParams();
-    params.set('qmin', (Number($('qmin').value) / 100).toFixed(2));
     params.set('tol', $('tol').value);
+    params.set('count', $('count').value);
     return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
-        .then(([flow]) => {
+        .then(([data]) => {
             if (token !== requestToken) return;
-            if (flow.error) { clearFlow(); showError(flow.error, flow.suggestions); return; }
-            adoptNames(flow);
-            drawFlow(flow, refit);
-        });
-}
+            if (data.error) {
+                clearFlow();
+                showError(data.error, data.suggestions);
+                return;
+            }
+            adoptNames(data);
+            drawFlow(data, refit);
 
-function loadJourneys(token) {
-    return fetch('/api/journeys?' + queryParams())
-        .then(r => r.json())
-        .then(data => {
-            if (token !== requestToken) return;
-            if (data.error) { showError(data.error, data.suggestions); return; }
             journeys = data.journeys;
             selectedJourney = null;      // nowa lista = stary wybór nieaktualny
             clearJourney();
@@ -759,7 +752,7 @@ function search() {
     clearJourney();
     clearPreview();
     resultsBox.innerHTML = '<div class="notice">Szukam połączeń…</div>';
-    Promise.all([loadFlow(token, true), loadJourneys(token)])
+    loadPlan(token, true)
         // Wyniki są tym, po co się przyszło - na telefonie pokazujemy je od
         // razu (na szerokim ekranie i tak widać wszystko naraz).
         .then(() => { if (token === requestToken && journeys.length) setView('list'); })
@@ -931,10 +924,12 @@ $('clear').addEventListener('click', () => {
     setView('map');       // nową relację wybiera się na mapie
 });
 
-// Suwaki panelu deweloperskiego: etykieta od razu, mapa po krótkim debounce
-// (odpowiedź z ciepłym cache to ~10 ms, więc działa "na żywo"). Lista
-// propozycji od tych parametrów nie zależy - przeładowujemy tylko przepływ.
-function liveSlider(inputId, valueId, affectsList) {
+// Suwaki panelu deweloperskiego: etykieta od razu, mapa i lista propozycji
+// po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
+// "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
+// więc każdy suwak siłą rzeczy odświeża i mapę, i listę - nie ma już
+// suwaków "tylko dla mapy".
+function liveSlider(inputId, valueId) {
     const input = $(inputId);
     const valueEl = $(valueId);
     let timer = null;
@@ -943,13 +938,14 @@ function liveSlider(inputId, valueId, affectsList) {
         clearTimeout(timer);
         timer = setTimeout(() => {
             if (!startInput.value || !endInput.value) return;
-            loadFlow(requestToken, false);
-            if (affectsList) loadJourneys(requestToken);
+            loadPlan(requestToken, false)
+                .catch(() => showError('Nie udało się połączyć z serwerem.'));
         }, 200);
     });
 }
-liveSlider('qmin', 'qmin-value');
 liveSlider('tol', 'tol-value');
-liveSlider('range', 'range-value', true);   // zasięg zmienia też same trasy
+liveSlider('range', 'range-value');
+liveSlider('extra', 'extra-value');
+liveSlider('count', 'count-value');
 
 }
