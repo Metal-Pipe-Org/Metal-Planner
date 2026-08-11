@@ -101,6 +101,59 @@ ten kadr zobaczymy po przełączeniu zakładki.
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
 
+### 4. PWA — `static/manifest.webmanifest` + `static/sw.js` + `static/pwa.js`
+
+Aplikacja instaluje się na telefonie i na pulpicie (ikona, własne okno bez
+paska adresu, ekran startowy). Manifest opisuje nazwę, kolory i ikony;
+service worker odpowiada za start bez sieci; `pwa.js` spina to z UI —
+rejestruje workera, pokazuje przycisk ⤓ (tylko wtedy, gdy przeglądarka
+faktycznie proponuje instalację) i pasek „jest nowa wersja".
+
+Service worker jedzie z **`/sw.js`**, a nie ze `/static/` — zasięg workera
+to jego katalog, więc z `/static/sw.js` nie objąłby strony głównej. Stąd
+osobny endpoint w `routes.py`. Strategie są dobrane per rodzaj zasobu:
+
+| Zasób | Strategia | Dlaczego |
+|---|---|---|
+| strona `/` | sieć, offline ostatnia znana kopia | rozkład ma być świeży, ale bez sieci lepiej pokazać powłokę niż dinozaura |
+| `/api/*` | tylko sieć | odpowiedź zależy od godziny; offline zwracamy `{error: …}`, które UI pokazuje jak każdy inny błąd |
+| statyki i Leaflet | cache od razu, odświeżenie w tle | start bez czekania na sieć |
+| kafelki mapy | cache od razu, limit 400 | raz obejrzana okolica działa offline |
+
+Kafelki pobieramy z `crossOrigin` (`static/app.js`), żeby worker dostawał
+normalną odpowiedź zamiast nieprzejrzystej — przeglądarka rozlicza te drugie
+z limitu miejsca po ~7 MB za sztukę niezależnie od tego, że kafelek waży
+kilkanaście kilobajtów.
+
+**Wersji cache'ów nie podbija się ręcznie.** `VERSION` w `sw.js` to
+placeholder, w który Flask przy serwowaniu `/sw.js` wstawia skrót SHA-256
+z zawartości `static/` i szablonu (`_frontend_digest` w `routes.py`).
+Zmiana dowolnego pliku frontu zmienia treść workera, więc przeglądarka
+widzi nową wersję, a ta przy aktywacji kasuje cache'e po poprzedniej.
+To odpowiednik hashowanych nazw plików z bundlerów (Vite, Workbox), tylko
+liczony w locie — bez build stepu, którego ten projekt poza tym nie ma.
+Skrót liczymy z zawartości, nie z dat: w kontenerze po każdym buildzie daty
+są nowe, a pliki te same. Koszt to ~0,3 ms na żądanie `/sw.js`.
+
+Panel ⚙ pokazuje wersję działającą w przeglądarce i pozwala **wymusić
+sprawdzenie aktualizacji** (`registration.update()`). Przycisk odpowiada
+w jednym z trzech stanów: wszystko aktualne, jest nowa wersja (instaluje
+się, zaraz będzie pasek z odświeżeniem) albo — i po to głównie powstał —
+**awaria**: serwer wydaje inną wersję, niż ta, na której chodzi aplikacja,
+a przeglądarka mimo wymuszenia nie widzi aktualizacji. To sygnał, że
+`/sw.js` jest gdzieś po drodze cache'owany (proxy, CDN, nagłówki) i
+użytkownicy zostają na starym froncie. Bez tej diagnostyki taka awaria jest
+niewidoczna: wszystko działa, tylko nikt nie dostaje poprawek. Sam `/sw.js`
+jest z tego powodu wyłączony z cache'owania w workerze — pytanie o wersję
+musi trafiać do serwera.
+
+Wyjątkiem jest cache kafelków
+(`planer-tiles-1`): jest poza wersjonowaniem, bo mapa nie zmienia się razem
+z aplikacją i szkoda ściągać jej po każdej poprawce w CSS.
+
+Bez sieci **i** bez zapamiętanej powłoki (np. pierwsze wejście offline)
+zostaje `static/offline.html` — strona bez żadnych zależności.
+
 ## Algorytmy
 
 ### CSA — Connection Scan Algorithm (`plan_route`)
@@ -265,10 +318,27 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
 | `static/app.js` | cały frontend: mapa, wyszukiwanie, lista propozycji |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
+| `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
+| `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`) |
+| `static/pwa.js` | rejestracja workera, przycisk instalacji, pasek nowej wersji |
+| `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
+| `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
 | `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
 
 ## Changelog
 
+- **2026-08-11** — planer jako PWA: manifest z ikonami, service worker
+  (`/sw.js`) z osobną strategią dla strony, API, statyk i kafelków mapy,
+  przycisk instalacji w nagłówku i pasek „jest nowa wersja". Bez sieci
+  aplikacja wstaje z cache'u, mapa pokazuje raz obejrzaną okolicę, a
+  wyszukiwanie mówi wprost, że wymaga połączenia. Wersja cache'ów to skrót
+  z zawartości frontu wstrzykiwany przy serwowaniu `/sw.js`, więc niczego
+  nie trzeba podbijać ręcznie; panel ⚙ pokazuje tę wersję, pozwala wymusić
+  sprawdzenie aktualizacji i krzyczy, gdy serwer wydaje co innego, niż
+  chodzi w przeglądarce. Kafelki chodzą teraz
+  przez CORS — nieprzejrzyste odpowiedzi zjadały ~7 MB limitu miejsca za
+  sztukę. `viewport-fit=cover` włącza wreszcie wcięcia ekranu, o które
+  style i tak już się upominały (`env(safe-area-inset-*)`).
 - **2026-08-04** — lista propozycji tras obok mapy przepływów: nowy
   `plan_journeys` (warianty metodą zakazu użytych linii, wspólne okno
   czasowe z przepływami) i `/api/journeys`; karty tras w stylu klasycznej

@@ -24,6 +24,16 @@ python3.11 -m venv .venv
 Port to domyślnie 5001 (5000 zajmuje AirPlay na macOS); można zmienić
 zmienną `PORT`.
 
+## Instalacja jako aplikacja (PWA)
+
+Planer instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
+głównego", na pulpicie ikoną ⤓ w nagłówku albo z paska adresu przeglądarki.
+Działa wtedy we własnym oknie, a raz odwiedzona okolica mapy jest dostępna
+też bez internetu (samo wyszukiwanie połączeń wymaga sieci).
+
+Instalację przeglądarki proponują wyłącznie po **HTTPS**; wyjątkiem jest
+`localhost`, więc lokalnie działa to od ręki.
+
 ## Codzienna aktualizacja rozkładu
 
 Cron na serwerze, np. o 3:00:

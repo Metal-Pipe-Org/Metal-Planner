@@ -14,6 +14,10 @@ L.control.zoom({position: 'bottomright'}).addTo(map);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap',
+    // Kafelki pobierane z CORS zamiast "no-cors": service worker dostaje
+    // wtedy normalną odpowiedź zamiast nieprzejrzystej, a te przeglądarka
+    // rozlicza z limitu miejsca po ~7 MB za sztukę niezależnie od rozmiaru.
+    crossOrigin: true,
 }).addTo(map);
 
 const $ = id => document.getElementById(id);

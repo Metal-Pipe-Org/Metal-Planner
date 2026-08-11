@@ -710,13 +710,97 @@ body.panel-hidden #sidebar {
 
 .tab-count[hidden] { display: none; }
 
+/* --------------------------------------------------------------- PWA --- */
+
+/* Przycisk instalacji pokazuje się dopiero, gdy przeglądarka ją proponuje,
+   a inline-flex z .icon-button sam z siebie zignorowałby atrybut hidden. */
+.icon-button[hidden] { display: none; }
+
+/* Wersja aplikacji w panelu ⚙: skrót + przycisk wymuszenia sprawdzenia. */
+.sw-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+}
+
+.sw-row code {
+    flex: 1;
+    overflow: hidden;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sw-row .button { flex: 0 0 auto; background: var(--surface-alt); }
+.sw-row .button:hover { background: #e8edf3; }
+.sw-row .button:disabled { opacity: 0.6; cursor: default; }
+
+/* Wynik sprawdzenia: zwykła podpowiedź, ostrzeżenie albo realny błąd. */
+.field-hint.ok { color: #2e7d32; }
+.field-hint.warn { color: #a15c07; }
+.field-hint.bad { color: #8c2b23; font-weight: 600; }
+
+/* Pasek komunikatów PWA (nowa wersja, utrata sieci) - nad wszystkim, bo
+   dotyczy całej aplikacji, a nie konkretnego panelu. */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 1300;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 10px 10px 16px;
+    transform: translateX(-50%);
+    border-radius: var(--radius);
+    background: var(--ink);
+    color: #fff;
+    box-shadow: var(--shadow);
+}
+
+.toast-action {
+    flex: 0 0 auto;
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.toast .toast-close {
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    color: #fff;
+    opacity: 0.7;
+}
+
+.toast .toast-close:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+@media (max-width: 760px) {
+    /* Nad zakładkami Mapa/Trasy, żeby żadnej z nich nie zasłaniać. */
+    .toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+}
+
 /* --------------------------------------------------------------- RWD --- */
 
 @media (max-width: 760px) {
     #view-tabs { display: flex; }
 
     #sidebar {
-        top: 8px;
+        /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu
+           (viewport-fit=cover), więc panel musi je omijać sam. */
+        top: calc(8px + env(safe-area-inset-top, 0px));
         left: 8px;
         right: 8px;
         bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
