@@ -1,7 +1,12 @@
+import mimetypes
 import os
 
 from flask import Flask
 from routes import init_routes
+
+# Python nie zna tego rozszerzenia, a manifest podany jako octet-stream bywa
+# przez przeglądarki ignorowany.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 app = Flask(__name__)
 

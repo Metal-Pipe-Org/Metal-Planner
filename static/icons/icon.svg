@@ -1,0 +1,10 @@
+<!-- Źródło ikony aplikacji: ta sama geometria co pliki PNG obok.
+     Motyw jak szyna w panelu wyszukiwania - start, trasa, cel. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+    <rect width="1024" height="1024" rx="224" ry="224" fill="#2563eb"/>
+    <g stroke="#fff" fill="none" stroke-linecap="round">
+        <path d="M368 368 L656 656" stroke-width="52"/>
+        <circle cx="368" cy="368" r="79" stroke-width="26" fill="#43a047"/>
+        <circle cx="656" cy="656" r="79" stroke-width="26" fill="#e53935"/>
+    </g>
+</svg>
