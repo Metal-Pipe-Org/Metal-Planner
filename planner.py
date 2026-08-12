@@ -7,6 +7,7 @@ na jego odjazd na przystanku startowym.
 """
 
 from bisect import bisect_left, bisect_right
+from collections import deque
 from datetime import datetime
 
 import gtfs
@@ -1072,9 +1073,30 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
     który mapa już narysowała: nic tu nie może pokazać przesiadki, której
     nie ma na mapie.
 
-    Przeszukiwanie w przód (najpierw najjaśniejsze gałęzie) od segmentów
-    zaczynających się na starcie relacji (graph['origin_ids']), z sufitami
-    kosztu skalowanymi do `limit` (patrz CANDIDATES_PER_JOURNEY/
+    Przeszukiwanie KOLEJKĄ (BFS po całym drzewie wariantów, najpierw
+    najjaśniejsze gałęzie), nie rekurencją: dawniej jeden globalny licznik
+    odwiedzin, sprawdzany na wejściu do KAŻDEGO wywołania, pozwalał JEDNEJ
+    gałęzi (jednemu miejscu startowemu albo jednemu gęsto rozgałęzionemu
+    węzłowi po drodze) zejść rekurencyjnie na pełną głębokość i wyczerpać
+    cały budżet na warianty JEDNEGO korytarza (np. kilka linii o zbliżonej
+    jasności z tego samego przystanku), zanim reszta origin_ids - albo inne
+    rozgałęzienie tej samej trasy - w ogóle dostała szansę. FIFO gwarantuje
+    przeciwnie: żadna gałąź nie zejdzie o poziom głębiej, dopóki WSZYSTKIE
+    inne żywe gałęzie (inne miejsca startowe, inne rozgałęzienia po drodze)
+    nie dostaną swojej kolejki na TYM SAMYM poziomie - jedna bogata okolica
+    nie może więc zmonopolizować przeszukiwania kosztem korytarzy, które
+    mapa przepływów i tak już narysowała gdzie indziej w grafie. Węzła NIE
+    ograniczamy do paru najjaśniejszych krawędzi na raz (kuszące, ale przy
+    ciasnym MAX_JOURNEY_CHAIN_LEGS zdarzają się węzły z kilkoma
+    kontynuacjami REMISUJĄCYMI na tej samej, najlepszej jasności - obcięcie
+    remisu byłoby arbitralne i mogłoby wyciąć jedyną krawędź, która akurat
+    prowadzi dalej do celu w limicie etapów, gubiąc nawet najszybszą
+    trasę). Duplikat (ten sam ciąg linii i te same miejsca wsiadania) jest
+    odrzucany w momencie ukończenia łańcucha, nie dopiero po zebraniu
+    wszystkich kandydatów - inaczej zajmowałby miejsce w limicie kosztem
+    korytarza znalezionego później.
+
+    Sufity kosztu skalowane do `limit` (patrz CANDIDATES_PER_JOURNEY/
     VISITS_PER_JOURNEY) - przy domyślnym limicie sufity to dokładnie
     MAX_JOURNEY_VISITS/MAX_JOURNEY_CANDIDATES; suwak "ile propozycji szukać"
     wyżej niż domyślne każe przeszukać graf głębiej, a nie tylko wypisać
@@ -1095,46 +1117,43 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
     candidate_cap = max(MAX_JOURNEY_CANDIDATES, limit * CANDIDATES_PER_JOURNEY)
     visit_cap = max(MAX_JOURNEY_VISITS, limit * VISITS_PER_JOURNEY)
 
-    candidates = []   # łańcuchy: [(seg, board_pos, alight_pos), ...]
-    seen = set()
-    visits = 0
-
     def edge_priority(edge):
         kind, _, _, _, other_id, _, _ = edge
         if kind == "target":
             return (0, 0.0)
         return (1, -seg_by_id[other_id]["q"])
 
-    def recurse(chain, sid, board_pos, visited):
-        nonlocal visits
-        if visits >= visit_cap or len(candidates) >= candidate_cap:
-            return
+    queue = deque(
+        ([], sid, 0, {sid})
+        for sid in sorted(origin_ids, key=lambda i: -seg_by_id[i]["q"])
+    )
+    candidates = []   # łańcuchy: [(seg, board_pos, alight_pos), ...]
+    seen = set()
+    visits = 0
+    while queue and visits < visit_cap and len(candidates) < candidate_cap:
+        chain, sid, board_pos, visited = queue.popleft()
         visits += 1
         seg = seg_by_id[sid]
-        for edge in sorted(exit_edges.get(sid, ()), key=edge_priority):
+        edges = sorted(exit_edges.get(sid, ()), key=edge_priority)
+        for edge in edges:
             kind, alight_pos, _, _, other_id, other_start, _ = edge
             new_chain = chain + [(seg, board_pos, alight_pos)]
             if kind == "target":
+                signature = tuple(
+                    (s["label"], day.stop_names[s["stops"][bp]])
+                    for s, bp, _ in new_chain
+                )
+                if signature in seen:
+                    continue
+                seen.add(signature)
                 candidates.append(new_chain)
                 if len(candidates) >= candidate_cap:
-                    return
+                    break
             elif other_id not in visited and len(new_chain) < MAX_JOURNEY_CHAIN_LEGS:
-                recurse(new_chain, other_id, other_start, visited | {other_id})
-
-    for sid in sorted(origin_ids, key=lambda i: -seg_by_id[i]["q"]):
-        recurse([], sid, 0, {sid})
-        if len(candidates) >= candidate_cap or visits >= visit_cap:
-            break
+                queue.append((new_chain, other_id, other_start, visited | {other_id}))
 
     ranked = []
     for chain in candidates:
-        signature = tuple(
-            (seg["label"], day.stop_names[seg["stops"][board_pos]])
-            for seg, board_pos, _ in chain
-        )
-        if signature in seen:
-            continue
-        seen.add(signature)
         first_dep = chain[0][0]["best_deps"][chain[0][0]["stops"][chain[0][1]]]
         last_seg, _, last_alight = chain[-1]
         arrival = last_seg["arr_times"][last_seg["stops"][last_alight - 1]]
