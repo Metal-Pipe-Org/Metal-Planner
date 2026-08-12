@@ -1,7 +1,9 @@
 # Metal-Planner — dokumentacja projektu
 
 Mini-wiki: co to jest, jak jest zbudowane, jak działają algorytmy i co się
-zmieniało. Instrukcja uruchomienia jest w [README.md](README.md).
+zmieniało. Instrukcja uruchomienia jest w [README.md](../README.md); gwarancje
+zachowania mapy przepływów i testy, które je pilnują, są w
+[FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md).
 
 ## O projekcie
 
@@ -279,6 +281,8 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `static/app.js` | cały frontend: mapa, wyszukiwanie, lista propozycji |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
 | `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
+| `docs/` | dokumentacja: ten plik, `ROUTING_ALGORITHM.md`, `FLOW_MAP_CONTRACT.md` |
+| `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
 

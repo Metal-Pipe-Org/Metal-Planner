@@ -31,23 +31,22 @@ the single fastest possible arrival:
 
 ```python
 best_stop, best_arr, _ = _scan(day, source_stops, target_stops, dep_sec)
-duration = best_arr - dep_sec
-extra = min(max(int(duration * (SLOWDOWN - 1)), MIN_EXTRA_SEC), MAX_EXTRA_SEC)
-deadline = best_arr + extra
+deadline = best_arr + extra_sec
 ```
+
+`extra_sec` is the app's one time-window slider ("Ile dłużej niż najszybsza
+trasa" — "how much longer than the fastest route"), read straight off the
+UI in minutes and converted to seconds, clamped between 0 and 60 minutes
+(30 minutes if you never touch it). This used to be four separate,
+overlapping sliders — a brightness threshold, a multiplier, and a min/max
+slack window — but their combined effect always reduced to this one number
+in the end, so they were replaced by it directly: whatever value you pick
+is simply how many extra minutes past the fastest possible arrival you're
+willing to see drawn.
 
 With our example: say the fastest way from Rynek to Politechnika takes 20
-minutes, arriving **10:20**. The rules are: allow up to 1.5× that time, but
-never less than 5 extra minutes and never more than 30:
-
-```python
-SLOWDOWN = 1.5          # allow routes taking up to ~1.5x the fastest time
-MIN_EXTRA_SEC = 300     # ...but always at least 5 minutes of slack...
-MAX_EXTRA_SEC = 1800    # ...and never more than 30 minutes
-```
-
-20 minutes × 0.5 = 10 minutes of extra slack (between the 5-minute floor and
-30-minute ceiling, so it applies as-is). **Deadline = 10:30.**
+minutes, arriving **10:20**, and the slider is currently giving 10 minutes
+of extra slack. **Deadline = 10:30.**
 
 Anything that would get you to Politechnika after 10:30 is simply not
 interesting enough to draw. Nothing from here on considers those options at
@@ -214,9 +213,11 @@ progress check tells them apart by comparing `latest[]` at this stop to
 useful, you should be **closer** to the goal now, meaning your slack should
 have gone *up* (later `latest[]`), not stayed flat or dropped. Continuing
 our table: boarding at Rynek gave `board_latest = 10:13`. A few stops later
-at pl. Grunwaldzki, `latest[] = 10:23` — that's 10 minutes *better*, comfortably
-past the `PROGRESS_TOL_SEC` (3-minute noise allowance) — real progress,
-counts as a valid exit.
+at pl. Grunwaldzki, `latest[] = 10:23` — that's 10 minutes *better*,
+comfortably past whatever `PROGRESS_TOL_SEC` currently allows (the
+"Tolerancja regresji" slider — 0 by default, meaning even a few seconds of
+improvement counts, up to 10 minutes of tolerance if it's dialed up) — real
+progress, counts as a valid exit.
 
 If instead the bus had looped back near its own starting point and
 `latest[]` there had dropped back down to, say, 10:11 (worse than the 10:13
@@ -244,16 +245,51 @@ point tracing the bus's route further past your actual destination.
 
 ## Step 6 — Turning "good enough" into a brightness number
 
-Each exit gets a rough value first — `arr_t + (deadline - leave_by)`,
-read as "arrival time here, plus however much slack `latest[]` still implied
-was left." That's a decent estimate but can be too generous for
-infrequently-running lines (their `latest[]` may reflect "wait for the very
-last bus of the evening," which overstates how good getting off there
-really is). So the algorithm refines it: for every exit, it looks at what
-you could *actually, concretely* transfer onto right there, and uses that
-real number instead when one exists. This refinement is a short loop (at
-most 8 passes) because one segment's refined value can depend on another
-segment's refined value, and it settles down once nothing changes anymore.
+Every exit needs a value: "if I got off here, how close would I end up to
+the deadline?" For most exits, the algorithm doesn't actually know what
+happens next — the two-way scan in Step 2 only proved you *could* still
+make it (`leave_by` is a yes/no line in the sand, not a timetable of what
+comes after). Finding out exactly how good the rest of the trip from this
+one specific stop would be means tracing the whole onward journey again
+from there — the same amount of work as the entire search, repeated once
+per exit. With thousands of exits across a city, that's not affordable.
+
+So the algorithm takes a shortcut: build one pool of trips worth
+considering at all (Steps 3-5 above), and while scoring how good each one's
+exits are, let an exit **borrow a real number from another trip already in
+that same pool**, whenever that other trip happens to depart from this
+stop shortly after arrival. If nothing in the pool connects from here,
+there's nothing real to borrow, and the algorithm needs a placeholder
+number instead.
+
+**The placeholder, and the bug it used to hide.** That placeholder used to
+be `arr_t + (deadline - leave_by)` — "arrival time here, plus however much
+slack `latest[]` still implied was left." The problem: `leave_by` is capped
+by how often that specific line runs (a bus that comes once an hour has a
+`leave_by` that doesn't move no matter what), while `deadline` grows every
+time the time-window slider goes up. So this placeholder's *badness* was
+measured as a gap to an ever-moving target — widening the slider could make
+an exit stuck with the placeholder look artificially worse, purely because
+the slider moved, with nothing about the real schedule changing. That's
+what caused segments to flicker in and out as the slider moved: a
+placeholder-stuck exit would dim as the window widened, then brighten again
+once the wider window let the pool finally include a real trip to borrow
+from.
+
+The fix: the placeholder is now `arr_t + min(WAIT_CAP_SEC, deadline -
+leave_by)` — capped at the same 20-minute "still a reasonable wait" cutoff
+the app already uses elsewhere to judge whether a transfer is realistic at
+all (`WAIT_CAP_SEC`). Below that cap it behaves exactly as it did before;
+past it, it simply stops growing. Widening the window can now only ever
+leave a placeholder unchanged or replace it with something real and
+better — never make it worse.
+
+**The refine loop.** For every exit, the algorithm looks at what you could
+*actually, concretely* transfer onto right there, among the trips already
+in the pool, and uses that real number instead when one exists. This
+refinement is a short loop (at most 8 passes) because one segment's refined
+value can depend on another segment's refined value, and it settles down
+once nothing changes anymore.
 
 Once every segment has a final value, brightness is just:
 
@@ -261,7 +297,8 @@ Once every segment has a final value, brightness is just:
 seg["q"] = (deadline - seg["bound"]) / (deadline - best_arr)
 ```
 
-The single optimal route scores `1.0`; something that only just squeaks in
+(clamped to the 0-1 range, and guarded against a zero-width window). The
+single optimal route scores `1.0`; something that only just squeaks in
 under the deadline scores close to `0.0`. That's the number the map turns
 directly into line opacity.
 
@@ -335,6 +372,22 @@ hands off to something distinctly dimmer than itself). Explore the
 brightest branches first, stop once enough distinct proposals are found or
 the search has spent its (small) budget, then rank what's left by arrival
 time, then by fewest transfers, then by least waiting.
+
+**Exploring breadth-first, not one branch at a time.** "Explore the
+brightest branches first" doesn't mean picking the single most promising
+starting point and following it as deep as it goes before trying anything
+else. It works level by level: every live branch — every starting point,
+every fork reached along the way — gets a turn at the current depth before
+any of them go one level deeper. A dense cluster of near-identical options
+right at the start (several lines a stop or two apart, all about equally
+good) used to be able to exhaust the entire search budget on trivial
+variations of itself before a genuinely different corridor — one the map
+was already drawing elsewhere — ever got a look, which is why proposals
+could all come back looking like the same route wearing slightly different
+middle legs. Working level by level means one rich neighborhood can no
+longer starve out the rest; an exact repeat of an already-found proposal is
+also thrown out the moment it's found, so it doesn't spend a slot a
+different corridor could have used.
 
 The payoff of doing it this way instead of running a separate search: a
 proposal can *never* name a transfer that isn't actually drawn on the map,

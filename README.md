@@ -8,7 +8,9 @@ propozycji podświetla ją na mapie, a kliknięcie linii na mapie otwiera
 propozycję, która nią jedzie. Na telefonie mapa i lista przełączają się
 dolnymi zakładkami.
 
-Pełny opis projektu, architektury i algorytmów: **[PROJECT.md](PROJECT.md)**.
+Pełny opis projektu, architektury i algorytmów: **[docs/PROJECT.md](docs/PROJECT.md)**
+(szczegóły samego algorytmu mapy przepływów: **[docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md)**,
+gwarancje zachowania mapy, które to sprawdzają: **[docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md)**).
 
 ## Szybki start
 
