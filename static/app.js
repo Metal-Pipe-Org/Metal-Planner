@@ -218,7 +218,10 @@ function pickEndpoint(value) {
     if (sel.start && sel.end) search();
 }
 
-map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
+map.on('click', e => {
+    if (handleFlowClick(e)) return;   // klik w narysowany kurs otwiera propozycję
+    pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
+});
 
 // ---------------------------------------------------- kadrowanie widoku ----
 
@@ -275,16 +278,21 @@ const BRIGHT_W = 0.45;
 
 let flowLayer = null;
 let flowParts = [];       // {layer, opacity, weight} - do przygaszania pod wybraną trasą
+let flowHits = [];        // {seg, layer, weight, latlngs} - do wykrywania kursora nad wiązką
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     flowParts = [];
+    flowHits = [];
+    clearFlowHover();
     setBaseDim(false);
 }
 
 function drawFlow(flow, refit) {
     if (flowLayer) map.removeLayer(flowLayer);   // bez clearFlow: przemalowanie
     flowParts = [];                              // wszystkich słupków tam i z powrotem
+    flowHits = [];                                // - stare warstwy z podświetlenia i tak znikają
+    clearFlowHover();
     setBaseDim(true);                            // to przy każdym ruchu suwaka za dużo
     const faint = [], casings = [], bright = [], badges = [];
     const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
@@ -293,28 +301,16 @@ function drawFlow(flow, refit) {
         const key = s.num + '|' + s.kind;
         const rel = s.w;
         const color = LINE_COLORS[s.kind] || LINE_COLORS.other;
-        const weight = 1 + 3.5 * rel;
-        const opacity = 0.10 + 0.85 * rel;
-        const line = L.polyline(s.path, {color, opacity, weight});
-        // Podpowiedź liczona przy każdym najechaniu, bo lista propozycji
-        // przychodzi osobnym zapytaniem - często dopiero po narysowaniu mapy.
-        line.bindTooltip(() => {
-            const label = `${MODE_LABEL[s.kind] || MODE_LABEL.other} ${s.num}`;
-            return journeyForLine(s.num, s.kind) === null
-                ? label : `${label} · kliknij, aby otworzyć trasę`;
-        }, {sticky: true});
-        line.on('mouseover', () => {
-            line.setStyle({opacity: 1, weight: weight + 2.5});
-            line.bringToFront();       // spod wiązki na wierzch
-        });
-        line.on('mouseout', () => line.setStyle(currentFlowStyle(line)));
-        line.on('click', event => {
-            const index = journeyForLine(s.num, s.kind, event.latlng);
-            if (index === null) return;   // linia bez propozycji: klik ustawia punkt
-            L.DomEvent.stop(event);       // ...a z propozycją - otwiera ją
-            openJourney(index, true);
-        });
+        const weight = 1.5 + 3 * rel;
+        const opacity = 0.35 + 0.60 * rel;
+        // Nieinteraktywna: kilka linii jadących tym samym korytarzem leży
+        // dokładnie jedna na drugiej, więc zwykłe hover/click Leaflet trafiłoby
+        // tylko w tę narysowaną na wierzchu. Zamiast tego kursor jest łapany
+        // globalnie (handleFlowHover/handleFlowClick, patrz niżej) i sprawdzany
+        // przeciw geometrii WSZYSTKICH kursów naraz - patrz kontrakt p.7.
+        const line = L.polyline(s.path, {color, opacity, weight, interactive: false});
         flowParts.push({layer: line, opacity, weight});
+        flowHits.push({seg: s, layer: line, weight, latlngs: s.path.map(p => L.latLng(p))});
         if (rel >= BRIGHT_W) {
             const casing = L.polyline(s.path, {
                 color: '#fff', opacity: 0.9, weight: weight + 2.5, interactive: false,
@@ -392,6 +388,88 @@ function dimFlow(dim) {
         });
     }
 }
+
+// --- kursor nad wiązką: znajduje WSZYSTKIE nałożone na siebie kursy, nie ----
+// --- tylko ten narysowany na wierzchu (kontrakt p.7) ------------------------
+
+let hoveredFlowLayers = [];
+let flowTooltip = null;
+const FLOW_HIT_SLACK_PX = 5;   // margines poza samą grubością linii, na niecelny kursor
+
+function distPointToSegmentPx(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return p.distanceTo(a);
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+    return p.distanceTo(L.point(a.x + t * dx, a.y + t * dy));
+}
+
+function polylineDistancePx(containerPoint, latlngs) {
+    let min = Infinity;
+    let prev = map.latLngToContainerPoint(latlngs[0]);
+    for (let i = 1; i < latlngs.length; i++) {
+        const cur = map.latLngToContainerPoint(latlngs[i]);
+        min = Math.min(min, distPointToSegmentPx(containerPoint, prev, cur));
+        prev = cur;
+    }
+    return min;
+}
+
+/** Wszystkie kursy pod danym miejscem na ekranie, posortowane od najbliższego. */
+function flowHitsAt(containerPoint) {
+    const hits = [];
+    for (const h of flowHits) {
+        const tol = h.weight / 2 + FLOW_HIT_SLACK_PX;
+        const dist = polylineDistancePx(containerPoint, h.latlngs);
+        if (dist <= tol) hits.push({...h, dist});
+    }
+    hits.sort((a, b) => a.dist - b.dist);
+    return hits;
+}
+
+function flowHoverLabel(hits) {
+    const names = [...new Set(hits.map(h => `${MODE_LABEL[h.seg.kind] || MODE_LABEL.other} ${h.seg.num}`))];
+    const hasJourney = hits.some(h => journeyForLine(h.seg.num, h.seg.kind) !== null);
+    return hasJourney ? `${names.join(', ')} · kliknij, aby otworzyć trasę` : names.join(', ');
+}
+
+function clearFlowHover() {
+    for (const layer of hoveredFlowLayers) layer.setStyle(currentFlowStyle(layer));
+    hoveredFlowLayers = [];
+    if (flowTooltip) { map.removeLayer(flowTooltip); flowTooltip = null; }
+}
+
+function handleFlowHover(e) {
+    const hits = flowHits.length ? flowHitsAt(e.containerPoint) : [];
+    if (!hits.length) { clearFlowHover(); return; }
+    const newLayers = hits.map(h => h.layer);
+    for (const layer of hoveredFlowLayers) {
+        if (!newLayers.includes(layer)) layer.setStyle(currentFlowStyle(layer));
+    }
+    // Od najmniej do najbardziej istotnego, żeby ten ostatni (najbliższy
+    // kursorowi) skończył na wierzchu wiązki.
+    for (const h of [...hits].reverse()) {
+        h.layer.setStyle({opacity: 1, weight: h.weight + 2.5});
+        h.layer.bringToFront();
+    }
+    hoveredFlowLayers = newLayers;
+    if (!flowTooltip) flowTooltip = L.tooltip({direction: 'top', offset: [0, -4]}).addTo(map);
+    flowTooltip.setLatLng(e.latlng).setContent(flowHoverLabel(hits));
+}
+
+/** Klik w kurs otwiera pasującą propozycję (najbliższą kliknięciu, licząc
+    od najbliższego z nałożonych na siebie kursów); klik obok - zwraca false,
+    a wywołujący ustawia punkt trasy zamiast tego. */
+function handleFlowClick(e) {
+    for (const h of flowHitsAt(e.containerPoint)) {
+        const index = journeyForLine(h.seg.num, h.seg.kind, e.latlng);
+        if (index !== null) { openJourney(index, true); return true; }
+    }
+    return false;
+}
+
+map.on('mousemove', handleFlowHover);
+map.on('mouseout', clearFlowHover);
 
 // -------------------------------------------------- rysowanie jednej trasy ----
 
@@ -724,7 +802,9 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         range_m: $('range').value,
-        extra_sec: (Number($('extra').value) * 60).toFixed(0),
+        extra_pct: $('extra').value,
+        extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
+        extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
     });
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
@@ -1012,7 +1092,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['tol', 'range', 'extra', 'count'];
+const DEV_SLIDER_IDS = ['tol', 'range', 'extra', 'extra-floor', 'extra-cap', 'count'];
 
 function loadDevPrefs() {
     try {
@@ -1063,6 +1143,8 @@ applyStoredDevPrefs();
 liveSlider('tol', 'tol-value');
 liveSlider('range', 'range-value');
 liveSlider('extra', 'extra-value');
+liveSlider('extra-floor', 'extra-floor-value');
+liveSlider('extra-cap', 'extra-cap-value');
 liveSlider('count', 'count-value');
 
 }
