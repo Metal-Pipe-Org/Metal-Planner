@@ -36,3 +36,14 @@ Cron na serwerze, np. o 3:00:
 
 Gdy pobieranie się nie powiedzie, stara baza zostaje nietknięta — aplikacja
 działa dalej na wczorajszych danych i przeładuje nowe sama, bez restartu.
+
+## Testy
+
+Sprawdzają gwarancje z [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md)
+na syntetycznych danych (bez SQLite, bez zależności od daty) - patrz ten
+plik po opis, co dokładnie który test sprawdza.
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+```
