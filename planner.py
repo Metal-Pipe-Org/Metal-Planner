@@ -191,15 +191,28 @@ def _round_path(coords):
     return [[round(lat, 5), round(lon, 5)] for lat, lon in coords]
 
 
-# Jeden suwak okna czasowego: "pokaż trasy do N minut wolniejsze niż
-# najszybsza". Dawniej to były cztery nakładające się na siebie suwaki
-# (próg jasności + mnożnik + widełki min/maks zapasu) - matematycznie ich
-# efekt zawsze sprowadzał się do jednej liczby (okno × (1 − próg jasności)),
-# więc zostaje jedna, wprost w minutach - bez utraty żadnej realnej
-# możliwości ustawienia.
-DEFAULT_EXTRA_SEC = 1800  # domyślnie 30 min dłużej niż najszybsza trasa
-MIN_EXTRA_SEC = 0
-MAX_EXTRA_SEC = 3600      # (suwak w UI go nadpisuje) - sufit rozsądku, 60 min
+# Okno czasowe: "pokaż trasy do X% dłuższe niż najszybsza" - procentowo,
+# nie w minutach, żeby okno rosło razem z długością trasy zamiast być
+# stałym naddatkiem (30 min "dodatku" to nic dla trasy godzinnej, ale
+# 250% dla trasy 20-minutowej). Dwa dodatkowe suwaki łatają skrajności
+# samej procentówki:
+#   - floor (minimalne okno w sekundach) - bez niego krótka trasa (np. 3
+#     min) przy 110% dostaje tylko ~18 s naddatku i prawie nic więcej się
+#     nie mieści w oknie, nawet przy 200%;
+#   - cap (maksymalne okno w sekundach) - żeby bardzo długa trasa nie
+#     otwierała absurdalnie szerokiego okna przy wysokim %.
+# Efektywne okno = clamp(czas_trasy × (pct/100 − 1), floor, cap).
+DEFAULT_EXTRA_PCT = 150   # domyślnie: pokaż trasy do 150% czasu najszybszej
+MIN_EXTRA_PCT = 110
+MAX_EXTRA_PCT = 200        # (suwak w UI go nadpisuje)
+
+DEFAULT_EXTRA_FLOOR_SEC = 600   # domyślnie: co najmniej 10 min naddatku
+MIN_EXTRA_FLOOR_SEC = 0
+MAX_EXTRA_FLOOR_SEC = 1800      # (suwak w UI go nadpisuje) - sufit 30 min
+
+DEFAULT_EXTRA_CAP_SEC = 3600    # domyślnie: najwyżej 60 min naddatku
+MIN_EXTRA_CAP_SEC = 600
+MAX_EXTRA_CAP_SEC = 7200        # (suwak w UI go nadpisuje) - sufit 120 min
 
 Q_ANCHOR_TOL = 0.10     # ogon rysujemy tylko do przesiadki w kontynuację
                         # niewiele ciemniejszą od segmentu (tolerancja jasności)
@@ -262,14 +275,26 @@ def _resolve_endpoints(day, start_query, end_query, start_point, end_point, rang
     return resolved
 
 
-def _deadline(best_arr, extra_sec=None):
-    """Granica sensowności: najlepszy przyjazd + extra_sec (suwak w UI, patrz
-    DEFAULT_EXTRA_SEC/MIN_EXTRA_SEC/MAX_EXTRA_SEC powyżej)."""
-    extra_sec = (
-        DEFAULT_EXTRA_SEC if extra_sec is None
-        else int(max(MIN_EXTRA_SEC, min(MAX_EXTRA_SEC, extra_sec)))
+def _deadline(best_arr, dep_sec, extra_pct=None, extra_floor_sec=None, extra_cap_sec=None):
+    """Granica sensowności: najlepszy przyjazd + naddatek (trzy suwaki w UI,
+    patrz DEFAULT_EXTRA_PCT/FLOOR/CAP powyżej) - naddatek to procent czasu
+    najszybszej trasy, przycięty do [floor, cap] w sekundach."""
+    extra_pct = (
+        DEFAULT_EXTRA_PCT if extra_pct is None
+        else max(MIN_EXTRA_PCT, min(MAX_EXTRA_PCT, extra_pct))
     )
-    return best_arr + extra_sec
+    extra_floor_sec = (
+        DEFAULT_EXTRA_FLOOR_SEC if extra_floor_sec is None
+        else int(max(MIN_EXTRA_FLOOR_SEC, min(MAX_EXTRA_FLOOR_SEC, extra_floor_sec)))
+    )
+    extra_cap_sec = (
+        DEFAULT_EXTRA_CAP_SEC if extra_cap_sec is None
+        else int(max(MIN_EXTRA_CAP_SEC, min(MAX_EXTRA_CAP_SEC, extra_cap_sec)))
+    )
+    best_duration_sec = best_arr - dep_sec
+    extra_sec = best_duration_sec * (extra_pct / 100 - 1)
+    extra_sec = max(extra_floor_sec, min(extra_cap_sec, extra_sec))
+    return best_arr + int(round(extra_sec))
 
 
 def _no_connection(start_name, end_name, dep_sec):
@@ -293,35 +318,46 @@ def _summarize_journey(legs, rides, arrival, dep_sec):
 
 
 def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
-              start_point=None, end_point=None, range_m=None, extra_sec=None,
-              journey_limit=None):
+              start_point=None, end_point=None, range_m=None, extra_pct=None,
+              extra_floor_sec=None, extra_cap_sec=None, journey_limit=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
-    Jednostką jest KURS, nie pojedynczy przeskok: dla każdego kursu, do którego
-    realnie da się wsiąść (skan w przód), rysujemy jeden ciągły segment od
-    przystanku wsiadania do celu albo do ostatniego wyjścia z WIDOCZNĄ
-    kontynuacją (przesiadką na segment, który też jest narysowany). Jasność
-    propaguje się wstecz przez przesiadki: dowóz nigdy nie jest ciemniejszy
-    niż to, do czego dowozi - narysowana sieć jest spójna od startu do celu.
+    Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
+    kursu, do którego realnie da się wsiąść (skan w przód), rozważamy jazdę
+    od przystanku wsiadania do celu albo do ostatniego wyjścia z WIDOCZNĄ
+    kontynuacją (przesiadką na segment, który też jest narysowany) - narysowana
+    sieć jest spójna od startu do celu, żaden fragment nie wisi w powietrzu.
+
+    Jednostką RYSOWANIA nie jest już jednak cały kurs naraz: jasność w danym
+    punkcie kursu odzwierciedla, jak dobrym wyborem jest wciąż w nim siedzieć
+    W TYM MIEJSCU (co da się jeszcze osiągnąć STĄD), nie jak dobrym wyborem
+    było wsiadanie do niego na starcie. Mijamy realną, porównywalnie widoczną
+    przesiadkę i z niej NIE korzystamy -> jasność dalszej części TEGO SAMEGO
+    fizycznego kursu spada do tego, co faktycznie zostaje osiągalne stąd.
+    Jeden kurs może więc wyjść na mapie jako kilka kolejnych kawałków o
+    różnej jasności (patrz _finalize_segments) - ale tylko tam, gdzie coś
+    naprawdę się zmienia; korytarz bez mijanej, lepszej opcji nadal dostaje
+    jedną, stałą jasność na całej narysowanej długości.
 
     Liczone w krokach (patrz odpowiednie funkcje): odkrycie segmentów
-    kandydujących (_discover_segments), dopracowanie ich jasności przez
-    konkretne kontynuacje (_refine_brightness), próg + spójność narysowanej
-    sieci (_select_and_anchor), złożenie odpowiedzi z geometrią
-    (_finalize_segments).
+    kandydujących (_discover_segments), dopracowanie ich jasności PER WYJŚCIE
+    przez konkretne kontynuacje (_refine_brightness), próg + spójność
+    narysowanej sieci (_select_and_anchor), pocięcie na kawałki i złożenie
+    odpowiedzi z geometrią (_finalize_segments).
 
     Lista propozycji tras ("journeys") to NIE osobny algorytm - to ścieżki
     przeczytane wprost z tego samego, już narysowanego grafu segmentów
     (_extract_transfer_graph + _enumerate_journeys), więc lista nigdy nie
     pokaże przesiadki, której nie ma na mapie, i reaguje na te same suwaki
-    (progress_tol_sec, extra_sec) co mapa.
+    (progress_tol_sec, extra_pct/extra_floor_sec/extra_cap_sec) co mapa.
 
-    extra_sec to jedyny suwak okna czasowego: "pokaż trasy do tylu sekund
-    wolniejsze niż najszybsza" (patrz _deadline) - zastępuje dawny próg
-    jasności + trzy suwaki wydłużenia, których łączny efekt zawsze
-    sprowadzał się do jednej liczby. Nie ma już osobnego progu jasności -
-    wszystko w oknie czasowym jest pokazywane, jasność (q) służy już tylko
-    do intensywności rysowania.
+    extra_pct/extra_floor_sec/extra_cap_sec to suwaki okna czasowego: "pokaż
+    trasy do X% dłuższe niż najszybsza, ale co najmniej floor i najwyżej cap
+    sekund naddatku" (patrz _deadline) - procent zamiast stałej liczby minut,
+    żeby okno skalowało się z długością trasy; floor/cap łatają skrajności
+    (bardzo krótkie albo bardzo długie trasy). Nie ma osobnego progu
+    jasności - wszystko w oknie czasowym jest pokazywane, jasność (q) służy
+    już tylko do intensywności rysowania.
     progress_tol_sec to luz reguły postępu (patrz _discover_segments);
     None = domyślne PROGRESS_TOL_SEC.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
@@ -363,7 +399,7 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     best_stop, best_arr, best_journey = _scan(day, source_stops, target_stops, dep_sec)
     if best_stop is None:
         return _no_connection(start_name, end_name, dep_sec)
-    deadline = _deadline(best_arr, extra_sec)
+    deadline = _deadline(best_arr, dep_sec, extra_pct, extra_floor_sec, extra_cap_sec)
 
     earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, target_stops, dep_sec, deadline)
@@ -501,8 +537,27 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
                     and leave_by <= prior_best - progress_tol_sec):
                 continue
             # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
-            # wysiądziemy tutaj ((deadline - leave_by) = czas stąd do celu).
-            exits.append((len(stops_seq), arr_t + (deadline - leave_by), arr_t, arr_s))
+            # wysiądziemy tutaj, ZANIM znajdzie się realna kontynuacja (patrz
+            # join_value w _refine_brightness): arr_t + "kara" za nieznaną
+            # resztę trasy. Karą jest (deadline - leave_by) OGRANICZONE do
+            # WAIT_CAP_SEC (ten sam, już przyjęty w kodzie próg "jeszcze
+            # spójnej przesiadki", patrz _catchable) - NIE samo
+            # (deadline - leave_by) bez ograniczenia: leave_by bywa
+            # spłaszczone realną częstotliwością kursów (ostatni kurs dnia
+            # z danego przystanku) i przy szerszym oknie przestaje rosnąć,
+            # więc bez ograniczenia kara rosłaby wraz z suwakiem okna bez
+            # końca - wyjście stawało się WIDOCZNIE gorsze tylko dlatego, że
+            # przesunięto suwak "pokaż więcej", co jest sprzeczne z jego
+            # intencją (patrz plan_flow). Ograniczenie do WAIT_CAP_SEC nie
+            # zmienia niczego, dopóki okno jest ciasne (kara i tak wypada
+            # mniejsza od sufitu - dokładnie jak dawniej), a tylko zatrzymuje
+            # dalszy wzrost, gdy okno urośnie ponad sensowną, stałą wartość -
+            # poszerzenie okna nie może już POGORSZYĆ tej estymaty, tylko
+            # najwyżej zastąpić ją lepszą, realną wartością z join_value.
+            exits.append((
+                len(stops_seq), arr_t + min(WAIT_CAP_SEC, deadline - leave_by),
+                arr_t, arr_s,
+            ))
             if arr_s in target_set:
                 break    # dojechaliśmy do celu - dalej nie rysujemy
         if not exits:
@@ -551,20 +606,26 @@ def _board_index(day, segs):
 
 
 def _refine_brightness(day, segs, target_set, deadline, best_arr):
-    """Krok 2: aproksymacja (deadline - latest) wlicza dla rzadkich linii
-    czekanie "do ostatniego kursu" i przekłamuje jasność. Liczymy więc
-    wartość każdego WYJŚCIA przez konkretne kontynuacje: najbliższy odjazd
+    """Krok 2: surowe przybliżenie wyjścia (patrz _discover_segments: arr_t +
+    WAIT_CAP_SEC) to tylko zgadywanka na wypadek braku realnej kontynuacji -
+    ma stały naddatek niezależny od deadline, więc samo w sobie nie
+    przekłamuje jasności przy przesunięciu suwaka okna czasowego, ale wciąż
+    nic nie wie o faktycznej dalszej trasie. Liczymy więc wartość każdego
+    WYJŚCIA przez konkretne kontynuacje: najbliższy odjazd
     segmentu, w który da się wskoczyć, plus najlepsze z jego DALSZYCH wyjść
     (sufiks - wyjść sprzed punktu wskoczenia nie da się już użyć). Wyjścia
     na cel są dokładne (wartość = przyjazd). Ustawia seg['bound']/seg['q'].
 
     q=1.0 musi wypaść dokładnie dla trasy najszybszej (bound == best_arr) -
     stąd odniesienie do best_arr, NIE do deadline: przy oknie zerowym
-    (extra_sec=0, deadline == best_arr) odległość "deadline - bound" dla
+    (okno=0, deadline == best_arr) odległość "deadline - bound" dla
     jedynej ocalałej, optymalnej trasy też wynosi 0, więc licząc względem
     deadline wyszłoby q=0 (najciemniej) właśnie dla trasy, która powinna
     świecić najjaśniej - mapa wtedy rysowała wszystko jako ledwie widoczne
     duchy, łącznie z jedyną prawdziwą propozycją.
+
+    Mianownik (span) to osobna sprawa - patrz jego wyliczenie niżej, tuż
+    przed q_of.
     """
     for seg in segs:
         for times in seg["dep_times"].values():
@@ -626,11 +687,44 @@ def _refine_brightness(day, segs, target_set, deadline, best_arr):
                     changed = True
         if not changed:
             break
+    refresh_suffixes()   # seg["suffix"] musi odzwierciedlać OSTATECZNE exit_vals,
+                          # nawet gdy pętla wyżej urwała się po 8 obiegach bez zbiegnięcia
 
-    span = max(deadline - best_arr, 1)
+    # Rozpiętość skali jasności to NIE cała szerokość okna czasowego
+    # (deadline - best_arr), tylko odległość do najgorszego kursu, który
+    # faktycznie się w oknie znalazł. Przy szerokim oknie prawdziwe kursy
+    # zwykle klastrują się blisko best_arr, więc dzielenie przez pełną
+    # (dużo większą) szerokość okna spłaszczałoby różnice między nimi w
+    # stronę samej góry skali - poszerzanie okna suwakiem NIE ma prawa
+    # rozjaśniać istniejących już opcji, tylko dopuszczać kolejne, gorsze.
+    # Pełny zakres jasności (od 1.0 do granicy widoczności) ma być
+    # wykorzystany zawsze, niezależnie od tego, jak szerokie jest okno -
+    # patrz punkt 9 kontraktu (FLOW_MAP_CONTRACT.md).
+    # suffix jest niemalejący (patrz refresh_suffixes) - suffix[0] to NAJLEPSZA
+    # wartość segmentu (to ona trafia w seg["bound"] parę linijek niżej), a
+    # suffix[-1] to jego NAJGORSZA narysowana wartość. Rozpiętość ma sięgać
+    # do najgorszej wartości gdziekolwiek na mapie, więc bierzemy suffix[-1],
+    # nie suffix[0].
+    worst_bound = max((seg["suffix"][-1] for seg in segs if seg["suffix"]), default=best_arr)
+    worst_bound = min(worst_bound, deadline)   # zabezpieczenie na surowe aproksymacje ponad deadline
+    span = max(worst_bound - best_arr, 1)
+
+    def q_of(bound):
+        return max(0.0, min(1.0, 1 - (bound - best_arr) / span))
+
     for seg in segs:
-        seg["bound"] = min(seg["exit_vals"])
-        seg["q"] = max(0.0, min(1.0, 1 - (seg["bound"] - best_arr) / span))
+        seg["bound"] = seg["suffix"][0]   # = min(exit_vals), tak jak dawniej
+        seg["q"] = q_of(seg["bound"])
+        # Jasność W KAŻDYM PUNKCIE kursu, nie jedna na cały segment: suffix[j]
+        # to najlepsza wartość osiągalna z pozycji wyjścia j LUB PÓŹNIEJ - czyli
+        # to, co jeszcze jest osiągalne, gdy WCIĄŻ siedzimy w pojeździe na tej
+        # wysokości. Mijamy realną, lepszą przesiadkę i z niej NIE korzystamy ->
+        # jasność dalszego odcinka spada do tego, co faktycznie zostaje
+        # osiągalne stąd. _finalize_segments tnie narysowany kurs na kawałki
+        # dokładnie w takich miejscach (i tylko w takich - suffix jest
+        # monotoniczny, więc żadnego bezsensownego migotania tam, gdzie nic
+        # się nie zmieniło).
+        seg["exit_q"] = [q_of(v) for v in seg["suffix"]]
 
 
 def _catchable(arr_t, buffer, dep_list):
@@ -841,22 +935,76 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
 
 
 def _finalize_segments(day, kept, ranges, geo_db):
-    """Krok 4: agreguje po (linia, przycięta trasa) biorąc maksimum jakości,
-    tnie geometrię (patrz gtfs.shape_slice) i formatuje odpowiedź.
+    """Krok 4: tnie każdy zatrzymany kurs na kawałki DOKŁADNIE tam, gdzie po
+    drodze mijamy realną, lepszą kontynuację, z której nie korzystamy (patrz
+    seg["exit_q"] w _refine_brightness) - jeden fizyczny kurs może więc
+    wyjść na mapie jako kilka kolejnych kawałków o różnej jasności, nie
+    jeden płaski odcinek od wsiadania do końca. Kawałki o (zaokrągleniowo)
+    tej samej jasności są sklejane, żeby nie mnożyć bez potrzeby liczby
+    narysowanych fragmentów tam, gdzie nic naprawdę się nie zmieniło. Prosty
+    kurs bez żadnej mijanej, lepszej przesiadki dostaje - tak jak dawniej -
+    jeden kawałek na całej narysowanej długości.
+
+    Poza tym: agregacja po (linia, dokładny fragment) biorąc maksimum
+    jakości (kilka kursów tego samego wzorca w oknie), tnie geometrię
+    (patrz gtfs.shape_slice) i formatuje odpowiedź.
+
+    Na końcu jasność jest PRZESKALOWANA tak, żeby najgorszy kawałek, który
+    FAKTYCZNIE trafia na mapę, lądował dokładnie na dole skali (w=0), nie
+    gdzieś w środku - okno czasowe (deadline) rozstrzyga tylko, co się w
+    ogóle pokazuje, ale sama skala jasności ma zawsze wykorzystywać cały
+    zakres 0-1 tego, co zostało pokazane. Podział na kawałki (wyżej) i
+    decyzje `_select_and_anchor` o tym, co przeżywa, liczą się na
+    WCZEŚNIEJSZYCH, nieprzeskalowanych wartościach seg["q"]/exit_q -
+    przeskalowanie na końcu jest czysto kosmetyczne (zmienia tylko liczby
+    do rysowania), nie wpływa na to, co się pokazuje ani gdzie tnie się
+    kawałki. Efekt: poszerzenie suwaka okna czasowego nie może rozjaśnić
+    ani przyciemnić już pokazanej opcji, dopóki się ona nadal pokazuje -
+    może tylko dopisać nowe, gorsze opcje pod spodem (patrz punkt 9
+    kontraktu, `docs/FLOW_MAP_CONTRACT.md`).
 
     geo_db to połączenie współdzielone z resztą zapytania (patrz plan_flow) -
     jedno połączenie na wszystkie wycinki geometrii, także te do propozycji
     tras."""
-    segments = {}
+    pieces = {}   # (linia, dokładny fragment) -> (q, shape_id)
     for seg in kept:
         start_pos, cut = ranges[id(seg)]
-        key = (seg["label"], tuple(seg["stops"][start_pos:cut]))
-        entry = segments.get(key)
-        if entry is None or seg["q"] > entry[0]:
-            segments[key] = (seg["q"], seg["shape"])
+        piece_start = start_pos
+        pending_end = None
+        pending_q = None
+        for (pos, _, _, _), exit_q in zip(seg["exits"], seg["exit_q"]):
+            if pos <= start_pos + 1 or pos > cut:
+                continue         # wyjście przed/na starcie narysowanej części - pomiń
+            if pending_q is not None and abs(exit_q - pending_q) < 5e-4:
+                pending_end = pos          # ta sama jasność - wydłuż bieżący kawałek
+                continue
+            if pending_q is not None:
+                _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
+                # Kolejny kawałek zaczyna się DOKŁADNIE tam, gdzie poprzedni
+                # się skończył (ten sam przystanek na styku - inaczej dwa
+                # kawałki tego samego fizycznego kursu miałyby dziurę między
+                # sobą na mapie). `pending_end` to `pos` (liczba przystanków,
+                # wyłączna górna granica wycinka) - jego WŁASNY indeks w
+                # `stops` to `pending_end - 1`.
+                piece_start = pending_end - 1
+            pending_end, pending_q = pos, exit_q
+        if pending_q is not None:
+            _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
+
+    worst_q = min((q for q, _ in pieces.values()), default=1.0)
+    span_q = 1.0 - worst_q
+
+    def rescale(q):
+        # Gdy wszystko pokazane jest już optymalne (span_q ~ 0 - np. jedyna
+        # widoczna opcja to najlepsza trasa), nie ma względem czego się
+        # skalować - wszystko dostaje pełną jasność zamiast dzielenia
+        # (prawie) przez zero.
+        if span_q < 1e-9:
+            return 1.0
+        return max(0.0, min(1.0, (q - worst_q) / span_q))
 
     brightest = sorted(
-        segments.items(), key=lambda kv: kv[1][0], reverse=True,
+        pieces.items(), key=lambda kv: kv[1][0], reverse=True,
     )
     seg_list = []
     for (label, stops_seq), (q, shape_id) in brightest:
@@ -868,10 +1016,17 @@ def _finalize_segments(day, kept, ranges, geo_db):
             "path": _round_path(path),
             "num": num,
             "kind": mode,
-            "w": round(q, 3),
+            "w": round(rescale(q), 3),
         })
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
     return seg_list
+
+
+def _keep_piece(pieces, seg, start, end, q):
+    key = (seg["label"], tuple(seg["stops"][start:end]))
+    entry = pieces.get(key)
+    if entry is None or q > entry[0]:
+        pieces[key] = (q, seg["shape"])
 
 
 def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):

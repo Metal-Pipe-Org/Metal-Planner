@@ -104,14 +104,37 @@
 
     <div class="field">
         <label for="extra">
-            Ile dłużej niż najszybsza trasa <output id="extra-value">30</output> min
+            Ile dłużej niż najszybsza trasa <output id="extra-value">150</output>%
         </label>
-        <input type="range" id="extra" min="0" max="60" step="1" value="30">
+        <input type="range" id="extra" min="110" max="200" step="5" value="150">
         <p class="field-hint">
-            Jedyny suwak okna czasowego — pokazuje trasy i propozycje do tylu
-            minut wolniejsze niż najszybsza. Zastąpił dawny próg jasności +
-            trzy suwaki wydłużenia: ich efekt zawsze sprowadzał się do jednej
-            liczby, więc zostaje jedna.
+            Okno czasowe procentowo, nie w minutach — rośnie razem z długością
+            trasy zamiast być stałym naddatkiem. Dwa suwaki niżej łatają
+            skrajności: bardzo krótkie i bardzo długie trasy.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="extra-floor">
+            Minimalne okno (niezależnie od %) <output id="extra-floor-value">10</output> min
+        </label>
+        <input type="range" id="extra-floor" min="0" max="30" step="1" value="10">
+        <p class="field-hint">
+            Przy krótkich trasach sam procent daje grosze — 3-minutowa trasa
+            przy 110% to ledwie 18 s naddatku. Ten suwak gwarantuje co
+            najmniej tyle minut okna, nawet dla bardzo krótkich tras.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="extra-cap">
+            Maksymalne okno (sufit dla długich tras) <output id="extra-cap-value">60</output> min
+        </label>
+        <input type="range" id="extra-cap" min="10" max="120" step="5" value="60">
+        <p class="field-hint">
+            Odwrotność powyższego — przy bardzo długiej najszybszej trasie
+            wysoki procent otworzyłby absurdalnie szerokie okno. Ten suwak je
+            ogranicza. Do debugów; jeśli nie przeszkadza, można zostawić.
         </p>
     </div>
 

@@ -86,6 +86,8 @@ def init_routes(app):
             _point_arg("start"),
             _point_arg("end"),
             _float_arg("range_m"),
-            extra_sec=_float_arg("extra_sec"),
+            extra_pct=_float_arg("extra_pct"),
+            extra_floor_sec=_float_arg("extra_floor_sec"),
+            extra_cap_sec=_float_arg("extra_cap_sec"),
             journey_limit=_float_arg("count"),
         ))
