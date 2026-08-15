@@ -2,8 +2,20 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Planer podróży — Wrocław</title>
+    <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu — tramwaje i autobusy.">
+
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="icon" href="{{ url_for('static', filename='icons/icon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('static', filename='icons/favicon-32.png') }}" sizes="32x32">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Planer">
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -21,6 +33,8 @@
             <h1>Planer podróży</h1>
             <p>Wrocław · tramwaje i autobusy</p>
         </div>
+        <button id="install" class="icon-button" title="Zainstaluj aplikację"
+                aria-label="Zainstaluj aplikację" hidden>⤓</button>
         <button id="dev-toggle" class="icon-button" title="Ustawienia deweloperskie"
                 aria-label="Ustawienia deweloperskie" aria-expanded="false">⚙</button>
     </header>
@@ -41,10 +55,13 @@
             </div>
             <div class="endpoint-fields">
                 <div class="ac-field">
-                    <input type="text" id="start" autocomplete="off" role="combobox"
-                           aria-label="Przystanek początkowy" aria-autocomplete="list"
-                           aria-expanded="false" aria-controls="start-list"
-                           placeholder="Skąd? np. Katedra">
+                    <input type="text" id="start" class="with-action" autocomplete="off"
+                           role="combobox" aria-label="Przystanek początkowy"
+                           aria-autocomplete="list" aria-expanded="false"
+                           aria-controls="start-list" placeholder="Skąd? np. Katedra">
+                    <button id="locate" class="icon-button in-field"
+                            title="Użyj mojej lokalizacji"
+                            aria-label="Ustaw start na mojej lokalizacji">◎</button>
                     <ul class="ac-list" id="start-list" role="listbox" hidden
                         aria-label="Podpowiedzi przystanków"></ul>
                 </div>
@@ -61,6 +78,8 @@
                     aria-label="Zamień początek z celem">⇅</button>
         </div>
 
+        <p class="locate-msg" id="locate-msg" role="status" hidden></p>
+
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
 
         <div class="search-row">
@@ -68,7 +87,9 @@
                 <span>Odjazd</span>
                 <input type="time" id="time" value="{{ form_time }}">
             </label>
-            <button id="search" class="button primary">Szukaj</button>
+            <button id="search" class="button primary">
+                <span class="spinner" aria-hidden="true"></span>Szukaj
+            </button>
             <button id="clear" class="icon-button" title="Wyczyść"
                     aria-label="Wyczyść wybór">✕</button>
         </div>
@@ -172,11 +193,26 @@
         </p>
     </div>
 
+    <div class="field" id="sw-field">
+        <label>Wersja aplikacji</label>
+        <div class="sw-row">
+            <code id="sw-version">—</code>
+            <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
+                Sprawdź
+            </button>
+        </div>
+        <p class="field-hint" id="sw-status" role="status">
+            Porównuje wersję działającą w przeglądarce z tą, którą serwer
+            wydaje w tej chwili.
+        </p>
+    </div>
+
 </div>
 {% endif %}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='pwa.js') }}"></script>
 
 </body>
 </html>

@@ -5,8 +5,8 @@ wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz** —
 główne korytarze jaskrawo, niszowe objazdy ledwo widocznie — a obok, w panelu,
 **listę gotowych propozycji** z godzinami, liniami i przesiadkami. Wybór
 propozycji podświetla ją na mapie, a kliknięcie linii na mapie otwiera
-propozycję, która nią jedzie. Na telefonie mapa i lista przełączają się
-dolnymi zakładkami.
+propozycję, która nią jedzie. Start można ustawić przyciskiem ◎ na aktualną
+lokalizację. Na telefonie mapa i lista przełączają się dolnymi zakładkami.
 
 Pełny opis projektu, architektury i algorytmów: **[docs/PROJECT.md](docs/PROJECT.md)**
 (szczegóły samego algorytmu mapy przepływów: **[docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md)**,
@@ -25,6 +25,16 @@ python3.11 -m venv .venv
 
 Port to domyślnie 5001 (5000 zajmuje AirPlay na macOS); można zmienić
 zmienną `PORT`.
+
+## Instalacja jako aplikacja (PWA)
+
+Planer instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
+głównego", na pulpicie ikoną ⤓ w nagłówku albo z paska adresu przeglądarki.
+Działa wtedy we własnym oknie, a raz odwiedzona okolica mapy jest dostępna
+też bez internetu (samo wyszukiwanie połączeń wymaga sieci).
+
+Instalację przeglądarki proponują wyłącznie po **HTTPS**; wyjątkiem jest
+`localhost`, więc lokalnie działa to od ręki.
 
 ## Codzienna aktualizacja rozkładu
 
@@ -47,3 +57,8 @@ plik po opis, co dokładnie który test sprawdza.
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests/ -v
 ```
+
+## Konwencja - branche
+- dla każdej funkcji tworzymy indywidualne branche w konwencji `username/feature`
+- tworzymy pull reguesty do testing gdy zmiany są gotowe
+- gdy zmiany są zebrane, przetestowane i gotowe to stworzenia następnego relase'a tworzymy pull request z `testing` do `main` 

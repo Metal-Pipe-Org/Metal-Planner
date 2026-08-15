@@ -1,9 +1,34 @@
+import hashlib
 from datetime import datetime
+from pathlib import Path
 
 from flask import jsonify, render_template, request
 
 import gtfs
 from planner import plan_flow, plan_route
+
+
+def _frontend_digest(app):
+    """Odcisk zawartości frontu - wersja cache'ów service workera.
+
+    Podstawiany w `sw.js` zamiast ręcznie podbijanego numeru: zmiana
+    czegokolwiek w `static/` albo w szablonie zmienia treść workera, więc
+    przeglądarka widzi nową wersję, a ta przy aktywacji kasuje stare cache'e.
+    To odpowiednik hashowanych nazw plików z bundlerów - tylko liczony
+    w locie, bez build stepu.
+
+    Liczone z zawartości, nie z dat - w kontenerze po każdym buildzie daty
+    są nowe, a pliki te same. Koszt: ~0,3 ms na kilkanaście plików, raz
+    na nawigację.
+    """
+    files = sorted(Path(app.static_folder).rglob("*"))
+    files.append(Path(app.root_path) / "templates" / "index.html")
+
+    digest = hashlib.sha256()
+    for path in files:
+        if path.is_file():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def _float_arg(name):
@@ -55,6 +80,20 @@ def init_routes(app):
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),
         )
+
+    @app.route("/sw.js")
+    def service_worker():
+        """Service worker musi jechać z korzenia - z /static/ obejmowałby
+        zasięgiem tylko statyki, a nie całą aplikację. Przy okazji wstrzykujemy
+        wersję cache'ów, żeby nie trzeba było jej pamiętać ręcznie."""
+        source = Path(app.static_folder, "sw.js").read_text(encoding="utf-8")
+        response = app.response_class(
+            source.replace("__VERSION__", _frontend_digest(app)),
+            mimetype="text/javascript",
+        )
+        # Bez tego nowa wersja workera potrafi wisieć w cache przeglądarki.
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
     @app.route("/healthz")
     def healthz():

@@ -57,6 +57,20 @@ uzupełnia tylko brakujący koniec relacji — **gotowego wyszukiwania nie
 kasuje żaden klik w mapę, tylko przycisk ✕**, żeby przypadkowe kliknięcie
 nie zabrało wyników sprzed chwili.
 
+W polu „skąd" siedzi przycisk **◎ — moja lokalizacja** (Geolocation API
+przeglądarki). Pozycja z GPS-a wchodzi tam jako zwykły punkt mapy, nie nazwa
+przystanku, więc backend sam znajdzie wokół niej słupki (ten sam zasięg
+z panelu ⚙, co przy kliknięciu w pustą przestrzeń). W odróżnieniu od klikania
+przycisk **nadpisuje** start, który już był — o to się prosi, klikając go —
+ale celu nie rusza: gdy „dokąd" jest wypełnione, od razu szuka, a gdy nie,
+przesuwa mapę na lokalizację, żeby wybrać cel z okolicy. Odmowa zgody, brak
+sygnału i timeout (10 s) mówią, co się stało, w linijce pod polami — świadomie
+nie w panelu wyników, bo te komunikaty nie mogą kasować gotowej listy tras,
+i nie jako `.hint`, bo te na telefonie znikają w widoku mapy, a to właśnie tam
+pyta się o lokalizację. Przeglądarki dają pozycję **tylko po HTTPS** (wyjątek:
+`localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
+chowa.
+
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
 - na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;
@@ -101,8 +115,70 @@ chowania panelu naraz tylko by myliły). Klasy `view-map`/`view-list` na
 Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
 ten kadr zobaczymy po przełączeniu zakładki.
 
+Na czas szukania (dwa zapytania naraz: przepływy + lista) leci **kółko
+ładowania** w dwóch miejscach, bo w każdym widoku widać co innego: w
+komunikacie „Szukam połączeń…" i na przycisku „Szukaj" — na telefonie w
+widoku mapy panel wyników jest schowany, więc samo pierwsze byłoby niewidoczne
+akurat tam, gdzie wyszukiwanie odpala się samo po drugim kliknięciu w mapę.
+Gasi je tylko odpowiedź na aktualne zapytanie (`requestToken`), a ✕ w trakcie
+szukania podbija token — porzucone zapytanie nie dorysuje już wyników relacji,
+której nie ma na ekranie.
+
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
+
+### 4. PWA — `static/manifest.webmanifest` + `static/sw.js` + `static/pwa.js`
+
+Aplikacja instaluje się na telefonie i na pulpicie (ikona, własne okno bez
+paska adresu, ekran startowy). Manifest opisuje nazwę, kolory i ikony;
+service worker odpowiada za start bez sieci; `pwa.js` spina to z UI —
+rejestruje workera, pokazuje przycisk ⤓ (tylko wtedy, gdy przeglądarka
+faktycznie proponuje instalację) i pasek „jest nowa wersja".
+
+Service worker jedzie z **`/sw.js`**, a nie ze `/static/` — zasięg workera
+to jego katalog, więc z `/static/sw.js` nie objąłby strony głównej. Stąd
+osobny endpoint w `routes.py`. Strategie są dobrane per rodzaj zasobu:
+
+| Zasób | Strategia | Dlaczego |
+|---|---|---|
+| strona `/` | sieć, offline ostatnia znana kopia | rozkład ma być świeży, ale bez sieci lepiej pokazać powłokę niż dinozaura |
+| `/api/*` | tylko sieć | odpowiedź zależy od godziny; offline zwracamy `{error: …}`, które UI pokazuje jak każdy inny błąd |
+| statyki i Leaflet | cache od razu, odświeżenie w tle | start bez czekania na sieć |
+| kafelki mapy | cache od razu, limit 400 | raz obejrzana okolica działa offline |
+
+Kafelki pobieramy z `crossOrigin` (`static/app.js`), żeby worker dostawał
+normalną odpowiedź zamiast nieprzejrzystej — przeglądarka rozlicza te drugie
+z limitu miejsca po ~7 MB za sztukę niezależnie od tego, że kafelek waży
+kilkanaście kilobajtów.
+
+**Wersji cache'ów nie podbija się ręcznie.** `VERSION` w `sw.js` to
+placeholder, w który Flask przy serwowaniu `/sw.js` wstawia skrót SHA-256
+z zawartości `static/` i szablonu (`_frontend_digest` w `routes.py`).
+Zmiana dowolnego pliku frontu zmienia treść workera, więc przeglądarka
+widzi nową wersję, a ta przy aktywacji kasuje cache'e po poprzedniej.
+To odpowiednik hashowanych nazw plików z bundlerów (Vite, Workbox), tylko
+liczony w locie — bez build stepu, którego ten projekt poza tym nie ma.
+Skrót liczymy z zawartości, nie z dat: w kontenerze po każdym buildzie daty
+są nowe, a pliki te same. Koszt to ~0,3 ms na żądanie `/sw.js`.
+
+Panel ⚙ pokazuje wersję działającą w przeglądarce i pozwala **wymusić
+sprawdzenie aktualizacji** (`registration.update()`). Przycisk odpowiada
+w jednym z trzech stanów: wszystko aktualne, jest nowa wersja (instaluje
+się, zaraz będzie pasek z odświeżeniem) albo — i po to głównie powstał —
+**awaria**: serwer wydaje inną wersję, niż ta, na której chodzi aplikacja,
+a przeglądarka mimo wymuszenia nie widzi aktualizacji. To sygnał, że
+`/sw.js` jest gdzieś po drodze cache'owany (proxy, CDN, nagłówki) i
+użytkownicy zostają na starym froncie. Bez tej diagnostyki taka awaria jest
+niewidoczna: wszystko działa, tylko nikt nie dostaje poprawek. Sam `/sw.js`
+jest z tego powodu wyłączony z cache'owania w workerze — pytanie o wersję
+musi trafiać do serwera.
+
+Wyjątkiem jest cache kafelków
+(`planer-tiles-1`): jest poza wersjonowaniem, bo mapa nie zmienia się razem
+z aplikacją i szkoda ściągać jej po każdej poprawce w CSS.
+
+Bez sieci **i** bez zapamiętanej powłoki (np. pierwsze wejście offline)
+zostaje `static/offline.html` — strona bez żadnych zależności.
 
 ## Algorytmy
 
@@ -280,12 +356,38 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
 | `static/app.js` | cały frontend: mapa, wyszukiwanie, lista propozycji |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
+| `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
+| `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`) |
+| `static/pwa.js` | rejestracja workera, przycisk instalacji, pasek nowej wersji |
+| `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
+| `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
 | `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
 | `docs/` | dokumentacja: ten plik, `ROUTING_ALGORITHM.md`, `FLOW_MAP_CONTRACT.md` |
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
 
+- **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
+  z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
+  niej), z wypełnionym celem odpala wyszukiwanie od razu, bez celu przesuwa
+  mapę na okolicę. Błędy zgody/sygnału w osobnej linijce pod polami, żeby nie
+  kasować gotowej listy tras; bez HTTPS (poza `localhost`) przycisk się chowa.
+  Do tego kółko ładowania na czas szukania — w komunikacie „Szukam połączeń…"
+  i na przycisku „Szukaj" (na telefonie w widoku mapy wyników nie widać, więc
+  samo pierwsze by nie wystarczyło). ✕ w trakcie wyszukiwania porzuca
+  zapytanie w locie zamiast czekać, aż dorysuje nieaktualne wyniki.
+- **2026-08-11** — planer jako PWA: manifest z ikonami, service worker
+  (`/sw.js`) z osobną strategią dla strony, API, statyk i kafelków mapy,
+  przycisk instalacji w nagłówku i pasek „jest nowa wersja". Bez sieci
+  aplikacja wstaje z cache'u, mapa pokazuje raz obejrzaną okolicę, a
+  wyszukiwanie mówi wprost, że wymaga połączenia. Wersja cache'ów to skrót
+  z zawartości frontu wstrzykiwany przy serwowaniu `/sw.js`, więc niczego
+  nie trzeba podbijać ręcznie; panel ⚙ pokazuje tę wersję, pozwala wymusić
+  sprawdzenie aktualizacji i krzyczy, gdy serwer wydaje co innego, niż
+  chodzi w przeglądarce. Kafelki chodzą teraz
+  przez CORS — nieprzejrzyste odpowiedzi zjadały ~7 MB limitu miejsca za
+  sztukę. `viewport-fit=cover` włącza wreszcie wcięcia ekranu, o które
+  style i tak już się upominały (`env(safe-area-inset-*)`).
 - **2026-08-09** — lista propozycji tras przestała być osobnym algorytmem:
   `plan_journeys` (metoda zakazu linii) usunięty, `/api/journeys` usunięty.
   Propozycje to teraz ścieżki czytane wprost z grafu segmentów, który
