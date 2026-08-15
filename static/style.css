@@ -44,6 +44,10 @@ body {
 }
 
 .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     border: none;
     border-radius: 10px;
     padding: 0 16px;
@@ -101,6 +105,33 @@ body {
 
 body.panel-hidden .icon-button.floating { left: 16px; }
 
+/* Kółko ładowania - pierścień z wyciętym fragmentem, w kolorze tekstu, więc
+   ten sam element działa i na przycisku (biały), i w komunikacie (szary). */
+.spinner {
+    display: inline-block;
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Kółko na przycisku pokazuje się tylko na czas wyszukiwania - poza nim
+   przycisk jest zwykłym „Szukaj". */
+#search .spinner { display: none; }
+body.searching #search .spinner { display: inline-block; }
+body.searching #search { cursor: progress; }
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner { animation-duration: 2.4s; }   /* wolniej, ale wciąż widać, że trwa */
+}
+
 .hint {
     margin: 10px 0 0;
     color: var(--ink-faint);
@@ -114,6 +145,12 @@ body.panel-hidden .icon-button.floating { left: 16px; }
     box-shadow: var(--shadow);
     color: var(--ink-soft);
     font-size: 14px;
+}
+
+.notice.loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .notice.error {
@@ -234,9 +271,49 @@ body.panel-hidden #sidebar {
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
+/* Miejsce na przycisk w polu (◎ „moja lokalizacja"), żeby wpisana nazwa
+   nie wjeżdżała pod niego. */
+.endpoint-fields input.with-action { padding-right: 42px; }
+
 /* Własna lista podpowiedzi nazw przystanków (zamiast <datalist>). */
 .ac-field {
     position: relative;
+}
+
+.icon-button.in-field {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 32px;
+    height: 32px;
+    background: none;
+    font-size: 15px;
+}
+
+.icon-button.in-field:hover { background: #e8edf3; }
+
+/* Czekanie na GPS: przycisk pulsuje i nie przyjmuje kolejnych kliknięć. */
+.icon-button.in-field:disabled {
+    cursor: default;
+    color: var(--accent);
+    animation: locate-pulse 1s ease-in-out infinite;
+}
+
+@keyframes locate-pulse {
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .icon-button.in-field:disabled { animation: none; opacity: 0.5; }
+}
+
+/* Komunikat spod pola startu (odmowa zgody, brak sygnału). Świadomie NIE jest
+   zwykłym .hint - te na telefonie znikają w widoku mapy, a to właśnie tam
+   pyta się o lokalizację. */
+.locate-msg {
+    margin: 8px 0 0;
+    color: #8c2b23;
+    font-size: 12.5px;
 }
 
 .ac-list {

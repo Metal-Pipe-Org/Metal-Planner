@@ -54,6 +54,20 @@ uzupełnia tylko brakujący koniec relacji — **gotowego wyszukiwania nie
 kasuje żaden klik w mapę, tylko przycisk ✕**, żeby przypadkowe kliknięcie
 nie zabrało wyników sprzed chwili.
 
+W polu „skąd" siedzi przycisk **◎ — moja lokalizacja** (Geolocation API
+przeglądarki). Pozycja z GPS-a wchodzi tam jako zwykły punkt mapy, nie nazwa
+przystanku, więc backend sam znajdzie wokół niej słupki (ten sam zasięg
+z panelu ⚙, co przy kliknięciu w pustą przestrzeń). W odróżnieniu od klikania
+przycisk **nadpisuje** start, który już był — o to się prosi, klikając go —
+ale celu nie rusza: gdy „dokąd" jest wypełnione, od razu szuka, a gdy nie,
+przesuwa mapę na lokalizację, żeby wybrać cel z okolicy. Odmowa zgody, brak
+sygnału i timeout (10 s) mówią, co się stało, w linijce pod polami — świadomie
+nie w panelu wyników, bo te komunikaty nie mogą kasować gotowej listy tras,
+i nie jako `.hint`, bo te na telefonie znikają w widoku mapy, a to właśnie tam
+pyta się o lokalizację. Przeglądarki dają pozycję **tylko po HTTPS** (wyjątek:
+`localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
+chowa.
+
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
 - na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;
@@ -97,6 +111,15 @@ chowania panelu naraz tylko by myliły). Klasy `view-map`/`view-list` na
 `<body>` na szerokim ekranie nie robią nic — tam widać oba widoki naraz.
 Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
 ten kadr zobaczymy po przełączeniu zakładki.
+
+Na czas szukania (dwa zapytania naraz: przepływy + lista) leci **kółko
+ładowania** w dwóch miejscach, bo w każdym widoku widać co innego: w
+komunikacie „Szukam połączeń…" i na przycisku „Szukaj" — na telefonie w
+widoku mapy panel wyników jest schowany, więc samo pierwsze byłoby niewidoczne
+akurat tam, gdzie wyszukiwanie odpala się samo po drugim kliknięciu w mapę.
+Gasi je tylko odpowiedź na aktualne zapytanie (`requestToken`), a ✕ w trakcie
+szukania podbija token — porzucone zapytanie nie dorysuje już wyników relacji,
+której nie ma na ekranie.
 
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
@@ -327,6 +350,15 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
+  z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
+  niej), z wypełnionym celem odpala wyszukiwanie od razu, bez celu przesuwa
+  mapę na okolicę. Błędy zgody/sygnału w osobnej linijce pod polami, żeby nie
+  kasować gotowej listy tras; bez HTTPS (poza `localhost`) przycisk się chowa.
+  Do tego kółko ładowania na czas szukania — w komunikacie „Szukam połączeń…"
+  i na przycisku „Szukaj" (na telefonie w widoku mapy wyników nie widać, więc
+  samo pierwsze by nie wystarczyło). ✕ w trakcie wyszukiwania porzuca
+  zapytanie w locie zamiast czekać, aż dorysuje nieaktualne wyniki.
 - **2026-08-11** — planer jako PWA: manifest z ikonami, service worker
   (`/sw.js`) z osobną strategią dla strony, API, statyk i kafelków mapy,
   przycisk instalacji w nagłówku i pasek „jest nowa wersja". Bez sieci

@@ -195,6 +195,60 @@ function pickEndpoint(value) {
 
 map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
 
+// ------------------------------------------- moja lokalizacja jako start ----
+
+// Pozycja z przeglądarki to dla nas zwykły punkt mapy, nie przystanek -
+// backend sam znajdzie wokół niego słupki (zasięg z panelu ⚙).
+const locateButton = $('locate');
+const locateMsg = $('locate-msg');
+
+const GEO_MESSAGES = {
+    1: 'Brak zgody na lokalizację — pozwól na nią w ustawieniach przeglądarki.',
+    2: 'Nie udało się ustalić lokalizacji.',
+    3: 'Ustalanie lokalizacji trwało zbyt długo — spróbuj ponownie.',
+};
+
+function showLocateMsg(text) {
+    locateMsg.textContent = text || '';
+    locateMsg.hidden = !text;
+}
+
+/** Przycisk ◎ - w przeciwieństwie do kliknięcia w mapę nadpisuje start, który
+    już był (o to się prosi, klikając go), ale celu nie rusza. */
+function useMyLocation(point) {
+    const previous = sel.start;
+    sel.start = point;
+    startInput.value = displayValue(point);
+    updatePointMarker('start', point);
+    restyle(previous, sel.start);
+    if (endInput.value) search();
+    else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
+}
+
+// Brak API (stara przeglądarka albo strona po http) - przycisk, który i tak
+// nic by nie zrobił, lepiej schować.
+if (!navigator.geolocation) {
+    locateButton.hidden = true;
+} else {
+    locateButton.addEventListener('click', () => {
+        showLocateMsg('');
+        locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
+        const finish = () => { locateButton.disabled = false; };
+        navigator.geolocation.getCurrentPosition(
+            position => {
+                finish();
+                useMyLocation({lat: position.coords.latitude,
+                               lon: position.coords.longitude});
+            },
+            error => {
+                finish();
+                showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
+            },
+            {enableHighAccuracy: true, timeout: 10000, maximumAge: 60000},
+        );
+    });
+}
+
 // ---------------------------------------------------- kadrowanie widoku ----
 
 function fitTo(points) {
@@ -671,6 +725,10 @@ resultsBox.addEventListener('mouseleave', clearPreview);
 // ------------------------------------------------------------ wyszukiwanie ----
 
 function resetResults() {
+    // Nowy token porzuca zapytanie w locie: po ✕ nie ma dorysować się wynik
+    // relacji, której już nie ma na ekranie (a kółko musi zgasnąć od razu).
+    ++requestToken;
+    setSearching(false);
     journeys = [];
     selectedJourney = null;
     clearJourney();
@@ -757,17 +815,34 @@ function loadJourneys(token) {
         });
 }
 
+/** Kółko ładowania w dwóch miejscach naraz, bo w każdym widoku widać co
+    innego: w komunikacie pod kartą (szeroki ekran, zakładka „Trasy") i na
+    przycisku „Szukaj" (telefon w widoku mapy - tam wyników nie widać, a
+    wyszukiwanie odpala się samo po drugim kliknięciu w mapę). */
+function setSearching(on) {
+    document.body.classList.toggle('searching', on);
+    $('search').disabled = on;
+    resultsBox.setAttribute('aria-busy', String(on));
+}
+
 function search() {
     if (!startInput.value || !endInput.value) return;
     const token = ++requestToken;
     clearJourney();
     clearPreview();
-    resultsBox.innerHTML = '<div class="notice">Szukam połączeń…</div>';
+    setSearching(true);
+    resultsBox.innerHTML =
+        '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
+        'Szukam połączeń…</div>';
     Promise.all([loadFlow(token, true), loadJourneys(token)])
         // Wyniki są tym, po co się przyszło - na telefonie pokazujemy je od
         // razu (na szerokim ekranie i tak widać wszystko naraz).
         .then(() => { if (token === requestToken && journeys.length) setView('list'); })
-        .catch(() => showError('Nie udało się połączyć z serwerem.'));
+        .catch(() => showError('Nie udało się połączyć z serwerem.'))
+        // Kółko gasi tylko odpowiedź na AKTUALNE zapytanie - przy szybkiej
+        // zmianie relacji stare, odsiane zapytanie nie może udawać, że nowe
+        // już się doliczyło.
+        .finally(() => { if (token === requestToken) setSearching(false); });
 }
 
 $('search').addEventListener('click', search);
@@ -930,6 +1005,7 @@ $('clear').addEventListener('click', () => {
     endInput.value = '';
     updatePointMarker('start', null);
     updatePointMarker('end', null);
+    showLocateMsg('');
     resetResults();
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
