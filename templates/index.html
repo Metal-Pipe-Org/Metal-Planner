@@ -55,10 +55,13 @@
             </div>
             <div class="endpoint-fields">
                 <div class="ac-field">
-                    <input type="text" id="start" autocomplete="off" role="combobox"
-                           aria-label="Przystanek początkowy" aria-autocomplete="list"
-                           aria-expanded="false" aria-controls="start-list"
-                           placeholder="Skąd? np. Katedra">
+                    <input type="text" id="start" class="with-action" autocomplete="off"
+                           role="combobox" aria-label="Przystanek początkowy"
+                           aria-autocomplete="list" aria-expanded="false"
+                           aria-controls="start-list" placeholder="Skąd? np. Katedra">
+                    <button id="locate" class="icon-button in-field"
+                            title="Użyj mojej lokalizacji"
+                            aria-label="Ustaw start na mojej lokalizacji">◎</button>
                     <ul class="ac-list" id="start-list" role="listbox" hidden
                         aria-label="Podpowiedzi przystanków"></ul>
                 </div>
@@ -74,6 +77,8 @@
             <button id="swap" class="icon-button" title="Zamień miejscami"
                     aria-label="Zamień początek z celem">⇅</button>
         </div>
+
+        <p class="locate-msg" id="locate-msg" role="status" hidden></p>
 
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
 

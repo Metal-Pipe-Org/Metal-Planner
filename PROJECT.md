@@ -54,6 +54,20 @@ uzupełnia tylko brakujący koniec relacji — **gotowego wyszukiwania nie
 kasuje żaden klik w mapę, tylko przycisk ✕**, żeby przypadkowe kliknięcie
 nie zabrało wyników sprzed chwili.
 
+W polu „skąd" siedzi przycisk **◎ — moja lokalizacja** (Geolocation API
+przeglądarki). Pozycja z GPS-a wchodzi tam jako zwykły punkt mapy, nie nazwa
+przystanku, więc backend sam znajdzie wokół niej słupki (ten sam zasięg
+z panelu ⚙, co przy kliknięciu w pustą przestrzeń). W odróżnieniu od klikania
+przycisk **nadpisuje** start, który już był — o to się prosi, klikając go —
+ale celu nie rusza: gdy „dokąd" jest wypełnione, od razu szuka, a gdy nie,
+przesuwa mapę na lokalizację, żeby wybrać cel z okolicy. Odmowa zgody, brak
+sygnału i timeout (10 s) mówią, co się stało, w linijce pod polami — świadomie
+nie w panelu wyników, bo te komunikaty nie mogą kasować gotowej listy tras,
+i nie jako `.hint`, bo te na telefonie znikają w widoku mapy, a to właśnie tam
+pyta się o lokalizację. Przeglądarki dają pozycję **tylko po HTTPS** (wyjątek:
+`localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
+chowa.
+
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
 - na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;
@@ -327,6 +341,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
+  z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
+  niej), z wypełnionym celem odpala wyszukiwanie od razu, bez celu przesuwa
+  mapę na okolicę. Błędy zgody/sygnału w osobnej linijce pod polami, żeby nie
+  kasować gotowej listy tras; bez HTTPS (poza `localhost`) przycisk się chowa.
 - **2026-08-11** — planer jako PWA: manifest z ikonami, service worker
   (`/sw.js`) z osobną strategią dla strony, API, statyk i kafelków mapy,
   przycisk instalacji w nagłówku i pasek „jest nowa wersja". Bez sieci
