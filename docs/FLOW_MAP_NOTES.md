@@ -43,15 +43,32 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
 
 ## Otwarte pytania
 
-**Punkt 4 — kotwiczenie końca gałęzi porównuje się do niewłaściwej
-jasności?** Od wdrożenia punktu 3 segment ma własną jasność zależną od
-pozycji, ale reguła kotwiczenia końca wciąż porównuje się do jasności
-segmentu **od wsiadania** (najlepszej, jaką segment kiedykolwiek
-osiąga), nie do jego **lokalnej** jasności w miejscu, które akurat
-rozważamy jako koniec. W praktyce to raczej ostrożniejsze niż błędne
-(ucina ogony wcześniej, nie później, niż lokalne porównanie by
-pozwoliło) — ale jeśli kiedyś okaże się, że sensowne, ciemniejące ogony
-znikają za wcześnie, to jest dokładnie to miejsce do przejrzenia.
+**Przesiadka kotwiczy się „jakimś" kursem linii, a uzasadnia ją konkretny
+(2026-08-15, DO ZROBIENIA).** Co jest zagwarantowane i zmierzone: każdy
+narysowany kawałek leży na realnej trasie start → cel dowożącej PRZED
+deadline'em — wsiadanie sprawdza skan w przód (`earliest`), wysiadanie skan
+wstecz (`latest`), zero naruszeń na 101/101 i 268/268 kawałków (patrz log
+niżej). Czego NIE ma: gwarancji, że dowolne złożenie narysowanych kawałków
+„na oko" też się w oknie zmieści. Kotwica końca pyta przez `_joins`, czy
+JAKIŚ kurs tego wzorca odjeżdża stąd w ciągu `WAIT_CAP_SEC` (20 min) — a
+kawałek, do którego się przesiadamy, jest narysowany na podstawie
+KONKRETNEGO kursu i to jego godziny przeszły test okna. Złapanie
+późniejszego odjazdu tej samej linii może więc wyprowadzić poza deadline.
+
+Ta sama rzecz mierzona miarą listy propozycji (`_can_board` — ten jeden
+kurs): 20 ze 101 kawałków przy 125%. Do rozstrzygnięcia: czy przesiadka na
+mapie ma być weryfikowana FAKTYCZNYM najbliższym odjazdem (i czy wtedy
+ponownie sprawdzać deadline dla tak złożonego łańcucha), czy „jakiś kurs w
+ciągu 20 min" zostaje świadomym uproszczeniem mapy linii. Uwaga na koszt:
+zaostrzenie do `_can_board` obcina mapę do ~20% obecnej zawartości, co samo
+w sobie łamie punkt 1 (mapa ma pokazywać wachlarz, nie jedną trasę) —
+właściwym kierunkiem jest raczej sprawdzanie deadline'u dla realnego
+najbliższego odjazdu niż podmiana miary kotwiczenia.
+
+Poprzednie wpisy (niestabilność reguły postępu; kotwiczenie końca
+porównujące się do niewłaściwej jasności) okazały się tym samym zjawiskiem
+widzianym z dwóch stron i zostały naprawione u źródła 2026-08-12 - patrz
+log niżej.
 
 ## Punkt 5 — dlaczego usunięty
 
@@ -456,3 +473,81 @@ przygaszenie 0.22, grupki numerów co 200 px, numery 0.8×, krycie numerów 1.
 Sekcja suwaków ZOSTAJE w kodzie, ale jest schowana — przełącznik
 `LOOK_TUNING` w `app.js` (`false`) chowa ją i każe ignorować zapamiętane w
 `localStorage` ustawienia, żeby czyjeś stare wartości nie przykryły
+domyślnych bez żadnej kontrolki, którą dałoby się to cofnąć.
+
+**Skąd bierze się „ogromna ilość tras" (pytanie użytkownika, zmierzone).**
+Relacja KSIĘŻE MAŁE → Wojszyce, okno 125%, `/api/flow`:
+
+| kiedy | najszybsza trasa | okno | kawałki | linie |
+|---|---|---|---|---|
+| 08:00 | 21 min | 10 min (dobija podłoga) | 2 | 2 |
+| 17:00 | 32 min | 10 min (dobija podłoga) | 2 | 2 |
+| 22:37 | **63 min** | **15 min** | 298 | 44 |
+
+Pierwsza przyczyna jest dokładnie taka, jak zgadywał użytkownik: **w nocy
+najszybsza trasa jest trzykrotnie dłuższa** (63 min vs 21 min rano), więc
+ten sam procent kupuje półtora raza szersze okno w minutach — a przy
+wszystkim jednakowo wolnym mieści się w nim mnóstwo wariantów.
+
+Druga przyczyna to **nieskomitowane zmiany w `planner.py`** (z sesji
+2026-08-12 i 2026-08-15, nie z tego przejścia). Ta sama relacja, 22:37:
+
+| kod | 125% | 200% |
+|---|---|---|
+| HEAD (3d1494a) | 37 kawałków / 30 linii | 107 / 42 |
+| drzewo robocze | 298 / 44 | 1289 / 82 |
+
+Atrybucja przez wyłączanie pojedynczych zmian:
+- **usunięta „reguła postępu"** w `_discover_segments` to główna przyczyna
+  wzrostu LICZBY LINII: HEAD z rozluźnionym `progress_tol_sec` (600 s)
+  daje dokładnie 44 linie przy 125% — czyli tyle, co dzisiejszy kod.
+  To nie jest regresja, tylko zapłacona cena: ta reguła była źródłem
+  „trasy znikają przy poszerzeniu okna" (patrz log 2026-08-12);
+- `origin_latest` liczone względem `best_arr` — drobny wkład (przy 200%:
+  1289 → 1118 kawałków, 82 → 75 linii; przy 125% zero różnicy);
+- filtr jasności w kotwicy końca — **żadnego** wkładu (298 → 298 przy 125%,
+  1289 → 1281 przy 200%), więc jego usunięcie nie „rozlało" mapy;
+- reszta wzrostu KAWAŁKÓW (37 → 298) to w większości cięcie po składzie
+  korytarza z punktu 7: jeden kurs wychodzi teraz jako kilkanaście
+  kawałków. Liczba kawałków NIE jest miarą liczby tras — do porównań
+  gęstości używać liczby linii.
+
+**Czy te linie to błąd? (weryfikacja punktu 4 na żywych danych).** Pytanie
+użytkownika po powyższym: skoro przy 125% wychodzą 44 linie, to czy mapa
+czegoś nie rysuje na darmo. Sprawdzone wprost: dla każdego narysowanego
+odcinka policzona osiągalność celu po krawędziach „wyjście → zdążalny,
+narysowany dalej kurs" (`_joins` na narysowanych częściach — dokładnie ta
+miara, którą kotwiczy `_select_and_anchor`).
+
+| relacja / okno | narysowane | prowadzi do celu | wisi w powietrzu |
+|---|---|---|---|
+| 22:37, 125% | 101 odc. / 44 linie | **101 / 44** | 0 |
+| 22:37, 200% | 268 / 82 | **268 / 82** | 0 |
+| 17:00, 200% | 90 / 41 | **90 / 41** | 0 |
+| 08:00, 200% | 15 / 12 | **15 / 12** | 0 |
+
+Punkt 4 trzyma. Gęstość nocnej mapy to skutek szerokiego okna w minutach
+(63-minutowa najszybsza trasa), nie rysowania odcinków donikąd.
+
+Ta sama rachuba miarą LISTY propozycji (`_can_board` — ten jeden, konkretny
+kurs zamiast „jakikolwiek kurs tego wzorca w ciągu 20 min") daje 20 ze 101
+odcinków przy 125%. To nie sprzeczność, tylko zmierzona różnica między
+pytaniami, na które odpowiadają mapa i lista — warto ją mieć zapisaną,
+zanim ktoś uzna jedną z tych liczb za błąd drugiej.
+
+**Twardsze sprawdzenie tego samego, wprost na warunkach okna** (bo pierwsza
+wersja tej notatki twierdziła błędnie, że łańcuch przesiadek może wyjść poza
+deadline): dla każdego zatrzymanego segmentu sprawdzone osobno, czy
+wsiadanie w jego kurs jest osiągalne skanem w przód (`earliest + bufor <=
+odjazd`) i czy narysowany koniec spełnia `arr_t <= latest[przystanek]`,
+czyli czy stamtąd wciąż da się zdążyć do celu przed deadline'em. Wynik:
+**0 naruszeń na 101 segmentów (125%) i 0 na 268 (200%)**. Najpóźniejszy
+narysowany przyjazd to 23:46 przy deadline 23:55 oraz 00:08 przy 00:10.
+Innymi słowy każdy narysowany kawałek jest przejeżdżany przez kompletną,
+realną trasę mieszczącą się w oknie — to gwarancja z konstrukcji (skan w
+przód + skan wstecz), nie tylko obserwacja.
+
+Co z tego NIE wynika i zostało jako otwarte pytanie (patrz „Otwarte
+pytania" na górze pliku): że dowolne złożenie narysowanych kawałków też się
+w oknie zmieści — kotwica przesiadki pyta o JAKIŚ kurs linii w ciągu 20
+minut, a okno przeszły godziny konkretnego kursu.
