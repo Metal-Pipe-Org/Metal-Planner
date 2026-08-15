@@ -1348,10 +1348,10 @@ function search() {
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
     saveLastSearch();
+    // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
+    // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
+    // zakładce „Trasy".
     loadPlan(token, true)
-        // Wyniki są tym, po co się przyszło - na telefonie pokazujemy je od
-        // razu (na szerokim ekranie i tak widać wszystko naraz).
-        .then(() => { if (token === requestToken && journeys.length) setView('list'); })
         .catch(() => showError('Nie udało się połączyć z serwerem.'))
         // Kółko gasi tylko odpowiedź na AKTUALNE zapytanie - przy szybkiej
         // zmianie relacji stare, odsiane zapytanie nie może udawać, że nowe
