@@ -207,3 +207,111 @@ Doc `ROUTING_ALGORITHM.md` (kroki 4, 5, 6, 7, 8) zaktualizowany w tym
 samym przejściu - opisywał usuniętą regułę postępu i starą, globalną
 wersję kotwicy końca jako aktualne zachowanie.
 
+## 2026-08-15 — trzecie przejście: odnoga na pętlę (punkt 4)
+
+Zgłoszenie: na mapie wystaje gałąź wjeżdżająca na pętlę końcową tylko po
+to, żeby zaraz z niej wrócić ("co to za odnoga?"). Regresja po drugim
+przejściu: usunięta wtedy w całości "reguła postępu" była — obok swojej
+znanej wady — JEDYNYM miejscem, które takie wjazdy na pętlę ucinało.
+
+Sedno pomyłki drugiego przejścia: reguła postępu miała słuszną INTENCJĘ
+(ogon ma prowadzić w stronę celu), ale mierzyła ją przez `latest` — "jak
+późno mogę stąd wyjechać". Ta wartość jest wysoka na węźle przesiadkowym z
+powodu GĘSTOŚCI KURSÓW, nie bliskości celu, więc reguła kasowała pół mapy
+razem z pętlami (pomiar na żywych danych: 42 zamiast 83 kawałków na
+Dworzec Główny → Krzyki przy 200%, w tym oczywiste trasy wprost do celu).
+Dlatego jej usunięcie wyglądało na poprawę, a strojenie jej tolerancji
+(dawny suwak "Tolerancja regresji") nigdy nie mogło zadziałać: przesuwało
+tylko próg szumu.
+
+Poprawka: intencja wraca, miara się zmienia. Kotwica końca w
+`_select_and_anchor` sprawdza teraz przez `_leads_onward`, czy kurs stojący
+na końcu ogona prowadzi DALEJ, czy zawraca na przystanek, który dopiero co
+minęliśmy. Kryterium jest czysto topologiczne — kolejność przystanków w
+rozkładzie — więc nie zależy od zegara, szerokości okna ani częstotliwości.
+
+Odrzucone po drodze (obie zmierzone, obie gorsze):
+- **czysta miara bliskości celu** (Dijkstra po grafie czasów przejazdu,
+  bez zegara). Miara sama w sobie jest czysta i tania (0,02 s), ale nie
+  odróżnia pętli od uczciwego DOWOZU: dowóz w bok, żeby złapać szybszą
+  linię, też oddala od celu, a ma prawo być na mapie. Złapał to
+  `test_backtrack_reference_ignores_unrelated_faster_option_from_origin`.
+- **łańcuch uziemienia do celu** (najmniejszy punkt stały zamiast
+  największego, żeby dwa ogony nie podpierały się nawzajem). Wycina więcej
+  wystających końcówek (21 zamiast 27 na sześciu relacjach), ale kosztem
+  22 zamiast 5 znikających odcinków przy poszerzaniu okna — czyli oddaje z
+  powrotem to, co naprawiły dwa poprzednie przejścia. Zostawione jako
+  znany, świadomie niewykorzystany wariant.
+
+Zmierzone na sześciu relacjach przy 200%, na wewnętrznym potoku (nie na
+współrzędnych — te zmienia równoległa przebudowa wiązek):
+- wystające końcówki (ogon, z którego nic narysowanego nie prowadzi
+  dalej): **94 → 27** łącznie; w dwóch relacjach zero.
+- odcinki znikające przy poszerzaniu okna 100%→200%: **5** łącznie na
+  ~1000 (poprzednio 0) — wszystkie to same wystające kikuty, które reguła
+  ucina dopiero przy szerszym oknie.
+
+Reszta wystających końcówek została dociągnięta zaraz potem — patrz
+następny wpis.
+
+Usunięty suwak "Ile propozycji tras szukać" (na prośbę użytkownika) —
+backend nadal używa swojego `DEFAULT_JOURNEY_LIMIT`.
+
+18/18 testów zielonych; nowy `test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back`
+zweryfikowany jako faktycznie czerwony bez poprawki.
+
+## 2026-08-15 — czwarte przejście: zero kikutów (punkt 4)
+
+Zgłoszenie: "nie chcę NIGDY żadnych kikutów". Zastrzeżenie z poprzedniego
+wpisu ("kursy jadą dalej, ale dalsza część nie mieści się w oknie") okazało
+się PRZY POMIARZE fałszywym tropem — z oknem nie miało to nic wspólnego.
+Wariant "kotwica musi mieć w oknie wyjście za tym przystankiem" zmierzony
+jako pierwszy: 27 → 26 kikutów, za to 5 → 13 znikających odcinków. Dopiero
+wypisanie trzech konkretnych przypadków z nazwami przystanków pokazało
+prawdziwe przyczyny — dwie, obie topologiczne:
+
+1. **Zawrócenie dalej niż o jeden przystanek.** `_leads_onward` porównywał
+   kontynuację tylko z POPRZEDNIM przystankiem. Tramwaj 1 dojeżdżał więc do
+   pętli Kamieńskiego "zakotwiczony" o piętnastkę, która zaraz wraca przez
+   Bałtycką i Kleczkowską — czyli dokładnie tam, skąd przyjechaliśmy, tylko
+   nie na ostatnim kroku. Analogicznie tramwaj 7 zaczynał przystanek przed
+   Dworcem Głównym i jechał OD dworca na Renomę i Operę, bo z Opery
+   ósemka wozi z powrotem przez Arkady na dworzec. Poprawka: `behind` to
+   cała przejechana droga kursu, nie jeden przystanek. **27 → 17 kikutów,
+   znikające bez zmian (5).**
+2. **Dwa ogony podpierające się nawzajem.** Po powyższym KAŻDY pozostały
+   kikut miał ten sam kształt: kotwica sama kończyła się w tym samym
+   miejscu (tramwaj 1 i tramwaj 7 wskazujące na siebie na Bałtyckiej).
+   Poprawka: kontynuacja musi być narysowana ZA tym przystankiem, nie
+   tylko jechać dalej w rozkładzie. **17 → 0 kikutów, ale 32 znikające** —
+   dokładnie ten wariant, który w trzecim przejściu odrzuciłem jako
+   "oddaje z powrotem monotoniczność".
+
+Rozwiązanie tego konfliktu: usunięty **filtr jasności z kotwicy końca**
+(`other["q"] + Q_ANCHOR_TOL >= exit_q[j]`). To była jedyna składowa kotwicy
+zależna od szerokości okna — jasność jest skalowana względem najgorszej
+opcji, która AKURAT mieści się w oknie (punkt 9), więc obie strony tego
+porównania ruszają się przy każdym ruchu suwaka i potrafią rozjechać się w
+przeciwne strony. Przy luźnej kotwicy taki przeskok kosztował jedną
+przesiadkę; przy ostrej — szedł kaskadą przez cały łańcuch. **Bez niego: 0
+kikutów i 0 znikających odcinków, przy WIĘKSZEJ liczbie narysowanych
+kawałków (1020 zamiast 1014).** Ten sam filtr zniknął z
+`_extract_transfer_graph`, żeby lista propozycji nie zaczęła milczeć o
+przesiadkach, które mapa rysuje.
+
+Warto zapamiętać kolejność, w jakiej to wyszło: dwa pierwsze pomysły
+(oba "okienne") były zmierzone i oba nietrafione, a diagnoza przyszła
+dopiero z wypisania konkretnych przypadków z nazwami przystanków. To samo
+zdarzyło się przejście wcześniej. Wniosek na przyszłość: przy kikutach
+najpierw wypisz trzy przykłady z nazwami, potem stawiaj hipotezę.
+
+Zmierzone na 14 relacjach × 14 szerokości okna (100%–300%): **0 kikutów
+przy KAŻDEJ szerokości okna, 0 znikających odcinków**; 3664 kawałki przy
+200%. Na żywym serwerze Biskupin → Dworzec Główny: 8 / 45 / 262 segmenty
+przy 110% / 150% / 200%.
+
+21/21 testów zielonych. Dwa nowe testy, każdy zweryfikowany jako czerwony
+po wyłączeniu dokładnie tej jednej reguły, której pilnuje:
+`test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line`
+oraz `test_two_tails_propping_each_other_up_are_both_cut_back`.
+

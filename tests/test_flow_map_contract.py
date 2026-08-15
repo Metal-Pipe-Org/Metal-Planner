@@ -450,6 +450,132 @@ def test_dead_end_branch_never_appears(install_day):
     assert len(_segs_by_num(result, "2", "tram")) == 1
 
 
+def test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back(install_day):
+    """Zgłoszone przez użytkownika 2026-08-15 ("co to za odnoga?"): ogon
+    wjeżdżający na pętlę końcową tylko po to, żeby zaraz z niej wrócić.
+
+    Tramwaj 1 mija Srodek (skąd realnie jedzie się do celu) i jedzie dalej
+    na PETLA. Na PETLA stoi zdążalny, jasny Tramwaj 2 - ale jedzie z
+    powrotem przez Srodek, czyli tam, skąd właśnie przyjechaliśmy. To nie
+    kontynuacja, tylko droga powrotna, więc odcinek Srodek -> PETLA nie ma
+    prawa się narysować (punkt 4), mimo że technicznie da się tam
+    "przesiąść"."""
+    trips = [
+        {"trip_id": "into_loop", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("M", 100, 100), ("L", 200, 200)]},
+        {"trip_id": "back_out", "label": "Tramwaj 2",
+         "stops": [("L", 400, 400), ("M", 500, 500), ("E", 600, 600)]},
+        {"trip_id": "onward", "label": "Autobus 3",
+         "stops": [("M", 300, 300), ("E", 450, 450)]},
+    ]
+    day = make_day(trips, names={"S": "Start", "M": "Srodek", "L": "PETLA", "E": "Cel"})
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+
+    # kontrola scenariusza: przesiadka Srodek -> Cel faktycznie jest widoczna
+    assert len(_segs_by_num(result, "3", "bus")) == 1
+
+    for seg in _segs_by_num(result, "1", "tram"):
+        assert _coords_of(day, ["L"])[0] not in seg["path"], (
+            "ogon Tramwaju 1 nie ma prawa sięgać pętli - jedyne, co z niej "
+            "odjeżdża, zawraca tam, skąd właśnie przyjechał"
+        )
+
+
+def test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line(install_day):
+    """Zawrócenie liczy się względem CAŁEJ przejechanej drogi, nie tylko
+    poprzedniego przystanku.
+
+    Tramwaj 1 jedzie Start -> Wezel -> Srodek -> PETLA. Z pętli odjeżdża
+    Tramwaj 15, ale wraca przez Wezel - przystanek, przez który już
+    przejechaliśmy (Srodek pomija, bo jedzie inną ulicą). Poprzednia wersja
+    reguły patrzyła tylko jeden przystanek wstecz ("czy wraca na Srodek?"),
+    więc uznawała to za kontynuację i rysowała ogon aż na pętlę. Realna
+    przesiadka jest na Wezle i tam ogon ma się kończyć."""
+    trips = [
+        {"trip_id": "into_loop", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("A", 100, 100), ("B", 200, 200), ("L", 300, 300)]},
+        {"trip_id": "back_out", "label": "Tramwaj 15",
+         "stops": [("L", 500, 500), ("A", 600, 600), ("E", 700, 700)]},
+    ]
+    day = make_day(trips, names={"S": "Start", "A": "Wezel", "B": "Srodek",
+                                 "L": "PETLA", "E": "Cel"})
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+
+    # kontrola scenariusza: przesiadka na Wezle jest widoczna, cel osiągalny
+    assert result["best_arrival"] == planner._fmt_time(700)
+    assert len(_segs_by_num(result, "15", "tram")) == 1
+
+    for seg in _segs_by_num(result, "1", "tram"):
+        for stop in ("B", "L"):
+            assert _coords_of(day, [stop])[0] not in seg["path"], (
+                f"ogon Tramwaju 1 nie ma prawa sięgać {day.stop_names[stop]!r} - "
+                "jedyne, co z pętli odjeżdża, zawraca po naszych własnych śladach"
+            )
+
+
+def test_two_tails_propping_each_other_up_are_both_cut_back(install_day):
+    """Kontynuacja musi sama być narysowana DALEJ, nie tylko jechać dalej
+    w rozkładzie.
+
+    Tramwaj 1 i Tramwaj 7 jadą tym samym korytarzem na PETLA. Obu ogony
+    kończą się na Ostatnim, bo z pętli wraca tylko droga powrotna (Tramwaj
+    15). Każdy z nich "widzi" tam drugiego jako zdążalną kontynuację, która
+    fizycznie jedzie dalej - i tak wzajemnie się podpierały, zostawiając na
+    mapie dwa kikuty kończące się w tym samym miejscu. Kontynuacja liczy
+    się tylko wtedy, gdy sama jest narysowana poza ten przystanek."""
+    # Dwa kursy każdej linii, żeby dało się przesiąść z jednej w drugą w OBIE
+    # strony - bez tego "wzajemne podpieranie się" nie powstaje.
+    trips = [
+        {"trip_id": "t1_a", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("M", 100, 100), ("B", 200, 200), ("K", 300, 300)]},
+        {"trip_id": "t1_b", "label": "Tramwaj 1",
+         "stops": [("S", 400, 400), ("M", 500, 500), ("B", 600, 600), ("K", 700, 700)]},
+        {"trip_id": "t7_a", "label": "Tramwaj 7",
+         "stops": [("S", 60, 60), ("M", 160, 160), ("B", 260, 260), ("K", 360, 360)]},
+        {"trip_id": "t7_b", "label": "Tramwaj 7",
+         "stops": [("S", 440, 440), ("M", 540, 540), ("B", 640, 640), ("K", 740, 740)]},
+        {"trip_id": "back_out", "label": "Tramwaj 15",
+         "stops": [("K", 420, 420), ("B", 500, 500), ("M", 580, 580),
+                   ("E", 660, 660)]},
+        {"trip_id": "onward", "label": "Autobus 3",
+         "stops": [("M", 300, 300), ("E", 500, 500)]},
+    ]
+    day = make_day(trips, names={"S": "Start", "M": "Wezel", "B": "Ostatni",
+                                 "K": "PETLA", "E": "Cel"})
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+
+    # kontrola scenariusza: realna droga do celu (przez Wezel) jest na mapie,
+    # a oba tramwaje dowożą do tej przesiadki
+    assert result["best_arrival"] == planner._fmt_time(500)
+    assert len(_segs_by_num(result, "3", "bus")) == 1
+    assert _segs_by_num(result, "1", "tram") != []
+
+    for seg in result["segments"]:
+        for stop in ("B", "K"):
+            assert _coords_of(day, [stop])[0] not in seg["path"], (
+                f"nic nie ma prawa dojeżdżać do {day.stop_names[stop]!r}: "
+                "stamtąd nie da się pojechać dalej, można tylko wrócić"
+            )
+
+
 # ----------------------------------------------------------------------- 6 -
 
 def test_shape_slice_uses_real_street_geometry_when_available():

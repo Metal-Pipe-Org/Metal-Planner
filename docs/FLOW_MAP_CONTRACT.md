@@ -46,15 +46,30 @@ celu**, nie ma prawa się pojawić na mapie.
 
 Kryterium jest czysto **fizyczna osiągalność** — czy da się tam realnie,
 w czasie, dotrzeć czymś, co mapa już rysuje — nie to, jak jasna jest ta
-rzecz, przez którą się dociera. Dlatego początek gałęzi kotwiczy się o
-DOWOLNĄ zdążalną przesiadkę z już narysowanego segmentu, choćby bardzo
-blada: bladość feedera nie oznacza, że dalsza, jasna część jest
-nieosiągalna, tylko że sam dojazd do niej nie jest najlepszą częścią
-podróży — a to normalne i zgodne z zasadą punktu 3. Koniec gałęzi ma
-dodatkowo (poza samą osiągalnością) wymóg porównywalnej jasności
-kontynuacji — to nie jest wymóg tego punktu kontraktu, tylko osobna,
-świadoma decyzja porządkowa: nie ciągnąć jasnego korytarza ogonem w bladą,
-nieistotną niszę.
+rzecz, przez którą się dociera. Gałąź kotwiczy więc DOWOLNA zdążalna
+przesiadka z narysowanego segmentu, choćby bardzo blada: bladość dojazdu
+nie znaczy, że dalsza, jasna część jest nieosiągalna. Tak samo jest na
+końcu — jasność kontynuacji nie ma tu nic do rzeczy.
+
+**Żadnych kikutów.** Ogon kończy się dopiero tam, gdzie stoi coś, co
+naprawdę prowadzi **dalej**. „Dalej" znaczy dwie rzeczy naraz:
+
+1. **Nie z powrotem po naszych własnych śladach.** Kurs zawracający na
+   JAKIKOLWIEK przystanek, przez który już przejechaliśmy — nie tylko na
+   ten ostatni — jest drogą powrotną, nie kontynuacją. Inaczej mapa wjeżdża
+   na pętlę końcową tylko po to, żeby zaraz z niej wrócić.
+2. **Kontynuacja musi sama być narysowana dalej.** To, że jedzie dalej w
+   rozkładzie, nie wystarcza — inaczej dwa ogony podpierają się nawzajem i
+   spotykają się tam, skąd nic nie odjeżdża.
+
+To NIE to samo, co minięcie lepszej przesiadki i jazda dalej (punkt 3) —
+tam jedzie się w stronę celu, tylko nie najlepiej, więc odcinek zostaje
+narysowany, po prostu ciemniej.
+
+Kierunek („czy to zawrócenie") czytamy z kolejności przystanków w
+rozkładzie, nie z tego, co akurat mieści się w oknie czasowym — inaczej
+przesunięcie suwaka okna zmieniałoby odpowiedź i kasowało gałęzie widoczne
+przy węższym oknie (patrz punkt 9).
 
 ## 6. Geometria po realnych ulicach i torach
 

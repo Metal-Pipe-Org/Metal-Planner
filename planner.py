@@ -215,8 +215,9 @@ DEFAULT_EXTRA_CAP_SEC = 3600    # domyślnie: najwyżej 60 min naddatku
 MIN_EXTRA_CAP_SEC = 600
 MAX_EXTRA_CAP_SEC = 7200        # (suwak w UI go nadpisuje) - sufit 120 min
 
-Q_ANCHOR_TOL = 0.10     # ogon rysujemy tylko do przesiadki w kontynuację
-                        # niewiele ciemniejszą od segmentu (tolerancja jasności)
+Q_ANCHOR_TOL = 0.10     # tolerancja jasności przy porównaniu segmentów
+                        # (patrz _extract_transfer_graph; kotwica końca mapy
+                        # już jej nie używa - patrz _select_and_anchor)
 BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
                         # (cofnięcia) o więcej niż 2 min
 WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
@@ -803,6 +804,52 @@ def _exit_index(day, kept, ranges):
     return exit_index
 
 
+def _leads_onward(day, other, stop, behind, drawn=None):
+    """Czy `other` jest w tym miejscu prawdziwą KONTYNUACJĄ, czy tylko
+    ZAWRACA po naszych własnych śladach.
+
+    Sedno punktu 4 kontraktu. Sam fakt, że na końcu ogona stoi zdążalny,
+    jasny kurs, NIE wystarcza, żeby ogon uznać za zakotwiczony: jeśli ten
+    kurs jedzie z powrotem na przystanek, przez który już przejechaliśmy
+    (klasycznie: pętla końcowa, na którą wjeżdża się tylko po to, żeby z
+    niej zaraz wrócić), to ogon nadal wisi w powietrzu - wystaje z sieci i
+    prowadzi donikąd, mimo że technicznie da się tam "przesiąść".
+
+    `behind` to CAŁA przejechana dotąd droga tego kursu (wszystkie
+    przystanki przed tym wyjściem, wraz z siblingami), nie tylko poprzedni
+    przystanek. Wersja "tylko poprzedni" (2026-08-15, pierwsza) łapała samą
+    czołową pętlę, ale przepuszczała każdą, która zawraca choć jeden
+    przystanek dalej - a to jest w realnej siatce regułą, nie wyjątkiem:
+    tramwaj 1 dojeżdżał do pętli Kamieńskiego, "kotwicząc się" o piętnastkę,
+    która zaraz wraca przez Bałtycką i Kleczkowską, czyli dokładnie tam,
+    skąd przyjechaliśmy - realna przesiadka jest cztery przystanki
+    wcześniej, na Pl. Staszica, i dopiero tam ogon ma się kończyć.
+    Zawrócenie na przystanek już minięty nigdy nie jest potrzebne, żeby
+    coś pokazać: skoro tam byliśmy, to segment odjeżdżający STAMTĄD jest
+    rysowany osobno i sam się kotwiczy - mapa nic nie traci, a przestaje
+    prowadzić w ślepe zaułki.
+
+    Liczone z FIZYCZNEJ kolejności przystanków kursu (z rozkładu, nie z
+    zapytania) - ani z zegara, ani z aktualnie narysowanych zakresów. Dzięki
+    temu odpowiedź "czy to zawrócenie" jest zawsze taka sama, niezależnie od
+    szerokości okna, więc przesunięcie suwaka nie może przez tę regułę
+    skasować niczego, co było widać wcześniej (punkt 9 kontraktu).
+
+    To była pierwotna intencja dawnej "reguły postępu", tyle że ta mierzyła
+    postęp przez `latest` ("jak późno mogę stąd wyjechać"), a ta wartość na
+    węźle przesiadkowym jest wysoka z powodu gęstych kursów, nie bliskości
+    celu - dlatego dawna reguła kasowała pół mapy razem z pętlami.
+    """
+    o_start, o_cut = drawn if drawn else (0, len(other["stops"]))
+    for stop2 in _sibling_places(day, stop):
+        position = other["pos_of"].get(stop2)
+        if position is None or position >= o_cut - 1 or position < o_start:
+            continue          # ten kurs się tu kończy - nie ma dokąd dalej
+        if other["stops"][position + 1] not in behind:
+            return True
+    return False
+
+
 def _select_and_anchor(day, segs, source_stops, target_set):
     """Krok 3: spójność narysowanej sieci (bez progu jasności - to, co jest
     w oknie czasowym, jest już wyznaczone przez deadline; q służy dalej
@@ -811,7 +858,9 @@ def _select_and_anchor(day, segs, source_stops, target_set):
     - początek: start relacji albo miejsce, gdzie dołącza (zdążalnie) inny
       narysowany segment - żaden segment nie zaczyna się "znikąd";
     - koniec: cel albo ostatnia przesiadka w porównywalnie jasny narysowany
-      segment - żaden ogon nie prowadzi "w powietrze".
+      segment, który prowadzi DALEJ, a nie z powrotem tam, skąd właśnie
+      przyjechaliśmy (patrz _leads_onward) - żaden ogon nie prowadzi
+      "w powietrze" ani na pętlę, z której trzeba by tylko wracać.
     Punkt stały: zakresy mogą tylko się kurczyć, więc iteracja zbiega.
     Zwraca (kept, ranges) - listę segmentów i ich (start_pos, cut).
     """
@@ -850,7 +899,12 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
             cut = 0
-            for pos, _, arr_t, stop in seg["exits"]:
+            behind = set()     # cała droga przejechana przed danym wyjściem
+            ridden = 0         # dokąd `behind` jest już wypełnione
+            for j, (pos, _, arr_t, stop) in enumerate(seg["exits"]):
+                while ridden < pos:
+                    behind.update(_sibling_places(day, seg["stops"][ridden]))
+                    ridden += 1
                 if pos <= start_pos + 1:
                     continue                 # wyjście przed/na starcie segmentu
                 if stop in target_set:
@@ -859,11 +913,30 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                 for other in passing_index.get(stop, ()):
                     if other is seg or id(other) not in drawn_stops:
                         continue
-                    # Kontynuacja musi być zdążalna i porównywalnie jasna -
-                    # jasny korytarz nie ciągnie ogona do bladej niszy.
-                    if (other["q"] + Q_ANCHOR_TOL >= seg["q"]
-                            and _joins(day, arr_t, stop, other,
-                                       drawn_stops[id(other)])):
+                    if not _leads_onward(day, other, stop, behind,
+                                         ranges[id(other)]):
+                        continue
+                    # Zostaje już tylko zdążalność. Był tu do 2026-08-15
+                    # jeszcze wymóg PORÓWNYWALNEJ JASNOŚCI kontynuacji
+                    # (`other["q"] + Q_ANCHOR_TOL >= seg["exit_q"][j]`) -
+                    # świadoma decyzja porządkowa "nie ciągnij jasnego
+                    # korytarza ogonem w bladą niszę", nigdy wymóg punktu 4.
+                    # USUNIĘTY: jasność jest liczona względem najgorszej
+                    # opcji, która AKURAT mieści się w oknie (punkt 9), więc
+                    # obie strony tego porównania przeskalowują się przy
+                    # ruchu suwaka - i potrafią się rozjechać w przeciwne
+                    # strony. To była JEDYNA składowa kotwicy końca zależna
+                    # od szerokości okna; przy ostrym wymogu kontynuacji
+                    # (patrz _leads_onward) jej wahania rozchodziły się
+                    # kaskadą przez cały łańcuch kotwic i kasowały odcinki
+                    # przy samym poszerzeniu suwaka (zmierzone: 32 zniknięcia
+                    # na ~1000 odcinków; bez tego warunku - zero, przy
+                    # WIĘKSZEJ liczbie narysowanych kawałków). Nisza, o którą
+                    # tu chodziło, i tak nie ma już jak powstać: kontynuacja
+                    # musi prowadzić dalej i sama być narysowana dalej, więc
+                    # jest częścią realnej drogi do celu, a nie ślepym
+                    # zaułkiem - i rysuje się bladą barwą (punkty 3 i 8).
+                    if _joins(day, arr_t, stop, other, drawn_stops[id(other)]):
                         cut = max(cut, pos)
                         break
             if cut >= start_pos + 2:
@@ -922,7 +995,7 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
         sid = id(seg)
         start_pos, cut = ranges[sid]
         edges = []
-        for pos, _, arr_t, stop in seg["exits"]:
+        for j, (pos, _, arr_t, stop) in enumerate(seg["exits"]):
             if not (start_pos < pos <= cut):
                 continue                        # wyjście poza narysowaną częścią
             if stop in target_set:
@@ -939,8 +1012,15 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
                 # docstring _can_board) - inaczej powstaje "teleportacja":
                 # przesiadka na kurs, który przy tym konkretnym przyjeździe
                 # już odjechał.
-                if (other["q"] + Q_ANCHOR_TOL >= seg["q"]
-                        and _can_board(day, arr_t, stop, other, other_board)):
+                #
+                # Filtr jasności (`other["q"] + Q_ANCHOR_TOL >= exit_q[j]`)
+                # zniknął stąd 2026-08-15 razem z tym samym filtrem przy
+                # kotwicy końca mapy (patrz _select_and_anchor) - te dwa
+                # miejsca muszą mówić to samo, bo obietnica plan_flow działa
+                # w obie strony: lista nie pokazuje przesiadki, której nie ma
+                # na mapie, ale też mapa nie ma prawa mieć przesiadki, o
+                # której lista przez niespójność milczy.
+                if _can_board(day, arr_t, stop, other, other_board):
                     edges.append(
                         ("transfer", pos, arr_t, stop, id(other), other_start, other_board)
                     )

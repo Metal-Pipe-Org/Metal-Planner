@@ -313,9 +313,91 @@ same honesty pass regardless of its score:
   currently-drawn segment you could catchably transfer onto that lands you
   partway along this one.
 - **End**: either it reaches the destination, or it's cut back to the last
-  point where it can hand off to another segment that's comparably bright
-  (within 10 percentage points of its own score) — not left dangling into
-  some barely-relevant side street.
+  point where it can hand off to another segment that genuinely *continues*
+  (see below) — never left dangling.
+
+A hand-off at the end of a tail only counts when the segment standing
+there really is a continuation. Two conditions, both added 2026-08-15
+after the map kept growing stumps in real data:
+
+1. **It must not turn back onto ground we already rode.** Not merely "not
+   back to the previous stop" — back to *any* stop this trip already
+   passed. A vehicle doing that is the way back, not a way onward:
+   classically a terminus loop the map drives onto purely in order to turn
+   around. The one-stop version of this test (the first attempt, the same
+   day) caught only the tightest loops and missed the common case by a
+   wide margin: tram 1 rode all the way up to the Kamieńskiego loop
+   "anchored" on tram 15, which promptly comes back down through Bałtycka
+   and Kleczkowska — stops tram 1 had just ridden through. The real
+   transfer was four stops earlier, at Pl. Staszica, and that is where the
+   tail now ends. Nothing is lost by refusing these: if we already stood
+   at that stop, the segment departing *from* it is drawn on its own and
+   anchors itself.
+2. **It must itself be drawn beyond that stop.** Physically continuing in
+   the timetable is not enough. Otherwise two tails prop each other up:
+   tram 1 and tram 7 both end at Bałtycka, each pointing at the other as
+   its "continuation", and the map keeps two stumps meeting at a stop
+   nothing leaves. Since ranges only ever shrink, this stays a
+   well-founded fixed point.
+
+Direction is read from the trip's stop order in the timetable, never from
+what currently fits inside the time window — otherwise widening the slider
+would change the answer and erase branches that were visible at a narrower
+setting.
+
+This is deliberately *not* the same as passing a better transfer and
+riding on (Step 6): there you're still heading toward the destination,
+just not optimally, so the stretch stays drawn, only dimmer.
+
+**What was removed to make this hold (2026-08-15).** The end check used to
+*also* require the continuation to be comparably bright (within 10
+percentage points) so a bright corridor wouldn't trail off into some
+barely-relevant side street. That was always housekeeping, never a
+requirement of contract point 4 — and it was the last ingredient of the
+end check that depends on how wide the window is: brightness is scaled
+against the worst option that *currently* fits (contract point 9), so both
+sides of that comparison move when the slider moves, and they can move
+apart. On its own that only cost an anchor here and there; combined with
+the strict continuation test above, each flip cascaded down a whole chain
+of anchors. Measured across 6 relations swept 100%→200%: 32 drawn stretches
+vanished purely from widening the window. Dropping the brightness
+condition brings that to **zero — with more pieces drawn, not fewer**. The
+side street it guarded against can no longer form anyway: a continuation
+now has to lead onward *and* be drawn onward, so it is part of a real path
+to the destination, and it is drawn dim (points 3 and 8) rather than
+excluded. The same condition was dropped from the transfer graph behind
+the route-proposals list, which mirrors this check by design.
+
+Measured after all of the above, on 14 relations × 14 window widths
+(100%–300%): zero dangling tips at every width, zero stretches lost to
+widening the window.
+
+An earlier rule tried to enforce the same intent by comparing how late you
+could still *depart* from each stop. That number is high at a busy
+interchange because service is frequent there, not because it's close to
+the destination, so the rule deleted half the map along with the loops
+(measured: 42 instead of 83 drawn pieces on one relation). Tuning its
+tolerance — the old "Tolerancja regresji" slider, since removed — only
+moved the noise threshold, which is why it never worked.
+
+A note on the brightness that *stayed*: wherever the code still compares a
+segment's brightness at a point, it uses *that specific point's own*
+brightness (Step 6's per-exit `q_of`), not the segment's best-ever score.
+Using the best-ever score was a bug, fixed 2026-08-12: if a ride picks up
+one excellent, distant opportunity much further along, that excellence
+correctly lights up the *whole* ride behind it (Step 6's
+fallback-to-later-exits already does that, honestly) — but it was then
+also being used as an unreasonably high bar for a completely unrelated,
+ordinary transfer near the *start* of the same ride, decoupled from
+anything actually true about that earlier point.
+
+An earlier rule tried to enforce the same intent by comparing how late you
+could still *depart* from each stop. That number is high at a busy
+interchange because service is frequent there, not because it's close to
+the destination, so the rule deleted half the map along with the loops
+(measured: 42 instead of 83 drawn pieces on one relation). Tuning its
+tolerance — the old "Tolerancja regresji" slider, since removed — only
+moved the noise threshold, which is why it never worked.
 
 Net result: nothing on the map starts from nowhere, and nothing trails off
 into thin air, regardless of how wide the time window is set.
@@ -366,8 +448,9 @@ proposal is then just: start at any corridor that begins at the true origin,
 and walk forward through it, at every real transfer point either (a) you've
 reached the destination — that's a complete proposal — or (b) you hop into
 whichever next corridor is reachable there, exactly the way Step 7 already
-verified was legitimate (same "comparably bright" test — a corridor never
-hands off to something distinctly dimmer than itself). Explore the
+verified was legitimate (same "comparably bright" test, judged at that
+same specific point — see Step 7's 2026-08-12 fix — so this list can't
+end up more conservative than what the map itself now draws). Explore the
 brightest branches first, stop once enough distinct proposals are found or
 the search has spent its (small) budget, then rank what's left by arrival
 time, then by fewest transfers, then by least waiting.
