@@ -44,3 +44,8 @@ Cron na serwerze, np. o 3:00:
 
 Gdy pobieranie się nie powiedzie, stara baza zostaje nietknięta — aplikacja
 działa dalej na wczorajszych danych i przeładuje nowe sama, bez restartu.
+
+## Konwencja - branche
+- dla każdej funkcji tworzymy indywidualne branche w konwencji `username/feature`
+- tworzymy pull reguesty do testing gdy zmiany są gotowe
+- gdy zmiany są zebrane, przetestowane i gotowe to stworzenia następnego relase'a tworzymy pull request z `testing` do `main` 
