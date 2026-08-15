@@ -950,6 +950,12 @@ const NEAR_CLICK_PX = 40;   // "ta linia w tym miejscu" - w pikselach ekranu
 
 /** Propozycja jeżdżąca daną linią: najbliższa klikniętemu miejscu, a gdy
     kliknięcie jest z dala od którejkolwiek - po prostu najlepsza z listy. */
+/** Bez `latlng`: czy ta linia ma W OGÓLE jakąś propozycję (podpowiedź przy
+    hover, sama nazwa wystarczy). Z `latlng`: czy ta linia ma propozycję,
+    która przejeżdża BLISKO wskazanego miejsca (klik) - bez tego rozróżnienia
+    klik w kurs, który jest na mapie przepływów, ale nie pokrywa się z żadną
+    propozycją akurat w tym miejscu, cichcem otwierał pierwszą z brzegu
+    propozycję tej samej linii gdziekolwiek indziej na mapie. */
 function journeyForLine(num, mode, latlng) {
     const clicked = latlng && map.latLngToContainerPoint(latlng);
     let fallback = null, nearest = null, nearestDist = Infinity;
@@ -964,7 +970,8 @@ function journeyForLine(num, mode, latlng) {
             }
         }
     });
-    return nearestDist <= NEAR_CLICK_PX ? nearest : fallback;
+    if (!clicked) return fallback;
+    return nearestDist <= NEAR_CLICK_PX ? nearest : null;
 }
 
 function badgeHtml(leg) {
