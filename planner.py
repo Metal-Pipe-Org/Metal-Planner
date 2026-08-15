@@ -219,11 +219,6 @@ Q_ANCHOR_TOL = 0.10     # ogon rysujemy tylko do przesiadki w kontynuację
                         # niewiele ciemniejszą od segmentu (tolerancja jasności)
 BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
                         # (cofnięcia) o więcej niż 2 min
-PROGRESS_TOL_SEC = 0    # domyślny luz reguły postępu (suwak w UI go nadpisuje) -
-                        # metryka latest bywa zaszumiona o 1-2 min między
-                        # sąsiednimi węzłami, nawet na dobrej trasie
-MIN_PROGRESS_TOL_SEC = 0
-MAX_PROGRESS_TOL_SEC = 600
 WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
 
 MIN_RANGE_M = 200       # zasięg szukania słupków wokół klikniętego punktu
@@ -318,7 +313,7 @@ def _summarize_journey(legs, rides, arrival, dep_sec):
     }
 
 
-def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
+def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, range_m=None, extra_pct=None,
               extra_floor_sec=None, extra_cap_sec=None, journey_limit=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
@@ -338,7 +333,16 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     Jeden kurs może więc wyjść na mapie jako kilka kolejnych kawałków o
     różnej jasności (patrz _finalize_segments) - ale tylko tam, gdzie coś
     naprawdę się zmienia; korytarz bez mijanej, lepszej opcji nadal dostaje
-    jedną, stałą jasność na całej narysowanej długości.
+    jedną, stałą jasność na całej narysowanej długości. Ta jasność per
+    pozycja to WYŁĄCZNIE wynik konkretnych, znalezionych kontynuacji
+    (_refine_brightness, patrz suffix-min tamże) - _discover_segments nie
+    odrzuca żadnego zdążalnego wyjścia z góry na podstawie porównania
+    sąsiednich przystanków (taki filtr istniał kiedyś, ale porównywał
+    surowe `latest` - wartość zależną od aktualnego okna czasowego - więc
+    dwa sąsiednie przystanki mogły zamienić się miejscami przy samym tylko
+    poszerzeniu suwaka i gasić realne wyjścia; usunięty 2026-08-12, bo
+    dokładnie ta sama gwarancja "brak migotania" wynika już poprawnie,
+    stabilnie względem okna, z suffix-min w _refine_brightness).
 
     Liczone w krokach (patrz odpowiednie funkcje): odkrycie segmentów
     kandydujących (_discover_segments), dopracowanie ich jasności PER WYJŚCIE
@@ -350,7 +354,7 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     przeczytane wprost z tego samego, już narysowanego grafu segmentów
     (_extract_transfer_graph + _enumerate_journeys), więc lista nigdy nie
     pokaże przesiadki, której nie ma na mapie, i reaguje na te same suwaki
-    (progress_tol_sec, extra_pct/extra_floor_sec/extra_cap_sec) co mapa.
+    (extra_pct/extra_floor_sec/extra_cap_sec) co mapa.
 
     extra_pct/extra_floor_sec/extra_cap_sec to suwaki okna czasowego: "pokaż
     trasy do X% dłuższe niż najszybsza, ale co najmniej floor i najwyżej cap
@@ -359,8 +363,6 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     (bardzo krótkie albo bardzo długie trasy). Nie ma osobnego progu
     jasności - wszystko w oknie czasowym jest pokazywane, jasność (q) służy
     już tylko do intensywności rysowania.
-    progress_tol_sec to luz reguły postępu (patrz _discover_segments);
-    None = domyślne PROGRESS_TOL_SEC.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -369,10 +371,6 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     faktycznie da się złożyć.
     """
     when = when or datetime.now()
-    progress_tol_sec = (
-        PROGRESS_TOL_SEC if progress_tol_sec is None
-        else max(MIN_PROGRESS_TOL_SEC, min(MAX_PROGRESS_TOL_SEC, progress_tol_sec))
-    )
     range_m = (
         DEFAULT_RANGE_M if range_m is None
         else max(MIN_RANGE_M, min(MAX_RANGE_M, range_m))
@@ -414,7 +412,7 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
 
     segs = _discover_segments(
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
-        latest, origin_latest, target_set, progress_tol_sec,
+        latest, origin_latest, target_set,
     )
     _refine_brightness(day, segs, target_set, deadline, best_arr)
     kept, ranges = _select_and_anchor(day, segs, source_stops, target_set)
@@ -459,18 +457,39 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
 
 
 def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
-                        latest, origin_latest, target_set, progress_tol_sec):
+                        latest, origin_latest, target_set):
     """Krok 1: dla każdego kursu w oknie wybiera miejsce wsiadania (reguła
     cofnięcia, patrz BACKTRACK_TOL_SEC) i idzie nim naprzód zbierając
-    wyjścia - zwraca listę segmentów kandydujących, jeszcze bez dopracowanej
-    jasności (patrz _refine_brightness).
+    KAŻDE zdążalne wyjście - zwraca listę segmentów kandydujących, jeszcze
+    bez dopracowanej jasności (patrz _refine_brightness).
 
-    Reguła postępu porównuje każdy przystanek do NAJLEPSZEGO `latest`
-    osiągniętego na tym kursie DO TEJ PORY (`best_latest_seen`), nie do
-    wartości zanotowanej raz przy wsiadaniu - bo ta druga wersja przepuszcza
-    powolny, ale realny odpływ: kilka przystanków z rzędu, każdy trochę
-    gorszy od poprzedniego, nigdy nie spadnie poniżej PIERWSZEGO pomiaru,
-    jeśli akurat od niego zaczyna się spadek.
+    Jedyny filtr tutaj jest ABSOLUTNY, nie względny: wyjście liczy się,
+    gdy jazda do tego przystanku i tak jeszcze mieści się w oknie (`arr_t
+    <= leave_by`, patrz niżej) - to samo `leave_by` sprawdzane przeciw
+    SOBIE SAMEMU (własny przyjazd vs własny termin), więc wynik jest
+    stabilny względem szerokości okna: raz zdążalny przystanek zostaje
+    zdążalny przy każdym szerszym oknie, nigdy na odwrót.
+
+    Było tu kiedyś DRUGIE, WZGLĘDNE sito ("reguła postępu") porównujące
+    `latest` sąsiednich przystanków tego samego kursu, żeby odrzucić z
+    góry przystanki "bez postępu" (miało to realizować punkt 3 kontraktu -
+    jasność ma spadać po minięciu realnej, lepszej przesiadki). USUNIĘTE
+    2026-08-12: `latest` dwóch sąsiednich przystanków rośnie z oknem w
+    RÓŻNYM tempie (każdy zależnie od tego, jaka akurat alternatywa jest w
+    danym miejscu "widoczna" w oknie), więc ich względna kolejność
+    potrafiła się odwrócić przy samym tylko poszerzeniu suwaka - przystanek
+    uznany za "postęp" przy jednej szerokości okna przestawał nim być przy
+    szerszej, gasząc realne, niezmienione fizycznie wyjście (stąd zgłoszenie
+    "trasy znikają przy zwiększeniu okna"). Podniesienie tolerancji tego
+    porównania (dawny suwak "Tolerancja regresji") tylko przesuwało próg
+    szumu, nie usuwało go - w gęstszej siatce POGARSZAŁO sprawę. Punkt 3 nie
+    wymaga tego filtra: _refine_brightness i tak liczy jasność KAŻDEGO
+    zdążalnego wyjścia z osobna przez suffix-min najlepszej REALNIE
+    znalezionej kontynuacji (nie przez surowe `latest`) - a to jest
+    dowodliwie monotoniczne (widoczny, jeśli w ogóle zdążalny) i stabilne
+    względem okna (patrz komentarz przy `bound` niżej i punkt 9 kontraktu).
+    Filtr "z góry" był więc nadmiarowy wobec już poprawnej, stabilnej
+    maszynerii niżej w potoku - i to on, nie ona, był źródłem niestabilności.
     """
     conns = day.conns
     trip_conns = {}   # kurs -> indeksy jego połączeń w oknie [dep_sec, deadline)
@@ -485,7 +504,6 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
     raw = {}     # (linia, pełna trasa) -> dane segmentu
     for trip, idxs in trip_conns.items():
         stops_seq = None
-        best_latest_seen = None
         departures = []   # (przystanek, odjazd) wzdłuż kursu - do przesiadek
         arrivals = []     # (przystanek, przyjazd) wzdłuż kursu - do etapów tras
         exits = []   # (pozycja w stops_seq, bound, przyjazd, przystanek)
@@ -515,28 +533,14 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
                         and stop_latest < origin_latest - BACKTRACK_TOL_SEC):
                     continue
                 stops_seq = [dep_s]
-                best_latest_seen = stop_latest
             elif dep_s != stops_seq[-1]:
                 break                        # przerwany łańcuch - utnij
             departures.append((dep_s, dep_t))
             arrivals.append((arr_s, arr_t))
             stops_seq.append(arr_s)
             leave_by = latest.get(arr_s)
-            prior_best = best_latest_seen   # najlepszy punkt PRZED tym przystankiem
-            if leave_by is not None and (
-                    best_latest_seen is None or leave_by > best_latest_seen):
-                best_latest_seen = leave_by
             if leave_by is None or arr_t > leave_by:
-                continue
-            # Wyjście liczy się tylko, gdy jazda PRZYBLIŻYŁA do celu - do
-            # NAJLEPSZEGO punktu tego kursu SPRZED tego przystanku, nie
-            # tylko do startu (inaczej kurs "w drugą stronę" świeciłby pełną
-            # jasnością). Porównanie do prior_best (a nie do już
-            # zaktualizowanego best_latest_seen) jest celowe: świeży
-            # rekord nie może sam siebie zdyskwalifikować.
-            if (prior_best is not None
-                    and leave_by <= prior_best - progress_tol_sec):
-                continue
+                continue   # ten konkretny przystanek już nie mieści się w oknie
             # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
             # wysiądziemy tutaj, ZANIM znajdzie się realna kontynuacja (patrz
             # join_value w _refine_brightness): arr_t + "kara" za nieznaną

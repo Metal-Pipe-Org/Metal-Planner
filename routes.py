@@ -82,7 +82,6 @@ def init_routes(app):
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
-            _float_arg("tol"),
             _point_arg("start"),
             _point_arg("end"),
             _float_arg("range_m"),

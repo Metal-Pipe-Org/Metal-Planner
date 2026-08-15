@@ -175,62 +175,41 @@ useful.
 
 ---
 
-## Step 5 — Where do you get OFF? (the exit / progress rule)
+## Step 5 — Where do you get OFF? (the exit rule)
 
 Once a valid boarding stop is chosen, the algorithm walks forward along that
 same trip's remaining stops, one at a time, asking at each one: *is this
-worth offering as a place to get off?*
+still within the time window if I got off here?*
 
 ```python
 leave_by = latest.get(arr_s)
 if leave_by is None or arr_t > leave_by:
-    continue                                     # (a) you'd already be too late
-if (board_latest is not None
-        and leave_by <= board_latest - PROGRESS_TOL_SEC):
-    continue                                     # (b) this stop isn't real progress
+    continue                                     # you'd already be too late
 exits.append((len(stops_seq), arr_t + (deadline - leave_by), arr_t, arr_s))
 ```
 
-Two separate checks, and they answer two separate questions:
+That's the only filter left: an absolute, self-contained check — this
+stop's own arrival time against this stop's own cutoff. Nothing about it
+depends on any *other* stop, so it can never flip from "yes" to "no" purely
+because the time-window slider moved: once a given stop is reachable in
+time, it stays reachable at every wider window too.
 
-**(a) Are you still on schedule?** `arr_t > leave_by` just means: you
-arrived at this stop later than the last moment `latest[]` says is still
-workable. If so, this stop is already too late to be useful — skip it as an
-exit (but keep walking the rest of the trip; one bad stop doesn't kill the
-whole segment).
-
-**(b) Did this ride actually get you closer, or did it just eat time?**
-This is the one that needs a concrete illustration, because two very
-different situations produce *the same arrival time*:
-
-- Sitting at a stop doing nothing for 10 minutes.
-- Riding a bus for 10 minutes in the *wrong direction* and then it happens
-  to be exactly as far (in slack-time) from the goal as when you started.
-
-Both "cost" you 10 minutes. Only one of them was worth boarding. The
-progress check tells them apart by comparing `latest[]` at this stop to
-`latest[]` back at boarding (`board_latest`): if the ride was genuinely
-useful, you should be **closer** to the goal now, meaning your slack should
-have gone *up* (later `latest[]`), not stayed flat or dropped. Continuing
-our table: boarding at Rynek gave `board_latest = 10:13`. A few stops later
-at pl. Grunwaldzki, `latest[] = 10:23` — that's 10 minutes *better*,
-comfortably past whatever `PROGRESS_TOL_SEC` currently allows (the
-"Tolerancja regresji" slider — 0 by default, meaning even a few seconds of
-improvement counts, up to 10 minutes of tolerance if it's dialed up) — real
-progress, counts as a valid exit.
-
-If instead the bus had looped back near its own starting point and
-`latest[]` there had dropped back down to, say, 10:11 (worse than the 10:13
-you started with), the check `leave_by <= board_latest - PROGRESS_TOL_SEC`
-would trigger and this stop would simply not be offered as an exit — the
-ride happened, time passed, but nothing about your position relative to the
-goal actually improved.
-
-**Why this matters for the map:** without rule (b), a bus heading the wrong
-way for a while would show up on the map looking exactly as promising as one
-heading the right way, because raw arrival-time arithmetic can't tell "spent
-10 minutes going nowhere useful" apart from "spent 10 minutes waiting."
-Rule (b) is what keeps only forward progress lit up.
+**There used to be a second check here, comparing each stop's slack to the
+best slack seen earlier on the same ride, to reject stops that weren't
+"real progress."** It was removed 2026-08-12. The intent was reasonable —
+a bus drifting the wrong way for a while shouldn't look as promising as one
+making steady progress — but the check compared `latest[]` values computed
+against the *current* time-window deadline, and two neighboring stops'
+`latest[]` grow at different, unrelated rates as that deadline widens
+(each reflects whatever alternate escape route happens to exist at that
+specific stop). Their relative order could flip purely from widening the
+slider, silently deleting a real, physically unchanged stretch of a route
+from the map — this was the direct cause of the "routes disappear when I
+widen the window" bug reported by the user. The guarantee this check
+existed for — that a course only gets *dimmer*, never brighter, after
+skipping a real opportunity to transfer — turned out to already be
+guaranteed correctly and stably by Step 6's per-exit refinement below, so
+removing the check lost nothing and fixed the instability.
 
 If a trip never produces a single valid exit anywhere along its route, it
 isn't drawn at all — there's no "maybe, dimly" fallback for a trip that
@@ -291,16 +270,22 @@ refinement is a short loop (at most 8 passes) because one segment's refined
 value can depend on another segment's refined value, and it settles down
 once nothing changes anymore.
 
-Once every segment has a final value, brightness is just:
+Once every exit has a final value, brightness for *that exit* is:
 
 ```python
-seg["q"] = (deadline - seg["bound"]) / (deadline - best_arr)
+q_of(bound) = clamp(1 - (bound - best_arr) / span, 0, 1)
 ```
 
-(clamped to the 0-1 range, and guarded against a zero-width window). The
-single optimal route scores `1.0`; something that only just squeaks in
-under the deadline scores close to `0.0`. That's the number the map turns
-directly into line opacity.
+where `span` is the distance from `best_arr` to the worst bound *actually
+shown anywhere on the map* (not the full width of the time window — see
+Step 7's note on why). The single optimal route scores `1.0`; the worst
+option that still made the cut scores `0.0`. Because a trip can have
+several exits, each with its own bound, `q_of` is applied per exit, and a
+segment's overall `seg["q"]` is just the best (brightest) of all of them —
+which, since exits earlier in a ride can always fall back on anything
+reachable later in the same ride, is always the value at its very first
+exit. That distinction — a segment's best-ever brightness vs. its
+brightness at one specific later point — matters again in Step 7.
 
 ---
 
@@ -344,11 +329,14 @@ stops themselves.
 
 For every trip running that day: find the earliest stop you could board
 without backtracking away from your goal, then walk forward collecting
-stops where you'd still be on schedule *and* genuinely closer to your
-destination than when you boarded. If you find at least one such stop,
-draw one line from boarding to the best of them, score it by how much real
-margin it leaves before the deadline, and only keep the ones bright enough
-and connected enough to belong on the map.
+every stop where you'd still be on schedule. If you find at least one such
+stop, score each one by how much real margin it leaves before the
+deadline (borrowing a real number from another trip you could transfer
+onto where possible), and only keep the parts of the ride that are
+connected enough to belong on the map — anchored at both ends to something
+real: at the start, anything catchable you could have arrived on; at the
+end, something that actually carries you onward rather than back over
+ground you already covered, and that is itself drawn onward.
 
 ---
 

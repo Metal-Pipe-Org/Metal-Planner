@@ -841,7 +841,6 @@ function adoptNames(data) {
     nie mogą już się rozjechać (patrz planner.plan_flow). */
 function loadPlan(token, refit) {
     const params = queryParams();
-    params.set('tol', $('tol').value);
     params.set('count', $('count').value);
     return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
         .then(([data]) => {
@@ -1092,7 +1091,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['tol', 'range', 'extra', 'extra-floor', 'extra-cap', 'count'];
+const DEV_SLIDER_IDS = ['range', 'extra', 'extra-floor', 'extra-cap'];
 
 function loadDevPrefs() {
     try {
@@ -1140,7 +1139,6 @@ function liveSlider(inputId, valueId) {
     });
 }
 applyStoredDevPrefs();
-liveSlider('tol', 'tol-value');
 liveSlider('range', 'range-value');
 liveSlider('extra', 'extra-value');
 liveSlider('extra-floor', 'extra-floor-value');

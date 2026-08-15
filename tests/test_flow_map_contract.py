@@ -210,7 +210,7 @@ def test_exit_brightness_is_non_increasing_along_a_course(install_day):
     origin_latest = max(latest[s] for s in {"S"} if s in latest)
     segs = planner._discover_segments(
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
-        latest, origin_latest, {"E"}, 0,
+        latest, origin_latest, {"E"},
     )
     planner._refine_brightness(day, segs, {"E"}, deadline, best_arr)
 
@@ -301,6 +301,60 @@ def test_previously_worst_option_brightens_when_a_new_worse_one_appears(install_
     assert slower_wide > slower_narrow                        # w szerokim - już nie dół, więc jaśniej
     assert mid_wide > mid_narrow                              # to samo dla środkowej opcji
     assert newly_worse_wide[0]["w"] == 0.0                    # nowy dół skali to teraz TA opcja
+
+
+def test_no_relative_progress_gate_at_boarding_stop(install_day):
+    """Regresja (znaleziona 2026-08-12, zgłoszona przez użytkownika jako
+    "trasy przez Gaj znikają przy poszerzeniu okna"). _discover_segments
+    miała kiedyś DODATKOWY, WZGLĘDNY filtr ("regułę postępu") porównujący
+    wyjścia kursu do NAJLEPSZEGO 'latest' osiągalnego W MIEJSCU WSIADANIA
+    przez JAKĄKOLWIEK inną, niepowiązaną przesiadkę. Gdy w miejscu wsiadania
+    istniała osobna, szybka trasa (tu: Tramwaj 9, Srodek->Cel wprost), jej
+    sama OBECNOŚĆ zawyżała punkt odniesienia i kasowała realne, pośrednie
+    wyjście na tym samym, wolniejszym kursie (Autobus 7, Srodek->Posrodku->
+    Cel) - mimo że fizycznie nie mają z sobą nic wspólnego. Naprawa
+    2026-08-12 (druga tura, po zgłoszeniu użytkownika że "Tolerancja
+    regresji" ma zostać na zawsze 0): ten filtr USUNIĘTY CAŁKOWICIE, nie
+    tylko poprawiony - _discover_segments zostawia teraz tylko absolutny
+    test "czy to jeszcze mieści się w oknie", a właściwą, stabilną jasność
+    per pozycja liczy _refine_brightness (suffix-min). Tramwaj 9 wsiada się
+    dopiero w szerokim oknie (odjazd 650) - test dowodzi, że jego obecność
+    i tak nie wpływa na to, co _discover_segments w ogóle zwraca dla
+    Autobusu 7."""
+    trips = [
+        {"trip_id": "feeder", "label": "Autobus 1",
+         "stops": [("S", 0, 0), ("F", 10, 10)]},
+        {"trip_id": "slow", "label": "Autobus 7",
+         "stops": [("M", 300, 300), ("P", 400, 420), ("E", 700, 700)]},
+        {"trip_id": "escape", "label": "Tramwaj 9",
+         "stops": [("M", 650, 650), ("E", 680, 680)]},
+    ]
+    day = make_day(
+        trips,
+        names={"S": "Start", "F": "Feeder", "M": "Srodek", "P": "Posrodku", "E": "Cel"},
+        siblings={"F": ("M",)},   # dojście piechotą z F do Srodka -> wsiadanie w Srodku to nie origin
+    )
+    install_day(day)
+    dep_sec = 0
+    deadline = 900   # szerokie okno - obejmuje też Tramwaj 9 (odjazd 650, przyjazd 680)
+
+    earliest, arrived_by, trip_board = planner._forward(day, {"S"}, dep_sec, deadline)
+    latest = planner._backward(day, {"E"}, dep_sec, deadline)
+    assert latest.get("M") == 650, (
+        "kontrola scenariusza: latest['M'] ma być zdominowane przez Tramwaj 9"
+    )
+
+    segs = planner._discover_segments(
+        day, dep_sec, deadline, earliest, arrived_by, trip_board,
+        latest, None, {"E"},   # origin_latest=None - izolacja od reguły cofnięcia
+    )
+    slow = next(s for s in segs if s["trip_id"] == "slow")
+    exit_stops = [e[3] for e in slow["exits"]]
+    assert "P" in exit_stops, (
+        "wyjście w Posrodku (realny, pośredni przystanek TEGO kursu) zniknęło, "
+        "mimo że w _discover_segments nie ma już żadnego filtra, który mógłby "
+        "je odrzucić z powodu niepowiązanej, szybkiej trasy w miejscu wsiadania"
+    )
 
 
 # ----------------------------------------------------------------------- 4 -
