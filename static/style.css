@@ -311,6 +311,21 @@ body.panel-hidden #sidebar {
     padding: 0;
 }
 
+.time-now-button {
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.time-now-button:hover { background: #e8edf3; color: var(--ink); }
+
 .search-row .button.primary { flex: 1; }
 
 /* ----------------------------------------------------- lista propozycji --- */

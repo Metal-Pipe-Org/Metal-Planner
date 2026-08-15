@@ -1234,16 +1234,17 @@ const LAST_SEARCH_KEY = 'metal-planner:last-search';
 function saveLastSearch() {
     try {
         localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
-            start: sel.start, end: sel.end, time: $('time').value,
+            start: sel.start, end: sel.end,
         }));
     } catch {
         // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
     }
 }
 
-/** Ostatnie wyszukiwanie (skąd/dokąd/godzina) wraca po odświeżeniu strony -
-    tylko gdy pola są jeszcze puste (nie nadpisujemy tego, co user już
-    zdążył wpisać, zanim ten kod się uruchomił). */
+/** Ostatnie wyszukiwanie (skąd/dokąd) wraca po odświeżeniu strony - tylko
+    gdy pola są jeszcze puste (nie nadpisujemy tego, co user już zdążył
+    wpisać, zanim ten kod się uruchomił). Godzina wraca sama z siebie do
+    "teraz", bo tak ustawia ją serwer przy każdym renderowaniu strony. */
 function restoreLastSearch() {
     if (startInput.value || endInput.value) return;
     let saved;
@@ -1257,7 +1258,8 @@ function restoreLastSearch() {
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
     endInput.value = displayValue(sel.end);
-    if (saved.time) $('time').value = saved.time;
+    // Godzina zostaje "teraz" (już ustawiona przez serwer przy renderowaniu
+    // strony) - nie przywracamy tu starej godziny z poprzedniego wyszukiwania.
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
     restyle(sel.start, sel.end);
@@ -1430,6 +1432,11 @@ $('swap').addEventListener('click', () => {
     updatePointMarker('end', sel.end);
     restyle(...previous, sel.start, sel.end);
     search();
+});
+
+$('time-now').addEventListener('click', () => {
+    $('time').value = new Date().toTimeString().slice(0, 5);
+    if (startInput.value && endInput.value) search();
 });
 
 $('clear').addEventListener('click', () => {
