@@ -404,9 +404,23 @@ def plan_flow(start_query, end_query, when=None,
     latest = _backward(day, target_stops, dep_sec, deadline)
 
     # Punkt odniesienia reguły cofnięcia: im później można być na przystanku
-    # i wciąż zdążyć (latest), tym bliżej celu się jest.
+    # i wciąż zdążyć (latest), tym bliżej celu się jest. Liczony względem
+    # best_arr (STAŁEJ, patrz _refine_brightness - ten sam powód: q=1.0 dla
+    # najszybszej trasy musi się odnosić do best_arr, nie do deadline), NIE
+    # względem samego `latest` (policzonego do deadline) - inaczej suwak
+    # okna, poszerzając się, mógłby gdzieś w mieście ujawnić zupełnie
+    # niepowiązaną, szybką trasę z innego przystanku startowego, winduje
+    # origin_latest i - wciąż w ramach TEGO SAMEGO progu BACKTRACK_TOL_SEC -
+    # kasuje w _discover_segments kandydatów na zupełnie innych, wolniejszych
+    # korytarzach, które z tamtą trasą nie mają nic wspólnego (ten sam rodzaj
+    # niestabilności, co już raz naprawiony dla `bound` przez WAIT_CAP_SEC -
+    # patrz FLOW_MAP_CONTRACT.md, punkt 9). `stop_latest` w _discover_segments
+    # zostaje liczone względem deadline jak dotychczas - rośnie razem z oknem,
+    # więc przy origin_latest ZAMROŻONYM na best_arr próg cofnięcia może z
+    # oknem tylko złagodnieć, nigdy zaostrzeć.
+    latest_at_best = _backward(day, target_stops, dep_sec, best_arr)
     origin_latest = max(
-        (latest[s] for s in source_stops if s in latest), default=None,
+        (latest_at_best[s] for s in source_stops if s in latest_at_best), default=None,
     )
     target_set = target_stops
 

@@ -151,10 +151,21 @@ if (origin_latest is not None and stop_latest is not None
     continue   # reject this boarding point
 ```
 
-`origin_latest` is just `latest[Rynek]` — **10:13** in our table above.
-`BACKTRACK_TOL_SEC` is 2 minutes. The check says: *reject boarding here if
-this stop's slack is more than 2 minutes worse than the slack you already
-have at your own starting point.*
+`origin_latest` is `latest[Rynek]` — but computed by a *second*, separate
+backward scan run only up to `best_arr` (the fastest possible arrival
+time), not up to the current `deadline`. That distinction matters: if it
+were computed against `deadline` directly, then widening the time-window
+slider could let the scan reach some entirely unrelated, fast trip from a
+*different* starting stop somewhere else in the city, inflating
+`origin_latest` for no reason connected to Bus 145 at all — and that
+inflation could then wrongly reject boarding points that were perfectly
+fine a moment ago, just because the slider moved (this was a real bug,
+fixed 2026-08-12 — see the log below). Anchoring to `best_arr` instead
+keeps this reference point fixed regardless of how wide the window gets,
+so widening the slider can only ever make this check *more* forgiving,
+never less. `BACKTRACK_TOL_SEC` is 2 minutes. The check says: *reject
+boarding here if this stop's slack is more than 2 minutes worse than the
+slack you already have at your own starting point.*
 
 Ogród Botaniczny's slack is **9:50** — that's 23 minutes worse than Rynek's
 10:13, way past the 2-minute tolerance. Rejected. Boarding there would mean

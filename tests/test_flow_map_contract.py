@@ -357,6 +357,70 @@ def test_no_relative_progress_gate_at_boarding_stop(install_day):
     )
 
 
+def _origin_latest_scenario_day():
+    """Start->Cel: 'Tramwaj 1' to najszybsza (bezpośrednia) trasa - definiuje
+    best_arr, nie ma nic wspólnego z resztą scenariusza. 'Autobus 2'+
+    'Autobus 3': realna, wolniejsza alternatywa przez Srodek i Posrodku -
+    wsiada się w Srodku (NIE na własnym przystanku startowym), więc
+    podlega regule cofnięcia. 'Tramwaj 9': osobna, niepowiązana trasa wprost
+    ze Startu, wolniejsza niż najszybsza, ale szybsza niż alternatywa przez
+    Srodek - istnieje WYŁĄCZNIE po to, by przy szerokim oknie stać się
+    złapalna i zawyżyć punkt odniesienia reguły cofnięcia (origin_latest),
+    mimo że fizycznie nie ma nic wspólnego z korytarzem przez Srodek."""
+    trips = [
+        {"trip_id": "best", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("E", 200, 200)]},
+        {"trip_id": "feeder", "label": "Autobus 2",
+         "stops": [("S", 0, 0), ("M", 50, 50)]},
+        {"trip_id": "slow_continue", "label": "Autobus 3",
+         "stops": [("M", 200, 200), ("P", 300, 320), ("E", 500, 500)]},
+        {"trip_id": "fast_direct", "label": "Tramwaj 9",
+         "stops": [("S", 600, 600), ("E", 650, 650)]},
+    ]
+    return make_day(trips, names={"S": "Start", "M": "Srodek", "P": "Posrodku", "E": "Cel"})
+
+
+def test_backtrack_reference_ignores_unrelated_faster_option_from_origin(install_day):
+    """Regresja (znaleziona 2026-08-12, ta sama zgłoszona przez użytkownika
+    "trasy znikają przy poszerzeniu okna" - druga, niezależna przyczyna).
+    origin_latest (punkt odniesienia reguły cofnięcia przy wyborze miejsca
+    wsiadania w _discover_segments) był liczony względem AKTUALNEGO
+    deadline, nie względem stałego best_arr - gdy suwak okna poszerzał się
+    na tyle, by złapać gdziekolwiek w mieście zupełnie niepowiązaną, szybszą
+    trasę z przystanku startowego, origin_latest skakał w górę i kasował
+    realnych kandydatów na zupełnie innych, wolniejszych korytarzach (tu:
+    Autobus 3 przez Srodek), mimo że fizycznie nie mają z tamtą trasą nic
+    wspólnego."""
+    day = _origin_latest_scenario_day()
+    install_day(day)
+
+    narrow = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=110, extra_floor_sec=320, extra_cap_sec=999999,   # deadline 520 - bez Tramwaju 9 (odjazd 600)
+    )
+    wide = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=110, extra_floor_sec=500, extra_cap_sec=999999,   # deadline 700 - Tramwaj 9 złapany
+    )
+    assert "error" not in narrow and "error" not in wide
+    assert narrow["best_arrival"] == planner._fmt_time(200)
+    assert wide["best_arrival"] == planner._fmt_time(200)
+
+    # kontrola scenariusza: Tramwaj 9 faktycznie widoczny dopiero w szerokim oknie
+    assert _segs_by_num(narrow, "9", "tram") == []
+    assert len(_segs_by_num(wide, "9", "tram")) == 1
+
+    # kontrola scenariusza: alternatywa przez Srodek widoczna w wąskim oknie
+    assert len(_segs_by_num(narrow, "3", "bus")) >= 1
+
+    # sedno testu: poszerzenie suwaka nie ma prawa jej skasować
+    assert len(_segs_by_num(wide, "3", "bus")) >= 1, (
+        "alternatywa przez Srodek zniknęła po poszerzeniu okna - origin_latest "
+        "został zawyżony przez niepowiązaną, szybszą trasę z przystanku "
+        "startowego"
+    )
+
+
 # ----------------------------------------------------------------------- 4 -
 
 def test_dead_end_branch_never_appears(install_day):

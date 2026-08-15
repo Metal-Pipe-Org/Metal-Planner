@@ -19,9 +19,11 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
   (sedno punktu), `test_no_flicker_without_a_real_alternative_to_skip`
   (bez konkurencyjnej przesiadki — zero sztucznego podziału),
   `test_exit_brightness_is_non_increasing_along_a_course` (własność, na
-- **4** — `test_dead_end_branch_never_appears`
   której to się opiera),
   `test_no_relative_progress_gate_at_boarding_stop`
+  (regresja 2026-08-12 — patrz log niżej)
+- **4** — `test_dead_end_branch_never_appears`,
+  `test_backtrack_reference_ignores_unrelated_faster_option_from_origin`
   (regresja 2026-08-12 — patrz log niżej)
 - **6** — `test_shape_slice_uses_real_street_geometry_when_available`,
   `test_shape_slice_falls_back_to_stop_polyline_without_a_shape`
