@@ -7,6 +7,15 @@ każdego punktu, historia wdrożeń i otwarte pytania są w
 [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md). Edytuj tę listę tylko
 wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 
+> **Ten plik zmienia się WYŁĄCZNIE na wyraźne polecenie użytkownika.**
+> Nigdy z własnej inicjatywy: ani „przy okazji", ani żeby dopisać to, co
+> właśnie zostało zaimplementowane, ani żeby odświeżyć opis implementacji,
+> który się zdezaktualizował. Jeśli uważasz, że coś tu wymaga zmiany —
+> zgłoś propozycję i czekaj na zgodę. Nieaktualny akapit w tym pliku jest
+> mniejszym problemem niż kontrakt przepisujący się sam. Wszystko inne
+> (historia, pomiary, szczegóły implementacji) idzie do
+> [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), który wolno dopisywać zawsze.
+
 ## 1. Cały wachlarz, nie jedna trasa
 
 Mapa pokazuje wszystkie sensowne dojazdy naraz, nie tylko najszybszy.
