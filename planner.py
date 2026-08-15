@@ -1033,20 +1033,125 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
     }
 
 
+def _hop_key(a, b):
+    return (a, b) if a <= b else (b, a)
+
+
+def _build_hop_members(kept, ranges):
+    """Dla każdego odcinka toru/ulicy (pary sąsiednich przystanków w
+    narysowanej części kursu) - zbiór ETYKIET linii, które tamtędy jadą.
+    Liczone z DOKŁADNYCH id przystanków (nie współrzędnych) - dwie linie
+    zatrzymujące się na tych samych dwóch, kolejnych słupkach fizycznie
+    dzielą tę samą ulicę/tory, więc to dokładne, nie przybliżone kryterium
+    "co się tu nakłada" (patrz _finalize_segments, sekcja o rozdzielaniu
+    wiązki)."""
+    hop_members = {}
+    for seg in kept:
+        start_pos, cut = ranges[id(seg)]
+        stops = seg["stops"]
+        for k in range(start_pos, cut - 1):
+            hop_members.setdefault(_hop_key(stops[k], stops[k + 1]), set()).add(seg["label"])
+    return hop_members
+
+
+def _membership_boundaries(hop_members, stops, start_pos, cut):
+    """Pozycje (konwencja 'exits' - wyłączna górna granica kawałka), w
+    których zestaw linii dzielących ten sam odcinek się zmienia - druga,
+    niezależna od jasności, przyczyna cięcia kawałka na mapie (patrz
+    _finalize_segments).
+
+    Zwraca INDEKSY PRZYSTANKÓW (nie pozycje w konwencji "exits"): indeks k
+    oznacza, że odcinek zaczynający się na stops[k] ma już inny zestaw linii
+    niż ten, który się na stops[k] kończy. Kawałek rysowany jako całość nie
+    ma prawa przez taki punkt przechodzić - inaczej cały dostałby skład
+    korytarza policzony dla swojego PIERWSZEGO odcinka i twierdziłby "tędy
+    jadą też X i Y" także tam, gdzie X i Y już dawno skręciły."""
+    boundaries = set()
+    prev_members = None
+    for k in range(start_pos, cut - 1):
+        members = frozenset(hop_members.get(_hop_key(stops[k], stops[k + 1]), ()))
+        if prev_members is not None and members != prev_members:
+            boundaries.add(k)
+        prev_members = members
+    return boundaries
+
+
+def _line_sort_key(label):
+    """JEDEN, globalny porządek linii - tramwaje przed autobusami, w obrębie
+    rodzaju numerycznie. To nie jest kosmetyka: skład korytarza (patrz
+    _corridor_lines) jest zawsze OBCIĘCIEM tego jednego porządku do linii
+    obecnych na danym odcinku, więc grupka numerów rysowana na wspólnym
+    korytarzu ma zawsze tę samą kolejność - i ta sama kolejność wychodzi w
+    podpowiedzi pod kursorem (patrz app.js). Numer nie ma jak przeskoczyć w
+    grupce z miejsca na miejsce między jednym odcinkiem a drugim."""
+    num, mode = _line_parts(label)
+    return (
+        {"tram": 0, "bus": 1}.get(mode, 2),
+        int(num) if num.isdigit() else 10 ** 6,
+        num,
+    )
+
+
+def _corridor_lines(pieces, hop_members):
+    """Dla każdego kawałka - PEŁNY skład korytarza, którym jedzie: wszystkie
+    linie dzielące z nim te same, kolejne przystanki, RAZEM Z NIM SAMYM, w
+    jednym, globalnym porządku (_line_sort_key). Kawałki jadące solo nie
+    dostają nic.
+
+    To jest cała odpowiedź backendu na kontrakt p.7 ("zawsze wiadomo, co tam
+    jedzie"): mapa rysuje prawdziwą geometrię, więc linie wspólnego korytarza
+    leżą jedna na drugiej i po samym kształcie nie da się ich rozróżnić.
+    Rozróżnia je front - grupką numerów postawioną raz na całym korytarzu i
+    przełączaniem między nimi pod kursorem (patrz app.js). Do jednego i do
+    drugiego potrzebna jest właśnie ta lista.
+
+    Liczona jest z ROZKŁADU (dokładne id przystanków, patrz
+    _build_hop_members), nie z odległości na ekranie. Front próbował kiedyś
+    zgadywać skład korytarza, mierząc piksele wokół kursora, i przy widoku
+    całego miasta doliczał linie z sąsiednich ulic - stąd brały się plakietki
+    "13 linii" tam, gdzie realnie jadą dwie.
+
+    Skład jest stały na całej długości kawałka, bo kawałki są cięte dokładnie
+    tam, gdzie się zmienia (patrz _membership_boundaries) - dlatego wystarczy
+    odczytać go z pierwszego odcinka."""
+    result = {}
+    for label, stops_seq in pieces:
+        members = hop_members.get(_hop_key(stops_seq[0], stops_seq[1]))
+        if not members or len(members) < 2:
+            continue
+        result[(label, stops_seq)] = [
+            {"num": _line_parts(other)[0], "kind": _line_parts(other)[1]}
+            for other in sorted(members, key=_line_sort_key)
+        ]
+    return result
+
+
+
 def _finalize_segments(day, kept, ranges, geo_db):
     """Krok 4: tnie każdy zatrzymany kurs na kawałki DOKŁADNIE tam, gdzie po
     drodze mijamy realną, lepszą kontynuację, z której nie korzystamy (patrz
     seg["exit_q"] w _refine_brightness) - jeden fizyczny kurs może więc
     wyjść na mapie jako kilka kolejnych kawałków o różnej jasności, nie
-    jeden płaski odcinek od wsiadania do końca. Kawałki o (zaokrągleniowo)
-    tej samej jasności są sklejane, żeby nie mnożyć bez potrzeby liczby
-    narysowanych fragmentów tam, gdzie nic naprawdę się nie zmieniło. Prosty
-    kurs bez żadnej mijanej, lepszej przesiadki dostaje - tak jak dawniej -
-    jeden kawałek na całej narysowanej długości.
+    jeden płaski odcinek od wsiadania do końca. RÓWNOLEGLE, tym samym
+    cięciem, tnie też tam, gdzie zmienia się zestaw linii dzielących ten
+    sam odcinek ulicy/torów (patrz _membership_boundaries) - to druga,
+    niezależna przyczyna cięcia, potrzebna do rozdzielania nakładających
+    się linii kawałek niżej. Kawałki, w których NIC z tego się nie zmienia,
+    są sklejane, żeby nie mnożyć bez potrzeby liczby narysowanych
+    fragmentów. Prosty kurs bez żadnej mijanej, lepszej przesiadki i bez
+    współdzielonego odcinka dostaje - tak jak dawniej - jeden kawałek na
+    całej narysowanej długości.
 
     Poza tym: agregacja po (linia, dokładny fragment) biorąc maksimum
     jakości (kilka kursów tego samego wzorca w oknie), tnie geometrię
     (patrz gtfs.shape_slice) i formatuje odpowiedź.
+
+    Nakładające się linie (kontrakt p.7 - zawsze wiadomo, co tu jedzie):
+    geometria zostaje prawdziwa, po torach i ulicach (kontrakt p.6), więc
+    linie wspólnego korytarza leżą na mapie jedna na drugiej. Backend nie
+    próbuje ich rozsuwać - podaje tylko SKŁAD korytarza (_corridor_lines,
+    pole `corridor` w odpowiedzi), a rozróżnianie robi front: grupką numerów
+    i przełączaniem pod kursorem.
 
     Na końcu jasność jest PRZESKALOWANA tak, żeby najgorszy kawałek, który
     FAKTYCZNIE trafia na mapę, lądował dokładnie na dole skali (w=0), nie
@@ -1065,17 +1170,29 @@ def _finalize_segments(day, kept, ranges, geo_db):
     geo_db to połączenie współdzielone z resztą zapytania (patrz plan_flow) -
     jedno połączenie na wszystkie wycinki geometrii, także te do propozycji
     tras."""
+    hop_members = _build_hop_members(kept, ranges)
+
     pieces = {}   # (linia, dokładny fragment) -> (q, shape_id)
     for seg in kept:
         start_pos, cut = ranges[id(seg)]
+        boundary_stops = _membership_boundaries(hop_members, seg["stops"], start_pos, cut)
         piece_start = start_pos
         pending_end = None
         pending_q = None
         for (pos, _, _, _), exit_q in zip(seg["exits"], seg["exit_q"]):
             if pos <= start_pos + 1 or pos > cut:
                 continue         # wyjście przed/na starcie narysowanej części - pomiń
-            if pending_q is not None and abs(exit_q - pending_q) < 5e-4:
-                pending_end = pos          # ta sama jasność - wydłuż bieżący kawałek
+            # Wydłużenie kawałka do `pos` obejmie odcinki o indeksach
+            # piece_start .. pos-2. Jeśli któryś z nich zaczyna już inny
+            # zestaw linii, kawałek przeszedłby przez zmianę składu korytarza
+            # i podawałby ten sam skład na całej długości, także tam, gdzie
+            # jest już inny (patrz _membership_boundaries).
+            crosses = any(piece_start < k <= pos - 2 for k in boundary_stops)
+            same = (pending_q is not None
+                    and abs(exit_q - pending_q) < 5e-4
+                    and not crosses)
+            if same:
+                pending_end = pos          # nic się nie zmieniło - wydłuż bieżący kawałek
                 continue
             if pending_q is not None:
                 _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
@@ -1090,7 +1207,7 @@ def _finalize_segments(day, kept, ranges, geo_db):
         if pending_q is not None:
             _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
 
-    worst_q = min((q for q, _ in pieces.values()), default=1.0)
+    worst_q = min((entry[0] for entry in pieces.values()), default=1.0)
     span_q = 1.0 - worst_q
 
     def rescale(q):
@@ -1102,6 +1219,8 @@ def _finalize_segments(day, kept, ranges, geo_db):
             return 1.0
         return max(0.0, min(1.0, (q - worst_q) / span_q))
 
+    corridors = _corridor_lines(pieces, hop_members)
+
     brightest = sorted(
         pieces.items(), key=lambda kv: kv[1][0], reverse=True,
     )
@@ -1111,17 +1230,28 @@ def _finalize_segments(day, kept, ranges, geo_db):
             shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
         )
         num, mode = _line_parts(label)
-        seg_list.append({
+        item = {
             "path": _round_path(path),
             "num": num,
             "kind": mode,
             "w": round(rescale(q), 3),
-        })
+        }
+        corridor = corridors.get((label, stops_seq))
+        if corridor:
+            # Kto tędy jedzie - CAŁY skład, razem z tą linią, z rozkładu, nie
+            # z odległości na ekranie (patrz _corridor_lines). Kawałki jadące
+            # solo (zdecydowana większość) nie dostają tego pola wcale, żeby
+            # nie puchła odpowiedź.
+            item["corridor"] = corridor
+        seg_list.append(item)
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
     return seg_list
 
 
 def _keep_piece(pieces, seg, start, end, q):
+    """Zapisuje kawałek pod kluczem (linia, dokładny fragment). Ten sam
+    fragment tej samej linii może pochodzić z kilku kursów w oknie - liczy
+    się najjaśniejszy."""
     key = (seg["label"], tuple(seg["stops"][start:end]))
     entry = pieces.get(key)
     if entry is None or q > entry[0]:

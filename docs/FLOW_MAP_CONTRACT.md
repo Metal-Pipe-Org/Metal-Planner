@@ -87,7 +87,20 @@ realizacji jest dowolny; liczy się efekt.
 
 To dotyczy też przypadku, gdy kilka linii jedzie dokładnie tym samym
 korytarzem i na mapie leżą jedna na drugiej: najechanie w to miejsce ma
-pokazać wszystkie z nich, nie tylko tę narysowaną na wierzchu wiązki.
+pokazać wszystkie z nich, nie tylko tę narysowaną na wierzchu.
+
+Rozsuwania linii nie ma — geometria jest prawdziwa (punkt 6), więc linie
+wspólnego korytarza leżą jedna na drugiej. Czytelność robią NUMERY:
+
+- **Skład korytarza z rozkładu, nie z ekranu.** To, które linie jadą danym
+  odcinkiem, rozstrzygają wspólne przystanki, nie odległość w pikselach.
+- **Numery skondensowane.** Wspólny korytarz dostaje JEDNĄ grupkę ze
+  wszystkimi swoimi numerami obok siebie, a nie osobny numer na linię —
+  w równych odstępach wzdłuż korytarza i bez nachodzenia na siebie.
+- **Kursor nazywa jedną linię.** Pod kursorem podświetla się WYŁĄCZNIE
+  jedna linia — na CAŁEJ swojej narysowanej długości, nie tylko kawałek pod
+  kursorem — a podpowiedź podaje jej numer wprost; domyślnie najjaśniejsza
+  z korytarza. Żeby wskazać inną, najeżdża się na jej numer w grupce.
 
 ## 8. Minimalna jasność nigdy nie spada do niewidoczności
 

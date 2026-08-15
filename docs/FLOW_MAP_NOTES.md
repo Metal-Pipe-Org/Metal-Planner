@@ -27,10 +27,14 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
   (regresja 2026-08-12 — patrz log niżej)
 - **6** — `test_shape_slice_uses_real_street_geometry_when_available`,
   `test_shape_slice_falls_back_to_stop_polyline_without_a_shape`
-- **7** — brak automatycznego testu (zachowanie frontendu — najechanie na
-  linię, także tam gdzie kilka nakłada się w tym samym miejscu, pokazuje
-  ich numery; wymagałoby testu w przeglądarce). Zweryfikowane czytaniem
-  kodu.
+- **7** — `test_lines_sharing_a_corridor_each_carry_the_whole_corridor`
+  (sedno punktu), `test_corridor_numbers_follow_one_global_order_everywhere`,
+  `test_a_piece_never_claims_a_corridor_it_has_already_left`,
+  `test_solo_line_never_gets_a_corridor_list`. Testy pokrywają to, co liczy
+  backend (skład korytarza); samo rysowanie grupek numerów i przełączanie
+  pod kursorem to frontend — wymagałoby testu w przeglądarce, więc jest
+  sprawdzone czytaniem kodu i symulacją rozstawiania grupek na żywych
+  danych (patrz log 2026-08-15, czwarte przejście).
 - **8** — brak automatycznego testu (stała wizualna frontendu, nie wynik
   algorytmu). Zweryfikowane czytaniem kodu i wizualnie na mapie.
 - **9** — `test_brightness_uses_full_range_regardless_of_window_width`,
@@ -314,4 +318,74 @@ przy 110% / 150% / 200%.
 po wyłączeniu dokładnie tej jednej reguły, której pilnuje:
 `test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line`
 oraz `test_two_tails_propping_each_other_up_are_both_cut_back`.
+
+## 2026-08-15 — punkt 7: cztery podejścia, trzy odrzucone
+
+Punkt 7 („zawsze wiadomo, co tam jedzie") kosztował cztery podejścia i trzy
+odrzucenia użytkownika z rzędu. Warto zapisać, co dokładnie w każdym z nich
+było nie tak, bo pomyłki nie były tego samego rodzaju.
+
+**Podejście 1 — gęstsze plakietki.** Numery linii dostawały zbiorczą
+plakietkę zbieraną po ODLEGŁOŚCI NA EKRANIE. Odrzucone: przy widoku całego
+miasta kilka pikseli to ponad sto metrów, więc plakietka doliczała linie z
+sąsiednich ulic i wypisywała „13 linii" tam, gdzie realnie jadą dwie
+(zmierzone na żywych danych: najgęstszy odcinek Wrocławia ma 8 linii —
+Galeria Dominikańska → Pl. Nowy Targ — a 138 z 245 odcinków ma dokładnie
+jedną). Do tego plakietki „N linii" nie dało się rozwinąć, bo marker był
+`interactive: false`.
+
+**Podejście 2 — przesunięcie w metrach.** Linie wspólnego korytarza
+rozsuwane o 3,5 m wprost we współrzędnych. Odrzucone: 3,5 m to przy widoku
+miasta ~0,2 piksela, czyli praca niewidoczna poza maksymalnym przybliżeniem,
+a przy nim z kolei przesadnie szeroka. Dodatkowo łamało to punkt 6
+(geometria po realnych torach).
+
+**Podejście 3 — pasma w pikselach (LOOM).** Rozsuwanie liczone w pikselach
+ekranu przez front, z globalnie stabilną kolejnością pasm (wzorowane na
+LOOM Bast/Brosi i na `line-offset` w MapLibre GL). Technicznie działało —
+zero kolizji pasm i zero przecięć na żywych danych — i mimo to zostało
+odrzucone jako dalej nieczytelne. Wniosek, który z tego został: sam fakt,
+że rozwiązanie jest poprawne i ma pokrycie w literaturze, nie znaczy, że
+rozwiązuje problem, który użytkownik naprawdę widzi.
+
+**Podejście 4 — to, co zostało (kierunek od użytkownika).** Rozsuwanie
+usunięte w całości; geometria wraca do prawdziwej i linie wspólnego
+korytarza znów leżą jedna na drugiej — bo to nigdy nie było źródłem
+nieczytelności. Nieczytelne były NUMERY: stały w losowych odstępach (w
+ułamkach długości kawałka, a kawałki mają skrajnie różne długości) i
+nachodziły na siebie. Trzy zmiany:
+
+- **kondensacja** — wspólny korytarz dostaje JEDNĄ grupkę ze wszystkimi
+  swoimi numerami obok siebie (skład z rozkładu, `planner._corridor_lines`,
+  pole `corridor`), a nie osobny numer na linię;
+- **równe odstępy** — kolejne grupki co stałą liczbę PIKSELÓW wzdłuż
+  korytarza, nie w ułamkach kawałka;
+- **zero nachodzenia** — kolizje liczone prostokątem o realnej szerokości
+  grupki (grupka pięciu numerów jest kilka razy szersza niż jeden numer),
+  z pierwszeństwem dla najjaśniejszych; grupki powyżej pięciu numerów łamią
+  się na wiersze.
+
+Pod kursorem podświetla się WYŁĄCZNIE jedna linia, a podpowiedź podaje jej
+numer wprost. Domyślnie najjaśniejsza z korytarza. Numery w grupce są też
+klikalne — najechanie wskazuje dokładnie tę linię, kliknięcie otwiera jej
+propozycję. (Przełączanie prawym przyciskiem myszy istniało tu do
+2026-08-15 — patrz wpis niżej.)
+
+Zmierzone (symulacja rozstawiania grupek: ta sama projekcja co w Leaflet,
+kadr 1200×800, pięć relacji, w tym Leśnica → Sępolno = 1105 kawałków):
+- **par nachodzących na siebie grupek: 0** w każdej relacji i na każdym
+  powiększeniu — to jest ta własność, o którą poszło;
+- numery zajmują 1–9% powierzchni kadru (najgorszy przypadek: widok całego
+  miasta);
+- 9–179 RÓŻNYCH składów korytarza na relację, przy 45–1105 kawałkach —
+  czyli kondensacja zmniejsza liczbę rzeczy do opisania kilkukrotnie.
+
+Odrzucone po drodze (zmierzone): **próg jasności dla numerów**
+(`LABEL_MIN_W`). Wyglądał na naturalny sposób na przerzedzenie mapy, ale
+kolejność zajmowania miejsca, kolizje i sufit i tak przycinają gęstość —
+próg wycinał więc numery także tam, gdzie było pusto: w przybliżonym widoku
+rzadkiej okolicy schodził z 57% opisanych korytarzy na 14%, nie
+oszczędzając ani procenta ekranu. Usunięty.
+
+19/19 testów zielonych.
 

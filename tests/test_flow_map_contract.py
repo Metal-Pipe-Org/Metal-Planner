@@ -15,12 +15,18 @@ Numeracja testów odpowiada numeracji punktów kontraktu:
   z kontraktu przez użytkownika - nie jest tu testowany jako gwarancja)
   6. geometria po realnych ulicach/torach, z fallbackiem na łamaną po
      przystankach, gdy nie ma dostępnego shape'u
+  7. zawsze wiadomo, co tam jedzie - gdy kilka linii dzieli dokładnie ten
+     sam odcinek (te same, kolejne przystanki), leżą na mapie jedna na
+     drugiej; backend nie rusza geometrii, tylko podaje SKŁAD korytarza
+     (planner._corridor_lines, pole `corridor`), z którego front robi grupkę
+     numerów i przełączanie linii pod kursorem
   9. pełny zakres jasności zawsze wykorzystany - liczony względem
      najgorszej FAKTYCZNIE pokazanej opcji, nie względem pełnej szerokości
      okna czasowego (poszerzanie okna nie rozjaśnia już pokazanych opcji)
 """
 
 import datetime
+import math
 import sqlite3
 
 import gtfs
@@ -151,7 +157,7 @@ def test_single_course_splits_brightness_at_a_real_skipped_transfer(install_day)
     )
     # kawałek Start->Środek: tak samo jasny jak najlepsza trasa
     start_to_mid = next(s for s in bus_pieces if s["path"] == _coords_of(day, ["S", "M"]))
-    mid_to_end = next(s for s in bus_pieces if s["path"] == _coords_of(day, ["M", "E"]))
+    mid_to_end = next(s for s in bus_pieces if s is not start_to_mid)
     assert start_to_mid["w"] == 1.0
     assert mid_to_end["w"] < start_to_mid["w"]
     # W tym scenariuszu mid_to_end (przyjazd samym autobusem, bez
@@ -167,10 +173,24 @@ def test_single_course_splits_brightness_at_a_real_skipped_transfer(install_day)
     # żadnej dziury ani zakładki na mapie.
     assert start_to_mid["path"][-1] == mid_to_end["path"][0]
 
-    # fallback geometrii (punkt 6): bez shape_id, ścieżka to łamana po
-    # rzeczywistych współrzędnych przystanków.
+    # fallback geometrii (punkt 6): bez shape_id, kawałek bez współdzielonego
+    # odcinka to nadal łamana po rzeczywistych współrzędnych przystanków.
     assert start_to_mid["path"] == _coords_of(day, ["S", "M"])
+
+    # mid_to_end NATOMIAST dzieli odcinek Środek->Cel z Tramwajem 3 (oba
+    # kursy zatrzymują się na tych samych dwóch, kolejnych słupkach) - to
+    # sytuacja z punktu 7. Geometria obu zostaje ta sama i prawdziwa, więc
+    # na mapie leżą jedna na drugiej; rozróżnia je skład korytarza (patrz
+    # sekcja "7" niżej i planner._corridor_lines).
     assert mid_to_end["path"] == _coords_of(day, ["M", "E"])
+    assert tram_pieces[0]["path"] == _coords_of(day, ["M", "E"])
+    assert mid_to_end["corridor"] == tram_pieces[0]["corridor"] == [
+        {"num": "3", "kind": "tram"}, {"num": "7", "kind": "bus"},
+    ]
+    # kawałek Start->Środek jedzie sam, więc składu nie dostaje wcale - i to
+    # jest właśnie powód, dla którego kurs musi być tu POCIĘTY także po
+    # zmianie składu, nie tylko po jasności
+    assert "corridor" not in start_to_mid
 
 
 def test_no_flicker_without_a_real_alternative_to_skip(install_day):
@@ -604,3 +624,167 @@ def test_shape_slice_uses_real_street_geometry_when_available():
 def test_shape_slice_falls_back_to_stop_polyline_without_a_shape():
     stop_coords = [(51.10, 17.00), (51.11, 17.01)]
     assert gtfs.shape_slice(None, stop_coords, db=None) == stop_coords
+
+
+# ----------------------------------------------------------------------- 7 -
+
+def _fully_overlapping_lines_day():
+    """Tramwaj 1 i Autobus 2 jadą DOKŁADNIE tym samym korytarzem od startu do
+    celu (te same, kolejne przystanki) - Tramwaj szybszy (najlepsza trasa),
+    Autobus wolniejszy, ale wciąż w oknie. Najprostszy możliwy przypadek
+    punktu 7: dwie linie leżące jedna na drugiej na całej długości."""
+    trips = [
+        {"trip_id": "tram", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("A", 100, 100), ("B", 200, 200),
+                   ("C", 300, 300), ("E", 400, 400)]},
+        {"trip_id": "bus", "label": "Autobus 2",
+         "stops": [("S", 0, 0), ("A", 150, 150), ("B", 300, 300),
+                   ("C", 450, 450), ("E", 600, 600)]},
+    ]
+    return make_day(trips, names={"S": "Start", "A": "A", "B": "B", "C": "C", "E": "Cel"})
+
+
+def test_lines_sharing_a_corridor_each_carry_the_whole_corridor(install_day):
+    """Sedno punktu 7: dwie linie na dokładnie tym samym korytarzu leżą na
+    mapie JEDNA NA DRUGIEJ - i tak ma zostać. Geometria jest prawdziwa, po
+    torach i ulicach (punkt 6), nikt jej nie rozsuwa; próby rozjeżdżania
+    wiązki na pasma odpadły trzy razy z rzędu (patrz FLOW_MAP_NOTES.md).
+
+    Rozpoznanie linii bierze się stąd, że KAŻDY kawałek niesie PEŁNY skład
+    swojego korytarza - razem z sobą samym. Front stawia z tego jedną grupkę
+    numerów na cały korytarz (zamiast rozrzucać po numerze na linię) i
+    pozwala się między nimi przełączać pod kursorem.
+
+    Skład jest liczony z ROZKŁADU (te same, kolejne przystanki), nie z
+    odległości na ekranie - to drugie przy widoku całego miasta doliczało
+    linie z sąsiednich ulic i wypisywało "13 linii" tam, gdzie jadą dwie."""
+    day = _fully_overlapping_lines_day()
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+
+    tram = _segs_by_num(result, "1", "tram")
+    bus = _segs_by_num(result, "2", "bus")
+    assert len(tram) == 1 and len(bus) == 1
+
+    raw = _coords_of(day, ["S", "A", "B", "C", "E"])
+    assert tram[0]["path"] == raw and bus[0]["path"] == raw, (
+        "geometria zostaje prawdziwa i identyczna dla obu linii - backend nie "
+        "przesuwa niczego w bok"
+    )
+
+    corridor = [{"num": "1", "kind": "tram"}, {"num": "2", "kind": "bus"}]
+    assert tram[0]["corridor"] == corridor
+    assert bus[0]["corridor"] == corridor, (
+        "obie linie muszą widzieć TEN SAM skład korytarza, razem z sobą samą - "
+        "inaczej grupka numerów wyglądałaby inaczej w zależności od tego, "
+        "którą linię akurat się wskazało, a przełączanie gubiłoby wskazaną"
+    )
+
+
+def _joining_line_day():
+    """Tramwaj 1 i Tramwaj 4 jadą razem S->A->B; na B dosiada się Tramwaj 2
+    (odjazd na tyle późny, że da się na niego przesiąść z Tramwaju 1) i dalej,
+    B->C->E, jadą we trzy. Skład korytarza zmienia się więc dokładnie w B."""
+    trips = [
+        {"trip_id": "t1", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("A", 100, 100), ("B", 200, 200),
+                   ("C", 300, 300), ("E", 400, 400)]},
+        {"trip_id": "t4", "label": "Tramwaj 4",
+         "stops": [("S", 0, 0), ("A", 130, 130), ("B", 260, 260),
+                   ("C", 390, 390), ("E", 520, 520)]},
+        {"trip_id": "t2", "label": "Tramwaj 2",
+         "stops": [("B", 400, 400), ("C", 480, 480), ("E", 560, 560)]},
+    ]
+    return make_day(trips, names={"S": "Start", "A": "A", "B": "B", "C": "C", "E": "Cel"})
+
+
+def _corridor_covering(result, num, coords):
+    """Skład korytarza z kawałka linii `num`, który obejmuje wszystkie podane
+    współrzędne."""
+    for seg in result["segments"]:
+        if seg["num"] == num and all(c in seg["path"] for c in coords):
+            return seg.get("corridor")
+    return None
+
+
+def test_corridor_numbers_follow_one_global_order_everywhere(install_day):
+    """Numery w grupce - a więc i kolejność przełączania pod kursorem - to
+    zawsze obcięcie JEDNEGO, globalnego porządku linii
+    (planner._line_sort_key) do linii obecnych na danym odcinku. Dzięki temu
+    numer nie przeskakuje w grupce z miejsca na miejsce przy przejściu na
+    sąsiedni odcinek, a "następna w kolejności" znaczy wszędzie to samo.
+
+    Dosiadający się Tramwaj 2 wchodzi więc POMIĘDZY 1 a 4, a nie na koniec
+    listy - a względna kolejność 1 przed 4 zostaje ta sama po obu stronach
+    przystanku B."""
+    day = _joining_line_day()
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+
+    before = _corridor_covering(result, "1", _coords_of(day, ["S", "A"]))
+    after = _corridor_covering(result, "1", _coords_of(day, ["C", "E"]))
+    assert before is not None and after is not None, (before, after)
+
+    assert [line["num"] for line in before] == ["1", "4"]
+    assert [line["num"] for line in after] == ["1", "2", "4"], (
+        "Tramwaj 2 ma wejść do grupki na swoje miejsce w globalnym porządku, "
+        "nie na koniec - inaczej numery przestawiałyby się z odcinka na odcinek"
+    )
+
+
+def test_a_piece_never_claims_a_corridor_it_has_already_left(install_day):
+    """Kawałek niesie JEDEN skład korytarza na całej swojej długości, więc
+    musi być pocięty dokładnie tam, gdzie ten skład się zmienia - obok
+    cięcia po jasności (punkt 3), tym samym mechanizmem.
+
+    Bez tego kawałek Tramwaju 1 ciągnący się przez B twierdziłby "tędy jadą
+    1, 2 i 4" także PRZED B, gdzie Tramwaju 2 jeszcze nie ma - grupka numerów
+    stanęłaby nad odcinkiem, którym połowa z nich nie jeździ."""
+    day = _joining_line_day()
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+
+    start = _coords_of(day, ["S"])[0]
+    end = _coords_of(day, ["E"])[0]
+    for seg in _segs_by_num(result, "1", "tram"):
+        assert not (start in seg["path"] and end in seg["path"]), (
+            "kawałek Tramwaju 1 przeszedł przez B jednym kawałkiem, mimo że "
+            "skład korytarza zmienia się właśnie tam"
+        )
+
+
+def test_solo_line_never_gets_a_corridor_list(install_day):
+    """Kontrolne: linia, która NIE dzieli żadnego odcinka z inną linią, nie
+    dostaje składu korytarza wcale - front rysuje wtedy jej numer sam, a pod
+    kursorem nie ma się co przełączać."""
+    day = make_day(
+        [{"trip_id": "bus", "label": "Autobus 7",
+          "stops": [("S", 0, 0), ("M", 400, 420), ("E", 1200, 1200)]}],
+        names={"S": "Start", "M": "Srodek", "E": "Cel"},
+    )
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+    pieces = _segs_by_num(result, "7", "bus")
+    assert len(pieces) == 1
+    assert pieces[0]["path"] == _coords_of(day, ["S", "M", "E"])
+    assert "corridor" not in pieces[0]
