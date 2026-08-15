@@ -22,9 +22,35 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 const $ = id => document.getElementById(id);
 
+// Stan paneli (schowany/rozwinięty) i ostatnie wyszukiwanie zapisujemy
+// w localStorage pod wspólnym kluczem - przeżywa odświeżenie strony i nowe
+// wizyty. Jeden mały odczyt/zapis JSON-a na zmianę, nie warto osobnych kluczy
+// na każde pole.
+const UI_STATE_KEY = 'metal-planner:ui-state';
+
+function loadUiState() {
+    try {
+        return JSON.parse(localStorage.getItem(UI_STATE_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+function saveUiState(patch) {
+    try {
+        localStorage.setItem(UI_STATE_KEY, JSON.stringify({...loadUiState(), ...patch}));
+    } catch {
+        // localStorage niedostępny (tryb prywatny) - panel działa dalej, po prostu się nie zapamięta
+    }
+}
+
+const uiState = loadUiState();
+
 const sidebar = $('sidebar');
+document.body.classList.toggle('panel-hidden', !!uiState.sidebarHidden);
 $('sidebar-toggle').addEventListener('click', () => {
-    document.body.classList.toggle('panel-hidden');
+    const hidden = document.body.classList.toggle('panel-hidden');
+    saveUiState({sidebarHidden: hidden});
 });
 
 // Panel deweloperski jest schowany za przyciskiem - normalny użytkownik
@@ -32,11 +58,13 @@ $('sidebar-toggle').addEventListener('click', () => {
 const devPanel = $('dev-panel');
 const devToggle = $('dev-toggle');
 if (devPanel) {
-    const setDev = open => {
+    const setDev = (open, persist = true) => {
         devPanel.classList.toggle('hidden', !open);
         devToggle.classList.toggle('active', open);
         devToggle.setAttribute('aria-expanded', String(open));
+        if (persist) saveUiState({devOpen: open});
     };
+    setDev(!!uiState.devOpen, false);
     devToggle.addEventListener('click', () => setDev(devPanel.classList.contains('hidden')));
     $('dev-close').addEventListener('click', () => setDev(false));
 }
@@ -81,6 +109,7 @@ let sel = {start: null, end: null};
 let journeys = [];
 let selectedJourney = null;   // indeks pozycji z listy albo null
 let requestToken = 0;         // odsiewa odpowiedzi na nieaktualne zapytania
+let resultsCollapsed = !!uiState.resultsCollapsed; // ukrywa samą listę propozycji (nie cały panel)
 
 const isPoint = v => v !== null && typeof v === 'object';
 const samePlace = (a, b) => isPoint(a) || isPoint(b)
@@ -193,7 +222,10 @@ function pickEndpoint(value) {
     if (sel.start && sel.end) search();
 }
 
-map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
+map.on('click', e => {
+    if (handleFlowClick(e)) return;   // klik w narysowany kurs otwiera propozycję
+    pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
+});
 
 // ------------------------------------------- moja lokalizacja jako start ----
 
@@ -297,62 +329,106 @@ function endpointPoints() {
 
 // Każdy kurs to jeden ciągły segment od przystanku wsiadania do ostatniego
 // sensownego wyjścia; jasność i grubość linii = zapas czasu najlepszego
-// wyjścia. Czytelność przy nachodzeniu: jaskrawe segmenty mają białą otoczkę
-// (styl mapy tramwajowej), a najechanie na linię podświetla ją i pokazuje
-// numer - widać, "która co gdzie", nawet w wiązce.
-const BRIGHT_W = 0.45;
+// wyjścia. Geometria jest PRAWDZIWA (kontrakt p.6) - linie dzielące ten sam
+// korytarz leżą jedna na drugiej i nikt ich nie rozsuwa. To, KTÓRA linia tam
+// jedzie, mówią dwie rzeczy: grupka numerów postawiona raz na całym wspólnym
+// korytarzu i przełączanie się między nimi pod kursorem (kontrakt p.7).
+
+// --- WYGLĄD: wartości do strojenia -----------------------------------------
+//
+// Wartości dobrane przez użytkownika na żywo, na realnej mapie (2026-08-15),
+// suwakami w panelu deweloperskim. Suwaki zostają w kodzie, ale są UKRYTE -
+// jeden przełącznik niżej (LOOK_TUNING) przywraca całą sekcję, gdyby trzeba
+// było dostroić to jeszcze raz.
+const LOOK_DEFAULTS = {
+    minOpacity: 0.1,      // krycie najbledszego kawałka (w=0)
+    maxOpacity: 1,        // krycie najjaśniejszego (w=1)
+    minWeight: 0.5,       // grubość najbledszego kawałka [px]
+    maxWeight: 3,         // grubość najjaśniejszego [px]
+    casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
+    dimFactor: 0.22,      // ile zostaje z krycia, gdy wybrana jest jedna trasa
+    labelStep: 200,       // co tyle pikseli korytarza staje kolejna grupka numerów
+    labelScale: 0.8,      // wielkość numerów (1 = jak w CSS)
+    labelOpacity: 1,      // mnożnik krycia grupek numerów
+};
+
+// JEDYNY przełącznik strojenia wyglądu: `true` pokazuje sekcję „Wygląd mapy"
+// w panelu deweloperskim (i zaczyna pamiętać ustawienia suwaków w
+// localStorage), `false` chowa ją w całości i zostawia same wartości wyżej.
+// Kod suwaków zostaje w repo celowo - patrz znaczniki TYMCZASOWE w
+// index.html i style.css.
+const LOOK_TUNING = false;
+const LOOK_PREFS_KEY = 'metal-planner:look-prefs';
+
+function loadLookPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(LOOK_PREFS_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+// Przy schowanych suwakach zapamiętane wartości są celowo POMIJANE - inaczej
+// czyjeś stare ustawienia z localStorage przykryłyby domyślne na zawsze, bez
+// żadnej kontrolki, którą dałoby się je cofnąć.
+const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING ? loadLookPrefs() : {})};
+
+const lookOpacity = rel => look.minOpacity + (look.maxOpacity - look.minOpacity) * rel;
+const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * rel;
 
 let flowLayer = null;
 let flowParts = [];       // {layer, opacity, weight} - do przygaszania pod wybraną trasą
+let flowHits = [];        // {seg, layer, casing, weight, latlngs} - kursor nad korytarzem
+let flowLabelLayer = null;
+let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania bez zapytania
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
+    if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     flowParts = [];
+    flowHits = [];
+    lastFlow = null;
+    clearFlowHover();
     setBaseDim(false);
 }
 
-function relBrightness(w) {
-    const qMinFrac = Number($('qmin').value) / 100;
-    return qMinFrac < 1
-        ? Math.max(0, Math.min(1, (w - qMinFrac) / (1 - qMinFrac)))
-        : 1;
+/** Skład korytarza danego kawałka: wszystkie linie jadące tymi samymi,
+    kolejnymi przystankami, w jednym globalnym porządku - prosto z rozkładu
+    (planner._corridor_lines). Kawałek jadący solo to skład jednoelementowy. */
+function corridorOf(seg) {
+    return seg.corridor && seg.corridor.length
+        ? seg.corridor
+        : [{num: seg.num, kind: seg.kind}];
+}
+
+function corridorKey(roster) {
+    return roster.map(l => l.kind + ' ' + l.num).join('|');
 }
 
 function drawFlow(flow, refit) {
     if (flowLayer) map.removeLayer(flowLayer);   // bez clearFlow: przemalowanie
     flowParts = [];                              // wszystkich słupków tam i z powrotem
+    flowHits = [];                               // - stare warstwy z podświetlenia i tak znikają
+    lastFlow = flow;
+    clearFlowHover();
     setBaseDim(true);                            // to przy każdym ruchu suwaka za dużo
-    const faint = [], casings = [], bright = [], badges = [];
-    const byLine = new Map();  // "num|kind" -> [segmenty] do plakietek
+    const faint = [], casings = [], bright = [];
 
     for (const s of flow.segments) {        // posortowane po w rosnąco
-        const key = s.num + '|' + s.kind;
-        const rel = relBrightness(s.w);
+        const rel = s.w;
         const color = LINE_COLORS[s.kind] || LINE_COLORS.other;
-        const weight = 1 + 3.5 * rel;
-        const opacity = 0.10 + 0.85 * rel;
-        const line = L.polyline(s.path, {color, opacity, weight});
-        // Podpowiedź liczona przy każdym najechaniu, bo lista propozycji
-        // przychodzi osobnym zapytaniem - często dopiero po narysowaniu mapy.
-        line.bindTooltip(() => {
-            const label = `${MODE_LABEL[s.kind] || MODE_LABEL.other} ${s.num}`;
-            return journeyForLine(s.num, s.kind) === null
-                ? label : `${label} · kliknij, aby otworzyć trasę`;
-        }, {sticky: true});
-        line.on('mouseover', () => {
-            line.setStyle({opacity: 1, weight: weight + 2.5});
-            line.bringToFront();       // spod wiązki na wierzch
-        });
-        line.on('mouseout', () => line.setStyle(currentFlowStyle(line)));
-        line.on('click', event => {
-            const index = journeyForLine(s.num, s.kind, event.latlng);
-            if (index === null) return;   // linia bez propozycji: klik ustawia punkt
-            L.DomEvent.stop(event);       // ...a z propozycją - otwiera ją
-            openJourney(index, true);
-        });
+        const weight = lookWeight(rel);
+        const opacity = lookOpacity(rel);
+        const latlngs = s.path.map(p => L.latLng(p));
+        // Nieinteraktywna: linie wspólnego korytarza leżą dokładnie jedna na
+        // drugiej, więc zwykłe hover/click Leaflet trafiałoby zawsze w tę
+        // narysowaną na wierzchu. Kursor jest łapany globalnie
+        // (handleFlowHover) i rozstrzygany po SKŁADZIE korytarza z rozkładu.
+        const line = L.polyline(latlngs, {color, opacity, weight, interactive: false});
         flowParts.push({layer: line, opacity, weight});
-        if (rel >= BRIGHT_W) {
-            const casing = L.polyline(s.path, {
+        let casing = null;
+        if (rel >= look.casingFrom) {
+            casing = L.polyline(latlngs, {
                 color: '#fff', opacity: 0.9, weight: weight + 2.5, interactive: false,
             });
             flowParts.push({layer: casing, opacity: 0.9, weight: weight + 2.5});
@@ -361,73 +437,454 @@ function drawFlow(flow, refit) {
         } else {
             faint.push(line);
         }
-        if (!byLine.has(key)) byLine.set(key, []);
-        byLine.get(key).push({...s, rel});
+        flowHits.push({
+            seg: s, layer: line, casing, weight, latlngs,
+            box: L.latLngBounds(latlngs),   // zgrubny odsiew przy szukaniu pod kursorem
+        });
     }
 
-    // Plakietki z numerem linii - tylko dla linii, które mają sensowny udział
-    // w przepływie; na najjaśniejszym segmencie linii, dłuższe segmenty
-    // dostają dodatkowe plakietki w 1/4 i 3/4 trasy.
-    for (const [key, segs] of byLine) {
-        const best = segs[segs.length - 1];
-        if (best.rel < 0.4) continue;
-        const [num, kind] = key.split('|');
-        const positions = new Set([Math.floor(best.path.length / 2)]);
-        if (best.path.length >= 20) {
-            positions.add(Math.floor(best.path.length / 4));
-            positions.add(Math.floor(3 * best.path.length / 4));
-        }
-        for (const p of positions) {
-            badges.push(L.marker(best.path[p], {
-                icon: L.divIcon({
-                    className: `line-badge ${kind}`, html: esc(num), iconSize: null,
-                }),
-                interactive: false,
-                opacity: 0.45 + 0.55 * best.rel,
-            }));
-        }
-    }
-
-    // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze -> plakietki.
-    flowLayer = L.layerGroup([...faint, ...casings, ...bright, ...badges]).addTo(map);
+    // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
+    flowLayer = L.layerGroup([...faint, ...casings, ...bright]).addTo(map);
+    placeLineLabels();
     if (selectedJourney !== null) dimFlow(true);
     if (!refit) return;
 
     // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać do widoku
-    // całego województwa przez jedną bladą nitkę...
+    // całego województwa przez jedną bladą nitkę... (progi własne - kadr nie
+    // ma się ruszać przy strojeniu wyglądu suwakami)
     let points = [];
-    for (const threshold of [0.7, BRIGHT_W, 0]) {
-        points = flow.segments.filter(s => relBrightness(s.w) >= threshold)
+    for (const threshold of [0.7, 0.45, 0]) {
+        points = flow.segments.filter(s => s.w >= threshold)
                               .flatMap(s => s.path);
         if (points.length >= 4) break;
     }
     fitTo([...points, ...endpointPoints()]);   // start i cel zawsze w kadrze
 }
 
-let flowDimmed = false;
-const DIM_FACTOR = 0.22;
+// --- numery linii: jedna grupka na cały wspólny korytarz -------------------
+//
+// Numery są JEDYNYM sposobem odróżnienia linii leżących na sobie, więc muszą
+// być czytelne - i to one, a nie geometria, dostały tu całą uwagę.
+//
+// Trzy zasady, każda naprawiająca konkretną wadę poprzednich wersji:
+//
+// - KONDENSACJA. Wspólny korytarz dostaje JEDNĄ grupkę ze wszystkimi swoimi
+//   numerami obok siebie, a nie osobny numer dla każdej linii rozrzucony
+//   gdzie indziej. Skład bierze się z rozkładu (seg.corridor), nie z tego, co
+//   akurat wpadło w promień kilku pikseli - liczenie "co tu jedzie" po
+//   pikselach dawało plakietki "13 linii" tam, gdzie realnie jadą dwie.
+// - RÓWNE ODSTĘPY. Kolejne grupki stają co stałą liczbę PIKSELÓW wzdłuż
+//   korytarza, nie w ułamkach długości kawałka. Kawałki mają bardzo różne
+//   długości (tnie je jasność i skład korytarza), więc "w połowie kawałka"
+//   znaczyło na ekranie odstępy losowe: raz gęsto, raz nic na pół mapy.
+// - ZERO NACHODZENIA. Kolizje sprawdza się prostokątem o REALNEJ szerokości
+//   grupki (grupka pięciu numerów jest kilka razy szersza niż jeden numer),
+//   a nie jednym stałym promieniem - dlatego numery nie mają jak na siebie
+//   wejść. Pierwszeństwo w zajmowaniu miejsca mają korytarze najjaśniejsze.
+//
+// Progu jasności tu NIE MA celowo. Kolejność zajmowania miejsca (od
+// najjaśniejszych), kolizje i sufit i tak przycinają gęstość, a próg wycinał
+// przy tym numery także tam, gdzie było zupełnie pusto: w przybliżonym widoku
+// rzadkiej okolicy potrafił zejść z 57% opisanych korytarzy na 14%, nie
+// oszczędzając ani procenta ekranu. Blade korytarze dostają więc numer wtedy,
+// gdy zostało dla niego miejsce - i tylko trochę bledszy.
+// Odstęp grupek i ich wielkość siedzą na suwakach (look.labelStep/labelScale) -
+// "co ile numerów" i "jak duże numery" to dokładnie te dwie rzeczy, którymi
+// reguluje się, jak natrętne są numery na mapie.
+const labelStepPx = () => look.labelStep;
+const labelRepeatPx = () => look.labelStep * 1.6;  // ten sam skład nie częściej niż co tyle
+const LABEL_EDGE_PX = 14;        // margines kadru - grupka nie może wystawać za mapę
+const LABEL_GAP_PX = 4;          // odstęp między sąsiednimi grupkami
+const LABEL_MAX = 60;            // sufit, żeby mapa nie zamieniła się w ścianę liczb
 
-function currentFlowStyle(layer) {
-    const part = flowParts.find(p => p.layer === layer);
-    if (!part) return {};
-    return {
-        opacity: flowDimmed ? part.opacity * DIM_FACTOR : part.opacity,
-        weight: part.weight,
-    };
+const CHIP_CHAR_PX = 6.6;        // szerokość cyfry przy foncie plakietki...
+const CHIP_PAD_PX = 10;          // ...plus jej własne obramowanie i wcięcie
+const CHIP_GAP_PX = 3;
+const CHIP_ROW_PX = 17;
+const CLUSTER_PAD_PX = 4;
+// Najgęstsze korytarze Wrocławia mają po 10 linii - jednym rządkiem to 260 px,
+// czyli pasek przez jedną trzecią ekranu, którego i tak nie da się objąć
+// wzrokiem. Łamiemy więc grupkę na wiersze: kwadratowa plamka czyta się jako
+// jedna rzecz i zajmuje dużo mniej miejsca w poprzek korytarza.
+const CLUSTER_MAX_COLS = 5;
+
+function clusterRows(roster) {
+    const rows = [];
+    for (let i = 0; i < roster.length; i += CLUSTER_MAX_COLS) {
+        rows.push(roster.slice(i, i + CLUSTER_MAX_COLS));
+    }
+    return rows;
 }
+
+/** Realny rozmiar grupki na ekranie [szerokość, wysokość] - z niego liczą się
+    kolizje, więc grupka pięciu numerów odsuwa sąsiadów pięć razy dalej niż
+    pojedynczy numer. */
+function clusterBox(roster) {
+    const rows = clusterRows(roster);
+    const scale = look.labelScale;   // numery rosną razem z suwakiem - i tak samo ich kolizje
+    let width = 0;
+    for (const row of rows) {
+        let w = 2 * CLUSTER_PAD_PX;
+        row.forEach((l, i) => {
+            w += CHIP_PAD_PX + CHIP_CHAR_PX * String(l.num).length + (i ? CHIP_GAP_PX : 0);
+        });
+        width = Math.max(width, w * scale);
+    }
+    return [width, (rows.length * CHIP_ROW_PX + 2 * CLUSTER_PAD_PX) * scale];
+}
+
+/** Punkty na ścieżce co `stepPx` PIKSELÓW EKRANU, pomijając te poza kadrem.
+    Pierwszy wypada w połowie kroku (albo w połowie krótkiego kawałka), żeby
+    numer nie lądował dokładnie na styku dwóch kawałków tego samego kursu. */
+function labelAnchors(latlngs, stepPx) {
+    const size = map.getSize();
+    const pts = latlngs.map(p => map.latLngToContainerPoint(p));
+    const lens = [];
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+        const len = pts[i].distanceTo(pts[i - 1]);
+        lens.push(len);
+        total += len;
+    }
+    if (total <= 0) return [];
+
+    const out = [];
+    let next = Math.min(stepPx / 2, total / 2);
+    let cum = 0;
+    for (let i = 1; i < pts.length; i++) {
+        const len = lens[i - 1];
+        while (len > 0 && next <= cum + len) {
+            const t = (next - cum) / len;
+            const at = L.point(
+                pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t,
+                pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t,
+            );
+            if (at.x >= LABEL_EDGE_PX && at.y >= LABEL_EDGE_PX
+                && at.x <= size.x - LABEL_EDGE_PX && at.y <= size.y - LABEL_EDGE_PX) {
+                out.push(at);
+            }
+            next += stepPx;
+        }
+        cum += len;
+    }
+    return out;
+}
+
+function placeLineLabels() {
+    if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
+    if (!flowHits.length) return;
+
+    // Duże zapytania to ponad tysiąc kawałków, a numery przeliczają się po
+    // każdym ruchu mapy - kawałki spoza kadru odsiewamy więc od razu, na
+    // surowych współrzędnych, zamiast rzutować każdy ich punkt na ekran.
+    const view = map.getBounds();
+    const candidates = [];
+    for (const h of flowHits) {
+        if (!h.latlngs.some(p => view.contains(p))) continue;
+        const roster = corridorOf(h.seg);
+        const key = corridorKey(roster);
+        for (const at of labelAnchors(h.latlngs, labelStepPx())) {
+            candidates.push({at, roster, key, w: h.seg.w});
+        }
+    }
+    candidates.sort((a, b) => b.w - a.w);   // najjaśniejsze zajmują miejsce pierwsze
+
+    const boxes = [];
+    const byKey = new Map();
+    const markers = [];
+    for (const c of candidates) {
+        if (markers.length >= LABEL_MAX) break;
+        const size = clusterBox(c.roster);
+        const half = size[0] / 2 + LABEL_GAP_PX;
+        const halfH = size[1] / 2 + LABEL_GAP_PX;
+        const box = [c.at.x - half, c.at.y - halfH, c.at.x + half, c.at.y + halfH];
+        if (boxes.some(b => b[0] < box[2] && box[0] < b[2] && b[1] < box[3] && box[1] < b[3])) continue;
+        const same = byKey.get(c.key);
+        if (same && same.some(p => p.distanceTo(c.at) < labelRepeatPx())) continue;
+        boxes.push(box);
+        if (same) same.push(c.at); else byKey.set(c.key, [c.at]);
+        markers.push(clusterMarker(map.containerPointToLatLng(c.at), c.roster, c.w));
+    }
+
+    flowLabelLayer = L.layerGroup(markers).addTo(map);
+    for (const marker of markers) bindCluster(marker);
+}
+
+function clusterMarker(at, roster, weight) {
+    let index = 0;
+    const rows = clusterRows(roster).map(row =>
+        '<span class="line-cluster-row">' + row.map(l =>
+            `<span class="line-chip ${esc(l.kind)}" data-i="${index++}">${esc(l.num)}</span>`,
+        ).join('') + '</span>',
+    ).join('');
+    const marker = L.marker(at, {
+        icon: L.divIcon({
+            className: 'line-cluster-anchor',
+            html: `<span class="line-cluster">${rows}</span>`,
+            iconSize: null,
+        }),
+        keyboard: false,
+        opacity: (flowDimmed ? 0.25 : 0.65 + 0.35 * weight) * look.labelOpacity,
+    });
+    marker.roster = roster;
+    return marker;
+}
+
+/** Numer w grupce jest też przyciskiem: najechanie wskazuje DOKŁADNIE tę
+    linię (nie trzeba się przełączać), a kliknięcie otwiera jej propozycję.
+    Bez tego grupka mówiłaby, co tędy jedzie, ale nie dałaby tego wskazać. */
+function bindCluster(marker) {
+    const el = marker.getElement();
+    if (!el) return;
+    L.DomEvent.on(el, 'mouseover', ev => {
+        const chip = ev.target.closest && ev.target.closest('.line-chip');
+        if (chip) pickFromCluster(marker, Number(chip.dataset.i));
+    });
+    L.DomEvent.on(el, 'click', ev => {
+        const chip = ev.target.closest && ev.target.closest('.line-chip');
+        if (!chip) return;
+        L.DomEvent.stop(ev);      // inaczej klik ustawiłby jeszcze punkt trasy
+        const line = marker.roster[Number(chip.dataset.i)];
+        const index = journeyForLine(line.num, line.kind, marker.getLatLng());
+        if (index !== null) openJourney(index, true);
+    });
+}
+
+let flowDimmed = false;
 
 /** Wybrana trasa musi być czytelna, więc reszta wachlarza schodzi w tło. */
 function dimFlow(dim) {
     flowDimmed = dim;
     for (const part of flowParts) {
-        part.layer.setStyle({opacity: dim ? part.opacity * DIM_FACTOR : part.opacity});
+        part.layer.setStyle({opacity: dim ? part.opacity * look.dimFactor : part.opacity});
     }
-    if (flowLayer) {
-        flowLayer.eachLayer(l => {
-            if (l.setOpacity) l.setOpacity(dim ? 0.2 : 1);   // plakietki linii
-        });
-    }
+    if (flowLabelLayer) placeLineLabels();   // grupki przeliczają własną widoczność
 }
+
+// Numery stoją co tyle a tyle pikseli KORYTARZA i tylko w kadrze, więc po
+// każdym ruchu mapy - przesunięciu i przybliżeniu - muszą powstać na nowo.
+map.on('moveend', placeLineLabels);
+
+// --- kursor nad korytarzem: na czym stoję ----------------------------------
+//
+// Pod kursorem podświetla się WYŁĄCZNIE jedna linia, a podpowiedź podaje jej
+// numer wprost. Domyślnie jest to najjaśniejsza linia korytarza (najczęściej
+// ta, o którą chodzi); żeby wskazać dowolną inną, najeżdża się na jej numer w
+// grupce (bindCluster). Podświetlanie całego korytarza naraz - tak było
+// wcześniej - sprawiało, że nic się z niego nie wyróżniało: widać było, że coś
+// tędy jedzie, ale nie na czym stoi kursor.
+//
+// Podświetla się CAŁA LINIA, nie sam kawałek pod kursorem. Jeden fizyczny kurs
+// bywa pocięty na kilkanaście kawałków (jasność - punkt 3, skład korytarza -
+// punkt 7), więc rozjaśnienie jednego z nich odpowiadało na pytanie "gdzie
+// dokładnie stoi kursor" zamiast na to, o które chodzi: "dokąd stąd jedzie ta
+// linia". Podświetlenie leży w OSOBNEJ warstwie dokładanej na wierzch
+// wszystkiego (ciemna otoczka + pełne krycie), a nie w przemalowaniu warstw na
+// miejscu - inaczej "na wierzchu" zależałoby od kolejności rysowania i jasna
+// linia obok potrafiła przykryć wskazaną.
+
+let flowTooltip = null;
+let flowHighlight = null;   // warstwa podświetlenia całej linii
+let flowHighlightKey = null;
+let flowPick = null;      // {key, index, options} - wskazana linia korytarza
+let flowPickAt = null;    // gdzie stoi kursor - do przerysowania po przełączeniu
+const FLOW_HIT_SLACK_PX = 5;   // margines poza grubością linii, na niecelny kursor
+const HALO_EXTRA_PX = 6;       // o tyle otoczka podświetlenia szersza od linii
+const HIGHLIGHT_EXTRA_PX = 2;  // o tyle sama linia grubsza pod kursorem
+
+function distPointToSegmentPx(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return p.distanceTo(a);
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+    return p.distanceTo(L.point(a.x + t * dx, a.y + t * dy));
+}
+
+function polylineDistancePx(containerPoint, latlngs) {
+    let min = Infinity;
+    let prev = map.latLngToContainerPoint(latlngs[0]);
+    for (let i = 1; i < latlngs.length; i++) {
+        const cur = map.latLngToContainerPoint(latlngs[i]);
+        min = Math.min(min, distPointToSegmentPx(containerPoint, prev, cur));
+        prev = cur;
+    }
+    return min;
+}
+
+/** Wszystkie kawałki pod danym miejscem na ekranie, od najbliższego.
+    Duże zapytania to ponad tysiąc kawałków, a to leci przy każdym ruchu
+    myszy - dlatego najpierw zgrubny odsiew po ramce kawałka (na surowych
+    współrzędnych), a dokładny pomiar odległości dopiero dla reszty. Margines
+    ramki liczy się z aktualnego powiększenia, żeby przy widoku całego miasta,
+    gdzie kilka pikseli to ponad sto metrów, nic nie wypadło przedwcześnie. */
+function flowHitsAt(containerPoint) {
+    const here = map.containerPointToLatLng(containerPoint);
+    const away = map.containerPointToLatLng(L.point(containerPoint.x + 16, containerPoint.y + 16));
+    const padLat = Math.abs(away.lat - here.lat);
+    const padLng = Math.abs(away.lng - here.lng);
+    const hits = [];
+    for (const h of flowHits) {
+        if (here.lat < h.box.getSouth() - padLat || here.lat > h.box.getNorth() + padLat
+            || here.lng < h.box.getWest() - padLng || here.lng > h.box.getEast() + padLng) {
+            continue;
+        }
+        const tol = h.weight / 2 + FLOW_HIT_SLACK_PX;
+        const dist = polylineDistancePx(containerPoint, h.latlngs);
+        if (dist <= tol) hits.push({...h, dist});
+    }
+    hits.sort((a, b) => a.dist - b.dist);
+    return hits;
+}
+
+/** Między czym można się w tym miejscu przełączać: skład korytarza NAJBLIŻSZEJ
+    linii - z rozkładu - dopasowany do narysowanych kawałków. Zestaw bierze się
+    z rozkładu, a nie z tego, co leży w promieniu kilku pikseli, bo przy widoku
+    całego miasta kilka pikseli to ponad sto metrów: do wyboru wchodziłyby
+    wtedy linie z sąsiednich ulic, którymi wcale się tędy nie jedzie. */
+function corridorOptions(hits) {
+    return corridorOf(hits[0].seg).map(l => ({
+        num: l.num,
+        kind: l.kind,
+        hit: hits.find(h => h.seg.num === l.num && h.seg.kind === l.kind) || null,
+    }));
+}
+
+function brightestOption(options) {
+    let best = 0, bestW = -1;
+    options.forEach((o, i) => {
+        const w = o.hit ? o.hit.seg.w : -1;
+        if (w > bestW) { bestW = w; best = i; }
+    });
+    return best;
+}
+
+function flowPickHtml() {
+    const options = flowPick.options;
+    const sel = options[flowPick.index];
+    const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
+    let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
+    if (options.length > 1) {
+        html += '<span class="flow-tip-row">' + options.map((o, i) =>
+            `<span class="line-chip ${esc(o.kind)}${i === flowPick.index ? ' picked' : ''}">`
+            + `${esc(o.num)}</span>`,
+        ).join('') + '</span>';
+        html += '<span class="flow-tip-hint">najedź na numer w grupce, żeby wskazać inną</span>';
+    }
+    if (flowPickAt && journeyForLine(sel.num, sel.kind, flowPickAt) !== null) {
+        html += '<span class="flow-tip-hint">kliknij, aby otworzyć trasę</span>';
+    }
+    return html;
+}
+
+/** Podświetlenie CAŁEJ wskazanej linii: wszystkie jej narysowane kawałki,
+    nie tylko ten pod kursorem. Najpierw ciemna otoczka pod spodem, potem
+    linia w pełnym kryciu - warstwa idzie na wierzch całej mapy, więc wskazana
+    linia wychodzi przed wszystkie inne, także jaśniejsze od siebie. */
+function showLineHighlight(num, kind) {
+    const key = kind + ' ' + num;
+    if (flowHighlightKey === key) return;      // ta sama linia - nie przerysowujemy
+    hideLineHighlight();
+    const parts = flowHits.filter(h => h.seg.num === num && h.seg.kind === kind);
+    if (!parts.length) return;
+    const color = LINE_COLORS[kind] || LINE_COLORS.other;
+    const halos = parts.map(h => L.polyline(h.latlngs, {
+        color: '#111', opacity: 0.85, weight: h.weight + HALO_EXTRA_PX,
+        lineCap: 'round', lineJoin: 'round', interactive: false,
+    }));
+    const cores = parts.map(h => L.polyline(h.latlngs, {
+        color, opacity: 1, weight: h.weight + HIGHLIGHT_EXTRA_PX,
+        lineCap: 'round', lineJoin: 'round', interactive: false,
+    }));
+    flowHighlight = L.layerGroup([...halos, ...cores]).addTo(map);
+    flowHighlightKey = key;
+}
+
+function hideLineHighlight() {
+    if (flowHighlight) { map.removeLayer(flowHighlight); flowHighlight = null; }
+    flowHighlightKey = null;
+}
+
+function renderFlowPick() {
+    if (!flowPick || !flowPickAt) return;
+    const sel = flowPick.options[flowPick.index];
+    if (sel.hit) showLineHighlight(sel.num, sel.kind);
+    else hideLineHighlight();
+    if (!flowTooltip) {
+        // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
+        // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
+        // przez co dymek nigdy nie powstawał (a każdy ruch myszy nad korytarzem
+        // próbował go stworzyć od nowa i wysypywał się w tym samym miejscu).
+        flowTooltip = L.tooltip({direction: 'top', offset: [0, -6]})
+            .setLatLng(flowPickAt).addTo(map);
+    }
+    flowTooltip.setLatLng(flowPickAt).setContent(flowPickHtml());
+}
+
+function clearFlowHover() {
+    hideLineHighlight();
+    if (flowTooltip) { map.removeLayer(flowTooltip); flowTooltip = null; }
+    flowPick = null;
+    flowPickAt = null;
+}
+
+function setFlowPick(options, at, index) {
+    const key = corridorKey(options);
+    if (!flowPick || flowPick.key !== key) {
+        flowPick = {key, index: brightestOption(options), options};
+    } else {
+        flowPick.options = options;
+        if (flowPick.index >= options.length) flowPick.index = brightestOption(options);
+    }
+    if (index !== undefined) flowPick.index = index;
+    flowPickAt = at;
+    renderFlowPick();
+}
+
+function handleFlowHover(e) {
+    // Nad grupką numerów rządzi grupka (patrz bindCluster): kursor jest wtedy
+    // kilka pikseli obok samej linii, więc szukanie po geometrii zgasiłoby
+    // dopiero co wskazany numer.
+    const target = e.originalEvent && e.originalEvent.target;
+    if (target && target.closest && target.closest('.line-cluster')) return;
+    const hits = flowHits.length ? flowHitsAt(e.containerPoint) : [];
+    if (!hits.length) { clearFlowHover(); return; }
+    setFlowPick(corridorOptions(hits), e.latlng);
+}
+
+function pickFromCluster(marker, index) {
+    const at = marker.getLatLng();
+    const hits = flowHitsAt(map.latLngToContainerPoint(at));
+    if (!hits.length) return;
+    const options = marker.roster.map(l => ({
+        num: l.num,
+        kind: l.kind,
+        hit: hits.find(h => h.seg.num === l.num && h.seg.kind === l.kind) || null,
+    }));
+    setFlowPick(options, at, index);
+}
+
+/** Klik w kurs otwiera pasującą propozycję - najpierw dla linii AKTUALNIE
+    wskazanej, żeby klik trafiał tam, gdzie patrzy podpowiedź; dopiero potem
+    dla pozostałych kawałków pod kursorem. Klik obok zwraca false, a wywołujący
+    ustawia punkt trasy zamiast tego. */
+function handleFlowClick(e) {
+    const tried = [];
+    if (flowPick) tried.push(flowPick.options[flowPick.index]);
+    for (const h of flowHitsAt(e.containerPoint)) tried.push({num: h.seg.num, kind: h.seg.kind});
+    for (const line of tried) {
+        const index = journeyForLine(line.num, line.kind, e.latlng);
+        if (index !== null) { openJourney(index, true); return true; }
+    }
+    return false;
+}
+
+map.on('mousemove', handleFlowHover);
+map.on('mouseout', clearFlowHover);
+
+// Prawy przycisk myszy NIE ROBI TU NIC (usunięte 2026-08-15). Przechodził
+// kiedyś na następną linię korytarza, ale wybieranie linii jest już w grupce
+// numerów - najechanie na numer wskazuje dokładnie tę linię, bez zgadywania,
+// ile razy trzeba kliknąć. Menu kontekstowe przeglądarki zostaje nietknięte.
 
 // -------------------------------------------------- rysowanie jednej trasy ----
 
@@ -551,6 +1008,12 @@ const NEAR_CLICK_PX = 40;   // "ta linia w tym miejscu" - w pikselach ekranu
 
 /** Propozycja jeżdżąca daną linią: najbliższa klikniętemu miejscu, a gdy
     kliknięcie jest z dala od którejkolwiek - po prostu najlepsza z listy. */
+/** Bez `latlng`: czy ta linia ma W OGÓLE jakąś propozycję (podpowiedź przy
+    hover, sama nazwa wystarczy). Z `latlng`: czy ta linia ma propozycję,
+    która przejeżdża BLISKO wskazanego miejsca (klik) - bez tego rozróżnienia
+    klik w kurs, który jest na mapie przepływów, ale nie pokrywa się z żadną
+    propozycją akurat w tym miejscu, cichcem otwierał pierwszą z brzegu
+    propozycję tej samej linii gdziekolwiek indziej na mapie. */
 function journeyForLine(num, mode, latlng) {
     const clicked = latlng && map.latLngToContainerPoint(latlng);
     let fallback = null, nearest = null, nearestDist = Infinity;
@@ -565,7 +1028,8 @@ function journeyForLine(num, mode, latlng) {
             }
         }
     });
-    return nearestDist <= NEAR_CLICK_PX ? nearest : fallback;
+    if (!clicked) return fallback;
+    return nearestDist <= NEAR_CLICK_PX ? nearest : null;
 }
 
 function badgeHtml(leg) {
@@ -662,6 +1126,10 @@ function renderJourneys() {
         <div class="results-head">
             <h2>Propozycje tras</h2>
             <span class="results-count">${journeys.length}</span>
+            <button id="results-toggle" class="icon-button"
+                    title="${resultsCollapsed ? 'Pokaż' : 'Ukryj'} propozycje tras"
+                    aria-label="${resultsCollapsed ? 'Pokaż' : 'Ukryj'} propozycje tras"
+                    aria-expanded="${String(!resultsCollapsed)}">${resultsCollapsed ? '▸' : '▾'}</button>
         </div>
         <ol class="journeys">${cards}</ol>
         <p class="results-foot">
@@ -669,6 +1137,7 @@ function renderJourneys() {
             tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
             zobaczyć całą trasę.
         </p>`;
+    resultsBox.classList.toggle('collapsed', resultsCollapsed);
 
     setTabCount(journeys.length);
     scrollToSelected();
@@ -686,6 +1155,13 @@ function scrollToSelected() {
 }
 
 resultsBox.addEventListener('click', event => {
+    if (event.target.closest('#results-toggle')) {
+        resultsCollapsed = !resultsCollapsed;
+        saveUiState({resultsCollapsed});
+        renderJourneys();
+        return;
+    }
+
     const card = event.target.closest('.journey');
     if (card) { selectJourney(Number(card.dataset.index)); return; }
 
@@ -752,6 +1228,9 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         range_m: $('range').value,
+        extra_pct: $('extra').value,
+        extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
+        extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
     });
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
@@ -783,25 +1262,22 @@ function adoptNames(data) {
     restyle(...previous, sel.start, sel.end);
 }
 
-function loadFlow(token, refit) {
+/** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
+    propozycji (journeys) - to ta sama, współdzielona odpowiedź, więc obie
+    nie mogą już się rozjechać (patrz planner.plan_flow). */
+function loadPlan(token, refit) {
     const params = queryParams();
-    params.set('qmin', (Number($('qmin').value) / 100).toFixed(2));
-    params.set('tol', $('tol').value);
     return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
-        .then(([flow]) => {
+        .then(([data]) => {
             if (token !== requestToken) return;
-            if (flow.error) { clearFlow(); showError(flow.error, flow.suggestions); return; }
-            adoptNames(flow);
-            drawFlow(flow, refit);
-        });
-}
+            if (data.error) {
+                clearFlow();
+                showError(data.error, data.suggestions);
+                return;
+            }
+            adoptNames(data);
+            drawFlow(data, refit);
 
-function loadJourneys(token) {
-    return fetch('/api/journeys?' + queryParams())
-        .then(r => r.json())
-        .then(data => {
-            if (token !== requestToken) return;
-            if (data.error) { showError(data.error, data.suggestions); return; }
             journeys = data.journeys;
             selectedJourney = null;      // nowa lista = stary wybór nieaktualny
             clearJourney();
@@ -813,6 +1289,43 @@ function loadJourneys(token) {
             }
             renderJourneys();
         });
+}
+
+const LAST_SEARCH_KEY = 'metal-planner:last-search';
+
+function saveLastSearch() {
+    try {
+        localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
+            start: sel.start, end: sel.end,
+        }));
+    } catch {
+        // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
+    }
+}
+
+/** Ostatnie wyszukiwanie (skąd/dokąd) wraca po odświeżeniu strony - tylko
+    gdy pola są jeszcze puste (nie nadpisujemy tego, co user już zdążył
+    wpisać, zanim ten kod się uruchomił). Godzina wraca sama z siebie do
+    "teraz", bo tak ustawia ją serwer przy każdym renderowaniu strony. */
+function restoreLastSearch() {
+    if (startInput.value || endInput.value) return;
+    let saved;
+    try {
+        saved = JSON.parse(localStorage.getItem(LAST_SEARCH_KEY));
+    } catch {
+        return;
+    }
+    if (!saved || !saved.start || !saved.end) return;
+    sel.start = saved.start;
+    sel.end = saved.end;
+    startInput.value = displayValue(sel.start);
+    endInput.value = displayValue(sel.end);
+    // Godzina zostaje "teraz" (już ustawiona przez serwer przy renderowaniu
+    // strony) - nie przywracamy tu starej godziny z poprzedniego wyszukiwania.
+    updatePointMarker('start', sel.start);
+    updatePointMarker('end', sel.end);
+    restyle(sel.start, sel.end);
+    search();
 }
 
 /** Kółko ładowania w dwóch miejscach naraz, bo w każdym widoku widać co
@@ -834,10 +1347,11 @@ function search() {
     resultsBox.innerHTML =
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
+    saveLastSearch();
     // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
     // zakładce „Trasy".
-    Promise.all([loadFlow(token, true), loadJourneys(token)])
+    loadPlan(token, true)
         .catch(() => showError('Nie udało się połączyć z serwerem.'))
         // Kółko gasi tylko odpowiedź na AKTUALNE zapytanie - przy szybkiej
         // zmianie relacji stare, odsiane zapytanie nie może udawać, że nowe
@@ -846,6 +1360,7 @@ function search() {
 }
 
 $('search').addEventListener('click', search);
+stopsReady.then(restoreLastSearch);
 
 // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" - dalej
 // liczy się to, co user wpisał, jak przy zwykłym wyszukiwaniu.
@@ -998,6 +1513,11 @@ $('swap').addEventListener('click', () => {
     search();
 });
 
+$('time-now').addEventListener('click', () => {
+    $('time').value = new Date().toTimeString().slice(0, 5);
+    if (startInput.value && endInput.value) search();
+});
+
 $('clear').addEventListener('click', () => {
     const previous = [sel.start, sel.end];
     sel = {start: null, end: null};
@@ -1011,25 +1531,144 @@ $('clear').addEventListener('click', () => {
     setView('map');       // nową relację wybiera się na mapie
 });
 
-// Suwaki panelu deweloperskiego: etykieta od razu, mapa po krótkim debounce
-// (odpowiedź z ciepłym cache to ~10 ms, więc działa "na żywo"). Lista
-// propozycji od tych parametrów nie zależy - przeładowujemy tylko przepływ.
-function liveSlider(inputId, valueId, affectsList) {
+// Suwaki panelu deweloperskiego: etykieta od razu, mapa i lista propozycji
+// po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
+// "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
+// więc każdy suwak siłą rzeczy odświeża i mapę, i listę - nie ma już
+// suwaków "tylko dla mapy".
+//
+// Wartości suwaków zapamiętujemy w localStorage (jeden klucz, mały JSON) -
+// przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
+// preferencji od nowa za każdym razem.
+const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
+const DEV_SLIDER_IDS = ['range', 'extra', 'extra-floor', 'extra-cap'];
+
+function loadDevPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(DEV_PREFS_KEY)) || {};
+    } catch {
+        return {};       // localStorage niedostępny (tryb prywatny) albo zepsuty JSON
+    }
+}
+
+function saveDevPref(id, value) {
+    const prefs = loadDevPrefs();
+    prefs[id] = value;
+    try {
+        localStorage.setItem(DEV_PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+        // localStorage niedostępny - suwak działa dalej, po prostu się nie zapamięta
+    }
+}
+
+function applyStoredDevPrefs() {
+    const prefs = loadDevPrefs();
+    for (const id of DEV_SLIDER_IDS) {
+        if (prefs[id] === undefined) continue;
+        const input = $(id);
+        const valueEl = $(id + '-value');
+        if (!input) continue;
+        input.value = prefs[id];
+        if (valueEl) valueEl.textContent = prefs[id];
+    }
+}
+
+function liveSlider(inputId, valueId) {
     const input = $(inputId);
     const valueEl = $(valueId);
     let timer = null;
     input.addEventListener('input', () => {
         valueEl.textContent = input.value;
+        saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
             if (!startInput.value || !endInput.value) return;
-            loadFlow(requestToken, false);
-            if (affectsList) loadJourneys(requestToken);
+            loadPlan(requestToken, false)
+                .catch(() => showError('Nie udało się połączyć z serwerem.'));
         }, 200);
     });
 }
-liveSlider('qmin', 'qmin-value');
-liveSlider('tol', 'tol-value');
-liveSlider('range', 'range-value', true);   // zasięg zmienia też same trasy
+applyStoredDevPrefs();
+liveSlider('range', 'range-value');
+liveSlider('extra', 'extra-value');
+liveSlider('extra-floor', 'extra-floor-value');
+liveSlider('extra-cap', 'extra-cap-value');
+
+// --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
+//
+// Te suwaki nie dotykają serwera - kręcą wyłącznie liczbami z LOOK_DEFAULTS,
+// więc mapa przemalowuje się natychmiast, z ostatniej odpowiedzi (lastFlow),
+// bez ponownego zapytania. Wartości są już dobrane (siedzą w LOOK_DEFAULTS),
+// więc cała sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca
+// ją, gdyby trzeba było stroić od nowa.
+const LOOK_KNOBS = {
+    'look-min-op': 'minOpacity',
+    'look-max-op': 'maxOpacity',
+    'look-min-w': 'minWeight',
+    'look-max-w': 'maxWeight',
+    'look-casing': 'casingFrom',
+    'look-dim': 'dimFactor',
+    'look-label-step': 'labelStep',
+    'look-label-size': 'labelScale',
+    'look-label-op': 'labelOpacity',
+};
+
+function saveLookPrefs() {
+    try {
+        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(look));
+    } catch {
+        // localStorage niedostępny - suwaki działają dalej, po prostu się nie zapamiętają
+    }
+}
+
+/** Przemalowanie z ostatniej odpowiedzi - bez zapytania do serwera. Wybrana
+    trasa rysuje się na nowo NA WIERZCHU przemalowanego wachlarza (kolejność
+    warstw w canvasie to kolejność dokładania). */
+function applyLook() {
+    document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+    if (lastFlow) drawFlow(lastFlow, false);
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+    const dump = $('look-dump');
+    if (dump) {
+        dump.textContent = Object.entries(look)
+            .map(([k, v]) => `${k}: ${v}`).join(', ');
+    }
+}
+
+function bindLookSliders() {
+    const section = $('look-section');
+    if (!section) return;               // sekcja skasowana - wartości zostają domyślne
+    if (!LOOK_TUNING) { section.hidden = true; return; }
+    section.hidden = false;
+    let timer = null;
+    const show = id => {
+        const input = $(id);
+        const out = $(id + '-value');
+        if (out) out.textContent = input.value;
+    };
+    for (const [id, key] of Object.entries(LOOK_KNOBS)) {
+        const input = $(id);
+        input.value = look[key];        // źródłem prawdy jest LOOK_DEFAULTS + localStorage
+        show(id);
+        input.addEventListener('input', () => {
+            look[key] = Number(input.value);
+            show(id);
+            saveLookPrefs();
+            clearTimeout(timer);        // przeciąganie suwaka: jedno przemalowanie na klatkę
+            timer = setTimeout(applyLook, 60);
+        });
+    }
+    $('look-reset').addEventListener('click', () => {
+        Object.assign(look, LOOK_DEFAULTS);
+        for (const [id, key] of Object.entries(LOOK_KNOBS)) {
+            $(id).value = look[key];
+            show(id);
+        }
+        saveLookPrefs();
+        applyLook();
+    });
+}
+bindLookSliders();
+document.documentElement.style.setProperty('--chip-scale', look.labelScale);
 
 }

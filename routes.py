@@ -5,7 +5,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
-from planner import plan_flow, plan_journeys, plan_route
+from planner import plan_flow, plan_route
 
 
 def _frontend_digest(app):
@@ -121,20 +121,10 @@ def init_routes(app):
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time")),
-            _float_arg("qmin"),
-            _float_arg("tol"),
             _point_arg("start"),
             _point_arg("end"),
             _float_arg("range_m"),
-        ))
-
-    @app.route("/api/journeys")
-    def api_journeys():
-        return jsonify(plan_journeys(
-            request.args.get("start", ""),
-            request.args.get("end", ""),
-            _parse_when(request.args.get("time")),
-            _point_arg("start"),
-            _point_arg("end"),
-            _float_arg("range_m"),
+            extra_pct=_float_arg("extra_pct"),
+            extra_floor_sec=_float_arg("extra_floor_sec"),
+            extra_cap_sec=_float_arg("extra_cap_sec"),
         ))

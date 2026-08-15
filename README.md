@@ -8,7 +8,9 @@ propozycji podświetla ją na mapie, a kliknięcie linii na mapie otwiera
 propozycję, która nią jedzie. Start można ustawić przyciskiem ◎ na aktualną
 lokalizację. Na telefonie mapa i lista przełączają się dolnymi zakładkami.
 
-Pełny opis projektu, architektury i algorytmów: **[PROJECT.md](PROJECT.md)**.
+Pełny opis projektu, architektury i algorytmów: **[docs/PROJECT.md](docs/PROJECT.md)**
+(szczegóły samego algorytmu mapy przepływów: **[docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md)**,
+gwarancje zachowania mapy, które to sprawdzają: **[docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md)**).
 
 ## Szybki start
 
@@ -44,6 +46,17 @@ Cron na serwerze, np. o 3:00:
 
 Gdy pobieranie się nie powiedzie, stara baza zostaje nietknięta — aplikacja
 działa dalej na wczorajszych danych i przeładuje nowe sama, bez restartu.
+
+## Testy
+
+Sprawdzają gwarancje z [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md)
+na syntetycznych danych (bez SQLite, bez zależności od daty) - patrz ten
+plik po opis, co dokładnie który test sprawdza.
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+```
 
 ## Konwencja - branche
 - dla każdej funkcji tworzymy indywidualne branche w konwencji `username/feature`

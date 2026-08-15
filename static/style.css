@@ -388,6 +388,21 @@ body.panel-hidden #sidebar {
     padding: 0;
 }
 
+.time-now-button {
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.time-now-button:hover { background: #e8edf3; color: var(--ink); }
+
 .search-row .button.primary { flex: 1; }
 
 /* ----------------------------------------------------- lista propozycji --- */
@@ -428,6 +443,18 @@ body.panel-hidden #sidebar {
     line-height: 18px;
     text-align: center;
     color: var(--ink-soft);
+}
+
+.results-head .icon-button {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+    margin-left: auto;
+}
+
+#results.collapsed .journeys,
+#results.collapsed .results-foot {
+    display: none;
 }
 
 .journeys {
@@ -665,6 +692,96 @@ body.panel-hidden #sidebar {
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.other { background: var(--other); }
 
+/* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
+   wszystkimi jego numerami obok siebie - nie osobna plakietka dla każdej
+   linii rozrzucona gdzie indziej (patrz placeLineLabels w app.js). Kotwica
+   sama nie ma rozmiaru; pudełko wysrodkowuje się na niej własnym transformem,
+   żeby numer stał NA korytarzu, a nie obok niego. */
+.line-cluster-anchor {
+    width: auto !important;
+    height: auto !important;
+    white-space: nowrap;
+}
+
+.line-cluster {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    flex-direction: column;   /* najgęstsze korytarze łamią się na wiersze */
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 9px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.line-cluster-row {
+    display: flex;
+    gap: 3px;
+}
+
+/* Pojedynczy numer w grupce - jest też celem myszy: najechanie wskazuje tę
+   linię na mapie, kliknięcie otwiera jej propozycję. */
+/* Wielkość numerów siedzi na suwaku "Wielkość numerów" (--chip-scale, patrz
+   TYMCZASOWE w app.js) - domyślnie 1, czyli dokładnie te rozmiary co poniżej. */
+.line-chip {
+    font-size: calc(11px * var(--chip-scale, 1));
+    font-weight: bold;
+    line-height: calc(15px * var(--chip-scale, 1));
+    padding: 0 calc(3px * var(--chip-scale, 1));
+    border-radius: 5px;
+    white-space: nowrap;
+}
+
+.line-chip.tram { color: var(--tram); }
+.line-chip.bus { color: var(--bus); }
+.line-chip.other { color: var(--other); }
+
+.line-chip.picked,
+.line-cluster .line-chip:hover { color: #fff; }
+.line-chip.picked.tram,
+.line-cluster .line-chip.tram:hover { background: var(--tram); }
+.line-chip.picked.bus,
+.line-cluster .line-chip.bus:hover { background: var(--bus); }
+.line-chip.picked.other,
+.line-cluster .line-chip.other:hover { background: var(--other); }
+
+/* Podpowiedź nad korytarzem odpowiada na jedno pytanie: "na czym stoję".
+   Numer wskazanej linii jest nagłówkiem, a pod nim ten sam rządek numerów co
+   na mapie - z podświetlonym tym jednym, żeby było widać, gdzie się jest w
+   kolejności i co jeszcze jedzie tym samym korytarzem. */
+.flow-tip-line {
+    display: block;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.flow-tip-line.tram { color: var(--tram); }
+.flow-tip-line.bus { color: var(--bus); }
+.flow-tip-line.other { color: var(--other); }
+
+.flow-tip-row {
+    display: flex;
+    gap: 3px;
+    margin: 3px 0 1px;
+    --chip-scale: 1;      /* podpowiedź ma swoją wielkość, nie skaluje się z mapą */
+}
+
+.flow-tip-row .line-chip { background: rgba(0, 0, 0, 0.07); }
+
+.flow-tip-hint {
+    display: block;
+    font-size: 11px;
+    opacity: 0.7;
+    font-style: italic;
+}
+
 /* ------------------------------------------------ panel deweloperski --- */
 
 #dev-panel {
@@ -673,6 +790,11 @@ body.panel-hidden #sidebar {
     right: 16px;
     z-index: 1000;
     width: 290px;
+    /* Suwaków jest już tyle, że nie mieszczą się na niższym ekranie - panel
+       przewija się w sobie zamiast wychodzić poza okno. */
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     transition: transform 0.2s ease, opacity 0.2s ease, visibility 0s;
 }
 
@@ -727,6 +849,40 @@ body.panel-hidden #sidebar {
     font-size: 11.5px;
     line-height: 1.4;
 }
+
+/* TYMCZASOWE (2026-08-15) - sekcja "Wygląd mapy" w panelu deweloperskim.
+   Idzie do kasacji razem z nią (patrz app.js, LOOK_DEFAULTS). */
+.dev-section {
+    margin-top: 18px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+}
+
+.dev-section h3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.dev-temp {
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: var(--surface-alt);
+    color: var(--ink-faint);
+}
+
+#dev-panel .field.compact { margin-top: 10px; }
+#dev-panel .field.compact label { font-size: 12px; font-weight: 500; }
+#dev-panel #look-reset { margin-top: 14px; width: 100%; }
+#look-dump { font-variant-numeric: tabular-nums; word-break: break-word; }
 
 .field-hint code {
     font-size: 11px;

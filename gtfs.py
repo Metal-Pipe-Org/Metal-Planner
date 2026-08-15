@@ -26,6 +26,18 @@ ROUTE_TYPE_LABELS = {0: "Tramwaj", 3: "Autobus"}
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
 
+# Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
+# polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
+# unicodedata.normalize, więc jawna tabela zamiast NFKD.
+_DIACRITIC_MAP = str.maketrans({
+    "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
+    "ó": "o", "ś": "s", "ź": "z", "ż": "z",
+})
+
+
+def _strip_diacritics(casefolded):
+    return casefolded.translate(_DIACRITIC_MAP)
+
 _day_cache = {}
 
 
@@ -113,7 +125,8 @@ class DayData:
 
     __slots__ = (
         "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
-        "display_name", "siblings", "trip_info", "trip_shape",
+        "display_name", "stops_by_norm_key", "norm_display_name",
+        "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of",
     )
 
@@ -127,6 +140,8 @@ class DayData:
         self.stop_coords = {}        # stop_id -> (lat, lon)
         self.stops_by_key = {}       # nazwa.casefold() -> [stop_id, ...]
         self.display_name = {}       # nazwa.casefold() -> oryginalna pisownia
+        self.stops_by_norm_key = {}  # jw. bez polskich znaków diakrytycznych
+        self.norm_display_name = {}  # jw. bez polskich znaków diakrytycznych
         self.siblings = {}           # stop_id -> inne słupki tego samego miejsca
         self.trip_info = {}          # trip_id -> (etykieta linii, kierunek)
         self.trip_shape = {}         # trip_id -> shape_id (geometria z shapes.txt)
@@ -204,6 +219,9 @@ def load_day(day):
         name_key = stop_name.casefold()
         data.stops_by_key.setdefault(name_key, []).append(stop_id)
         data.display_name.setdefault(name_key, stop_name)
+        norm_key = _strip_diacritics(name_key)
+        data.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
+        data.norm_display_name.setdefault(norm_key, stop_name)
 
     # Kanoniczne miejsce (patrz _build_places) i most pieszy między jego
     # słupkami (patrz _walking_bridges) - _merge_bridges scala go tu z
@@ -284,6 +302,10 @@ def match_stop(query, data):
     całe kanoniczne miejsce, nie tylko słupki o dokładnie wpisanej nazwie
     (patrz _expand_to_places) - albo (None, None, [podpowiedzi]) gdy nazwa
     jest nieznana/niejednoznaczna.
+
+    Dopasowanie ignoruje wielkość liter i - dopiero gdy dokładna pisownia
+    zawiedzie - polskie znaki diakrytyczne (patrz _strip_diacritics), więc
+    "Zabia" trafia w "Żabia", a "Dworzec Glowny" w "Dworzec Główny".
     """
     key = " ".join(query.split()).casefold()
     if not key:
@@ -291,11 +313,30 @@ def match_stop(query, data):
     if key in data.stops_by_key:
         return data.display_name[key], _expand_to_places(data, data.stops_by_key[key]), None
 
+    norm_key = _strip_diacritics(key)
+    if norm_key in data.stops_by_norm_key:
+        return (
+            data.norm_display_name[norm_key],
+            _expand_to_places(data, data.stops_by_norm_key[norm_key]),
+            None,
+        )
+
     candidates = [k for k in data.stops_by_key if key in k]
     if len(candidates) == 1:
         k = candidates[0]
         return data.display_name[k], _expand_to_places(data, data.stops_by_key[k]), None
-    return None, None, sorted(data.display_name[k] for k in candidates)[:8]
+    if candidates:
+        return None, None, sorted(data.display_name[k] for k in candidates)[:8]
+
+    norm_candidates = [k for k in data.stops_by_norm_key if norm_key in k]
+    if len(norm_candidates) == 1:
+        k = norm_candidates[0]
+        return (
+            data.norm_display_name[k],
+            _expand_to_places(data, data.stops_by_norm_key[k]),
+            None,
+        )
+    return None, None, sorted({data.norm_display_name[k] for k in norm_candidates})[:8]
 
 
 def all_stop_names():

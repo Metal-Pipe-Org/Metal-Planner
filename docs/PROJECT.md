@@ -1,7 +1,9 @@
 # Metal-Planner — dokumentacja projektu
 
 Mini-wiki: co to jest, jak jest zbudowane, jak działają algorytmy i co się
-zmieniało. Instrukcja uruchomienia jest w [README.md](README.md).
+zmieniało. Instrukcja uruchomienia jest w [README.md](../README.md); gwarancje
+zachowania mapy przepływów i testy, które je pilnują, są w
+[FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md).
 
 ## O projekcie
 
@@ -38,11 +40,12 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
   przystankami, posortowanych po odjeździe) i cache'uje ją. Klucz cache
   zawiera mtime pliku bazy, więc po nocnej podmianie dane przeładują się
   same — bez restartu Flaska.
-- **`planner.py`** — trzy algorytmy na tej samej tablicy połączeń:
-  `plan_route` (jedna najszybsza trasa, CSA), `plan_flow` (mapa przepływów)
-  i `plan_journeys` (lista propozycji tras) — opis niżej.
+- **`planner.py`** — dwa algorytmy na tej samej tablicy połączeń:
+  `plan_route` (jedna najszybsza trasa, CSA) i `plan_flow` (mapa przepływów
+  — zwraca teraz w jednej odpowiedzi i segmenty do rysowania, i listę
+  gotowych propozycji, czytaną wprost z tego samego grafu) — opis niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
-  `/api/flow`, `/api/journeys` (szczegóły w sekcji API).
+  `/api/flow` (szczegóły w sekcji API).
 
 ### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 
@@ -198,29 +201,40 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
 Pierwsze zapytanie dnia kosztuje ~1 s (ładowanie tablicy do RAM),
 kolejne są natychmiastowe (~30 ms).
 
-### Lista propozycji tras (`plan_journeys`)
+### Lista propozycji tras (część `plan_flow`, nie osobny algorytm)
 
 Mapa przepływów pokazuje, **czym w ogóle da się dojechać**; lista nazywa
-z tego kilka gotowych wariantów z godzinami. Oba widoki liczą to samo okno
-czasowe (`_deadline`: najlepszy przyjazd + ~50% czasu podróży, 5–30 min),
-więc nie mogą się rozjechać.
+z tego kilka gotowych wariantów z godzinami. To już NIE jest osobny skan —
+lista to po prostu ścieżki przeczytane wprost z tego samego grafu segmentów,
+który mapa właśnie narysowała (`_extract_transfer_graph` +
+`_enumerate_journeys`, wołane na końcu `plan_flow`, po `_select_and_anchor`).
+Efekt: lista nigdy nie pokaże przesiadki, której nie ma na mapie, i reaguje
+na te same suwaki (tolerancja regresji, okno czasowe) — dawniej to nie było
+prawdą (lista miała własne, niezależne od suwaków okno).
 
-Warianty powstają **metodą zakazów** (plateau/via-banning), bez osobnego
-algorytmu wielokryterialnego:
+1. **Graf przesiadek** (`_extract_transfer_graph`): węzły to już narysowane,
+   przycięte segmenty mapy; krawędzie to miejsca, gdzie z wyjścia jednego
+   segmentu da się zdążalnie wskoczyć w drugi — dokładnie ten sam warunek
+   porównywalnej jasności, którego `_select_and_anchor` już użył, żeby
+   uznać koniec segmentu za zakotwiczony. Punkty startowe to segmenty
+   zaczynające się na starcie relacji.
+2. **Przeszukiwanie** (`_enumerate_journeys`): w przód od startu, najpierw
+   najjaśniejsze gałęzie, z sufitami kosztu (limit etapów na propozycję,
+   limit zebranych wariantów, limit odwiedzonych węzłów) — duże miasto przy
+   niskim progu jasności mógłby inaczej dać kombinatoryczną eksplozję.
+3. Odpada powtórzony układ (te same linie wsiadane na tych samych
+   przystankach); ranking po przyjeździe, potem liczbie przesiadek, potem
+   czasie oczekiwania — tak jak dawniej.
+4. **Zabezpieczenie**: `_select_and_anchor` potrafi przyciąć najszybsze
+   segmenty z powodów niezwiązanych z progiem jasności (reguła kotwicy) -
+   `plan_flow` sprawdza, czy najszybsza trasa (już policzona przez `_scan`
+   na potrzeby deadline'u) rzeczywiście pojawia się w wyniku grafu; jeśli
+   nie, dorysowuje ją wprost - i do mapy, i do listy, tym samym
+   zrekonstruowanym przejazdem, więc obie odpowiedzi nadal się zgadzają.
 
-1. Najszybsza trasa to zwykłe CSA (`_scan`) + rekonstrukcja etapów.
-2. Potem ten sam skan powtarzamy z **zakazem każdej użytej linii** po kolei
-   (BFS po zbiorach zakazów, do dwóch linii naraz) — dostajemy trasy
-   strukturalnie inne, a nie ten sam korytarz kwadrans później.
-3. Odpada wszystko, co dociera po deadline albo powtarza układ (te same
-   linie wsiadane na tych samych przystankach).
-4. Sufity kosztu: maks. 14 skanów i 6 propozycji na zapytanie; każdy skan
-   z zakazem jest ucinany deadline'em, żeby przy nieosiągalnym celu nie
-   przeglądać reszty doby. Realnie 15–45 ms na cache'owanym dniu.
-
-Etapy dostają geometrię z `shapes.txt` (ten sam `gtfs.shape_slice` co
-przepływy, jedno połączenie do bazy na zapytanie), więc wybrana propozycja
-rysuje się po realnych ulicach i torach.
+Etapy dostają geometrię wprost z segmentu (ten sam `gtfs.shape_slice`, jedno
+połączenie do bazy na całe zapytanie - i mapę, i listę), więc wybrana
+propozycja rysuje się po realnych ulicach i torach.
 
 ### Mapa przepływów / „symulacja mrówek" (`plan_flow`)
 
@@ -314,18 +328,19 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
-- `GET /api/journeys?start=&end=&time=HH:MM` (albo `start_lat`/`start_lon`,
-  `end_lat`/`end_lon` i `range_m` — jak w `/api/flow`) — lista propozycji:
-  `{start, end, departure, deadline, journeys: [{departure, arrival,
-  duration_min, wait_min, transfers, legs: [...]}, …]}`, posortowana po
-  godzinie przyjazdu. Etap przejazdu: `{kind: "ride", line, num, mode,
-  headsign, from, from_time, to, to_time, minutes, stops, stops_count,
-  path}`; etap pieszy: `{kind: "walk", text, minutes, from, to, path}`.
-- `GET /api/flow?start=&end=&time=HH:MM&qmin=0.60` — mapa przepływów:
+- `GET /api/flow?start=&end=&time=HH:MM&extra_sec=600` (albo `start_lat`/
+  `start_lon`, `end_lat`/`end_lon` i `range_m` zamiast nazw) — JEDNA
+  odpowiedź niesie i mapę, i listę propozycji (dawniej dwa osobne
+  zapytania/endpointy — `/api/journeys` zniknął, patrz wyżej dlaczego):
   `{start, end, departure, best_arrival, deadline, segments: [{path:
-  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …]}`,
-  segmenty posortowane rosnąco po `w` (kolejność rysowania); `path` to
-  kolejne przystanki od wsiadania do ostatniego użytecznego wyjścia.
+  [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …],
+  journeys: [{departure, arrival, duration_min, wait_min, transfers,
+  legs: [...]}, …]}`. `segments` posortowane rosnąco po `w` (kolejność
+  rysowania); `path` to kolejne przystanki od wsiadania do ostatniego
+  użytecznego wyjścia. `journeys` posortowane po godzinie przyjazdu; etap
+  przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
+  to, to_time, minutes, stops, stops_count, path}`; etap pieszy:
+  `{kind: "walk", text, minutes, from, to, path}`.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -335,7 +350,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 |---|---|
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
-| `planner.py` | CSA (`plan_route`), mapa przepływów (`plan_flow`), lista propozycji (`plan_journeys`) |
+| `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
@@ -347,6 +362,8 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
 | `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
 | `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
+| `docs/` | dokumentacja: ten plik, `ROUTING_ALGORITHM.md`, `FLOW_MAP_CONTRACT.md` |
+| `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
 
@@ -371,6 +388,38 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   przez CORS — nieprzejrzyste odpowiedzi zjadały ~7 MB limitu miejsca za
   sztukę. `viewport-fit=cover` włącza wreszcie wcięcia ekranu, o które
   style i tak już się upominały (`env(safe-area-inset-*)`).
+- **2026-08-09** — lista propozycji tras przestała być osobnym algorytmem:
+  `plan_journeys` (metoda zakazu linii) usunięty, `/api/journeys` usunięty.
+  Propozycje to teraz ścieżki czytane wprost z grafu segmentów, który
+  `plan_flow` i tak już liczy dla mapy (`_extract_transfer_graph` +
+  `_enumerate_journeys`) - jedno zapytanie/`fetch` niesie obie rzeczy naraz,
+  więc mapa i lista nie mogą się już rozjechać (dawniej potrafiły: lista
+  ignorowała próg jasności i inne suwaki mapy).
+
+  Przy okazji znaleziona i naprawiona prawdziwa przyczyna (nie łatka na
+  objawie) przypadku, w którym najszybsza trasa potrafiła w ogóle nie
+  pojawić się ani na mapie, ani na liście: reguła cofnięcia w
+  `_discover_segments` porównywała KAŻDY kandydujący przystanek wsiadania
+  do NAJLEPSZEGO `latest[]` spośród wszystkich rozwiniętych przystanków
+  startowych (klik w punkt mapy rozwija się w kilka fizycznie różnych
+  słupków w zasięgu) - więc wsiadanie na jednym z nich odpadało, jeśli
+  akurat INNY przystanek startowy miał lepsze dalsze połączenia, mimo że
+  bycie na którymkolwiek z własnych przystanków startowych nigdy nie jest
+  "cofnięciem". Naprawione: reguła cofnięcia pomija teraz przystanki
+  startowe (`arrived_by == "origin"`) całkowicie. Zostaje jedno,
+  niezależne od tego zabezpieczenie w `plan_flow`: gdyby `_select_and_anchor`
+  i tak przycięło WSZYSTKIE segmenty do zera (skrajny przypadek, nie
+  pojedynczy brakujący segment), dorysowuje najszybszą trasę wprost.
+
+  Cztery nakładające się na siebie suwaki okna czasowego (próg jasności +
+  mnożnik wydłużenia + widełki min/maks zapasu) zastąpione jednym: "ile
+  dłużej niż najszybsza trasa" (`extra_sec`, wprost w minutach, 0–60 min,
+  domyślnie 30). Ich łączny efekt matematycznie zawsze sprowadzał się do
+  jednej liczby (okno × (1 − próg jasności)), więc żadna kombinacja starych
+  czterech suwaków nie dawała niczego, czego nie dałoby się osiągnąć jednym.
+  Próg jasności zniknął też z `_select_and_anchor` - okno czasowe
+  (`_deadline`) samo w sobie wyznacza, co jest brane pod uwagę; `q` zostaje
+  tylko jako ciągła wartość do intensywności rysowania.
 - **2026-08-04** — lista propozycji tras obok mapy przepływów: nowy
   `plan_journeys` (warianty metodą zakazu użytych linii, wspólne okno
   czasowe z przepływami) i `/api/journeys`; karty tras w stylu klasycznej
@@ -428,9 +477,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - Intensywność w trybie przepływów to przybliżenie (zapas czasu najlepszego
   wyjścia względem deadline) — bywa, że rzadko kursująca, ale dobra linia
   wyjdzie bledsza, niż powinna.
-- Segment pokazuje też objazdy „w bok", jeśli mieszczą się w limicie 1,5× —
-  to celowe (niszowe opcje mają być widoczne), ale przy szerokim limicie
-  bywa tego sporo; ewentualny suwak zakresu jest na liście pomysłów.
+- Segment pokazuje też objazdy „w bok", jeśli mieszczą się w oknie czasowym
+  (suwak „ile dłużej niż najszybsza trasa" w panelu, domyślnie 30 min, do
+  60 min) — to celowe (niszowe opcje mają być widoczne), ale przy szerokim
+  oknie bywa tego sporo.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
 - Wyszukiwanie działa w ramach jednej doby rozkładowej: zapytanie o 0:30
@@ -443,5 +493,4 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 - Dymki na węzłach przesiadkowych: „w co mogę się tu przesiąść i o której".
 - Więcej odjazdów tej samej trasy na liście („następny kurs o…").
-- Suwak zakresu (1,5× / 2× / 3×) w panelu.
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
