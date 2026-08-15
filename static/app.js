@@ -841,7 +841,6 @@ function adoptNames(data) {
     nie mogą już się rozjechać (patrz planner.plan_flow). */
 function loadPlan(token, refit) {
     const params = queryParams();
-    params.set('count', $('count').value);
     return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
         .then(([data]) => {
             if (token !== requestToken) return;
@@ -1143,6 +1142,5 @@ liveSlider('range', 'range-value');
 liveSlider('extra', 'extra-value');
 liveSlider('extra-floor', 'extra-floor-value');
 liveSlider('extra-cap', 'extra-cap-value');
-liveSlider('count', 'count-value');
 
 }
