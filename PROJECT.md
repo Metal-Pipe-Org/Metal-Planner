@@ -112,6 +112,15 @@ chowania panelu naraz tylko by myliły). Klasy `view-map`/`view-list` na
 Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
 ten kadr zobaczymy po przełączeniu zakładki.
 
+Na czas szukania (dwa zapytania naraz: przepływy + lista) leci **kółko
+ładowania** w dwóch miejscach, bo w każdym widoku widać co innego: w
+komunikacie „Szukam połączeń…" i na przycisku „Szukaj" — na telefonie w
+widoku mapy panel wyników jest schowany, więc samo pierwsze byłoby niewidoczne
+akurat tam, gdzie wyszukiwanie odpala się samo po drugim kliknięciu w mapę.
+Gasi je tylko odpowiedź na aktualne zapytanie (`requestToken`), a ✕ w trakcie
+szukania podbija token — porzucone zapytanie nie dorysuje już wyników relacji,
+której nie ma na ekranie.
+
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
 
@@ -346,6 +355,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   niej), z wypełnionym celem odpala wyszukiwanie od razu, bez celu przesuwa
   mapę na okolicę. Błędy zgody/sygnału w osobnej linijce pod polami, żeby nie
   kasować gotowej listy tras; bez HTTPS (poza `localhost`) przycisk się chowa.
+  Do tego kółko ładowania na czas szukania — w komunikacie „Szukam połączeń…"
+  i na przycisku „Szukaj" (na telefonie w widoku mapy wyników nie widać, więc
+  samo pierwsze by nie wystarczyło). ✕ w trakcie wyszukiwania porzuca
+  zapytanie w locie zamiast czekać, aż dorysuje nieaktualne wyniki.
 - **2026-08-11** — planer jako PWA: manifest z ikonami, service worker
   (`/sw.js`) z osobną strategią dla strony, API, statyk i kafelków mapy,
   przycisk instalacji w nagłówku i pasek „jest nowa wersja". Bez sieci

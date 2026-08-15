@@ -44,6 +44,10 @@ body {
 }
 
 .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     border: none;
     border-radius: 10px;
     padding: 0 16px;
@@ -101,6 +105,33 @@ body {
 
 body.panel-hidden .icon-button.floating { left: 16px; }
 
+/* Kółko ładowania - pierścień z wyciętym fragmentem, w kolorze tekstu, więc
+   ten sam element działa i na przycisku (biały), i w komunikacie (szary). */
+.spinner {
+    display: inline-block;
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Kółko na przycisku pokazuje się tylko na czas wyszukiwania - poza nim
+   przycisk jest zwykłym „Szukaj". */
+#search .spinner { display: none; }
+body.searching #search .spinner { display: inline-block; }
+body.searching #search { cursor: progress; }
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner { animation-duration: 2.4s; }   /* wolniej, ale wciąż widać, że trwa */
+}
+
 .hint {
     margin: 10px 0 0;
     color: var(--ink-faint);
@@ -114,6 +145,12 @@ body.panel-hidden .icon-button.floating { left: 16px; }
     box-shadow: var(--shadow);
     color: var(--ink-soft);
     font-size: 14px;
+}
+
+.notice.loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .notice.error {
