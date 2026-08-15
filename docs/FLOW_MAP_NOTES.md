@@ -445,3 +445,14 @@ przeglądarki wraca do normy.
 powstawał, a każdy ruch myszy nad korytarzem próbował go stworzyć od nowa i
 wysypywał się w tym samym miejscu. Błąd jest starszy niż punkt 7 — siedział
 w kodzie od czasów, gdy dymek pokazywał listę linii. Naprawione:
+`setLatLng` przed `addTo`. Bez tego cała podpowiedź „na czym stoisz" (numer
+linii, skład korytarza, „kliknij, aby otworzyć trasę") była martwym kodem.
+
+## 2026-08-15, drugie przejście: dobrane wartości wyglądu + skąd bierze się gęstość mapy
+
+**Wartości wyglądu dobrane przez użytkownika na żywo** i wpisane jako
+`LOOK_DEFAULTS`: krycie 0.1 → 1, grubość 0.5 → 3 px, otoczka od 0.45,
+przygaszenie 0.22, grupki numerów co 200 px, numery 0.8×, krycie numerów 1.
+Sekcja suwaków ZOSTAJE w kodzie, ale jest schowana — przełącznik
+`LOOK_TUNING` w `app.js` (`false`) chowa ją i każe ignorować zapamiętane w
+`localStorage` ustawienia, żeby czyjeś stare wartości nie przykryły

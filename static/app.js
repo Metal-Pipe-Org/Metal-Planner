@@ -1500,4 +1500,81 @@ liveSlider('extra', 'extra-value');
 liveSlider('extra-floor', 'extra-floor-value');
 liveSlider('extra-cap', 'extra-cap-value');
 
+// --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
+//
+// Te suwaki nie dotykają serwera - kręcą wyłącznie liczbami z LOOK_DEFAULTS,
+// więc mapa przemalowuje się natychmiast, z ostatniej odpowiedzi (lastFlow),
+// bez ponownego zapytania. Wartości są już dobrane (siedzą w LOOK_DEFAULTS),
+// więc cała sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca
+// ją, gdyby trzeba było stroić od nowa.
+const LOOK_KNOBS = {
+    'look-min-op': 'minOpacity',
+    'look-max-op': 'maxOpacity',
+    'look-min-w': 'minWeight',
+    'look-max-w': 'maxWeight',
+    'look-casing': 'casingFrom',
+    'look-dim': 'dimFactor',
+    'look-label-step': 'labelStep',
+    'look-label-size': 'labelScale',
+    'look-label-op': 'labelOpacity',
+};
+
+function saveLookPrefs() {
+    try {
+        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(look));
+    } catch {
+        // localStorage niedostępny - suwaki działają dalej, po prostu się nie zapamiętają
+    }
+}
+
+/** Przemalowanie z ostatniej odpowiedzi - bez zapytania do serwera. Wybrana
+    trasa rysuje się na nowo NA WIERZCHU przemalowanego wachlarza (kolejność
+    warstw w canvasie to kolejność dokładania). */
+function applyLook() {
+    document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+    if (lastFlow) drawFlow(lastFlow, false);
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+    const dump = $('look-dump');
+    if (dump) {
+        dump.textContent = Object.entries(look)
+            .map(([k, v]) => `${k}: ${v}`).join(', ');
+    }
+}
+
+function bindLookSliders() {
+    const section = $('look-section');
+    if (!section) return;               // sekcja skasowana - wartości zostają domyślne
+    if (!LOOK_TUNING) { section.hidden = true; return; }
+    section.hidden = false;
+    let timer = null;
+    const show = id => {
+        const input = $(id);
+        const out = $(id + '-value');
+        if (out) out.textContent = input.value;
+    };
+    for (const [id, key] of Object.entries(LOOK_KNOBS)) {
+        const input = $(id);
+        input.value = look[key];        // źródłem prawdy jest LOOK_DEFAULTS + localStorage
+        show(id);
+        input.addEventListener('input', () => {
+            look[key] = Number(input.value);
+            show(id);
+            saveLookPrefs();
+            clearTimeout(timer);        // przeciąganie suwaka: jedno przemalowanie na klatkę
+            timer = setTimeout(applyLook, 60);
+        });
+    }
+    $('look-reset').addEventListener('click', () => {
+        Object.assign(look, LOOK_DEFAULTS);
+        for (const [id, key] of Object.entries(LOOK_KNOBS)) {
+            $(id).value = look[key];
+            show(id);
+        }
+        saveLookPrefs();
+        applyLook();
+    });
+}
+bindLookSliders();
+document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+
 }
