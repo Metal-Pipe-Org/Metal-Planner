@@ -600,6 +600,96 @@ body.panel-hidden #sidebar {
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.other { background: var(--other); }
 
+/* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
+   wszystkimi jego numerami obok siebie - nie osobna plakietka dla każdej
+   linii rozrzucona gdzie indziej (patrz placeLineLabels w app.js). Kotwica
+   sama nie ma rozmiaru; pudełko wysrodkowuje się na niej własnym transformem,
+   żeby numer stał NA korytarzu, a nie obok niego. */
+.line-cluster-anchor {
+    width: auto !important;
+    height: auto !important;
+    white-space: nowrap;
+}
+
+.line-cluster {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    flex-direction: column;   /* najgęstsze korytarze łamią się na wiersze */
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 9px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.line-cluster-row {
+    display: flex;
+    gap: 3px;
+}
+
+/* Pojedynczy numer w grupce - jest też celem myszy: najechanie wskazuje tę
+   linię na mapie, kliknięcie otwiera jej propozycję. */
+/* Wielkość numerów siedzi na suwaku "Wielkość numerów" (--chip-scale, patrz
+   TYMCZASOWE w app.js) - domyślnie 1, czyli dokładnie te rozmiary co poniżej. */
+.line-chip {
+    font-size: calc(11px * var(--chip-scale, 1));
+    font-weight: bold;
+    line-height: calc(15px * var(--chip-scale, 1));
+    padding: 0 calc(3px * var(--chip-scale, 1));
+    border-radius: 5px;
+    white-space: nowrap;
+}
+
+.line-chip.tram { color: var(--tram); }
+.line-chip.bus { color: var(--bus); }
+.line-chip.other { color: var(--other); }
+
+.line-chip.picked,
+.line-cluster .line-chip:hover { color: #fff; }
+.line-chip.picked.tram,
+.line-cluster .line-chip.tram:hover { background: var(--tram); }
+.line-chip.picked.bus,
+.line-cluster .line-chip.bus:hover { background: var(--bus); }
+.line-chip.picked.other,
+.line-cluster .line-chip.other:hover { background: var(--other); }
+
+/* Podpowiedź nad korytarzem odpowiada na jedno pytanie: "na czym stoję".
+   Numer wskazanej linii jest nagłówkiem, a pod nim ten sam rządek numerów co
+   na mapie - z podświetlonym tym jednym, żeby było widać, gdzie się jest w
+   kolejności i co jeszcze jedzie tym samym korytarzem. */
+.flow-tip-line {
+    display: block;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.flow-tip-line.tram { color: var(--tram); }
+.flow-tip-line.bus { color: var(--bus); }
+.flow-tip-line.other { color: var(--other); }
+
+.flow-tip-row {
+    display: flex;
+    gap: 3px;
+    margin: 3px 0 1px;
+    --chip-scale: 1;      /* podpowiedź ma swoją wielkość, nie skaluje się z mapą */
+}
+
+.flow-tip-row .line-chip { background: rgba(0, 0, 0, 0.07); }
+
+.flow-tip-hint {
+    display: block;
+    font-size: 11px;
+    opacity: 0.7;
+    font-style: italic;
+}
+
 /* ------------------------------------------------ panel deweloperski --- */
 
 #dev-panel {

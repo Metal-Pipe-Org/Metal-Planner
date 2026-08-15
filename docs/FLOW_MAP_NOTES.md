@@ -389,3 +389,59 @@ oszczędzając ani procenta ekranu. Usunięty.
 
 19/19 testów zielonych.
 
+## 2026-08-15 — widoczność dołu skali, całe linie pod kursorem, koniec prawego przycisku
+
+Cztery rzeczy naraz, wszystkie po stronie rysowania (planner nietknięty,
+21/21 testów zielonych).
+
+**Dół skali był niewidoczny — i to on udawał „linie donikąd" (punkt 8).**
+Najbledszy kawałek (w=0) miał `opacity 0.35` i `1,5 px`. Na tle kafelków OSM
+wychodziła z tego szara nitka nie do odróżnienia od zwykłej ulicy. Skutek
+sięgał dalej niż estetyka: **zakotwiczone** ogony wyglądały jak urwane w
+powietrzu, bo widać było jasny koniec, a nie widać było tego, co go
+przedłuża. Nazwany przypadek (KSIĘŻE MAŁE → Wojszyce, 21:32, okno 200%):
+tramwaj 15 kończy się na PARKU POŁUDNIOWYM i jest tam zakotwiczony
+przesiadką w autobus 612, który jedzie stamtąd dalej — przez Bielany, Ślęzę
+i Wysoką — do samych Wojszyc, z przyjazdem 22:38, czyli dokładnie na
+granicy okna. Sprawdzone w kodzie (`_select_and_anchor` → `_leads_onward` +
+`_joins`), nie zgadywane: kotwica jest, kontynuacja jest narysowana, tylko
+że `exit_q` schodzi po drodze do 0.00 i po przeskalowaniu wychodzi z tego
+w=0 — czyli ta właśnie, niewidoczna nitka. Punkt 4 nie był złamany; złamany
+był punkt 8, a wyglądało to jak złamany punkt 4.
+
+Wartość progu wybrał potem użytkownik suwakami, na realnej mapie — patrz
+wpis niżej (te `0.35 / 1.5 px` były po prostu za mało widoczne przy
+ówczesnej, grubszej reszcie skali; sam próg nie ma w kontrakcie żadnej
+liczby, punkt 8 mówi tylko „ma być widoczne bez najeżdżania myszką").
+
+**Suwaki wyglądu (TYMCZASOWE).** Dziewięć liczb, którymi rysuje się mapę
+(dół i góra skali krycia i grubości, próg białej otoczki, przygaszenie pod
+wybraną trasą, odstęp/wielkość/krycie grupek numerów), siedzi w
+`LOOK_DEFAULTS` w `app.js` i jednocześnie na suwakach w panelu
+deweloperskim, sekcja „Wygląd mapy". Suwaki nie ruszają serwera —
+przemalowują mapę z ostatniej odpowiedzi (`lastFlow`), więc dobiera się je
+na żywo, na realnej mapie, zamiast zgadywać w kodzie. Po ustaleniu wartości:
+wpisać je w `LOOK_DEFAULTS` i skasować sekcję (znaczniki TYMCZASOWE są w
+`app.js`, `index.html` i `style.css`).
+
+**Pod kursorem podświetla się CAŁA LINIA, nie kawałek.** Jeden fizyczny kurs
+bywa pocięty na kilkanaście kawałków (jasność — punkt 3, skład korytarza —
+punkt 7), więc rozjaśnianie jednego z nich odpowiadało na pytanie „gdzie
+dokładnie stoi kursor" zamiast na to, o które chodzi: „dokąd stąd jedzie ta
+linia". Teraz podświetlenie to OSOBNA warstwa dokładana na wierzch
+wszystkiego (ciemna otoczka + pełne krycie), a nie przemalowanie warstw w
+miejscu — inaczej „na wierzchu" zależy od kolejności rysowania i jasna linia
+obok potrafi przykryć tę wskazaną.
+
+**Prawy przycisk myszy — usunięty.** Przechodził na następną linię
+korytarza. Wybieranie linii jest już w grupce numerów (najechanie na numer
+wskazuje dokładnie tę linię), więc przełączanie było drugą drogą do tego
+samego, tyle że przez zgadywanie, ile razy kliknąć. Menu kontekstowe
+przeglądarki wraca do normy.
+
+**Przy okazji: dymek nad korytarzem nigdy nie działał.** `L.tooltip(opts)
+.addTo(map)` bez wcześniejszego `setLatLng` rzuca wyjątkiem w środku
+`addTo` (Leaflet od razu liczy pozycję dymka), więc `flowTooltip` nigdy nie
+powstawał, a każdy ruch myszy nad korytarzem próbował go stworzyć od nowa i
+wysypywał się w tym samym miejscu. Błąd jest starszy niż punkt 7 — siedział
+w kodzie od czasów, gdy dymek pokazywał listę linii. Naprawione:
