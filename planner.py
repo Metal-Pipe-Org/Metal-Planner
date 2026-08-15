@@ -215,15 +215,11 @@ DEFAULT_EXTRA_CAP_SEC = 3600    # domyślnie: najwyżej 60 min naddatku
 MIN_EXTRA_CAP_SEC = 600
 MAX_EXTRA_CAP_SEC = 7200        # (suwak w UI go nadpisuje) - sufit 120 min
 
-Q_ANCHOR_TOL = 0.10     # ogon rysujemy tylko do przesiadki w kontynuację
-                        # niewiele ciemniejszą od segmentu (tolerancja jasności)
+Q_ANCHOR_TOL = 0.10     # tolerancja jasności przy porównaniu segmentów
+                        # (patrz _extract_transfer_graph; kotwica końca mapy
+                        # już jej nie używa - patrz _select_and_anchor)
 BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
                         # (cofnięcia) o więcej niż 2 min
-PROGRESS_TOL_SEC = 0    # domyślny luz reguły postępu (suwak w UI go nadpisuje) -
-                        # metryka latest bywa zaszumiona o 1-2 min między
-                        # sąsiednimi węzłami, nawet na dobrej trasie
-MIN_PROGRESS_TOL_SEC = 0
-MAX_PROGRESS_TOL_SEC = 600
 WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
 
 MIN_RANGE_M = 200       # zasięg szukania słupków wokół klikniętego punktu
@@ -318,7 +314,7 @@ def _summarize_journey(legs, rides, arrival, dep_sec):
     }
 
 
-def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
+def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, range_m=None, extra_pct=None,
               extra_floor_sec=None, extra_cap_sec=None, journey_limit=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
@@ -338,7 +334,16 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     Jeden kurs może więc wyjść na mapie jako kilka kolejnych kawałków o
     różnej jasności (patrz _finalize_segments) - ale tylko tam, gdzie coś
     naprawdę się zmienia; korytarz bez mijanej, lepszej opcji nadal dostaje
-    jedną, stałą jasność na całej narysowanej długości.
+    jedną, stałą jasność na całej narysowanej długości. Ta jasność per
+    pozycja to WYŁĄCZNIE wynik konkretnych, znalezionych kontynuacji
+    (_refine_brightness, patrz suffix-min tamże) - _discover_segments nie
+    odrzuca żadnego zdążalnego wyjścia z góry na podstawie porównania
+    sąsiednich przystanków (taki filtr istniał kiedyś, ale porównywał
+    surowe `latest` - wartość zależną od aktualnego okna czasowego - więc
+    dwa sąsiednie przystanki mogły zamienić się miejscami przy samym tylko
+    poszerzeniu suwaka i gasić realne wyjścia; usunięty 2026-08-12, bo
+    dokładnie ta sama gwarancja "brak migotania" wynika już poprawnie,
+    stabilnie względem okna, z suffix-min w _refine_brightness).
 
     Liczone w krokach (patrz odpowiednie funkcje): odkrycie segmentów
     kandydujących (_discover_segments), dopracowanie ich jasności PER WYJŚCIE
@@ -350,7 +355,7 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     przeczytane wprost z tego samego, już narysowanego grafu segmentów
     (_extract_transfer_graph + _enumerate_journeys), więc lista nigdy nie
     pokaże przesiadki, której nie ma na mapie, i reaguje na te same suwaki
-    (progress_tol_sec, extra_pct/extra_floor_sec/extra_cap_sec) co mapa.
+    (extra_pct/extra_floor_sec/extra_cap_sec) co mapa.
 
     extra_pct/extra_floor_sec/extra_cap_sec to suwaki okna czasowego: "pokaż
     trasy do X% dłuższe niż najszybsza, ale co najmniej floor i najwyżej cap
@@ -359,8 +364,6 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     (bardzo krótkie albo bardzo długie trasy). Nie ma osobnego progu
     jasności - wszystko w oknie czasowym jest pokazywane, jasność (q) służy
     już tylko do intensywności rysowania.
-    progress_tol_sec to luz reguły postępu (patrz _discover_segments);
-    None = domyślne PROGRESS_TOL_SEC.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -369,10 +372,6 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     faktycznie da się złożyć.
     """
     when = when or datetime.now()
-    progress_tol_sec = (
-        PROGRESS_TOL_SEC if progress_tol_sec is None
-        else max(MIN_PROGRESS_TOL_SEC, min(MAX_PROGRESS_TOL_SEC, progress_tol_sec))
-    )
     range_m = (
         DEFAULT_RANGE_M if range_m is None
         else max(MIN_RANGE_M, min(MAX_RANGE_M, range_m))
@@ -406,15 +405,29 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
     latest = _backward(day, target_stops, dep_sec, deadline)
 
     # Punkt odniesienia reguły cofnięcia: im później można być na przystanku
-    # i wciąż zdążyć (latest), tym bliżej celu się jest.
+    # i wciąż zdążyć (latest), tym bliżej celu się jest. Liczony względem
+    # best_arr (STAŁEJ, patrz _refine_brightness - ten sam powód: q=1.0 dla
+    # najszybszej trasy musi się odnosić do best_arr, nie do deadline), NIE
+    # względem samego `latest` (policzonego do deadline) - inaczej suwak
+    # okna, poszerzając się, mógłby gdzieś w mieście ujawnić zupełnie
+    # niepowiązaną, szybką trasę z innego przystanku startowego, winduje
+    # origin_latest i - wciąż w ramach TEGO SAMEGO progu BACKTRACK_TOL_SEC -
+    # kasuje w _discover_segments kandydatów na zupełnie innych, wolniejszych
+    # korytarzach, które z tamtą trasą nie mają nic wspólnego (ten sam rodzaj
+    # niestabilności, co już raz naprawiony dla `bound` przez WAIT_CAP_SEC -
+    # patrz FLOW_MAP_CONTRACT.md, punkt 9). `stop_latest` w _discover_segments
+    # zostaje liczone względem deadline jak dotychczas - rośnie razem z oknem,
+    # więc przy origin_latest ZAMROŻONYM na best_arr próg cofnięcia może z
+    # oknem tylko złagodnieć, nigdy zaostrzeć.
+    latest_at_best = _backward(day, target_stops, dep_sec, best_arr)
     origin_latest = max(
-        (latest[s] for s in source_stops if s in latest), default=None,
+        (latest_at_best[s] for s in source_stops if s in latest_at_best), default=None,
     )
     target_set = target_stops
 
     segs = _discover_segments(
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
-        latest, origin_latest, target_set, progress_tol_sec,
+        latest, origin_latest, target_set,
     )
     _refine_brightness(day, segs, target_set, deadline, best_arr)
     kept, ranges = _select_and_anchor(day, segs, source_stops, target_set)
@@ -459,18 +472,39 @@ def plan_flow(start_query, end_query, when=None, progress_tol_sec=None,
 
 
 def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
-                        latest, origin_latest, target_set, progress_tol_sec):
+                        latest, origin_latest, target_set):
     """Krok 1: dla każdego kursu w oknie wybiera miejsce wsiadania (reguła
     cofnięcia, patrz BACKTRACK_TOL_SEC) i idzie nim naprzód zbierając
-    wyjścia - zwraca listę segmentów kandydujących, jeszcze bez dopracowanej
-    jasności (patrz _refine_brightness).
+    KAŻDE zdążalne wyjście - zwraca listę segmentów kandydujących, jeszcze
+    bez dopracowanej jasności (patrz _refine_brightness).
 
-    Reguła postępu porównuje każdy przystanek do NAJLEPSZEGO `latest`
-    osiągniętego na tym kursie DO TEJ PORY (`best_latest_seen`), nie do
-    wartości zanotowanej raz przy wsiadaniu - bo ta druga wersja przepuszcza
-    powolny, ale realny odpływ: kilka przystanków z rzędu, każdy trochę
-    gorszy od poprzedniego, nigdy nie spadnie poniżej PIERWSZEGO pomiaru,
-    jeśli akurat od niego zaczyna się spadek.
+    Jedyny filtr tutaj jest ABSOLUTNY, nie względny: wyjście liczy się,
+    gdy jazda do tego przystanku i tak jeszcze mieści się w oknie (`arr_t
+    <= leave_by`, patrz niżej) - to samo `leave_by` sprawdzane przeciw
+    SOBIE SAMEMU (własny przyjazd vs własny termin), więc wynik jest
+    stabilny względem szerokości okna: raz zdążalny przystanek zostaje
+    zdążalny przy każdym szerszym oknie, nigdy na odwrót.
+
+    Było tu kiedyś DRUGIE, WZGLĘDNE sito ("reguła postępu") porównujące
+    `latest` sąsiednich przystanków tego samego kursu, żeby odrzucić z
+    góry przystanki "bez postępu" (miało to realizować punkt 3 kontraktu -
+    jasność ma spadać po minięciu realnej, lepszej przesiadki). USUNIĘTE
+    2026-08-12: `latest` dwóch sąsiednich przystanków rośnie z oknem w
+    RÓŻNYM tempie (każdy zależnie od tego, jaka akurat alternatywa jest w
+    danym miejscu "widoczna" w oknie), więc ich względna kolejność
+    potrafiła się odwrócić przy samym tylko poszerzeniu suwaka - przystanek
+    uznany za "postęp" przy jednej szerokości okna przestawał nim być przy
+    szerszej, gasząc realne, niezmienione fizycznie wyjście (stąd zgłoszenie
+    "trasy znikają przy zwiększeniu okna"). Podniesienie tolerancji tego
+    porównania (dawny suwak "Tolerancja regresji") tylko przesuwało próg
+    szumu, nie usuwało go - w gęstszej siatce POGARSZAŁO sprawę. Punkt 3 nie
+    wymaga tego filtra: _refine_brightness i tak liczy jasność KAŻDEGO
+    zdążalnego wyjścia z osobna przez suffix-min najlepszej REALNIE
+    znalezionej kontynuacji (nie przez surowe `latest`) - a to jest
+    dowodliwie monotoniczne (widoczny, jeśli w ogóle zdążalny) i stabilne
+    względem okna (patrz komentarz przy `bound` niżej i punkt 9 kontraktu).
+    Filtr "z góry" był więc nadmiarowy wobec już poprawnej, stabilnej
+    maszynerii niżej w potoku - i to on, nie ona, był źródłem niestabilności.
     """
     conns = day.conns
     trip_conns = {}   # kurs -> indeksy jego połączeń w oknie [dep_sec, deadline)
@@ -485,7 +519,6 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
     raw = {}     # (linia, pełna trasa) -> dane segmentu
     for trip, idxs in trip_conns.items():
         stops_seq = None
-        best_latest_seen = None
         departures = []   # (przystanek, odjazd) wzdłuż kursu - do przesiadek
         arrivals = []     # (przystanek, przyjazd) wzdłuż kursu - do etapów tras
         exits = []   # (pozycja w stops_seq, bound, przyjazd, przystanek)
@@ -515,28 +548,14 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
                         and stop_latest < origin_latest - BACKTRACK_TOL_SEC):
                     continue
                 stops_seq = [dep_s]
-                best_latest_seen = stop_latest
             elif dep_s != stops_seq[-1]:
                 break                        # przerwany łańcuch - utnij
             departures.append((dep_s, dep_t))
             arrivals.append((arr_s, arr_t))
             stops_seq.append(arr_s)
             leave_by = latest.get(arr_s)
-            prior_best = best_latest_seen   # najlepszy punkt PRZED tym przystankiem
-            if leave_by is not None and (
-                    best_latest_seen is None or leave_by > best_latest_seen):
-                best_latest_seen = leave_by
             if leave_by is None or arr_t > leave_by:
-                continue
-            # Wyjście liczy się tylko, gdy jazda PRZYBLIŻYŁA do celu - do
-            # NAJLEPSZEGO punktu tego kursu SPRZED tego przystanku, nie
-            # tylko do startu (inaczej kurs "w drugą stronę" świeciłby pełną
-            # jasnością). Porównanie do prior_best (a nie do już
-            # zaktualizowanego best_latest_seen) jest celowe: świeży
-            # rekord nie może sam siebie zdyskwalifikować.
-            if (prior_best is not None
-                    and leave_by <= prior_best - progress_tol_sec):
-                continue
+                continue   # ten konkretny przystanek już nie mieści się w oknie
             # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
             # wysiądziemy tutaj, ZANIM znajdzie się realna kontynuacja (patrz
             # join_value w _refine_brightness): arr_t + "kara" za nieznaną
@@ -785,6 +804,52 @@ def _exit_index(day, kept, ranges):
     return exit_index
 
 
+def _leads_onward(day, other, stop, behind, drawn=None):
+    """Czy `other` jest w tym miejscu prawdziwą KONTYNUACJĄ, czy tylko
+    ZAWRACA po naszych własnych śladach.
+
+    Sedno punktu 4 kontraktu. Sam fakt, że na końcu ogona stoi zdążalny,
+    jasny kurs, NIE wystarcza, żeby ogon uznać za zakotwiczony: jeśli ten
+    kurs jedzie z powrotem na przystanek, przez który już przejechaliśmy
+    (klasycznie: pętla końcowa, na którą wjeżdża się tylko po to, żeby z
+    niej zaraz wrócić), to ogon nadal wisi w powietrzu - wystaje z sieci i
+    prowadzi donikąd, mimo że technicznie da się tam "przesiąść".
+
+    `behind` to CAŁA przejechana dotąd droga tego kursu (wszystkie
+    przystanki przed tym wyjściem, wraz z siblingami), nie tylko poprzedni
+    przystanek. Wersja "tylko poprzedni" (2026-08-15, pierwsza) łapała samą
+    czołową pętlę, ale przepuszczała każdą, która zawraca choć jeden
+    przystanek dalej - a to jest w realnej siatce regułą, nie wyjątkiem:
+    tramwaj 1 dojeżdżał do pętli Kamieńskiego, "kotwicząc się" o piętnastkę,
+    która zaraz wraca przez Bałtycką i Kleczkowską, czyli dokładnie tam,
+    skąd przyjechaliśmy - realna przesiadka jest cztery przystanki
+    wcześniej, na Pl. Staszica, i dopiero tam ogon ma się kończyć.
+    Zawrócenie na przystanek już minięty nigdy nie jest potrzebne, żeby
+    coś pokazać: skoro tam byliśmy, to segment odjeżdżający STAMTĄD jest
+    rysowany osobno i sam się kotwiczy - mapa nic nie traci, a przestaje
+    prowadzić w ślepe zaułki.
+
+    Liczone z FIZYCZNEJ kolejności przystanków kursu (z rozkładu, nie z
+    zapytania) - ani z zegara, ani z aktualnie narysowanych zakresów. Dzięki
+    temu odpowiedź "czy to zawrócenie" jest zawsze taka sama, niezależnie od
+    szerokości okna, więc przesunięcie suwaka nie może przez tę regułę
+    skasować niczego, co było widać wcześniej (punkt 9 kontraktu).
+
+    To była pierwotna intencja dawnej "reguły postępu", tyle że ta mierzyła
+    postęp przez `latest` ("jak późno mogę stąd wyjechać"), a ta wartość na
+    węźle przesiadkowym jest wysoka z powodu gęstych kursów, nie bliskości
+    celu - dlatego dawna reguła kasowała pół mapy razem z pętlami.
+    """
+    o_start, o_cut = drawn if drawn else (0, len(other["stops"]))
+    for stop2 in _sibling_places(day, stop):
+        position = other["pos_of"].get(stop2)
+        if position is None or position >= o_cut - 1 or position < o_start:
+            continue          # ten kurs się tu kończy - nie ma dokąd dalej
+        if other["stops"][position + 1] not in behind:
+            return True
+    return False
+
+
 def _select_and_anchor(day, segs, source_stops, target_set):
     """Krok 3: spójność narysowanej sieci (bez progu jasności - to, co jest
     w oknie czasowym, jest już wyznaczone przez deadline; q służy dalej
@@ -793,7 +858,9 @@ def _select_and_anchor(day, segs, source_stops, target_set):
     - początek: start relacji albo miejsce, gdzie dołącza (zdążalnie) inny
       narysowany segment - żaden segment nie zaczyna się "znikąd";
     - koniec: cel albo ostatnia przesiadka w porównywalnie jasny narysowany
-      segment - żaden ogon nie prowadzi "w powietrze".
+      segment, który prowadzi DALEJ, a nie z powrotem tam, skąd właśnie
+      przyjechaliśmy (patrz _leads_onward) - żaden ogon nie prowadzi
+      "w powietrze" ani na pętlę, z której trzeba by tylko wracać.
     Punkt stały: zakresy mogą tylko się kurczyć, więc iteracja zbiega.
     Zwraca (kept, ranges) - listę segmentów i ich (start_pos, cut).
     """
@@ -832,7 +899,12 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
             cut = 0
-            for pos, _, arr_t, stop in seg["exits"]:
+            behind = set()     # cała droga przejechana przed danym wyjściem
+            ridden = 0         # dokąd `behind` jest już wypełnione
+            for j, (pos, _, arr_t, stop) in enumerate(seg["exits"]):
+                while ridden < pos:
+                    behind.update(_sibling_places(day, seg["stops"][ridden]))
+                    ridden += 1
                 if pos <= start_pos + 1:
                     continue                 # wyjście przed/na starcie segmentu
                 if stop in target_set:
@@ -841,11 +913,30 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                 for other in passing_index.get(stop, ()):
                     if other is seg or id(other) not in drawn_stops:
                         continue
-                    # Kontynuacja musi być zdążalna i porównywalnie jasna -
-                    # jasny korytarz nie ciągnie ogona do bladej niszy.
-                    if (other["q"] + Q_ANCHOR_TOL >= seg["q"]
-                            and _joins(day, arr_t, stop, other,
-                                       drawn_stops[id(other)])):
+                    if not _leads_onward(day, other, stop, behind,
+                                         ranges[id(other)]):
+                        continue
+                    # Zostaje już tylko zdążalność. Był tu do 2026-08-15
+                    # jeszcze wymóg PORÓWNYWALNEJ JASNOŚCI kontynuacji
+                    # (`other["q"] + Q_ANCHOR_TOL >= seg["exit_q"][j]`) -
+                    # świadoma decyzja porządkowa "nie ciągnij jasnego
+                    # korytarza ogonem w bladą niszę", nigdy wymóg punktu 4.
+                    # USUNIĘTY: jasność jest liczona względem najgorszej
+                    # opcji, która AKURAT mieści się w oknie (punkt 9), więc
+                    # obie strony tego porównania przeskalowują się przy
+                    # ruchu suwaka - i potrafią się rozjechać w przeciwne
+                    # strony. To była JEDYNA składowa kotwicy końca zależna
+                    # od szerokości okna; przy ostrym wymogu kontynuacji
+                    # (patrz _leads_onward) jej wahania rozchodziły się
+                    # kaskadą przez cały łańcuch kotwic i kasowały odcinki
+                    # przy samym poszerzeniu suwaka (zmierzone: 32 zniknięcia
+                    # na ~1000 odcinków; bez tego warunku - zero, przy
+                    # WIĘKSZEJ liczbie narysowanych kawałków). Nisza, o którą
+                    # tu chodziło, i tak nie ma już jak powstać: kontynuacja
+                    # musi prowadzić dalej i sama być narysowana dalej, więc
+                    # jest częścią realnej drogi do celu, a nie ślepym
+                    # zaułkiem - i rysuje się bladą barwą (punkty 3 i 8).
+                    if _joins(day, arr_t, stop, other, drawn_stops[id(other)]):
                         cut = max(cut, pos)
                         break
             if cut >= start_pos + 2:
@@ -904,7 +995,7 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
         sid = id(seg)
         start_pos, cut = ranges[sid]
         edges = []
-        for pos, _, arr_t, stop in seg["exits"]:
+        for j, (pos, _, arr_t, stop) in enumerate(seg["exits"]):
             if not (start_pos < pos <= cut):
                 continue                        # wyjście poza narysowaną częścią
             if stop in target_set:
@@ -921,8 +1012,15 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
                 # docstring _can_board) - inaczej powstaje "teleportacja":
                 # przesiadka na kurs, który przy tym konkretnym przyjeździe
                 # już odjechał.
-                if (other["q"] + Q_ANCHOR_TOL >= seg["q"]
-                        and _can_board(day, arr_t, stop, other, other_board)):
+                #
+                # Filtr jasności (`other["q"] + Q_ANCHOR_TOL >= exit_q[j]`)
+                # zniknął stąd 2026-08-15 razem z tym samym filtrem przy
+                # kotwicy końca mapy (patrz _select_and_anchor) - te dwa
+                # miejsca muszą mówić to samo, bo obietnica plan_flow działa
+                # w obie strony: lista nie pokazuje przesiadki, której nie ma
+                # na mapie, ale też mapa nie ma prawa mieć przesiadki, o
+                # której lista przez niespójność milczy.
+                if _can_board(day, arr_t, stop, other, other_board):
                     edges.append(
                         ("transfer", pos, arr_t, stop, id(other), other_start, other_board)
                     )
@@ -935,20 +1033,125 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
     }
 
 
+def _hop_key(a, b):
+    return (a, b) if a <= b else (b, a)
+
+
+def _build_hop_members(kept, ranges):
+    """Dla każdego odcinka toru/ulicy (pary sąsiednich przystanków w
+    narysowanej części kursu) - zbiór ETYKIET linii, które tamtędy jadą.
+    Liczone z DOKŁADNYCH id przystanków (nie współrzędnych) - dwie linie
+    zatrzymujące się na tych samych dwóch, kolejnych słupkach fizycznie
+    dzielą tę samą ulicę/tory, więc to dokładne, nie przybliżone kryterium
+    "co się tu nakłada" (patrz _finalize_segments, sekcja o rozdzielaniu
+    wiązki)."""
+    hop_members = {}
+    for seg in kept:
+        start_pos, cut = ranges[id(seg)]
+        stops = seg["stops"]
+        for k in range(start_pos, cut - 1):
+            hop_members.setdefault(_hop_key(stops[k], stops[k + 1]), set()).add(seg["label"])
+    return hop_members
+
+
+def _membership_boundaries(hop_members, stops, start_pos, cut):
+    """Pozycje (konwencja 'exits' - wyłączna górna granica kawałka), w
+    których zestaw linii dzielących ten sam odcinek się zmienia - druga,
+    niezależna od jasności, przyczyna cięcia kawałka na mapie (patrz
+    _finalize_segments).
+
+    Zwraca INDEKSY PRZYSTANKÓW (nie pozycje w konwencji "exits"): indeks k
+    oznacza, że odcinek zaczynający się na stops[k] ma już inny zestaw linii
+    niż ten, który się na stops[k] kończy. Kawałek rysowany jako całość nie
+    ma prawa przez taki punkt przechodzić - inaczej cały dostałby skład
+    korytarza policzony dla swojego PIERWSZEGO odcinka i twierdziłby "tędy
+    jadą też X i Y" także tam, gdzie X i Y już dawno skręciły."""
+    boundaries = set()
+    prev_members = None
+    for k in range(start_pos, cut - 1):
+        members = frozenset(hop_members.get(_hop_key(stops[k], stops[k + 1]), ()))
+        if prev_members is not None and members != prev_members:
+            boundaries.add(k)
+        prev_members = members
+    return boundaries
+
+
+def _line_sort_key(label):
+    """JEDEN, globalny porządek linii - tramwaje przed autobusami, w obrębie
+    rodzaju numerycznie. To nie jest kosmetyka: skład korytarza (patrz
+    _corridor_lines) jest zawsze OBCIĘCIEM tego jednego porządku do linii
+    obecnych na danym odcinku, więc grupka numerów rysowana na wspólnym
+    korytarzu ma zawsze tę samą kolejność - i ta sama kolejność wychodzi w
+    podpowiedzi pod kursorem (patrz app.js). Numer nie ma jak przeskoczyć w
+    grupce z miejsca na miejsce między jednym odcinkiem a drugim."""
+    num, mode = _line_parts(label)
+    return (
+        {"tram": 0, "bus": 1}.get(mode, 2),
+        int(num) if num.isdigit() else 10 ** 6,
+        num,
+    )
+
+
+def _corridor_lines(pieces, hop_members):
+    """Dla każdego kawałka - PEŁNY skład korytarza, którym jedzie: wszystkie
+    linie dzielące z nim te same, kolejne przystanki, RAZEM Z NIM SAMYM, w
+    jednym, globalnym porządku (_line_sort_key). Kawałki jadące solo nie
+    dostają nic.
+
+    To jest cała odpowiedź backendu na kontrakt p.7 ("zawsze wiadomo, co tam
+    jedzie"): mapa rysuje prawdziwą geometrię, więc linie wspólnego korytarza
+    leżą jedna na drugiej i po samym kształcie nie da się ich rozróżnić.
+    Rozróżnia je front - grupką numerów postawioną raz na całym korytarzu i
+    przełączaniem między nimi pod kursorem (patrz app.js). Do jednego i do
+    drugiego potrzebna jest właśnie ta lista.
+
+    Liczona jest z ROZKŁADU (dokładne id przystanków, patrz
+    _build_hop_members), nie z odległości na ekranie. Front próbował kiedyś
+    zgadywać skład korytarza, mierząc piksele wokół kursora, i przy widoku
+    całego miasta doliczał linie z sąsiednich ulic - stąd brały się plakietki
+    "13 linii" tam, gdzie realnie jadą dwie.
+
+    Skład jest stały na całej długości kawałka, bo kawałki są cięte dokładnie
+    tam, gdzie się zmienia (patrz _membership_boundaries) - dlatego wystarczy
+    odczytać go z pierwszego odcinka."""
+    result = {}
+    for label, stops_seq in pieces:
+        members = hop_members.get(_hop_key(stops_seq[0], stops_seq[1]))
+        if not members or len(members) < 2:
+            continue
+        result[(label, stops_seq)] = [
+            {"num": _line_parts(other)[0], "kind": _line_parts(other)[1]}
+            for other in sorted(members, key=_line_sort_key)
+        ]
+    return result
+
+
+
 def _finalize_segments(day, kept, ranges, geo_db):
     """Krok 4: tnie każdy zatrzymany kurs na kawałki DOKŁADNIE tam, gdzie po
     drodze mijamy realną, lepszą kontynuację, z której nie korzystamy (patrz
     seg["exit_q"] w _refine_brightness) - jeden fizyczny kurs może więc
     wyjść na mapie jako kilka kolejnych kawałków o różnej jasności, nie
-    jeden płaski odcinek od wsiadania do końca. Kawałki o (zaokrągleniowo)
-    tej samej jasności są sklejane, żeby nie mnożyć bez potrzeby liczby
-    narysowanych fragmentów tam, gdzie nic naprawdę się nie zmieniło. Prosty
-    kurs bez żadnej mijanej, lepszej przesiadki dostaje - tak jak dawniej -
-    jeden kawałek na całej narysowanej długości.
+    jeden płaski odcinek od wsiadania do końca. RÓWNOLEGLE, tym samym
+    cięciem, tnie też tam, gdzie zmienia się zestaw linii dzielących ten
+    sam odcinek ulicy/torów (patrz _membership_boundaries) - to druga,
+    niezależna przyczyna cięcia, potrzebna do rozdzielania nakładających
+    się linii kawałek niżej. Kawałki, w których NIC z tego się nie zmienia,
+    są sklejane, żeby nie mnożyć bez potrzeby liczby narysowanych
+    fragmentów. Prosty kurs bez żadnej mijanej, lepszej przesiadki i bez
+    współdzielonego odcinka dostaje - tak jak dawniej - jeden kawałek na
+    całej narysowanej długości.
 
     Poza tym: agregacja po (linia, dokładny fragment) biorąc maksimum
     jakości (kilka kursów tego samego wzorca w oknie), tnie geometrię
     (patrz gtfs.shape_slice) i formatuje odpowiedź.
+
+    Nakładające się linie (kontrakt p.7 - zawsze wiadomo, co tu jedzie):
+    geometria zostaje prawdziwa, po torach i ulicach (kontrakt p.6), więc
+    linie wspólnego korytarza leżą na mapie jedna na drugiej. Backend nie
+    próbuje ich rozsuwać - podaje tylko SKŁAD korytarza (_corridor_lines,
+    pole `corridor` w odpowiedzi), a rozróżnianie robi front: grupką numerów
+    i przełączaniem pod kursorem.
 
     Na końcu jasność jest PRZESKALOWANA tak, żeby najgorszy kawałek, który
     FAKTYCZNIE trafia na mapę, lądował dokładnie na dole skali (w=0), nie
@@ -967,17 +1170,29 @@ def _finalize_segments(day, kept, ranges, geo_db):
     geo_db to połączenie współdzielone z resztą zapytania (patrz plan_flow) -
     jedno połączenie na wszystkie wycinki geometrii, także te do propozycji
     tras."""
+    hop_members = _build_hop_members(kept, ranges)
+
     pieces = {}   # (linia, dokładny fragment) -> (q, shape_id)
     for seg in kept:
         start_pos, cut = ranges[id(seg)]
+        boundary_stops = _membership_boundaries(hop_members, seg["stops"], start_pos, cut)
         piece_start = start_pos
         pending_end = None
         pending_q = None
         for (pos, _, _, _), exit_q in zip(seg["exits"], seg["exit_q"]):
             if pos <= start_pos + 1 or pos > cut:
                 continue         # wyjście przed/na starcie narysowanej części - pomiń
-            if pending_q is not None and abs(exit_q - pending_q) < 5e-4:
-                pending_end = pos          # ta sama jasność - wydłuż bieżący kawałek
+            # Wydłużenie kawałka do `pos` obejmie odcinki o indeksach
+            # piece_start .. pos-2. Jeśli któryś z nich zaczyna już inny
+            # zestaw linii, kawałek przeszedłby przez zmianę składu korytarza
+            # i podawałby ten sam skład na całej długości, także tam, gdzie
+            # jest już inny (patrz _membership_boundaries).
+            crosses = any(piece_start < k <= pos - 2 for k in boundary_stops)
+            same = (pending_q is not None
+                    and abs(exit_q - pending_q) < 5e-4
+                    and not crosses)
+            if same:
+                pending_end = pos          # nic się nie zmieniło - wydłuż bieżący kawałek
                 continue
             if pending_q is not None:
                 _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
@@ -992,7 +1207,7 @@ def _finalize_segments(day, kept, ranges, geo_db):
         if pending_q is not None:
             _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
 
-    worst_q = min((q for q, _ in pieces.values()), default=1.0)
+    worst_q = min((entry[0] for entry in pieces.values()), default=1.0)
     span_q = 1.0 - worst_q
 
     def rescale(q):
@@ -1004,6 +1219,8 @@ def _finalize_segments(day, kept, ranges, geo_db):
             return 1.0
         return max(0.0, min(1.0, (q - worst_q) / span_q))
 
+    corridors = _corridor_lines(pieces, hop_members)
+
     brightest = sorted(
         pieces.items(), key=lambda kv: kv[1][0], reverse=True,
     )
@@ -1013,17 +1230,28 @@ def _finalize_segments(day, kept, ranges, geo_db):
             shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
         )
         num, mode = _line_parts(label)
-        seg_list.append({
+        item = {
             "path": _round_path(path),
             "num": num,
             "kind": mode,
             "w": round(rescale(q), 3),
-        })
+        }
+        corridor = corridors.get((label, stops_seq))
+        if corridor:
+            # Kto tędy jedzie - CAŁY skład, razem z tą linią, z rozkładu, nie
+            # z odległości na ekranie (patrz _corridor_lines). Kawałki jadące
+            # solo (zdecydowana większość) nie dostają tego pola wcale, żeby
+            # nie puchła odpowiedź.
+            item["corridor"] = corridor
+        seg_list.append(item)
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
     return seg_list
 
 
 def _keep_piece(pieces, seg, start, end, q):
+    """Zapisuje kawałek pod kluczem (linia, dokładny fragment). Ten sam
+    fragment tej samej linii może pochodzić z kilku kursów w oknie - liczy
+    się najjaśniejszy."""
     key = (seg["label"], tuple(seg["stops"][start:end]))
     entry = pieces.get(key)
     if entry is None or q > entry[0]:

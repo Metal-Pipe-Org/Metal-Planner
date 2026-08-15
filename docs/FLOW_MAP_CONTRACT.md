@@ -7,6 +7,15 @@ każdego punktu, historia wdrożeń i otwarte pytania są w
 [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md). Edytuj tę listę tylko
 wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 
+> **Ten plik zmienia się WYŁĄCZNIE na wyraźne polecenie użytkownika.**
+> Nigdy z własnej inicjatywy: ani „przy okazji", ani żeby dopisać to, co
+> właśnie zostało zaimplementowane, ani żeby odświeżyć opis implementacji,
+> który się zdezaktualizował. Jeśli uważasz, że coś tu wymaga zmiany —
+> zgłoś propozycję i czekaj na zgodę. Nieaktualny akapit w tym pliku jest
+> mniejszym problemem niż kontrakt przepisujący się sam. Wszystko inne
+> (historia, pomiary, szczegóły implementacji) idzie do
+> [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), który wolno dopisywać zawsze.
+
 ## 1. Cały wachlarz, nie jedna trasa
 
 Mapa pokazuje wszystkie sensowne dojazdy naraz, nie tylko najszybszy.
@@ -46,15 +55,30 @@ celu**, nie ma prawa się pojawić na mapie.
 
 Kryterium jest czysto **fizyczna osiągalność** — czy da się tam realnie,
 w czasie, dotrzeć czymś, co mapa już rysuje — nie to, jak jasna jest ta
-rzecz, przez którą się dociera. Dlatego początek gałęzi kotwiczy się o
-DOWOLNĄ zdążalną przesiadkę z już narysowanego segmentu, choćby bardzo
-blada: bladość feedera nie oznacza, że dalsza, jasna część jest
-nieosiągalna, tylko że sam dojazd do niej nie jest najlepszą częścią
-podróży — a to normalne i zgodne z zasadą punktu 3. Koniec gałęzi ma
-dodatkowo (poza samą osiągalnością) wymóg porównywalnej jasności
-kontynuacji — to nie jest wymóg tego punktu kontraktu, tylko osobna,
-świadoma decyzja porządkowa: nie ciągnąć jasnego korytarza ogonem w bladą,
-nieistotną niszę.
+rzecz, przez którą się dociera. Gałąź kotwiczy więc DOWOLNA zdążalna
+przesiadka z narysowanego segmentu, choćby bardzo blada: bladość dojazdu
+nie znaczy, że dalsza, jasna część jest nieosiągalna. Tak samo jest na
+końcu — jasność kontynuacji nie ma tu nic do rzeczy.
+
+**Żadnych kikutów.** Ogon kończy się dopiero tam, gdzie stoi coś, co
+naprawdę prowadzi **dalej**. „Dalej" znaczy dwie rzeczy naraz:
+
+1. **Nie z powrotem po naszych własnych śladach.** Kurs zawracający na
+   JAKIKOLWIEK przystanek, przez który już przejechaliśmy — nie tylko na
+   ten ostatni — jest drogą powrotną, nie kontynuacją. Inaczej mapa wjeżdża
+   na pętlę końcową tylko po to, żeby zaraz z niej wrócić.
+2. **Kontynuacja musi sama być narysowana dalej.** To, że jedzie dalej w
+   rozkładzie, nie wystarcza — inaczej dwa ogony podpierają się nawzajem i
+   spotykają się tam, skąd nic nie odjeżdża.
+
+To NIE to samo, co minięcie lepszej przesiadki i jazda dalej (punkt 3) —
+tam jedzie się w stronę celu, tylko nie najlepiej, więc odcinek zostaje
+narysowany, po prostu ciemniej.
+
+Kierunek („czy to zawrócenie") czytamy z kolejności przystanków w
+rozkładzie, nie z tego, co akurat mieści się w oknie czasowym — inaczej
+przesunięcie suwaka okna zmieniałoby odpowiedź i kasowało gałęzie widoczne
+przy węższym oknie (patrz punkt 9).
 
 ## 6. Geometria po realnych ulicach i torach
 
@@ -72,7 +96,20 @@ realizacji jest dowolny; liczy się efekt.
 
 To dotyczy też przypadku, gdy kilka linii jedzie dokładnie tym samym
 korytarzem i na mapie leżą jedna na drugiej: najechanie w to miejsce ma
-pokazać wszystkie z nich, nie tylko tę narysowaną na wierzchu wiązki.
+pokazać wszystkie z nich, nie tylko tę narysowaną na wierzchu.
+
+Rozsuwania linii nie ma — geometria jest prawdziwa (punkt 6), więc linie
+wspólnego korytarza leżą jedna na drugiej. Czytelność robią NUMERY:
+
+- **Skład korytarza z rozkładu, nie z ekranu.** To, które linie jadą danym
+  odcinkiem, rozstrzygają wspólne przystanki, nie odległość w pikselach.
+- **Numery skondensowane.** Wspólny korytarz dostaje JEDNĄ grupkę ze
+  wszystkimi swoimi numerami obok siebie, a nie osobny numer na linię —
+  w równych odstępach wzdłuż korytarza i bez nachodzenia na siebie.
+- **Kursor nazywa jedną linię.** Pod kursorem podświetla się WYŁĄCZNIE
+  jedna linia — na CAŁEJ swojej narysowanej długości, nie tylko kawałek pod
+  kursorem — a podpowiedź podaje jej numer wprost; domyślnie najjaśniejsza
+  z korytarza. Żeby wskazać inną, najeżdża się na jej numer w grupce.
 
 ## 8. Minimalna jasność nigdy nie spada do niewidoczności
 

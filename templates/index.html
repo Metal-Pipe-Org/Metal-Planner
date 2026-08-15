@@ -86,6 +86,7 @@
             <label class="time-field">
                 <span>Odjazd</span>
                 <input type="time" id="time" value="{{ form_time }}">
+                <button type="button" id="time-now" class="time-now-button">teraz</button>
             </label>
             <button id="search" class="button primary">
                 <span class="spinner" aria-hidden="true"></span>Szukaj
@@ -160,29 +161,6 @@
     </div>
 
     <div class="field">
-        <label for="tol">
-            Tolerancja regresji <output id="tol-value">0</output> s
-        </label>
-        <input type="range" id="tol" min="0" max="300" step="15" value="0">
-        <p class="field-hint">
-            Luz reguły postępu — metryka <code>latest</code> bywa zaszumiona
-            o minutę–dwie nawet na dobrej trasie.
-        </p>
-    </div>
-
-    <div class="field">
-        <label for="count">
-            Ile propozycji tras szukać <output id="count-value">6</output>
-        </label>
-        <input type="range" id="count" min="1" max="20" step="1" value="6">
-        <p class="field-hint">
-            Do bruteforcowania: każe algorytmowi przeszukać graf głębiej
-            i wypisać do tylu wariantów. Jeśli tylu naprawdę nie ma, lista
-            będzie krótsza — nic tu się nie zmyśla.
-        </p>
-    </div>
-
-    <div class="field">
         <label for="range">
             Zasięg szukania punktu <output id="range-value">1000</output> m
         </label>
@@ -204,6 +182,94 @@
         <p class="field-hint" id="sw-status" role="status">
             Porównuje wersję działającą w przeglądarce z tą, którą serwer
             wydaje w tej chwili.
+        </p>
+    </div>
+
+    {#
+      TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
+      Wartości są już dobrane i siedzą w LOOK_DEFAULTS w app.js, więc sekcja
+      jest SCHOWANA (`hidden` niżej + LOOK_TUNING w app.js). Kod zostaje na
+      wypadek ponownego strojenia: `LOOK_TUNING = true` przywraca ją w
+      całości. Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
+    #}
+    <div class="dev-section" id="look-section" hidden>
+        <h3>Wygląd mapy <span class="dev-temp">tymczasowe</span></h3>
+
+        <div class="field compact">
+            <label for="look-min-op">
+                Najbledsza linia — krycie <output id="look-min-op-value">0.1</output>
+            </label>
+            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.1">
+            <p class="field-hint">
+                Dolny próg widoczności (punkt 8 kontraktu). Najbledszy kawałek
+                ma być widoczny bez najeżdżania myszką.
+            </p>
+        </div>
+
+        <div class="field compact">
+            <label for="look-min-w">
+                Najbledsza linia — grubość <output id="look-min-w-value">0.5</output> px
+            </label>
+            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="0.5">
+        </div>
+
+        <div class="field compact">
+            <label for="look-max-op">
+                Najjaśniejsza linia — krycie <output id="look-max-op-value">1</output>
+            </label>
+            <input type="range" id="look-max-op" min="0.3" max="1" step="0.05" value="1">
+        </div>
+
+        <div class="field compact">
+            <label for="look-max-w">
+                Najjaśniejsza linia — grubość <output id="look-max-w-value">3</output> px
+            </label>
+            <input type="range" id="look-max-w" min="2" max="12" step="0.5" value="3">
+        </div>
+
+        <div class="field compact">
+            <label for="look-casing">
+                Biała otoczka od jasności <output id="look-casing-value">0.45</output>
+            </label>
+            <input type="range" id="look-casing" min="0" max="1.05" step="0.05" value="0.45">
+            <p class="field-hint">
+                1.05 = nigdy, 0 = zawsze. Otoczka oddziela jasne korytarze od
+                tła, ale pogrubia całą sieć.
+            </p>
+        </div>
+
+        <div class="field compact">
+            <label for="look-dim">
+                Przygaszenie przy wybranej trasie <output id="look-dim-value">0.22</output>
+            </label>
+            <input type="range" id="look-dim" min="0.05" max="1" step="0.01" value="0.22">
+        </div>
+
+        <div class="field compact">
+            <label for="look-label-step">
+                Odstęp grupek numerów <output id="look-label-step-value">200</output> px
+            </label>
+            <input type="range" id="look-label-step" min="120" max="700" step="20" value="200">
+        </div>
+
+        <div class="field compact">
+            <label for="look-label-size">
+                Wielkość numerów <output id="look-label-size-value">0.8</output>×
+            </label>
+            <input type="range" id="look-label-size" min="0.7" max="1.6" step="0.05" value="0.8">
+        </div>
+
+        <div class="field compact">
+            <label for="look-label-op">
+                Krycie numerów <output id="look-label-op-value">1</output>×
+            </label>
+            <input type="range" id="look-label-op" min="0.3" max="1" step="0.05" value="1">
+        </div>
+
+        <button type="button" id="look-reset" class="button">Przywróć domyślne</button>
+        <p class="field-hint" id="look-dump">
+            Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
+            i skasuję tę sekcję.
         </p>
     </div>
 
