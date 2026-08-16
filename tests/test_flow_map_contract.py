@@ -48,7 +48,7 @@ def _segs_by_num(result, num, kind):
 # --------------------------------------------------------------------- 2 ---
 
 def test_deadline_scales_with_best_route_duration():
-    # 150% domyślnie -> 50% czasu trasy jako naddatek
+    # 150% -> 50% czasu trasy jako naddatek
     d = planner._deadline(1000, 0, extra_pct=150, extra_floor_sec=0, extra_cap_sec=99999)
     assert d == 1000 + 500
 

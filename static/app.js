@@ -222,10 +222,7 @@ function pickEndpoint(value) {
     if (sel.start && sel.end) search();
 }
 
-map.on('click', e => {
-    if (handleFlowClick(e)) return;   // klik w narysowany kurs otwiera propozycję
-    pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
-});
+map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
 
 // ------------------------------------------- moja lokalizacja jako start ----
 
@@ -336,14 +333,16 @@ function endpointPoints() {
 
 // --- WYGLĄD: wartości do strojenia -----------------------------------------
 //
-// Wartości dobrane przez użytkownika na żywo, na realnej mapie (2026-08-15),
-// suwakami w panelu deweloperskim. Suwaki zostają w kodzie, ale są UKRYTE -
-// jeden przełącznik niżej (LOOK_TUNING) przywraca całą sekcję, gdyby trzeba
-// było dostroić to jeszcze raz.
+// Wartości dobrane przez użytkownika na żywo, na realnej mapie (2026-08-16),
+// suwakami w panelu deweloperskim - sekcja jest z powrotem WIDOCZNA
+// (LOOK_TUNING niżej), żeby dało się stroić dalej.
+//
+// minWeight = maxWeight to świadomy wybór: grubość jest STAŁA, a różnicę
+// zapasu czasu niesie samo krycie (0.4 -> 1).
 const LOOK_DEFAULTS = {
-    minOpacity: 0.1,      // krycie najbledszego kawałka (w=0)
+    minOpacity: 0.4,      // krycie najbledszego kawałka (w=0)
     maxOpacity: 1,        // krycie najjaśniejszego (w=1)
-    minWeight: 0.5,       // grubość najbledszego kawałka [px]
+    minWeight: 3,         // grubość najbledszego kawałka [px]
     maxWeight: 3,         // grubość najjaśniejszego [px]
     casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
     dimFactor: 0.22,      // ile zostaje z krycia, gdy wybrana jest jedna trasa
@@ -357,7 +356,7 @@ const LOOK_DEFAULTS = {
 // localStorage), `false` chowa ją w całości i zostawia same wartości wyżej.
 // Kod suwaków zostaje w repo celowo - patrz znaczniki TYMCZASOWE w
 // index.html i style.css.
-const LOOK_TUNING = false;
+const LOOK_TUNING = true;
 const LOOK_PREFS_KEY = 'metal-planner:look-prefs';
 
 function loadLookPrefs() {
@@ -630,9 +629,10 @@ function clusterMarker(at, roster, weight) {
     return marker;
 }
 
-/** Numer w grupce jest też przyciskiem: najechanie wskazuje DOKŁADNIE tę
-    linię (nie trzeba się przełączać), a kliknięcie otwiera jej propozycję.
-    Bez tego grupka mówiłaby, co tędy jedzie, ale nie dałaby tego wskazać. */
+/** Numer w grupce wskazuje się WYŁĄCZNIE najechaniem: kursor nad numerem
+    podświetla DOKŁADNIE tę linię. Bez tego grupka mówiłaby, co tędy jedzie,
+    ale nie dałaby tego wskazać. Klik nie robi tu nic - jest tylko wygaszany,
+    żeby nie dobił do map.on('click') i nie ustawił punktu trasy. */
 function bindCluster(marker) {
     const el = marker.getElement();
     if (!el) return;
@@ -640,14 +640,7 @@ function bindCluster(marker) {
         const chip = ev.target.closest && ev.target.closest('.line-chip');
         if (chip) pickFromCluster(marker, Number(chip.dataset.i));
     });
-    L.DomEvent.on(el, 'click', ev => {
-        const chip = ev.target.closest && ev.target.closest('.line-chip');
-        if (!chip) return;
-        L.DomEvent.stop(ev);      // inaczej klik ustawiłby jeszcze punkt trasy
-        const line = marker.roster[Number(chip.dataset.i)];
-        const index = journeyForLine(line.num, line.kind, marker.getLatLng());
-        if (index !== null) openJourney(index, true);
-    });
+    L.DomEvent.on(el, 'click', ev => L.DomEvent.stop(ev));
 }
 
 let flowDimmed = false;
@@ -770,9 +763,6 @@ function flowPickHtml() {
         ).join('') + '</span>';
         html += '<span class="flow-tip-hint">najedź na numer w grupce, żeby wskazać inną</span>';
     }
-    if (flowPickAt && journeyForLine(sel.num, sel.kind, flowPickAt) !== null) {
-        html += '<span class="flow-tip-hint">kliknij, aby otworzyć trasę</span>';
-    }
     return html;
 }
 
@@ -863,20 +853,9 @@ function pickFromCluster(marker, index) {
     setFlowPick(options, at, index);
 }
 
-/** Klik w kurs otwiera pasującą propozycję - najpierw dla linii AKTUALNIE
-    wskazanej, żeby klik trafiał tam, gdzie patrzy podpowiedź; dopiero potem
-    dla pozostałych kawałków pod kursorem. Klik obok zwraca false, a wywołujący
-    ustawia punkt trasy zamiast tego. */
-function handleFlowClick(e) {
-    const tried = [];
-    if (flowPick) tried.push(flowPick.options[flowPick.index]);
-    for (const h of flowHitsAt(e.containerPoint)) tried.push({num: h.seg.num, kind: h.seg.kind});
-    for (const line of tried) {
-        const index = journeyForLine(line.num, line.kind, e.latlng);
-        if (index !== null) { openJourney(index, true); return true; }
-    }
-    return false;
-}
+// Klik w narysowany kurs NIE OTWIERA ŻADNEJ PROPOZYCJI (usunięte 2026-08-16).
+// Mapa przepływów tylko pokazuje wachlarz, a wskazywanie konkretnej linii jest
+// wyłącznie pod kursorem (hover). Propozycje otwiera się z listy obok.
 
 map.on('mousemove', handleFlowHover);
 map.on('mouseout', clearFlowHover);
@@ -945,8 +924,8 @@ function drawJourney(index, keepView) {
     if (!journey) return;
     journeyLayer = L.layerGroup(legLayers(journey.legs, {preview: false})).addTo(map);
     dimFlow(true);
-    // Po kliknięciu w mapę nie wyrywamy widoku spod kursora - kadrujemy
-    // tylko wtedy, gdy trasa i tak nie mieści się w kadrze.
+    // Przy przerysowaniu w miejscu (suwaki wyglądu) nie wyrywamy widoku -
+    // kadrujemy tylko wtedy, gdy trasa i tak nie mieści się w kadrze.
     const points = [...journey.legs.flatMap(leg => leg.path), ...endpointPoints()];
     if (!keepView || !map.getBounds().contains(L.latLngBounds(points))) fitTo(points);
 }
@@ -991,45 +970,17 @@ function deselectJourney() {
     renderJourneys();
 }
 
-/** Otwiera propozycję (z listy albo z mapy) - w przeciwieństwie do kliknięcia
-    w kartę nigdy jej nie zamyka, więc klik w narysowaną trasę jest bezpieczny. */
-function openJourney(index, keepView) {
+/** Otwiera propozycję z listy - w przeciwieństwie do kliknięcia w kartę nigdy
+    jej nie zamyka. Mapa nigdy tu nie trafia: klik w mapę nie otwiera tras. */
+function openJourney(index) {
     clearPreview();
     // Otwarcie trasy przy schowanym panelu byłoby niewidoczne - także wtedy,
     // gdy klikamy w trasę już wybraną.
     document.body.classList.remove('panel-hidden');
     if (selectedJourney === index) { scrollToSelected(); return; }
     selectedJourney = index;
-    drawJourney(index, keepView);
+    drawJourney(index);
     renderJourneys();
-}
-
-const NEAR_CLICK_PX = 40;   // "ta linia w tym miejscu" - w pikselach ekranu
-
-/** Propozycja jeżdżąca daną linią: najbliższa klikniętemu miejscu, a gdy
-    kliknięcie jest z dala od którejkolwiek - po prostu najlepsza z listy. */
-/** Bez `latlng`: czy ta linia ma W OGÓLE jakąś propozycję (podpowiedź przy
-    hover, sama nazwa wystarczy). Z `latlng`: czy ta linia ma propozycję,
-    która przejeżdża BLISKO wskazanego miejsca (klik) - bez tego rozróżnienia
-    klik w kurs, który jest na mapie przepływów, ale nie pokrywa się z żadną
-    propozycją akurat w tym miejscu, cichcem otwierał pierwszą z brzegu
-    propozycję tej samej linii gdziekolwiek indziej na mapie. */
-function journeyForLine(num, mode, latlng) {
-    const clicked = latlng && map.latLngToContainerPoint(latlng);
-    let fallback = null, nearest = null, nearestDist = Infinity;
-    journeys.forEach((journey, index) => {
-        for (const leg of journey.legs) {
-            if (leg.kind !== 'ride' || leg.num !== num || leg.mode !== mode) continue;
-            if (fallback === null) fallback = index;
-            if (!clicked) continue;
-            for (const point of leg.path) {
-                const dist = clicked.distanceTo(map.latLngToContainerPoint(point));
-                if (dist < nearestDist) { nearestDist = dist; nearest = index; }
-            }
-        }
-    });
-    if (!clicked) return fallback;
-    return nearestDist <= NEAR_CLICK_PX ? nearest : null;
 }
 
 function badgeHtml(leg) {
