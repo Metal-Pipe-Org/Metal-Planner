@@ -126,9 +126,9 @@
 
     <div class="field">
         <label for="extra">
-            Ile dłużej niż najszybsza trasa <output id="extra-value">150</output>%
+            Ile dłużej niż najszybsza trasa <output id="extra-value">125</output>%
         </label>
-        <input type="range" id="extra" min="110" max="200" step="5" value="150">
+        <input type="range" id="extra" min="110" max="200" step="5" value="125">
         <p class="field-hint">
             Okno czasowe procentowo, nie w minutach — rośnie razem z długością
             trasy zamiast być stałym naddatkiem. Dwa suwaki niżej łatają
@@ -138,9 +138,9 @@
 
     <div class="field">
         <label for="extra-floor">
-            Minimalne okno (niezależnie od %) <output id="extra-floor-value">10</output> min
+            Minimalne okno (niezależnie od %) <output id="extra-floor-value">5</output> min
         </label>
-        <input type="range" id="extra-floor" min="0" max="30" step="1" value="10">
+        <input type="range" id="extra-floor" min="0" max="30" step="1" value="5">
         <p class="field-hint">
             Przy krótkich trasach sam procent daje grosze — 3-minutowa trasa
             przy 110% to ledwie 18 s naddatku. Ten suwak gwarantuje co
@@ -150,9 +150,9 @@
 
     <div class="field">
         <label for="extra-cap">
-            Maksymalne okno (sufit dla długich tras) <output id="extra-cap-value">60</output> min
+            Maksymalne okno (sufit dla długich tras) <output id="extra-cap-value">15</output> min
         </label>
-        <input type="range" id="extra-cap" min="10" max="120" step="5" value="60">
+        <input type="range" id="extra-cap" min="10" max="120" step="5" value="15">
         <p class="field-hint">
             Odwrotność powyższego — przy bardzo długiej najszybszej trasie
             wysoki procent otworzyłby absurdalnie szerokie okno. Ten suwak je
@@ -187,19 +187,20 @@
 
     {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
-      Wartości są już dobrane i siedzą w LOOK_DEFAULTS w app.js, więc sekcja
-      jest SCHOWANA (`hidden` niżej + LOOK_TUNING w app.js). Kod zostaje na
-      wypadek ponownego strojenia: `LOOK_TUNING = true` przywraca ją w
-      całości. Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
+      Sekcja jest WIDOCZNA (LOOK_TUNING = true w app.js) — strojenie trwa.
+      Atrybut `hidden` niżej to tylko stan startowy: app.js zdejmuje go albo
+      zostawia, zależnie od tego przełącznika. Bieżące wartości siedzą w
+      LOOK_DEFAULTS w app.js i to one są domyślne, gdy sekcja jest schowana.
+      Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
     <div class="dev-section" id="look-section" hidden>
         <h3>Wygląd mapy <span class="dev-temp">tymczasowe</span></h3>
 
         <div class="field compact">
             <label for="look-min-op">
-                Najbledsza linia — krycie <output id="look-min-op-value">0.1</output>
+                Najbledsza linia — krycie <output id="look-min-op-value">0.4</output>
             </label>
-            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.1">
+            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.4">
             <p class="field-hint">
                 Dolny próg widoczności (punkt 8 kontraktu). Najbledszy kawałek
                 ma być widoczny bez najeżdżania myszką.
@@ -208,9 +209,9 @@
 
         <div class="field compact">
             <label for="look-min-w">
-                Najbledsza linia — grubość <output id="look-min-w-value">0.5</output> px
+                Najbledsza linia — grubość <output id="look-min-w-value">3</output> px
             </label>
-            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="0.5">
+            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="3">
         </div>
 
         <div class="field compact">

@@ -203,15 +203,15 @@ def _round_path(coords):
 #   - cap (maksymalne okno w sekundach) - żeby bardzo długa trasa nie
 #     otwierała absurdalnie szerokiego okna przy wysokim %.
 # Efektywne okno = clamp(czas_trasy × (pct/100 − 1), floor, cap).
-DEFAULT_EXTRA_PCT = 150   # domyślnie: pokaż trasy do 150% czasu najszybszej
+DEFAULT_EXTRA_PCT = 125   # domyślnie: pokaż trasy do 125% czasu najszybszej
 MIN_EXTRA_PCT = 110
 MAX_EXTRA_PCT = 200        # (suwak w UI go nadpisuje)
 
-DEFAULT_EXTRA_FLOOR_SEC = 600   # domyślnie: co najmniej 10 min naddatku
+DEFAULT_EXTRA_FLOOR_SEC = 300   # domyślnie: co najmniej 5 min naddatku
 MIN_EXTRA_FLOOR_SEC = 0
 MAX_EXTRA_FLOOR_SEC = 1800      # (suwak w UI go nadpisuje) - sufit 30 min
 
-DEFAULT_EXTRA_CAP_SEC = 3600    # domyślnie: najwyżej 60 min naddatku
+DEFAULT_EXTRA_CAP_SEC = 900     # domyślnie: najwyżej 15 min naddatku
 MIN_EXTRA_CAP_SEC = 600
 MAX_EXTRA_CAP_SEC = 7200        # (suwak w UI go nadpisuje) - sufit 120 min
 
