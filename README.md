@@ -38,14 +38,41 @@ Instalację przeglądarki proponują wyłącznie po **HTTPS**; wyjątkiem jest
 
 ## Codzienna aktualizacja rozkładu
 
-Cron na serwerze, np. o 3:00:
+Serwer robi to sam: raz na dobę o godzinie z `GTFS_AUTO_UPDATE_HOUR`
+(w `docker-compose.yml` domyślnie 3:00, wg strefy czasowej kontenera).
+Harmonogram żyje w procesie głównym serwera — jeden niezależnie od liczby
+workerów — a samą aktualizację odpala jako osobny proces, więc budowa bazy
+nie rośnie w pamięci serwera. Pusta wartość wyłącza harmonogram.
+
+To nie jest wygoda, tylko warunek działania: paczka GTFS ma okno ważności
+rzędu trzech tygodni, więc kontener stojący dłużej bez restartu dojechałby
+do jego końca i przestał znajdować **jakiekolwiek** połączenia.
+
+Gdy pobieranie się nie powiedzie, stara baza zostaje nietknięta — aplikacja
+działa dalej na wczorajszych danych i przeładuje nowe sama, bez restartu.
+
+Poza Dockerem to samo załatwia cron, np. o 3:00:
 
 ```
 0 3 * * * cd /sciezka/do/Metal-Planner && .venv/bin/python update_gtfs.py >> logs/update.log 2>&1
 ```
 
-Gdy pobieranie się nie powiedzie, stara baza zostaje nietknięta — aplikacja
-działa dalej na wczorajszych danych i przeładuje nowe sama, bez restartu.
+### Odświeżanie przy starcie serwera
+
+Cron nie jest potrzebny do jednego przypadku: **każdy start serwera odświeża
+rozkład sam** — i w kontenerze (`docker/entrypoint.sh`, przed gunicornem),
+i lokalnie (`python app.py`). Zasada jest ta sama: brakującą bazę serwer
+pobiera blokująco, przed startem, a istniejącą odświeża w tle — wstaje
+natychmiast na dotychczasowych danych i podmienia je w locie.
+
+Różnica jest jedna. Lokalnie obowiązuje **próg świeżości**: baza młodsza niż
+`GTFS_MAX_AGE_HOURS` (domyślnie 12 h) nie jest ruszana. Bez tego reloader
+Flaska, który restartuje serwer po każdym zapisie pliku, ciągnąłby 12 MB po
+każdym Ctrl+S. Kontener restartuje się rzadko, więc tam progu nie ma —
+aktualizuje zawsze.
+
+`GTFS_UPDATE_ON_START=off` wyłącza to w obu miejscach (w kontenerze przez
+`docker-compose.yml`).
 
 ## Testy
 
