@@ -21,6 +21,16 @@ if [ ! -f "$DATA_DIR/gtfs.sqlite" ]; then
     # Niepowodzenie nie blokuje startu: aplikacja wstanie z komunikatem o braku
     # danych, a rozkład da się dociągnąć przyciskiem w menu deweloperskim.
     python -u /app/update_gtfs.py || echo "OSTRZEŻENIE: nie udało się pobrać rozkładu."
+elif [ "$GTFS_UPDATE_ON_START" != "off" ]; then
+    # Restart = odświeżenie rozkładu, żeby po wdrożeniu nie jechać na paczce
+    # sprzed tygodnia. W tle, bo baza już jest: serwer wstaje natychmiast na
+    # obecnych danych, a gotową paczkę update_gtfs.py podmienia atomowo
+    # i gtfs.py przeładuje ją sam (klucz cache zawiera mtime bazy).
+    #
+    # Subshell z || i & - błąd aktualizacji ma zostać ostrzeżeniem w logu,
+    # a nie procesem potomnym kończącym się niezerowym kodem pod PID-em 1.
+    echo "Odświeżam rozkład w tle (serwer startuje na obecnej bazie)..."
+    (python -u /app/update_gtfs.py || echo "OSTRZEŻENIE: nie udało się odświeżyć rozkładu - zostaje poprzedni.") &
 fi
 
 exec "$@"

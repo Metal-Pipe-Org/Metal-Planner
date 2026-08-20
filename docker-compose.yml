@@ -38,9 +38,22 @@ services:
       - "127.0.0.1:5002:8000"
 
     environment:
-      # Godzina codziennej automatycznej aktualizacji rozkladu.
-      # Puste = tylko reczna, z menu deweloperskiego.
+      # Godzina codziennej automatycznej aktualizacji rozkladu (0-23), wg
+      # zegara kontenera - czyli wg TZ ponizej. Harmonogram siedzi w procesie
+      # glownym serwera, wiec jest jeden niezaleznie od WEB_CONCURRENCY,
+      # a sama aktualizacja leci osobnym procesem i znika po kilkunastu
+      # sekundach. Bez tego kontener stojacy tygodniami bez restartu dojedzie
+      # do konca waznosci paczki (~3 tygodnie) i przestanie cokolwiek
+      # znajdowac. Puste = tylko reczna i przy restarcie.
       GTFS_AUTO_UPDATE_HOUR: "3"
+
+      # Kazdy restart kontenera odswieza rozklad. Dzieje sie to w tle, wiec
+      # serwer wstaje od razu na dotychczasowej bazie, a nowa paczka
+      # podmienia sie atomowo w trakcie dzialania (nieudane pobranie zostawia
+      # stara baze nietknieta). Wyjatek: gdy bazy jeszcze nie ma, pobieranie
+      # blokuje start - inaczej nie byloby czego serwowac.
+      # "off" wylacza odswiezanie przy starcie (zostaje GTFS_AUTO_UPDATE_HOUR).
+      GTFS_UPDATE_ON_START: "on"
 
       # Rozklad jest liczony wg zegara kontenera.
       TZ: "Europe/Warsaw"

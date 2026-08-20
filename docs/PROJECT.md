@@ -32,6 +32,25 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
    aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
    wczorajsza baza zostaje nietknięta.
 
+Ma trzy punkty wejścia: wywołanie ręczne (albo z crona), start serwera
+i codzienny harmonogram. Ten ostatni to `start_daily_scheduler()` — wątek
+uruchamiany z hooka `on_starting` w `gunicorn.conf.py` (proces master, przed
+forkiem workerów, więc jeden na kontener) i z `app.py` przy starcie lokalnym.
+O godzinie z `GTFS_AUTO_UPDATE_HOUR` odpala `update_gtfs.py` jako podproces —
+`fork+exec` zamiast wątku, bo budowa SQLite w wątku procesu, który forkuje
+workery, to prosta droga do zakleszczenia świeżo zforkowanego dziecka.
+Bez harmonogramu kontener stojący dłużej niż okno ważności paczki (~3 tygodnie)
+przestałby znajdować jakiekolwiek kursy.
+
+Odpala się też sam przy starcie serwera — bez bazy blokująco (nie ma czego
+serwować), z bazą w tle, więc serwer wstaje od razu na starych danych,
+a atomowa podmiana + mtime w kluczu cache'a w `gtfs.py` sprawiają, że świeży
+rozkład wchodzi bez restartu. Dwie ścieżki, bo dwa punkty wejścia:
+`docker/entrypoint.sh` (kontener, przed gunicornem) i `refresh_on_start()`
+wywołane z `app.py` (uruchomienie lokalne). Lokalna dodatkowo pomija bazę
+młodszą niż `GTFS_MAX_AGE_HOURS` (12 h) — reloader Flaska restartuje serwer
+po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
+
 ### 2. Backend — Flask
 
 - **`gtfs.py`** — dostęp do SQLite. Przy pierwszym zapytaniu danego dnia

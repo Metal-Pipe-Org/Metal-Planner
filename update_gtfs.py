@@ -3,6 +3,15 @@
 Uruchamiany ręcznie lub z crona, np. codziennie o 3:00:
     0 3 * * * cd /sciezka/do/Metal-Planner && python3 update_gtfs.py
 
+...a przy starcie serwera przez refresh_on_start() - wywołuje ją app.py
+(uruchomienie lokalne). W kontenerze robi to samo docker/entrypoint.sh, jeszcze
+przed startem gunicorna, więc tamta ścieżka tędy nie przechodzi.
+
+Trzecie wejście to start_daily_scheduler(): codzienna aktualizacja o godzinie
+z GTFS_AUTO_UPDATE_HOUR, wątkiem w procesie serwera. Bez niej kontener, który
+stoi tygodniami bez restartu, dojechałby do końca okna ważności paczki
+(calendar.txt obejmuje ~3 tygodnie) i przestał znajdować jakiekolwiek kursy.
+
 Baza jest budowana obok jako gtfs_new.sqlite i podmieniana atomowo
 (os.replace), więc działająca aplikacja nigdy nie widzi wpół zapisanego pliku.
 """
@@ -12,11 +21,13 @@ import io
 import os
 import re
 import sqlite3
+import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 # Portal Otwarte Dane Wrocław publikuje kolejne paczki GTFS nazwane datą
@@ -28,6 +39,18 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 DB_PATH = DATA_DIR / "gtfs.sqlite"
 NEW_DB_PATH = DATA_DIR / "gtfs_new.sqlite"
 ZIP_PATH = DATA_DIR / "gtfs_download.zip"
+
+# Po ilu godzinach od ostatniej podmiany start serwera ma pobrać rozkład
+# na nowo. Chroni przed pobieraniem 12 MB po każdym zapisie pliku: reloader
+# Flaska restartuje serwer przy każdej zmianie kodu, a rozkład zmienia się
+# raz na dobę, nie co Ctrl+S.
+DEFAULT_MAX_AGE_HOURS = 12
+
+# Co ile scheduler sprawdza zegar, czekając na swoją godzinę. Krótkie drzemki
+# zamiast jednego sleep-a na osiem godzin, żeby zmiana czasu, przestawienie
+# zegara albo uśpienie hosta nie przesunęły terminu o te osiem godzin.
+# Koszt jest pomijalny: pobudka to odczyt zegara i odjęcie dat.
+SCHEDULER_TICK_SEC = 300
 
 SCHEMA = """
 CREATE TABLE stops (
@@ -262,7 +285,8 @@ def build_database(zip_path, db_path):
     db.close()
 
 
-def main():
+def run_update():
+    """Pełne przejście: pobranie, budowa, atomowa podmiana. True = udało się."""
     started = time.monotonic()
     DATA_DIR.mkdir(exist_ok=True)
     try:
@@ -272,11 +296,173 @@ def main():
         # Stara baza zostaje nietknięta - aplikacja dalej działa na wczorajszych danych.
         print(f"BŁĄD aktualizacji: {e}", file=sys.stderr)
         NEW_DB_PATH.unlink(missing_ok=True)
-        sys.exit(1)
+        return False
 
     os.replace(NEW_DB_PATH, DB_PATH)
     ZIP_PATH.unlink(missing_ok=True)
     print(f"Gotowe: {DB_PATH} ({time.monotonic() - started:.0f} s)")
+    return True
+
+
+def db_age_hours():
+    """Wiek bazy w godzinach albo None, gdy jeszcze jej nie ma."""
+    if not DB_PATH.exists():
+        return None
+    return (time.time() - DB_PATH.stat().st_mtime) / 3600
+
+
+def refresh_on_start(max_age_hours=None):
+    """Aktualizacja rozkładu przy starcie serwera. Zwraca wątek albo None.
+
+    Trzy przypadki, w kolejności:
+      - brak bazy      -> pobranie blokujące; bez rozkładu nie ma czego serwować,
+      - baza świeższa niż próg -> nic, żeby restart co chwilę nie ciągnął tego samego,
+      - baza starsza   -> wątek w tle; serwer rusza od razu na dotychczasowych
+        danych, a gdy nowa paczka wjedzie na miejsce (os.replace), gtfs.py
+        przeładuje ją sam - mtime bazy siedzi w kluczu jego cache'a.
+
+    GTFS_UPDATE_ON_START=off wyłącza całość, GTFS_MAX_AGE_HOURS zmienia próg.
+    """
+    if os.environ.get("GTFS_UPDATE_ON_START", "on").lower() == "off":
+        return None
+
+    if max_age_hours is None:
+        try:
+            max_age_hours = float(os.environ.get("GTFS_MAX_AGE_HOURS", DEFAULT_MAX_AGE_HOURS))
+        except ValueError:
+            max_age_hours = DEFAULT_MAX_AGE_HOURS
+
+    age = db_age_hours()
+    if age is None:
+        print("Brak bazy rozkładów - pobieram paczkę GTFS (~1 min)...")
+        if not run_update():
+            print("OSTRZEŻENIE: nie udało się pobrać rozkładu.", file=sys.stderr)
+        return None
+
+    if age < max_age_hours:
+        print(f"Rozkład sprzed {age:.1f} h - pomijam aktualizację przy starcie.")
+        return None
+
+    print(f"Rozkład sprzed {age:.1f} h - odświeżam w tle (serwer działa na obecnym).")
+    thread = threading.Thread(target=run_update, name="gtfs-update", daemon=True)
+    thread.start()
+    return thread
+
+
+def _next_run_at(hour, now=None):
+    """Najbliższe wystąpienie `hour:00` wg czasu lokalnego, jako datetime.
+
+    Zwracamy punkt w czasie, a nie liczbę sekund do niego, celowo: termin
+    złożony z "teraz + ileś sekund" wypada o ułamek przed pełną godziną (bo
+    zegar czytany jest dwa razy) i w logu widnieje jako 02:59 zamiast 03:00.
+
+    Trafienie w termin co do sekundy liczymy jako jutro, nie jako "teraz":
+    inaczej pętla schedulera, wróciwszy z aktualizacji w tej samej sekundzie,
+    odpaliłaby ją drugi raz.
+    """
+    now = now or datetime.now()
+    target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
+
+
+def scheduled_hour(value=None):
+    """Godzina z GTFS_AUTO_UPDATE_HOUR jako int 0-23, albo None = bez harmonogramu.
+
+    Pusta wartość to świadome "tylko ręcznie" (tak opisuje ją docker-compose.yml),
+    więc nie jest błędem. Wartość niepoprawna już jest - i mówimy o tym głośno,
+    bo cicho wyłączony harmonogram wyszedłby na jaw dopiero pustymi wynikami
+    wyszukiwania, po wygaśnięciu okna ważności paczki.
+    """
+    if value is None:
+        value = os.environ.get("GTFS_AUTO_UPDATE_HOUR", "")
+    value = str(value).strip()
+    if not value:
+        return None
+
+    try:
+        hour = int(value)
+    except ValueError:
+        hour = -1
+    if not 0 <= hour <= 23:
+        print(
+            f"GTFS_AUTO_UPDATE_HOUR={value!r} to nie godzina 0-23 "
+            "- automatyczna aktualizacja wyłączona.",
+            file=sys.stderr,
+        )
+        return None
+    return hour
+
+
+def _run_update_subprocess():
+    """Aktualizacja w osobnym procesie (fork+exec), nie w tym wątku.
+
+    Dwa powody. Pierwszy: to leci w masterze gunicorna, który forkuje workery -
+    a fork w procesie z wątkiem w środku budowy SQLite kopiuje do dziecka
+    zamki trzymane przez wątek, którego tam nie ma. Drugi: ~35 MB budowy
+    znika razem z procesem, zamiast zostać w pamięci serwera.
+
+    Kodu wyjścia świadomie nie sprawdzamy: arbiter gunicorna woła
+    os.waitpid(-1) i zbiera nasze dziecko przed subprocess, a CPython łyka
+    wtedy ChildProcessError i raportuje returncode 0 niezależnie od tego, jak
+    poszło. Wynik i tak jest w logach - update_gtfs.py sam wypisuje "Gotowe:"
+    albo "BŁĄD aktualizacji:".
+    """
+    subprocess.run([sys.executable, str(Path(__file__).resolve())], check=False)
+
+
+def _daily_loop(hour):
+    while True:
+        target = _next_run_at(hour)
+        # flush=True nie jest ozdobnikiem: pierwszy obieg tej pętli leci
+        # w masterze gunicorna jeszcze przed forkiem workerów, a wszystko, co
+        # zostanie wtedy w buforze stdout, każdy worker dziedziczy i wypłukuje
+        # przy swoim wyjściu - ta sama linia pojawiłaby się w logu trzy razy.
+        print(f"Kolejna automatyczna aktualizacja rozkładu: {target:%Y-%m-%d %H:%M} "
+              f"(GTFS_AUTO_UPDATE_HOUR={hour}).", flush=True)
+
+        # Odliczamy do stałego punktu w czasie, a nie odejmując przespane
+        # sekundy - dzięki temu skok zegara do przodu odpala aktualizację od
+        # razu, a do tyłu po prostu przedłuża czekanie.
+        while True:
+            remaining = (target - datetime.now()).total_seconds()
+            if remaining <= 0:
+                break
+            time.sleep(min(remaining, SCHEDULER_TICK_SEC))
+
+        try:
+            _run_update_subprocess()
+        except Exception as e:
+            # Wątek, który zdechnie na wyjątku, przestaje aktualizować
+            # cokolwiek aż do restartu serwera - a objaw, czyli puste wyniki
+            # wyszukiwania, pojawi się dopiero po wygaśnięciu paczki, tygodnie
+            # później. Logujemy i próbujemy jutro.
+            print(f"BŁĄD harmonogramu aktualizacji: {e}", file=sys.stderr, flush=True)
+
+
+def start_daily_scheduler(hour=None):
+    """Wątek odświeżający rozkład codziennie o `hour`. Zwraca wątek albo None.
+
+    Wołane raz na proces serwera: z on_starting w gunicorn.conf.py (master,
+    przed forkiem workerów - więc jeden harmonogram niezależnie od
+    WEB_CONCURRENCY) i z app.py przy uruchomieniu lokalnym.
+    """
+    hour = scheduled_hour(hour)
+    if hour is None:
+        return None
+
+    thread = threading.Thread(
+        target=_daily_loop, args=(hour,), name="gtfs-scheduler", daemon=True
+    )
+    thread.start()
+    return thread
+
+
+def main():
+    # Wywołanie ręczne i z crona aktualizuje bezwarunkowo - próg świeżości
+    # dotyczy tylko startu serwera.
+    sys.exit(0 if run_update() else 1)
 
 
 if __name__ == "__main__":
