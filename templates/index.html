@@ -1,64 +1,293 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Public Transport Route Planner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Planer podróży — Wrocław</title>
+    <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu — tramwaje i autobusy.">
+
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="icon" href="{{ url_for('static', filename='icons/icon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('static', filename='icons/favicon-32.png') }}" sizes="32x32">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Planer">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
-<div class="container">
+<div id="map"></div>
 
-    <h1>Public Transport Route Planner</h1>
+<button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
+        aria-label="Pokaż/ukryj panel">&larr;</button>
 
-    <form method="POST">
+<aside id="sidebar">
 
-        <label>Starting Stop</label>
-        <input
-            type="text"
-            name="start"
-            placeholder="e.g. Central Station"
-            required
-        >
+    <header class="app-bar">
+        <div class="brand">
+            <h1>Planer podróży</h1>
+            <p>Wrocław · tramwaje i autobusy</p>
+        </div>
+        <button id="install" class="icon-button" title="Zainstaluj aplikację"
+                aria-label="Zainstaluj aplikację" hidden>⤓</button>
+        <button id="dev-toggle" class="icon-button" title="Ustawienia deweloperskie"
+                aria-label="Ustawienia deweloperskie" aria-expanded="false">⚙</button>
+    </header>
 
-        <label>Destination Stop</label>
-        <input
-            type="text"
-            name="end"
-            placeholder="e.g. University"
-            required
-        >
+    {% if data_error %}
 
-        <button type="submit">
-            Plan Route
-        </button>
+    <div class="card"><div class="notice error">{{ data_error }}</div></div>
 
-    </form>
+    {% else %}
 
-    {% if route %}
+    <div class="card search-card">
 
-    <div class="result">
+        <div class="endpoints">
+            <div class="rail" aria-hidden="true">
+                <span class="rail-dot start"></span>
+                <span class="rail-line"></span>
+                <span class="rail-dot end"></span>
+            </div>
+            <div class="endpoint-fields">
+                <div class="ac-field">
+                    <input type="text" id="start" class="with-action" autocomplete="off"
+                           role="combobox" aria-label="Przystanek początkowy"
+                           aria-autocomplete="list" aria-expanded="false"
+                           aria-controls="start-list" placeholder="Skąd? np. Katedra">
+                    <button id="locate" class="icon-button in-field"
+                            title="Użyj mojej lokalizacji"
+                            aria-label="Ustaw start na mojej lokalizacji">◎</button>
+                    <ul class="ac-list" id="start-list" role="listbox" hidden
+                        aria-label="Podpowiedzi przystanków"></ul>
+                </div>
+                <div class="ac-field">
+                    <input type="text" id="end" autocomplete="off" role="combobox"
+                           aria-label="Przystanek docelowy" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="end-list"
+                           placeholder="Dokąd? np. pl. Grunwaldzki">
+                    <ul class="ac-list" id="end-list" role="listbox" hidden
+                        aria-label="Podpowiedzi przystanków"></ul>
+                </div>
+            </div>
+            <button id="swap" class="icon-button" title="Zamień miejscami"
+                    aria-label="Zamień początek z celem">⇅</button>
+        </div>
 
-        <h2>Route Found</h2>
+        <p class="locate-msg" id="locate-msg" role="status" hidden></p>
 
-        <p><strong>Start:</strong> {{ route.start }}</p>
-        <p><strong>Destination:</strong> {{ route.end }}</p>
+        <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
 
-        <p><strong>Connections:</strong></p>
+        <div class="search-row">
+            <div class="time-field">
+                <div>
+                      <span>Odjazd</span>
+                    <input type="time" id="time" value="{{ form_time }}">
+                    <button type="button" id="time-now" class="time-now-button">teraz</button>
+                    <button type="button" id="day-toggle" class="icon-button" title="Więcej opcji czasu"
+                            aria-label="Więcej opcji czasu" aria-expanded="false" aria-controls="day-panel">⌵</button>
+                </div>
+                <div id="day-panel" class="day-panel hidden">
+                <span>Data</span>
+                <input type="date" id="date" value="{{ form_date }}">
+                </div>
+            </div>
+            <button id="search" class="button primary">
+                <span class="spinner" aria-hidden="true"></span>Szukaj
+            </button>
+            <button id="clear" class="icon-button" title="Wyczyść"
+                    aria-label="Wyczyść wybór">✕</button>
+        </div>
 
-        <ul>
-            {% for connection in route.connections %}
-                <li>{{ connection }}</li>
-            {% endfor %}
-        </ul>
-
-        <p><strong>Travel Time:</strong> {{ route.travel_time }}</p>
+        <p class="hint">
+            Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
+            potem cel. Inną relację zacznij od ✕.
+        </p>
 
     </div>
 
+    <div id="results" class="results" aria-live="polite"></div>
+
     {% endif %}
 
+</aside>
+
+{% if not data_error %}
+<nav id="view-tabs" aria-label="Widok">
+    <button class="tab active" data-view="map" aria-pressed="true">Mapa</button>
+    <button class="tab" data-view="list" aria-pressed="false">
+        Trasy <span id="tab-count" class="tab-count" hidden>0</span>
+    </button>
+</nav>
+
+<div id="dev-panel" class="card hidden">
+
+    <header class="dev-head">
+        <h2>Strojenie algorytmu</h2>
+        <button id="dev-close" class="icon-button" title="Zamknij"
+                aria-label="Zamknij panel deweloperski">✕</button>
+    </header>
+
+    <div class="field">
+        <label for="extra">
+            Ile dłużej niż najszybsza trasa <output id="extra-value">125</output>%
+        </label>
+        <input type="range" id="extra" min="110" max="200" step="5" value="125">
+        <p class="field-hint">
+            Okno czasowe procentowo, nie w minutach — rośnie razem z długością
+            trasy zamiast być stałym naddatkiem. Dwa suwaki niżej łatają
+            skrajności: bardzo krótkie i bardzo długie trasy.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="extra-floor">
+            Minimalne okno (niezależnie od %) <output id="extra-floor-value">5</output> min
+        </label>
+        <input type="range" id="extra-floor" min="0" max="30" step="1" value="5">
+        <p class="field-hint">
+            Przy krótkich trasach sam procent daje grosze — 3-minutowa trasa
+            przy 110% to ledwie 18 s naddatku. Ten suwak gwarantuje co
+            najmniej tyle minut okna, nawet dla bardzo krótkich tras.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="extra-cap">
+            Maksymalne okno (sufit dla długich tras) <output id="extra-cap-value">15</output> min
+        </label>
+        <input type="range" id="extra-cap" min="10" max="120" step="5" value="15">
+        <p class="field-hint">
+            Odwrotność powyższego — przy bardzo długiej najszybszej trasie
+            wysoki procent otworzyłby absurdalnie szerokie okno. Ten suwak je
+            ogranicza. Do debugów; jeśli nie przeszkadza, można zostawić.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="range">
+            Zasięg szukania punktu <output id="range-value">1000</output> m
+        </label>
+        <input type="range" id="range" min="200" max="1500" step="100" value="1000">
+        <p class="field-hint">
+            Przy kliknięciu w dowolny punkt mapy — jak daleko szukać słupków,
+            z których można wsiąść lub wysiąść.
+        </p>
+    </div>
+
+    <div class="field" id="sw-field">
+        <label>Wersja aplikacji</label>
+        <div class="sw-row">
+            <code id="sw-version">—</code>
+            <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
+                Sprawdź
+            </button>
+        </div>
+        <p class="field-hint" id="sw-status" role="status">
+            Porównuje wersję działającą w przeglądarce z tą, którą serwer
+            wydaje w tej chwili.
+        </p>
+    </div>
+
+    {#
+      TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
+      Sekcja jest WIDOCZNA (LOOK_TUNING = true w app.js) — strojenie trwa.
+      Atrybut `hidden` niżej to tylko stan startowy: app.js zdejmuje go albo
+      zostawia, zależnie od tego przełącznika. Bieżące wartości siedzą w
+      LOOK_DEFAULTS w app.js i to one są domyślne, gdy sekcja jest schowana.
+      Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
+    #}
+    <div class="dev-section" id="look-section" hidden>
+        <h3>Wygląd mapy <span class="dev-temp">tymczasowe</span></h3>
+
+        <div class="field compact">
+            <label for="look-min-op">
+                Najbledsza linia — krycie <output id="look-min-op-value">0.4</output>
+            </label>
+            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.4">
+            <p class="field-hint">
+                Dolny próg widoczności (punkt 8 kontraktu). Najbledszy kawałek
+                ma być widoczny bez najeżdżania myszką.
+            </p>
+        </div>
+
+        <div class="field compact">
+            <label for="look-min-w">
+                Najbledsza linia — grubość <output id="look-min-w-value">3</output> px
+            </label>
+            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="3">
+        </div>
+
+        <div class="field compact">
+            <label for="look-max-op">
+                Najjaśniejsza linia — krycie <output id="look-max-op-value">1</output>
+            </label>
+            <input type="range" id="look-max-op" min="0.3" max="1" step="0.05" value="1">
+        </div>
+
+        <div class="field compact">
+            <label for="look-max-w">
+                Najjaśniejsza linia — grubość <output id="look-max-w-value">3</output> px
+            </label>
+            <input type="range" id="look-max-w" min="2" max="12" step="0.5" value="3">
+        </div>
+
+        <div class="field compact">
+            <label for="look-casing">
+                Biała otoczka od jasności <output id="look-casing-value">0.45</output>
+            </label>
+            <input type="range" id="look-casing" min="0" max="1.05" step="0.05" value="0.45">
+            <p class="field-hint">
+                1.05 = nigdy, 0 = zawsze. Otoczka oddziela jasne korytarze od
+                tła, ale pogrubia całą sieć.
+            </p>
+        </div>
+
+        <div class="field compact">
+            <label for="look-dim">
+                Przygaszenie przy wybranej trasie <output id="look-dim-value">0.22</output>
+            </label>
+            <input type="range" id="look-dim" min="0.05" max="1" step="0.01" value="0.22">
+        </div>
+
+        <div class="field compact">
+            <label for="look-label-step">
+                Odstęp grupek numerów <output id="look-label-step-value">200</output> px
+            </label>
+            <input type="range" id="look-label-step" min="120" max="700" step="20" value="200">
+        </div>
+
+        <div class="field compact">
+            <label for="look-label-size">
+                Wielkość numerów <output id="look-label-size-value">0.8</output>×
+            </label>
+            <input type="range" id="look-label-size" min="0.7" max="1.6" step="0.05" value="0.8">
+        </div>
+
+        <div class="field compact">
+            <label for="look-label-op">
+                Krycie numerów <output id="look-label-op-value">1</output>×
+            </label>
+            <input type="range" id="look-label-op" min="0.3" max="1" step="0.05" value="1">
+        </div>
+
+        <button type="button" id="look-reset" class="button">Przywróć domyślne</button>
+        <p class="field-hint" id="look-dump">
+            Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
+            i skasuję tę sekcję.
+        </p>
+    </div>
+
 </div>
+{% endif %}
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='pwa.js') }}"></script>
 
 </body>
 </html>

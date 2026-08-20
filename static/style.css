@@ -1,42 +1,1084 @@
+/* Planer podróży - warstwa UI nad pełnoekranową mapą.
+   Kolejność: tokeny -> elementy wspólne -> panel -> lista tras -> mapa
+   -> panel deweloperski -> RWD. */
+
+:root {
+    --tram: #c62828;
+    --bus: #1565c0;
+    --other: #6a1b9a;
+    --accent: #2563eb;
+    --ink: #16202b;
+    --ink-soft: #5b6b7c;
+    --ink-faint: #8a99a8;
+    --line: #e3e8ee;
+    --surface: #fff;
+    --surface-alt: #f5f7fa;
+    --sheet: #e9edf2;                /* tło listy tras na telefonie */
+    --radius: 14px;
+    --shadow: 0 6px 24px rgba(16, 32, 48, 0.14), 0 1px 3px rgba(16, 32, 48, 0.10);
+    --sidebar-w: 380px;
+}
+
+* { box-sizing: border-box; }
+
 body {
-    font-family: Arial, sans-serif;
-    background: #f5f5f5;
+    margin: 0;
+    color: var(--ink);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
 }
 
-.container {
-    width: 500px;
-    margin: 40px auto;
-    background: white;
-    padding: 25px;
+#map {
+    position: fixed;
+    inset: 0;
+}
+
+/* --------------------------------------------------- elementy wspólne --- */
+
+.card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 14px;
+}
+
+.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: none;
     border-radius: 10px;
+    padding: 0 16px;
+    height: 40px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
-h1 {
-    text-align: center;
+.button.primary {
+    background: var(--accent);
+    color: #fff;
 }
 
-label {
-    display: block;
-    margin-top: 15px;
+.button.primary:hover { background: #1d4fd7; }
+
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
-input {
+.icon-button:hover { background: #e8edf3; color: var(--ink); }
+
+.icon-button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.icon-button.floating {
+    position: fixed;
+    top: 16px;
+    left: calc(var(--sidebar-w) + 28px);
+    z-index: 1100;
+    width: 40px;
+    height: 40px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    font-size: 18px;
+    transition: left 0.25s ease;
+}
+
+body.panel-hidden .icon-button.floating { left: 16px; }
+
+/* Kółko ładowania - pierścień z wyciętym fragmentem, w kolorze tekstu, więc
+   ten sam element działa i na przycisku (biały), i w komunikacie (szary). */
+.spinner {
+    display: inline-block;
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Kółko na przycisku pokazuje się tylko na czas wyszukiwania - poza nim
+   przycisk jest zwykłym „Szukaj". */
+#search .spinner { display: none; }
+body.searching #search .spinner { display: inline-block; }
+body.searching #search { cursor: progress; }
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner { animation-duration: 2.4s; }   /* wolniej, ale wciąż widać, że trwa */
+}
+
+.hint {
+    margin: 10px 0 0;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+}
+
+.notice {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    color: var(--ink-soft);
+    font-size: 14px;
+}
+
+.notice.loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.notice.error {
+    background: #fdecea;
+    box-shadow: none;
+    color: #8c2b23;
+}
+
+.notice.error p { margin: 0 0 6px; }
+.notice.error ul { margin: 4px 0 0; padding-left: 18px; }
+.notice.error a { color: #8c2b23; }
+
+/* ------------------------------------------------------ panel z lewej --- */
+
+#sidebar {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    bottom: 16px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: var(--sidebar-w);
+    transition: transform 0.25s ease, opacity 0.25s ease, visibility 0s;
+}
+
+body.panel-hidden #sidebar {
+    transform: translateX(calc(-1 * var(--sidebar-w) - 24px));
+    opacity: 0;
+    visibility: hidden;              /* schowany panel znika też dla czytników */
+    transition-delay: 0s, 0s, 0.25s;
+}
+
+.app-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    flex: 0 0 auto;
+}
+
+.brand h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.brand p {
+    margin: 1px 0 0;
+    color: var(--ink-faint);
+    font-size: 12px;
+}
+
+.search-card { flex: 0 0 auto; }
+
+/* Pola "skąd/dokąd" z szyną: kropka - kreska - kropka, jak na schemacie linii. */
+.endpoints {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 0;
+}
+
+.rail-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.rail-dot.start { background: #43a047; }
+.rail-dot.end { background: #e53935; }
+
+.rail-line {
+    flex: 1;
+    width: 2px;
+    min-height: 26px;
+    margin: 3px 0;
+    background: repeating-linear-gradient(
+        to bottom, var(--line) 0 3px, transparent 3px 6px);
+}
+
+.endpoint-fields {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.endpoint-fields input {
     width: 100%;
-    padding: 10px;
-    margin-top: 5px;
-    box-sizing: border-box;
+    height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    font: inherit;
+    color: var(--ink);
 }
 
-button {
-    margin-top: 20px;
-    width: 100%;
-    padding: 12px;
+.endpoint-fields input:focus,
+.time-field input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* Miejsce na przycisk w polu (◎ „moja lokalizacja"), żeby wpisana nazwa
+   nie wjeżdżała pod niego. */
+.endpoint-fields input.with-action { padding-right: 42px; }
+
+/* Własna lista podpowiedzi nazw przystanków (zamiast <datalist>). */
+.ac-field {
+    position: relative;
+}
+
+.icon-button.in-field {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 32px;
+    height: 32px;
+    background: none;
+    font-size: 15px;
+}
+
+.icon-button.in-field:hover { background: #e8edf3; }
+
+/* Czekanie na GPS: przycisk pulsuje i nie przyjmuje kolejnych kliknięć. */
+.icon-button.in-field:disabled {
+    cursor: default;
+    color: var(--accent);
+    animation: locate-pulse 1s ease-in-out infinite;
+}
+
+@keyframes locate-pulse {
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .icon-button.in-field:disabled { animation: none; opacity: 0.5; }
+}
+
+/* Komunikat spod pola startu (odmowa zgody, brak sygnału). Świadomie NIE jest
+   zwykłym .hint - te na telefonie znikają w widoku mapy, a to właśnie tam
+   pyta się o lokalizację. */
+.locate-msg {
+    margin: 8px 0 0;
+    color: #8c2b23;
+    font-size: 12.5px;
+}
+
+.ac-list {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 246px;
+    margin: 0;
+    padding: 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+    background: var(--surface);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+}
+
+.ac-list[hidden] { display: none; }
+
+.ac-item {
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     cursor: pointer;
 }
 
-.result {
-    margin-top: 30px;
-    padding: 15px;
-    background: #eef7ff;
+/* Gdy podświetleniem steruje klawiatura, hover się nie wtrąca - inaczej
+   widać dwa "wybrane" wiersze naraz. */
+.ac-list:not(.kb) .ac-item:hover,
+.ac-item.active {
+    background: var(--surface-alt);
+}
+
+.ac-item mark {
+    background: none;
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.search-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.time-field {
+    flex: 0 0 auto;
+    flex-direction: column;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: auto;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    color: var(--ink-faint);
+    font-size: 12.5px;
+}
+.day-panel {
+    margin-top: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+}
+
+.day-panel.hidden {
+    display: none;
+}
+
+.time-field input {
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    padding: 0;
+}
+
+.time-now-button {
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.time-now-button:hover { background: #e8edf3; color: var(--ink); }
+
+.search-row .button.primary { flex: 1; }
+
+/* ----------------------------------------------------- lista propozycji --- */
+
+.results {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+}
+
+.results-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 8px 4px;
+}
+
+.results-head h2 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+}
+
+.results-count {
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    color: var(--ink-soft);
+}
+
+.results-head .icon-button {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+    margin-left: auto;
+}
+
+#results.collapsed .journeys,
+#results.collapsed .results-foot {
+    display: none;
+}
+
+.journeys {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.journey {
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.journey:hover { border-color: #c9d6e4; }
+.journey:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.journey.selected {
+    border-color: var(--accent);
+    box-shadow: var(--shadow), 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.j-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.j-clock {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.j-duration {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-soft);
+}
+
+.j-lines {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-top: 8px;
+}
+
+.j-meta {
+    margin-top: 6px;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+}
+
+/* Plakietka linii - ten sam język co numery na mapie. */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: 6px;
+    background: var(--other);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.badge.tram { background: var(--tram); }
+.badge.bus { background: var(--bus); }
+
+/* Łącznik między plakietkami: ciągły = przesiadka na miejscu,
+   kropkowany = trzeba przejść na inne stanowisko. */
+.hop {
+    width: 14px;
+    height: 2px;
+    margin: 0 3px;
+    background: #c5cfda;
+    border-radius: 2px;
+}
+
+.hop.walk {
+    background: repeating-linear-gradient(
+        to right, #c5cfda 0 3px, transparent 3px 6px);
+}
+
+/* Rozwinięcie wybranej propozycji: oś czasu etapów. */
+.timeline {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 12px 0 0;
+    border-top: 1px solid var(--line);
+}
+
+.timeline li {
+    display: grid;
+    grid-template-columns: 42px 16px 1fr;
+    align-items: start;
+    column-gap: 8px;
+}
+
+.tl-time {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink);
+    text-align: right;
+    line-height: 18px;
+}
+
+.tl-dot {
+    position: relative;
+    align-self: stretch;
+    justify-self: center;
+    width: 2px;
+    background: var(--line);
+}
+
+.tl-stop .tl-dot::before {
+    content: "";
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    width: 9px;
+    height: 9px;
+    transform: translateX(-50%);
+    border: 2px solid var(--ink-soft);
+    border-radius: 50%;
+    background: #fff;
+}
+
+.tl-stop.first .tl-dot { background: linear-gradient(to bottom, transparent 9px, var(--line) 9px); }
+.tl-stop.last .tl-dot { background: linear-gradient(to bottom, var(--line) 9px, transparent 9px); }
+.tl-stop.first .tl-dot::before { border-color: #43a047; }
+.tl-stop.last .tl-dot::before { border-color: #e53935; }
+
+.tl-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 18px;
+    padding-bottom: 6px;
+}
+
+.tl-ride .tl-dot { background: var(--other); }
+.tl-ride.tram .tl-dot { background: var(--tram); }
+.tl-ride.bus .tl-dot { background: var(--bus); }
+
+.tl-ride .tl-body {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 2px 0 8px;
+}
+
+.tl-headsign {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+}
+
+.tl-info {
+    flex-basis: 100%;
+    font-size: 12px;
+    color: var(--ink-faint);
+}
+
+.tl-walk .tl-dot {
+    background: repeating-linear-gradient(
+        to bottom, #b7c2ce 0 3px, transparent 3px 6px);
+}
+
+.tl-walk .tl-body {
+    padding: 2px 0 8px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    font-style: italic;
+}
+
+.j-collapse {
+    margin: 8px 0 0;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    text-align: center;
+}
+
+.results-foot {
+    margin: 10px 4px 0;
+    color: var(--ink-faint);
+    font-size: 12px;
+    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+}
+
+/* -------------------------------------------------------------- mapa --- */
+
+/* Plakietka numeru linii rysowana na mapie: obrys dla przepływów (żeby nie
+   zasłaniać wiązki), wypełnienie dla wybranej trasy. */
+.line-badge {
+    background: #fff;
+    border: 1.5px solid #444;
     border-radius: 8px;
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 14px;
+    width: auto !important;
+    height: auto !important;
+    white-space: nowrap;
+    text-align: center;
+    box-shadow: 0 0 3px rgba(0, 0, 0, 0.35);
+}
+
+.line-badge.tram { color: var(--tram); border-color: var(--tram); }
+.line-badge.bus { color: var(--bus); border-color: var(--bus); }
+.line-badge.other { color: var(--other); border-color: var(--other); }
+
+.line-badge.solid {
+    color: #fff;
+    font-size: 11px;
+    line-height: 16px;
+    padding: 0 6px;
+    border-color: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.line-badge.solid.tram { background: var(--tram); }
+.line-badge.solid.bus { background: var(--bus); }
+.line-badge.solid.other { background: var(--other); }
+
+/* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
+   wszystkimi jego numerami obok siebie - nie osobna plakietka dla każdej
+   linii rozrzucona gdzie indziej (patrz placeLineLabels w app.js). Kotwica
+   sama nie ma rozmiaru; pudełko wysrodkowuje się na niej własnym transformem,
+   żeby numer stał NA korytarzu, a nie obok niego. */
+.line-cluster-anchor {
+    width: auto !important;
+    height: auto !important;
+    white-space: nowrap;
+}
+
+.line-cluster {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    flex-direction: column;   /* najgęstsze korytarze łamią się na wiersze */
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 9px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.line-cluster-row {
+    display: flex;
+    gap: 3px;
+}
+
+/* Pojedynczy numer w grupce - jest też celem myszy: najechanie wskazuje tę
+   linię na mapie, kliknięcie otwiera jej propozycję. */
+/* Wielkość numerów siedzi na suwaku "Wielkość numerów" (--chip-scale, patrz
+   TYMCZASOWE w app.js) - domyślnie 1, czyli dokładnie te rozmiary co poniżej. */
+.line-chip {
+    font-size: calc(11px * var(--chip-scale, 1));
+    font-weight: bold;
+    line-height: calc(15px * var(--chip-scale, 1));
+    padding: 0 calc(3px * var(--chip-scale, 1));
+    border-radius: 5px;
+    white-space: nowrap;
+}
+
+.line-chip.tram { color: var(--tram); }
+.line-chip.bus { color: var(--bus); }
+.line-chip.other { color: var(--other); }
+
+.line-chip.picked,
+.line-cluster .line-chip:hover { color: #fff; }
+.line-chip.picked.tram,
+.line-cluster .line-chip.tram:hover { background: var(--tram); }
+.line-chip.picked.bus,
+.line-cluster .line-chip.bus:hover { background: var(--bus); }
+.line-chip.picked.other,
+.line-cluster .line-chip.other:hover { background: var(--other); }
+
+/* Podpowiedź nad korytarzem odpowiada na jedno pytanie: "na czym stoję".
+   Numer wskazanej linii jest nagłówkiem, a pod nim ten sam rządek numerów co
+   na mapie - z podświetlonym tym jednym, żeby było widać, gdzie się jest w
+   kolejności i co jeszcze jedzie tym samym korytarzem. */
+.flow-tip-line {
+    display: block;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.flow-tip-line.tram { color: var(--tram); }
+.flow-tip-line.bus { color: var(--bus); }
+.flow-tip-line.other { color: var(--other); }
+
+.flow-tip-row {
+    display: flex;
+    gap: 3px;
+    margin: 3px 0 1px;
+    --chip-scale: 1;      /* podpowiedź ma swoją wielkość, nie skaluje się z mapą */
+}
+
+.flow-tip-row .line-chip { background: rgba(0, 0, 0, 0.07); }
+
+.flow-tip-hint {
+    display: block;
+    font-size: 11px;
+    opacity: 0.7;
+    font-style: italic;
+}
+
+/* ------------------------------------------------ panel deweloperski --- */
+
+#dev-panel {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 1000;
+    width: 290px;
+    /* Suwaków jest już tyle, że nie mieszczą się na niższym ekranie - panel
+       przewija się w sobie zamiast wychodzić poza okno. */
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transition: transform 0.2s ease, opacity 0.2s ease, visibility 0s;
+}
+
+#dev-panel.hidden {
+    transform: translateX(20px);
+    opacity: 0;
+    visibility: hidden;
+    transition-delay: 0s, 0s, 0.2s;
+}
+
+.dev-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.dev-head h2 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.dev-head .icon-button { width: 28px; height: 28px; font-size: 13px; }
+
+#dev-panel .field { margin-top: 14px; }
+
+#dev-panel label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#dev-panel output {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+#dev-panel input[type="range"] {
+    width: 100%;
+    margin: 6px 0 0;
+    accent-color: var(--accent);
+}
+
+.field-hint {
+    margin: 4px 0 0;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    line-height: 1.4;
+}
+
+/* TYMCZASOWE (2026-08-15) - sekcja "Wygląd mapy" w panelu deweloperskim.
+   Idzie do kasacji razem z nią (patrz app.js, LOOK_DEFAULTS). */
+.dev-section {
+    margin-top: 18px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+}
+
+.dev-section h3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.dev-temp {
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: var(--surface-alt);
+    color: var(--ink-faint);
+}
+
+#dev-panel .field.compact { margin-top: 10px; }
+#dev-panel .field.compact label { font-size: 12px; font-weight: 500; }
+#dev-panel #look-reset { margin-top: 14px; width: 100%; }
+#look-dump { font-variant-numeric: tabular-nums; word-break: break-word; }
+
+.field-hint code {
+    font-size: 11px;
+    background: var(--surface-alt);
+    padding: 0 3px;
+    border-radius: 3px;
+}
+
+/* ------------------------------------------- zakładki (tylko telefon) --- */
+
+#view-tabs {
+    display: none;               /* na szerokim ekranie widać oba widoki naraz */
+    position: fixed;
+    z-index: 1200;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    gap: 4px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line);
+}
+
+.tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    height: 44px;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--ink-soft);
+    cursor: pointer;
+    user-select: none;                       /* stuknięcie nie ma zaznaczać etykiety */
+    -webkit-tap-highlight-color: transparent;
+}
+
+.tab.active {
+    background: var(--surface-alt);
+    color: var(--accent);
+}
+
+.tab-count {
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+}
+
+.tab-count[hidden] { display: none; }
+
+/* --------------------------------------------------------------- PWA --- */
+
+/* Przycisk instalacji pokazuje się dopiero, gdy przeglądarka ją proponuje,
+   a inline-flex z .icon-button sam z siebie zignorowałby atrybut hidden. */
+.icon-button[hidden] { display: none; }
+
+/* Wersja aplikacji w panelu ⚙: skrót + przycisk wymuszenia sprawdzenia. */
+.sw-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+}
+
+.sw-row code {
+    flex: 1;
+    overflow: hidden;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sw-row .button { flex: 0 0 auto; background: var(--surface-alt); }
+.sw-row .button:hover { background: #e8edf3; }
+.sw-row .button:disabled { opacity: 0.6; cursor: default; }
+
+/* Wynik sprawdzenia: zwykła podpowiedź, ostrzeżenie albo realny błąd. */
+.field-hint.ok { color: #2e7d32; }
+.field-hint.warn { color: #a15c07; }
+.field-hint.bad { color: #8c2b23; font-weight: 600; }
+
+/* Pasek komunikatów PWA (utrata sieci) - nad wszystkim, bo dotyczy całej
+   aplikacji, a nie konkretnego panelu. */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 1300;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 10px 10px 16px;
+    transform: translateX(-50%);
+    border-radius: var(--radius);
+    background: var(--ink);
+    color: #fff;
+    box-shadow: var(--shadow);
+}
+
+.toast .toast-close {
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    color: #fff;
+    opacity: 0.7;
+}
+
+.toast .toast-close:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+@media (max-width: 760px) {
+    /* Nad zakładkami Mapa/Trasy, żeby żadnej z nich nie zasłaniać. */
+    .toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* --------------------------------------------------------------- RWD --- */
+
+@media (max-width: 760px) {
+    #view-tabs { display: flex; }
+
+    #sidebar {
+        /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu
+           (viewport-fit=cover), więc panel musi je omijać sam. */
+        top: calc(8px + env(safe-area-inset-top, 0px));
+        left: 8px;
+        right: 8px;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
+        width: auto;
+    }
+
+    /* Widok mapy: z panelu zostaje sama karta wyszukiwania, reszta ekranu
+       to mapa. */
+    body.view-map #sidebar { bottom: auto; }
+    body.view-map .app-bar,
+    body.view-map .hint,
+    body.view-map .results { display: none; }
+
+    /* Widok listy: panel na cały ekran, na własnym tle - mapa pod spodem
+       zostaje w DOM (Leaflet musi znać rozmiar kontenera, żeby poprawnie
+       kadrować także wtedy, gdy patrzymy na listę), ale nie prześwituje
+       między kartami. */
+    body.view-list #sidebar {
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+        padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
+        background: var(--sheet);
+    }
+
+    /* Poświata pod tekstem była na czytelność nad mapą - na jednolitym tle
+       tylko brudzi. */
+    body.view-list .results-head h2,
+    body.view-list .results-foot { text-shadow: none; }
+
+    /* Zakładki zastępują ☰ - dwa mechanizmy chowania panelu naraz tylko by
+       myliły, a przy schowanym ☰ nie byłoby czym go odsłonić. */
+    .icon-button.floating { display: none; }
+
+    body.panel-hidden #sidebar {
+        transform: none;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+    }
+
+    #dev-panel {
+        left: 8px;
+        right: 8px;
+        width: auto;
+        max-height: 70vh;
+        overflow-y: auto;
+    }
 }

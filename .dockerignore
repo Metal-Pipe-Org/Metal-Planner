@@ -1,0 +1,19 @@
+.git
+.gitignore
+.gitattributes
+.claude/
+.vscode/
+.idea/
+
+myenv/
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+
+# Baza rozkładów mieszka w wolumenie, nie w obrazie.
+data/
+logs/
+*.log
+*.sqlite

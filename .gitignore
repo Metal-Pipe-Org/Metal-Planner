@@ -62,6 +62,9 @@ instance/
 *.sqlite3
 *.db
 
+# Pobrane dane GTFS
+data/
+
 # =========================
 # Logs
 # =========================
