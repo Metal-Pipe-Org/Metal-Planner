@@ -367,16 +367,27 @@ body.panel-hidden #sidebar {
 }
 
 .time-field {
+    flex: 0 0 auto;
+    flex-direction: column;
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 40px;
+    height: auto;
     padding: 0 10px;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--surface-alt);
     color: var(--ink-faint);
     font-size: 12.5px;
+}
+.day-panel {
+    margin-top: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+}
+
+.day-panel.hidden {
+    display: none;
 }
 
 .time-field input {

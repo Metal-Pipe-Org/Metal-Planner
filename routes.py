@@ -50,14 +50,21 @@ def _point_arg(prefix):
         return None
 
 
-def _parse_when(time_str):
+def _parse_when(time_str,data_str):
     """Godzina 'HH:MM' z formularza -> datetime dzisiaj o tej porze (domyślnie teraz)."""
     when = datetime.now()
     time_str = (time_str or "").strip()
+    data_str = (data_str or "").strip()
     if time_str:
         try:
             hours, minutes = time_str.split(":")
             when = when.replace(hour=int(hours), minute=int(minutes), second=0)
+        except ValueError:
+            pass
+    if data_str:
+        try:
+            day, month,year = time_str.split(":")
+            when = when.replace(day=int(day), month=int(month))
         except ValueError:
             pass
     return when
@@ -79,6 +86,7 @@ def init_routes(app):
             stops=stops,
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),
+            form_date=datetime.now().strftime("%d.%m.%y"),
         )
 
     @app.route("/sw.js")
@@ -112,7 +120,7 @@ def init_routes(app):
         return jsonify(plan_route(
             request.args.get("start", ""),
             request.args.get("end", ""),
-            _parse_when(request.args.get("time")),
+            _parse_when(request.args.get("time"),request.args.get("date")),
         ))
 
     @app.route("/api/flow")
@@ -120,7 +128,7 @@ def init_routes(app):
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
-            _parse_when(request.args.get("time")),
+            _parse_when(request.args.get("time"),request.args.get("date")),
             _point_arg("start"),
             _point_arg("end"),
             _float_arg("range_m"),

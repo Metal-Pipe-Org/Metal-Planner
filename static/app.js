@@ -68,6 +68,22 @@ if (devPanel) {
     devToggle.addEventListener('click', () => setDev(devPanel.classList.contains('hidden')));
     $('dev-close').addEventListener('click', () => setDev(false));
 }
+// Panel wyboru dnia
+const dayPanel = $('day-panel');
+const dayToggle = $('day-toggle');
+
+if (dayPanel && dayToggle) {
+    // Sterowanie widocznością panelu
+    const setDay = (open, persist = true) => {
+        dayPanel.classList.toggle('hidden', !open);
+        dayToggle.classList.toggle('active', open);
+        dayToggle.setAttribute('aria-expanded', String(open));
+        if (persist) saveUiState({ dayOpen: open });
+    };
+
+    setDay(!!uiState.dayOpen, false);
+    dayToggle.addEventListener('click', () => setDay(dayPanel.classList.contains('hidden')));
+}
 
 // Na telefonie panel i mapa nie mieszczą się naraz, więc zamiast nachodzić
 // na siebie przełączają się zakładkami (na szerokim ekranie klasy widoku
@@ -1178,6 +1194,7 @@ function showError(message, suggestions) {
 function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
+        date: $('date').value,
         range_m: $('range').value,
         extra_pct: $('extra').value,
         extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
