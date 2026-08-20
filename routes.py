@@ -63,8 +63,8 @@ def _parse_when(time_str,data_str):
             pass
     if data_str:
         try:
-            day, month,year = time_str.split(":")
-            when = when.replace(day=int(day), month=int(month))
+            year,month,day = data_str.split("-")
+            when = when.replace(day=int(day), month=int(month),year=int(year))
         except ValueError:
             pass
     return when
