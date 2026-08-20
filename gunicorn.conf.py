@@ -19,3 +19,10 @@ threads = int(os.environ.get("GUNICORN_THREADS", "8"))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", "120"))
 accesslog = "-"
 errorlog = "-"
+
+# Control socket (gunicornc) doszedł w 25.1.0 i domyślnie lądowałby w $HOME.
+# W kontenerze entrypoint schodzi na użytkownika app przez gosu, które nie
+# zmienia HOME - ten nadal wskazuje na /root, więc próba założenia gniazda
+# kończy się błędem w logu przy każdym starcie. Serwer wstaje mimo to, ale
+# pożytku z gniazda tu nie ma, więc go nie tworzymy.
+control_socket_disable = True
