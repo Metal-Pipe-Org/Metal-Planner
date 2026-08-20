@@ -52,6 +52,11 @@ const isCacheable = response =>
     response && (response.ok || response.type === 'opaque');
 
 self.addEventListener('install', event => {
+    // Nowa wersja nie czeka na zamknięcie kart - instaluje się i od razu
+    // przejmuje sterowanie. Dzięki temu aktualizacja dzieje się sama,
+    // bez pytania użytkownika o zgodę (patrz pwa.js).
+    self.skipWaiting();
+
     event.waitUntil((async () => {
         const shell = await caches.open(SHELL);
         await shell.addAll(SHELL_URLS);
@@ -73,12 +78,10 @@ self.addEventListener('activate', event => {
     })());
 });
 
-// Nowa wersja czeka na zamknięcie wszystkich kart; pasek "Odśwież" w pwa.js
-// pozwala przejąć sterowanie od razu. Na pytanie o wersję odpowiadamy tym,
-// co faktycznie jest wkompilowane w tego workera - panel ⚙ porównuje to
-// z wersją serwowaną w tej chwili przez serwer.
+// Na pytanie o wersję odpowiadamy tym, co faktycznie jest wkompilowane
+// w tego workera - panel ⚙ porównuje to z wersją serwowaną w tej chwili
+// przez serwer.
 self.addEventListener('message', event => {
-    if (event.data === 'SKIP_WAITING') self.skipWaiting();
     if (event.data === 'VERSION' && event.ports[0]) {
         event.ports[0].postMessage(VERSION);
     }

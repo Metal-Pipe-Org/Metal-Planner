@@ -1,37 +1,37 @@
-/* Warstwa PWA: rejestracja service workera, przycisk instalacji i informacja
-   o nowej wersji. Celowo osobny plik od app.js - działa także wtedy, gdy nie
+/* Warstwa PWA: rejestracja service workera, przycisk instalacji i podmiana
+   frontu na nowy. Celowo osobny plik od app.js - działa także wtedy, gdy nie
    ma bazy rozkładów i panel pokazuje sam komunikat o błędzie. */
 
 if ('serviceWorker' in navigator) {
+    // Karta, która wystartowała bez workera, dostaje go przy pierwszej
+    // instalacji - to nie jest aktualizacja i nie ma czego przeładowywać.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then(watchForUpdate, () => {});
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
     });
 
-    // Przejęcie sterowania przez nową wersję = jedno przeładowanie strony.
+    /* Nowa wersja instaluje się i przejmuje stronę sama (skipWaiting w sw.js),
+       więc nie pytamy o zgodę - kod na ekranie jest w tym momencie już stary
+       i wystarczy go podmienić przeładowaniem.
+
+       Robimy to tylko wtedy, gdy nie ma czego zgubić: dopóki użytkownik
+       niczego nie kliknął ani nie wpisał. Przeglądarka sprawdza workera
+       właśnie przy wejściu na stronę, więc w praktyce przeładowanie wypada
+       ułamek sekundy po odświeżeniu i wygląda jak jego część. Jeśli ktoś
+       zdążył już czegoś szukać, zostawiamy go w spokoju - nowa wersja i tak
+       wjedzie przy następnym wejściu, a wywalony w pół drogi formularz jest
+       gorszy niż jedno wyszukiwanie na starym froncie. */
+    let touched = false;
+    const markTouched = () => { touched = true; };
+    window.addEventListener('pointerdown', markTouched, {once: true, capture: true});
+    window.addEventListener('keydown', markTouched, {once: true, capture: true});
+
     let reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloading) return;
+        if (!hadController || touched || reloading) return;
         reloading = true;
         location.reload();
-    });
-}
-
-/* Nowa wersja czeka w kolejce dopóki żyje stara karta - zamiast czekać na
-   zamknięcie wszystkich, proponujemy odświeżenie. */
-function watchForUpdate(registration) {
-    const offerReload = worker => {
-        if (!navigator.serviceWorker.controller) return;   // pierwsza instalacja
-        showUpdateScreen(() => worker.postMessage('SKIP_WAITING'));
-    };
-
-    if (registration.waiting) offerReload(registration.waiting);
-
-    registration.addEventListener('updatefound', () => {
-        const worker = registration.installing;
-        if (!worker) return;
-        worker.addEventListener('statechange', () => {
-            if (worker.state === 'installed') offerReload(worker);
-        });
     });
 }
 
@@ -64,12 +64,12 @@ window.addEventListener('appinstalled', () => {
 
 /* Panel ⚙ - wymuszenie sprawdzenia aktualizacji.
 
-   Pasek "jest nowa wersja" pojawia się tylko wtedy, gdy przeglądarka sama
-   zauważy nowego workera. Tutaj można ją do tego zmusić i - co ważniejsze -
-   zobaczyć, że coś jest nie tak: jeśli serwer wydaje inną wersję niż ta,
-   na której chodzi aplikacja, a mimo to nie ma aktualizacji, to znaczy, że
-   /sw.js jest gdzieś po drodze cache'owany i użytkownicy zostają na starym
-   froncie. Bez tej diagnostyki taka awaria jest niewidoczna. */
+   Aktualizacja wchodzi sama przy wejściu na stronę. Tutaj można ją wymusić
+   od ręki i - co ważniejsze - zobaczyć, że coś jest nie tak: jeśli serwer
+   wydaje inną wersję niż ta, na której chodzi aplikacja, a mimo wymuszenia
+   nie ma aktualizacji, to znaczy, że /sw.js jest gdzieś po drodze
+   cache'owany i użytkownicy zostają na starym froncie. Bez tej diagnostyki
+   taka awaria jest niewidoczna. */
 
 const swVersionEl = document.getElementById('sw-version');
 const swStatusEl = document.getElementById('sw-status');
@@ -124,7 +124,7 @@ async function checkForUpdate() {
     await registration.update();
 
     if (registration.installing || registration.waiting) {
-        setSwStatus(`Jest nowa wersja (${served}) — instaluje się, zaraz pojawi się pasek z odświeżeniem.`, 'ok');
+        setSwStatus(`Jest nowa wersja (${served}) — instaluje się, wejdzie po odświeżeniu strony.`, 'ok');
     } else if (served && running && served !== running) {
         setSwStatus(
             `Coś jest nie tak: serwer wydaje ${served}, a aplikacja chodzi na ${running} `
@@ -158,112 +158,10 @@ if ('serviceWorker' in navigator && swVersionEl) {
         });
 }
 
-/* Ekran nowej wersji.
-
-   Stary front chodzący na nowym API to najgorszy możliwy stan - pasek na dole
-   dawało się klikać obok tygodniami. Dlatego aktualizacja zajmuje cały ekran
-   i wygląda na to, czym jest: na warunek dalszej pracy. ✕ zostaje, bo nie mamy
-   prawa przerwać komuś sprawdzania odjazdu na przystanku - ale zjazd jest
-   wtedy do paska na dole, więc odświeżenie nie znika z ekranu.
-
-   Ekran stawiamy raz: kolejne zdarzenia od tego samego workera (albo powrót
-   sieci) nie mogą przykryć okna, które użytkownik właśnie czyta. */
-let updateScreen = null;
-
-function showUpdateScreen(onUpdate) {
-    if (updateScreen) return;
-
-    const previous = document.activeElement;
-
-    updateScreen = document.createElement('div');
-    updateScreen.className = 'update-screen';
-    updateScreen.setAttribute('role', 'dialog');
-    updateScreen.setAttribute('aria-modal', 'true');
-    updateScreen.setAttribute('aria-labelledby', 'update-screen-title');
-
-    const box = document.createElement('div');
-    box.className = 'update-screen-box';
-
-    const close = document.createElement('button');
-    close.className = 'update-screen-close icon-button';
-    close.type = 'button';
-    close.setAttribute('aria-label', 'Pomiń na razie');
-    close.textContent = '✕';
-
-    const mark = document.createElement('div');
-    mark.className = 'update-screen-mark';
-    mark.setAttribute('aria-hidden', 'true');
-    mark.textContent = '⟳';
-
-    const title = document.createElement('h2');
-    title.className = 'update-screen-title';
-    title.id = 'update-screen-title';
-    title.textContent = 'Jest nowa wersja planera';
-
-    const text = document.createElement('p');
-    text.className = 'update-screen-text';
-    text.textContent = 'Ta karta korzysta ze starej wersji. Odśwież, żeby zaktualizować.';
-
-    const update = document.createElement('button');
-    update.className = 'update-screen-action';
-    update.type = 'button';
-    update.textContent = 'Odśwież teraz';
-
-    const skip = document.createElement('button');
-    skip.className = 'update-screen-skip';
-    skip.type = 'button';
-    skip.textContent = 'Nie teraz';
-
-    box.append(close, mark, title, text, update, skip);
-    updateScreen.append(box);
-    document.body.append(updateScreen);
-    update.focus();
-
-    function dismiss() {
-        hideUpdateScreen();
-        if (previous && previous.focus) previous.focus();
-        // Pominięcie nie może skasować aktualizacji - schodzi do paska,
-        // z którego da się ją odpalić w dowolnej chwili.
-        showToast('Jest nowa wersja planera.', 'Odśwież', onUpdate);
-    }
-
-    function onKeydown(event) {
-        if (event.key === 'Escape') dismiss();
-        // Modal bez pułapki na Tab wypuszcza fokus na mapę pod spodem -
-        // czytnik ekranu czytałby wtedy interfejs, którego nie widać.
-        if (event.key !== 'Tab') return;
-        const stops = [update, skip, close];
-        const first = stops[0];
-        const last = stops[stops.length - 1];
-        const active = document.activeElement;
-        if (event.shiftKey && (active === first || !box.contains(active))) {
-            event.preventDefault();
-            last.focus();
-        } else if (!event.shiftKey && active === last) {
-            event.preventDefault();
-            first.focus();
-        }
-    }
-
-    update.addEventListener('click', () => {
-        update.disabled = true;
-        update.textContent = 'Odświeżam…';
-        onUpdate();
-    });
-    close.addEventListener('click', dismiss);
-    skip.addEventListener('click', dismiss);
-    updateScreen.addEventListener('keydown', onKeydown);
-}
-
-function hideUpdateScreen() {
-    if (updateScreen) updateScreen.remove();
-    updateScreen = null;
-}
-
-/* Jeden wspólny pasek na dole - używa go i aktualizacja, i utrata sieci. */
+/* Pasek na dole - dziś zostaje po nim tylko informacja o utracie sieci. */
 let toast = null;
 
-function showToast(message, actionLabel, onAction) {
+function showToast(message) {
     hideToast();
 
     toast = document.createElement('div');
@@ -273,17 +171,6 @@ function showToast(message, actionLabel, onAction) {
     const text = document.createElement('span');
     text.textContent = message;
     toast.append(text);
-
-    if (actionLabel) {
-        const action = document.createElement('button');
-        action.className = 'toast-action';
-        action.textContent = actionLabel;
-        action.addEventListener('click', () => {
-            hideToast();
-            onAction();
-        });
-        toast.append(action);
-    }
 
     const close = document.createElement('button');
     close.className = 'toast-close icon-button';
@@ -303,7 +190,6 @@ function hideToast() {
 // Po powrocie sieci ostatnie wyszukiwanie i tak trzeba powtórzyć ręcznie,
 // ale warto powiedzieć wprost, dlaczego wyniki przestały się pojawiać.
 window.addEventListener('offline', () => {
-    if (updateScreen) return;   // nie przykrywamy okna aktualizacji paskiem
     showToast('Brak połączenia — mapa działa z pamięci, trasy nie.');
 });
 

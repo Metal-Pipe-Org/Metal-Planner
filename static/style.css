@@ -978,121 +978,8 @@ body.panel-hidden #sidebar {
 .field-hint.warn { color: #a15c07; }
 .field-hint.bad { color: #8c2b23; font-weight: 600; }
 
-/* Ekran nowej wersji - na całą aplikację, bo stary front na nowym API to
-   nie jest stan, w którym warto dalej klikać. ✕ zostaje, ale trzeba go
-   znaleźć. */
-.update-screen {
-    position: fixed;
-    inset: 0;
-    z-index: 1400;                   /* nad paskiem .toast */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px
-             calc(16px + env(safe-area-inset-bottom, 0px));
-    background: rgba(16, 32, 48, 0.72);
-    -webkit-backdrop-filter: blur(3px);
-    backdrop-filter: blur(3px);
-    animation: update-screen-in 160ms ease-out;
-}
-
-.update-screen-box {
-    position: relative;
-    width: min(420px, 100%);
-    max-height: 100%;
-    overflow: auto;
-    padding: 32px 28px 24px;
-    border-radius: var(--radius);
-    background: var(--surface);
-    box-shadow: var(--shadow);
-    text-align: center;
-}
-
-.update-screen-close {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 32px;
-    height: 32px;
-    background: transparent;
-    color: var(--ink-faint);
-}
-
-.update-screen-mark {
-    margin-bottom: 12px;
-    color: var(--accent);
-    font-size: 40px;
-    line-height: 1;
-}
-
-.update-screen-title {
-    margin: 0 0 8px;
-    font-size: 20px;
-}
-
-.update-screen-text {
-    margin: 0 0 24px;
-    color: var(--ink-soft);
-}
-
-.update-screen-action {
-    width: 100%;
-    height: 44px;
-    border: none;
-    border-radius: 10px;
-    background: var(--accent);
-    color: #fff;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.update-screen-action:disabled { opacity: 0.7; cursor: default; }
-
-/* „Nie teraz" ma działać, ale nie zapraszać - stąd sam tekst, bez przycisku. */
-.update-screen-skip {
-    margin-top: 12px;
-    padding: 6px 10px;
-    border: none;
-    background: none;
-    color: var(--ink-faint);
-    font: inherit;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.update-screen-skip:hover { color: var(--ink-soft); }
-
-@keyframes update-screen-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .update-screen { animation: none; }
-}
-
-/* Na telefonie okno zajmuje ekran w całości - w zainstalowanej aplikacji
-   nie ma paska adresu, który podpowiadałby, że to nadal ta sama strona. */
-@media (max-width: 760px) {
-    .update-screen { padding: 0; }
-
-    .update-screen-box {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        width: 100%;
-        height: 100%;
-        border-radius: 0;
-        padding: calc(24px + env(safe-area-inset-top, 0px)) 24px
-                 calc(24px + env(safe-area-inset-bottom, 0px));
-    }
-
-    .update-screen-close { top: calc(10px + env(safe-area-inset-top, 0px)); }
-}
-
-/* Pasek komunikatów PWA (nowa wersja, utrata sieci) - nad wszystkim, bo
-   dotyczy całej aplikacji, a nie konkretnego panelu. */
+/* Pasek komunikatów PWA (utrata sieci) - nad wszystkim, bo dotyczy całej
+   aplikacji, a nie konkretnego panelu. */
 .toast {
     position: fixed;
     left: 50%;
@@ -1108,19 +995,6 @@ body.panel-hidden #sidebar {
     background: var(--ink);
     color: #fff;
     box-shadow: var(--shadow);
-}
-
-.toast-action {
-    flex: 0 0 auto;
-    height: 32px;
-    padding: 0 12px;
-    border: none;
-    border-radius: 8px;
-    background: var(--accent);
-    color: #fff;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
 }
 
 .toast .toast-close {
