@@ -978,8 +978,8 @@ body.panel-hidden #sidebar {
 .field-hint.warn { color: #a15c07; }
 .field-hint.bad { color: #8c2b23; font-weight: 600; }
 
-/* Pasek komunikatów PWA (nowa wersja, utrata sieci) - nad wszystkim, bo
-   dotyczy całej aplikacji, a nie konkretnego panelu. */
+/* Pasek komunikatów PWA (utrata sieci) - nad wszystkim, bo dotyczy całej
+   aplikacji, a nie konkretnego panelu. */
 .toast {
     position: fixed;
     left: 50%;
@@ -995,19 +995,6 @@ body.panel-hidden #sidebar {
     background: var(--ink);
     color: #fff;
     box-shadow: var(--shadow);
-}
-
-.toast-action {
-    flex: 0 0 auto;
-    height: 32px;
-    padding: 0 12px;
-    border: none;
-    border-radius: 8px;
-    background: var(--accent);
-    color: #fff;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
 }
 
 .toast .toast-close {

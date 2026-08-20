@@ -1,39 +1,37 @@
-/* Warstwa PWA: rejestracja service workera, przycisk instalacji i informacja
-   o nowej wersji. Celowo osobny plik od app.js - działa także wtedy, gdy nie
+/* Warstwa PWA: rejestracja service workera, przycisk instalacji i podmiana
+   frontu na nowy. Celowo osobny plik od app.js - działa także wtedy, gdy nie
    ma bazy rozkładów i panel pokazuje sam komunikat o błędzie. */
 
 if ('serviceWorker' in navigator) {
+    // Karta, która wystartowała bez workera, dostaje go przy pierwszej
+    // instalacji - to nie jest aktualizacja i nie ma czego przeładowywać.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then(watchForUpdate, () => {});
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
     });
 
-    // Przejęcie sterowania przez nową wersję = jedno przeładowanie strony.
+    /* Nowa wersja instaluje się i przejmuje stronę sama (skipWaiting w sw.js),
+       więc nie pytamy o zgodę - kod na ekranie jest w tym momencie już stary
+       i wystarczy go podmienić przeładowaniem.
+
+       Robimy to tylko wtedy, gdy nie ma czego zgubić: dopóki użytkownik
+       niczego nie kliknął ani nie wpisał. Przeglądarka sprawdza workera
+       właśnie przy wejściu na stronę, więc w praktyce przeładowanie wypada
+       ułamek sekundy po odświeżeniu i wygląda jak jego część. Jeśli ktoś
+       zdążył już czegoś szukać, zostawiamy go w spokoju - nowa wersja i tak
+       wjedzie przy następnym wejściu, a wywalony w pół drogi formularz jest
+       gorszy niż jedno wyszukiwanie na starym froncie. */
+    let touched = false;
+    const markTouched = () => { touched = true; };
+    window.addEventListener('pointerdown', markTouched, {once: true, capture: true});
+    window.addEventListener('keydown', markTouched, {once: true, capture: true});
+
     let reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloading) return;
+        if (!hadController || touched || reloading) return;
         reloading = true;
         location.reload();
-    });
-}
-
-/* Nowa wersja czeka w kolejce dopóki żyje stara karta - zamiast czekać na
-   zamknięcie wszystkich, proponujemy odświeżenie. */
-function watchForUpdate(registration) {
-    const offerReload = worker => {
-        if (!navigator.serviceWorker.controller) return;   // pierwsza instalacja
-        showToast('Jest nowa wersja planera.', 'Odśwież', () => {
-            worker.postMessage('SKIP_WAITING');
-        });
-    };
-
-    if (registration.waiting) offerReload(registration.waiting);
-
-    registration.addEventListener('updatefound', () => {
-        const worker = registration.installing;
-        if (!worker) return;
-        worker.addEventListener('statechange', () => {
-            if (worker.state === 'installed') offerReload(worker);
-        });
     });
 }
 
@@ -66,12 +64,12 @@ window.addEventListener('appinstalled', () => {
 
 /* Panel ⚙ - wymuszenie sprawdzenia aktualizacji.
 
-   Pasek "jest nowa wersja" pojawia się tylko wtedy, gdy przeglądarka sama
-   zauważy nowego workera. Tutaj można ją do tego zmusić i - co ważniejsze -
-   zobaczyć, że coś jest nie tak: jeśli serwer wydaje inną wersję niż ta,
-   na której chodzi aplikacja, a mimo to nie ma aktualizacji, to znaczy, że
-   /sw.js jest gdzieś po drodze cache'owany i użytkownicy zostają na starym
-   froncie. Bez tej diagnostyki taka awaria jest niewidoczna. */
+   Aktualizacja wchodzi sama przy wejściu na stronę. Tutaj można ją wymusić
+   od ręki i - co ważniejsze - zobaczyć, że coś jest nie tak: jeśli serwer
+   wydaje inną wersję niż ta, na której chodzi aplikacja, a mimo wymuszenia
+   nie ma aktualizacji, to znaczy, że /sw.js jest gdzieś po drodze
+   cache'owany i użytkownicy zostają na starym froncie. Bez tej diagnostyki
+   taka awaria jest niewidoczna. */
 
 const swVersionEl = document.getElementById('sw-version');
 const swStatusEl = document.getElementById('sw-status');
@@ -126,7 +124,7 @@ async function checkForUpdate() {
     await registration.update();
 
     if (registration.installing || registration.waiting) {
-        setSwStatus(`Jest nowa wersja (${served}) — instaluje się, zaraz pojawi się pasek z odświeżeniem.`, 'ok');
+        setSwStatus(`Jest nowa wersja (${served}) — instaluje się, wejdzie po odświeżeniu strony.`, 'ok');
     } else if (served && running && served !== running) {
         setSwStatus(
             `Coś jest nie tak: serwer wydaje ${served}, a aplikacja chodzi na ${running} `
@@ -160,10 +158,10 @@ if ('serviceWorker' in navigator && swVersionEl) {
         });
 }
 
-/* Jeden wspólny pasek na dole - używa go i aktualizacja, i utrata sieci. */
+/* Pasek na dole - dziś zostaje po nim tylko informacja o utracie sieci. */
 let toast = null;
 
-function showToast(message, actionLabel, onAction) {
+function showToast(message) {
     hideToast();
 
     toast = document.createElement('div');
@@ -173,17 +171,6 @@ function showToast(message, actionLabel, onAction) {
     const text = document.createElement('span');
     text.textContent = message;
     toast.append(text);
-
-    if (actionLabel) {
-        const action = document.createElement('button');
-        action.className = 'toast-action';
-        action.textContent = actionLabel;
-        action.addEventListener('click', () => {
-            hideToast();
-            onAction();
-        });
-        toast.append(action);
-    }
 
     const close = document.createElement('button');
     close.className = 'toast-close icon-button';
