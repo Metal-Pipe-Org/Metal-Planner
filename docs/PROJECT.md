@@ -133,7 +133,18 @@ Aplikacja instaluje się na telefonie i na pulpicie (ikona, własne okno bez
 paska adresu, ekran startowy). Manifest opisuje nazwę, kolory i ikony;
 service worker odpowiada za start bez sieci; `pwa.js` spina to z UI —
 rejestruje workera, pokazuje przycisk ⤓ (tylko wtedy, gdy przeglądarka
-faktycznie proponuje instalację) i pasek „jest nowa wersja".
+faktycznie proponuje instalację) i podmienia front na nowy.
+
+O nowej wersji nie pytamy. Worker robi `skipWaiting()` przy instalacji, więc
+przejmuje stronę od razu, a `pwa.js` łapie `controllerchange` i przeładowuje
+kartę — kod na ekranie jest w tym momencie i tak już stary. Robimy to tylko
+wtedy, gdy nie ma czego zgubić: dopóki użytkownik niczego nie kliknął ani nie
+wpisał. Przeglądarka sprawdza workera właśnie przy wejściu na stronę, więc
+przeładowanie wypada ułamek sekundy po odświeżeniu i wygląda jak jego część.
+Jeśli ktoś zdążył już czegoś szukać, zostawiamy go w spokoju — nowa wersja
+wjedzie przy następnym wejściu, a wywalony w pół drogi formularz jest gorszy
+niż jedno wyszukiwanie na starym froncie. Wymusić sprawdzenie można z panelu
+⚙, który porównuje wersję działającą z tą wydawaną przez serwer.
 
 Service worker jedzie z **`/sw.js`**, a nie ze `/static/` — zasięg workera
 to jego katalog, więc z `/static/sw.js` nie objąłby strony głównej. Stąd
@@ -164,7 +175,7 @@ są nowe, a pliki te same. Koszt to ~0,3 ms na żądanie `/sw.js`.
 Panel ⚙ pokazuje wersję działającą w przeglądarce i pozwala **wymusić
 sprawdzenie aktualizacji** (`registration.update()`). Przycisk odpowiada
 w jednym z trzech stanów: wszystko aktualne, jest nowa wersja (instaluje
-się, zaraz będzie pasek z odświeżeniem) albo — i po to głównie powstał —
+się, wejdzie po odświeżeniu strony) albo — i po to głównie powstał —
 **awaria**: serwer wydaje inną wersję, niż ta, na której chodzi aplikacja,
 a przeglądarka mimo wymuszenia nie widzi aktualizacji. To sygnał, że
 `/sw.js` jest gdzieś po drodze cache'owany (proxy, CDN, nagłówki) i
@@ -358,7 +369,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
 | `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
 | `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`) |
-| `static/pwa.js` | rejestracja workera, przycisk instalacji, pasek nowej wersji |
+| `static/pwa.js` | rejestracja workera, przycisk instalacji, ciche przejście na nową wersję |
 | `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
 | `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
 | `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
