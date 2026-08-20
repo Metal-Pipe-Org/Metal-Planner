@@ -22,7 +22,7 @@ services:
       # Po znaku # jest galaz, z ktorej Docker sklonuje kod. testing jest
       # galezia wdrozeniowa - musi zgadzac sie z galezia, z ktorej pobrano
       # ten plik (deploy.sh to sprawdza i przerywa przy rozjezdzie).
-      context: https://github.com/Metal-Pipe-Org/Metal-Planner.git#testing
+      context: https://github.com/Metal-Pipe-Org/Metal-Planner.git#main
     container_name: metal-planner
     restart: unless-stopped
 
