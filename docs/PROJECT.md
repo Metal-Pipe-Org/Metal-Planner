@@ -133,7 +133,14 @@ Aplikacja instaluje się na telefonie i na pulpicie (ikona, własne okno bez
 paska adresu, ekran startowy). Manifest opisuje nazwę, kolory i ikony;
 service worker odpowiada za start bez sieci; `pwa.js` spina to z UI —
 rejestruje workera, pokazuje przycisk ⤓ (tylko wtedy, gdy przeglądarka
-faktycznie proponuje instalację) i pasek „jest nowa wersja".
+faktycznie proponuje instalację) i ekran „jest nowa wersja".
+
+Nowa wersja nie melduje się paskiem na dole, tylko pełnoekranowym oknem
+(`.update-screen`, na telefonie na cały ekran) — stary front chodzący na
+nowym API to stan, w którym nie warto dalej klikać, a pasek dawało się
+ignorować tygodniami. ✕ i „nie teraz" zostają, bo nie mamy prawa przerwać
+komuś sprawdzania odjazdu na przystanku; pominięcie zjeżdża wtedy do
+zwykłego paska, więc odświeżenie nie znika z ekranu.
 
 Service worker jedzie z **`/sw.js`**, a nie ze `/static/` — zasięg workera
 to jego katalog, więc z `/static/sw.js` nie objąłby strony głównej. Stąd
@@ -358,7 +365,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
 | `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
 | `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`) |
-| `static/pwa.js` | rejestracja workera, przycisk instalacji, pasek nowej wersji |
+| `static/pwa.js` | rejestracja workera, przycisk instalacji, ekran nowej wersji |
 | `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
 | `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
 | `data/gtfs.sqlite` | baza rozkładów (poza gitem) |

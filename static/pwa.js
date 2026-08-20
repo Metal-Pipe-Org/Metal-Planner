@@ -21,9 +21,7 @@ if ('serviceWorker' in navigator) {
 function watchForUpdate(registration) {
     const offerReload = worker => {
         if (!navigator.serviceWorker.controller) return;   // pierwsza instalacja
-        showToast('Jest nowa wersja planera.', 'Odśwież', () => {
-            worker.postMessage('SKIP_WAITING');
-        });
+        showUpdateScreen(() => worker.postMessage('SKIP_WAITING'));
     };
 
     if (registration.waiting) offerReload(registration.waiting);
@@ -160,6 +158,108 @@ if ('serviceWorker' in navigator && swVersionEl) {
         });
 }
 
+/* Ekran nowej wersji.
+
+   Stary front chodzący na nowym API to najgorszy możliwy stan - pasek na dole
+   dawało się klikać obok tygodniami. Dlatego aktualizacja zajmuje cały ekran
+   i wygląda na to, czym jest: na warunek dalszej pracy. ✕ zostaje, bo nie mamy
+   prawa przerwać komuś sprawdzania odjazdu na przystanku - ale zjazd jest
+   wtedy do paska na dole, więc odświeżenie nie znika z ekranu.
+
+   Ekran stawiamy raz: kolejne zdarzenia od tego samego workera (albo powrót
+   sieci) nie mogą przykryć okna, które użytkownik właśnie czyta. */
+let updateScreen = null;
+
+function showUpdateScreen(onUpdate) {
+    if (updateScreen) return;
+
+    const previous = document.activeElement;
+
+    updateScreen = document.createElement('div');
+    updateScreen.className = 'update-screen';
+    updateScreen.setAttribute('role', 'dialog');
+    updateScreen.setAttribute('aria-modal', 'true');
+    updateScreen.setAttribute('aria-labelledby', 'update-screen-title');
+
+    const box = document.createElement('div');
+    box.className = 'update-screen-box';
+
+    const close = document.createElement('button');
+    close.className = 'update-screen-close icon-button';
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Pomiń na razie');
+    close.textContent = '✕';
+
+    const mark = document.createElement('div');
+    mark.className = 'update-screen-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = '⟳';
+
+    const title = document.createElement('h2');
+    title.className = 'update-screen-title';
+    title.id = 'update-screen-title';
+    title.textContent = 'Jest nowa wersja planera';
+
+    const text = document.createElement('p');
+    text.className = 'update-screen-text';
+    text.textContent = 'Ta karta korzysta ze starej wersji. Odśwież, żeby zaktualizować.';
+
+    const update = document.createElement('button');
+    update.className = 'update-screen-action';
+    update.type = 'button';
+    update.textContent = 'Odśwież teraz';
+
+    const skip = document.createElement('button');
+    skip.className = 'update-screen-skip';
+    skip.type = 'button';
+    skip.textContent = 'Nie teraz';
+
+    box.append(close, mark, title, text, update, skip);
+    updateScreen.append(box);
+    document.body.append(updateScreen);
+    update.focus();
+
+    function dismiss() {
+        hideUpdateScreen();
+        if (previous && previous.focus) previous.focus();
+        // Pominięcie nie może skasować aktualizacji - schodzi do paska,
+        // z którego da się ją odpalić w dowolnej chwili.
+        showToast('Jest nowa wersja planera.', 'Odśwież', onUpdate);
+    }
+
+    function onKeydown(event) {
+        if (event.key === 'Escape') dismiss();
+        // Modal bez pułapki na Tab wypuszcza fokus na mapę pod spodem -
+        // czytnik ekranu czytałby wtedy interfejs, którego nie widać.
+        if (event.key !== 'Tab') return;
+        const stops = [update, skip, close];
+        const first = stops[0];
+        const last = stops[stops.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || !box.contains(active))) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && active === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
+    update.addEventListener('click', () => {
+        update.disabled = true;
+        update.textContent = 'Odświeżam…';
+        onUpdate();
+    });
+    close.addEventListener('click', dismiss);
+    skip.addEventListener('click', dismiss);
+    updateScreen.addEventListener('keydown', onKeydown);
+}
+
+function hideUpdateScreen() {
+    if (updateScreen) updateScreen.remove();
+    updateScreen = null;
+}
+
 /* Jeden wspólny pasek na dole - używa go i aktualizacja, i utrata sieci. */
 let toast = null;
 
@@ -203,6 +303,7 @@ function hideToast() {
 // Po powrocie sieci ostatnie wyszukiwanie i tak trzeba powtórzyć ręcznie,
 // ale warto powiedzieć wprost, dlaczego wyniki przestały się pojawiać.
 window.addEventListener('offline', () => {
+    if (updateScreen) return;   // nie przykrywamy okna aktualizacji paskiem
     showToast('Brak połączenia — mapa działa z pamięci, trasy nie.');
 });
 
