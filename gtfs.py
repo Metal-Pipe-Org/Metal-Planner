@@ -9,6 +9,7 @@ import math
 import re
 import sqlite3
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "gtfs.sqlite"
@@ -18,6 +19,18 @@ WEEKDAY_COLUMNS = [
 ]
 
 ROUTE_TYPE_LABELS = {0: "Tramwaj", 3: "Autobus"}
+
+# Doba rozkładowa nie kończy się o północy. Kurs nocny wyjeżdżający o 23:46
+# jedzie dalej jako 24:02, 24:16, ... i w GTFS należy do kalendarza dnia,
+# w którym wyruszył - inaczej jego stop_times przestałyby rosnąć, a wzorzec
+# kursowania ("noc z soboty na niedzielę") trzeba by ciąć na pół. Rozkład
+# dnia D musi więc obejmować ogon doby D-1, bo to on obsługuje godziny
+# 00:00-06:00 tego dnia (patrz update_gtfs.parse_gtfs_time).
+PREV_DAY_SEC = 24 * 3600
+# Ten sam kurs bywa aktywny w obu dobach (serwis pon-czw), a planner kluczuje
+# przesiadki po trip_id - egzemplarz z doby D-1 dostaje więc własny
+# identyfikator. Prefiks nie występuje w identyfikatorach GTFS.
+PREV_DAY_PREFIX = "~"
 
 # Duże węzły przesiadkowe bywają w GTFS rozbite na kilka nazwanych peronów
 # kierunkowych ("PL. GRUNWALDZKI W/t", "... Z/a", ...) - dla pasażera to
@@ -182,7 +195,14 @@ def active_service_ids(db, day):
 
 
 def load_day(day):
-    """Zwraca DayData dla podanej daty (datetime.date), z cache."""
+    """Zwraca DayData dla podanej daty (datetime.date), z cache.
+
+    Oś czasu jest liczona od północy `day`: kursy tej doby zachowują swoje
+    sekundy (także te ponad 24 h), a ogon doby poprzedniej wchodzi przesunięty
+    o -24 h. Dzięki temu odjazd o 00:46 to 2760 niezależnie od tego, w czyim
+    kalendarzu kurs siedzi, i skan CSA nie musi wiedzieć o istnieniu północy
+    (patrz PREV_DAY_SEC).
+    """
     key = (day.isoformat(), DB_PATH.stat().st_mtime if DB_PATH.exists() else 0)
     if key in _day_cache:
         return _day_cache[key]
@@ -191,6 +211,7 @@ def load_day(day):
     data = DayData()
 
     active = active_service_ids(db, day)
+    active_prev = active_service_ids(db, day - timedelta(days=1))
 
     route_names = {}   # route_id -> etykieta, np. "Tramwaj 5"
     for route_id, short_name, long_name, route_type in db.execute(
@@ -199,16 +220,30 @@ def load_day(day):
         kind = ROUTE_TYPE_LABELS.get(route_type, "Linia")
         route_names[route_id] = f"{kind} {short_name or long_name}".strip()
 
-    active_trips = set()
+    # trip_id z bazy -> ((identyfikator w DayData, przesunięcie sekund), ...).
+    # Kurs jeżdżący w obu dobach ma dwa wpisy: to dwa różne autobusy w tym
+    # rozkładzie, więc muszą być rozróżnialne dla logiki przesiadek.
+    trip_ids = {}
     for trip_id, route_id, service_id, headsign, shape_id in db.execute(
         "SELECT trip_id, route_id, service_id, trip_headsign, shape_id FROM trips"
     ):
-        if service_id in active:
-            trip_id = sys.intern(trip_id)
-            active_trips.add(trip_id)
-            data.trip_info[trip_id] = (route_names.get(route_id, "Linia ?"), headsign or "")
-            if shape_id:
-                data.trip_shape[trip_id] = sys.intern(shape_id)
+        today = service_id in active
+        yesterday = service_id in active_prev
+        if not (today or yesterday):
+            continue
+        trip_id = sys.intern(trip_id)
+        instances = []
+        if today:
+            instances.append((trip_id, 0))
+        if yesterday:
+            instances.append((sys.intern(PREV_DAY_PREFIX + trip_id), PREV_DAY_SEC))
+        info = (route_names.get(route_id, "Linia ?"), headsign or "")
+        shape = sys.intern(shape_id) if shape_id else None
+        for instance_id, _ in instances:
+            data.trip_info[instance_id] = info
+            if shape:
+                data.trip_shape[instance_id] = shape
+        trip_ids[trip_id] = tuple(instances)
 
     for stop_id, stop_name, lat, lon in db.execute(
         "SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops"
@@ -237,19 +272,30 @@ def load_day(day):
     prev_trip = None
     prev_stop = None
     prev_dep = 0
+    entries = ()
     conns = data.conns
     for trip_id, stop_id, arrival_sec, departure_sec in db.execute(
         "SELECT trip_id, stop_id, arrival_sec, departure_sec "
         "FROM stop_times ORDER BY trip_id, stop_sequence"
     ):
-        if trip_id not in active_trips:
-            prev_trip = None
+        if trip_id != prev_trip:
+            prev_trip = trip_id
+            prev_stop = None
+            entries = trip_ids.get(trip_id, ())
+        if not entries:
             continue
-        trip_id = sys.intern(trip_id)
         stop_id = sys.intern(stop_id)
-        if trip_id == prev_trip:
-            conns.append((prev_dep, arrival_sec, prev_stop, stop_id, trip_id))
-        prev_trip, prev_stop, prev_dep = trip_id, stop_id, departure_sec
+        if prev_stop is not None:
+            for instance_id, shift in entries:
+                dep = prev_dep - shift
+                # Ogon doby D-1 zaczyna się dla nas o północy: to, co ten kurs
+                # przejechał wcześniej, jest już przeszłością i nie da się do
+                # niego wsiąść.
+                if dep >= 0:
+                    conns.append(
+                        (dep, arrival_sec - shift, prev_stop, stop_id, instance_id)
+                    )
+        prev_stop, prev_dep = stop_id, departure_sec
     db.close()
 
     conns.sort(key=lambda c: c[0])
@@ -508,20 +554,40 @@ def _simplify(points):
     return kept
 
 
+def db_trip(trip_id):
+    """Identyfikator kursu z DayData -> (trip_id w bazie, przesunięcie sekund).
+
+    Egzemplarz z doby D-1 nosi prefiks i czasy przesunięte o -24 h wobec
+    tego, co leży w bazie (patrz load_day) - każde sięgnięcie z powrotem do
+    SQLite musi to odkręcić.
+    """
+    if trip_id.startswith(PREV_DAY_PREFIX):
+        return trip_id[len(PREV_DAY_PREFIX):], PREV_DAY_SEC
+    return trip_id, 0
+
+
 def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None):
     """Kolejne przystanki kursu od wsiadania do wysiadania (stop_id, przyjazd, odjazd).
+
+    Czasy - i te na wejściu, i te w wyniku - są na osi wczytanego dnia, więc
+    dla kursu z doby D-1 wiersze z bazy trzeba przesunąć tak samo jak przy
+    budowie tablicy połączeń.
 
     Z podanym `db` korzysta z cudzego połączenia (jedno na całe zapytanie);
     bez niego otwiera i zamyka własne.
     """
+    trip_id, shift = db_trip(trip_id)
     own_db = db is None
     db = db or _connect()
     try:
-        rows = db.execute(
-            "SELECT stop_id, arrival_sec, departure_sec FROM stop_times "
-            "WHERE trip_id = ? ORDER BY stop_sequence",
-            (trip_id,),
-        ).fetchall()
+        rows = [
+            (stop_id, arrival_sec - shift, departure_sec - shift)
+            for stop_id, arrival_sec, departure_sec in db.execute(
+                "SELECT stop_id, arrival_sec, departure_sec FROM stop_times "
+                "WHERE trip_id = ? ORDER BY stop_sequence",
+                (trip_id,),
+            )
+        ]
     finally:
         if own_db:
             db.close()

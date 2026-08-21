@@ -224,7 +224,9 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
   i dojście piesze bez bufora);
 - słupki o tej samej nazwie przystanku traktujemy jak jeden węzeł połączony
   przejściem 3 min;
-- kursy po północy mają w GTFS godziny 24:xx+ i „po prostu działają";
+- kursy po północy mają w GTFS godziny 24:xx+ i liczą się do doby, w której
+  wyruszyły, więc rozkład dnia D obejmuje też ogon dnia D-1 przesunięty
+  o -24 h — to on obsługuje godziny 00:00-06:00 (patrz `gtfs.PREV_DAY_SEC`);
 - trasę odtwarzamy wstecz po zapisanych wskaźnikach (które połączenie
   poprawiło który przystanek).
 
@@ -513,8 +515,6 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   oknie bywa tego sporo.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
-- Wyszukiwanie działa w ramach jednej doby rozkładowej: zapytanie o 0:30
-  nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
 - Brak tras pieszych po mieście — przesiadka tylko między słupkami
   o identycznej nazwie przystanku.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
