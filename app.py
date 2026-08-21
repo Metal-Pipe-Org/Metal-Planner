@@ -3,6 +3,9 @@ import os
 
 from flask import Flask
 
+# Przed resztą importów aplikacji: data/.env ma być wczytany, zanim
+# którykolwiek moduł sięgnie po os.environ.
+import config  # noqa: F401
 import update_gtfs
 from routes import init_routes
 

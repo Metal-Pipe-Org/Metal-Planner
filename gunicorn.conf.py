@@ -14,6 +14,9 @@ niezależnie od liczby workerów.
 
 import os
 
+# Wczytuje data/.env - konfiguracja gunicorna czyta os.environ poniżej,
+# a to jest pierwszy kod aplikacji, jaki master wykonuje w kontenerze.
+import config  # noqa: F401
 import update_gtfs
 
 bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
