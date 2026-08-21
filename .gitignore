@@ -62,8 +62,9 @@ instance/
 *.sqlite3
 *.db
 
-# Pobrane dane GTFS
-data/
+# Pobrane dane GTFS (baza, token, .env) - caly folder poza szablonem .env
+data/*
+!data/.env.example
 
 # =========================
 # Logs

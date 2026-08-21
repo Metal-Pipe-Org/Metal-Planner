@@ -79,6 +79,8 @@ services:
       # Wszystkie dane aplikacji sa w nim widoczne wprost z serwera:
       #   ./data/gtfs.sqlite      - baza rozkladow (~80 MB)
       #   ./data/dev_token.txt    - token menu deweloperskiego
+      #   ./data/.env             - sekrety, m.in. PKP_API_KEY
+      #                             (wzor: data/.env.example z repo)
       # Kopia zapasowa = skopiowanie tego folderu.
       - ./data:/app/data
 

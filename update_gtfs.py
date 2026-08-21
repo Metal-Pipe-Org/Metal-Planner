@@ -30,6 +30,10 @@ import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+# Ten plik bywa uruchamiany sam (docker/entrypoint.sh, cron), poza
+# procesem serwera - musi wczytać data/.env na własną rękę.
+import config  # noqa: F401
+
 # Portal Otwarte Dane Wrocław publikuje kolejne paczki GTFS nazwane datą
 # początku obowiązywania (GTFS_DDMMRRRR). Ta strona listuje je wszystkie:
 GTFS_LIST_URL = "https://open-data.cui.wroclaw.pl/hdb/ft/6/"
