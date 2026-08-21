@@ -14,12 +14,26 @@ import gtfs
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
 WALK_SEC = 180       # przejście między słupkami tego samego miejsca (patrz gtfs.py)
+
+# Ile MUSI oszczędzić przesiadka, żeby w ogóle warto ją było proponować.
+# Nocne linie zjeżdżają się w węźle i ruszają z niego tą samą minutą tą samą
+# ulicą, więc różnice na końcu bywają czystym zaokrągleniem dwóch rozkładów -
+# a wysiadanie z pojazdu, który sam dowozi do celu, kosztuje przejście na
+# inny peron i ryzyko utraty połączenia na całe pół godziny. Suwak w panelu
+# deweloperskim (transfer_gain_sec w API).
+TRANSFER_GAIN_SEC = 600
+# W jakim oknie w ogóle SZUKAMY wariantu bez przesiadki. Celowo niezależne
+# od progu: suwak rozstrzyga, który wariant jest proponowany jako najlepszy,
+# a nie który istnieje - przy progu 0 obie opcje mają dalej być widoczne.
+# Tyle, ile wynosi górny koniec suwaka.
+SEATED_HORIZON_SEC = 1800
 INF = float("inf")
 
 
-def plan_route(start_query, end_query, when=None):
+def plan_route(start_query, end_query, when=None, transfer_gain_sec=None):
     """Zwraca dict z trasą ('legs', czasy) albo z kluczem 'error'."""
     when = when or datetime.now()
+    gain_sec = TRANSFER_GAIN_SEC if transfer_gain_sec is None else int(transfer_gain_sec)
 
     try:
         day = gtfs.load_day(when.date())
@@ -44,16 +58,39 @@ def plan_route(start_query, end_query, when=None):
                      f"po {_fmt_time(dep_sec)} tego dnia."
         }
 
-    legs = _reconstruct(day, journey, best_stop)
+    # /api/plan oddaje JEDNĄ trasę, więc bierzemy wariant proponowany jako
+    # najlepszy przy obecnym progu (pełen wachlarz jest w /api/flow).
+    legs = _variants(day, _reconstruct(day, journey, best_stop), gain_sec)[0]
+    # Przyjazd bierzemy z samej trasy, nie z best_arr - w wariancie bez
+    # przesiadki to może być świadomie oddana minuta czy dwie.
+    arrival = _arrival_of(legs)
     first_dep = legs[0]["dep_sec"]
+    _drop_private(legs)
     return {
         "start": start_name,
         "end": end_name,
         "departure": _fmt_time(first_dep),
-        "arrival": _fmt_time(best_arr),
-        "travel_time": f"{round((best_arr - first_dep) / 60)} min",
+        "arrival": _fmt_time(arrival),
+        "travel_time": f"{round((arrival - first_dep) / 60)} min",
         "legs": legs,
     }
+
+
+def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs):
+    """Czy w kurs, którym już jedziemy, można wsiąść na `stop` mniejszą
+    liczbą przejazdów niż w zapisanym punkcie wsiadania.
+
+    Sam warunek "mniej przejazdów" nie wystarczy - trzeba jeszcze zdążyć na
+    odjazd z tego przystanku, tym samym buforem co przy zwykłym wsiadaniu.
+    Przystanek osiągnięty PRZEZ TEN kurs nigdy nie przejdzie: ma o przejazd
+    więcej niż punkt wsiadania, więc przesunięcie nie potrafi rozciąć jazdy
+    jednym pojazdem na dwa etapy.
+    """
+    reached = earliest.get(stop, INF)
+    if reached is INF or legs[stop] >= board_legs:
+        return False
+    buffer = TRANSFER_SEC if journey[stop][0] == "ride" else 0
+    return reached + buffer <= dep_t
 
 
 def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline=None):
@@ -68,15 +105,19 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
     earliest = {}
     journey = {}      # stop_id -> ("origin",) | ("ride", idx_wsiadania, idx_wysiadania) | ("walk", skad)
     trip_board = {}   # trip_id -> indeks połączenia, na którym wsiedliśmy do kursu
+    trip_legs = {}    # trip_id -> liczba przejazdów PRZED wsiadaniem do kursu
+    legs = {}         # stop_id -> liczba przejazdów w najlepszej drodze do niego
 
     # Użytkownik podaje nazwę przystanku, więc startuje ze wszystkich jego słupków.
     for stop in source_stops:
         earliest[stop] = dep_sec
         journey[stop] = ("origin",)
+        legs[stop] = 0
 
     targets = set(target_stops)
     best_arr = INF
     best_stop = None
+    best_legs = INF
     limit = INF if deadline is None else deadline
 
     for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
@@ -96,19 +137,50 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
             if reached + buffer > dep_t:
                 continue
             trip_board[trip] = i
+            trip_legs[trip] = legs[dep_s]
+        elif _cheaper_boarding(earliest, journey, legs, dep_s, dep_t,
+                               trip_legs[trip]):
+            # Jedziemy już tym kursem, ale właśnie mijamy przystanek, na
+            # którym stalibyśmy MNIEJSZĄ liczbą przejazdów niż w zapisanym
+            # punkcie wsiadania - w skrajnym przypadku sam start relacji.
+            # Punkt wsiadania zapisuje się przy PIERWSZYM przystanku kursu,
+            # do którego dało się zdążyć, a bywa nim miejsce, do którego
+            # trzeba się dopiero dowieźć innym pojazdem. Bez przesunięcia
+            # rekonstrukcja musi ten dojazd potem czymś wytłumaczyć i wypisuje
+            # etap "dojedź dwa przystanki pod początek trasy tego autobusu",
+            # choć autobus i tak zaraz przejeżdża obok nas. Godziny się przez
+            # to nie zmieniają - to ten sam pojazd - więc przesunięcie tylko
+            # zdejmuje z trasy etap, który niczego nie dawał.
+            trip_board[trip] = i
+            trip_legs[trip] = legs[dep_s]
 
-        if arr_t < earliest.get(arr_s, INF):
+        # Przy REMISIE na godzinie przyjazdu wygrywa droga z mniejszą liczbą
+        # przejazdów - inaczej decyduje o tym kolejność skanowania i podróżny
+        # dostaje polecenie przesiadki do sąsiedniego autobusu, który dowozi
+        # go na miejsce o tej samej minucie. Lista propozycji z mapy
+        # przepływów sortuje tak od dawna (patrz _enumerate_journeys: klucz
+        # (arrival, len(chain) - 1, ...)); tu chodzi o to samo w samym skanie,
+        # bo z niego bierze się trasa w gałęzi awaryjnej plan_flow.
+        ride_legs = trip_legs[trip] + 1
+        known = earliest.get(arr_s, INF)
+        if arr_t < known or (arr_t == known and ride_legs < legs[arr_s]):
             earliest[arr_s] = arr_t
             journey[arr_s] = ("ride", trip_board[trip], i)
-            if arr_s in targets and arr_t < best_arr:
+            legs[arr_s] = ride_legs
+            if arr_s in targets and (arr_t < best_arr or
+                                     (arr_t == best_arr and ride_legs < best_legs)):
                 best_arr = arr_t
                 best_stop = arr_s
+                best_legs = ride_legs
             # Relaksacja pieszo na pozostałe słupki tego samego miejsca.
             for sibling in day.siblings.get(arr_s, ()):
                 walk_arr = arr_t + WALK_SEC
-                if walk_arr < earliest.get(sibling, INF):
+                known_sib = earliest.get(sibling, INF)
+                if walk_arr < known_sib or (walk_arr == known_sib
+                                            and ride_legs < legs[sibling]):
                     earliest[sibling] = walk_arr
                     journey[sibling] = ("walk", arr_s)
+                    legs[sibling] = ride_legs
 
     return best_stop, best_arr, journey
 
@@ -119,6 +191,9 @@ def _reconstruct(day, journey, last_stop, geo_db=None):
     Z otwartym `geo_db` ścieżka etapu jest wycinkiem geometrii kursu (realne
     ulice i tory, tak jak na mapie przepływów); bez niego - łamaną po
     przystankach.
+
+    Oddaje trasę taką, jaka wyszła ze skanu; wariant bez nieopłacalnych
+    przesiadek dokłada obok _variants.
     """
     legs = []
     stop = last_stop
@@ -131,36 +206,154 @@ def _reconstruct(day, journey, last_stop, geo_db=None):
         else:
             _, board_i, exit_i = entry
             board = day.conns[board_i]
-            trip = board[4]
-            line, headsign = day.trip_info[trip]
-            exit_arr = day.conns[exit_i][1]
-            # Pełna lista przystanków etapu - do narysowania linii na mapie.
-            path_rows = gtfs.trip_path(
-                trip, board[2], board[0], stop, exit_arr, geo_db
-            )
-            coords = [day.stop_coords[s] for s, _, _ in path_rows]
-            if geo_db is not None and len(coords) >= 2:
-                coords = gtfs.shape_slice(day.trip_shape.get(trip), coords, geo_db)
-            num, mode = _line_parts(line)
-            legs.append({
-                "kind": "ride",
-                "line": line,
-                "num": num,
-                "mode": mode,
-                "headsign": headsign,
-                "from": day.stop_names[board[2]],
-                "from_time": _fmt_time(board[0]),
-                "to": day.stop_names[stop],
-                "to_time": _fmt_time(exit_arr),
-                "dep_sec": board[0],
-                "minutes": round((exit_arr - board[0]) / 60),
-                "stops": [day.stop_names[s] for s, _, _ in path_rows],
-                "stops_count": max(len(path_rows) - 1, 1),
-                "path": _round_path(coords),
-            })
+            legs.append(_ride_leg(day, board[4], board[2], board[0], stop,
+                                  day.conns[exit_i][1], geo_db))
             stop = board[2]
     legs.reverse()
     return legs
+
+
+_PRIVATE_LEG_KEYS = ("_trip", "_from_id", "_to_id", "_arr_sec")
+
+
+def _next_ride(legs, i):
+    """Indeks kolejnego przejazdu po `i` (po drodze może być przejście)."""
+    for j in range(i + 1, len(legs)):
+        if legs[j]["kind"] == "ride":
+            return j
+    return None
+
+
+def _seated_exit(day, leg, nxt, gain_sec, allow_siblings):
+    """Gdzie i o której pojazd z etapu `leg` sam dowozi tam, dokąd dojeżdża
+    `nxt` - albo None, jeśli nie dowozi wcale lub za późno."""
+    limit = nxt["_arr_sec"] + gain_sec
+    rodzenstwo = day.siblings.get(nxt["_to_id"], ()) if allow_siblings else ()
+    for i in gtfs.trip_conns(day, leg["_trip"]):
+        _, arr_t, _, arr_s, _ = day.conns[i]
+        if arr_t <= leg["_arr_sec"]:
+            continue             # jeszcze przed naszym wysiadaniem
+        if arr_t > limit:
+            break                # czasy w kursie rosną - dalej może być tylko gorzej
+        if arr_s == nxt["_to_id"] or arr_s in rodzenstwo:
+            return arr_s, arr_t
+    return None
+
+
+def _seated_legs(day, legs, horizon_sec, geo_db=None):
+    """Ta sama trasa bez przesiadek, które nie zarabiają na siebie - albo
+    None, gdy nie ma czego zdejmować.
+
+    Dla dwóch kolejnych przejazdów sprawdza, czy pojazd z pierwszego sam
+    dojeżdża tam, gdzie kończy się drugi - i czy nie później niż `gain_sec`
+    po nim. Jeśli tak, oba etapy (razem z przejściem między nimi) zastępuje
+    jedną, dłuższą jazdą. Przyjazd może się przez to opóźnić o mniej niż
+    `gain_sec`.
+
+    Wejścia NIE rusza: oba warianty trasy - z przesiadką i bez - jadą dalej
+    obok siebie na listę propozycji, a próg rozstrzyga tylko, który z nich
+    jest proponowany jako najlepszy (patrz _variants). `horizon_sec` mówi,
+    jak dużo później wolno dojechać, żeby wariant w ogóle uznać za sensowny
+    do pokazania - to NIE jest próg opłacalności.
+
+    Na CELU relacji dopuszczamy inny słupek tego samego miejsca - nocne linie
+    zjeżdżają na różne perony jednego dworca (241 na 3512, 249 na 3519),
+    a dla pasażera to ten sam przystanek, o który pytał. W środku trasy
+    wymagamy dokładnie tego samego słupka, bo następny etap musi odjechać
+    stamtąd, gdzie go zostawiliśmy.
+    """
+    if horizon_sec <= 0:
+        return None
+    legs = list(legs)
+    zmienione = False
+    while True:
+        for i, leg in enumerate(legs):
+            j = _next_ride(legs, i) if leg["kind"] == "ride" else None
+            if j is None:
+                continue
+            cel = _seated_exit(day, leg, legs[j], horizon_sec,
+                               allow_siblings=(j == len(legs) - 1))
+            if cel is None:
+                continue
+            legs[i:j + 1] = [_ride_leg(day, leg["_trip"], leg["_from_id"],
+                                       leg["dep_sec"], cel[0], cel[1], geo_db)]
+            zmienione = True
+            break
+        else:
+            return legs if zmienione else None
+
+
+def _transfers(legs):
+    return max(sum(1 for leg in legs if leg["kind"] == "ride") - 1, 0)
+
+
+def _journey_cost(legs, gain_sec):
+    """Przyjazd z karą za każdą przesiadkę - klucz wyboru wariantu
+    "proponowany jako najlepszy". Sam przyjazd pokazujemy prawdziwy."""
+    return _arrival_of(legs) + _transfers(legs) * gain_sec
+
+
+def _variants(day, legs, gain_sec, geo_db=None):
+    """Trasa w wariantach: tak jak wyszła ze skanu (najwcześniejszy przyjazd)
+    i - jeśli jest co zdjąć - bez nieopłacalnych przesiadek. Obie zostają
+    widoczne; kolejność mówi, którą przy obecnym progu uważamy za lepszą."""
+    warianty = [legs]
+    bez_przesiadki = _seated_legs(
+        day, legs, max(gain_sec, SEATED_HORIZON_SEC), geo_db)
+    if bez_przesiadki is not None:
+        warianty.append(bez_przesiadki)
+    warianty.sort(key=lambda w: (_journey_cost(w, gain_sec), _transfers(w)))
+    return warianty
+
+
+def _arrival_of(legs):
+    """Godzina dojazdu do celu wg samych etapów - po sklejeniu w _stay_seated
+    nie musi się już równać najwcześniejszemu możliwemu przyjazdowi."""
+    rides = [leg for leg in legs if leg["kind"] == "ride"]
+    return rides[-1]["_arr_sec"] if rides else None
+
+
+def _drop_private(legs):
+    """Zdejmuje pola robocze, żeby nie wyciekły do odpowiedzi API."""
+    for leg in legs:
+        for key in _PRIVATE_LEG_KEYS:
+            leg.pop(key, None)
+    return legs
+
+
+def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
+    """Etap przejazdu jednym kursem, od wsiadania do wysiadania.
+
+    Prywatne pola `_trip`/`_from_id`/`_to_id` służą wyłącznie sklejaniu
+    etapów w _stay_seated i są z odpowiedzi zdejmowane.
+    """
+    line, headsign = day.trip_info[trip]
+    # Pełna lista przystanków etapu - do narysowania linii na mapie.
+    path_rows = gtfs.trip_path(trip, board_stop, board_dep, exit_stop, exit_arr, geo_db)
+    coords = [day.stop_coords[s] for s, _, _ in path_rows]
+    if geo_db is not None and len(coords) >= 2:
+        coords = gtfs.shape_slice(day.trip_shape.get(trip), coords, geo_db)
+    num, mode = _line_parts(line)
+    return {
+        "kind": "ride",
+        "line": line,
+        "num": num,
+        "mode": mode,
+        "headsign": headsign,
+        "from": day.stop_names[board_stop],
+        "from_time": _fmt_time(board_dep),
+        "to": day.stop_names[exit_stop],
+        "to_time": _fmt_time(exit_arr),
+        "dep_sec": board_dep,
+        "minutes": round((exit_arr - board_dep) / 60),
+        "stops": [day.stop_names[s] for s, _, _ in path_rows],
+        "stops_count": max(len(path_rows) - 1, 1),
+        "path": _round_path(coords),
+        "_trip": trip,
+        "_from_id": board_stop,
+        "_to_id": exit_stop,
+        "_arr_sec": exit_arr,
+    }
 
 
 def _walk_leg(day, from_stop, to_stop):
@@ -316,7 +509,8 @@ def _summarize_journey(legs, rides, arrival, dep_sec):
 
 def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, range_m=None, extra_pct=None,
-              extra_floor_sec=None, extra_cap_sec=None, journey_limit=None):
+              extra_floor_sec=None, extra_cap_sec=None, journey_limit=None,
+              transfer_gain_sec=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -393,6 +587,7 @@ def plan_flow(start_query, end_query, when=None,
     end_name, target_stops = ends["end"], ends["target_stops"]
 
     dep_sec = when.hour * 3600 + when.minute * 60 + when.second
+    gain_sec = TRANSFER_GAIN_SEC if transfer_gain_sec is None else int(transfer_gain_sec)
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek") i jest zapasowym
     # planem, gdyby kotwiczenie (patrz niżej) przycięło wszystko do zera.
@@ -438,7 +633,8 @@ def plan_flow(start_query, end_query, when=None,
         if kept:
             seg_list = _finalize_segments(day, kept, ranges, geo_db)
             graph = _extract_transfer_graph(day, kept, ranges, source_stops, target_set)
-            journeys = _enumerate_journeys(day, graph, dep_sec, geo_db, limit=journey_limit)
+            journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
+                                           limit=journey_limit, gain_sec=gain_sec)
         else:
             # Zabezpieczenie: _scan już udowodnił, że połączenie istnieje
             # (best_stop nie jest None), więc jeśli kotwiczenie i tak
@@ -447,16 +643,38 @@ def plan_flow(start_query, end_query, when=None,
             # cofnięcia w _discover_segments, patrz komentarz przy
             # arrived_by[dep_s] != "origin"), narysuj i wylistuj
             # przynajmniej samą najszybszą trasę zamiast pustej odpowiedzi.
-            fallback_legs = _reconstruct(day, best_journey, best_stop, geo_db)
-            fallback_rides = [leg for leg in fallback_legs if leg["kind"] == "ride"]
-            seg_list = []
-            for leg in fallback_rides:
-                num, mode = _line_parts(leg["line"])
-                seg_list.append({"path": leg["path"], "num": num, "kind": mode, "w": 1.0})
-            journeys = (
-                [_summarize_journey(fallback_legs, fallback_rides, best_arr, dep_sec)]
-                if fallback_rides else []
+            # Najszybsza trasa i - jeśli jest co zdjąć - ta sama bez
+            # nieopłacalnej przesiadki. Pokazujemy OBIE; pierwsza jest tą
+            # proponowaną jako najlepsza przy obecnym progu.
+            warianty = _variants(
+                day, _reconstruct(day, best_journey, best_stop, geo_db),
+                gain_sec, geo_db,
             )
+            journeys = []
+            seg_list = []
+            narysowane = set()
+            for rank, wariant in enumerate(warianty):
+                rides = [leg for leg in wariant if leg["kind"] == "ride"]
+                if not rides:
+                    continue
+                # Przyjazd bierzemy z samej trasy; best_arr zostaje
+                # najwcześniejszym możliwym i dalej wyznacza okno mapy.
+                journeys.append(_summarize_journey(
+                    wariant, rides, _arrival_of(wariant) or best_arr, dep_sec))
+                # Jaśniej rysujemy wariant proponowany - tak jak wszędzie
+                # indziej na tej mapie jasność znaczy "lepsza opcja".
+                waga = 1.0 if rank == 0 else 0.6
+                for leg in rides:
+                    num, mode = _line_parts(leg["line"])
+                    klucz = (num, mode, tuple(map(tuple, leg["path"])))
+                    if klucz in narysowane:
+                        continue
+                    narysowane.add(klucz)
+                    seg_list.append(
+                        {"path": leg["path"], "num": num, "kind": mode, "w": waga})
+            seg_list.sort(key=lambda seg: seg["w"])   # blade pierwsze, jaskrawe na wierzchu
+            for wariant in warianty:
+                _drop_private(wariant)
     finally:
         geo_db.close()
 
@@ -1294,7 +1512,8 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
     }
 
 
-def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT):
+def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT,
+                        gain_sec=TRANSFER_GAIN_SEC):
     """Lista konkretnych propozycji tras, czytana wprost z grafu przesiadek
     mapy przepływów (patrz _extract_transfer_graph) - żadnego osobnego
     przeszukiwania CSA. Propozycja to po prostu ścieżka przez ten sam graf,
@@ -1385,11 +1604,18 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
         first_dep = chain[0][0]["best_deps"][chain[0][0]["stops"][chain[0][1]]]
         last_seg, _, last_alight = chain[-1]
         arrival = last_seg["arr_times"][last_seg["stops"][last_alight - 1]]
-        ranked.append((arrival, len(chain) - 1, -first_dep, chain))
+        # Przesiadka kosztuje gain_sec: propozycja z przesiadką musi tyle
+        # oszczędzić, żeby wyprzedzić jazdę bez niej (patrz TRANSFER_GAIN_SEC).
+        # Sortujemy po koszcie z karą, ale pokazujemy prawdziwy przyjazd.
+        # Liczba przesiadek zostaje rozstrzygnięciem remisu, więc przy progu 0
+        # klucz jest dokładnie taki jak przed wprowadzeniem kary.
+        przesiadki = len(chain) - 1
+        ranked.append((arrival + przesiadki * gain_sec,
+                       przesiadki, -first_dep, chain, arrival))
     ranked.sort(key=lambda item: item[:3])
 
     journeys = []
-    for arrival, _, neg_dep, chain in ranked[:limit]:
+    for _cost, _przesiadki, neg_dep, chain, arrival in ranked[:limit]:
         legs = []
         for i, (seg, board_pos, alight_pos) in enumerate(chain):
             if i > 0:

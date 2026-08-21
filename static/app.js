@@ -1199,6 +1199,7 @@ function queryParams() {
         extra_pct: $('extra').value,
         extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
         extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
+        transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
@@ -1509,7 +1510,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['range', 'extra', 'extra-floor', 'extra-cap'];
+const DEV_SLIDER_IDS = ['range', 'extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
 
 function loadDevPrefs() {
     try {
@@ -1561,6 +1562,7 @@ liveSlider('range', 'range-value');
 liveSlider('extra', 'extra-value');
 liveSlider('extra-floor', 'extra-floor-value');
 liveSlider('extra-cap', 'extra-cap-value');
+liveSlider('transfer-gain', 'transfer-gain-value');
 
 // --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
 //
