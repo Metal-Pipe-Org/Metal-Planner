@@ -145,6 +145,11 @@ której nie ma na ekranie.
 
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
+Suwaki: trzy od okna czasowego mapy, zasięg szukania punktu oraz **próg
+opłacalności przesiadki** (`transfer_gain_sec`, domyślnie 10 min — patrz opis
+skanu wyżej; nie kasuje żadnej opcji, tylko decyduje, która jest proponowana
+jako najlepsza). Wartości lądują w `localStorage` i w query
+stringu `/api/flow`.
 
 ### 4. PWA — `static/manifest.webmanifest` + `static/sw.js` + `static/pwa.js`
 
@@ -227,6 +232,27 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
 - kursy po północy mają w GTFS godziny 24:xx+ i liczą się do doby, w której
   wyruszyły, więc rozkład dnia D obejmuje też ogon dnia D-1 przesunięty
   o -24 h — to on obsługuje godziny 00:00-06:00 (patrz `gtfs.PREV_DAY_SEC`);
+- punkt wsiadania w kurs zapisuje się przy pierwszym jego przystanku, na
+  który zdążymy, ale jest przesuwany dalej, jeśli po drodze mijamy przystanek
+  osiągalny MNIEJSZĄ liczbą przejazdów (w skrajnym przypadku sam start).
+  Godziny to ten sam pojazd, więc przyjazd się nie zmienia — znika za to
+  etap "dojedź pod początek trasy tego autobusu, który i tak zaraz Cię
+  minie" (patrz `planner._cheaper_boarding`; odpowiednik reguły postępu,
+  którą mapa przepływów ma u siebie od 2026-07-18);
+- przy REMISIE na godzinie przyjazdu wygrywa droga z mniejszą liczbą
+  przejazdów. Bez tego o wyniku decyduje kolejność skanowania i potrafi
+  wyjść "wysiądź i przesiądź się do sąsiedniego autobusu, który dowozi
+  o tej samej minucie". Lista propozycji z mapy sortuje tak od dawna
+  (`_enumerate_journeys`), skan dostał to samo;
+- gdy pojazd, którym już jedziemy, sam dowozi do celu, obok trasy ze skanu
+  staje jej wariant **bez tej przesiadki** (`_seated_legs`; na celu relacji
+  liczy się też inny słupek tego samego przystanku — nocne linie zjeżdżają
+  na różne perony jednego dworca). Obie opcje idą na listę propozycji;
+  `TRANSFER_GAIN_SEC` (domyślnie 10 min, suwak w panelu ⚙) rozstrzyga
+  wyłącznie, która jest **proponowana jako najlepsza** — przesiadka musi
+  tyle oszczędzić, żeby wyprzedzić jazdę bez niej. Nic nie znika: przy
+  progu 0 kolejność wraca do samego przyjazdu. Okno czasowe mapy jest
+  nietknięte, `best_arr` zostaje najwcześniejszym możliwym przyjazdem;
 - trasę odtwarzamy wstecz po zapisanych wskaźnikach (które połączenie
   poprawiło który przystanek).
 

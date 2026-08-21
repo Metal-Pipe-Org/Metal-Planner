@@ -121,6 +121,7 @@ def init_routes(app):
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time"),request.args.get("date")),
+            transfer_gain_sec=_float_arg("transfer_gain_sec"),
         ))
 
     @app.route("/api/flow")
@@ -135,4 +136,5 @@ def init_routes(app):
             extra_pct=_float_arg("extra_pct"),
             extra_floor_sec=_float_arg("extra_floor_sec"),
             extra_cap_sec=_float_arg("extra_cap_sec"),
+            transfer_gain_sec=_float_arg("transfer_gain_sec"),
         ))

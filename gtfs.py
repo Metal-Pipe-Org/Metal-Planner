@@ -140,7 +140,7 @@ class DayData:
         "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
         "display_name", "stops_by_norm_key", "norm_display_name",
         "siblings", "trip_info", "trip_shape",
-        "stops_by_place", "place_of",
+        "stops_by_place", "place_of", "conns_by_trip",
     )
 
     def __init__(self):
@@ -160,6 +160,7 @@ class DayData:
         self.trip_shape = {}         # trip_id -> shape_id (geometria z shapes.txt)
         self.stops_by_place = {}     # klucz miejsca -> [stop_id, ...] (patrz _build_places)
         self.place_of = {}           # stop_id -> klucz miejsca
+        self.conns_by_trip = None    # kurs -> indeksy w conns (leniwie, patrz trip_conns)
 
 
 def _connect():
@@ -564,6 +565,22 @@ def db_trip(trip_id):
     if trip_id.startswith(PREV_DAY_PREFIX):
         return trip_id[len(PREV_DAY_PREFIX):], PREV_DAY_SEC
     return trip_id, 0
+
+
+def trip_conns(data, trip_id):
+    """Połączenia jednego kursu z tablicy dnia, po kolei (indeksy w data.conns).
+
+    Indeks kurs -> indeksy budujemy przy pierwszym pytaniu i trzymamy przy
+    DayData. Sam skan go nie potrzebuje (idzie liniowo po całej tablicy),
+    używa go dopiero sklejanie etapów w plannerze - a że dane są tuż obok,
+    w pamięci, nie ma po co wracać po nie do SQLite.
+    """
+    if data.conns_by_trip is None:
+        index = {}
+        for i, conn in enumerate(data.conns):
+            index.setdefault(conn[4], []).append(i)
+        data.conns_by_trip = index
+    return data.conns_by_trip.get(trip_id, ())
 
 
 def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None):
