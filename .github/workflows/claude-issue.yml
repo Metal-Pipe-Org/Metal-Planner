@@ -1,0 +1,47 @@
+name: Claude - rozwiąż issue
+
+# Odpala się, gdy issue dostanie etykietę "claude".
+# Claude czyta zgłoszenie, wprowadza poprawkę, uruchamia testy i otwiera PR.
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  solve-issue:
+    if: github.event.label.name == 'claude'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: testing
+          fetch-depth: 0
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Zależności (żeby Claude mógł odpalić pytest)
+        run: pip install -r requirements-dev.txt
+
+      - name: Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          base_branch: testing
+          track_progress: true
+          prompt: |
+            /solve-issue REPO: ${{ github.repository }} ISSUE_NUMBER: ${{ github.event.issue.number }}
+          claude_args: |
+            --max-turns 40
+            --allowedTools 'Read,Glob,Grep,Edit,MultiEdit,Write,Bash(python:*),Bash(python3:*),Bash(pytest:*),Bash(pip:*),Bash(git:*),Bash(gh:*)'
