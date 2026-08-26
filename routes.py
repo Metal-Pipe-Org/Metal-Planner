@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
+import vehicles
 from planner import plan_flow, plan_route
 
 
@@ -114,6 +115,17 @@ def init_routes(app):
             return jsonify(gtfs.all_stops_geo())
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
+
+    @app.route("/api/vehicles")
+    def api_vehicles():
+        """Żywe pozycje autobusów/tramwajów (portal open-data, patrz vehicles.py) -
+        warstwa włączana przyciskiem ◉ w nagłówku, zamiennie ze słupkami."""
+        try:
+            return jsonify({"vehicles": vehicles.get_vehicles()})
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+        except (OSError, ValueError) as e:
+            return jsonify({"error": f"Nie udało się pobrać pozycji pojazdów: {e}"}), 503
 
     @app.route("/api/plan")
     def api_plan():

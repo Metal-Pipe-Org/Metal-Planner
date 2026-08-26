@@ -123,3 +123,8 @@ yarn-error.log*
 *.key
 secrets/
 credentials/
+
+# AI
+
+.claude/
+CLAUDE.md

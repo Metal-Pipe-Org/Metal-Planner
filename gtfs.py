@@ -19,6 +19,7 @@ WEEKDAY_COLUMNS = [
 ]
 
 ROUTE_TYPE_LABELS = {0: "Tramwaj", 3: "Autobus"}
+ROUTE_KIND_BY_TYPE = {0: "tram", 3: "bus"}  # patrz planner.MODE_OF_LABEL
 
 # Doba rozkładowa nie kończy się o północy. Kurs nocny wyjeżdżający o 23:46
 # jedzie dalej jako 24:02, 24:16, ... i w GTFS należy do kalendarza dnia,
@@ -412,6 +413,37 @@ def all_stops_geo():
     ]
     db.close()
     return stops
+
+
+_line_kind_cache = None
+_line_kind_generation = None
+
+
+def line_kind_map():
+    """route_short_name -> "tram"/"bus"/"other" (patrz vehicles.py: dopasowanie
+    pozycji pojazdów z open-data do koloru/rodzaju linii).
+
+    Z tabeli routes, niezależne od dnia (w przeciwieństwie do _day_cache) -
+    jeden wpis starcza na całą wersję bazy, więc cache jest kluczowany samym
+    mtime, tak jak geo_generation(). Nazwy są .strip()-owane: GTFS ma kilka
+    route_short_name z końcową spacją ("116 "), a Nazwa_Linii z API pojazdów
+    przychodzi już bez niej - bez tego dopasowanie by dla nich zawodziło.
+    """
+    global _line_kind_cache, _line_kind_generation
+    mtime = DB_PATH.stat().st_mtime if DB_PATH.exists() else 0
+    if mtime != _line_kind_generation:
+        db = _connect()
+        mapping = {}
+        for short_name, route_type in db.execute(
+            "SELECT DISTINCT route_short_name, route_type FROM routes"
+        ):
+            name = (short_name or "").strip()
+            if name:
+                mapping[name] = ROUTE_KIND_BY_TYPE.get(route_type, "other")
+        db.close()
+        _line_kind_cache = mapping
+        _line_kind_generation = mtime
+    return _line_kind_cache
 
 
 _shape_cache = {}       # shape_id -> [(lat, lon), ...]
