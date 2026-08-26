@@ -1,0 +1,28 @@
+name: CI
+
+# Uruchamiany wyłącznie ręcznie (Actions -> CI -> Run workflow).
+# Testy na `main` wymagają data/gtfs.sqlite, którego nie ma w repo, więc na
+# świeżym klonie 14 z nich pada. Automatyczne wyzwalacze wracają, gdy na `main`
+# trafi hermetyczny zestaw testów z `testing`:
+#   push:
+#     branches: [main, testing]
+#   pull_request:
+on:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+
+      - run: pytest -q tests
