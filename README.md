@@ -19,12 +19,14 @@ Wymagany Python ≥ 3.9 (Flask 3.x nie działa na 3.8).
 ```bash
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python update_gtfs.py   # pobiera rozkład (~12 MB) i buduje bazę, ~10 s
-.venv/bin/python app.py           # http://localhost:5001
+.venv/bin/python update_gtfs.py
+.venv/bin/python app.py
 ```
 
-Port to domyślnie 5001 (5000 zajmuje AirPlay na macOS); można zmienić
-zmienną `PORT`.
+`update_gtfs.py` pobiera rozkład (~12 MB) i buduje z niego bazę — zajmuje to
+około 10 sekund. `app.py` wystawia serwer na http://localhost:5001; port to
+domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
+`PORT`.
 
 ## Instalacja jako aplikacja (PWA)
 
