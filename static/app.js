@@ -85,6 +85,24 @@ if (dayPanel && dayToggle) {
     dayToggle.addEventListener('click', () => setDay(dayPanel.classList.contains('hidden')));
 }
 
+// Pole godziny to zwykły tekst, nie <input type="time"> - natywny widget w
+// niektórych przeglądarkach (np. Safari) pokazuje AM/PM zależnie od ustawień
+// regionalnych systemu i ignoruje atrybut lang strony, więc format 24h nie
+// dało się wymusić inaczej niż samodzielnym formatowaniem.
+const timeInput = $('time');
+timeInput.addEventListener('input', () => {
+    let digits = timeInput.value.replace(/\D/g, '').slice(0, 4);
+    if (digits.length > 2) digits = digits.slice(0, 2) + ':' + digits.slice(2);
+    timeInput.value = digits;
+});
+timeInput.addEventListener('blur', () => {
+    const match = timeInput.value.match(/^(\d{1,2}):?(\d{1,2})?$/);
+    if (!match) { timeInput.value = ''; return; }
+    const hours = Math.min(23, parseInt(match[1], 10) || 0);
+    const minutes = Math.min(59, parseInt(match[2], 10) || 0);
+    timeInput.value = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+});
+
 // Na telefonie panel i mapa nie mieszczą się naraz, więc zamiast nachodzić
 // na siebie przełączają się zakładkami (na szerokim ekranie klasy widoku
 // nic nie robią - tam widać jedno i drugie). Karta wyszukiwania zostaje
