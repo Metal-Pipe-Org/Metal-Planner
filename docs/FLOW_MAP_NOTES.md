@@ -27,16 +27,23 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
   (regresja 2026-08-12 — patrz log niżej)
 - **6** — `test_shape_slice_uses_real_street_geometry_when_available`,
   `test_shape_slice_falls_back_to_stop_polyline_without_a_shape`
-- **7** — `test_lines_sharing_a_corridor_each_carry_the_whole_corridor`
+- **7** — backend: `test_lines_sharing_a_corridor_each_carry_the_whole_corridor`
   (sedno punktu), `test_corridor_numbers_follow_one_global_order_everywhere`,
   `test_a_piece_never_claims_a_corridor_it_has_already_left`,
-  `test_solo_line_never_gets_a_corridor_list`. Testy pokrywają to, co liczy
-  backend (skład korytarza); samo rysowanie grupek numerów i przełączanie
-  pod kursorem to frontend — wymagałoby testu w przeglądarce, więc jest
-  sprawdzone czytaniem kodu i symulacją rozstawiania grupek na żywych
-  danych (patrz log 2026-08-15, czwarte przejście).
-- **8** — brak automatycznego testu (stała wizualna frontendu, nie wynik
-  algorytmu). Zweryfikowane czytaniem kodu i wizualnie na mapie.
+  `test_solo_line_never_gets_a_corridor_list`. Front (od 2026-08-27, przez
+  emulator — patrz niżej): `test_number_groups_never_overlap`,
+  `test_hovering_a_number_names_exactly_that_line`,
+  `test_every_group_stands_on_a_drawn_corridor`,
+  `test_the_map_labels_its_corridors_at_all`
+- **8** — front, przez emulator (od 2026-08-27):
+  `test_brightness_scale_never_reaches_invisibility`,
+  `test_nothing_actually_drawn_is_invisible`. Wcześniej: brak testu, samo
+  czytanie kodu i oglądanie mapy.
+- **10** — front, przez emulator (od 2026-08-27):
+  `test_time_at_a_stop_comes_straight_from_the_schedule`,
+  `test_stop_anchors_run_along_the_line_in_order`,
+  `test_time_never_goes_backwards_along_a_piece`,
+  `test_the_time_dot_sits_on_the_line`
 - **9** — `test_brightness_uses_full_range_regardless_of_window_width`,
   `test_previously_worst_option_brightens_when_a_new_worse_one_appears`,
   oraz pośrednio `test_single_course_splits_brightness_at_a_real_skipped_transfer`
@@ -551,6 +558,119 @@ Co z tego NIE wynika i zostało jako otwarte pytanie (patrz „Otwarte
 pytania" na górze pliku): że dowolne złożenie narysowanych kawałków też się
 w oknie zmieści — kotwica przesiadki pyta o JAKIŚ kurs linii w ciągu 20
 minut, a okno przeszły godziny konkretnego kursu.
+
+## Tryb awaryjny: przyczyna znaleziona i naprawiona (2026-08-27)
+
+Wyszło z pomiaru spisanego w `docs/TODO_EMULATOR_I_TRYB_AWARYJNY.md`:
+`plan_flow` ma gałąź `else` na wypadek, gdyby `_select_and_anchor` przyciął
+wszystkie segmenty do zera, i rysuje wtedy samą najszybszą trasę z
+jasnościami `1.0`/`0.6` wpisanymi na sztywno. Komentarz nazywał to
+„skrajnym, rzadkim przypadkiem". Nie było ani skrajne, ani rzadkie:
+Sosnowiecka → Wojszyce o 15:37 przy domyślnym oknie dawała **31 kandydatów
+i 0 zatrzymanych**.
+
+**Przyczyna — kotwica początku pytała o złą rzecz.** Pytała „czy kurs
+ZACZYNA się na przystanku startowym" (`seg["stops"][0] in source_stops`),
+a powinna „czy da się do niego wsiąść NA przystanku startowym". Miejsce
+wsiadania wybrane w `_discover_segments` to najwcześniejsze możliwe, nie
+jedyne. Na Sosnowieckiej wygląda to tak:
+
+- Autobus 124 wiezie ze Sosnowieckiej (słupek 3019) przez Brochowską na
+  pętlę KSIĘŻE WIELKIE i tam kończy — to jedyny segment startujący na
+  przystanku startowym;
+- z pętli wyjeżdża 124/134 i wraca tą samą ulicą: Brochowska (drugi słupek,
+  424) → Sosnowiecka (drugi słupek, 3020) → Zagłębiowska → miasto. Jego
+  segment ZACZYNA się na pętli, bo tam wypada najwcześniejsze wsiadanie
+  (dojechawszy tam 124-tką), a przystanek startowy mija w swoim środku.
+
+Kotwica końca słusznie zabijała pierwszy segment: jedyna kontynuacja z
+pętli wraca po jego własnych śladach (`_leads_onward`, punkt 4). Ale wtedy
+drugi tracił JEDYNĄ kotwicę początku, jaką kotwica umiała zobaczyć — choć
+pasażer po prostu wsiada do niego obok, na drugim słupku Sosnowieckiej.
+Punkt stały rozplątywał się dalej kaskadą: 31 → 28 → 24 → 16 → 11 → 5 → 2
+→ 1 → 0 w ośmiu iteracjach.
+
+**Naprawa** (`_select_and_anchor`): pozycja, na której segment stoi na
+przystanku startowym i ma stamtąd odjazd, jest sama w sobie kotwicą
+początku. To samo pytanie zadaje teraz `_extract_transfer_graph`
+(`origin_ids` liczone z zakotwiczonej pozycji, nie z `stops[0]`) — inaczej
+mapa się rysowała, a lista propozycji wychodziła pusta, bo szukała ścieżek
+od segmentów „zaczynających się" na starcie.
+
+**Zmierzone, przemiat 64 relacji × godzin (16 miejsc, 4 pory dnia):**
+
+| | przed | po |
+|---|---|---|
+| relacji w trybie awaryjnym | 2 | **0** |
+| map, które straciły choć jeden segment | — | **0** |
+| map z większą liczbą zatrzymanych segmentów | — | 3 |
+| map rysowanych dłużej (segment od startu, nie od pętli) | — | 16 |
+
+Sosnowiecka → Wojszyce 15:37: 0 → **25 zatrzymanych segmentów, 57 kawałków,
+18 linii, pełna skala jasności 0,0–1,0, 5 propozycji tras** (przedtem: jedna
+trasa z trybu awaryjnego). Ubytek liczby *kawałków* w 10 przypadkach to nie
+strata: sprawdzone na Wojszyce → Biskupin 07:15, gdzie linia 113 przestała
+być łamana na dwa kawałki, a 903 jest teraz rysowana od samego startu (14
+punktów zamiast 6).
+
+**Los trybu awaryjnego.** Zostaje jako zabezpieczenie — konstrukcyjnie wciąż
+jest osiągalny (kontynuacja zawraca po własnych śladach, a przesiadka piętro
+niżej wypada poza `WAIT_CAP_SEC`) — ale przestał udawać zwykłą mapę:
+odpowiedź `/api/flow` ma teraz pole `degraded`, a front na jego podstawie
+dopisuje NAD listą mały komunikat w tym samym stylu, co pozostałe błędy
+(„Tryb awaryjny: nie udało się ułożyć wachlarza połączeń…") — na wyraźną
+prośbę użytkownika, 2026-08-27. Nad listą, nie zamiast niej: pokazana trasa
+ma zostać widoczna. Test: `test_fallback_mode_shows_a_notice_on_screen`
+(sprawdzony mutacją: po usunięciu wywołania test pada). Testy zaplecza:
+`test_fallback_map_admits_that_it_is_a_fallback`,
+`test_a_normal_map_is_not_marked_as_a_fallback`,
+`test_course_passing_the_origin_after_a_loop_is_anchored_at_the_origin`
+(ten ostatni to odtworzony układ z Sosnowieckiej).
+
+## Emulator frontu: punkty 7, 8 i 10 wreszcie testowane (2026-08-27)
+
+Do tej pory testy sięgały wyłącznie `planner.py`, więc trzy punkty
+kontraktu żyjące w `static/app.js` nie były sprawdzane niczym — zmiana w
+froncie mogła po cichu złamać kontrakt. Doszedł emulator:
+
+- `tests/js/harness.js` — minimalny Leaflet (rzut Web Mercator jak w
+  oryginale, `latLngToContainerPoint`, `fitBounds` z marginesami panelu,
+  `moveend`), minimalny DOM i `localStorage`, po czym uruchamia **prawdziwy
+  `static/app.js`** — nie kopię i nie wycinek. Kod mapy siedzi w app.js
+  wewnątrz bloku `if (startInput) { … }`, więc harness dokleja eksport
+  swoich uchwytów przed ostatnią klamrą pliku; gdyby ten blok zmienił
+  kształt, harness pada z komunikatem zamiast po cichu przestać sprawdzać.
+- `tests/js/flow_fixture.json` — prawdziwa odpowiedź `/api/flow`
+  (Sosnowiecka → Wojszyce 15:37, 57 kawałków, 32 z korytarzem).
+- `tests/js/checks.js` + `tests/test_flow_map_front.py` — 11 testów.
+
+**Silnik: JavaScriptCore przez `osascript -l JavaScript`**, nie node+jsdom.
+Powód: projekt nie ma dziś żadnej zależności javascriptowej ani kroku
+budowania, na maszynie nie ma `node`, a CI nie ma w ogóle. Cena: testy są
+macOS-owe i gdzie indziej się pomijają (`pytest.skip`). Cały pakiet chodzi
+poniżej 0,1 s.
+
+**Zmierzone na fixture:** 22 grupki numerów, 0 kolizji; 34 najechania na
+numer, 0 pomyłek wskazania; 157 godzin na przystankach, największy błąd
+interpolacji **0 s**; 3477 próbek wzdłuż linii, 0 cofnięć czasu; kropka
+**0 m** od linii; najmniejsze krycie 0,4 przy grubości 3 px.
+
+**Czy te testy potrafią paść** — sprawdzone pięcioma mutacjami `app.js`,
+każda złapana przez właściwy test i tylko przez niego:
+
+| mutacja | złapana przez |
+|---|---|
+| wyłączone odrzucanie kolidujących grupek | `..._groups_never_overlap` (+ test przełącznika) |
+| interpolacja przesunięta o 30 s | `..._comes_straight_from_the_schedule`, `..._never_goes_backwards` |
+| `minOpacity` 0,4 → 0,02 | `..._never_reaches_invisibility`, `..._nothing_actually_drawn_is_invisible` |
+| kropka czasu 55 m obok linii | `..._time_dot_sits_on_the_line` |
+| grupka ignoruje, który numer wskazano | `..._names_exactly_that_line` |
+
+Świadome ograniczenia atrapy (spisane też w harnessie): brak prawdziwego
+układu CSS — rozmiar grupki bierze się z `clusterBox`, nie z pomiaru tekstu
+przez przeglądarkę; zdarzenia myszy wywoływane wprost, nie przez propagację
+DOM; `fetch` nigdy nie woła callbacków, więc nic nie dzieje się
+asynchronicznie.
 
 ## Pomysł do zrobienia kiedyś: znaczek „nowe", który gaśnie sam (2026-08-27)
 

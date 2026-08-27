@@ -146,7 +146,7 @@
       w odpowiedzi, przełącznik tylko przemalowuje mapę.
     #}
     <details class="dev-fold" id="fold-time" open>
-        <summary>Czas na mapie <span class="dev-temp">nowe</span></summary>
+        <summary>Czas na mapie</summary>
 
         <label class="dev-check">
             <input type="checkbox" id="time-hover"> Godzina w punkcie pod kursorem
@@ -223,6 +223,10 @@
     <details class="dev-fold" id="fold-transfer">
     <summary>Przesiadki</summary>
 
+    <p class="field-hint strong">
+        Ten suwak NIE zmienia mapy — dotyczy wyłącznie listy „Propozycje tras”.
+    </p>
+
     <div class="field">
         <label for="transfer-gain">
             Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
@@ -236,7 +240,7 @@
             do celu. Nocne linie ruszają z węzła tą samą minutą tą samą
             ulicą, więc różnica na końcu bywa zaokrągleniem dwóch rozkładów,
             a wysiadanie kosztuje przejście na inny peron. 0 = liczy się sam
-            przyjazd.
+            przyjazd. Wachlarz na mapie rysuje się niezależnie od tej wartości.
         </p>
     </div>
 
@@ -285,7 +289,7 @@
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
     <details class="dev-fold" id="look-section" hidden>
-        <summary>Wygląd mapy <span class="dev-temp">tymczasowe</span></summary>
+        <summary>Wygląd mapy</summary>
 
         <div class="field compact">
             <label for="look-min-op">

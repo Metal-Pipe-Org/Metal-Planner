@@ -596,6 +596,129 @@ def test_two_tails_propping_each_other_up_are_both_cut_back(install_day):
             )
 
 
+def _origin_passed_after_a_terminus_loop_day():
+    """Realny układ z Sosnowieckiej (zmierzony 2026-08-27): przystanek
+    startowy ma dwa słupki, a linia obsługuje go PO drodze z pętli końcowej.
+
+    Autobus 124 dowozi ze Startu (słupek "w stronę pętli") na PETLA i tam
+    kończy. Z pętli wyjeżdża Autobus 134 i wraca tą samą ulicą - przez
+    Srodek i przez DRUGI słupek Startu - a dopiero potem jedzie w miasto do
+    celu. Pasażer nie ma po co jechać na pętlę: wsiada na drugim słupku
+    Startu, obok. Ale najwcześniejsze możliwe wsiadanie do 134 (a tym samym
+    początek jego segmentu) wypada na PETLI, bo da się tam dojechać
+    124-tką."""
+    trips = [
+        {"trip_id": "into_loop", "label": "Autobus 124",
+         "stops": [("S_in", 0, 0), ("M_in", 60, 60), ("L", 120, 120)]},
+        {"trip_id": "out_of_loop", "label": "Autobus 134",
+         "stops": [("L", 300, 300), ("M_out", 360, 360), ("S_out", 420, 420),
+                   ("P", 700, 700), ("E", 1000, 1000)]},
+        {"trip_id": "alt", "label": "Tramwaj 5",
+         "stops": [("P", 820, 820), ("Q", 950, 950), ("E", 1200, 1200)]},
+    ]
+    return make_day(
+        trips,
+        names={"S_in": "Start", "S_out": "Start", "M_in": "Srodek",
+               "M_out": "Srodek", "L": "PETLA", "P": "Wezel", "Q": "Objazd",
+               "E": "Cel"},
+        siblings={"S_in": ("S_out",), "S_out": ("S_in",),
+                  "M_in": ("M_out",), "M_out": ("M_in",)},
+    )
+
+
+def test_course_passing_the_origin_after_a_loop_is_anchored_at_the_origin(install_day):
+    """Kotwica początku pyta "czy da się TU wsiąść", nie "czy kurs się tu
+    zaczyna".
+
+    Segment Autobusu 134 zaczyna się na PETLI (tam wypada najwcześniejsze
+    wsiadanie), ale mija przystanek startowy w swoim środku - i to właśnie
+    tam pasażer do niego wsiada. Gdyby kotwica początku patrzyła tylko na
+    PIERWSZY przystanek segmentu, 134 mógłby się zakotwiczyć wyłącznie o
+    124-tkę jadącą na pętlę - a ta słusznie ginie na kotwicy końca (punkt 4:
+    z pętli wraca się po własnych śladach). Wtedy ginie 134, za nim wszystko,
+    co się o niego opierało, i cała mapa schodzi do jednej trasy.
+
+    Zmierzone na żywych danych (Sosnowiecka -> Wojszyce, 15:37): 31
+    kandydatów, 0 zatrzymanych - dokładnie ten układ."""
+    day = _origin_passed_after_a_terminus_loop_day()
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+    assert result["best_arrival"] == planner._fmt_time(1000)
+
+    # 134 musi być na mapie i musi być narysowany OD przystanku startowego -
+    # stamtąd się w niego wsiada.
+    onward = _segs_by_num(result, "134", "bus")
+    assert onward != [], "kurs mijający start w środku musi się zakotwiczyć na starcie"
+    assert any(_coords_of(day, ["S_out"])[0] in seg["path"] for seg in onward)
+
+    # ...a skoro sieć się nie rozpadła, widać też przesiadkę na Wezle, czyli
+    # cały wachlarz, a nie samą najszybszą trasę (punkt 1).
+    assert _segs_by_num(result, "5", "tram") != [], (
+        "mapa zeszła do jednej trasy - kotwiczenie przycięło wszystko do zera"
+    )
+    assert result["degraded"] is False
+
+    # ...ale ogon na pętlę nadal się nie rysuje (punkt 4).
+    for seg in _segs_by_num(result, "124", "bus"):
+        assert _coords_of(day, ["L"])[0] not in seg["path"]
+
+
+def test_fallback_map_admits_that_it_is_a_fallback(install_day):
+    """Tryb awaryjny plan_flow (kotwiczenie przycięło wszystko do zera)
+    rysuje JEDNĄ trasę z jasnościami wpisanymi na sztywno - łamie punkty 1,
+    2 i 9 kontraktu. Skoro zostaje jako zabezpieczenie, to musi się do tego
+    przyznawać, żeby rzadka mapa nie wyglądała identycznie jak "tędy
+    naprawdę nic nie jedzie".
+
+    Układ: Autobus 1 dowozi na Zawrotkę, a jedyne, co stamtąd odjeżdża,
+    wraca przez Pośrednią - czyli tam, skąd właśnie przyjechaliśmy - więc
+    ogon 1 nie ma się o co zakotwiczyć (punkt 4). Przesiadka piętro niżej,
+    na samej Pośredniej, też nie ratuje sprawy: Autobus 2 pojawia się tam
+    dopiero po ponad 20 minutach czekania (WAIT_CAP_SEC), a tyle nie łączy
+    już dwóch segmentów w jedną widoczną drogę. Autobus 2 traci więc swoją
+    jedyną kotwicę początku i sieć schodzi do zera. Przystanek startowy nie
+    leży po drodze żadnego z tych kursów, więc nie ratuje ich też kotwica
+    "da się tu wsiąść"."""
+    trips = [
+        {"trip_id": "r1", "label": "Autobus 1",
+         "stops": [("S", 0, 0), ("A", 100, 100), ("M", 200, 200)]},
+        {"trip_id": "r2", "label": "Autobus 2",
+         "stops": [("M", 1400, 1400), ("A", 1500, 1500), ("E", 1600, 1600)]},
+    ]
+    day = make_day(trips, names={"S": "Start", "A": "Posrednia",
+                                 "M": "Zawrotka", "E": "Cel"})
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+    assert result["segments"] != []          # coś jednak pokazujemy
+    assert result["degraded"] is True, (
+        "mapa zeszła do samej najszybszej trasy i musi to powiedzieć wprost"
+    )
+
+
+def test_a_normal_map_is_not_marked_as_a_fallback(install_day):
+    """Odwrotna strona tego samego znacznika: zwykła mapa nie ma prawa go
+    podnosić, inaczej stałby się bezużyteczny."""
+    day = _three_tier_fan_day()
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+        extra_pct=110, extra_floor_sec=1800, extra_cap_sec=999999,
+    )
+    assert "error" not in result
+    assert result["degraded"] is False
+
+
 # ----------------------------------------------------------------------- 6 -
 
 def test_shape_slice_uses_real_street_geometry_when_available():

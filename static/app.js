@@ -1573,6 +1573,48 @@ function adoptNames(data) {
 /** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
     propozycji (journeys) - to ta sama, współdzielona odpowiedź, więc obie
     nie mogą już się rozjechać (patrz planner.plan_flow). */
+/** Ostrzeżenie o TRYBIE AWARYJNYM mapy - ten sam wygląd, co pozostałe
+    komunikaty błędów, ale dopisywane NAD listą, nie zamiast niej: w tym
+    trybie jakaś trasa i tak jest pokazana i ma zostać widoczna.
+
+    Kiedy się pojawia: serwer nie zdołał złożyć wachlarza opcji i przysłał
+    samą najszybszą trasę (pole `degraded` w odpowiedzi /api/flow, patrz
+    plan_flow). Bez tego komunikatu rzadka mapa wygląda dokładnie tak samo
+    jak "tędy naprawdę nic nie jedzie" i nie da się tych dwóch rzeczy
+    odróżnić na ekranie. */
+function showDegradedNotice() {
+    resultsBox.insertAdjacentHTML('afterbegin',
+        '<div class="notice error degraded"><p>Tryb awaryjny: nie udało się '
+        + 'ułożyć wachlarza połączeń, mapa pokazuje tylko najszybszą trasę.'
+        + '</p></div>');
+}
+
+/** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
+    dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
+function renderPlan(data, refit) {
+    adoptNames(data);
+    drawFlow(data, refit);
+
+    journeys = data.journeys;
+    selectedJourney = null;      // nowa lista = stary wybór nieaktualny
+    clearJourney();
+    clearPreview();
+    dimFlow(false);
+    if (!journeys.length) {
+        // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
+        // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
+        // przeczyć (zdarza się przy szerokim oknie, gdy graf urośnie
+        // ponad budżet szukania w _enumerate_journeys).
+        showError(data.segments.length
+            ? 'Mapa pokazuje połączenia, ale przy tak szerokim oknie nie '
+              + 'udało się z nich złożyć listy tras. Zawęź okno czasowe.'
+            : 'Nie znaleziono żadnego połączenia w tym oknie czasowym.');
+    } else {
+        renderJourneys();
+    }
+    if (data.degraded) showDegradedNotice();
+}
+
 function loadPlan(token, refit) {
     const params = queryParams();
     return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
@@ -1583,26 +1625,7 @@ function loadPlan(token, refit) {
                 showError(data.error, data.suggestions);
                 return;
             }
-            adoptNames(data);
-            drawFlow(data, refit);
-
-            journeys = data.journeys;
-            selectedJourney = null;      // nowa lista = stary wybór nieaktualny
-            clearJourney();
-            clearPreview();
-            dimFlow(false);
-            if (!journeys.length) {
-                // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
-                // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
-                // przeczyć (zdarza się przy szerokim oknie, gdy graf urośnie
-                // ponad budżet szukania w _enumerate_journeys).
-                showError(data.segments.length
-                    ? 'Mapa pokazuje połączenia, ale przy tak szerokim oknie nie '
-                      + 'udało się z nich złożyć listy tras. Zawęź okno czasowe.'
-                    : 'Nie znaleziono żadnego połączenia w tym oknie czasowym.');
-                return;
-            }
-            renderJourneys();
+            renderPlan(data, refit);
         });
 }
 

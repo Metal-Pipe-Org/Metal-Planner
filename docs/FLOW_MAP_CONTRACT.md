@@ -134,6 +134,32 @@ opcję, to poprzednio-najgorsze trasy mogą się realnie rozjaśnić — dół
 skali przesunął się niżej. To drugie nie jest błędem, to ta sama zasada
 działająca w drugą stronę.
 
+## 10. Mapa mówi, ile to trwa i o której się tam będzie
+
+Mapa odpowiada nie tylko na „jak dojechać”, ale też na „ile to trwa” i
+„o której”. Trzema warstwami, od najogólniejszej:
+
+**Bez ruszania myszą** widać czas całej podróży: najszybszy możliwy dojazd
+i najpóźniejszy, jaki mapa jeszcze rysuje.
+
+**Pod kursorem, dla punktu pod kursorem** — nie dla całej linii i nie dla
+jakiegoś jej kawałka — widać dwie godziny: o której tym pojazdem jest się
+dokładnie tutaj, i o której jest się w celu, jadąc dalej najszybszą możliwą
+kontynuacją. Do tego ile to jeszcze zajmie.
+
+**Skąd te godziny.** Z rozkładu tego samego kursu, z którego narysowano ten
+odcinek. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
+proporcjonalnie do przebytej drogi, nie średnią: bliżej następnego
+przystanku znaczy bliżej jego godziny. Wolno wyłącznie to: interpolacja
+**między dwiema godzinami odczytanymi z rozkładu tego samego kursu**. Nie
+wolno szacować ze średniej prędkości, z odległości w linii prostej ani
+sklejać czasów z dwóch różnych kursów.
+
+**Czego czas nie rusza.** Nie zajmuje żadnego kanału zarezerwowanego dla
+jakości trasy — nie zmienia jasności, grubości ani koloru linii (punkty 1,
+6, 8, 9). Wchodzi wyłącznie jako liczba dopisana obok. Wyłączenie czasu
+zostawia mapę dokładnie taką, jaka była, zanim czas się na niej pojawił.
+
 ## Priorytet: poprawność przed szybkością
 
 Rozsądna szybkość działania jest pożądana, ale nigdy kosztem poprawności.

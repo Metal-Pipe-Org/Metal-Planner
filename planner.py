@@ -646,6 +646,7 @@ def plan_flow(start_query, end_query, when=None,
         # sięgania po listę propozycji (i bez drugiego szukania).
         best_legs = _reconstruct(day, best_journey, best_stop, geo_db)
         fastest = _fastest_summary(best_legs, best_arr, dep_sec)
+        degraded = False
         if kept:
             seg_list = _finalize_segments(day, kept, ranges, geo_db)
             graph = _extract_transfer_graph(day, kept, ranges, source_stops, target_set)
@@ -654,15 +655,31 @@ def plan_flow(start_query, end_query, when=None,
         else:
             # Zabezpieczenie: _scan już udowodnił, że połączenie istnieje
             # (best_stop nie jest None), więc jeśli kotwiczenie i tak
-            # przycięło WSZYSTKO do zera (skrajny, rzadki przypadek - nie
-            # mylić z brakiem pojedynczego segmentu, na to jest reguła
-            # cofnięcia w _discover_segments, patrz komentarz przy
-            # arrived_by[dep_s] != "origin"), narysuj i wylistuj
-            # przynajmniej samą najszybszą trasę zamiast pustej odpowiedzi.
+            # przycięło WSZYSTKO do zera, narysuj i wylistuj przynajmniej
+            # samą najszybszą trasę zamiast pustej odpowiedzi.
+            #
+            # To NIE jest zwykła mapa i odpowiedź mówi o tym wprost
+            # (degraded), bo łamie kontrakt: rysuje jedną trasę zamiast
+            # całego wachlarza (punkt 1), a jasności ma wpisane na sztywno,
+            # nie policzone (punkty 2 i 9). Bez tego znacznika rzadka mapa
+            # wygląda tak samo jak "tędy naprawdę nic nie jedzie".
+            #
+            # Kiedy tu wpadamy: gdy nic nie zazębia się w łańcuch start ->
+            # cel, np. jedyna kontynuacja najlepszej trasy zawraca po
+            # przystankach, które właśnie minęliśmy (_leads_onward), a
+            # nigdzie po drodze nie da się wsiąść na przystanku startowym.
+            # Nie jest to przypadek "skrajny i rzadki", jak głosił tu
+            # komentarz do 2026-08-27: zwykła dzienna relacja przez pół
+            # miasta (Sosnowiecka -> Wojszyce, 15:37) w niego wpadała, bo
+            # kotwica początku pytała "czy kurs się tu ZACZYNA" zamiast
+            # "czy da się TU wsiąść" (patrz _select_and_anchor). Po tamtej
+            # naprawie na przemiecie 64 realnych relacji nie wpada w niego
+            # już żadna, ale konstrukcyjnie wciąż jest osiągalny.
             # Najszybsza trasa i - jeśli jest co zdjąć - ta sama bez
             # nieopłacalnej przesiadki. Pokazujemy OBIE; pierwsza jest tą
             # proponowaną jako najlepsza przy obecnym progu.
             warianty = _variants(day, best_legs, gain_sec, geo_db)
+            degraded = True
             journeys = []
             seg_list = []
             narysowane = set()
@@ -713,6 +730,11 @@ def plan_flow(start_query, end_query, when=None,
         "fastest": fastest,
         "segments": seg_list,
         "journeys": journeys,
+        # True tylko w trybie awaryjnym (patrz gałąź else wyżej): mapa jest
+        # wtedy jedną trasą z jasnościami wpisanymi na sztywno, a nie
+        # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
+        # niż zwykle - i nie brać rzadkiej mapy za "tędy nic nie jedzie".
+        "degraded": degraded,
     }
 
 
@@ -1169,6 +1191,25 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                     times = seg["dep_times"].get(stop2)
                     if times is None:
                         continue
+                    if stop2 in source_stops:
+                        # Wsiadamy tu wprost, bez żadnej przesiadki: to jeden
+                        # z przystanków startowych relacji, a kurs ma stąd
+                        # odjazd w oknie. Miejsce wsiadania wybrane w
+                        # _discover_segments (stops[0]) to NAJWCZEŚNIEJSZE
+                        # możliwe, a nie jedyne - kurs wyjeżdżający z pętli
+                        # końcowej mija start dopiero w swoim środku (da się
+                        # do niego wcześniej wsiąść, dojechawszy na tę pętlę
+                        # czymś innym). Bez tej gałęzi taki kurs mógłby się
+                        # zakotwiczyć wyłącznie o segment jadący NA pętlę, a
+                        # ten słusznie ginie na kotwicy końca (_leads_onward:
+                        # z pętli wraca się po własnych śladach) - i cała
+                        # sieć, opierając się o niego, rozplątywała się do
+                        # zera, po czym plan_flow wchodził w tryb awaryjny.
+                        # Zmierzone 2026-08-27 na Sosnowiecka -> Wojszyce
+                        # 15:37: 31 kandydatów, 0 zatrzymanych.
+                        if start_pos is None or p < start_pos:
+                            start_pos = p
+                        continue
                     for other, _, arr_t, stop in exit_index.get(stop2, ()):
                         if other is seg:
                             continue
@@ -1242,8 +1283,13 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
     w jego punkt stały, żeby nie dotykać jego istniejącej wydajności/logiki.
 
     Zwraca słownik z:
-    - origin_ids: id() segmentów zaczynających się na starcie relacji -
-      punkty startowe przeszukiwania (patrz _enumerate_journeys),
+    - origin_ids: id() segmentu -> pozycja wsiadania, dla segmentów, które
+      mapa rysuje OD przystanku startowego relacji - punkty startowe
+      przeszukiwania (patrz _enumerate_journeys). Pozycja wsiadania to
+      zakotwiczony początek narysowanego kawałka (ranges), a nie stops[0]:
+      kurs wyjeżdżający z pętli końcowej mija start dopiero w swoim środku
+      i właśnie tam się do niego wsiada (patrz kotwica początku w
+      _select_and_anchor),
     - exit_edges: dla każdego segmentu - lista jego wyjść w narysowanej
       części: albo dojazd do celu, albo przesiadka w inny segment (ten sam
       warunek porównywalnej jasności co _select_and_anchor przy kotwicy
@@ -1264,7 +1310,11 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
         for seg in kept
     }
 
-    origin_ids = {id(seg) for seg in kept if seg["stops"][0] in source_stops}
+    origin_ids = {
+        id(seg): ranges[id(seg)][0]
+        for seg in kept
+        if seg["stops"][ranges[id(seg)][0]] in source_stops
+    }
 
     # Krawędź: ("target", pos, arr_t, stop, None, None, None) albo
     # ("transfer", pos, arr_t, stop, id(other), other_start, other_board) -
@@ -1688,7 +1738,7 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
         return (1, -seg_by_id[other_id]["q"])
 
     queue = deque(
-        ([], sid, 0, {sid})
+        ([], sid, origin_ids[sid], {sid})
         for sid in sorted(origin_ids, key=lambda i: -seg_by_id[i]["q"])
     )
     candidates = []   # łańcuchy: [(seg, board_pos, alight_pos), ...]
