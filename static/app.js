@@ -409,11 +409,96 @@ const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING ? loadLookPrefs() : {})};
 const lookOpacity = rel => look.minOpacity + (look.maxOpacity - look.minOpacity) * rel;
 const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * rel;
 
+// --- CZAS NA MAPIE ---------------------------------------------------------
+//
+// Mapa mówi WSZYSTKO o tym, jak dojechać, i nic o tym, ile to trwa. To ten
+// brak zasypuje ten blok - i tylko on: żadna z tych rzeczy nie zmienia
+// geometrii, jasności ani grubości linii (kontrakt p.1, p.6, p.8, p.9 zostają
+// nietknięte). Czas dokłada się WYŁĄCZNIE jako liczba: w dymku pod kursorem,
+// pod numerkiem w grupce i w pasku nad mapą.
+//
+// ŻADNA z tych liczb nie jest tu liczona - wszystkie przychodzą gotowe
+// z serwera (planner._span_seconds, pola sec/ahead_sec/run_sec kawałka oraz
+// best_sec/limit_sec/fastest całej odpowiedzi). Front je tylko formatuje,
+// żeby nie dało się zobaczyć na mapie czasu, którego nikt nie policzył
+// z rozkładu.
+//
+// Każda rzecz siedzi na własnym przełączniku w panelu deweloperskim - to
+// jest wciąż szukanie formy, a nie gotowa decyzja.
+const TIME_DEFAULTS = {
+    hover: true,        // czas w dymku pod kursorem
+    bar: true,          // ...razem z paskiem: jaka to część najszybszej trasy
+    ends: true,         // kropki "stąd" i "dotąd" - czego dotyczy liczba
+    chips: false,       // czas małym drukiem pod numerkiem w grupce
+    headline: true,     // pasek nad mapą: najszybciej tyle, pokazane do tyle
+    basis: 'ahead',     // którą liczbę pokazywać - patrz TIME_BASIS
+};
+
+// Trzy sensowne odpowiedzi na pytanie "ile to trwa", bo pod kursorem świeci
+// się CAŁA linia, a ta bywa na mapie kilkoma osobnymi przejazdami:
+//   ahead - stąd do końca tego przejazdu (domyślne: to, co realnie zostaje
+//           do przejechania, jeśli się nie wysiądzie)
+//   piece - sam kawałek pod kursorem (bywa jednym przystankiem - dokładne,
+//           ale zwykle za drobne, żeby coś znaczyć)
+//   run   - cały ten przejazd, od wsiadania do końca narysowanej części
+const TIME_BASIS = {
+    ahead: {field: 'ahead_sec', label: 'stąd do końca'},
+    piece: {field: 'sec', label: 'ten kawałek'},
+    run: {field: 'run_sec', label: 'cały ten przejazd'},
+};
+
+const TIME_PREFS_KEY = 'metal-planner:time-prefs';
+
+function loadTimePrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(TIME_PREFS_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+const timeOpts = {...TIME_DEFAULTS, ...loadTimePrefs()};
+
+function saveTimePrefs() {
+    try {
+        localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(timeOpts));
+    } catch {
+        // localStorage niedostępny - przełączniki działają dalej, tylko się nie zapamiętają
+    }
+}
+
+/** Sekundy -> "8 min" / "1 h 3 min". Zaokrąglenie w dół do minuty, bo
+    rozkład i tak jest minutowy. */
+function fmtMins(sec) {
+    const total = Math.round(sec / 60);
+    if (total < 60) return total + ' min';
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/** Krótko, na plakietkę: samo "8" z minutowym primem. */
+function fmtMinsShort(sec) {
+    return Math.round(sec / 60) + '′';
+}
+
+/** Liczba, którą w tej chwili pokazujemy dla kawałka - albo null, gdy serwer
+    jej dla tego kawałka nie podał (patrz _span_seconds). */
+function timeOfSeg(seg) {
+    const sec = seg && seg[TIME_BASIS[timeOpts.basis].field];
+    return typeof sec === 'number' ? sec : null;
+}
+
 let flowLayer = null;
 let flowParts = [];       // {layer, opacity, weight} - do przygaszania pod wybraną trasą
 let flowHits = [];        // {seg, layer, casing, weight, latlngs} - kursor nad korytarzem
 let flowLabelLayer = null;
 let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania bez zapytania
+// Warstwy "czasu na mapie" - zadeklarowane razem z resztą warstw wachlarza,
+// zanim cokolwiek zdąży je sprzątnąć (clearFlow leci niżej, ale wywołuje się
+// też przy starcie).
+let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
+let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
@@ -422,6 +507,7 @@ function clearFlow() {
     flowHits = [];
     lastFlow = null;
     clearFlowHover();
+    renderTimeHeadline();
     setBaseDim(false);
 }
 
@@ -479,6 +565,7 @@ function drawFlow(flow, refit) {
     // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
     flowLayer = L.layerGroup([...faint, ...casings, ...bright]).addTo(map);
     placeLineLabels();
+    renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
     if (!refit) return;
 
@@ -492,6 +579,65 @@ function drawFlow(flow, refit) {
         if (points.length >= 4) break;
     }
     fitTo([...points, ...endpointPoints()]);   // start i cel zawsze w kadrze
+}
+
+// --- pasek nad mapą: ile w ogóle trwa ta podróż ----------------------------
+//
+// Jedyna liczba na mapie, której nie trzeba szukać kursorem - i jedyna, która
+// odpowiada na pytanie zadawane najpierw: "ile to w ogóle zajmuje". Podaje
+// dwie granice całego wachlarza: najszybszy dojazd i najpóźniejszy, jaki mapa
+// jeszcze rysuje (czyli dokładnie to, co ustawia suwak okna czasowego).
+// Najechanie na najszybszy czas pokazuje, KTÓRĄ trasą się go osiąga - obie
+// liczby przychodzą z serwera (best_sec/limit_sec/fastest), razem z gotową
+// geometrią tej trasy.
+
+function showFastest() {
+    hideFastest();
+    const fastest = lastFlow && lastFlow.fastest;
+    if (!fastest || !fastest.legs || !fastest.legs.length) return;
+    const halos = [], cores = [];
+    for (const leg of fastest.legs) {
+        const latlngs = leg.path.map(p => L.latLng(p));
+        halos.push(L.polyline(latlngs, {
+            color: '#111', opacity: 0.85, weight: 9,
+            lineCap: 'round', lineJoin: 'round', interactive: false,
+        }));
+        cores.push(L.polyline(latlngs, {
+            color: LINE_COLORS[leg.kind] || LINE_COLORS.other, opacity: 1, weight: 5,
+            lineCap: 'round', lineJoin: 'round', interactive: false,
+        }));
+    }
+    fastestLayer = L.layerGroup([...halos, ...cores]).addTo(map);
+}
+
+function hideFastest() {
+    if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
+}
+
+function renderTimeHeadline() {
+    const el = $('time-headline');
+    if (!el) return;
+    const flow = lastFlow;
+    if (!timeOpts.headline || !flow || typeof flow.best_sec !== 'number') {
+        el.hidden = true;
+        el.innerHTML = '';
+        hideFastest();
+        return;
+    }
+    const chips = ((flow.fastest && flow.fastest.legs) || []).map(leg =>
+        `<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`).join('');
+    el.innerHTML =
+        `<span class="headline-best" tabindex="0">Najszybciej `
+        + `<b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
+        + `<span class="headline-sep">·</span>`
+        + `<span class="headline-limit">mapa pokazuje do `
+        + `<b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
+    el.hidden = false;
+    const best = el.querySelector('.headline-best');
+    best.addEventListener('mouseenter', showFastest);
+    best.addEventListener('mouseleave', hideFastest);
+    best.addEventListener('focus', showFastest);
+    best.addEventListener('blur', hideFastest);
 }
 
 // --- numery linii: jedna grupka na cały wspólny korytarz -------------------
@@ -535,6 +681,7 @@ const CHIP_PAD_PX = 10;          // ...plus jej własne obramowanie i wcięcie
 const CHIP_GAP_PX = 3;
 const CHIP_ROW_PX = 17;
 const CLUSTER_PAD_PX = 4;
+const CHIP_TIME_ROW_PX = 11;     // dodatkowy wiersz grupki, gdy pod numerem stoi czas
 // Najgęstsze korytarze Wrocławia mają po 10 linii - jednym rządkiem to 260 px,
 // czyli pasek przez jedną trzecią ekranu, którego i tak nie da się objąć
 // wzrokiem. Łamiemy więc grupkę na wiersze: kwadratowa plamka czyta się jako
@@ -555,15 +702,22 @@ function clusterRows(roster) {
 function clusterBox(roster) {
     const rows = clusterRows(roster);
     const scale = look.labelScale;   // numery rosną razem z suwakiem - i tak samo ich kolizje
+    // Czas pod numerkiem powiększa grupkę w obu wymiarach, więc musi wejść
+    // do POMIARU, nie tylko do rysowania - inaczej grupki zaczęłyby na siebie
+    // wchodzić (kolizje liczą się z tego pudełka, patrz placeLineLabels).
+    const chars = l => (timeOpts.chips
+        ? Math.max(String(l.num).length, 3)   // "12′" bywa szersze niż sam numer
+        : String(l.num).length);
+    const rowPx = CHIP_ROW_PX + (timeOpts.chips ? CHIP_TIME_ROW_PX : 0);
     let width = 0;
     for (const row of rows) {
         let w = 2 * CLUSTER_PAD_PX;
         row.forEach((l, i) => {
-            w += CHIP_PAD_PX + CHIP_CHAR_PX * String(l.num).length + (i ? CHIP_GAP_PX : 0);
+            w += CHIP_PAD_PX + CHIP_CHAR_PX * chars(l) + (i ? CHIP_GAP_PX : 0);
         });
         width = Math.max(width, w * scale);
     }
-    return [width, (rows.length * CHIP_ROW_PX + 2 * CLUSTER_PAD_PX) * scale];
+    return [width, (rows.length * rowPx + 2 * CLUSTER_PAD_PX) * scale];
 }
 
 /** Punkty na ścieżce co `stepPx` PIKSELÓW EKRANU, pomijając te poza kadrem.
@@ -636,19 +790,44 @@ function placeLineLabels() {
         if (same && same.some(p => p.distanceTo(c.at) < labelRepeatPx())) continue;
         boxes.push(box);
         if (same) same.push(c.at); else byKey.set(c.key, [c.at]);
-        markers.push(clusterMarker(map.containerPointToLatLng(c.at), c.roster, c.w));
+        markers.push(clusterMarker(
+            map.containerPointToLatLng(c.at), c.roster, c.w,
+            timeOpts.chips ? chipTimesAt(c.at, c.roster) : null,
+        ));
     }
 
     flowLabelLayer = L.layerGroup(markers).addTo(map);
     for (const marker of markers) bindCluster(marker);
 }
 
-function clusterMarker(at, roster, weight) {
+/** Czas dla KAŻDEJ linii grupki z osobna. Grupka opisuje cały wspólny
+    korytarz, a jego linie rozjeżdżają się w różnych miejscach i mają stąd
+    różne dalsze czasy - jedna liczba na całą grupkę byłaby liczbą tylko
+    jednej z nich. Liczy się tylko przy włączonym przełączniku, bo to
+    dodatkowe trafienie w geometrię na każdą postawioną grupkę. */
+function chipTimesAt(at, roster) {
+    const hits = flowHitsAt(at);
+    return roster.map(l => {
+        const hit = hits.find(h => h.seg.num === l.num && h.seg.kind === l.kind);
+        return hit ? timeOfSeg(hit.seg) : null;
+    });
+}
+
+function clusterMarker(at, roster, weight, times) {
     let index = 0;
     const rows = clusterRows(roster).map(row =>
-        '<span class="line-cluster-row">' + row.map(l =>
-            `<span class="line-chip ${esc(l.kind)}" data-i="${index++}">${esc(l.num)}</span>`,
-        ).join('') + '</span>',
+        '<span class="line-cluster-row">' + row.map(l => {
+            const sec = times ? times[index] : null;
+            // Slot jest celem myszy (patrz bindCluster) - dzięki temu wskazanie
+            // linii działa tak samo, gdy kursor stoi na czasie pod numerem.
+            const html = `<span class="line-chip-slot" data-i="${index++}">`
+                + `<span class="line-chip ${esc(l.kind)}">${esc(l.num)}</span>`
+                + (times
+                    ? `<span class="chip-time">${sec === null ? '' : esc(fmtMinsShort(sec))}</span>`
+                    : '')
+                + '</span>';
+            return html;
+        }).join('') + '</span>',
     ).join('');
     const marker = L.marker(at, {
         icon: L.divIcon({
@@ -671,8 +850,8 @@ function bindCluster(marker) {
     const el = marker.getElement();
     if (!el) return;
     L.DomEvent.on(el, 'mouseover', ev => {
-        const chip = ev.target.closest && ev.target.closest('.line-chip');
-        if (chip) pickFromCluster(marker, Number(chip.dataset.i));
+        const slot = ev.target.closest && ev.target.closest('.line-chip-slot');
+        if (slot) pickFromCluster(marker, Number(slot.dataset.i));
     });
     L.DomEvent.on(el, 'click', ev => L.DomEvent.stop(ev));
 }
@@ -790,14 +969,80 @@ function flowPickHtml() {
     const sel = options[flowPick.index];
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
     let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
+    html += flowTipTimeHtml(sel);
     if (options.length > 1) {
         html += '<span class="flow-tip-row">' + options.map((o, i) =>
             `<span class="line-chip ${esc(o.kind)}${i === flowPick.index ? ' picked' : ''}">`
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
-        html += '<span class="flow-tip-hint">najedź na numer w grupce, żeby wskazać inną</span>';
     }
     return html;
+}
+
+/** Czas w dymku: jedna duża liczba i - opcjonalnie - pasek mówiący, jaką
+    częścią NAJSZYBSZEJ trasy ona jest. Pasek jest tu po to, żeby "18 min"
+    dało się od razu z czymś porównać: sama liczba nie mówi, czy to kawałek
+    drogi, czy prawie cała.
+
+    Odniesieniem jest najszybsza trasa (flow.best_sec), nie okno mapy - okno
+    rusza się suwakiem, więc pasek liczony względem niego zmieniałby długość
+    przy samym tylko poszerzeniu "pokaż więcej", nic nie mówiąc o czasie
+    (ten sam powód, dla którego jasność odnosi się do best_arr, patrz
+    kontrakt p.9). */
+function flowTipTimeHtml(sel) {
+    if (!timeOpts.hover || !sel.hit) return '';
+    const sec = timeOfSeg(sel.hit.seg);
+    if (sec === null) return '';
+    let html = '<span class="flow-tip-time">'
+        + `<b>${esc(fmtMins(sec))}</b>`
+        + `<span class="flow-tip-what">${esc(TIME_BASIS[timeOpts.basis].label)}</span>`
+        + '</span>';
+    const total = lastFlow && lastFlow.best_sec;
+    if (timeOpts.bar && total) {
+        // Minimum 2%, żeby jednoprzystankowy kawałek nie wyszedł paskiem
+        // o zerowej szerokości, czyli "brak danych" zamiast "bardzo krótki".
+        const pct = Math.max(2, Math.min(100, Math.round((100 * sec) / total)));
+        html += `<span class="flow-tip-bar"><i style="width:${pct}%"></i></span>`
+            + `<span class="flow-tip-share">${pct}% najszybszej trasy `
+            + `(${esc(fmtMins(total))})</span>`;
+    }
+    return html;
+}
+
+// Liczba w dymku dotyczy KONKRETNEGO odcinka, a pod kursorem świeci się cała
+// linia - te dwie kropki mówią więc, od którego do którego miejsca ta liczba
+// jest liczona. Pełna kropka = "stąd", pusta = "dotąd". Bez nich "18 min"
+// wisiałoby przy linii ciągnącej się przez pół miasta i nie dałoby się
+// zgadnąć, którego jej fragmentu dotyczy.
+
+function spanDot(at, color, filled) {
+    return L.circleMarker(at, {
+        radius: 5, color: '#111', weight: 2, opacity: 0.9,
+        fillColor: filled ? color : '#fff', fillOpacity: 1, interactive: false,
+    });
+}
+
+function showSpanEnds(hit) {
+    hideSpanEnds();
+    if (!timeOpts.ends || !timeOpts.hover || !hit) return;
+    const seg = hit.seg;
+    if (timeOfSeg(seg) === null) return;
+    let to = null;
+    if (timeOpts.basis === 'piece') to = hit.latlngs[hit.latlngs.length - 1];
+    else if (timeOpts.basis === 'ahead' && seg.ahead_to) to = L.latLng(seg.ahead_to);
+    // Dla "cały ten przejazd" kropek nie ma celowo: kawałek pod kursorem nie
+    // jest jego początkiem, więc para kropek wskazywałaby nie ten odcinek,
+    // co liczba - lepiej nic niż wskazanie nieprawdy.
+    if (!to) return;
+    const color = LINE_COLORS[seg.kind] || LINE_COLORS.other;
+    flowSpanLayer = L.layerGroup([
+        spanDot(hit.latlngs[0], color, true),
+        spanDot(to, color, false),
+    ]).addTo(map);
+}
+
+function hideSpanEnds() {
+    if (flowSpanLayer) { map.removeLayer(flowSpanLayer); flowSpanLayer = null; }
 }
 
 /** Podświetlenie CAŁEJ wskazanej linii: wszystkie jej narysowane kawałki,
@@ -833,6 +1078,7 @@ function renderFlowPick() {
     const sel = flowPick.options[flowPick.index];
     if (sel.hit) showLineHighlight(sel.num, sel.kind);
     else hideLineHighlight();
+    showSpanEnds(sel.hit);
     if (!flowTooltip) {
         // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
         // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
@@ -846,6 +1092,7 @@ function renderFlowPick() {
 
 function clearFlowHover() {
     hideLineHighlight();
+    hideSpanEnds();
     if (flowTooltip) { map.removeLayer(flowTooltip); flowTooltip = null; }
     flowPick = null;
     flowPickAt = null;
@@ -1658,5 +1905,66 @@ function bindLookSliders() {
 }
 bindLookSliders();
 document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+
+// --- przełączniki "czasu na mapie" -----------------------------------------
+//
+// Nic tu nie rusza serwera: wszystkie liczby są już w ostatniej odpowiedzi
+// (lastFlow), więc przełącznik przemalowuje mapę natychmiast, bez zapytania.
+const TIME_TOGGLES = {
+    'time-hover': 'hover',
+    'time-bar': 'bar',
+    'time-ends': 'ends',
+    'time-chips': 'chips',
+    'time-show-headline': 'headline',
+};
+
+function applyTimeOpts() {
+    if (lastFlow) drawFlow(lastFlow, false);   // grupki i pasek liczą się od nowa
+    else renderTimeHeadline();
+    renderFlowPick();                          // dymek pod kursorem, jeśli akurat wisi
+}
+
+function bindTimeToggles() {
+    for (const [id, key] of Object.entries(TIME_TOGGLES)) {
+        const input = $(id);
+        if (!input) continue;
+        input.checked = !!timeOpts[key];
+        input.addEventListener('change', () => {
+            timeOpts[key] = input.checked;
+            saveTimePrefs();
+            applyTimeOpts();
+        });
+    }
+    const basis = $('time-basis');
+    if (!basis) return;
+    basis.value = timeOpts.basis;
+    basis.addEventListener('change', () => {
+        timeOpts.basis = basis.value;
+        saveTimePrefs();
+        applyTimeOpts();
+    });
+}
+bindTimeToggles();
+
+// --- rozwijane sekcje panelu -----------------------------------------------
+//
+// Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
+// pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
+const DEV_FOLD_IDS = [
+    'fold-time', 'fold-window', 'fold-transfer', 'fold-range',
+    'look-section', 'fold-version',
+];
+
+function bindDevFolds() {
+    const prefs = loadDevPrefs();
+    for (const id of DEV_FOLD_IDS) {
+        const el = $(id);
+        if (!el) continue;
+        const saved = prefs['fold:' + id];
+        if (saved !== undefined) el.open = !!saved;
+        el.addEventListener('toggle', () => saveDevPref('fold:' + id, el.open));
+    }
+}
+bindDevFolds();
 
 }

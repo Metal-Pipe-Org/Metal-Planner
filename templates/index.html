@@ -23,6 +23,12 @@
 
 <div id="map"></div>
 
+{#
+  Pasek nad mapą: ile w ogóle trwa ta podróż (patrz renderTimeHeadline
+  w app.js). Treść wstawia front z odpowiedzi serwera - tu tylko miejsce.
+#}
+<div id="time-headline" class="time-headline" hidden></div>
+
 <button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
         aria-label="Pokaż/ukryj panel">&larr;</button>
 
@@ -133,6 +139,55 @@
                 aria-label="Zamknij panel deweloperski">✕</button>
     </header>
 
+    {#
+      Czas na mapie — cała sekcja jest jednym eksperymentem (2026-08-27).
+      Każda rzecz osobno, bo to wciąż szukanie formy: co ma być widać zawsze,
+      co dopiero pod kursorem. Nic tutaj nie rusza serwera — liczby są już
+      w odpowiedzi, przełącznik tylko przemalowuje mapę.
+    #}
+    <details class="dev-fold" id="fold-time" open>
+        <summary>Czas na mapie <span class="dev-temp">nowe</span></summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-hover"> Czas w dymku pod kursorem
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-bar"> …z paskiem „ile to z całej trasy”
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-ends"> …i kropkami „stąd — dotąd”
+        </label>
+
+        <div class="field compact">
+            <label for="time-basis">Którą liczbę pokazywać</label>
+            <select id="time-basis">
+                <option value="ahead">Stąd do końca tego przejazdu</option>
+                <option value="piece">Sam kawałek pod kursorem</option>
+                <option value="run">Cały ten przejazd</option>
+            </select>
+            <p class="field-hint">
+                Pod kursorem świeci się CAŁA linia, a ta bywa na mapie kilkoma
+                osobnymi przejazdami — stąd wybór. „Sam kawałek” bywa jednym
+                przystankiem: dokładne, ale zwykle za drobne, żeby coś znaczyć.
+            </p>
+        </div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-chips"> Czas pod numerkiem w grupce
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-show-headline"> Pasek nad mapą z czasem podróży
+        </label>
+        <p class="field-hint">
+            Pasek podaje dwie granice wachlarza: najszybszy dojazd i najpóźniejszy,
+            jaki mapa jeszcze rysuje. Najechanie na pierwszą liczbę pokazuje,
+            którą trasą się ten czas osiąga.
+        </p>
+    </details>
+
+    <details class="dev-fold" id="fold-window" open>
+    <summary>Okno czasowe</summary>
+
     <div class="field">
         <label for="extra">
             Ile dłużej niż najszybsza trasa <output id="extra-value">125</output>%
@@ -169,6 +224,11 @@
         </p>
     </div>
 
+    </details>
+
+    <details class="dev-fold" id="fold-transfer">
+    <summary>Przesiadki</summary>
+
     <div class="field">
         <label for="transfer-gain">
             Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
@@ -186,6 +246,11 @@
         </p>
     </div>
 
+    </details>
+
+    <details class="dev-fold" id="fold-range">
+    <summary>Szukanie punktu</summary>
+
     <div class="field">
         <label for="range">
             Zasięg szukania punktu <output id="range-value">1000</output> m
@@ -197,8 +262,12 @@
         </p>
     </div>
 
+    </details>
+
+    <details class="dev-fold" id="fold-version">
+    <summary>Wersja aplikacji</summary>
+
     <div class="field" id="sw-field">
-        <label>Wersja aplikacji</label>
         <div class="sw-row">
             <code id="sw-version">—</code>
             <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
@@ -211,6 +280,8 @@
         </p>
     </div>
 
+    </details>
+
     {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
       Sekcja jest WIDOCZNA (LOOK_TUNING = true w app.js) — strojenie trwa.
@@ -219,8 +290,8 @@
       LOOK_DEFAULTS w app.js i to one są domyślne, gdy sekcja jest schowana.
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
-    <div class="dev-section" id="look-section" hidden>
-        <h3>Wygląd mapy <span class="dev-temp">tymczasowe</span></h3>
+    <details class="dev-fold" id="look-section" hidden>
+        <summary>Wygląd mapy <span class="dev-temp">tymczasowe</span></summary>
 
         <div class="field compact">
             <label for="look-min-op">
@@ -298,7 +369,7 @@
             Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
             i skasuję tę sekcję.
         </p>
-    </div>
+    </details>
 
 </div>
 {% endif %}

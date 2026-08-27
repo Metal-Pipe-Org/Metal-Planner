@@ -630,6 +630,12 @@ def plan_flow(start_query, end_query, when=None,
     gtfs.geo_generation()      # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()    # jedno połączenie na WSZYSTKIE wycinki geometrii zapytania
     try:
+        # Najszybsza trasa i tak jest już policzona wyżej (_scan wyznacza nią
+        # skalę całej mapy) - odtwarzamy ją raz, tutaj, żeby front mógł podać
+        # "najszybciej tyle a tyle" i pokazać, KTÓRĄ trasą to jest, bez
+        # sięgania po listę propozycji (i bez drugiego szukania).
+        best_legs = _reconstruct(day, best_journey, best_stop, geo_db)
+        fastest = _fastest_summary(best_legs, best_arr, dep_sec)
         if kept:
             seg_list = _finalize_segments(day, kept, ranges, geo_db)
             graph = _extract_transfer_graph(day, kept, ranges, source_stops, target_set)
@@ -646,10 +652,7 @@ def plan_flow(start_query, end_query, when=None,
             # Najszybsza trasa i - jeśli jest co zdjąć - ta sama bez
             # nieopłacalnej przesiadki. Pokazujemy OBIE; pierwsza jest tą
             # proponowaną jako najlepsza przy obecnym progu.
-            warianty = _variants(
-                day, _reconstruct(day, best_journey, best_stop, geo_db),
-                gain_sec, geo_db,
-            )
+            warianty = _variants(day, best_legs, gain_sec, geo_db)
             journeys = []
             seg_list = []
             narysowane = set()
@@ -684,8 +687,35 @@ def plan_flow(start_query, end_query, when=None,
         "departure": _fmt_time(dep_sec),
         "best_arrival": _fmt_time(best_arr),
         "deadline": _fmt_time(deadline),
+        # Cały zakres czasowy mapy w sekundach, tą samą miarą co kawałki:
+        # od najszybszego możliwego dojazdu do najpóźniejszego, jaki mapa
+        # jeszcze rysuje (deadline). "Najszybciej X, pokazane do Y".
+        "best_sec": best_arr - dep_sec,
+        "limit_sec": deadline - dep_sec,
+        "fastest": fastest,
         "segments": seg_list,
         "journeys": journeys,
+    }
+
+
+def _fastest_summary(legs, arrival, dep_sec):
+    """Najszybsza trasa w postaci minimalnej: ile trwa i którędy biegnie.
+
+    To NIE jest pozycja listy propozycji tras - nie ma tu przystanków,
+    godzin ani opisów etapów, tylko tyle, ile trzeba, żeby napisać "najszybciej
+    X min" i po najechaniu na tę liczbę pokazać na mapie, która to trasa."""
+    return {
+        "sec": arrival - dep_sec,
+        "arrival": _fmt_time(arrival),
+        "legs": [
+            {
+                "num": leg["num"],
+                "kind": leg["mode"],
+                "sec": leg["minutes"] * 60,
+                "path": leg["path"],
+            }
+            for leg in legs if leg["kind"] == "ride"
+        ],
     }
 
 
@@ -873,13 +903,27 @@ def _refine_brightness(day, segs, target_set, deadline, best_arr):
 
     for seg in segs:
         seg["exit_vals"] = [e[1] for e in seg["exits"]]
+        # Czy ta wartość jest ODCZYTANA, czy ZGADNIĘTA. Wyjście na sam cel
+        # jest dokładne (wartość = przyjazd), wyjście z realną kontynuacją
+        # też (join_value czyta konkretne odjazdy). Wyjście bez widocznej
+        # kontynuacji dostaje surową aproksymację (arr_t + kara) - to jest
+        # zgadywanka i mapa nie ma prawa pokazać jej jako godziny
+        # (patrz punkt 10 kontraktu).
+        seg["exit_exact"] = [e[3] in target_set for e in seg["exits"]]
 
     def refresh_suffixes():
         for seg in segs:
             suffix = list(seg["exit_vals"])
+            exact = list(seg["exit_exact"])
             for j in range(len(suffix) - 2, -1, -1):
-                suffix[j] = min(suffix[j], suffix[j + 1])
+                # Minimum z sufiksu niesie ze sobą swoją "dokładność" - jeśli
+                # najlepsza osiągalna stąd wartość pochodzi ze zgadywanki,
+                # to cała ta pozycja jest zgadnięta.
+                if suffix[j + 1] < suffix[j]:
+                    suffix[j] = suffix[j + 1]
+                    exact[j] = exact[j + 1]
             seg["suffix"] = suffix
+            seg["suffix_exact"] = exact
             seg["exit_pos"] = [e[0] for e in seg["exits"]]
 
     def join_value(arr_t, stop, other):
@@ -920,6 +964,7 @@ def _refine_brightness(day, segs, target_set, deadline, best_arr):
                         best = value
                 # bez widocznej kontynuacji zostaje surowa aproksymacja
                 new_value = raw_bound if best is None else best
+                seg["exit_exact"][j] = best is not None
                 if new_value != seg["exit_vals"][j]:
                     seg["exit_vals"][j] = new_value
                     changed = True
@@ -1397,7 +1442,10 @@ def _finalize_segments(day, kept, ranges, geo_db):
         piece_start = start_pos
         pending_end = None
         pending_q = None
-        for (pos, _, _, _), exit_q in zip(seg["exits"], seg["exit_q"]):
+        pending_reach = None      # o której jest się w celu, jadąc dalej stąd
+        pending_ok = False        # ...i czy ta godzina jest odczytana, czy zgadnięta
+        for (pos, _, _, _), exit_q, reach, reach_ok in zip(
+                seg["exits"], seg["exit_q"], seg["suffix"], seg["suffix_exact"]):
             if pos <= start_pos + 1 or pos > cut:
                 continue         # wyjście przed/na starcie narysowanej części - pomiń
             # Wydłużenie kawałka do `pos` obejmie odcinki o indeksach
@@ -1413,7 +1461,8 @@ def _finalize_segments(day, kept, ranges, geo_db):
                 pending_end = pos          # nic się nie zmieniło - wydłuż bieżący kawałek
                 continue
             if pending_q is not None:
-                _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
+                _keep_piece(pieces, seg, piece_start, pending_end, pending_q,
+                            pending_reach, pending_ok)
                 # Kolejny kawałek zaczyna się DOKŁADNIE tam, gdzie poprzedni
                 # się skończył (ten sam przystanek na styku - inaczej dwa
                 # kawałki tego samego fizycznego kursu miałyby dziurę między
@@ -1422,8 +1471,10 @@ def _finalize_segments(day, kept, ranges, geo_db):
                 # `stops` to `pending_end - 1`.
                 piece_start = pending_end - 1
             pending_end, pending_q = pos, exit_q
+            pending_reach, pending_ok = reach, reach_ok
         if pending_q is not None:
-            _keep_piece(pieces, seg, piece_start, pending_end, pending_q)
+            _keep_piece(pieces, seg, piece_start, pending_end, pending_q,
+                        pending_reach, pending_ok)
 
     worst_q = min((entry[0] for entry in pieces.values()), default=1.0)
     span_q = 1.0 - worst_q
@@ -1443,10 +1494,9 @@ def _finalize_segments(day, kept, ranges, geo_db):
         pieces.items(), key=lambda kv: kv[1][0], reverse=True,
     )
     seg_list = []
-    for (label, stops_seq), (q, shape_id) in brightest:
-        path = gtfs.shape_slice(
-            shape_id, [day.stop_coords[s] for s in stops_seq], geo_db,
-        )
+    for (label, stops_seq), (q, shape_id, times, reach, reach_ok) in brightest:
+        coords = [day.stop_coords[s] for s in stops_seq]
+        path = gtfs.shape_slice(shape_id, coords, geo_db)
         num, mode = _line_parts(label)
         item = {
             "path": _round_path(path),
@@ -1454,6 +1504,17 @@ def _finalize_segments(day, kept, ranges, geo_db):
             "kind": mode,
             "w": round(rescale(q), 3),
         }
+        # Godziny - z rozkładu, nie z geometrii (patrz _piece_times):
+        #   stops_t - [lat, lon, sekunda] dla każdego przystanku kawałka;
+        #             front interpoluje z tego godzinę w punkcie pod kursorem
+        #   arrive  - o której jest się W CELU, jadąc dalej stąd; tylko gdy
+        #             ta liczba jest odczytana, nie zgadnięta
+        if times is not None:
+            item["stops_t"] = [
+                [*point, when] for point, when in zip(_round_path(coords), times)
+            ]
+        if reach is not None and reach_ok:
+            item["arrive"] = reach
         corridor = corridors.get((label, stops_seq))
         if corridor:
             # Kto tędy jedzie - CAŁY skład, razem z tą linią, z rozkładu, nie
@@ -1466,14 +1527,52 @@ def _finalize_segments(day, kept, ranges, geo_db):
     return seg_list
 
 
-def _keep_piece(pieces, seg, start, end, q):
+def _keep_piece(pieces, seg, start, end, q, reach, reach_ok):
     """Zapisuje kawałek pod kluczem (linia, dokładny fragment). Ten sam
     fragment tej samej linii może pochodzić z kilku kursów w oknie - liczy
-    się najjaśniejszy."""
+    się najjaśniejszy, i to JEGO godziny jadą razem z nim: kawałek i podane
+    przy nim czasy mają pochodzić z tego samego, jednego kursu.
+
+    reach to przyjazd DO CELU, gdy jedzie się dalej stąd najlepszą znaną
+    kontynuacją - dokładnie ta sama liczba, z której policzono jasność tego
+    kawałka (patrz seg["exit_q"] w _refine_brightness). Kolor i godzina mówią
+    więc jedno i to samo, tylko dwoma kanałami. reach_ok mówi, czy ta liczba
+    jest ODCZYTANA z rozkładu, czy ZGADNIĘTA (brak widocznej kontynuacji) -
+    zgadniętej mapa nie pokazuje."""
     key = (seg["label"], tuple(seg["stops"][start:end]))
     entry = pieces.get(key)
     if entry is None or q > entry[0]:
-        pieces[key] = (q, seg["shape"])
+        pieces[key] = (q, seg["shape"], _piece_times(seg, start, end),
+                       reach, reach_ok)
+
+
+def _piece_times(seg, start, end):
+    """Godziny przejazdu tego kursu przez KAŻDY przystanek kawałka, po kolei.
+
+    Front ma z tego dwie rzeczy: czas samego kawałka (ostatnia minus pierwsza)
+    i - to ważniejsze - godzinę w DOWOLNYM punkcie pod kursorem, przez
+    interpolację między dwiema sąsiednimi godzinami (patrz punkt 10
+    kontraktu). Dlatego godziny jadą per przystanek, a nie jako jedna para
+    na cały kawałek: interpolować wolno tylko MIĘDZY dwoma sąsiednimi
+    przystankami, nie przez pół trasy.
+
+    None w środku listy jest niemożliwe do wykorzystania, więc gdy
+    czegokolwiek brakuje (przystanek powtórzony w pętli potrafi nadpisać wpis
+    w słowniku), oddajemy None i front nie pokazuje dla tego kawałka godziny
+    wcale, zamiast pokazywać zmyśloną."""
+    stops = seg["stops"][start:end]
+    times = []
+    for i, stop in enumerate(stops):
+        # Pierwszy przystanek kawałka opisuje ODJAZD (stąd się rusza), każdy
+        # następny PRZYJAZD (do niego się dojeżdża).
+        when = seg["best_deps"].get(stop) if i == 0 else seg["arr_times"].get(stop)
+        if when is None:
+            return None
+        times.append(when)
+    for a, b in zip(times, times[1:]):
+        if b < a:
+            return None      # czasy się cofają - kurs odczytany niewiarygodnie
+    return times
 
 
 def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):

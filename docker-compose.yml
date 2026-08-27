@@ -55,6 +55,14 @@ services:
       # "off" wylacza odswiezanie przy starcie (zostaje GTFS_AUTO_UPDATE_HOUR).
       GTFS_UPDATE_ON_START: "on"
 
+      # Autobusow gminy Siechnice (800, 810, 83-89, 860, 870, 890) nie ma
+      # w zadnych otwartych danych - jedyne strukturalne zrodlo to
+      # niedokumentowane API systemu kiedyPrzyjedzie, ktorego robots.txt
+      # brzmi "Disallow: /" i ktore nie ma zadnego regulaminu. Dlatego "off":
+      # wlaczenie jest swiadoma decyzja, nie ustawieniem domyslnym.
+      # Patrz docs/SIECHNICE_DANE.md.
+      SIECHNICE_ENABLED: "off"
+
       # Rozklad jest liczony wg zegara kontenera.
       TZ: "Europe/Warsaw"
 

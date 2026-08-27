@@ -76,6 +76,26 @@ aktualizuje zawsze.
 `GTFS_UPDATE_ON_START=off` wyłącza to w obu miejscach (w kontenerze przez
 `docker-compose.yml`).
 
+### Autobusy gminy Siechnice
+
+Linii 800, 810, 83–89, 860, 870, 890 **nie ma w żadnych otwartych danych** —
+ani we wrocławskim GTFS, ani na dane.gov.pl, ani w Krajowym Punkcie
+Dostępowym. Jedyne strukturalne źródło to niedokumentowane API systemu
+kiedyPrzyjedzie, którym gmina obsługuje informację pasażerską; `siechnice.py`
+umie z niego złożyć kompletne kursy i dokleić je do bazy.
+
+Jest to **domyślnie wyłączone**, bo `robots.txt` tego serwisu to `Disallow: /`
+i nie ma tam żadnego regulaminu ani zgody na ponowne wykorzystanie danych.
+Włącza się świadomie:
+
+```
+SIECHNICE_ENABLED=on .venv/bin/python update_gtfs.py
+```
+
+Docelowe rozwiązanie to poprosić gminę o eksport GTFS — dlaczego to prośba
+o włączenie istniejącej funkcji, do kogo pisać i co w tym piśmie napisać,
+opisuje [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
+
 ## Testy
 
 Sprawdzają gwarancje z [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md)
