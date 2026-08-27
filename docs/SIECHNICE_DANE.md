@@ -133,3 +133,28 @@ Warstwa przekształceń w `siechnice.py` przestaje być potrzebna - zostaje
 wrocławski. Sklejanie słupków ze wspólnymi (`match_existing_stops`) zostaje
 niezależnie od źródła: linie 800/810 dojeżdżają na wrocławskie Bardzką i Suchą
 przez Iwiny, a bez sklejenia byłyby to dwa osobne markery bez przesiadki.
+
+## Wynik na żywych danych (27.08.2026)
+
+Pełne przejście po 237 słupkach na 3 dni rozkładu, ok. 95 s na dzień:
+
+- **linie z kursami:** 800+80, 810+81, 83, 84, 85, 86+860, 87+870, 89+890
+  (w `/api/directions` widać dodatkowo 59, 59A, 60, 61, 61A — na tych
+  słupkach nie było w tym oknie żadnych odjazdów);
+- **kursy:** 303 w czwartek i piątek, 173 w sobotę — proporcja zgodna
+  z rozkładem dnia roboczego i weekendu;
+- **kursów bez rozpoznanej linii: 0** na 779 — przecięcie zbiorów linii
+  rozstrzyga numer za każdym razem;
+- **słupki:** 55 sklejonych z wrocławskimi, 182 nowe, zero nazw
+  występujących równolegle w obu źródłach (czyli nic się nie zdublowało);
+- wyszukiwanie `Siechnice - Urząd Miejski` → `GALERIA DOMINIKAŃSKA` zwraca
+  trasę łączącą autobus gminny z komunikacją Wrocławia.
+
+### Pułapka wydajnościowa, na wypadek gdyby ktoś to przepisywał
+
+Pierwsza wersja klienta używała `urllib.request.urlopen`, czyli nowego
+połączenia TLS na każde zapytanie — i co kilkanaste zapytanie wisiało 20–60 s
+(czasy retransmisji SYN), niezależnie od tempa pytania. Przejście po jednym
+słupku zajmowało ~20 minut. Na **połączeniu trwałym** te same zapytania idą
+po ~0,14 s i nie zwiecha się ani jedno. To nie było przeciążenie serwera
+naszym tempem — zwolnienie do 1,5 s między zapytaniami nic nie dało.

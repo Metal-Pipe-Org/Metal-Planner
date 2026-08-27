@@ -551,3 +551,16 @@ Co z tego NIE wynika i zostało jako otwarte pytanie (patrz „Otwarte
 pytania" na górze pliku): że dowolne złożenie narysowanych kawałków też się
 w oknie zmieści — kotwica przesiadki pyta o JAKIŚ kurs linii w ciągu 20
 minut, a okno przeszły godziny konkretnego kursu.
+
+## Pomysł do zrobienia kiedyś: znaczek „nowe", który gaśnie sam (2026-08-27)
+
+Sekcje panelu deweloperskiego dostają ręcznie dopisywane znaczki —
+`tymczasowe` przy „Wyglądzie mapy", `nowe` przy „Czasie na mapie". Problem
+jest zawsze ten sam: nikt nie pamięta, żeby je później skasować, więc „nowe"
+wisi pół roku i przestaje cokolwiek znaczyć.
+
+Pomysł użytkownika: zamiast wpisywać sam napis, wpisywać przy nim DATĘ
+wprowadzenia, a znaczek renderować tylko wtedy, gdy od tej daty minęło mniej
+niż ~7 dni. Wtedy „nowe" gaśnie samo i nie zostawia po sobie długu.
+
+Nie zrobione — zanotowane na wyraźną prośbę, do decyzji później.

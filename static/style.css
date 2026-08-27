@@ -808,6 +808,18 @@ body.panel-hidden #sidebar {
     color: var(--ink-soft);
 }
 
+/* Przyjazd do celu - druga linijka dymka, mniejsza od godziny "tu jesteś",
+   bo odpowiada na pytanie zadawane drugie. */
+.flow-tip-goal {
+    display: block;
+    margin-top: 1px;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+.flow-tip-goal b { color: var(--ink); }
+
 .flow-tip-bar {
     display: block;
     /* Dymek zwęża się do treści, więc pasek bez własnej szerokości potrafiłby

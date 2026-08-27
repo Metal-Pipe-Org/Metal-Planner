@@ -92,6 +92,11 @@ Włącza się świadomie:
 SIECHNICE_ENABLED=on .venv/bin/python update_gtfs.py
 ```
 
+Kosztuje to ok. 1,5 minuty na każdy dzień rozkładu (237 słupków × jedno
+zapytanie), czyli ok. 10 minut przy domyślnym oknie tygodniowym. Awaria tego
+kroku nie przerywa aktualizacji — rozkład Wrocławia wjeżdża na miejsce
+niezależnie.
+
 Docelowe rozwiązanie to poprosić gminę o eksport GTFS — dlaczego to prośba
 o włączenie istniejącej funkcji, do kogo pisać i co w tym piśmie napisać,
 opisuje [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).

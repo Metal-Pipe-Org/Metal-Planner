@@ -213,7 +213,7 @@ def _reconstruct(day, journey, last_stop, geo_db=None):
     return legs
 
 
-_PRIVATE_LEG_KEYS = ("_trip", "_from_id", "_to_id", "_arr_sec")
+_PRIVATE_LEG_KEYS = ("_trip", "_from_id", "_to_id", "_arr_sec", "_stops_t")
 
 
 def _next_ride(legs, i):
@@ -353,6 +353,16 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "_from_id": board_stop,
         "_to_id": exit_stop,
         "_arr_sec": exit_arr,
+        # Godziny przejazdu przez kolejne przystanki etapu - do interpolacji
+        # godziny w dowolnym punkcie linii na mapie (patrz _piece_times; tu
+        # to samo, tylko dla trybu awaryjnego plan_flow, gdzie mapa rysuje
+        # się wprost z etapów trasy, a nie z kawałków). Pole prywatne: do
+        # odpowiedzi listy tras nie trafia (patrz _PRIVATE_LEG_KEYS).
+        "_stops_t": [
+            [*_round_path([day.stop_coords[stop]])[0],
+             departure if i == 0 else arrival]
+            for i, (stop, arrival, departure) in enumerate(path_rows)
+        ],
     }
 
 
@@ -662,8 +672,9 @@ def plan_flow(start_query, end_query, when=None,
                     continue
                 # Przyjazd bierzemy z samej trasy; best_arr zostaje
                 # najwcześniejszym możliwym i dalej wyznacza okno mapy.
+                arrival = _arrival_of(wariant) or best_arr
                 journeys.append(_summarize_journey(
-                    wariant, rides, _arrival_of(wariant) or best_arr, dep_sec))
+                    wariant, rides, arrival, dep_sec))
                 # Jaśniej rysujemy wariant proponowany - tak jak wszędzie
                 # indziej na tej mapie jasność znaczy "lepsza opcja".
                 waga = 1.0 if rank == 0 else 0.6
@@ -673,8 +684,15 @@ def plan_flow(start_query, end_query, when=None,
                     if klucz in narysowane:
                         continue
                     narysowane.add(klucz)
-                    seg_list.append(
-                        {"path": leg["path"], "num": num, "kind": mode, "w": waga})
+                    item = {"path": leg["path"], "num": num, "kind": mode, "w": waga}
+                    # Tryb awaryjny też ma podawać godziny - inaczej mapa raz
+                    # je ma, a raz nie, zależnie od tego, czy kotwiczenie coś
+                    # zostawiło. Cel osiąga się tu z definicji tą trasą, więc
+                    # przyjazd jest odczytany, nie zgadnięty.
+                    if leg.get("_stops_t"):
+                        item["stops_t"] = leg["_stops_t"]
+                        item["arrive"] = arrival
+                    seg_list.append(item)
             seg_list.sort(key=lambda seg: seg["w"])   # blade pierwsze, jaskrawe na wierzchu
             for wariant in warianty:
                 _drop_private(wariant)

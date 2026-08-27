@@ -149,31 +149,25 @@
         <summary>Czas na mapie <span class="dev-temp">nowe</span></summary>
 
         <label class="dev-check">
-            <input type="checkbox" id="time-hover"> Czas w dymku pod kursorem
+            <input type="checkbox" id="time-hover"> Godzina w punkcie pod kursorem
         </label>
         <label class="dev-check">
-            <input type="checkbox" id="time-bar"> …z paskiem „ile to z całej trasy”
+            <input type="checkbox" id="time-bar"> …z paskiem „ile stąd zostało”
         </label>
         <label class="dev-check">
-            <input type="checkbox" id="time-ends"> …i kropkami „stąd — dotąd”
+            <input type="checkbox" id="time-ends"> …i kropką dokładnie w tym punkcie
         </label>
-
-        <div class="field compact">
-            <label for="time-basis">Którą liczbę pokazywać</label>
-            <select id="time-basis">
-                <option value="ahead">Stąd do końca tego przejazdu</option>
-                <option value="piece">Sam kawałek pod kursorem</option>
-                <option value="run">Cały ten przejazd</option>
-            </select>
-            <p class="field-hint">
-                Pod kursorem świeci się CAŁA linia, a ta bywa na mapie kilkoma
-                osobnymi przejazdami — stąd wybór. „Sam kawałek” bywa jednym
-                przystankiem: dokładne, ale zwykle za drobne, żeby coś znaczyć.
-            </p>
-        </div>
+        <p class="field-hint">
+            Duża godzina to moment, w którym ten pojazd jest dokładnie pod
+            kursorem — interpolowany między dwoma sąsiednimi przystankami tego
+            kursu. Pod nią przyjazd do celu, jeśli jedzie się dalej stąd; to ta
+            sama liczba, z której policzona jest jasność, więc kolor i godzina
+            nie mogą powiedzieć czegoś innego. Kawałek bez odczytanej dalszej
+            drogi nie pokazuje jej wcale.
+        </p>
 
         <label class="dev-check">
-            <input type="checkbox" id="time-chips"> Czas pod numerkiem w grupce
+            <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
         </label>
         <label class="dev-check">
             <input type="checkbox" id="time-show-headline"> Pasek nad mapą z czasem podróży

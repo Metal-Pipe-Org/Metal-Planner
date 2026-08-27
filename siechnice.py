@@ -37,15 +37,14 @@ z tych zbiorów).
 """
 
 import concurrent.futures
+import http.client
 import json
 import os
 import re
 import sqlite3
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import date, timedelta
 
 BASE_URL = "https://siechnice.kiedyprzyjedzie.pl"
@@ -62,16 +61,15 @@ DEFAULT_DAYS = 7
 REQUEST_DELAY_SEC = 0.3
 REQUEST_TIMEOUT_SEC = 30
 
-# Ile zapytań naraz. Serwer bywa kapryśny niezależnie od naszego tempa:
-# mediana odpowiedzi to ~0,3 s, ale co kilkanaste zapytanie potrafi wisieć
-# 20-60 s, i zwolnienie tempa tego nie zmienia (sprawdzone). Wąskim gardłem
-# jest więc opóźnienie, nie liczba zapytań - kilka równoległych wątków
-# przykrywa zwiechy, a REQUEST_DELAY_SEC dalej trzyma tempo w ryzach.
+# Ile zapytań naraz. Tempa to nie podnosi - sufitem jest REQUEST_DELAY_SEC,
+# wspólny dla wszystkich wątków. Chodzi o to, żeby pojedyncza wolniejsza
+# odpowiedź nie wstrzymywała kolejnych: przy jednym wątku każda sekunda
+# czekania to sekunda przestoju całego pobierania.
 CONCURRENCY = 4
 
-# Serwer potrafi zgubić pojedyncze połączenie w środku przejścia (zwykłe
-# zerwanie, nie przeciążenie - kolejna próba wchodzi od razu). Bez ponowienia
-# jedno takie zgubione zapytanie kasuje kilkuminutowe pobieranie.
+# Utrzymywane połączenie serwer może zamknąć w dowolnym momencie (limit
+# zapytań na połączenie, keep-alive timeout). Wtedy zapytanie trzeba powtórzyć
+# na świeżym gnieździe - bez tego jedno takie zamknięcie kasuje całe pobieranie.
 REQUEST_RETRIES = 3
 RETRY_BACKOFF_SEC = 2.0
 
@@ -118,21 +116,37 @@ def haversine_m(lat1, lon1, lat2, lon2):
 # Warstwa sieciowa - jedyne miejsce, które dotyka cudzego serwera.
 # --------------------------------------------------------------------------
 
-class Client:
-    """Odpytywanie API z wymuszonym tempem, bezpieczne dla wielu wątków.
+class HttpError(Exception):
+    """Serwer odpowiedział statusem innym niż 200."""
 
-    Przerwa jest liczona od poprzedniego zapytania, nie doklejana po każdym:
-    kiedy odpowiedź i tak przyszła wolniej niż REQUEST_DELAY_SEC, nie ma po co
-    dodatkowo czekać. Zamek obejmuje samo wyznaczenie terminu, nie czekanie -
-    inaczej wątki stałyby w kolejce po zamek zamiast po termin i cała
-    równoległość zeszłaby na nie.
+
+class Client:
+    """Odpytywanie API po połączeniu trwałym, z wymuszonym tempem.
+
+    POŁĄCZENIE JEST TU RZECZĄ ISTOTNĄ, nie szczegółem. Zwykłe
+    urllib.request.urlopen otwiera nowe połączenie TLS na każde zapytanie,
+    a przy kilkuset zapytaniach pod rząd ten serwer przestaje odpowiadać na
+    część nawiązań: co kilkanaste zapytanie wisiało 20-60 s (charakterystyczne
+    czasy retransmisji SYN), niezależnie od tego, jak wolno pytaliśmy.
+    Na jednym połączeniu trzymanym otwartym te same zapytania idą po ~0,14 s
+    i nie zwiecha się ani jedno - pełne przejście po 237 słupkach skraca się
+    z ~20 minut do ~40 sekund.
+
+    Połączenie jest per wątek (threading.local): http.client.HTTPSConnection
+    nie jest bezpieczne dla wielu wątków, a każdy wątek i tak potrzebuje
+    własnego gniazda.
+
+    Tempo jest wspólne dla wszystkich wątków. Zamek obejmuje samo wyznaczenie
+    terminu, nie czekanie - inaczej wątki stałyby w kolejce po zamek zamiast
+    po termin i cała równoległość zeszłaby na nie.
     """
 
     def __init__(self, base_url=BASE_URL, delay=REQUEST_DELAY_SEC):
-        self.base_url = base_url
+        self.host = urllib.parse.urlsplit(base_url).netloc
         self.delay = delay
         self._next_slot_at = 0.0
         self._slot_lock = threading.Lock()
+        self._local = threading.local()
 
     def _wait_for_slot(self):
         with self._slot_lock:
@@ -143,21 +157,47 @@ class Client:
         if wait > 0:
             time.sleep(wait)
 
+    def _connection(self):
+        connection = getattr(self._local, "connection", None)
+        if connection is None:
+            connection = http.client.HTTPSConnection(self.host, timeout=REQUEST_TIMEOUT_SEC)
+            self._local.connection = connection
+        return connection
+
+    def _drop_connection(self):
+        connection = getattr(self._local, "connection", None)
+        if connection is not None:
+            connection.close()
+            self._local.connection = None
+
+    def close(self):
+        self._drop_connection()
+
     def get_json(self, path, params=None):
-        url = self.base_url + path
         if params:
-            url += "?" + urllib.parse.urlencode(params)
+            path += "?" + urllib.parse.urlencode(params)
 
         for attempt in range(REQUEST_RETRIES):
             self._wait_for_slot()
-            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             try:
-                with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SEC) as response:
-                    return json.loads(response.read().decode("utf-8"))
-            except urllib.error.HTTPError:
+                connection = self._connection()
+                connection.request("GET", path, headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "application/json",
+                    "Connection": "keep-alive",
+                })
+                response = connection.getresponse()
+                body = response.read()
+                if response.status != 200:
+                    raise HttpError(f"HTTP {response.status} dla {path}")
+                return json.loads(body.decode("utf-8"))
+            except HttpError:
                 # Odpowiedź serwera, nie awaria łącza - ponowienie da to samo.
                 raise
-            except (urllib.error.URLError, TimeoutError, ConnectionError):
+            except (OSError, http.client.HTTPException):
+                # Utrzymywane połączenie serwer może zamknąć w dowolnym
+                # momencie - wtedy trzeba je odtworzyć, a nie tylko ponowić.
+                self._drop_connection()
                 if attempt == REQUEST_RETRIES - 1:
                     raise
                 time.sleep(RETRY_BACKOFF_SEC * (attempt + 1))
@@ -375,33 +415,36 @@ def fetch_feed(client=None, days=DEFAULT_DAYS, today=None, log=print):
     log(f"  słupki: {len(stops)}")
 
     designators = [s["designator"] for s in stops]
+    result = []
 
-    def gather(fetch_one):
-        """fetch_one(designator) na wszystkich słupkach naraz -> {designator: wynik}."""
-        with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+    # Jedna pula na całe pobieranie, nie po jednej na przebieg: wątek trzyma
+    # otwarte połączenie (patrz Client), a nowa pula co przebieg kazałaby
+    # nawiązywać je od nowa - czyli dokładnie to, czego unikamy.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+        def gather(fetch_one):
+            """fetch_one(designator) na wszystkich słupkach -> {designator: wynik}."""
             return dict(zip(designators, pool.map(fetch_one, designators)))
 
-    lines_by_stop = {
-        designator: {d["line"] for d in directions if d.get("line")}
-        for designator, directions in gather(client.directions).items()
-    }
-    all_lines = sorted({line for lines in lines_by_stop.values() for line in lines})
-    log(f"  linie: {', '.join(all_lines) or '(brak)'}")
-
-    result = []
-    for offset in range(days):
-        day = today + timedelta(days=offset)
-        departures_by_stop = {
-            designator: payload.get("departures", [])
-            for designator, payload in gather(
-                lambda designator: client.timetable(designator, day)
-            ).items()
+        lines_by_stop = {
+            designator: {d["line"] for d in directions if d.get("line")}
+            for designator, directions in gather(client.directions).items()
         }
-        trips, stats = build_trips(departures_by_stop, lines_by_stop)
-        log(f"  {day}: kursów {len(trips)}"
-            f" (pominięto: bez linii {stats['skipped_no_line']},"
-            f" jednoprzystankowych {stats['skipped_short']})")
-        result.append((day, trips))
+        all_lines = sorted({line for lines in lines_by_stop.values() for line in lines})
+        log(f"  linie: {', '.join(all_lines) or '(brak)'}")
+
+        for offset in range(days):
+            day = today + timedelta(days=offset)
+            departures_by_stop = {
+                designator: payload.get("departures", [])
+                for designator, payload in gather(
+                    lambda designator: client.timetable(designator, day)
+                ).items()
+            }
+            trips, stats = build_trips(departures_by_stop, lines_by_stop)
+            log(f"  {day}: kursów {len(trips)}"
+                f" (pominięto: bez linii {stats['skipped_no_line']},"
+                f" jednoprzystankowych {stats['skipped_short']})")
+            result.append((day, trips))
 
     return stops, result
 
