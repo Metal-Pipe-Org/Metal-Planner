@@ -28,9 +28,36 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 2. Pobiera zip (~12 MB), parsuje pliki CSV (`stops`, `routes`, `trips`,
    `stop_times`, `calendar`, `shapes` — geometria tras po ulicach/torach…)
    i buduje `data/gtfs_new.sqlite`.
-3. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
+3. Dokleja do niej rozkład gminy Siechnice (`siechnice.py`), jeśli jest
+   włączony — patrz niżej.
+4. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
    aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
    wczorajsza baza zostaje nietknięta.
+
+#### Drugie źródło — `siechnice.py`
+
+Autobusów gminy Siechnice nie ma w żadnym otwartym zbiorze: ani we
+wrocławskim GTFS, ani na dane.gov.pl, ani w Krajowym Punkcie Dostępowym.
+Jedyne strukturalne źródło to niedokumentowane API systemu kiedyPrzyjedzie,
+z którego `siechnice.py` składa kompletne kursy: odjazdy o tym samym
+`trip_id`, ułożone po `index`, to jeden przejazd — czyli dokładnie `trip`
++ `stop_times`. Numer linii wychodzi z przecięcia zbiorów linii obsługujących
+kolejne słupki kursu.
+
+Słupki wspólne z Wrocławiem (Bardzka, Sucha, Iwiny — tamtędy jadą 800/810)
+sklejają się z istniejącymi po **zgodnej nazwie i bliskości**, więc kurs
+z Siechnic wjeżdża na ten sam `stop_id` co tramwaj: przesiadka bez kary za
+przejście i jeden marker na mapie zamiast dwóch.
+
+Każda pobrana data dostaje własny `service_id` i wpis w `calendar_dates`
+(`exception_type=1`), bo API oddaje rozkład per konkretny dzień — kalendarz
+odtworzony z reguły tygodniowej byłby zgadywaniem.
+
+Całość jest **domyślnie wyłączona** (`SIECHNICE_ENABLED=on` włącza):
+`robots.txt` tego serwisu to `Disallow: /` i nie ma tam regulaminu ani zgody
+na ponowne wykorzystanie. Awaria tego kroku nie przerywa aktualizacji —
+rozkład Wrocławia wjeżdża na miejsce niezależnie. Rozpoznanie źródeł, powody
+i wzór pisma do gminy o eksport GTFS: [SIECHNICE_DANE.md](SIECHNICE_DANE.md).
 
 Ma trzy punkty wejścia: wywołanie ręczne (albo z crona), start serwera
 i codzienny harmonogram. Ten ostatni to `start_daily_scheduler()` — wątek

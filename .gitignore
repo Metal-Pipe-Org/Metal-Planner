@@ -2,9 +2,12 @@
 # macOS
 # =========================
 .DS_Store
+.DS_Store?
 .AppleDouble
 .LSOverride
 ._*
+.Spotlight-V100
+.Trashes
 
 # =========================
 # Python
@@ -42,7 +45,9 @@ MANIFEST
 venv/
 env/
 .venv/
+.venv*/
 ENV/
+.python-version
 
 # =========================
 # Flask
@@ -98,8 +103,15 @@ htmlcov/
 # =========================
 .vscode/
 .idea/
+.idea_modules/
+*.iml
+.zed/
+.fleet/
+*.sublime-workspace
+*.sublime-project
 *.swp
 *.swo
+*~
 
 # =========================
 # Flask uploads / generated files
@@ -123,3 +135,19 @@ yarn-error.log*
 *.key
 secrets/
 credentials/
+
+# =========================
+# Claude Code - stan lokalny
+# (settings.json i launch.json sa wersjonowane, reszta jest per-maszyna)
+# =========================
+.claude/settings.local.json
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.claude/checkpoints/
+.claude/mailbox/
+.claude/routines/.state/
+.claude/agent-registry.json
+.claude/agent-memory-local/
+.claude/first-run
+.claude/assistant-daemon-state.json
