@@ -705,8 +705,8 @@ function renderTimeHeadline() {
     const chips = ((flow.fastest && flow.fastest.legs) || []).map(leg =>
         `<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`).join('');
     el.innerHTML =
-        `<span class="headline-best" tabindex="0">Najszybciej `
-        + `<b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
+        `<span class="headline-best" tabindex="0">Najszybciej o `
+        + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
         + `<span class="headline-sep">·</span>`
         + `<span class="headline-limit">mapa pokazuje do `
         + `<b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
@@ -1081,8 +1081,8 @@ function flowTipTimeHtml(when) {
     // punkt 10 kontraktu.
     if (when.arrive === null) return html;
     const left = when.arrive - when.now;
-    html += '<span class="flow-tip-goal">w celu <b>'
-        + `${esc(fmtClock(when.arrive))}</b> · stąd ${esc(fmtMins(left))}</span>`;
+    html += '<span class="flow-tip-goal">stąd w <b>'
+        + `${esc(fmtMins(left))}</b> u celu (<b>${esc(fmtClock(when.arrive))}</b>)</span>`;
     const total = lastFlow && lastFlow.best_sec;
     if (timeOpts.bar && total) {
         // Minimum 2%, zeby bardzo krotka reszta drogi nie wyszla paskiem o
