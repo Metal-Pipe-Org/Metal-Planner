@@ -1,0 +1,50 @@
+name: Sprzątanie pominiętych biegów
+
+# Wyzwalacz `issue_comment` w claude-issue.yml tworzy bieg przy KAŻDYM komentarzu
+# w repo — GitHub nie umie filtrować po treści, więc te bez @claude odbija dopiero
+# warunek `if` w jobie. Pominięcia nie kosztują minut (job nie dostaje runnera),
+# ale zapychają listę w zakładce Actions. Ten workflow je stamtąd usuwa.
+#
+# Cron chodzi w UTC i nie przesuwa się z czasem letnim: 03:17 UTC to 05:17
+# w Polsce latem i 04:17 zimą. Nierówna minuta z rozmysłem — biegi planowane
+# na pełne godziny czekają w kolejce GitHuba najdłużej.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+# Kasowanie biegów wymaga zapisu do Actions. Reszty uprawnień nie dajemy.
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Skasuj pominięte biegi solvera
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Tylko biegi claude-issue.yml — cudzych workflow nie ruszamy.
+          ids=$(gh api \
+            "repos/$REPO/actions/workflows/claude-issue.yml/runs?status=skipped&per_page=100" \
+            --jq '.workflow_runs[].id')
+
+          if [ -z "$ids" ]; then
+            echo "Nic do sprzątania." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          count=0
+          for id in $ids; do
+            echo "Kasuję bieg $id"
+            gh api -X DELETE "repos/$REPO/actions/runs/$id"
+            count=$((count + 1))
+          done
+
+          echo "Usunięto pominiętych biegów: $count" | tee -a "$GITHUB_STEP_SUMMARY"
