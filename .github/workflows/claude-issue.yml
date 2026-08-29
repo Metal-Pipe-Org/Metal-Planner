@@ -16,12 +16,14 @@ concurrency:
 
 jobs:
   solve-issue:
-    # Wywołanie musi wołać @claude, dotyczyć issue (nie PR-a), pochodzić
-    # od kogoś z zespołu i nie być wpisem samego bota.
+    # Wstępne odsianie: wołanie @claude pod issue (nie pod PR-em) i nie od bota.
+    # Uprawnień NIE sprawdzamy przez `author_association` — przy prywatnym
+    # członkostwie w organizacji GitHub zwraca tam CONTRIBUTOR albo NONE nawet
+    # dla osoby z prawem zapisu. Kto ma write, rozstrzyga sama akcja
+    # (checkWritePermissions) i to ona odbija obcych.
     if: >-
       !github.event.issue.pull_request
       && contains(github.event.comment.body || github.event.issue.body || '', '@claude')
-      && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association || github.event.issue.author_association)
       && github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 30
