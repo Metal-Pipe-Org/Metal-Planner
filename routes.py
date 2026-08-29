@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
+import timetables
 from planner import plan_flow, plan_route
 
 
@@ -70,23 +71,45 @@ def _parse_when(time_str,data_str):
     return when
 
 
+def _day_arg():
+    """Data z query stringa (YYYY-MM-DD) jako `date`; brak/śmieci = dzisiaj.
+
+    Tryb rozkładów pyta o całą dobę, a nie o moment, więc w przeciwieństwie
+    do wyszukiwarki nie potrzebuje godziny (patrz _parse_when).
+    """
+    return _parse_when(None, request.args.get("date")).date()
+
+
+def _int_arg(name):
+    try:
+        return int(request.args[name])
+    except (KeyError, ValueError):
+        return None
+
+
 def init_routes(app):
 
     @app.route("/")
     def index():
         try:
             stops = gtfs.all_stop_names()
+            lines = timetables.all_lines()
             data_error = None
         except FileNotFoundError as e:
             stops = []
+            lines = []
             data_error = str(e)
 
         return render_template(
             "index.html",
             stops=stops,
+            lines=lines,
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),
-            form_date=datetime.now().strftime("%d.%m.%y"),
+            # ISO, bo tego i tylko tego wymaga <input type="date"> - przy
+            # formacie dziennym pole zostawało puste i data nie docierała
+            # do serwera wcale.
+            form_date=datetime.now().strftime("%Y-%m-%d"),
         )
 
     @app.route("/sw.js")
@@ -122,6 +145,34 @@ def init_routes(app):
             request.args.get("end", ""),
             _parse_when(request.args.get("time"),request.args.get("date")),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
+        ))
+
+    @app.route("/api/line")
+    def api_line():
+        """Rozkład jednej linii: warianty trasy, przystanki, kursy, geometria."""
+        return jsonify(timetables.line_timetable(
+            request.args.get("num", ""),
+            _day_arg(),
+            request.args.get("mode") or None,
+        ))
+
+    @app.route("/api/stop_board")
+    def api_stop_board():
+        """Tablica odjazdów z jednego przystanku - wszystkie linie naraz."""
+        return jsonify(timetables.stop_board(
+            request.args.get("stop", ""),
+            _day_arg(),
+            _int_arg("now_sec"),
+        ))
+
+    @app.route("/api/trip")
+    def api_trip():
+        """Jeden kurs: przystanki z godzinami i przebieg na mapie."""
+        return jsonify(timetables.trip_detail(
+            request.args.get("trip", ""),
+            _day_arg(),
+            request.args.get("stop") or None,
+            _int_arg("dep"),
         ))
 
     @app.route("/api/flow")
