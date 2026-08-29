@@ -105,6 +105,18 @@ body {
 
 body.panel-hidden .icon-button.floating { left: 16px; }
 
+/* Przełącznik trybu stoi tuż obok chowania panelu - jeden odstęp przycisku. */
+.icon-button.floating.second { left: calc(var(--sidebar-w) + 76px); }
+body.panel-hidden .icon-button.floating.second { left: 64px; }
+
+/* Włączony tryb ma być widoczny na samym przycisku - a białe tło pływających
+   przycisków jest specyficzniejsze niż samo .active i by je przykryło. */
+.icon-button.floating.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
 /* Kółko ładowania - pierścień z wyciętym fragmentem, w kolorze tekstu, więc
    ten sam element działa i na przycisku (biały), i w komunikacie (szary). */
 .spinner {
@@ -1210,6 +1222,277 @@ body.panel-hidden #sidebar {
     .toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
 
+/* ------------------------------------------------------- rozkłady jazdy --- */
+
+/* Dwa tryby panelu wykluczają się nawzajem: karta wyszukiwania i karta
+   rozkładów zajmują to samo miejsce, a przełącznik ◷ podmienia jedno na
+   drugie. Wynikom robimy to samo - jedne i drugie są listą pod kartą. */
+#timetable-card,
+#tt-results { display: none; }
+
+body.mode-timetable .search-card,
+body.mode-timetable #results { display: none; }
+
+body.mode-timetable #timetable-card { display: block; }
+body.mode-timetable #tt-results { display: block; }
+
+/* Pasek "ile trwa podróż" opisuje wynik wyszukiwania - w rozkładach nie ma
+   czego opisywać. */
+body.mode-timetable .time-headline { display: none; }
+
+#tt-search .spinner { display: none; }
+body.tt-searching #tt-search .spinner { display: inline-block; }
+body.tt-searching #tt-search { cursor: progress; }
+
+/* Linia / Przystanek - dwa rodzaje rozkładu, jeden pod drugim byłby dwoma
+   osobnymi formularzami; obok siebie to jedno pytanie z dwiema odpowiedziami. */
+.tt-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--surface-alt);
+}
+
+.tt-tab {
+    flex: 1;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 10px;
+    background: transparent;
+    color: var(--ink-soft);
+    font: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.tt-tab.active {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(16, 32, 48, 0.16);
+}
+
+.timetable-card .search-row { margin-top: 10px; }
+
+.tt-card { margin-bottom: 10px; }
+
+.tt-h3 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.tt-sub {
+    color: var(--ink-faint);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* Warianty trasy linii: kierunek plus to, ile kursów tędy jedzie - kurs
+   skrócony do zajezdni ma być na pierwszy rzut oka odróżnialny od kierunku
+   podstawowego. */
+.tt-variants {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tt-variant {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.tt-variant:hover { background: var(--surface-alt); }
+
+.tt-variant.active {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tt-dir { font-weight: 600; }
+
+/* Godziny odjazdów i numery linii - jedno i drugie to gęsta siatka małych
+   przycisków, więc wspólny pojemnik z własnym przewijaniem. */
+.tt-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    max-height: 190px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.tt-course {
+    min-width: 52px;
+    padding: 5px 7px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+
+.tt-course:hover { background: var(--surface-alt); }
+
+.tt-course.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+}
+
+/* Plakietka linii jako przełącznik: odhaczona traci kolor, ale zostaje na
+   swoim miejscu - to wciąż lista linii tego przystanku, tylko wypisana. */
+.tt-line {
+    border: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.tt-line.off {
+    background: var(--surface-alt);
+    color: var(--ink-faint);
+    box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.tt-filter-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.tt-filter-head .tt-h3 { margin: 0; margin-right: auto; }
+
+.tt-mini {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 10px;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tt-mini:hover { background: var(--surface-alt); }
+
+.tt-mini.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+}
+
+/* Tablica odjazdów i oś przystanków dzielą siatkę: godzina - kropka - treść,
+   tak samo jak oś wybranej trasy w wyszukiwarce. */
+.tt-board,
+.tt-stops {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.tt-dep {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.tt-dep:hover { background: var(--surface-alt); }
+.tt-dep.open { background: var(--surface-alt); }
+
+.tt-dep .tt-t {
+    width: 44px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.tt-head {
+    overflow: hidden;
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-platform {
+    margin-left: auto;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+}
+
+.tt-trip { padding: 4px 0 8px 8px; }
+
+.tt-stop {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.tt-stop:hover { background: var(--surface-alt); }
+
+.tt-stop .tt-t {
+    width: 44px;
+    color: var(--ink-soft);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Kropka na osi - kolor bierze się z rodzaju pojazdu, tak jak linia na mapie. */
+.tt-dot {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 auto;
+    border: 2px solid var(--other);
+    border-radius: 50%;
+    background: var(--surface);
+}
+
+.tt-stops.tram .tt-dot { border-color: var(--tram); }
+.tt-stops.bus .tt-dot { border-color: var(--bus); }
+
+/* Krańce osi na pełno - widać, gdzie ten kurs się zaczyna i kończy. */
+.tt-stops.tram .tt-stop:first-child .tt-dot,
+.tt-stops.tram .tt-stop:last-child .tt-dot { background: var(--tram); }
+.tt-stops.bus .tt-stop:first-child .tt-dot,
+.tt-stops.bus .tt-stop:last-child .tt-dot { background: var(--bus); }
+
+.tt-name { font-size: 13.5px; }
+
+.tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
+.tt-more:hover { background: #e8edf3; }
+
+/* Przełącznik trybu w zakładkach - tylko telefon (pływające ◷ jest tam
+   schowane razem z ☰). */
+.tab-icon { display: none; }
+
 /* --------------------------------------------------------------- RWD --- */
 
 @media (max-width: 760px) {
@@ -1253,6 +1536,26 @@ body.panel-hidden #sidebar {
     /* Zakładki zastępują ☰ - dwa mechanizmy chowania panelu naraz tylko by
        myliły, a przy schowanym ☰ nie byłoby czym go odsłonić. */
     .icon-button.floating { display: none; }
+
+    /* ...a razem z ☰ znika też pływający przełącznik trybu, więc rozkłady
+       dostają swoje miejsce w pasku zakładek. */
+    .tab-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        border: none;
+        background: transparent;
+        color: var(--ink-soft);
+        font-size: 18px;
+        cursor: pointer;
+    }
+
+    .tab-icon.active { color: var(--accent); }
+
+    /* W trybie rozkładów widok mapy pokazuje samą kartę rozkładu - tak jak
+       w wyszukiwarce pokazuje samą kartę wyszukiwania. */
+    body.mode-timetable.view-map #tt-results { display: none; }
 
     body.panel-hidden #sidebar {
         transform: none;

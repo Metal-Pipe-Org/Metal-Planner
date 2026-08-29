@@ -90,8 +90,14 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
   `plan_route` (jedna najszybsza trasa, CSA) i `plan_flow` (mapa przepływów
   — zwraca teraz w jednej odpowiedzi i segmenty do rysowania, i listę
   gotowych propozycji, czytaną wprost z tego samego grafu) — opis niżej.
+- **`timetables.py`** — drugi tryb aplikacji: rozkład linii i tablica
+  odjazdów z przystanku. Rozkład linii idzie wprost z SQLite (kursy doby
+  rozkładowej, grupowane po ciągu przystanków), tablica przystanku — z tej
+  samej tablicy połączeń dnia co planer, bo odjazd z przystanku to po
+  prostu połączenie, które się w nim zaczyna.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
-  `/api/flow` (szczegóły w sekcji API).
+  `/api/flow`, `/api/line`, `/api/stop_board`, `/api/trip` (szczegóły
+  w sekcji API).
 
 ### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 
@@ -426,8 +432,26 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
   to, to_time, minutes, stops, stops_count, path}`; etap pieszy:
   `{kind: "walk", text, minutes, from, to, path}`.
+- `GET /api/line?num=17&mode=tram&date=YYYY-MM-DD` — rozkład jednej linii:
+  `{num, mode, label, date, variants: [{headsign, from, to, stops:
+  [{name, lat, lon}, …], path: [[lat,lon], …], trips: [{id, dep: "05:12",
+  sec, times: ["05:12", …]}, …]}, …]}`. Wariant = jeden ciąg przystanków
+  (kierunek albo kurs skrócony), warianty posortowane po liczbie kursów
+  malejąco; `times` ma tyle pozycji, co `stops`.
+- `GET /api/stop_board?stop=&date=YYYY-MM-DD` — tablica odjazdów:
+  `{stop, date, center: [lat, lon], platforms: […], lines: [{mode, num,
+  headsign, count}, …], departures: [{line, t: "12:03", sec, trip, stop,
+  platform?}, …]}`. `departures[].line` to indeks w `lines`. Bez geometrii
+  — na dużym węźle jest ponad sto par (linia, kierunek), a naraz widać z
+  nich parę; trasy dociąga front przez `/api/trip`, dla linii faktycznie
+  zaznaczonych.
+- `GET /api/trip?trip=&date=&stop=&dep=` — jeden kurs: `{trip, num, mode,
+  line, headsign, board_index, stops: [{name, lat, lon, t, sec}, …],
+  path: [[lat,lon], …], tail: [[lat,lon], …]}`. `tail` to przebieg od
+  słupka podanego w `stop`/`dep` do końca kursu — front rysuje go
+  jaskrawo, a resztę `path` blado.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
-  w nazwie przystanku.
+  w nazwie przystanku albo numerze linii.
 
 ## Struktura plików
 
@@ -436,10 +460,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
+| `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
-| `static/app.js` | cały frontend: mapa, wyszukiwanie, lista propozycji |
+| `static/app.js` | frontend wyszukiwarki: mapa, wyszukiwanie, lista propozycji |
+| `static/timetable.js` | frontend rozkładów (drugi tryb panelu, po moście z `app.js`) |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
 | `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
 | `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`) |
@@ -452,6 +478,19 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-08-29** — drugi tryb panelu: **rozkłady jazdy**, przełączane
+  przyciskiem ◷ obok chowania panelu (na telefonie w pasku zakładek).
+  Rozkład linii (warianty trasy, kursy, przebieg na mapie) i tablica
+  odjazdów z przystanku, w której plakietkami linii składa się rozkład
+  z dowolnego ich podzbioru; trasy zaznaczonych linii — od tego przystanku
+  dalej — idą na mapę, a kliknięcie odjazdu pokazuje ten jeden kurs
+  z godzinami. Backend: `timetables.py` + `/api/line`, `/api/stop_board`,
+  `/api/trip`. Front: `static/timetable.js`, wpięty w mapę wyszukiwarki
+  wąskim mostem (`window.plannerBridge` na końcu `app.js`) — wejście
+  w rozkłady chowa wachlarz połączeń, wyjście odtwarza go z pamięci, bez
+  ponownego zapytania. Przy okazji: pole daty wyszukiwarki dostało wartość
+  w formacie ISO — `<input type="date">` innego nie przyjmuje, więc do tej
+  pory startowało puste.
 - **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
   z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
   niej), z wypełnionym celem odpala wyszukiwanie od razu, bez celu przesuwa

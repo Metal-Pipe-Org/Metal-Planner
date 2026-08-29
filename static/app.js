@@ -230,7 +230,12 @@ const stopsReady = fetch('/api/stops')
             m.bindTooltip(s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
-            m.on('click', e => { L.DomEvent.stop(e); pickEndpoint(s.name); });
+            m.on('click', e => {
+                L.DomEvent.stop(e);
+                // W trybie rozkładów klik w słupek nie wybiera końca relacji,
+                // tylko pokazuje jego tablicę odjazdów (static/timetable.js).
+                if (!timetableTook(s.name)) pickEndpoint(s.name);
+            });
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
         }
@@ -256,7 +261,18 @@ function pickEndpoint(value) {
     if (sel.start && sel.end) search();
 }
 
-map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
+/** Czy tryb rozkładów przejął ten klik. Pusty punkt mapy nie znaczy tam nic -
+    rozkład ma przystanek albo linię, nie współrzędne - więc klik poza słupkiem
+    jest po prostu ignorowany. */
+function timetableTook(stopName) {
+    return document.body.classList.contains('mode-timetable')
+        && !!(window.timetableMode && window.timetableMode.pickStop(stopName));
+}
+
+map.on('click', e => {
+    if (document.body.classList.contains('mode-timetable')) return;
+    pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
+});
 
 // ------------------------------------------- moja lokalizacja jako start ----
 
@@ -1726,19 +1742,34 @@ const FOLDED_NAMES = STOP_NAMES.map(fold);
 
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
     chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
-function suggestionsFor(query) {
+function suggestionsFor(query, names = STOP_NAMES, folded = FOLDED_NAMES) {
     const needle = fold(query.trim());
     if (!needle) return [];
     const prefix = [], inside = [];
-    STOP_NAMES.forEach((name, i) => {
-        const at = FOLDED_NAMES[i].indexOf(needle);
+    names.forEach((name, i) => {
+        const at = folded[i].indexOf(needle);
         if (at === 0) prefix.push({name, at, len: needle.length});
         else if (at > 0) inside.push({name, at, len: needle.length});
     });
     return [...prefix, ...inside].slice(0, MAX_SUGGESTIONS);
 }
 
-function attachAutocomplete(input, onPick) {
+/** `options.names` podmienia źródło podpowiedzi (tryb rozkładów podaje numery
+    linii zamiast nazw przystanków), `options.onEnter` - to, co robi Enter poza
+    listą. Domyślnie jedno i drugie jest tym, czego chce wyszukiwarka. */
+function attachAutocomplete(input, onPick, options = {}) {
+    // `names` bywa funkcją, bo tryb rozkładów podpowiada raz numery linii,
+    // raz nazwy przystanków - i przełącza się między nimi w TYM SAMYM polu.
+    const source = typeof options.names === 'function'
+        ? options.names
+        : () => options.names || STOP_NAMES;
+    const foldedCache = new Map();
+    const foldedFor = names => {
+        if (names === STOP_NAMES) return FOLDED_NAMES;
+        if (!foldedCache.has(names)) foldedCache.set(names, names.map(fold));
+        return foldedCache.get(names);
+    };
+    const onEnter = options.onEnter || search;
     const list = $(input.id + '-list');
     let items = [];
     let active = -1;          // -1 = nic nie wybrane klawiaturą
@@ -1754,7 +1785,8 @@ function attachAutocomplete(input, onPick) {
     }
 
     function open() {
-        items = suggestionsFor(input.value);
+        const names = source();
+        items = suggestionsFor(input.value, names, foldedFor(names));
         active = -1;
         if (!items.length) { close(); return; }
         list.innerHTML = items.map((item, i) => {
@@ -1817,7 +1849,7 @@ function attachAutocomplete(input, onPick) {
         case 'Enter':
             event.preventDefault();
             if (active >= 0) choose(active);
-            else { close(); search(); }
+            else { close(); onEnter(); }
             break;
         }
     });
@@ -2062,5 +2094,41 @@ function bindDevFolds() {
     }
 }
 bindDevFolds();
+
+// ------------------------------------------------- most do trybu rozkładów ----
+//
+// Rozkłady (static/timetable.js) to drugi widok TEJ SAMEJ mapy: własny plik,
+// żeby ten nie puchł, ale rysuje po tym samym Leaflecie i musi umieć schować
+// wachlarz wyszukiwarki na czas swojego panowania. Stąd wąski, jawny most
+// zamiast globalnych zmiennych - poza tym, co niżej, nic z app.js nie wycieka.
+//
+// Schowanie wachlarza NIE kasuje ostatniej odpowiedzi (lastFlow): powrót do
+// wyszukiwania odtwarza dokładnie to, co było widać, bez ponownego zapytania.
+
+function suspendPlanner() {
+    if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
+    if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
+    flowParts = [];
+    flowHits = [];
+    clearFlowHover();
+    clearJourney();
+    clearPreview();
+    hideFastest();
+    setBaseDim(false);          // przystanki wracają do pełnej widoczności - w
+    const headline = $('time-headline');   // rozkładach to one są treścią mapy
+    if (headline) headline.hidden = true;
+}
+
+function resumePlanner() {
+    if (lastFlow) drawFlow(lastFlow, false);
+    else renderTimeHeadline();
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+}
+
+window.plannerBridge = {
+    map, esc, fitTo, setView, attachAutocomplete, setBaseDim,
+    LINE_COLORS, MODE_LABEL, STOP_NAMES,
+    suspendPlanner, resumePlanner,
+};
 
 }

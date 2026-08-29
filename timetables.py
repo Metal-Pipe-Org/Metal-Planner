@@ -267,7 +267,7 @@ def _tail_from(db, data, trip, rows, board_stop, board_dep):
     return tail, _path_of(data.trip_shape.get(trip), coords, db)
 
 
-def stop_board(query, day, when_sec=None):
+def stop_board(query, day):
     """Tablica odjazdów z przystanku: wszystkie odjazdy doby, opisane linią
     (numer + kierunek), do której należą.
 
@@ -351,7 +351,6 @@ def stop_board(query, day, when_sec=None):
             for mode, line_num, headsign in order
         ],
         "departures": departures,
-        "now_sec": when_sec,
     }
 
 

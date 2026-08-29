@@ -162,7 +162,6 @@ def init_routes(app):
         return jsonify(timetables.stop_board(
             request.args.get("stop", ""),
             _day_arg(),
-            _int_arg("now_sec"),
         ))
 
     @app.route("/api/trip")

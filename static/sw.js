@@ -30,6 +30,7 @@ const SHELL_URLS = [
     '/static/offline.html',
     '/static/style.css',
     '/static/app.js',
+    '/static/timetable.js',
     '/static/pwa.js',
     '/static/manifest.webmanifest',
     '/static/icons/icon-192.png',

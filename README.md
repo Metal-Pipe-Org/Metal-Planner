@@ -28,6 +28,29 @@ około 10 sekund. `app.py` wystawia serwer na http://localhost:5001; port to
 domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
 `PORT`.
 
+## Rozkłady jazdy — linie i przystanki
+
+Obok wyszukiwarki połączeń panel ma drugi tryb, przełączany przyciskiem ◷
+tuż obok ← (chowania panelu); na telefonie ten sam przycisk jest w pasku
+zakładek na dole. Oba tryby zajmują to samo miejsce — wejście w rozkłady
+chowa okienko wyszukiwania, wyjście przywraca je razem z tym, co było
+narysowane na mapie, bez ponownego szukania.
+
+**Linia** — po numerze. Kursy grupowane po ciągu przystanków, nie po samym
+kierunku: linia ma zwykle dwa kierunki i do tego garść kursów skróconych
+(do zajezdni, do pętli w połowie trasy), a zlanie ich w jedną tablicę
+godzin dałoby rozkład, pod którym podpisany jest przystanek, przez który
+połowa tych kursów nie przejeżdża. Wybór wariantu rysuje jego przebieg na
+mapie; wybór godziny odjazdu dopisuje czas przy każdym przystanku.
+
+**Przystanek** — po nazwie albo kliknięciem słupka na mapie. Tablica
+odjazdów wszystkich linii, z plakietkami do odhaczania: zostaje rozkład
+złożony dokładnie z tych linii, które zaznaczysz — od jednej do wszystkich
+naraz. Trasy zaznaczonych linii, **od tego przystanku dalej**, rysują się
+na mapie (do ośmiu linii, wyżej z węzła robi się kłębek); kliknięcie
+konkretnego odjazdu pokazuje ten jeden kurs z godzinami na każdym
+przystanku.
+
 ## Instalacja jako aplikacja (PWA)
 
 Planer instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
