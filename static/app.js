@@ -428,8 +428,8 @@ const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * r
 // wciaz szukanie formy, a nie gotowa decyzja.
 const TIME_DEFAULTS = {
     hover: true,        // godzina w punkcie pod kursorem + przyjazd do celu
-    bar: true,          // ...razem z paskiem: jaka to czesc najszybszej trasy
-    ends: true,         // kropka dokladnie w punkcie, ktorego dotyczy godzina
+    bar: false,         // ...razem z paskiem: jaka to czesc najszybszej trasy
+    ends: false,        // kropka dokladnie w punkcie, ktorego dotyczy godzina
     chips: false,       // godzina malym drukiem pod numerkiem w grupce
     headline: true,     // pasek nad mapa: najszybciej tyle, pokazane do tyle
 };
@@ -667,7 +667,8 @@ function drawFlow(flow, refit) {
 // jeszcze rysuje (czyli dokładnie to, co ustawia suwak okna czasowego).
 // Najechanie na najszybszy czas pokazuje, KTÓRĄ trasą się go osiąga - obie
 // liczby przychodzą z serwera (best_sec/limit_sec/fastest), razem z gotową
-// geometrią tej trasy.
+// geometrią tej trasy. Obie strony paska podają godzinę i czas jazdy w tej
+// samej kolejności, żeby dało się je czytać jednym spojrzeniem.
 
 function showFastest() {
     hideFastest();
@@ -709,7 +710,7 @@ function renderTimeHeadline() {
         + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
         + `<span class="headline-sep">·</span>`
         + `<span class="headline-limit">mapa pokazuje do `
-        + `<b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
+        + `<b>${esc(flow.deadline)}</b>, w <b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
