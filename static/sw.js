@@ -34,6 +34,11 @@ const SHELL_URLS = [
     '/static/manifest.webmanifest',
     '/static/icons/icon-192.png',
     '/static/icons/icon-512.png',
+    // Oba formaty do powłoki, nie ten "właściwy": który zagra, rozstrzyga
+    // przeglądarka (patrz PIPE_SOURCES w app.js), a offline nie ma już jak
+    // dobrać brakującego.
+    '/static/sounds/metal-pipe.ogg',
+    '/static/sounds/metal-pipe.m4a',
 ];
 
 // CDN bywa kapryśny, a brak Leafleta to tylko brak mapy - nie blokujemy

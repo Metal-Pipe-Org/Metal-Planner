@@ -928,6 +928,120 @@ body.panel-hidden #sidebar {
     .time-headline { top: auto; bottom: 64px; font-size: 12px; }
 }
 
+/* ------------------------------------ tablica odjazdów przesiadki --- */
+
+/* Dymek pod kropką przystanku na trasie. Leaflet daje tu domyślnie jedną
+   linijkę bez zawijania - tablica jest siatką, więc trzeba mu to odebrać. */
+.timetable-tip {
+    /* Szerokość STAŁA, nie "do treści": kolumna kierunku to 1fr z przycięciem,
+       a taka w dymku zwężającym się do zawartości schodzi do zera - kierunek
+       znikał wtedy w całości, a godziny łamały się na dwie linijki. Szerzej
+       niż początkowe 300px, odkąd rytm powtórzeń stoi w tej samej linii co
+       "za ile" - prawa kolumna urosła i zjadała kierunek. */
+    width: 340px;
+    max-width: calc(100vw - 24px);
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    color: var(--ink);
+    font: inherit;
+    white-space: normal;
+}
+
+.timetable-tip.leaflet-tooltip-top::before { border-top-color: var(--surface); }
+
+.tt-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+    font-size: 12.5px;
+    font-weight: 700;
+}
+
+.tt-stop {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-from {
+    flex: none;
+    color: var(--ink-faint);
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.tt-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* Kolumny: godzina - plakietka - kierunek - "za ile". Stałe szerokości dwóch
+   pierwszych trzymają numery linii w jednej osi, więc tablicę czyta się
+   z góry na dół, a nie każdy wiersz od nowa. */
+.tt-rows li {
+    display: grid;
+    grid-template-columns: 38px 34px 1fr auto;
+    align-items: center;
+    column-gap: 7px;
+    padding: 2px 0;
+    font-size: 12.5px;
+}
+
+.tt-time {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Plakietka z listy propozycji, tylko mniejsza - w dymku obok niej stoi
+   jeszcze kierunek, a ten musi się zmieścić bez zawijania. */
+.tt-rows .badge {
+    min-width: 0;
+    width: 34px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 5px;
+    font-size: 11.5px;
+}
+
+.tt-dir {
+    overflow: hidden;
+    color: var(--ink-soft);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-in {
+    color: var(--ink-faint);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    text-align: right;
+}
+
+/* Rytm linii pod czasem oczekiwania: "za 4 min" / "co 15 min". Druga linijka,
+   bo to odpowiedź na inne pytanie - nie "kiedy najbliższy", tylko "a jak mi
+   ucieknie". Mniejsza, żeby nie konkurowała z pierwszą. */
+/* Rytm powtórzeń w TEJ SAMEJ linii co "za ile" - osobny wiersz podnosiłby
+   wysokość akurat tym pozycjom, które się powtarzają, i tablica przestawała
+   być równa. */
+.tt-in small {
+    font-size: 10px;
+    opacity: 0.75;
+}
+
+.tt-note {
+    color: var(--ink-soft);
+    font-size: 12.5px;
+}
+
 /* ------------------------------------------------ panel deweloperski --- */
 
 #dev-panel {

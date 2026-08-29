@@ -76,6 +76,75 @@ def plan_route(start_query, end_query, when=None, transfer_gain_sec=None):
     }
 
 
+# Ile odjazdów pokazuje tablica przystanku pod kropką przesiadki. Tyle mieści
+# się w dymku bez przewijania, a dalsze i tak są poza horyzontem decyzji
+# "czym stąd pojechać".
+TIMETABLE_LIMIT = 8
+# Sufit dla `limit` z zapytania. Mapa przepływów prosi z zapasem, bo z tej listy
+# zostawia potem tylko linie, w które sama pozwala tu wsiąść - a przy węźle,
+# z którego odjeżdża pół miasta, te kilka właściwych bywa dopiero w trzeciej
+# dziesiątce.
+TIMETABLE_MAX = 60
+
+
+def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
+                   point=None):
+    """Tablica odjazdów jednego przystanku - to, co widać po najechaniu na
+    kropkę przesiadki na mapie.
+
+    Przystanek wskazuje się NAZWĄ albo `point` = (lat, lon). Po współrzędnych
+    pyta mapa przepływów: kropki stawia z geometrii kawałków, więc zna
+    położenie słupka, a nie jego nazwę (patrz gtfs.stop_at).
+
+    `when` wyznacza DOBĘ rozkładową, `from_sec` godzinę na jej osi. Osobno,
+    bo etap trasy potrafi wypaść po północy (odjazd 24:40 to wciąż rozkład
+    dnia poprzedniego) - a wtedy sama godzina "00:40" wskazywałaby dobę
+    o jedną za daleko. Bez `from_sec` liczymy od godziny z `when`.
+
+    Przystanek rozumiemy jako MIEJSCE, nie słupek (patrz gtfs.match_stop):
+    najeżdżając na węzeł, pasażer pyta o wszystko, co z niego odjeżdża, a nie
+    o jeden peron, przy którym akurat wysiadł.
+    """
+    when = when or datetime.now()
+
+    try:
+        day = gtfs.load_day(when.date())
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+
+    if point is not None:
+        name, stops = gtfs.stop_at(point[0], point[1], day)
+        if name is None:
+            return {"error": "W tym miejscu nie ma przystanku."}
+    else:
+        name, stops, hints = gtfs.match_stop(stop_query, day)
+        if name is None:
+            return _unknown_stop(stop_query, hints)
+
+    if from_sec is None:
+        from_sec = when.hour * 3600 + when.minute * 60 + when.second
+    from_sec = int(from_sec)
+
+    departures = []
+    for dep_sec, trip, _stop_id in gtfs.stop_departures(day, stops, from_sec, limit):
+        line, headsign = day.trip_info[trip]
+        num, mode = _line_parts(line)
+        departures.append({
+            "time": _fmt_time(dep_sec),
+            # Sekunda na osi doby - po niej front odsiewa odjazdy sprzed
+            # horyzontu mapy; "HH:MM" po północy zawija się i nie da się
+            # z niego porównywać (patrz gtfs.load_day).
+            "sec": dep_sec,
+            "in_min": round((dep_sec - from_sec) / 60),
+            "line": line,
+            "num": num,
+            "mode": mode,
+            "headsign": headsign,
+        })
+
+    return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
+
+
 def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs):
     """Czy w kurs, którym już jedziemy, można wsiąść na `stop` mniejszą
     liczbą przejazdów niż w zapisanym punkcie wsiadania.
@@ -345,6 +414,7 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "to": day.stop_names[exit_stop],
         "to_time": _fmt_time(exit_arr),
         "dep_sec": board_dep,
+        "arr_sec": exit_arr,
         "minutes": round((exit_arr - board_dep) / 60),
         "stops": [day.stop_names[s] for s, _, _ in path_rows],
         "stops_count": max(len(path_rows) - 1, 1),
@@ -634,7 +704,11 @@ def plan_flow(start_query, end_query, when=None,
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
         latest, origin_latest, target_set,
     )
-    _refine_brightness(day, segs, target_set, deadline, best_arr)
+    # Jeden skan wstecz daje ODCZYTANĄ odpowiedź "wysiadam tu o tej godzinie -
+    # o której jestem w celu" dla każdego przystanku w oknie. To z niego bierze
+    # się jasność; bez niego była szacowana (patrz _target_profile).
+    profile = _target_profile(day, target_set, dep_sec, deadline)
+    _refine_brightness(day, segs, target_set, deadline, best_arr, profile)
     kept, ranges = _select_and_anchor(day, segs, source_stops, target_set)
 
     gtfs.geo_generation()      # jeden stat na zapytanie; czyści cache po podmianie bazy
@@ -648,7 +722,8 @@ def plan_flow(start_query, end_query, when=None,
         fastest = _fastest_summary(best_legs, best_arr, dep_sec)
         degraded = False
         if kept:
-            seg_list = _finalize_segments(day, kept, ranges, geo_db)
+            seg_list, nodes = _finalize_segments(
+                day, kept, ranges, geo_db, earliest, profile[2], deadline)
             graph = _extract_transfer_graph(day, kept, ranges, source_stops, target_set)
             journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                            limit=journey_limit, gain_sec=gain_sec)
@@ -682,6 +757,7 @@ def plan_flow(start_query, end_query, when=None,
             degraded = True
             journeys = []
             seg_list = []
+            nodes = []
             narysowane = set()
             for rank, wariant in enumerate(warianty):
                 rides = [leg for leg in wariant if leg["kind"] == "ride"]
@@ -727,8 +803,15 @@ def plan_flow(start_query, end_query, when=None,
         # jeszcze rysuje (deadline). "Najszybciej X, pokazane do Y".
         "best_sec": best_arr - dep_sec,
         "limit_sec": deadline - dep_sec,
+        # Horyzont mapy na osi doby. Odjazd późniejszy nie należy do ŻADNEGO
+        # rysowanego wariantu - to warunek konieczny, liczony z best_arr
+        # (skan CSA), więc nie zależy od szacowanych przyjazdów kawałków.
+        "deadline_sec": deadline,
         "fastest": fastest,
         "segments": seg_list,
+        # Węzły przesiadkowe: po jednym na miejsce, z liniami, w które MAPA
+        # pozwala tu wsiąść (patrz _transfer_nodes).
+        "nodes": nodes,
         "journeys": journeys,
         # True tylko w trybie awaryjnym (patrz gałąź else wyżej): mapa jest
         # wtedy jedną trasą z jasnościami wpisanymi na sztywno, a nie
@@ -836,8 +919,35 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
                         and stop_latest < origin_latest - BACKTRACK_TOL_SEC):
                     continue
                 stops_seq = [dep_s]
+                seen_places = {day.place_of.get(dep_s, dep_s): 0}
             elif dep_s != stops_seq[-1]:
                 break                        # przerwany łańcuch - utnij
+            # Kurs wracający na MIEJSCE, przez które już przejechał, dalej nie
+            # wiezie - zawraca (punkt 4 kontraktu: "mapa wjeżdża na pętlę
+            # końcową tylko po to, żeby zaraz z niej wrócić"). Zgłoszone
+            # 2026-08-29: autobus 102 rysował zjazd na pętlę pod Kosmonautów
+            # i natychmiastowy powrót tą samą ulicą.
+            #
+            # Po MIEJSCU, nie po słupku: pętla nawrotowa ma zwykle osobny
+            # słupek w tę i we w tę, więc porównanie identyfikatorów niczego
+            # by nie złapało.
+            #
+            # Cięcie jest bezpieczne, bo trafia wyłącznie w nawroty: na
+            # przemiecie 4 relacji wszystkie 14 zawróceń mieściło się w 1-2
+            # przystankach, ani jedno nie było linią realnie obsługującą to
+            # samo miejsce drugi raz w dalszym przebiegu.
+            #
+            # SĄSIEDNIE przystanki tego samego miejsca to NIE zawrócenie:
+            # miejsce bywa grubsze od słupka i linia potrafi minąć dwa jego
+            # przystanki jeden po drugim, jadąc prosto (tramwaj 7 mija tak
+            # dwa razy Kamieńskiego w drodze na Klecinę). Zawróceniem jest
+            # dopiero POWRÓT - wyjazd z miejsca i przyjazd do niego z powrotem,
+            # czyli odległość co najmniej dwóch kroków.
+            arr_place = day.place_of.get(arr_s, arr_s)
+            wczesniej = seen_places.get(arr_place)
+            if wczesniej is not None and len(stops_seq) - wczesniej >= 2:
+                break
+            seen_places.setdefault(arr_place, len(stops_seq))
             departures.append((dep_s, dep_t))
             arrivals.append((arr_s, arr_t))
             stops_seq.append(arr_s)
@@ -845,8 +955,8 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
             if leave_by is None or arr_t > leave_by:
                 continue   # ten konkretny przystanek już nie mieści się w oknie
             # bound: najwcześniejszy możliwy przyjazd do celu, jeśli
-            # wysiądziemy tutaj, ZANIM znajdzie się realna kontynuacja (patrz
-            # join_value w _refine_brightness): arr_t + "kara" za nieznaną
+            # wysiądziemy tutaj, ZANIM odczyta się realną wartość (patrz
+            # _target_profile): arr_t + "kara" za nieznaną
             # resztę trasy. Karą jest (deadline - leave_by) OGRANICZONE do
             # WAIT_CAP_SEC (ten sam, już przyjęty w kodzie próg "jeszcze
             # spójnej przesiadki", patrz _catchable) - NIE samo
@@ -861,7 +971,7 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
             # mniejsza od sufitu - dokładnie jak dawniej), a tylko zatrzymuje
             # dalszy wzrost, gdy okno urośnie ponad sensowną, stałą wartość -
             # poszerzenie okna nie może już POGORSZYĆ tej estymaty, tylko
-            # najwyżej zastąpić ją lepszą, realną wartością z join_value.
+            # najwyżej zastąpić ją odczytaną wartością z _target_profile.
             exits.append((
                 len(stops_seq), arr_t + min(WAIT_CAP_SEC, deadline - leave_by),
                 arr_t, arr_s,
@@ -913,16 +1023,26 @@ def _board_index(day, segs):
     return index
 
 
-def _refine_brightness(day, segs, target_set, deadline, best_arr):
+def _refine_brightness(day, segs, target_set, deadline, best_arr, profile):
     """Krok 2: surowe przybliżenie wyjścia (patrz _discover_segments: arr_t +
     WAIT_CAP_SEC) to tylko zgadywanka na wypadek braku realnej kontynuacji -
     ma stały naddatek niezależny od deadline, więc samo w sobie nie
     przekłamuje jasności przy przesunięciu suwaka okna czasowego, ale wciąż
-    nic nie wie o faktycznej dalszej trasie. Liczymy więc wartość każdego
-    WYJŚCIA przez konkretne kontynuacje: najbliższy odjazd
-    segmentu, w który da się wskoczyć, plus najlepsze z jego DALSZYCH wyjść
-    (sufiks - wyjść sprzed punktu wskoczenia nie da się już użyć). Wyjścia
-    na cel są dokładne (wartość = przyjazd). Ustawia seg['bound']/seg['q'].
+    nic nie wie o faktycznej dalszej trasie. Wartość każdego WYJŚCIA
+    ODCZYTUJEMY więc z profilu (patrz _target_profile): "wysiadam tu o tej
+    godzinie - o której najwcześniej jestem w celu". Wyjścia na sam cel są
+    z definicji dokładne (wartość = przyjazd).
+    Ustawia seg['bound']/seg['q'].
+
+    Do 2026-08-29 stała tu zamiast tego iteracja do punktu stałego po
+    kontynuacjach WIDOCZNYCH NA MAPIE (join_value): bierz gotową wartość
+    sąsiedniego segmentu i przesuń ją o opóźnienie wsiadania. Dwa błędy
+    naraz - zakładała, że sztywny rozkład przesunie się elastycznie o tyle
+    samo na całej dalszej długości, i oznaczała wynik jako ODCZYTANY, choć
+    powstał z oszacowania (a to oszacowanie mogło samo pochodzić z kolejnego).
+    Stąd sprzeczność widoczna gołym okiem: kawałek podawał godzinę przyjazdu,
+    a jego jedyna kontynuacja nie znała żadnej. Profil zna odpowiedź dla
+    KAŻDEGO przystanku w oknie, nie tylko dla narysowanych, i to bez iteracji.
 
     q=1.0 musi wypaść dokładnie dla trasy najszybszej (bound == best_arr) -
     stąd odniesienie do best_arr, NIE do deadline: przy oknie zerowym
@@ -939,79 +1059,54 @@ def _refine_brightness(day, segs, target_set, deadline, best_arr):
         for times in seg["dep_times"].values():
             times.sort()
 
-    passing_index = _board_index(day, segs)
+    for seg in segs:
+        vals, exact = [], []
+        for _pos, _raw, arr_t, stop in seg["exits"]:
+            if stop in target_set:
+                vals.append(arr_t)        # wyjście na sam cel: wartość = przyjazd
+                exact.append(True)
+                continue
+            # INF znaczy tu coś konkretnego, nie "nie wiem": WYSIADANIE TUTAJ
+            # do niczego nie prowadzi. Prawie zawsze dlatego, że jedyną
+            # kontynuacją jest ten sam pojazd, a na przesiadkę nie starcza
+            # nawet bufora (129 ze 129 takich wyjść na relacji LEŚNICA ->
+            # BARTOSZOWICE, 16:44). Wartość tej POZYCJI weźmie się wtedy z
+            # sufiksu niżej - z dalszych wyjść tego samego kursu, czyli z
+            # jazdy dalej. Wpisywanie tu kary z _discover_segments byłoby
+            # zmyśleniem gorszej opcji tam, gdzie opcji po prostu nie ma -
+            # a że kar było więcej niż odczytów, to ONE wyznaczały skalę
+            # jasności całej mapy.
+            value = _profile_value(day, profile, stop, arr_t)
+            vals.append(value)
+            exact.append(value != INF)
+        seg["exit_vals"] = vals
+        seg["exit_exact"] = exact
 
     for seg in segs:
-        seg["exit_vals"] = [e[1] for e in seg["exits"]]
-        # Czy ta wartość jest ODCZYTANA, czy ZGADNIĘTA. Wyjście na sam cel
-        # jest dokładne (wartość = przyjazd), wyjście z realną kontynuacją
-        # też (join_value czyta konkretne odjazdy). Wyjście bez widocznej
-        # kontynuacji dostaje surową aproksymację (arr_t + kara) - to jest
-        # zgadywanka i mapa nie ma prawa pokazać jej jako godziny
-        # (patrz punkt 10 kontraktu).
-        seg["exit_exact"] = [e[3] in target_set for e in seg["exits"]]
-
-    def refresh_suffixes():
-        for seg in segs:
-            suffix = list(seg["exit_vals"])
-            exact = list(seg["exit_exact"])
-            for j in range(len(suffix) - 2, -1, -1):
-                # Minimum z sufiksu niesie ze sobą swoją "dokładność" - jeśli
-                # najlepsza osiągalna stąd wartość pochodzi ze zgadywanki,
-                # to cała ta pozycja jest zgadnięta.
-                if suffix[j + 1] < suffix[j]:
-                    suffix[j] = suffix[j + 1]
-                    exact[j] = exact[j + 1]
-            seg["suffix"] = suffix
-            seg["suffix_exact"] = exact
-            seg["exit_pos"] = [e[0] for e in seg["exits"]]
-
-    def join_value(arr_t, stop, other):
-        """Przyjazd do celu, gdy z (arr_t, stop) wskakujemy w `other`
-        i korzystamy z jego wyjść ZA punktem wskoczenia."""
-        best = None
-        for stop2 in _sibling_places(day, stop):
-            times = other["dep_times"].get(stop2)
-            position = other["pos_of"].get(stop2)
-            if times is None or position is None:
-                continue
-            buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
-            i = bisect_left(times, arr_t + buffer)
-            if i == len(times):
-                continue
-            j = bisect_right(other["exit_pos"], position)
-            if j == len(other["suffix"]):
-                continue          # za punktem wskoczenia nie ma już wyjść
-            shift = max(0, times[i] - other["best_deps"].get(stop2, times[i]))
-            candidate = other["suffix"][j] + shift
-            if best is None or candidate < best:
-                best = candidate
-        return best
-
-    for _ in range(8):        # punkt stały; zbiega w 2-4 obiegach
-        refresh_suffixes()
-        changed = False
-        for seg in segs:
-            for j, (pos, raw_bound, arr_t, stop) in enumerate(seg["exits"]):
-                if stop in target_set:
-                    continue          # wartość = przyjazd, już dokładna
-                best = None
-                for other in passing_index.get(stop, ()):
-                    if other is seg:
-                        continue
-                    value = join_value(arr_t, stop, other)
-                    if value is not None and (best is None or value < best):
-                        best = value
-                # bez widocznej kontynuacji zostaje surowa aproksymacja
-                new_value = raw_bound if best is None else best
-                seg["exit_exact"][j] = best is not None
-                if new_value != seg["exit_vals"][j]:
-                    seg["exit_vals"][j] = new_value
-                    changed = True
-        if not changed:
-            break
-    refresh_suffixes()   # seg["suffix"] musi odzwierciedlać OSTATECZNE exit_vals,
-                          # nawet gdy pętla wyżej urwała się po 8 obiegach bez zbiegnięcia
+        # suffix[j] = najlepsza wartość osiągalna z pozycji j LUB PÓŹNIEJ, czyli
+        # to, co jeszcze zostaje w zasięgu, gdy WCIĄŻ się w tym pojeździe siedzi.
+        # Minimum niesie ze sobą swoją "dokładność": jeśli najlepsze osiągalne
+        # stąd wyjście jest zgadnięte, to cała ta pozycja jest zgadnięta.
+        suffix = list(seg["exit_vals"])
+        exact = list(seg["exit_exact"])
+        for j in range(len(suffix) - 2, -1, -1):
+            if suffix[j + 1] < suffix[j]:
+                suffix[j] = suffix[j + 1]
+                exact[j] = exact[j + 1]
+        # Co zostało na INF, to ogon za ostatnim użytecznym wyjściem (sufiks
+        # jest niemalejący, więc INF-y mogą siedzieć tylko na końcu): dalsza
+        # jazda tym kursem nie prowadzi już nigdzie w oknie. Tu dopiero wchodzi
+        # surowa aproksymacja z _discover_segments - z progiem best_arr, żeby
+        # zgadywanka nie twierdziła, że pobija udowodnione optimum, i niemalejąco,
+        # bo jazda dalej nie może nagle zacząć wyglądać lepiej. exact=False:
+        # mapa nie ma prawa pokazać takiej liczby jako godziny (punkt 10).
+        for j, value in enumerate(suffix):
+            if value == INF:
+                floor = suffix[j - 1] if j else best_arr
+                suffix[j] = max(floor, seg["exits"][j][1], best_arr)
+                exact[j] = False
+        seg["suffix"] = suffix
+        seg["suffix_exact"] = exact
 
     # Rozpiętość skali jasności to NIE cała szerokość okna czasowego
     # (deadline - best_arr), tylko odległość do najgorszego kursu, który
@@ -1048,6 +1143,97 @@ def _refine_brightness(day, segs, target_set, deadline, best_arr):
         # monotoniczny, więc żadnego bezsensownego migotania tam, gdzie nic
         # się nie zmieniło).
         seg["exit_q"] = [q_of(v) for v in seg["suffix"]]
+
+
+def _target_profile(day, target_set, dep_sec, deadline):
+    """Dla KAŻDEGO przystanku: o której najwcześniej jest się w celu, będąc tu
+    o godzinie t. Profilowy CSA - jeden skan wstecz po tych samych połączeniach,
+    które i tak są posortowane po odjeździe.
+
+    To jest odpowiedź ODCZYTANA z rozkładu, nie oszacowana. Zastąpiła
+    zgadywankę, która stąd wyrosła: dawne join_value brało gotową wartość
+    kontynuacji i dodawało do niej `shift` - opóźnienie wsiadania względem
+    kursu, dla którego tamtą wartość policzono - zakładając, że cały dalszy
+    łańcuch przesunie się dokładnie o tyle samo. Rozkład jest sztywny, więc
+    to założenie myli się w obie strony, a przede wszystkim NIE WIE, kiedy
+    późniejszy kurs traci przesiadkę i realny przyjazd skacze o kwadrans.
+    Na relacji LEŚNICA -> BARTOSZOWICE (16:44, 2026-08-29) 116 z 232 wyjść
+    obiecywało w ten sposób przyjazd wcześniejszy, niż da się osiągnąć - do
+    10 minut za wcześnie - a że wartość poniżej optimum i tak jest obcinana
+    do q=1.0, połowa mapy świeciła pełnym blaskiem bez pokrycia.
+
+    Zwraca (neg_deps, arrs): dla przystanku dwie równoległe listy - godziny
+    odjazdu ze znakiem minus (rosnąco, więc bisect działa wprost) i przyjazdy
+    do celu. Obie maleją wzdłuż listy: im wcześniej się tu stoi, tym więcej
+    kursów zostaje do wyboru, więc przyjazd może tylko być wcześniejszy.
+    Wpis dopisujemy TYLKO gdy poprawia - lista jest z definicji Pareto-
+    optymalna i krótka.
+
+    Koszt: 17,7 tys. połączeń w oknie, 23 ms (relacja jak wyżej).
+    """
+    conns = day.conns
+    neg_deps, arrs = {}, {}
+    board_value = {}       # (kurs, słupek) -> przyjazd do celu, wsiadając tu w ten kurs
+    trip_arr = {}          # kurs -> przyjazd do celu, jadąc nim dalej stąd
+
+    def value_at(stop, t):
+        times = neg_deps.get(stop)
+        if times is None:
+            return INF
+        # Wpisy z odjazdem >= t to prefiks listy, a przyjazdy wzdłuż niej
+        # maleją - więc najlepszy z nich stoi na jego końcu.
+        i = bisect_right(times, -t) - 1
+        return arrs[stop][i] if i >= 0 else INF
+
+    # Malejąco po odjeździe: zanim dojdziemy do połączenia, wszystko, na co da
+    # się z niego przesiąść, jest już policzone (tak samo jak w _backward).
+    for i in range(bisect_left(day.dep_times, deadline) - 1, -1, -1):
+        dep_t, arr_t, dep_s, arr_s, trip = conns[i]
+        if dep_t < dep_sec:
+            break
+        # Trzy sposoby dojechania do celu tym połączeniem: wysiąść w celu,
+        # jechać dalej tym samym kursem, przesiąść się na przystanku dojazdu.
+        best = arr_t if arr_s in target_set else INF
+        stay = trip_arr.get(trip, INF)
+        if stay < best:
+            best = stay
+        for stop2 in _sibling_places(day, arr_s):
+            buffer = TRANSFER_SEC if stop2 == arr_s else WALK_SEC
+            value = value_at(stop2, arr_t + buffer)
+            if value < best:
+                best = value
+        if best == INF:
+            continue
+        trip_arr[trip] = best
+        # To samo `best`, tylko zaadresowane inaczej: profil odpowiada "stoję
+        # tu o tej godzinie", a to - "wsiadam TU w TEN kurs". Tablica odjazdów
+        # pyta o to drugie, bo wiersz dotyczy konkretnego odjazdu, nie
+        # najlepszego, jaki stąd jest (patrz _line_deadlines).
+        board_value[(trip, dep_s)] = best
+        known = arrs.get(dep_s)
+        if known is None:
+            neg_deps[dep_s], arrs[dep_s] = [-dep_t], [best]
+        elif best < known[-1]:
+            neg_deps[dep_s].append(-dep_t)
+            known.append(best)
+    return neg_deps, arrs, board_value
+
+
+def _profile_value(day, profile, stop, arr_t):
+    """Wysiadamy na `stop` o `arr_t` - o której najwcześniej jesteśmy w celu?
+    INF, gdy wysiadanie tutaj do niczego nie prowadzi (bywa: gdy jedyną
+    kontynuacją jest ten sam pojazd, na przesiadkę nie ma nawet bufora)."""
+    neg_deps, arrs, _board = profile
+    best = INF
+    for stop2 in _sibling_places(day, stop):
+        buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+        times = neg_deps.get(stop2)
+        if times is None:
+            continue
+        i = bisect_right(times, -(arr_t + buffer)) - 1
+        if i >= 0 and arrs[stop2][i] < best:
+            best = arrs[stop2][i]
+    return best
 
 
 def _catchable(arr_t, buffer, dep_list):
@@ -1458,7 +1644,8 @@ def _corridor_lines(pieces, hop_members):
 
 
 
-def _finalize_segments(day, kept, ranges, geo_db):
+def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
+                       board_value=None, deadline=None):
     """Krok 4: tnie każdy zatrzymany kurs na kawałki DOKŁADNIE tam, gdzie po
     drodze mijamy realną, lepszą kontynuację, z której nie korzystamy (patrz
     seg["exit_q"] w _refine_brightness) - jeden fizyczny kurs może więc
@@ -1562,7 +1749,7 @@ def _finalize_segments(day, kept, ranges, geo_db):
         pieces.items(), key=lambda kv: kv[1][0], reverse=True,
     )
     seg_list = []
-    for (label, stops_seq), (q, shape_id, times, reach, reach_ok) in brightest:
+    for (label, stops_seq), (q, shape_id, times, reach, reach_ok, _headsign) in brightest:
         coords = [day.stop_coords[s] for s in stops_seq]
         path = gtfs.shape_slice(shape_id, coords, geo_db)
         num, mode = _line_parts(label)
@@ -1592,7 +1779,138 @@ def _finalize_segments(day, kept, ranges, geo_db):
             item["corridor"] = corridor
         seg_list.append(item)
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
-    return seg_list
+    return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline)
+
+
+def _rides_back(earliest, board, alight):
+    """Czy ten kawałek WIEZIE Z POWROTEM - mierzone rozkładem, nie geometrią.
+
+    `earliest[stop]` (patrz _forward) to najwcześniejsza godzina, o której da
+    się być na przystanku. Jeśli tam, dokąd ten kurs wiezie, można było być
+    WCZEŚNIEJ niż tam, gdzie stoimy, to jedziemy w miejsce już za nami -
+    przejazd nie daje postępu, tylko cofa. Węzeł nie ma prawa proponować
+    takiego kursu (zgłoszone 2026-08-29: Kamiennogórska oferowała tramwaj 3
+    na Leśnicę osobie, która właśnie z Leśnicy przyjechała).
+
+    To NIE jest nowa reguła - punkt 4 kontraktu mówi ją od początku ("kurs
+    zawracający na JAKIKOLWIEK przystanek, przez który już przejechaliśmy,
+    jest drogą powrotną, nie kontynuacją"). Tyle że egzekwował ją tylko
+    _leads_onward, dla RYSOWANEJ mapy - lista pod kropką jej nie sprawdzała.
+
+    Miara luzu (`_backward`) się do tego nie nadaje: w szerokim oknie objazd
+    o przystanek kosztuje minutę terminu, więc próg cofnięcia go nie łapie.
+    Postęp łapie, bo pyta o coś innego - nie "czy zdążę", tylko "czy to
+    w ogóle jest przede mną".
+
+    Dotyczy WYŁĄCZNIE tego, co węzeł proponuje. Rysowanej mapy nie rusza:
+    stabilność jasności względem szerokości okna zostaje nietknięta
+    (patrz _discover_segments i punkt 9 kontraktu).
+
+    Bez `earliest` (tryb awaryjny) nie odsiewamy nic.
+    """
+    if not earliest:
+        return False
+    here, there = earliest.get(board), earliest.get(alight)
+    if here is None or there is None:
+        return False
+    return there <= here
+
+
+def _line_deadlines(day, stops, board_value, from_sec, deadline):
+    """Dla każdej linii odjeżdżającej z tego miejsca: OSTATNI odjazd, którym
+    jeszcze da się dojechać do celu w oknie mapy.
+
+    To jest mocna wersja reguły "tylko to, co jeszcze zdąży" (punkt 11
+    kontraktu). Słaba, dotychczasowa, sprawdzała tylko, czy sam ODJAZD mieści
+    się w oknie - warunek konieczny, nie wystarczający: autobus odjeżdżający
+    minutę przed zamknięciem okna prawie na pewno do celu w nim nie dowiezie.
+    Tutaj pytamy wprost: wsiadam W TEN kurs W TYM miejscu - o której jestem
+    w celu? Odpowiedź jest odczytana z rozkładu (patrz _target_profile).
+
+    JEDNA godzina na linię wystarczy, bo późniejszy kurs tej samej linii w tę
+    samą stronę nie może dojechać wcześniej niż wcześniejszy - wartość jest
+    względem godziny niemalejąca. Ostatni zdążający odjazd dzieli więc listę
+    na dwie części i front ma do sprawdzenia jedną liczbę na wiersz.
+
+    Linia bez ANI JEDNEGO zdążającego kursu w ogóle nie jest opcją i nie
+    powinna się pojawić na liście.
+    """
+    out = {}
+    for dep, trip, stop in gtfs.departures_between(day, stops, from_sec, deadline):
+        value = board_value.get((trip, stop))
+        if value is None or value > deadline:
+            continue
+        label, headsign = day.trip_info[trip]
+        num, mode = _line_parts(label)
+        key = (num, mode, headsign)
+        if dep > out.get(key, -1):
+            out[key] = dep
+    return out
+
+
+def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None):
+    """Węzły przesiadkowe mapy - to, na czym front stawia kropki z tablicą
+    odjazdów.
+
+    Po jednym na MIEJSCE, nie na słupek: plac z trzema peronami ma być jedną
+    kropką mówiącą wszystko, a nie trzema, z których każda mówi co innego
+    (patrz gtfs._build_places).
+
+    `lines` to linie, w które da się tu WSIĄŚĆ WEDŁUG MAPY - czyli te, których
+    kawałek z tego miejsca się zaczyna. Z kierunkiem, bo ta sama linia mija
+    węzeł w obie strony, a mapa proponuje jedną: bez headsigna tablica
+    pokazywałaby tramwaj jadący dokładnie tam, skąd się przyjechało.
+
+    `sec` to najwcześniejsza godzina, o której można tu być - od niej liczy się
+    "co stąd jeszcze odjedzie". Współrzędne bierzemy z tego samego słupka, co
+    ta godzina, żeby kropka stanęła na peronie, a nie w środku skrzyżowania.
+    """
+    nodes = {}
+    for (label, stops_seq), (_q, _shape, times, _reach, _ok, headsign) in pieces.items():
+        if times is None:
+            continue                     # bez godzin nie ma o co pytać
+        num, mode = _line_parts(label)
+        ends = ((stops_seq[0], times[0], True), (stops_seq[-1], times[-1], False))
+        for stop, when, boarding in ends:
+            key = day.place_of.get(stop, stop)
+            node = nodes.setdefault(key, {"sec": None, "stop": None, "lines": set()})
+            if node["sec"] is None or when < node["sec"]:
+                node["sec"], node["stop"] = when, stop
+            if boarding and not _rides_back(earliest, stops_seq[0], stops_seq[-1]):
+                node["lines"].add((num, mode, headsign))
+
+    out = []
+    for key, node in nodes.items():
+        if not node["lines"]:
+            continue                     # tylko się tu wysiada - nie ma przesiadki
+        # Ostatni odjazd każdej linii, którym jeszcze się zdąży. Liczone dla
+        # WSZYSTKICH słupków miejsca, bo dymek i tak scala je w jedną tablicę.
+        limits = {}
+        if board_value is not None and deadline is not None:
+            limits = _line_deadlines(
+                day, day.stops_by_place.get(key, [node["stop"]]),
+                board_value, node["sec"], deadline,
+            )
+        lines = []
+        for num, kind, headsign in sorted(node["lines"]):
+            depart_by = limits.get((num, kind, headsign))
+            if limits and depart_by is None:
+                continue      # tą linią stąd nie dojedzie się już wcale
+            entry = {"num": num, "kind": kind, "headsign": headsign}
+            if depart_by is not None:
+                entry["depart_by"] = depart_by
+            lines.append(entry)
+        if not lines:
+            continue
+        lat, lon = _round_path([day.stop_coords[node["stop"]]])[0]
+        out.append({
+            "name": day.stop_names[node["stop"]],
+            "lat": lat,
+            "lon": lon,
+            "sec": node["sec"],
+            "lines": lines,
+        })
+    return out
 
 
 def _keep_piece(pieces, seg, start, end, q, reach, reach_ok):
@@ -1611,7 +1929,7 @@ def _keep_piece(pieces, seg, start, end, q, reach, reach_ok):
     entry = pieces.get(key)
     if entry is None or q > entry[0]:
         pieces[key] = (q, seg["shape"], _piece_times(seg, start, end),
-                       reach, reach_ok)
+                       reach, reach_ok, seg["headsign"])
 
 
 def _piece_times(seg, start, end):
@@ -1672,6 +1990,7 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
         "to": day.stop_names[to_stop],
         "to_time": _fmt_time(arr_t),
         "dep_sec": dep_t,
+        "arr_sec": arr_t,
         "minutes": round((arr_t - dep_t) / 60),
         "stops": [day.stop_names[s] for s in stops],
         "stops_count": len(stops) - 1,

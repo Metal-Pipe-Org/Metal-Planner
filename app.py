@@ -12,6 +12,11 @@ from routes import init_routes
 # Python nie zna tego rozszerzenia, a manifest podany jako octet-stream bywa
 # przez przeglądarki ignorowany.
 mimetypes.add_type("application/manifest+json", ".webmanifest")
+# Baza Pythona odpowiada na .m4a "audio/mp4a-latm" - to typ dla surowego
+# strumienia LATM, nie dla pliku MP4, i Safari potrafi go odrzucić. A .m4a
+# jest właśnie dla Safari (nie umie Ogg Opus, patrz PIPE_SOURCES w app.js),
+# więc zły typ zabiłby jedyny format, jaki mu zostaje.
+mimetypes.add_type("audio/mp4", ".m4a")
 
 app = Flask(__name__)
 

@@ -35,3 +35,23 @@ def pkp_api_key():
     musiałby sprawdzać i None, i pusty napis.
     """
     return os.environ.get("PKP_API_KEY", "").strip() or None
+
+
+# Ile odjazdów pokazuje dymek pod kropką przesiadki. Wartość dobrana tak, żeby
+# dymek mieścił się bez przewijania - podnosząc ją, sprawdź, czy nie zasłania
+# mapy, o którą się właśnie pyta.
+TIMETABLE_ROWS_DEFAULT = 8
+TIMETABLE_ROWS_MAX = 20
+
+
+def timetable_rows():
+    """Liczba odjazdów w dymku (TIMETABLE_ROWS z .env albo środowiska).
+
+    Sufit jest po to, żeby literówka w .env nie zamieniła dymka w pełnoekranowy
+    rozkład jazdy przykrywający mapę.
+    """
+    try:
+        rows = int(os.environ.get("TIMETABLE_ROWS", "").strip())
+    except ValueError:
+        return TIMETABLE_ROWS_DEFAULT
+    return max(1, min(rows, TIMETABLE_ROWS_MAX))

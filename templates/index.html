@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body data-timetable-rows="{{ timetable_rows }}">
 
 <div id="map"></div>
 
@@ -259,6 +259,25 @@
             z których można wsiąść lub wysiąść.
         </p>
     </div>
+
+    </details>
+
+    {#
+      SEKCJA SCHOWANA (SOUND_TUNING = false w app.js) — na razie dźwięk po
+      prostu jest, bez ustawienia. Atrybut `hidden` niżej to tylko stan
+      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
+    #}
+    <details class="dev-fold" id="fold-sound" hidden>
+    <summary>Dźwięk</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="sound-pipe"> Metalowa rura po znalezieniu trasy
+        </label>
+        <p class="field-hint">
+            Spadająca rura. Milczy, gdy system prosi o ograniczenie animacji
+            (<code>prefers-reduced-motion</code>) i gdy przeglądarka nie
+            pozwala jeszcze grać.
+        </p>
 
     </details>
 

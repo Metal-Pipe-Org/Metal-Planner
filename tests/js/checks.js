@@ -254,4 +254,343 @@ checks.tryb_awaryjny_mowi_o_sobie_na_ekranie = (() => {
     };
 })();
 
+// --- kropki przystanków na trasie i ich tablica odjazdów -------------------
+
+/* Legs zbudowane tu na miejscu, nie z fixture'a: kropka pyta o `arr_sec`,
+   a to pole młodsze od zapisanej odpowiedzi - fixture i tak testuje co
+   innego (mapę przepływów), więc nie ma po co go pod to przestawiać. */
+const LEGS = [
+    {kind: 'ride', mode: 'bus', num: '134', from: 'Sosnowiecka', to: 'Bardzka',
+     dep_sec: 57180, arr_sec: 57960, path: [[51.08, 17.06], [51.09, 17.05], [51.10, 17.04]]},
+    {kind: 'walk', minutes: 3, path: [[51.10, 17.04], [51.10, 17.041]]},
+    {kind: 'ride', mode: 'tram', num: '5', from: 'Bardzka', to: 'RYNEK',
+     dep_sec: 58080, arr_sec: 58560, path: [[51.10, 17.041], [51.11, 17.03]]},
+];
+
+const dotsOf = layers => layers.filter(l => l.kind === 'circleMarker');
+
+checks.stop_dots = (() => {
+    const dots = dotsOf(app.legLayers(LEGS, {preview: false}));
+    // Po jednej na wsiadanie i wysiadanie każdego z dwóch przejazdów.
+    const zTooltipem = dots.filter(d => d._tooltip);
+    const doNajechania = dots.filter(d => d.options.interactive !== false);
+    return {
+        ok: dots.length === 4 && zTooltipem.length === 4 && doNajechania.length === 4,
+        dots: dots.length,
+        withTooltip: zTooltipem.length,
+        hoverable: doNajechania.length,
+    };
+})();
+
+checks.stop_dots_only_when_drawn = (() => {
+    // Podgląd pod kursorem na liście nie ma kropek do najechania - myszka
+    // jest wtedy nad kartą, nie nad mapą, a warstwa i tak zaraz znika.
+    const dots = dotsOf(app.legLayers(LEGS, {preview: true}));
+    return {ok: dots.length === 0, dots: dots.length};
+})();
+
+checks.timetable_html = (() => {
+    const html = app.timetableHtml({
+        stop: 'Bardzka',
+        from_time: '16:06',
+        departures: [
+            {time: '16:06', sec: 57960, in_min: 0, num: '134', mode: 'bus',
+             headsign: 'LEŚNICA'},
+            {time: '16:08', sec: 58080, in_min: 2, num: '5', mode: 'tram',
+             headsign: 'BISKUPIN'},
+            // drugi kurs 134 - ma się ZWINĄĆ w notkę przy pierwszym,
+            // a nie stanąć jako trzeci wiersz
+            {time: '16:16', sec: 58560, in_min: 10, num: '134', mode: 'bus',
+             headsign: 'LEŚNICA'},
+        ],
+    });
+    const wierszy = (html.match(/<li>/g) || []).length;
+    return {
+        ok: html.includes('Bardzka') && html.includes('16:06')
+            && html.includes('badge bus') && html.includes('badge tram')
+            && html.includes('LEŚNICA')
+            && html.includes('2 min')
+            && wierszy === 2                     // 3 odjazdy -> 2 wiersze
+            // Rytm w TEJ SAMEJ linii co "za ile" (nie osobnym wierszem),
+            // a najbliższy odjazd to "0 min", nie "teraz" - nagłówek mówi
+            // "od 16:06" i to nie jest godzina zegarowa.
+            && html.includes('0 min<small> · co 10 min</small>')
+            && !html.includes('teraz'),
+        wierszy,
+        html: html.slice(0, 200),
+    };
+})();
+
+checks.timetable_html_empty = (() => {
+    const html = app.timetableHtml({stop: 'Pętla', from_time: '23:59', departures: []});
+    return {ok: html.includes('Pętla') && html.includes('tt-note'), html};
+})();
+
+/* Kursor nad kropką ma wyłączać dymek "tu jesteś" z mapy przepływów: kropka
+   leży na narysowanej linii, więc bez pierwszeństwa oba dymki wychodzą jeden
+   na drugim (widać to było na wąskim ekranie). */
+checks.pierwszenstwo_kropki_nad_dymkiem_przeplywow = (() => {
+    app.drawFlow(FLOW_FIXTURE, false);
+
+    // Punkt, w którym naprawdę coś narysowano - inaczej sprawdzenie
+    // przechodziłoby na pusto.
+    let point = null;
+    for (const h of app.flowHits) {
+        const at = app.map.latLngToContainerPoint(h.latlngs[0]);
+        if (app.flowHitsAt(at).length) { point = at; break; }
+    }
+    if (!point) return {ok: false, powod: 'nie ma w co trafić kursorem'};
+
+    const najedz = () => app.handleFlowHover({
+        containerPoint: point,
+        latlng: app.map.containerPointToLatLng(point),
+        originalEvent: {target: null},
+    });
+
+    najedz();
+    const bezKropki = !!app.flowPick;
+
+    // ...a teraz to samo miejsce, tyle że kursor wszedł na kropkę
+    const dot = app.legLayers(LEGS, {preview: false})
+                   .filter(l => l.kind === 'circleMarker')[0];
+    dot.fire('mouseover');
+    najedz();
+    const zKropka = !!app.flowPick;
+
+    dot.fire('mouseout');
+    najedz();
+    const poZejsciu = !!app.flowPick;
+
+    return {
+        ok: bezKropki && !zKropka && poZejsciu,
+        dymek_bez_kropki: bezKropki,
+        dymek_gdy_kursor_na_kropce: zKropka,
+        dymek_po_zejsciu_z_kropki: poZejsciu,
+    };
+})();
+
+/* Ten sam punkt ma dawać ZAWSZE tę samą godzinę. Dwa kursy tej samej linii
+   leżą na mapie jeden na drugim, a hity są posortowane po pikselach - branie
+   pierwszego z brzegu sprawiało, że drgnięcie kursora przestawiało "tu jesteś"
+   o kwadrans (zgłoszone 2026-08-29). Wygrywa kurs z najwcześniejszym "u celu". */
+checks.ten_sam_punkt_ta_sama_godzina = (() => {
+    const hit = (num, arrive, dist) => ({dist, seg: {num, kind: 'bus', arrive}});
+    // kolejność jak z flowHitsAt: rosnąco po odległości w pikselach
+    const hits = [hit('102', 51000, 0.5), hit('102', 49800, 1.4), hit('9', 40000, 0.9)];
+
+    const wybrany = app.hitFor(hits, '102', 'bus');
+    // ...a teraz to samo, tylko kursor drgnął i kolejność się odwróciła
+    const odwrotnie = app.hitFor(
+        [hits[1], hits[0], hits[2]].map(h => ({...h})), '102', 'bus');
+
+    return {
+        ok: wybrany.seg.arrive === 49800
+            && odwrotnie.seg.arrive === 49800
+            && app.hitFor(hits, '9', 'bus').seg.arrive === 40000
+            && app.hitFor(hits, '77', 'bus') === null,
+        wybrany: wybrany.seg.arrive,
+        po_drgnieciu: odwrotnie.seg.arrive,
+    };
+})();
+
+/* Kawałek bez odczytanej godziny u celu nie ma prawa wygrać z takim, który ją
+   ma - inaczej dymek traciłby liczbę, którą wcześniej pokazywał. */
+checks.kawalek_bez_godziny_nie_wygrywa = (() => {
+    const hit = (arrive, dist) => ({dist, seg: {num: '5', kind: 'tram', arrive}});
+    const zPrzodu = app.hitFor([hit(undefined, 0.2), hit(52000, 1.1)], '5', 'tram');
+    const zTylu = app.hitFor([hit(52000, 0.2), hit(undefined, 1.1)], '5', 'tram');
+    const zadenNieMa = app.hitFor([hit(undefined, 0.2), hit(undefined, 1.1)], '5', 'tram');
+    return {
+        ok: zPrzodu.seg.arrive === 52000 && zTylu.seg.arrive === 52000
+            && zadenNieMa !== null,
+        z_przodu: zPrzodu.seg.arrive, z_tylu: zTylu.seg.arrive,
+    };
+})();
+
+/* Kropki wachlarza: po jednej na węzeł z backendu, każda do najechania. */
+checks.kropki_wachlarza = (() => {
+    const dots = app.flowStopDots([
+        {name: 'PILCZYCE', lat: 51.13, lon: 16.95, sec: 48720,
+         lines: [{num: '3', kind: 'tram', headsign: 'KSIĘŻE MAŁE'}]},
+        {name: 'Rondo', lat: 51.11, lon: 17.01, sec: 49000, lines: []},
+    ]);
+    return {
+        ok: dots.length === 2 && dots.every(d => d._tooltip),
+        kropek: dots.length,
+        z_tooltipem: dots.filter(d => d._tooltip).length,
+    };
+})();
+
+/* Tablica pokazuje tylko to, w co MAPA pozwala tu wsiąść - z kierunkiem,
+   bo ta sama linia mija węzeł w obie strony (zgłoszone 2026-08-29:
+   dymek na Pilczycach wypisywał tramwaj jadący tam, skąd się przyjechało). */
+checks.tablica_tylko_to_co_mapa_oferuje = (() => {
+    const dep = (num, mode, headsign) => ({time: '13:32', in_min: 0, num, mode, headsign});
+    const data = {stop: 'PILCZYCE', from_time: '13:32', departures: [
+        dep('3', 'tram', 'KSIĘŻE MAŁE'),
+        dep('3', 'tram', 'LEŚNICA'),      // ta sama trójka, druga strona
+        dep('152', 'bus', 'BLACHARSKA'),  // mapa jej stąd nie proponuje
+        dep('20', 'tram', 'LEŚNICA'),
+    ]};
+    const lines = [{num: '3', kind: 'tram', headsign: 'KSIĘŻE MAŁE'},
+                   {num: '20', kind: 'tram', headsign: 'LEŚNICA'}];
+    const zostalo = app.keepOfferedLines(data, lines).departures;
+    const bezFiltra = app.keepOfferedLines(data, null).departures;
+    return {
+        ok: zostalo.length === 2
+            && zostalo[0].headsign === 'KSIĘŻE MAŁE'
+            && zostalo[1].num === '20'
+            && bezFiltra.length === 4,
+        zostalo: zostalo.map(d => d.num + '→' + d.headsign),
+    };
+})();
+
+/* Mocna wersja "tylko to, co jeszcze zdąży": nie "czy odjazd mieści się
+   w oknie mapy" (warunek konieczny), tylko "czy TYM kursem w ogóle się
+   dojedzie" - serwer podaje przy linii ostatni taki odjazd (depart_by,
+   patrz planner._line_deadlines). */
+checks.odjazd_ktorym_sie_nie_zdazy_wypada = (() => {
+    const dep = (sec, num, headsign) => ({time: '00:00', sec, in_min: 0,
+                                          num, mode: 'tram', headsign});
+    const data = {stop: 'PILCZYCE', from_time: '17:00', departures: [
+        dep(61200, '3', 'KSIĘŻE MAŁE'),   // 17:00 - zdąży
+        dep(61800, '3', 'KSIĘŻE MAŁE'),   // 17:10 - ostatni, który zdąży
+        dep(62400, '3', 'KSIĘŻE MAŁE'),   // 17:20 - już nie
+        dep(62400, '20', 'OPORÓW'),       // inna linia, inny termin - zdąży
+    ]};
+    const lines = [
+        {num: '3', kind: 'tram', headsign: 'KSIĘŻE MAŁE', depart_by: 61800},
+        {num: '20', kind: 'tram', headsign: 'OPORÓW', depart_by: 63000},
+    ];
+    const zostalo = app.keepOfferedLines(data, lines).departures;
+    // Bez depart_by (np. odpowiedź z cache'u sprzed zmiany) nie wycinamy nic -
+    // brak liczby nie jest powodem do gubienia wierszy.
+    const bezTerminu = app.keepOfferedLines(data, lines.map(
+        ({num, kind, headsign}) => ({num, kind, headsign}))).departures;
+    return {
+        ok: zostalo.length === 3 && !zostalo.some(d => d.num === '3' && d.sec === 62400)
+            && bezTerminu.length === 4,
+        zostalo: zostalo.map(d => d.num + '@' + d.sec),
+    };
+})();
+
+/* Osiem odjazdów jednej linii to nie osiem opcji, tylko jedna opcja i jej
+   rytm. Zostaje jeden wiersz: najbliższy odjazd + "co X min". */
+checks.powtorzenia_zwijaja_sie_w_notke = (() => {
+    const dep = (min, num, headsign) => ({time: '00:00', sec: min * 60, in_min: min,
+                                          num, mode: 'tram', headsign});
+    const wynik = app.summariseRepeats([
+        dep(4, '3', 'LEŚNICA'), dep(12, '20', 'OPORÓW'), dep(19, '3', 'LEŚNICA'),
+        dep(34, '3', 'LEŚNICA'), dep(49, '3', 'LEŚNICA'),
+    ]);
+    const trojka = wynik.find(d => d.num === '3');
+    const dwudziestka = wynik.find(d => d.num === '20');
+    return {
+        ok: wynik.length === 2                      // jeden wiersz na linię
+            && trojka.in_min === 4                  // najbliższy, nie któryś dalszy
+            && trojka.every_min === 15              // ...i rytm w notce
+            && dwudziestka.every_min === undefined  // pojedynczy kurs bez notki
+            && wynik[0].num === '3',                // kolejność po najbliższym
+        wiersze: wynik.map(d => `${d.num} za ${d.in_min}` +
+                                (d.every_min ? ` co ${d.every_min}` : '')),
+    };
+})();
+
+/* Odstęp to MEDIANA - jeden nocny przeskok nie ma prawa opisać taktu. */
+checks.rytm_z_mediany_nie_ze_sredniej = (() => {
+    const dep = min => ({time: '00:00', sec: min * 60, in_min: min,
+                         num: '5', mode: 'tram', headsign: 'KRZYKI'});
+    // przerwy: 10, 10, 10, 120 -> mediana 10, średnia 37,5
+    const wynik = app.summariseRepeats([dep(0), dep(10), dep(20), dep(30), dep(150)]);
+    return {ok: wynik[0].every_min === 10, every_min: wynik[0].every_min};
+})();
+
+/* Kierunek to osobna opcja - i osobny wiersz z własnym rytmem. */
+checks.notka_rozroznia_kierunki = (() => {
+    const dep = (min, headsign) => ({time: '00:00', sec: min * 60, in_min: min,
+                                     num: '3', mode: 'tram', headsign});
+    const wynik = app.summariseRepeats([dep(0, 'LEŚNICA'), dep(2, 'KSIĘŻE MAŁE'),
+                                        dep(20, 'LEŚNICA'), dep(22, 'KSIĘŻE MAŁE')]);
+    return {
+        ok: wynik.length === 2 && wynik.every(d => d.every_min === 20),
+        wiersze: wynik.map(d => d.headsign + ' co ' + d.every_min),
+    };
+})();
+
+/* Liczba wierszy przychodzi z konfigu serwera, nie jest wpisana w kod. */
+checks.liczba_wierszy_z_konfigu = (() => ({
+    ok: app.TIMETABLE_ROWS === 8,          // harness podaje data-timetable-rows="8"
+    rows: app.TIMETABLE_ROWS,
+}))();
+
+/* Odjazd po zamknięciu okna mapy nie należy do żadnego rysowanego wariantu.
+   Warunek konieczny, nie wystarczający - mocniejszy odsiew wymagałby godzin
+   przyjazdu kawałków, a te bywają niemożliwe (patrz punkt 11 kontraktu). */
+checks.odjazdy_za_horyzontem_wypadaja = (() => {
+    const dep = sec => ({time: '00:00', sec, in_min: 0, num: '107',
+                         mode: 'bus', headsign: 'PRACZE'});
+    const data = {stop: 'Halicka', from_time: '14:21',
+                  departures: [dep(51660), dep(52860), dep(53460), dep(55260)]};
+    const zostalo = app.keepWithinHorizon(data, 52860).departures;
+    const bezHoryzontu = app.keepWithinHorizon(data, null).departures;
+    return {
+        // 52860 to sam horyzont - mieści się, dopiero późniejsze wypadają
+        ok: zostalo.length === 2 && bezHoryzontu.length === 4,
+        zostalo: zostalo.map(d => d.sec),
+    };
+})();
+
+
+// --- dźwięk spadającej rury ------------------------------------------------
+
+function nagrajDzwiek(fn) {
+    const przed = {zagrane: audioLog.zagrane, przewiniete: audioLog.przewiniete};
+    fn();
+    return {
+        zagrane: audioLog.zagrane - przed.zagrane,
+        przewiniete: audioLog.przewiniete - przed.przewiniete,
+        zrodlo: audioLog.ostatni,
+    };
+}
+
+checks.dzwiek_wybiera_format_ktory_przegladarka_umie = (() => {
+    // Emulator udaje przeglądarkę bez Ogg Opus, ale z AAC - czyli Safari.
+    // Ma sięgnąć po drugi plik, a nie po pierwszy z listy.
+    app.soundOpts.pipe = true;
+    const w = nagrajDzwiek(() => app.playPipeDrop());
+    return {
+        ok: w.zagrane === 1 && /metal-pipe\.m4a$/.test(w.zrodlo || ''),
+        zrodlo: w.zrodlo,
+        formaty: app.PIPE_SOURCES.map(s => s[0]),
+    };
+})();
+
+checks.dzwiek_gra_od_poczatku_przy_powtorzeniu = (() => {
+    // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać od nowa,
+    // a nie zostać po cichu pominięte.
+    app.soundOpts.pipe = true;
+    const w = nagrajDzwiek(() => { app.playPipeDrop(); app.playPipeDrop(); });
+    return {ok: w.zagrane === 2 && w.przewiniete === 2, ...w};
+})();
+
+checks.dzwiek_milczy_przy_ograniczonym_ruchu = (() => {
+    app.soundOpts.pipe = true;
+    globalThis.__mniejRuchu = true;
+    const w = nagrajDzwiek(() => app.playPipeDrop());
+    globalThis.__mniejRuchu = false;
+    return {ok: w.zagrane === 0, ...w};
+})();
+
+checks.dzwiek_milczy_gdy_wylaczony = (() => {
+    app.soundOpts.pipe = false;
+    const w = nagrajDzwiek(() => app.playPipeDrop());
+    app.soundOpts.pipe = true;
+    return {ok: w.zagrane === 0, ...w};
+})();
+
+checks.nagranie_nie_gra_na_pelnej_glosnosci = (() => {
+    // Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm, nie żart.
+    return {ok: app.PIPE_VOLUME > 0 && app.PIPE_VOLUME < 0.6, glosnosc: app.PIPE_VOLUME};
+})();
+
 JSON.stringify(checks);

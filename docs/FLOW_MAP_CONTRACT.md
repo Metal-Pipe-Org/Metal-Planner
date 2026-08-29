@@ -160,6 +160,43 @@ jakości trasy — nie zmienia jasności, grubości ani koloru linii (punkty 1,
 6, 8, 9). Wchodzi wyłącznie jako liczba dopisana obok. Wyłączenie czasu
 zostawia mapę dokładnie taką, jaka była, zanim czas się na niej pojawił.
 
+## 11. Mapa pokazuje, gdzie i w co można się przesiąść
+
+Wachlarz rysuje przejazdy, ale przesiadka jest w nim punktem, nie linią —
+i dopóki nie ma o nią jak zapytać, mapa odpowiada tylko na „którędy”, a nie
+na pytanie zadawane naprawdę w tym miejscu: „a jak mi ucieknie?”.
+
+**Gdzie stoi kropka.** Tam, gdzie mapa widzi sensowne wysiadanie — nie na
+każdym mijanym przystanku. **Jedna na MIEJSCE, nie na słupek:** plac z trzema
+peronami to jedna przesiadka, a grupowanie jest to samo, którym rozkład
+rozpoznaje miejsce — nie odległość na ekranie.
+
+**Co pokazuje.** Odjazdy stąd: godzinę, linię, kierunek i za ile.
+
+**Tylko to, czym MAPA pozwala stąd jechać** — nie wszystko, co tędy
+przejeżdża. Linia, której mapa stąd nie proponuje, wypisana wygląda jak opcja,
+a nią nie jest. Kierunek jest częścią tożsamości linii: ta sama linia mija
+węzeł w obie strony, a mapa proponuje jedną.
+
+**Tylko to, co jeszcze zdąży.** Odjazd, którym nie da się dojechać do celu
+w oknie, które mapa rysuje, to szum udający opcję.
+
+**Powtórzenia to jeden wiersz.** Kolejne kursy tej samej linii nie są kolejnymi
+opcjami, tylko rytmem jednej: najbliższy odjazd i „co X min”. Ani wypisywania
+wszystkich, ani gubienia części.
+
+**Godzina, od której liczymy.** Najwcześniejsza, o której według mapy można tu
+być — nie „teraz” i nie godzina z formularza. Na osi doby rozkładowej, nie
+zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
+
+**Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
+ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne
+kursy — rozstrzyga jedna, jawna reguła, nie to, który jest bliżej w pikselach.
+
+**Czego kropka nie rusza.** Tak jak czas (punkt 10): nie zajmuje żadnego
+kanału zarezerwowanego dla jakości trasy — nie zmienia jasności, grubości ani
+koloru. Zdjęcie kropek zostawia mapę dokładnie taką, jaka była.
+
 ## Priorytet: poprawność przed szybkością
 
 Rozsądna szybkość działania jest pożądana, ale nigdy kosztem poprawności.
