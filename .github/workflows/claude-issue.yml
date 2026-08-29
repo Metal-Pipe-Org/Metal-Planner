@@ -63,5 +63,6 @@ jobs:
             w wątku. Przeczytaj całą dyskusję: najświeższy wpis jest wiążący —
             jeśli doprecyzowuje albo zmienia treść zgłoszenia, trzymaj się jego.
           claude_args: |
+            --model claude-sonnet-5
             --max-turns 40
             --allowedTools 'Read,Glob,Grep,Edit,MultiEdit,Write,Bash(python:*),Bash(python3:*),Bash(pytest:*),Bash(pip:*),Bash(git:*),Bash(gh:*)'
