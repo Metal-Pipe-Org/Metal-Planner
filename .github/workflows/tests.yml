@@ -1,6 +1,6 @@
-name: CI
+name: Automatyczne testy
 
-# Uruchamiany wyłącznie ręcznie (Actions -> CI -> Run workflow).
+# Uruchamiany wyłącznie ręcznie (Actions -> Automatyczne testy -> Run workflow).
 # Testy na `main` wymagają data/gtfs.sqlite, którego nie ma w repo, więc na
 # świeżym klonie 14 z nich pada. Automatyczne wyzwalacze wracają, gdy na `main`
 # trafi hermetyczny zestaw testów z `testing`:
