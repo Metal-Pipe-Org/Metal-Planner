@@ -1891,6 +1891,15 @@ function saveLastSearch() {
     }
 }
 
+/** Wołane przy X - zapomniana trasa nie ma wracać po odświeżeniu strony. */
+function forgetLastSearch() {
+    try {
+        localStorage.removeItem(LAST_SEARCH_KEY);
+    } catch {
+        // localStorage niedostępny - nie ma czego czyścić
+    }
+}
+
 /** Ostatnie wyszukiwanie (skąd/dokąd) wraca po odświeżeniu strony - tylko
     gdy pola są jeszcze puste (nie nadpisujemy tego, co user już zdążył
     wpisać, zanim ten kod się uruchomił). Godzina wraca sama z siebie do
@@ -2120,6 +2129,7 @@ $('clear').addEventListener('click', () => {
     resetResults();
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
+    forgetLastSearch();
 });
 
 // Suwaki panelu deweloperskiego: etykieta od razu, mapa i lista propozycji
