@@ -1,5 +1,8 @@
 # Metal-Planner
 
+wszystko z brancha testing jest na https://metal-testing.sze.one/
+wszystko z brancha main jest na https://metal.sze.one/
+
 Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej
 wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz** —
 główne korytarze jaskrawo, niszowe objazdy ledwo widocznie — a obok, w panelu,

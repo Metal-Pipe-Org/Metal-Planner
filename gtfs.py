@@ -9,6 +9,7 @@ import math
 import re
 import sqlite3
 import sys
+from bisect import bisect_left
 from datetime import timedelta
 from pathlib import Path
 
@@ -140,7 +141,7 @@ class DayData:
         "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
         "display_name", "stops_by_norm_key", "norm_display_name",
         "siblings", "trip_info", "trip_shape",
-        "stops_by_place", "place_of", "conns_by_trip",
+        "stops_by_place", "place_of", "conns_by_trip", "deps_by_stop",
     )
 
     def __init__(self):
@@ -161,6 +162,7 @@ class DayData:
         self.stops_by_place = {}     # klucz miejsca -> [stop_id, ...] (patrz _build_places)
         self.place_of = {}           # stop_id -> klucz miejsca
         self.conns_by_trip = None    # kurs -> indeksy w conns (leniwie, patrz trip_conns)
+        self.deps_by_stop = None     # słupek -> odjazdy (leniwie, patrz stop_departures)
 
 
 def _connect():
@@ -340,6 +342,33 @@ def nearby_stops(lat, lon, day, radius_m, max_n=LAST_MILE_MAX_STOPS):
     in_range.sort()
     triggers = [stop_id for _, stop_id in in_range[:max_n]]
     return set(_expand_to_places(day, triggers))
+
+
+STOP_SNAP_M = 60   # kropka na mapie stoi NA słupku, nie "gdzieś w okolicy"
+
+
+def stop_at(lat, lon, data, max_m=STOP_SNAP_M):
+    """Przystanek pod wskazanym punktem: (nazwa, [stop_id, ...] całego miejsca).
+
+    Do pytania o kropkę narysowaną na słupku - front zna jej współrzędne, ale
+    nie nazwę. Inaczej niż nearby_stops, które zbiera wszystko w promieniu
+    dojścia i odpowiada na zupełnie inne pytanie ("skąd mogę tu zacząć"): tu
+    punkt ma trafić w JEDEN konkretny słupek, więc promień jest mały, a wynik
+    to ten najbliższy, dociągnięty do reszty swojego miejsca
+    (patrz _expand_to_places).
+
+    (None, None) gdy w zasięgu nie ma nic - lepsze niż odpowiedź o przystanku
+    oddalonym o pół kilometra.
+    """
+    best_dist = None
+    best_stop = None
+    for stop_id, (slat, slon) in data.stop_coords.items():
+        dist = _haversine_m(lat, lon, slat, slon)
+        if dist <= max_m and (best_dist is None or dist < best_dist):
+            best_dist, best_stop = dist, stop_id
+    if best_stop is None:
+        return None, None
+    return data.stop_names[best_stop], _expand_to_places(data, [best_stop])
 
 
 def match_stop(query, data):
@@ -581,6 +610,65 @@ def trip_conns(data, trip_id):
             index.setdefault(conn[4], []).append(i)
         data.conns_by_trip = index
     return data.conns_by_trip.get(trip_id, ())
+
+
+def stop_departures(data, stop_ids, from_sec, limit=20):
+    """Najbliższe odjazdy z podanych słupków, od `from_sec` na osi dnia.
+
+    Zwraca [(odjazd, trip_id, stop_id), ...] po kolei, najwyżej `limit`.
+
+    Indeks słupek -> odjazdy budujemy przy pierwszym pytaniu i trzymamy przy
+    DayData - tak samo jak conns_by_trip (patrz trip_conns). Skan CSA go nie
+    potrzebuje, więc dopóki nikt nie najedzie na kropkę przesiadki, nie ma po
+    co go liczyć.
+
+    Ostatni przystanek kursu nie ma tu wpisu: połączenia opisują przejazd
+    MIĘDZY słupkami, a na pętli i tak nie ma do czego wsiąść.
+    """
+    if data.deps_by_stop is None:
+        index = {}
+        # conns są posortowane po odjeździe, więc każda lista wychodzi z tej
+        # pętli już uporządkowana - bisect niżej może na tym polegać.
+        for dep, _arr, from_stop, _to_stop, trip in data.conns:
+            index.setdefault(from_stop, []).append((dep, trip))
+        data.deps_by_stop = index
+
+    upcoming = []
+    for stop_id in stop_ids:
+        deps = data.deps_by_stop.get(stop_id)
+        if not deps:
+            continue
+        start = bisect_left(deps, (from_sec,))
+        upcoming.extend(
+            (dep, trip, stop_id) for dep, trip in deps[start:start + limit]
+        )
+    upcoming.sort()
+    return upcoming[:limit]
+
+
+def departures_between(data, stop_ids, from_sec, to_sec):
+    """Wszystkie odjazdy z podanych słupków w oknie [from_sec, to_sec].
+
+    Jak stop_departures, ale bez limitu sztuk - bo pytanie jest inne. Tablica
+    odjazdów pyta "co najbliżej", a to jest do policzenia, KTÓRYM ostatnim
+    kursem danej linii jeszcze się gdzieś zdąży (patrz planner._line_deadlines):
+    tam obcięcie po liczbie sztuk dałoby odpowiedź zależną od limitu, a nie od
+    rozkładu. Oknem jest i tak horyzont mapy, więc lista nie rośnie w
+    nieskończoność.
+    """
+    stop_departures(data, (), from_sec, 0)      # dociąga indeks deps_by_stop
+    out = []
+    for stop_id in stop_ids:
+        deps = data.deps_by_stop.get(stop_id)
+        if not deps:
+            continue
+        start = bisect_left(deps, (from_sec,))
+        for dep, trip in deps[start:]:
+            if dep > to_sec:
+                break
+            out.append((dep, trip, stop_id))
+    out.sort()
+    return out
 
 
 def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None):

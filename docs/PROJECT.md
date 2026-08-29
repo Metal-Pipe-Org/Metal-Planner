@@ -91,7 +91,7 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
   — zwraca teraz w jednej odpowiedzi i segmenty do rysowania, i listę
   gotowych propozycji, czytaną wprost z tego samego grafu) — opis niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
-  `/api/flow` (szczegóły w sekcji API).
+  `/api/flow`, `/api/timetable` (szczegóły w sekcji API).
 
 ### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 
@@ -422,10 +422,34 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   journeys: [{departure, arrival, duration_min, wait_min, transfers,
   legs: [...]}, …]}`. `segments` posortowane rosnąco po `w` (kolejność
   rysowania); `path` to kolejne przystanki od wsiadania do ostatniego
-  użytecznego wyjścia. `journeys` posortowane po godzinie przyjazdu; etap
+  użytecznego wyjścia. `nodes` to węzły przesiadkowe pod kropki na mapie:
+  `[{name, lat, lon, sec, lines: [{num, kind, headsign}, …]}, …]` — po jednym
+  na MIEJSCE, nie na słupek (plac z trzema peronami to jedna kropka), `sec` =
+  najwcześniejsza godzina, o której można tam być, `lines` = linie, w które
+  MAPA pozwala tam wsiąść, z kierunkiem (ta sama linia mija węzeł w obie
+  strony, a mapa proponuje jedną). Węzeł, z którego nie da się w nic wsiąść,
+  nie trafia na listę — nie ma tam przesiadki.
+  `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
-  to, to_time, minutes, stops, stops_count, path}`; etap pieszy:
-  `{kind: "walk", text, minutes, from, to, path}`.
+  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, path}`; etap
+  pieszy: `{kind: "walk", text, minutes, from, to, path}`. `dep_sec`/`arr_sec`
+  to sekundy na osi doby rozkładowej (mogą przekroczyć 24 h) — `from_time`
+  i `to_time` po północy zawijają się do `00:xx` i nie da się z nich odtworzyć
+  doby (patrz `/api/timetable`).
+- `GET /api/timetable?stop=&date=&from_sec=&limit=` (albo `lat`/`lon`
+  zamiast `stop`) — tablica odjazdów jednego przystanku, pod dymek kropki
+  przesiadki na mapie:
+  `{stop, from_time, departures: [{time, in_min, line, num, mode, headsign},
+  …]}`, najbliższe 8, po kolei. Przystanek rozumiany jako MIEJSCE (wszystkie
+  słupki, patrz `gtfs.match_stop`) — na węźle pasażer pyta o wszystko, co
+  stąd odjeżdża, a nie o peron, przy którym wysiadł. `from_sec` podaje
+  godzinę na osi doby rozkładowej; bez niego liczymy od godziny z `time`.
+  Ostatni przystanek kursu nie ma odjazdów — `departures` bywa puste.
+  Wersji z `lat`/`lon` używa mapa przepływów: kropki stawia z geometrii
+  kawałków, więc zna położenie słupka, a nie jego nazwę (`gtfs.stop_at`
+  dociąga najbliższy słupek w promieniu 60 m i całe jego miejsce).
+  `limit` (domyślnie 8, sufit 60) podnosi mapa przepływów: z tej listy
+  zostawia potem tylko linie z `nodes[].lines`, więc musi dostać z zapasem.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -451,6 +475,144 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-08-29** — dźwięk spadającej metalowej rury po znalezieniu trasy
+  (`static/sounds/`). Nagranie, nie synteza. Dwa formaty, bo jeden nie
+  wystarcza: Ogg Opus i AAC w m4a dla Safari, wybór przez `canPlayType`;
+  oba w powłoce service workera, więc grają offline. Przyciszone do 0.35,
+  bo nagranie ma szczyt ponad 0 dBFS. Milczy przy `prefers-reduced-motion`.
+  Gra tylko po WYSZUKANIU — suwaki w panelu ⚙ też wołają `loadPlan`
+  i mają zostać ciche. Ustawienie jest schowane (`SOUND_TUNING = false`,
+  ten sam układ co `LOOK_TUNING`).
+
+- **2026-08-29** — mocna wersja reguły „tylko to, co jeszcze zdąży"
+  (`planner._line_deadlines`). Dotąd dymek odsiewał odjazdy warunkiem
+  KONIECZNYM — „czy odjazd mieści się w oknie mapy" — a to za mało:
+  autobus ruszający minutę przed zamknięciem okna do celu w nim nie dowiezie.
+  Teraz węzeł niesie przy każdej linii `depart_by`: ostatni odjazd, którym
+  DA SIĘ dojechać, odczytany z profilu (wsiadam w ten kurs tutaj — o której
+  jestem w celu). Jedna liczba na linię wystarcza, bo późniejszy kurs tej
+  samej linii w tę samą stronę nie dojedzie wcześniej.
+  `LEŚNICA → BARTOSZOWICE, 16:44`: stara reguła zostawiała 245 odjazdów,
+  nowa 115 — **130 wierszy udawało opcję, nie będąc nią**. Podobnie na
+  innych relacjach (118 z 223, 361 z 712). Linia, którą stąd nie dojedzie
+  się już wcale, znika z listy w całości.
+
+- **2026-08-29** — narysowany kurs urywa się tam, gdzie zawraca (punkt 4
+  kontraktu). Zgłoszone na autobusie 102 pod Kosmonautów: mapa rysowała
+  wjazd na pętlę i powrót tą samą ulicą. Porównujemy MIEJSCA, nie słupki —
+  pętla nawrotowa ma zwykle osobny słupek w każdą stronę. Ale dwa SĄSIEDNIE
+  przystanki jednego miejsca to nie zawrócenie, tylko grubsze grupowanie:
+  tramwaj 7 mija tak dwa razy Kamieńskiego, jadąc prosto na Klecinę, a
+  ucięcie go odbierało jedynemu dojazdowi jego wyjście i cała relacja
+  POŚWIĘTNE → KLECINA spadała do trybu awaryjnego. Zawróceniem jest dopiero
+  powrót o co najmniej dwa kroki. Po zmianie: 569 narysowanych kursów na
+  24 kombinacjach relacja/godzina, **zero powrotów**, bez straty pokrycia
+  (te same liczby kawałków, linii i punktów geometrii) i bez trybu
+  awaryjnego.
+
+- **2026-08-29** — tablica odjazdów: rytm powtórzeń („co X min") stoi w tej
+  samej linii co „za ile", a nie pod nim — osobny wiersz podnosił wysokość
+  akurat tym pozycjom, które się powtarzają, i tablica przestawała być
+  równa (wszystkie wiersze mają teraz 22,8 px). Najbliższy odjazd pisze się
+  „0 min", nie „teraz": nagłówek mówi „od 16:57", a to nie jest godzina
+  zegarowa, tylko najwcześniejsza, o której da się tu być — „teraz" obok
+  niej znaczyło co innego, niż czytelnik zakładał. Dymek 300 → 340 px, bo
+  prawa kolumna urosła i zjadała kierunek.
+
+- **2026-08-29** — jasność mapy ODCZYTANA, nie oszacowana
+  (`planner._target_profile`). Wartość każdego wyjścia („wysiadam tu o tej
+  godzinie — o której jestem w celu”) liczył dotąd punkt stały po
+  kontynuacjach widocznych na mapie: `join_value` brało gotową wartość
+  sąsiedniego segmentu i przesuwało ją o opóźnienie wsiadania
+  (`other["suffix"][j] + shift`). Zakładało więc, że sztywny rozkład jest
+  sprężysty — że cały dalszy łańcuch przesunie się dokładnie o tyle samo.
+  Nie przesuwa się: późniejszy kurs gubi przesiadkę i przyjazd skacze
+  o kwadrans, nie o minutę. Wynik był przy tym znakowany jako ODCZYTANY,
+  choć powstał z oszacowania — stąd sprzeczność widoczna gołym okiem:
+  kawałek podawał godzinę przyjazdu, a jego jedyna kontynuacja nie znała
+  żadnej.
+
+  Teraz liczy to profilowy CSA: jeden skan wstecz po tych samych
+  połączeniach daje odpowiedź dla KAŻDEGO przystanku w oknie, bez iteracji
+  i bez ograniczania się do tego, co narysowane. Przy okazji zniknął próg
+  `best_arr` na wartościach odczytanych — niepotrzebny, bo żadna z nich
+  optimum nie pobija (pilnuje tego test), a maskowałby prawdziwą
+  sprzeczność, gdyby wróciła. Zostaje tylko na surowej aproksymacji.
+
+  `LEŚNICA → BARTOSZOWICE, 16:44`: 116 z 232 wyjść obiecywało przyjazd
+  wcześniejszy, niż da się osiągnąć (do 10 min za wcześnie); **0 kawałków
+  bez godziny przyjazdu (było 39 na 151)**, a jasność wreszcie różnicuje —
+  dwie realne klasy, 17:57 i 18:07, zamiast 74 kawałków na `w = 1.00`.
+  Przemiat 20 relacji: zero kawałków bez godziny, zero trybu awaryjnego.
+  Koszt: 23 ms na zapytanie. Testy: `tests/test_profil_dojazdu.py`.
+
+  „Tu nie da się wysiąść” znaczy teraz INF, a nie wymyśloną karę: wartość
+  takiej POZYCJI bierze się z sufiksu (z dalszych wyjść tego samego kursu,
+  czyli z jazdy dalej). Wcześniej kar było więcej niż odczytów, więc to ONE
+  wyznaczały skalę jasności całej mapy. Surowa aproksymacja została tylko
+  tam, gdzie naprawdę nic już nie prowadzi dalej — ogon za ostatnim
+  użytecznym wyjściem — i dalej nie jest pokazywana jako godzina.
+
+- **2026-08-29** — naprawiona przyczyna sprzecznych godzin. Wartość wyjścia
+  („o której jest się w celu, jadąc dalej stąd”) dostała próg: nie może być
+  wcześniejsza niż `best_arr` ze skanu CSA, bo do tego wyjścia dojechało się
+  ze STARTU i nie ma prawa pobić optimum całej relacji. Bez progu przybliżenie
+  z `join_value` schodziło poniżej, a `q_of` obcinało wynik do 1.0 — kawałek
+  z niemożliwym przyjazdem świecił tak samo jak najlepsza trasa.
+  Na relacji LEŚNICA → BARTOSZOWICE (13:32): **105 z 354 kawałków obiecywało
+  przyjazd wcześniejszy niż możliwy — teraz 0.**
+
+  Węzeł przestał też proponować kursy WIOZĄCE Z POWROTEM (`_rides_back`):
+  jeśli tam, dokąd kurs wiezie, dało się być wcześniej niż tam, gdzie stoimy,
+  to nie jest to opcja. Mierzone `earliest` ze skanu w przód, nie geometrią
+  i nie luzem z `_backward` — luz się do tego nie nadaje, bo w szerokim oknie
+  objazd o przystanek kosztuje minutę terminu (Kamiennogórska: 13:52 → 13:51)
+  i próg cofnięcia go nie łapie. Dotyczy wyłącznie tego, co węzeł proponuje;
+  rysowanej mapy i stabilności jasności nie rusza.
+  Kamiennogórska nie oferuje już tramwaju 3 na Leśnicę osobie, która właśnie
+  z Leśnicy przyjechała; węzłów 78 → 56, ofert 323 → 249.
+
+
+- **2026-08-29** — kropki są też na SAMEJ mapie przepływów, nie tylko na
+  wybranej trasie: stoją na końcach kawałków, czyli tam, gdzie mapa widzi
+  sensowne wysiadanie — a więc dokładnie tam, gdzie da się przesiąść
+  (`flowStopDots`). Nazwy przystanku front tam nie zna, bo kropki bierze
+  z geometrii, więc `/api/timetable` przyjmuje też `lat`/`lon`.
+
+  Węzły liczy backend (`_transfer_nodes`, pole `nodes`), a nie front z
+  geometrii, i to z dwóch powodów, których front nie umiałby rozstrzygnąć sam.
+  Po pierwsze **jedna kropka na MIEJSCE**: plac z trzema peronami dostawał
+  wcześniej trzy kropki, każdą z inną zawartością — grupowanie po miejscu jest
+  w rozkładzie (`gtfs._build_places`), więc front nie ma go z czego odtworzyć
+  i nie powinien zgadywać po odległości na ekranie (168 kropek → 86 na relacji
+  Księże Małe → Leśnica). Po drugie **tylko to, w co mapa pozwala tu wsiąść**:
+  dymek na Pilczycach wypisywał wszystko, co przez nie przejeżdża, razem
+  z tramwajem jadącym dokładnie tam, skąd się przyjechało. Kierunek jest
+  częścią tożsamości linii, więc `lines` niosą headsign — samo „122" nie
+  wystarczy, bo mapa proponuje jedną stronę, a przez węzeł jadą obie.
+
+  Przy okazji naprawione: w jednym miejscu dymek potrafił pokazać dwie różne
+  godziny „tu jesteś" (13:02 albo 13:07, zależnie od drgnięcia kursora o
+  piksel). Pod kursorem leży kilka kawałków TEJ SAMEJ linii — to różne kursy,
+  a wybierany był ten bliższy w pikselach. Teraz wygrywa kurs dowożący do celu
+  najwcześniej, jednym wspólnym wyborem dla dymka i dla godzin w grupce
+  numerów (`hitFor`) — wcześniej te dwa miejsca mogły wskazać różne kursy.
+
+- **2026-08-29** — kropki na wsiadaniu i wysiadaniu każdego etapu są do
+  najechania: dymek pokazuje TABLICĘ ODJAZDÓW tego przystanku (`stopDot`
+  w `app.js`, `/api/timetable` → `planner.stop_timetable` →
+  `gtfs.stop_departures`). Mapa rysowała te kropki od dawna, ale mówiły
+  tylko „tu się przesiadasz" — a pytanie zadawane w tym miejscu brzmi „a jak
+  mi ucieknie, to co dalej?". Godzina idzie z etapu w SEKUNDACH doby
+  rozkładowej (`dep_sec`/`arr_sec`), nie jako „HH:MM": przesiadka o 24:40
+  należy do rozkładu dnia poprzedniego, a zapytana zegarową „00:40"
+  wypisałaby cały dzień od rana — czyli odjazdy dawno odjechane. Indeks
+  słupek → odjazdy powstaje leniwie przy pierwszym najechaniu (~30 ms raz na
+  dzień, tak jak `conns_by_trip`), więc skan CSA nic za to nie płaci.
+  Klik w kropkę nie zamyka trasy, choć klik obok niej nadal zamyka: na
+  telefonie dotknięcie jest jedynym sposobem otwarcia dymka i nie może przy
+  okazji sprzątać tego, czego dotyczy.
 
 - **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
   z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
@@ -574,6 +736,5 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Pomysły na dalej
 
-- Dymki na węzłach przesiadkowych: „w co mogę się tu przesiąść i o której".
 - Więcej odjazdów tej samej trasy na liście („następny kurs o…").
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).

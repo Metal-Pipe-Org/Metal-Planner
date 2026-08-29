@@ -4,8 +4,10 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request
 
+import config
 import gtfs
-from planner import plan_flow, plan_route
+from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
+                     stop_timetable)
 
 
 def _frontend_digest(app):
@@ -50,6 +52,14 @@ def _point_arg(prefix):
         return None
 
 
+def _latlon_arg():
+    """Para (lat, lon) z `lat`/`lon` - punkt wskazany wprost, bez prefiksu."""
+    try:
+        return float(request.args["lat"]), float(request.args["lon"])
+    except (KeyError, ValueError):
+        return None
+
+
 def _parse_when(time_str,data_str):
     """Godzina 'HH:MM' z formularza -> datetime dzisiaj o tej porze (domyślnie teraz)."""
     when = datetime.now()
@@ -85,6 +95,7 @@ def init_routes(app):
             "index.html",
             stops=stops,
             data_error=data_error,
+            timetable_rows=config.timetable_rows(),
             form_time=datetime.now().strftime("%H:%M"),
             form_date=datetime.now().strftime("%d.%m.%y"),
         )
@@ -122,6 +133,25 @@ def init_routes(app):
             request.args.get("end", ""),
             _parse_when(request.args.get("time"),request.args.get("date")),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
+        ))
+
+    @app.route("/api/timetable")
+    def api_timetable():
+        """Tablica odjazdów przystanku - dymek pod kropką przesiadki na mapie.
+
+        `from_sec` to godzina na osi doby rozkładowej (patrz gtfs.load_day):
+        front podaje ją wprost z etapu trasy, żeby przesiadka po północy
+        pytała o właściwą dobę.
+        """
+        # `limit` z zapytania: mapa przepływów odsiewa potem linie, których
+        # z tego miejsca i tak nie proponuje, więc musi dostać z zapasem.
+        limit = _float_arg("limit")
+        return jsonify(stop_timetable(
+            request.args.get("stop", ""),
+            _parse_when(request.args.get("time"), request.args.get("date")),
+            _float_arg("from_sec"),
+            limit=min(int(limit), TIMETABLE_MAX) if limit else TIMETABLE_LIMIT,
+            point=_latlon_arg(),
         ))
 
     @app.route("/api/flow")

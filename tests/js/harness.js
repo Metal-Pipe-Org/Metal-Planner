@@ -113,9 +113,28 @@ const layerBase = extra => Object.assign({
     _added: false,
     addTo(m) { this._added = true; if (m && m._layers) m._layers.add(this); return this; },
     remove() { this._added = false; return this; },
-    on() { return this; },
+    // Uchwyty pamiętane, nie wyrzucane: bez tego nie da się odegrać
+    // najechania na kropkę (patrz checks.js, pierwszenstwo_kropki).
+    on(type, fn) {
+        (this._handlers || (this._handlers = {}))[type] = fn;
+        return this;
+    },
     off() { return this; },
-    bindTooltip() { return this; },
+    fire(type, e) {
+        const fn = this._handlers && this._handlers[type];
+        if (fn) fn(e || {});
+        return this;
+    },
+    bindTooltip(content, options) {
+        this._tooltip = {content, options: options || {}};
+        return this;
+    },
+    setTooltipContent(content) {
+        if (this._tooltip) this._tooltip.content = content;
+        return this;
+    },
+    openTooltip() { return this; },
+    closeTooltip() { return this; },
     setStyle(style) { Object.assign(this.options, style); return this; },
     setLatLng(ll) { this._latlng = toLatLng(ll); return this; },
     getLatLng() { return this._latlng; },
@@ -232,9 +251,18 @@ L.map = () => mapStub;
 function fakeElement(id) {
     const el = {
         id, tagName: 'DIV', open: false, checked: false, disabled: false,
-        hidden: false, value: '', textContent: '', innerHTML: '',
+        hidden: false, value: '', innerHTML: '', _text: '',
+        // textContent -> innerHTML tak, jak robi to przeglądarka: na tym stoi
+        // esc() z app.js, przez które przechodzi każda nazwa wstawiana w HTML.
+        // Bez tego esc() oddaje pusty string i dymki wychodzą bez treści.
+        get textContent() { return this._text; },
+        set textContent(v) {
+            this._text = v == null ? '' : String(v);
+            this.innerHTML = this._text
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        },
         offsetWidth: 320, offsetHeight: 40, scrollTop: 0, scrollHeight: 0,
-        dataset: {},
+        dataset: {timetableRows: '8'},
         style: {
             _props: new Map(),
             setProperty(k, v) { this._props.set(k, v); },
@@ -286,7 +314,7 @@ const document = {
         if (!elements.has(id)) elements.set(id, fakeElement(id));
         return elements.get(id);
     },
-    createElement: tag => fakeElement(tag),
+    createElement: tag => (tag === 'audio' ? fakeAudio() : fakeElement(tag)),
     querySelector: sel => document.body.querySelector(sel),
     querySelectorAll: () => [],
     addEventListener() {}, removeEventListener() {},
@@ -308,8 +336,62 @@ const navigator = {geolocation: {getCurrentPosition() {}, watchPosition() {}},
 function thenable() { return {then: thenable, catch: thenable, finally: thenable}; }
 const fetch = () => thenable();
 
+/* JavaScriptCore z osascript nie zna URLSearchParams, a app.js składa nim
+   każdy query string (queryParams, tablica odjazdów). Tyle, ile jest w
+   użyciu: budowa z obiektu, set i sklejenie do tekstu. */
+class URLSearchParams {
+    constructor(init) {
+        this._pairs = Object.entries(init || {}).map(([k, v]) => [k, String(v)]);
+    }
+    set(key, value) {
+        const found = this._pairs.find(p => p[0] === key);
+        if (found) found[1] = String(value);
+        else this._pairs.push([key, String(value)]);
+    }
+    get(key) {
+        const found = this._pairs.find(p => p[0] === key);
+        return found ? found[1] : null;
+    }
+    toString() {
+        return this._pairs
+            .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v))
+            .join('&');
+    }
+}
+
+/* Element <audio> zamiast karty dźwiękowej: notuje, co na nim ustawiono
+   i ile razy kazano grać. `canPlayType` udaje przeglądarkę, która NIE umie
+   Ogg Opus, ale umie AAC - czyli dokładnie ten przypadek, dla którego jest
+   drugi plik. Test sprawdza więc, że wybór formatu naprawdę działa, a nie
+   że pierwszy z brzegu wpis przechodzi. */
+const audioLog = {utworzone: 0, zagrane: 0, przewiniete: 0, ostatni: null};
+
+function fakeAudio() {
+    audioLog.utworzone++;
+    const el = {
+        tagName: 'AUDIO', src: '', preload: '', volume: 1,
+        _time: 0,
+        get currentTime() { return this._time; },
+        set currentTime(v) { this._time = v; audioLog.przewiniete++; },
+        canPlayType(type) {
+            if (globalThis.__brakDekoderow) return '';
+            return /mp4/.test(type) ? 'maybe' : '';
+        },
+        play() { audioLog.zagrane++; audioLog.ostatni = this.src; return {catch() {}}; },
+    };
+    return el;
+}
+
 const window = {
-    matchMedia: () => ({matches: true, addEventListener() {}, addListener() {}}),
+    // Zapytania o szerokość mają wychodzić na prawdę (panel liczy na "szeroko"),
+    // ale prefers-reduced-motion domyślnie NIE - inaczej syntezator milczałby
+    // w każdym teście i nie dałoby się sprawdzić, że w ogóle gra.
+    matchMedia: (query) => ({
+        matches: /prefers-reduced-motion/.test(query)
+            ? !!globalThis.__mniejRuchu
+            : true,
+        addEventListener() {}, addListener() {},
+    }),
     innerHeight: VIEW_SIZE.y, innerWidth: VIEW_SIZE.x,
     addEventListener() {}, removeEventListener() {},
     location: {search: '', href: 'http://localhost/'},
@@ -330,6 +412,9 @@ const INJECTION = `
     get resultsBox() { return resultsBox; },
     flowHitsAt, corridorOptions, pickFromCluster, handleFlowHover, clearFlowHover,
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
+    legLayers, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
+    summariseRepeats, TIMETABLE_ROWS, keepWithinHorizon,
+    playPipeDrop, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },
     get flowLabelLayer() { return flowLabelLayer; },
     get flowPick() { return flowPick; },

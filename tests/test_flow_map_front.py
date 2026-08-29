@@ -171,3 +171,134 @@ def test_fallback_mode_shows_a_notice_on_screen(front):
     trasa nadal była widoczna. Bez tego rzadka mapa wygląda identycznie jak
     "tędy naprawdę nic nie jedzie"."""
     _check(front, "tryb_awaryjny_mowi_o_sobie_na_ekranie")
+
+
+# ------------------------------------------- tablica odjazdów przesiadki -
+
+def test_every_leg_end_is_a_hoverable_dot(front):
+    """Kropki na wsiadaniu i wysiadaniu każdego przejazdu są do najechania -
+    to one otwierają tablicę odjazdów przystanku. Do 2026-08-29 były
+    `interactive: false`, czyli mapa rysowała punkt przesiadki, o który nie
+    dało się zapytać."""
+    result = _check(front, "stop_dots")
+    assert result["dots"] == 4
+
+
+def test_hover_preview_has_no_dots(front):
+    """Podgląd trasy spod kursora na liście kropek nie stawia: kursor jest
+    wtedy nad kartą, a warstwa znika przy ruchu myszą."""
+    _check(front, "stop_dots_only_when_drawn")
+
+
+def test_timetable_bubble_names_line_direction_and_wait(front):
+    """Dymek odpowiada na "czym stąd pojadę": godzina, numer w kolorze
+    środka transportu, kierunek i za ile - a kolejny kurs tej samej linii
+    zwija się w notkę "co X min", zamiast zajmować własny wiersz."""
+    _check(front, "timetable_html")
+
+
+def test_timetable_bubble_says_when_nothing_departs(front):
+    """Pusta tablica ma to powiedzieć wprost - pusty dymek czyta się jak
+    zepsuty, a nie jak "to już ostatni z tego przystanku"."""
+    _check(front, "timetable_html_empty")
+
+
+def test_stop_dot_wins_over_the_flow_bubble(front):
+    """Kropka leży na narysowanej linii, więc bez pierwszeństwa dymek
+    z tablicą odjazdów i dymek „tu jesteś" wychodzą jeden na drugim - a po
+    zejściu z kropki ten drugi musi wrócić."""
+    _check(front, "pierwszenstwo_kropki_nad_dymkiem_przeplywow")
+
+
+def test_the_same_spot_always_reports_the_same_time(front):
+    """Zgłoszone 2026-08-29: w tym samym miejscu dymek pokazywał raz 13:02,
+    raz 13:07. To dwa różne KURSY tej samej linii, leżące na mapie jeden na
+    drugim - a wybierany był ten bliższy w pikselach, więc drgnięcie kursora
+    przestawiało godzinę. Wygrywa kurs z najwcześniejszym "u celu"."""
+    _check(front, "ten_sam_punkt_ta_sama_godzina")
+
+
+def test_a_piece_without_a_read_arrival_never_wins(front):
+    """...ale kawałek bez odczytanej godziny u celu nie może wygrać z takim,
+    który ją ma - dymek straciłby liczbę, którą przed chwilą pokazywał."""
+    _check(front, "kawalek_bez_godziny_nie_wygrywa")
+
+
+def test_flow_map_has_hoverable_dots_of_its_own(front):
+    """Kropki stoją także na SAMEJ mapie przepływów, nie tylko na wybranej
+    trasie - po jednej na węzeł policzony przez backend."""
+    _check(front, "kropki_wachlarza")
+
+
+def test_the_bubble_lists_only_what_the_map_offers_here(front):
+    """Zgłoszone 2026-08-29: dymek na Pilczycach wypisywał wszystko, co przez
+    nie przejeżdża - z tramwajem jadącym tam, skąd się przyjechało. Zostaje
+    tylko to, w co mapa pozwala tu wsiąść, a kierunek jest częścią tożsamości
+    linii."""
+    _check(front, "tablica_tylko_to_co_mapa_oferuje")
+
+
+def test_repeated_departures_collapse_into_a_cadence_note(front):
+    """Osiem odjazdów jednej linii to nie osiem opcji, tylko jedna opcja i jej
+    rytm. Zostaje jeden wiersz - najbliższy odjazd plus „co X min" - zamiast
+    wypisywania wszystkich albo gubienia części."""
+    _check(front, "powtorzenia_zwijaja_sie_w_notke")
+
+
+def test_the_cadence_is_a_median_not_a_mean(front):
+    """Jeden nocny przeskok o godzinę nie ma prawa przesunąć liczby opisującej
+    normalny takt."""
+    _check(front, "rytm_z_mediany_nie_ze_sredniej")
+
+
+def test_the_cadence_keeps_directions_apart(front):
+    """Ta sama linia w drugą stronę to osobna opcja - osobny wiersz i osobny
+    rytm."""
+    _check(front, "notka_rozroznia_kierunki")
+
+
+def test_row_count_comes_from_config(front):
+    """Ile odjazdów pokazuje dymek, ustawia się w konfigu (TIMETABLE_ROWS
+    w .env), a nie w kodzie frontu."""
+    _check(front, "liczba_wierszy_z_konfigu")
+
+
+def test_departures_past_the_map_horizon_are_dropped(front):
+    """Dymek na rzadkim węźle wypisywał odjazdy o 17:51 na mapie kończącej się
+    o 15:12 - godziny prawdziwe, ale bez związku z podróżą, o którą pytamy.
+    Odjazd po zamknięciu okna nie należy do żadnego rysowanego wariantu."""
+    _check(front, "odjazdy_za_horyzontem_wypadaja")
+
+
+def test_the_pipe_picks_a_format_the_browser_can_play(front):
+    """Dwa pliki, bo jeden nie wystarcza: Ogg Opus i AAC. Emulator udaje
+    przeglądarkę bez Ogg - ma sięgnąć po drugi, a nie po pierwszy z listy."""
+    _check(front, "dzwiek_wybiera_format_ktory_przegladarka_umie")
+
+
+def test_the_pipe_restarts_on_a_second_search(front):
+    """Drugie wyszukiwanie w trakcie pierwszego dźwięku gra od nowa, a nie
+    zostaje po cichu pominięte."""
+    _check(front, "dzwiek_gra_od_poczatku_przy_powtorzeniu")
+
+
+def test_the_pipe_respects_reduced_motion(front):
+    """System prosi o ograniczenie animacji - dźwięk milczy."""
+    _check(front, "dzwiek_milczy_przy_ograniczonym_ruchu")
+
+
+def test_the_pipe_obeys_its_switch(front):
+    """Wyłączony przełącznik znaczy cisza, choć sekcja jest schowana."""
+    _check(front, "dzwiek_milczy_gdy_wylaczony")
+
+
+def test_the_recording_is_attenuated(front):
+    """Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm."""
+    _check(front, "nagranie_nie_gra_na_pelnej_glosnosci")
+
+
+def test_departures_that_cannot_make_it_are_dropped(front):
+    """Mocna wersja reguły „tylko to, co jeszcze zdąży": nie „czy odjazd mieści
+    się w oknie mapy" (warunek konieczny), tylko „czy TYM kursem w ogóle się
+    dojedzie" - serwer podaje przy linii ostatni taki odjazd."""
+    _check(front, "odjazd_ktorym_sie_nie_zdazy_wypada")

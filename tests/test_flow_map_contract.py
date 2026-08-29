@@ -232,7 +232,8 @@ def test_exit_brightness_is_non_increasing_along_a_course(install_day):
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
         latest, origin_latest, {"E"},
     )
-    planner._refine_brightness(day, segs, {"E"}, deadline, best_arr)
+    profile = planner._target_profile(day, {"E"}, dep_sec, deadline)
+    planner._refine_brightness(day, segs, {"E"}, deadline, best_arr, profile)
 
     for seg in segs:
         qs = seg["exit_q"]
@@ -911,3 +912,62 @@ def test_solo_line_never_gets_a_corridor_list(install_day):
     assert len(pieces) == 1
     assert pieces[0]["path"] == _coords_of(day, ["S", "M", "E"])
     assert "corridor" not in pieces[0]
+
+
+# ----------------------------------------------------------------------- 4 -
+
+def _turning_loop_day():
+    """Dwa kursy, które na poziomie MIEJSC wyglądają podobnie, a są czym innym.
+
+    „loop"  S -> Rondo -> Pętla -> Rondo -> E   — wjeżdża na pętlę i wraca
+    „prosty" S -> Kamieńskiego -> Kamieńskiego -> E — dwa sąsiednie słupki
+             jednego miejsca, minięte jeden po drugim, jadąc prosto
+    """
+    trips = [
+        {"trip_id": "loop", "label": "Autobus 102",
+         "stops": [("S", 0, 0), ("R1", 300, 300), ("P", 420, 420),
+                   ("R2", 540, 540), ("E", 900, 900)]},
+        {"trip_id": "prosty", "label": "Tramwaj 7",
+         "stops": [("S", 0, 0), ("K1", 300, 300), ("K2", 360, 360), ("E", 900, 900)]},
+    ]
+    return make_day(trips, names={
+        "R1": "Rondo", "R2": "Rondo",
+        "K1": "Kamieńskiego", "K2": "Kamieńskiego",
+        "P": "Petla", "S": "Start", "E": "Cel",
+    })
+
+
+def _discovered(day, dep_sec=0):
+    best_stop, best_arr, _ = planner._scan(day, {"S"}, {"E"}, dep_sec)
+    deadline = planner._deadline(best_arr, dep_sec, extra_pct=200,
+                                 extra_floor_sec=0, extra_cap_sec=999999)
+    earliest, arrived_by, trip_board = planner._forward(day, {"S"}, dep_sec, deadline)
+    latest = planner._backward(day, {"E"}, dep_sec, deadline)
+    origin_latest = max(latest[s] for s in {"S"} if s in latest)
+    segs = planner._discover_segments(
+        day, dep_sec, deadline, earliest, arrived_by, trip_board,
+        latest, origin_latest, {"E"},
+    )
+    return {seg["label"]: seg["stops"] for seg in segs}
+
+
+def test_a_drawn_course_stops_where_it_turns_back(install_day):
+    """Kurs wracający na MIEJSCE, przez które już przejechał, dalej nie wiezie -
+    zawraca. Mapa ma się na tym urwać, zamiast rysować wjazd na pętlę końcową
+    i natychmiastowy powrót tą samą ulicą (punkt 4; zgłoszone 2026-08-29 na
+    autobusie 102 pod Kosmonautów)."""
+    day = _turning_loop_day()
+    install_day(day)
+    stops = _discovered(day)
+    assert stops["Autobus 102"] == ["S", "R1", "P"], stops["Autobus 102"]
+
+
+def test_two_stops_of_one_place_in_a_row_are_not_a_turn_back(install_day):
+    """Miejsce bywa grubsze od słupka: linia potrafi minąć dwa jego przystanki
+    jeden po drugim, jadąc PROSTO. Ucięcie takiego kursu odbierało jedynemu
+    dojazdowi do celu jego wyjście i cała relacja spadała do trybu awaryjnego
+    (POŚWIĘTNE -> KLECINA)."""
+    day = _turning_loop_day()
+    install_day(day)
+    stops = _discovered(day)
+    assert stops["Tramwaj 7"] == ["S", "K1", "K2", "E"], stops["Tramwaj 7"]
