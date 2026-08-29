@@ -2,11 +2,15 @@
 
    Odpowiada na dwa pytania, na które wyszukiwarka nie odpowiada wcale:
 
-   - LINIA ("co robi 17-tka") - warianty trasy (kierunki i kursy skrócone),
-     lista przystanków, godziny wybranego kursu i cały przebieg na mapie;
+   - LINIA ("co robi 17-tka") - kierunki, godziny każdego kursu i cały
+     przebieg na mapie;
    - PRZYSTANEK ("co odjeżdża z Katedry") - tablica odjazdów wszystkich linii,
      z zaznaczaniem, KTÓRE z nich mają być w tej tablicy złączone; trasy
      zaznaczonych linii - od tego przystanku dalej - rysują się na mapie.
+
+   Jedno pole na jedno i drugie. Rodzaj rozkładu wynika z tego, co się wpisało,
+   a nie z przełącznika ustawianego wcześniej: "17" to linia, "Katedra" to
+   przystanek, a na liście podpowiedzi widać, co jest czym.
 
    Oba tryby jeżdżą po TEJ SAMEJ mapie Leafleta co wyszukiwarka, więc wejście
    w rozkłady chowa wachlarz połączeń (plannerBridge.suspendPlanner), a wyjście
@@ -24,6 +28,7 @@ const $ = id => document.getElementById(id);
 
 const queryInput = $('tt-query');
 const dateInput = $('tt-date');
+const clearButton = $('tt-clear');
 const resultsBox = $('tt-results');
 const hintBox = $('tt-hint');
 if (!queryInput || !resultsBox) return;
@@ -34,28 +39,33 @@ const LINES = JSON.parse($('line-names').textContent);
 const LINE_NUMS = LINES.map(line => line.num);
 const MODE_OF_NUM = new Map(LINES.map(line => [line.num, line.mode]));
 
-// Ile tras naraz ma sens na mapie. Powyżej tego progu z węzła przesiadkowego
-// robi się kłębek, w którym nie widać już żadnej pojedynczej linii - wtedy
+// Ile linii naraz ma sens na mapie. Powyżej tego progu z węzła przesiadkowego
+// robi się kłębek, w którym nie widać już żadnej pojedynczej trasy - wtedy
 // tablica zostaje, a mapa czeka na zawężenie wyboru.
 const MAX_ROUTES_ON_MAP = 8;
 // Ile kierunków jednej linii rysujemy. Linia ma dwa podstawowe, a poza nimi
-// garść kursów skróconych - te ostatnie dokładają nitki, które i tak leżą na
-// trasie podstawowej, więc na mapie nic nie wnoszą.
+// garść kursów skróconych - te leżą na trasie podstawowej i nic nie wnoszą.
 const MAX_DIRS_PER_LINE = 2;
 // Ile odjazdów pokazujemy od razu. Doba na dużym węźle to ~2000 wierszy.
-const BOARD_PAGE = 60;
+const BOARD_PAGE = 40;
 // Przybliżenie tablicy bez tras: sam przystanek to punkt, a punkt kadruje się
 // na maksymalne zbliżenie - z którego nie widać nawet, w którym jest mieście.
 const BOARD_ZOOM = 15;
+// Wariant "poboczny" linii: tyle razy mniej kursów niż jej wariant główny.
+// Kursy zjazdowe do zajezdni mają ich pojedyncze sztuki i nie mają prawa
+// stać w jednym rzędzie z kierunkiem, którym linia jeździ cały dzień.
+const SIDE_VARIANT_RATIO = 0.25;
 
 // ------------------------------------------------------------- stan ----
 
-let kind = 'line';        // 'line' albo 'stop'
+let kind = null;          // 'line' albo 'stop' - wynika z tego, co znaleziono
 let data = null;          // ostatnia odpowiedź serwera
 let token = 0;            // odsiewa odpowiedzi na nieaktualne zapytania
 
-let variantIndex = 0;     // wybrany wariant trasy linii
-let courseIndex = null;   // wybrany kurs tej linii (null = sam przebieg)
+let variantIndex = 0;     // wybrany kierunek linii
+let courseIndex = null;   // wybrany kurs tej linii
+let sideOpen = false;     // rozwinięte warianty skrócone
+let recenter = false;     // przewinąć pasek godzin do wybranego kursu
 
 let picked = new Set();   // zaznaczone linie tablicy ("bus|8")
 let fromSec = null;       // od której godziny pokazujemy odjazdy (null = doba)
@@ -131,11 +141,17 @@ function showRoutes(layers, markers, refit, points) {
     if (refit && points && points.length) fitTo(points);
 }
 
-/** Wszystkie słupki miasta na raz to tło, na którym nie widać narysowanej
+/** Wszystkie słupki miasta naraz to tło, na którym nie widać narysowanej
     trasy - dokładnie ten sam problem, co przy mapie przepływów, więc i to samo
     rozwiązanie. Przygaszamy je dopiero, gdy jest co przygaszać. */
-function dimBase(dim) {
-    B.setBaseDim(dim);
+const dimBase = dim => B.setBaseDim(dim);
+
+/** Trasa dociągnięta asynchronicznie - dokładamy ją do warstwy, która już
+    stoi na mapie, zamiast przerysowywać całość: odpowiedzi wracają jedna po
+    drugiej i każde przerysowanie mrugałoby resztą. */
+function addRoute(path, mode) {
+    if (!routeLayer) routeLayer = L.layerGroup().addTo(map);
+    for (const layer of routeLines(path, mode, 'soft')) routeLayer.addLayer(layer);
 }
 
 // ------------------------------------------------------ przełącznik ----
@@ -143,9 +159,7 @@ function dimBase(dim) {
 const modeButtons = [$('mode-toggle'), $('mode-toggle-m')].filter(Boolean);
 const tabLabel = $('tab-list-label');
 
-function active() {
-    return document.body.classList.contains('mode-timetable');
-}
+const active = () => document.body.classList.contains('mode-timetable');
 
 /** Wejście w rozkłady chowa wachlarz połączeń i odsłania panel (przy schowanym
     panelu przełącznik nie miałby czego pokazać); wyjście odtwarza dokładnie to,
@@ -179,66 +193,71 @@ for (const button of modeButtons) {
 window.timetableMode = {
     pickStop(name) {
         if (!active() || !name) return false;
-        setKind('stop');
         queryInput.value = name;
-        load();
+        load('stop');
         return true;
     },
 };
 
-// ------------------------------------------------------ pole i tryby ----
+// ------------------------------------------- jedno pole, dwa rodzaje ----
 
-function setKind(next) {
-    if (kind === next) return;
-    kind = next;
-    for (const tab of document.querySelectorAll('.tt-tab')) {
-        const on = tab.dataset.tt === kind;
-        tab.classList.toggle('active', on);
-        tab.setAttribute('aria-pressed', String(on));
+/** Podpowiedzi: najpierw pasujące linie, potem przystanki. Numer wpisuje się
+    krótko i trafia w kilkanaście linii naraz, więc ich pula jest ograniczona -
+    inaczej "1" wypełniłoby całą listę numerami i nie zostałoby miejsca na
+    przystanek, którego nazwa zaczyna się od cyfry ("8 Maja"). */
+const LINE_LIMIT = 5, STOP_LIMIT = 6;
+
+function suggest(query) {
+    const lines = B.suggestionsFor(query, LINE_NUMS, null, LINE_LIMIT)
+        .map(item => ({...item, kind: 'line', mode: MODE_OF_NUM.get(item.name)}));
+    const stops = B.suggestionsFor(query, B.STOP_NAMES, null, STOP_LIMIT)
+        .map(item => ({...item, kind: 'stop'}));
+    return [...lines, ...stops];
+}
+
+function suggestionRow(item) {
+    // Numer linii bez podświetlania trafienia: plakietka JEST tym numerem,
+    // więc pasuje cała, a kolorowy fragment w kolorowym prostokącie tylko
+    // zabiera kontrast.
+    if (item.kind === 'line') {
+        return `<span class="badge ${esc(item.mode)}">${esc(item.name)}</span>`
+             + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`;
     }
-    queryInput.placeholder = kind === 'line'
-        ? 'Numer linii, np. 17' : 'Przystanek, np. Katedra';
-    hintBox.textContent = kind === 'line'
-        ? 'Wpisz numer linii — zobaczysz jej kursy i przebieg na mapie.'
-        : 'Wpisz przystanek albo kliknij słupek na mapie — dostaniesz tablicę '
-          + 'odjazdów wszystkich linii, które z niego jadą.';
-    reset();
+    return `<span class="ac-pin" aria-hidden="true"></span>`
+         + `<span class="ac-name">${B.suggestionHtml(item)}</span>`
+         + `<span class="ac-kind">przystanek</span>`;
 }
 
-for (const tab of document.querySelectorAll('.tt-tab')) {
-    tab.addEventListener('click', () => {
-        setKind(tab.dataset.tt);
-        queryInput.value = '';
-        queryInput.focus();
-    });
-}
-
-// Podpowiedzi: numery linii albo nazwy przystanków, zależnie od trybu. Dwa
-// osobne wpięcia w to samo pole - każde ze swoją listą - bo źródło zmienia
-// się razem z trybem, a nie w trakcie pisania.
-B.attachAutocomplete(queryInput, load, {
-    names: () => (kind === 'line' ? LINE_NUMS : B.STOP_NAMES),
-    onEnter: load,
+B.attachAutocomplete(queryInput, item => load(item.kind), {
+    suggest,
+    render: suggestionRow,
+    onEnter: () => load(),
 });
 
-function currentDate() {
-    return dateInput && dateInput.value ? dateInput.value : '';
+/** Czego szuka wpisany tekst, gdy nikt nie wybrał podpowiedzi. Numer linii
+    jest rozstrzygający - żaden przystanek we Wrocławiu nie nazywa się samą
+    liczbą - a wszystko inne jedzie do przystanków. */
+function kindOf(query) {
+    return MODE_OF_NUM.has(query.trim()) ? 'line' : 'stop';
 }
+
+const currentDate = () => (dateInput && dateInput.value) || '';
 
 // ------------------------------------------------------ zapytania ----
 
 function setBusy(on) {
     document.body.classList.toggle('tt-searching', on);
-    $('tt-search').disabled = on;
     resultsBox.setAttribute('aria-busy', String(on));
 }
 
 function reset() {
     ++token;
     setBusy(false);
+    kind = null;
     data = null;
     variantIndex = 0;
     courseIndex = null;
+    sideOpen = false;
     picked = new Set();
     fromSec = null;
     boardLimit = BOARD_PAGE;
@@ -247,6 +266,13 @@ function reset() {
     resultsBox.innerHTML = '';
     clearMap();
     dimBase(false);
+    syncField();
+}
+
+function syncField() {
+    const filled = !!queryInput.value.trim();
+    clearButton.hidden = !filled;
+    hintBox.hidden = !!data;
 }
 
 function fail(message, suggestions) {
@@ -259,9 +285,10 @@ function fail(message, suggestions) {
     resultsBox.innerHTML = html + '</div>';
 }
 
-function load() {
+function load(forced) {
     const query = queryInput.value.trim();
-    if (!query) return;
+    if (!query) { reset(); return; }
+    const wanted = forced || kindOf(query);
     const mine = ++token;
     clearMap();
     setBusy(true);
@@ -271,7 +298,7 @@ function load() {
 
     const params = new URLSearchParams({date: currentDate()});
     let url;
-    if (kind === 'line') {
+    if (wanted === 'line') {
         params.set('num', query);
         const mode = MODE_OF_NUM.get(query);
         if (mode) params.set('mode', mode);
@@ -283,29 +310,52 @@ function load() {
 
     fetch(url).then(r => r.json()).then(payload => {
         if (mine !== token) return;
-        if (payload.error) { data = null; clearMap(); fail(payload.error, payload.suggestions); return; }
+        if (payload.error) {
+            kind = null;
+            data = null;
+            clearMap();
+            dimBase(false);
+            fail(payload.error, payload.suggestions);
+            return;
+        }
+        kind = wanted;
         data = payload;
         variantIndex = 0;
-        courseIndex = null;
+        sideOpen = false;
         openDep = null;
         boardLimit = BOARD_PAGE;
-        if (kind === 'stop') {
+        if (kind === 'line') {
+            // Rozkład otwiera się na najbliższym kursie, a nie na pustej
+            // liście przystanków: pytanie brzmi "o której to jedzie",
+            // więc jakaś godzina musi być na ekranie od razu.
+            const first = mainVariants()[0] || payload.variants[0];
+            variantIndex = payload.variants.indexOf(first);
+            courseIndex = nextCourseIndex(first);
+            recenter = true;
+        } else {
             picked = new Set(payload.lines.map(lineKey));
             fromSec = defaultFromSec(payload);
         }
+        // Widok PRZED treścią: na telefonie zakładka "Mapa" trzyma listę
+        // wyników w display:none, a wtedy pasek godzin ma zerową wysokość
+        // i nie da się go przewinąć do wybranego kursu.
+        B.setView('list');
         render();
         draw(true);
-        B.setView('list');
     }).catch(() => {
         if (mine === token) fail('Nie udało się połączyć z serwerem.');
     }).finally(() => {
-        if (mine === token) setBusy(false);
+        if (mine === token) { setBusy(false); syncField(); }
     });
 }
 
-$('tt-search').addEventListener('click', load);
-if (dateInput) dateInput.addEventListener('change', () => { if (data) load(); });
-$('tt-clear').addEventListener('click', () => {
+queryInput.addEventListener('input', syncField);
+if (dateInput) dateInput.addEventListener('change', () => { if (data) load(kind); });
+$('tt-today').addEventListener('click', () => {
+    dateInput.value = isoToday();
+    if (data) load(kind);
+});
+clearButton.addEventListener('click', () => {
     queryInput.value = '';
     reset();
     queryInput.focus();
@@ -321,14 +371,70 @@ function draw(refit) {
 }
 
 function render() {
+    syncField();
     if (!data) return;
     if (kind === 'line') renderLine();
     else renderBoard();
 }
 
+function isoToday() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+         + `-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+const nowSec = () => {
+    const now = new Date();
+    return now.getHours() * 3600 + now.getMinutes() * 60;
+};
+
+/** Godzina odniesienia dla rozkładu - "teraz", ale tylko dla dnia
+    dzisiejszego. Rozkład na inny dzień czyta się od początku doby, bo
+    bieżąca godzina nic o nim nie mówi. */
+const referenceSec = () => (data.date === isoToday() ? nowSec() : null);
+
+const DAY_NAMES = ['niedziela', 'poniedziałek', 'wtorek', 'środa',
+                   'czwartek', 'piątek', 'sobota'];
+
+function dayLabel() {
+    const [y, m, d] = data.date.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const name = DAY_NAMES[date.getDay()];
+    return data.date === isoToday()
+        ? `dziś, ${name}` : `${name} ${d}.${String(m).padStart(2, '0')}`;
+}
+
+function plural(n, one, few, many) {
+    if (n === 1) return one;
+    const rest = n % 10, hundreds = n % 100;
+    return rest >= 2 && rest <= 4 && (hundreds < 12 || hundreds > 14) ? few : many;
+}
+
 // ------------------------------------------------- rozkład jednej linii ----
 
 const variantOf = () => (data && data.variants ? data.variants[variantIndex] : null);
+
+/** Kierunki podstawowe kontra kursy skrócone. Linia ma dwa kierunki, a poza
+    nimi zjazdy do zajezdni i wjazdy z pętli w połowie trasy - pokazane
+    równorzędnie zamieniają wybór kierunku w listę kilkunastu pozycji, w
+    której trzeba szukać tej właściwej. */
+function mainVariants() {
+    if (!data.variants.length) return [];
+    const top = data.variants[0].trips.length;
+    return data.variants.filter(v => v.trips.length >= top * SIDE_VARIANT_RATIO);
+}
+
+const sideVariants = () => data.variants.filter(v => !mainVariants().includes(v));
+
+/** Pierwszy kurs po godzinie odniesienia (albo ostatni w dobie, gdy już po
+    wszystkim). Bez tego rozkład otwiera się na liście przystanków bez godzin. */
+function nextCourseIndex(variant) {
+    if (!variant || !variant.trips.length) return null;
+    const from = referenceSec();
+    if (from === null) return 0;
+    const found = variant.trips.findIndex(trip => trip.sec >= from);
+    return found === -1 ? variant.trips.length - 1 : found;
+}
 
 function courseTimes() {
     const variant = variantOf();
@@ -341,11 +447,10 @@ function drawLine(refit) {
     const variant = variantOf();
     focusLayer = dropLayer(focusLayer);
     if (!variant) { clearMap(); return; }
-    const times = courseTimes();
     dimBase(true);
     showRoutes(
         routeLines(variant.path, data.mode),
-        [...stopDots(variant.stops, data.mode, times),
+        [...stopDots(variant.stops, data.mode, courseTimes()),
          ...terminusDots(variant.stops, data.mode)],
         refit,
         variant.path,
@@ -359,14 +464,17 @@ function renderLine() {
     }
     const variant = variantOf();
     const times = courseTimes();
+    const course = courseIndex === null ? null : variant.trips[courseIndex];
 
-    const variants = data.variants.map((v, i) => `
-        <button type="button" class="tt-variant${i === variantIndex ? ' active' : ''}"
-                data-variant="${i}" aria-pressed="${i === variantIndex}">
-            <span class="tt-dir">→ ${esc(v.headsign)}</span>
-            <span class="tt-sub">z ${esc(v.from)} · ${v.trips.length}
-                ${plural(v.trips.length, 'kurs', 'kursy', 'kursów')}</span>
-        </button>`).join('');
+    const directionButton = v => {
+        const i = data.variants.indexOf(v);
+        return `<button type="button" class="tt-dir${i === variantIndex ? ' active' : ''}"
+                        data-variant="${i}" aria-pressed="${i === variantIndex}">
+                    <span class="tt-dir-to">${esc(v.headsign)}</span>
+                    <span class="tt-dir-sub">z ${esc(v.from)}</span>
+                </button>`;
+    };
+    const side = sideVariants();
 
     const courses = variant.trips.map((trip, i) => `
         <button type="button" class="tt-course${i === courseIndex ? ' active' : ''}"
@@ -381,42 +489,65 @@ function renderLine() {
         </li>`).join('');
 
     resultsBox.innerHTML = `
-        <div class="results-head">
-            <h2>${esc(data.label)}</h2>
-            <span class="results-count">${data.variants.length}</span>
+        <div class="tt-title">
+            <span class="badge ${esc(data.mode)}">${esc(data.num)}</span>
+            <span class="tt-title-main">${esc(MODE_LABEL[data.mode] || 'Linia')}
+                ${esc(data.num)}</span>
+            <span class="tt-title-sub">${esc(dayLabel())}</span>
         </div>
+
         <div class="card tt-card">
-            <div class="tt-variants">${variants}</div>
+            <div class="tt-dirs">${mainVariants().map(directionButton).join('')}</div>
+            ${side.length ? `
+                <details class="tt-side"${sideOpen ? ' open' : ''}>
+                    <summary>${side.length}
+                        ${plural(side.length, 'kurs skrócony', 'kursy skrócone', 'kursów skróconych')}
+                        — do zajezdni i z pętli po drodze</summary>
+                    <div class="tt-dirs">${side.map(directionButton).join('')}</div>
+                </details>` : ''}
         </div>
+
         <div class="card tt-card">
-            <h3 class="tt-h3">Odjazdy z „${esc(variant.from)}"</h3>
-            <div class="tt-chips">${courses}</div>
-            <p class="field-hint">
-                ${courseIndex === null
-                    ? 'Wybierz godzinę odjazdu, żeby zobaczyć czas na każdym przystanku.'
-                    : 'Kliknij tę samą godzinę ponownie, żeby wrócić do samej trasy.'}
-            </p>
+            <div class="tt-card-head">
+                <h3 class="tt-h3">Odjazdy z „${esc(variant.from)}"</h3>
+                <span class="tt-count">${variant.trips.length}</span>
+            </div>
+            <div class="tt-chips tt-courses">${courses}</div>
         </div>
+
         <div class="card tt-card">
-            <h3 class="tt-h3">Przystanki <span class="tt-sub">${variant.stops.length}</span></h3>
+            <div class="tt-card-head">
+                <h3 class="tt-h3">${course
+                    ? `Kurs ${esc(course.dep)} → ${esc(variant.headsign)}`
+                    : 'Przystanki'}</h3>
+                <span class="tt-count">${variant.stops.length}</span>
+            </div>
             <ol class="tt-stops ${esc(data.mode)}">${stops}</ol>
         </div>`;
+
+    scrollCoursesToActive();
+}
+
+/** Pasek godzin jest długi (doba to i sto kursów), a interesująca jest ta
+    jedna wybrana - więc pasek ustawia się na niej, zamiast zaczynać od 4 rano.
+    Tylko po zmianie rozkładu albo kierunku: przy klikaniu godzin pasek ma
+    stać w miejscu, w którym użytkownik go zostawił. */
+function scrollCoursesToActive() {
+    if (!recenter) return;
+    recenter = false;
+    const strip = resultsBox.querySelector('.tt-courses');
+    const chip = strip && strip.querySelector('.tt-course.active');
+    if (!chip) return;
+    strip.scrollTop = Math.max(
+        0, chip.offsetTop - strip.clientHeight / 2 + chip.offsetHeight / 2);
 }
 
 // ------------------------------------------------ tablica przystanku ----
 
 const lineKey = line => `${line.mode}|${line.num}`;
 
-/** Domyślnie tablica zaczyna się "teraz" - ale tylko dla dnia dzisiejszego.
-    Rozkład na inny dzień pokazujemy od początku doby, bo bieżąca godzina nic
-    o nim nie mówi. */
-function defaultFromSec(payload) {
-    const today = new Date();
-    const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
-              + `-${String(today.getDate()).padStart(2, '0')}`;
-    if (payload.date !== iso) return null;
-    return today.getHours() * 3600 + today.getMinutes() * 60;
-}
+const defaultFromSec = payload =>
+    (payload.date === isoToday() ? nowSec() : null);
 
 /** Linie tablicy pogrupowane po numerze - kierunki tej samej linii są jednym
     przełącznikiem. Zaznaczanie ma odpowiadać na "chcę widzieć 8, 9 i 17",
@@ -502,14 +633,6 @@ function drawBoard(refit) {
     if (openDep !== null) drawOpenDeparture();
 }
 
-/** Trasa dociągnięta asynchronicznie - dokładamy ją do warstwy, która już
-    stoi na mapie, zamiast przerysowywać całość: odpowiedzi wracają jedna po
-    drugiej i każde przerysowanie mrugałoby resztą. */
-function addRoute(path, mode) {
-    if (!routeLayer) routeLayer = L.layerGroup().addTo(map);
-    for (const layer of routeLines(path, mode, 'soft')) routeLayer.addLayer(layer);
-}
-
 function representative(lineIndex) {
     const list = data.departures.filter(dep => dep.line === lineIndex);
     if (!list.length) return null;
@@ -539,13 +662,12 @@ function drawOpenDeparture() {
     fetchTrip(dep).then(trip => {
         if (!trip || !active() || kind !== 'stop' || openDep === null) return;
         focusLayer = dropLayer(focusLayer);
-        const layers = [
+        const onward = trip.stops.slice(trip.board_index);
+        focusLayer = L.layerGroup([
             ...routeLines(trip.path, trip.mode, 'ghost'),
             ...routeLines(trip.tail, trip.mode, 'full'),
-            ...stopDots(trip.stops.slice(trip.board_index), trip.mode,
-                        trip.stops.slice(trip.board_index).map(s => s.t)),
-        ];
-        focusLayer = L.layerGroup(layers).addTo(map);
+            ...stopDots(onward, trip.mode, onward.map(s => s.t)),
+        ]).addTo(map);
         fitTo(trip.tail);
     });
 }
@@ -554,6 +676,7 @@ function renderBoard() {
     const groups = lineGroups();
     const shown = visibleDepartures();
     const page = shown.slice(0, boardLimit);
+    const all = picked.size === groups.length;
 
     const chips = groups.map(group => `
         <button type="button" class="tt-line badge ${esc(group.mode)}${picked.has(group.key) ? '' : ' off'}"
@@ -571,43 +694,45 @@ function renderBoard() {
             role="button" aria-expanded="${open}">
             <span class="tt-t">${esc(dep.t)}</span>
             <span class="badge ${esc(line.mode)}">${esc(line.num)}</span>
-            <span class="tt-head">→ ${esc(line.headsign)}</span>
+            <span class="tt-head">${esc(line.headsign)}</span>
             ${dep.platform ? `<span class="tt-platform">${esc(dep.platform)}</span>` : ''}
         </li>${open ? tripHtml(dep) : ''}`;
     }).join('');
 
-    const picks = picked.size;
-    const mapNote = picks === 0
-        ? 'Nie zaznaczono żadnej linii — tablica jest pusta.'
-        : picks > MAX_ROUTES_ON_MAP
-            ? `Zaznaczonych kierunków jest ${picks} — na mapie rysujemy trasy `
-              + `dopiero od ${MAX_ROUTES_ON_MAP} w dół, inaczej nie widać z nich żadnej.`
-            : 'Trasy zaznaczonych linii — od tego przystanku dalej — widać na mapie.';
+    const mapNote = picked.size === 0
+        ? 'Nic nie zaznaczone — tablica jest pusta.'
+        : groups.length > MAX_ROUTES_ON_MAP && picked.size > MAX_ROUTES_ON_MAP
+            ? `Zostaw najwyżej ${MAX_ROUTES_ON_MAP} linii, a ich trasy pokażą się na mapie.`
+            : 'Trasy zaznaczonych linii — stąd dalej — widać na mapie.';
 
     resultsBox.innerHTML = `
-        <div class="results-head">
-            <h2>${esc(data.stop)}</h2>
-            <span class="results-count">${shown.length}</span>
+        <div class="tt-title">
+            <span class="ac-pin big" aria-hidden="true"></span>
+            <span class="tt-title-main">${esc(data.stop)}</span>
+            <span class="tt-title-sub">${esc(dayLabel())}</span>
         </div>
+
         <div class="card tt-card">
-            <div class="tt-filter-head">
-                <h3 class="tt-h3">Linie w tej tablicy</h3>
-                <button type="button" class="tt-mini" data-pick="all">wszystkie</button>
-                <button type="button" class="tt-mini" data-pick="none">żadna</button>
+            <div class="tt-card-head">
+                <h3 class="tt-h3">Linie</h3>
+                <button type="button" class="tt-mini" data-pick="${all ? 'none' : 'all'}">
+                    ${all ? 'odznacz wszystkie' : 'zaznacz wszystkie'}
+                </button>
             </div>
             <div class="tt-chips">${chips}</div>
-            <p class="field-hint">
-                Odhaczone linie znikają z tablicy — zostaje rozkład złożony
-                dokładnie z tych, które zaznaczysz. ${esc(mapNote)}
-            </p>
+            <p class="field-hint">${esc(mapNote)}</p>
         </div>
+
         <div class="card tt-card">
-            <div class="tt-filter-head">
+            <div class="tt-card-head">
                 <h3 class="tt-h3">Odjazdy</h3>
-                <button type="button" class="tt-mini${fromSec === null ? ' active' : ''}"
-                        data-from="day">cała doba</button>
-                <button type="button" class="tt-mini${fromSec === null ? '' : ' active'}"
-                        data-from="now">od teraz</button>
+                <span class="tt-count">${shown.length}</span>
+                <div class="tt-switch">
+                    <button type="button" class="tt-mini${fromSec === null ? '' : ' active'}"
+                            data-from="now">od teraz</button>
+                    <button type="button" class="tt-mini${fromSec === null ? ' active' : ''}"
+                            data-from="day">cała doba</button>
+                </div>
             </div>
             <ol class="tt-board">${rows}</ol>
             ${shown.length > page.length ? `
@@ -630,31 +755,30 @@ function tripHtml(dep) {
         </li>`).join('');
     return `<li class="tt-trip">
         <ol class="tt-stops ${esc(trip.mode)}">${stops}</ol>
-        <p class="field-hint">Kliknij ponownie, żeby zwinąć ten kurs.</p>
+        <p class="field-hint">Kliknij godzinę ponownie, żeby zwinąć ten kurs.</p>
     </li>`;
 }
 
 // --------------------------------------------------------- zdarzenia ----
 
-function plural(n, one, few, many) {
-    if (n === 1) return one;
-    const rest = n % 10, hundreds = n % 100;
-    return rest >= 2 && rest <= 4 && (hundreds < 12 || hundreds > 14) ? few : many;
-}
-
 resultsBox.addEventListener('click', event => {
-    const suggest = event.target.closest('[data-suggest]');
-    if (suggest) {
+    const suggestion = event.target.closest('[data-suggest]');
+    if (suggestion) {
         event.preventDefault();
-        queryInput.value = suggest.dataset.suggest;
+        queryInput.value = suggestion.dataset.suggest;
         load();
         return;
     }
 
     const variant = event.target.closest('[data-variant]');
     if (variant) {
-        variantIndex = Number(variant.dataset.variant);
-        courseIndex = null;
+        const index = Number(variant.dataset.variant);
+        sideOpen = !mainVariants().includes(data.variants[index]);
+        variantIndex = index;
+        // Kierunek zmienia zestaw kursów - trzymanie numeru poprzedniego
+        // pokazałoby przypadkową godzinę, więc wracamy do najbliższej.
+        courseIndex = nextCourseIndex(variantOf());
+        recenter = true;
         render();
         draw(true);
         return;
@@ -692,7 +816,7 @@ resultsBox.addEventListener('click', event => {
 
     const from = event.target.closest('[data-from]');
     if (from) {
-        fromSec = from.dataset.from === 'day' ? null : defaultFromSec(data) || 0;
+        fromSec = from.dataset.from === 'day' ? null : (referenceSec() ?? 0);
         boardLimit = BOARD_PAGE;
         render();
         draw(false);
@@ -709,14 +833,13 @@ resultsBox.addEventListener('click', event => {
     if (dep) {
         const index = Number(dep.dataset.dep);
         openDep = openDep === index ? null : index;
+        render();
         if (openDep === null) {
             focusLayer = dropLayer(focusLayer);
-            render();
             draw(false);
         } else {
             // Kurs bywa jeszcze w drodze - rysujemy i przerysowujemy listę,
             // gdy odpowiedź dojdzie (tripHtml czyta z tego samego cache).
-            render();
             drawOpenDeparture();
             fetchTrip(data.departures[index]).then(() => {
                 if (openDep === index) render();

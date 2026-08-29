@@ -480,17 +480,31 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 - **2026-08-29** — drugi tryb panelu: **rozkłady jazdy**, przełączane
   przyciskiem ◷ obok chowania panelu (na telefonie w pasku zakładek).
-  Rozkład linii (warianty trasy, kursy, przebieg na mapie) i tablica
-  odjazdów z przystanku, w której plakietkami linii składa się rozkład
-  z dowolnego ich podzbioru; trasy zaznaczonych linii — od tego przystanku
-  dalej — idą na mapę, a kliknięcie odjazdu pokazuje ten jeden kurs
-  z godzinami. Backend: `timetables.py` + `/api/line`, `/api/stop_board`,
-  `/api/trip`. Front: `static/timetable.js`, wpięty w mapę wyszukiwarki
-  wąskim mostem (`window.plannerBridge` na końcu `app.js`) — wejście
-  w rozkłady chowa wachlarz połączeń, wyjście odtwarza go z pamięci, bez
-  ponownego zapytania. Przy okazji: pole daty wyszukiwarki dostało wartość
-  w formacie ISO — `<input type="date">` innego nie przyjmuje, więc do tej
-  pory startowało puste.
+  Rozkład linii (kierunki, kursy, przebieg na mapie) i tablica odjazdów
+  z przystanku, w której plakietkami linii składa się rozkład z dowolnego
+  ich podzbioru; trasy zaznaczonych linii — od tego przystanku dalej — idą
+  na mapę, a kliknięcie odjazdu pokazuje ten jeden kurs z godzinami.
+  Backend: `timetables.py` + `/api/line`, `/api/stop_board`, `/api/trip`.
+  Front: `static/timetable.js`, wpięty w mapę wyszukiwarki wąskim mostem
+  (`window.plannerBridge` na końcu `app.js`) — wejście w rozkłady chowa
+  wachlarz połączeń, wyjście odtwarza go z pamięci, bez ponownego zapytania.
+
+  Trzy decyzje z UI, bo każda odwraca to, co napisało się najpierw:
+  **jedno pole** zamiast zakładek „Linia / Przystanek" — zakładka kazała
+  wybrać rodzaj rozkładu, zanim było wiadomo, czego się szuka, a „17"
+  i „Katedra" i tak nie da się pomylić; rodzaj widać na liście podpowiedzi
+  (plakietka linii / znaczek słupka) i tam wystarczy. **Brak przycisku
+  „Pokaż"** — wybór podpowiedzi ładuje od razu, Enter też. **Rozkład linii
+  otwiera się na najbliższym kursie**, a nie na liście przystanków bez
+  godzin: pytanie brzmi „o której to jedzie", więc jakaś godzina musi być
+  na ekranie od razu, a pasek godzin sam przewija się na tę porę.
+  `attachAutocomplete` dostało przy okazji haki `suggest`/`render`, więc
+  klawiatura i ARIA listy podpowiedzi są nadal w jednym miejscu, a rozkłady
+  podstawiają tylko własne szukanie i własny wiersz.
+
+  Przy okazji: pole daty wyszukiwarki dostało wartość w formacie ISO —
+  `<input type="date">` innego nie przyjmuje, więc do tej pory startowało
+  puste.
 - **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
   z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
   niej), z wypełnionym celem odpala wyszukiwanie od razu, bez celu przesuwa

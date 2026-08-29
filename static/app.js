@@ -1742,7 +1742,8 @@ const FOLDED_NAMES = STOP_NAMES.map(fold);
 
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
     chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
-function suggestionsFor(query, names = STOP_NAMES, folded = FOLDED_NAMES) {
+function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIONS) {
+    folded = folded || (names === STOP_NAMES ? FOLDED_NAMES : names.map(fold));
     const needle = fold(query.trim());
     if (!needle) return [];
     const prefix = [], inside = [];
@@ -1751,24 +1752,27 @@ function suggestionsFor(query, names = STOP_NAMES, folded = FOLDED_NAMES) {
         if (at === 0) prefix.push({name, at, len: needle.length});
         else if (at > 0) inside.push({name, at, len: needle.length});
     });
-    return [...prefix, ...inside].slice(0, MAX_SUGGESTIONS);
+    return [...prefix, ...inside].slice(0, limit);
 }
 
-/** `options.names` podmienia źródło podpowiedzi (tryb rozkładów podaje numery
-    linii zamiast nazw przystanków), `options.onEnter` - to, co robi Enter poza
-    listą. Domyślnie jedno i drugie jest tym, czego chce wyszukiwarka. */
+/** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów
+    podstawia własny (plakietka linii albo znaczek przystanku). */
+function suggestionHtml(item) {
+    return esc(item.name.slice(0, item.at))
+         + `<mark>${esc(item.name.slice(item.at, item.at + item.len))}</mark>`
+         + esc(item.name.slice(item.at + item.len));
+}
+
+/** Klawiatura, ARIA i zamykanie listy są tu raz; co dokładnie się podpowiada
+    i jak wygląda wiersz, wołający może podmienić:
+    - `options.suggest(query)` - własne szukanie (rozkłady mieszają w jednej
+      liście linie i przystanki, więc nie da się tego opisać jedną tablicą nazw);
+    - `options.render(item)`   - własny wiersz;
+    - `options.onEnter()`      - co robi Enter poza listą.
+    `onPick` dostaje wybraną pozycję, nie sam napis. */
 function attachAutocomplete(input, onPick, options = {}) {
-    // `names` bywa funkcją, bo tryb rozkładów podpowiada raz numery linii,
-    // raz nazwy przystanków - i przełącza się między nimi w TYM SAMYM polu.
-    const source = typeof options.names === 'function'
-        ? options.names
-        : () => options.names || STOP_NAMES;
-    const foldedCache = new Map();
-    const foldedFor = names => {
-        if (names === STOP_NAMES) return FOLDED_NAMES;
-        if (!foldedCache.has(names)) foldedCache.set(names, names.map(fold));
-        return foldedCache.get(names);
-    };
+    const suggest = options.suggest || (query => suggestionsFor(query));
+    const render = options.render || suggestionHtml;
     const onEnter = options.onEnter || search;
     const list = $(input.id + '-list');
     let items = [];
@@ -1785,17 +1789,13 @@ function attachAutocomplete(input, onPick, options = {}) {
     }
 
     function open() {
-        const names = source();
-        items = suggestionsFor(input.value, names, foldedFor(names));
+        items = suggest(input.value);
         active = -1;
         if (!items.length) { close(); return; }
-        list.innerHTML = items.map((item, i) => {
-            const hit = esc(item.name.slice(item.at, item.at + item.len));
-            return `<li class="ac-item" role="option" aria-selected="false"
-                        id="${list.id}-${i}" data-index="${i}">` +
-                   `${esc(item.name.slice(0, item.at))}<mark>${hit}</mark>` +
-                   `${esc(item.name.slice(item.at + item.len))}</li>`;
-        }).join('');
+        list.innerHTML = items.map((item, i) =>
+            `<li class="ac-item" role="option" aria-selected="false"
+                 id="${list.id}-${i}" data-index="${i}">${render(item)}</li>`
+        ).join('');
         list.hidden = false;
         list.classList.remove('kb');
         input.setAttribute('aria-expanded', 'true');
@@ -1831,7 +1831,7 @@ function attachAutocomplete(input, onPick, options = {}) {
         if (!item) return;
         input.value = item.name;
         close();
-        onPick();
+        onPick(item);
     }
 
     input.addEventListener('input', open);
@@ -2126,7 +2126,8 @@ function resumePlanner() {
 }
 
 window.plannerBridge = {
-    map, esc, fitTo, setView, attachAutocomplete, setBaseDim,
+    map, esc, fitTo, setView, setBaseDim,
+    attachAutocomplete, suggestionsFor, suggestionHtml,
     LINE_COLORS, MODE_LABEL, STOP_NAMES,
     suspendPlanner, resumePlanner,
 };

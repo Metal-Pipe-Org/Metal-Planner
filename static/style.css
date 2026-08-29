@@ -1240,46 +1240,130 @@ body.mode-timetable #tt-results { display: block; }
    czego opisywać. */
 body.mode-timetable .time-headline { display: none; }
 
-#tt-search .spinner { display: none; }
-body.tt-searching #tt-search .spinner { display: inline-block; }
-body.tt-searching #tt-search { cursor: progress; }
+/* --- pole szukania ------------------------------------------------------- */
 
-/* Linia / Przystanek - dwa rodzaje rozkładu, jeden pod drugim byłby dwoma
-   osobnymi formularzami; obok siebie to jedno pytanie z dwiema odpowiedziami. */
-.tt-tabs {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 10px;
-    padding: 3px;
+/* Te same style, co pola "skąd/dokąd" - jedno pole tekstowe w tej aplikacji
+   ma wyglądać jak każde inne, niezależnie od tego, w której karcie stoi. */
+.tt-field input {
+    width: 100%;
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--surface-alt);
-}
-
-.tt-tab {
-    flex: 1;
-    border: none;
-    border-radius: 8px;
-    padding: 7px 10px;
-    background: transparent;
-    color: var(--ink-soft);
     font: inherit;
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-}
-
-.tt-tab.active {
-    background: var(--surface);
+    font-size: 15px;
     color: var(--ink);
-    box-shadow: 0 1px 3px rgba(16, 32, 48, 0.16);
 }
 
-.timetable-card .search-row { margin-top: 10px; }
+.tt-field input.with-action { padding-right: 42px; }
+
+.tt-field input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.tt-field .icon-button.in-field { top: 6px; }
+
+/* Wiersz podpowiedzi ma od razu mówić, co to jest: plakietka w kolorze
+   pojazdu = linia, znaczek słupka = przystanek. Bez tego jedno pole na dwie
+   rzeczy byłoby zgadywanką. */
+.ac-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ac-item .badge { flex: 0 0 auto; }
+
+.ac-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ac-kind {
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+}
+
+/* Znaczek przystanku - ten sam okrąg, co słupek na mapie. */
+.ac-pin {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 auto;
+    margin: 0 9px;
+    border: 2px solid var(--bus);
+    border-radius: 50%;
+    background: var(--surface);
+}
+
+.ac-pin.big {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    border-width: 3px;
+    background: #ffd54f;
+    border-color: #263238;
+}
+
+.tt-day {
+    margin-top: 10px;
+    color: var(--ink-soft);
+}
+
+.tt-day input[type="date"] { flex: 0 0 auto; }
+
+/* Kółko ładowania siedzi w wierszu daty - przycisku "Pokaż" nie ma, więc nie
+   ma go gdzie postawić, a szukanie musi być widoczne. */
+.tt-spinner { display: none; margin-left: auto; color: var(--ink-faint); }
+body.tt-searching .tt-spinner { display: inline-block; }
+
+/* --- wyniki -------------------------------------------------------------- */
+
+/* Nagłówek wyniku zastępuje .results-head z wyszukiwarki: tam wystarczał
+   napis "propozycje tras", tu trzeba powiedzieć CZYJ to rozkład i NA KIEDY. */
+.tt-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 8px 2px;
+    /* Prawy margines na pasek przewijania listy - bez niego dzień wyjeżdża
+       poza kadr i urywa się w połowie słowa. */
+    padding-right: 8px;
+    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+}
+
+.tt-title-main {
+    font-size: 15px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-title-sub {
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    white-space: nowrap;
+}
 
 .tt-card { margin-bottom: 10px; }
 
+.tt-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
 .tt-h3 {
-    margin: 0 0 8px;
+    margin: 0;
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -1287,24 +1371,34 @@ body.tt-searching #tt-search { cursor: progress; }
     color: var(--ink-soft);
 }
 
-.tt-sub {
-    color: var(--ink-faint);
-    font-size: 12px;
-    font-weight: 400;
-    letter-spacing: 0;
-    text-transform: none;
+.tt-count {
+    padding: 0 7px;
+    border-radius: 999px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
 }
 
-/* Warianty trasy linii: kierunek plus to, ile kursów tędy jedzie - kurs
-   skrócony do zajezdni ma być na pierwszy rzut oka odróżnialny od kierunku
-   podstawowego. */
-.tt-variants {
+.tt-switch {
     display: flex;
-    flex-direction: column;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.tt-card-head .tt-mini:not(.tt-switch .tt-mini) { margin-left: auto; }
+
+/* Kierunek linii: dwa duże przyciski obok siebie - to jest wybór "w którą
+   stronę", a nie pozycja z listy. */
+.tt-dirs {
+    display: flex;
     gap: 6px;
 }
 
-.tt-variant {
+.tt-dir {
+    flex: 1 1 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -1318,22 +1412,59 @@ body.tt-searching #tt-search { cursor: progress; }
     cursor: pointer;
 }
 
-.tt-variant:hover { background: var(--surface-alt); }
+.tt-dir:hover { background: var(--surface-alt); }
 
-.tt-variant.active {
+.tt-dir.active {
     border-color: var(--accent);
+    background: #eef3ff;
     box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.tt-dir { font-weight: 600; }
+.tt-dir-to {
+    font-weight: 600;
+    font-size: 13.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-dir-to::before { content: "→ "; color: var(--ink-faint); }
+
+.tt-dir-sub {
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Kursy skrócone schowane pod rozwijaniem - są, ale nie zabierają miejsca
+   kierunkom, którymi linia jeździ cały dzień. */
+.tt-side { margin-top: 8px; }
+
+.tt-side > summary {
+    color: var(--ink-soft);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tt-side .tt-dirs {
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+
+.tt-side .tt-dir { flex: 1 1 45%; }
 
 /* Godziny odjazdów i numery linii - jedno i drugie to gęsta siatka małych
    przycisków, więc wspólny pojemnik z własnym przewijaniem. */
 .tt-chips {
+    /* Pozycjonowany, żeby offsetTop plakietki liczył się WZGLĘDEM paska -
+       na tym stoi przewinięcie do wybranego kursu (patrz timetable.js). */
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
-    max-height: 190px;
+    max-height: 168px;
     overflow-y: auto;
     overscroll-behavior: contain;
 }
@@ -1376,15 +1507,6 @@ body.tt-searching #tt-search { cursor: progress; }
     box-shadow: inset 0 0 0 1px var(--line);
 }
 
-.tt-filter-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
-}
-
-.tt-filter-head .tt-h3 { margin: 0; margin-right: auto; }
-
 .tt-mini {
     border: 1px solid var(--line);
     border-radius: 999px;
@@ -1393,6 +1515,7 @@ body.tt-searching #tt-search { cursor: progress; }
     color: var(--ink-soft);
     font: inherit;
     font-size: 12px;
+    white-space: nowrap;
     cursor: pointer;
 }
 
@@ -1422,7 +1545,7 @@ body.tt-searching #tt-search { cursor: progress; }
     cursor: pointer;
 }
 
-.tt-dep:hover { background: var(--surface-alt); }
+.tt-dep:hover,
 .tt-dep.open { background: var(--surface-alt); }
 
 .tt-dep .tt-t {
@@ -1438,6 +1561,8 @@ body.tt-searching #tt-search { cursor: progress; }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.tt-head::before { content: "→ "; color: var(--ink-faint); }
 
 .tt-platform {
     margin-left: auto;

@@ -36,12 +36,21 @@ zakładek na dole. Oba tryby zajmują to samo miejsce — wejście w rozkłady
 chowa okienko wyszukiwania, wyjście przywraca je razem z tym, co było
 narysowane na mapie, bez ponownego szukania.
 
-**Linia** — po numerze. Kursy grupowane po ciągu przystanków, nie po samym
-kierunku: linia ma zwykle dwa kierunki i do tego garść kursów skróconych
-(do zajezdni, do pętli w połowie trasy), a zlanie ich w jedną tablicę
-godzin dałoby rozkład, pod którym podpisany jest przystanek, przez który
-połowa tych kursów nie przejeżdża. Wybór wariantu rysuje jego przebieg na
-mapie; wybór godziny odjazdu dopisuje czas przy każdym przystanku.
+Jest **jedno pole** na jedno i drugie: „17" to linia, „Katedra" to
+przystanek. Rodzaj widać na liście podpowiedzi — linie mają plakietkę
+w kolorze pojazdu, przystanki znaczek słupka — czyli tam, gdzie faktycznie
+jest potrzebny, a nie w przełączniku ustawianym przed wpisaniem czegokolwiek.
+
+**Linia.** Dwa kierunki podstawowe stoją obok siebie, a kursy skrócone
+(do zajezdni, z pętli w połowie trasy) chowają się pod rozwijaniem — jest
+ich zwykle więcej niż samych kierunków i równorzędnie pokazane zamieniają
+wybór kierunku w szukanie w liście. Rozkład otwiera się od razu na
+**najbliższym kursie**, z godzinami przy każdym przystanku i przebiegiem
+na mapie; pasek godzin jest przewinięty na tę właśnie porę.
+
+Kursy są grupowane po ciągu przystanków, nie po samym napisie na czole:
+zlanie ich w jedną tablicę godzin dałoby rozkład, pod którym podpisany
+jest przystanek, przez który połowa tych kursów nie przejeżdża.
 
 **Przystanek** — po nazwie albo kliknięciem słupka na mapie. Tablica
 odjazdów wszystkich linii, z plakietkami do odhaczania: zostaje rozkład

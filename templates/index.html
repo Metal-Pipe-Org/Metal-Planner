@@ -138,40 +138,37 @@
     #}
     <div class="card timetable-card" id="timetable-card">
 
-        <div class="tt-tabs" role="group" aria-label="Rodzaj rozkładu">
-            <button type="button" class="tt-tab active" data-tt="line"
-                    aria-pressed="true">Linia</button>
-            <button type="button" class="tt-tab" data-tt="stop"
-                    aria-pressed="false">Przystanek</button>
-        </div>
-
-        <div class="ac-field">
-            <input type="text" id="tt-query" autocomplete="off" role="combobox"
-                   aria-label="Numer linii albo nazwa przystanku"
+        {#
+          JEDNO pole na linię i na przystanek. Rozdzielenie ich zakładkami
+          kazało wybrać rodzaj rozkładu, zanim w ogóle było wiadomo, czego się
+          szuka - a "17" i "Katedra" i tak nie da się ze sobą pomylić. Rodzaj
+          widać na liście podpowiedzi (plakietka linii / znaczek przystanku),
+          czyli tam, gdzie faktycznie potrzebny.
+        #}
+        <div class="ac-field tt-field">
+            <input type="text" id="tt-query" class="with-action" autocomplete="off"
+                   role="combobox" aria-label="Numer linii albo nazwa przystanku"
                    aria-autocomplete="list" aria-expanded="false"
-                   aria-controls="tt-query-list" placeholder="Numer linii, np. 17">
+                   aria-controls="tt-query-list"
+                   placeholder="Linia albo przystanek — np. 17, Katedra">
+            <button id="tt-clear" class="icon-button in-field" title="Wyczyść"
+                    aria-label="Wyczyść rozkład" hidden>&#10005;</button>
             <ul class="ac-list" id="tt-query-list" role="listbox" hidden
-                aria-label="Podpowiedzi"></ul>
+                aria-label="Podpowiedzi linii i przystanków"></ul>
         </div>
 
         <script id="line-names" type="application/json">{{ lines|tojson }}</script>
 
-        <div class="search-row">
-            <div class="time-field">
-                <div class="time-row">
-                    <span>Dzień</span>
-                    <input type="date" id="tt-date" value="{{ form_date }}">
-                </div>
-            </div>
-            <button id="tt-search" class="button primary">
-                <span class="spinner" aria-hidden="true"></span>Pokaż
-            </button>
-            <button id="tt-clear" class="icon-button" title="Wyczyść"
-                    aria-label="Wyczyść rozkład">&#10005;</button>
+        <div class="tt-day time-row">
+            <span>Dzień</span>
+            <input type="date" id="tt-date" value="{{ form_date }}">
+            <button type="button" id="tt-today" class="time-now-button">dziś</button>
+            <span class="spinner tt-spinner" aria-hidden="true"></span>
         </div>
 
         <p class="hint" id="tt-hint">
-            Wpisz numer linii — zobaczysz jej kursy i przebieg na mapie.
+            Wpisz numer linii albo nazwę przystanku — możesz też kliknąć
+            słupek na mapie.
         </p>
 
     </div>
