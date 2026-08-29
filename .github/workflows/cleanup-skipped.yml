@@ -1,4 +1,4 @@
-name: Sprzątanie pominiętych biegów
+name: Sprzątanie pominiętych run'ów
 
 # Wyzwalacz `issue_comment` w claude-issue.yml tworzy bieg przy KAŻDYM komentarzu
 # w repo — GitHub nie umie filtrować po treści, więc te bez @claude odbija dopiero
