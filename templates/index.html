@@ -90,17 +90,17 @@
 
         <div class="search-row">
             <div class="time-field">
-                <div>
-                      <span>Odjazd</span>
+                <div class="time-row">
+                    <span>Odjazd</span>
                     <input type="text" id="time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
                            maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
                     <button type="button" id="time-now" class="time-now-button">teraz</button>
                     <button type="button" id="day-toggle" class="icon-button" title="Więcej opcji czasu"
                             aria-label="Więcej opcji czasu" aria-expanded="false" aria-controls="day-panel">⌵</button>
                 </div>
-                <div id="day-panel" class="day-panel hidden">
-                <span>Data</span>
-                <input type="date" id="date" value="{{ form_date }}">
+                <div id="day-panel" class="day-panel hidden time-row">
+                    <span>Data</span>
+                    <input type="date" id="date" value="{{ form_date }}">
                 </div>
             </div>
             <button id="search" class="button primary">

@@ -370,7 +370,7 @@ body.panel-hidden #sidebar {
     flex: 0 0 auto;
     flex-direction: column;
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 8px;
     height: auto;
     padding: 0 10px;
@@ -380,6 +380,13 @@ body.panel-hidden #sidebar {
     color: var(--ink-faint);
     font-size: 12.5px;
 }
+
+.time-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .day-panel {
     margin-top: 6px;
     padding-top: 8px;
