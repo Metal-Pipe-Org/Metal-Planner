@@ -24,6 +24,7 @@ import os
 # "Not a string" - w kółko, bo compose restartuje kontener.
 import config as _config  # noqa: F401
 import update_gtfs
+import update_pkp
 
 bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
@@ -49,3 +50,4 @@ def on_starting(server):
     i tyle równoległych przebudów bazy o 3:00.
     """
     update_gtfs.start_daily_scheduler()
+    update_pkp.start_daily_scheduler()  # no-op bez PKP_API_KEY - patrz update_pkp.py

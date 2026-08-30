@@ -409,7 +409,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## API
 
-- `GET /api/stops` — wszystkie słupki: `[{name, lat, lon}, …]`.
+- `GET /api/stops` — wszystkie słupki MPK i (o ile skonfigurowano
+  `PKP_API_KEY` i geokodowanie zdążyło już znaleźć współrzędne - patrz
+  `pkp.py`/`update_pkp.py`) stacje PKP: `[{name, lat, lon, kind: "stop"|
+  "train"}, …]`. `kind` mówi frontowi, jakim stylem narysować marker
+  (`static/app.js`) - reszta pól jest taka sama dla obu rodzajów.
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
@@ -426,6 +430,20 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
   to, to_time, minutes, stops, stops_count, path}`; etap pieszy:
   `{kind: "walk", text, minutes, from, to, path}`.
+  Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
+  akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
+  (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
+  `plan_flow` dokładnie tak samo, jak gdyby PKP nie istniało. Połączenia
+  kolejowe są doklejone WPROST do tablicy połączeń, którą skanuje CSA
+  (`gtfs.load_day` → `pkp.augment_day`, patrz `pkp.py`) — dla wyszukiwarki
+  stacja PKP to zwykły przystanek, a przesiadka pociąg↔MPK to zwykła
+  przesiadka (przez `siblings`, jeśli są bliżej niż `pkp.TRANSFER_RADIUS_M`).
+  Efekt: relacja „Warszawa Centralna → Rynek” po prostu działa — jedna trasa,
+  etapy kolejowe i miejskie razem, bez żadnego specjalnego pola w odpowiedzi.
+  Stacja PKP bez ustalonych współrzędnych (geokodowanie w toku - patrz
+  `update_pkp.py`) jest dla wyszukiwarki niewidoczna, a etap kolejowy nie ma
+  geometrii trasy (`path: []` na etapie — sama stacja, jeśli ma współrzędne,
+  i tak ma marker na mapie, patrz `/api/stops`).
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
   w nazwie przystanku.
 
@@ -436,6 +454,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
+| `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
@@ -446,12 +465,299 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `static/pwa.js` | rejestracja workera, przycisk instalacji, ciche przejście na nową wersję |
 | `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
 | `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
-| `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
+| `data/gtfs.sqlite` | baza rozkładu MPK (poza gitem) |
+| `update_pkp.py` | pobranie rozkładu PKP + budowa SQLite + atomowa podmiana + geokodowanie stacji |
+| `data/pkp.sqlite` | baza rozkładu PKP, tylko z `PKP_API_KEY` (poza gitem) |
+| `data/pkp_station_coords.json` | współrzędne stacji PKP z geokodowania (poza gitem) |
 | `docs/` | dokumentacja: ten plik, `ROUTING_ALGORITHM.md`, `FLOW_MAP_CONTRACT.md` |
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
 
+- **2026-08-30** — geokodowanie stacji PKP uproszczone na wyraźną prośbę
+  użytkownika do DWÓCH źródeł: WYŁĄCZNIE mapa PLK i portal pasażera -
+  OpenStreetMap/Overpass i Nominatim (razem z całym mechanizmem "stacje za
+  granicą", który na nich polegał) usunięte z `update_pkp.py` całkowicie,
+  nie tylko zdegradowane do zapasowych. Powód: oba to zewnętrzne geokodery
+  dopasowujące po samej nazwie miejscowości, bez wiedzy o tym, że Polska ma
+  wiele miejsc o tej samej nazwie w różnych regionach - historia tego
+  pliku to seria takich błędów (Augustów, Widuchowa, Słupca, ~300 innych
+  przez pospolite nazwy jak "Chałupy", a nawet sam portal pasażera dla
+  zagranicznego "Kolina", patrz wpis niżej) - PLK i portal to jedyne dwa
+  źródła PIERWSZOOSOBOWE (dane samego zarządcy sieci / własnego sprzedawcy
+  biletów), więc jedyne, które nie zgadują po nazwie. Konsekwencja: stacje
+  ZA GRANICĄ (Berlin, Wiedeń, Kijów, ...) nie mają już żadnego źródła
+  współrzędnych - żadne z dwóch pozostałych nie obejmuje zagranicy (patrz
+  nagłówek `_fetch_portalpasazera_point`) - zostają bez markera zamiast
+  zgadywanej pozycji; walidacja tras (`find_suspect_coords`) i mapa PLK/
+  portal pasażera zostają bez zmian poza tym. Usunięte też: eksperymentalne
+  automatyczne usuwanie ze słownika stacji tych bez żadnego kursu w danym
+  oknie rozkładu (`build_database`, wprowadzone i tego samego dnia cofnięte
+  na prośbę użytkownika) - `stations` znowu zawiera WSZYSTKO, co zwróci
+  słownik API, niezależnie od tego, czy dana stacja ma jakikolwiek `stops`.
+  Filtr w `pkp.all_station_names()` (tylko stacje z ustalonymi
+  współrzędnymi - patrz wpis niżej) zostaje bez zmian - to inny, celowo
+  zachowany mechanizm.
+
+- **2026-08-29** — piąte źródło geokodowania: katalog stacji na
+  portalpasazera.pl (oficjalny portal sprzedaży biletów PKP,
+  `update_pkp._fetch_portalpasazera_point` - scraping pojedynczej strony,
+  brak publicznego API, więc bez zbiorczego zapytania jak PLK/OSM).
+  Zgłoszone przez użytkownika na żywo (Góra Śląska, Zwierzyniec - obu nie
+  miały ani PLK, ani OSM, ani Nominatim, a portal miał). Kolejność w
+  `geocode_missing_stations` zmieniona na wyraźną prośbę użytkownika: oba
+  źródła PIERWSZOOSOBOWE PKP/PLK (mapa PLK, potem ten portal) mają
+  pierwszeństwo przed zewnętrznymi geokoderami - dopiero to, czego żadne
+  z dwóch nie znajdzie, dogania OpenStreetMap, a na końcu Nominatim
+  (wcześniej było odwrotnie: OSM i Nominatim przed portalem). Uwaga
+  znaleziona przy okazji: portal miewa TĘ SAMĄ pułapkę zbieżności nazw co
+  Nominatim/OSM (patrz wpis niżej o Augustowie/Widuchowej) - dla
+  zagranicznej stacji „Kolin” (Czechy) portal zwraca współrzędne zupełnie
+  innej, przypadkowo tak samo nazwanej polskiej wsi (73-116 Kolin,
+  zachodniopomorskie); złapane i odrzucone automatycznie przez istniejącą
+  walidację tras (`find_suspect_coords` - sąsiedzi na trasie 350+ km od
+  tego wyniku), więc stacja zostaje bez markera zamiast dostać zły.
+
+- **2026-08-29** — `update_pkp.build_database` usuwa ze słownika stacji
+  (tabela `stations`) każdą, która nie ma ŻADNEGO wpisu w `stops` w tym
+  oknie rozkładu (`DELETE ... WHERE station_id NOT IN (SELECT DISTINCT
+  station_id FROM stops)`, tuż po ich wstawieniu). Zgłoszone przez
+  użytkownika: taka stacja i tak nigdy nie pojawi się w żadnej realnej
+  trasie (żaden kurs przez nią nie przejeżdża), więc nie ma sensu jej
+  geokodować (`_read_stations` czyta wprost z tej tabeli) ani pokazywać
+  w podpowiedziach wyszukiwarki (`pkp.all_station_names`/`all_stations_geo`,
+  ta sama tabela) - jedna zmiana zamiast osobnego filtra w obu miejscach.
+  Na żywej bazie usunęło to 59 z 3266 stacji - część to osobne, nieużywane
+  wpisy obok innych stacji o tej samej nazwie z realnym kursem (np. "Berlin
+  Zoolog Garten"/"Berlin Hbf" - dokładnie te, które wcześniej dostały
+  ręczną poprawkę nazwy w `NAME_OVERRIDES`/geokodowanie, na próżno - żaden
+  kurs przez nie nie jeździ), część to jawnie syntetyczne wpisy-zaślepki
+  ("WARSZAWA -", "BERLIN -", ...). Osierocone wpisy dla usuniętych stacji
+  wyczyszczone też z `data/pkp_station_coords.json` (59) i
+  `data/pkp_foreign_stations.json` (17) - pokrycie geokodowania: 3185/3207
+  (99,3%) na przeciętej już bazie.
+
+- **2026-08-29** — geokodowanie stacji PKP rozszerzone o trzy kolejne
+  źródła ponad sam Nominatim (patrz wpis niżej o dwóch pierwszych błędach) -
+  OFICJALNA mapa infrastruktury PLK (mapa.plk-sa.pl, warstwa "punkty
+  eksploatacyjne", WFS przez GeoServer, `update_pkp._fetch_plk_points`,
+  wymaga `pyproj` do konwersji EPSG:2180 → WGS84) jako NAJBARDZIEJ
+  wiarygodne źródło (ok. 93% trafień samą nazwą stacji, bez żadnego
+  dopasowania rozmytego); zbiorcze zapytanie do OpenStreetMap/Overpass
+  (`_fetch_osm_stations`) jako drugie; Nominatim - już istniejący,
+  ostrożny, per-stacja - dopiero jako trzecie, dla reszty. Osobny, czwarty
+  mechanizm dla stacji ZA GRANICĄ (PKP ma połączenia międzynarodowe) -
+  najpierw OSM/Overpass dla sąsiednich krajów (`FOREIGN_AREA_CODES`: DE,
+  CZ, SK, AT, HU, SI, LT, UA, HR), potem Nominatim ograniczony do tych
+  krajów, z trwałym oznaczeniem w `data/pkp_foreign_stations.json`, żeby
+  kolejne uruchomienia nie próbowały ich już (bez sensu) w Polsce.
+
+  Stała, automatyczna walidacja wpięta w `run_geocode()`:
+  `find_suspect_coords`/`purge_suspect_coords` porównuje odległość między
+  GEOGRAFICZNIE SĄSIADUJĄCYMI stacjami tej samej trasy (po `order_number`) -
+  realne sąsiednie przystanki nigdy nie są >100 km od siebie, więc duży
+  skok zdradza błędne dopasowanie nazwy (typowy przypadek: popularna nazwa
+  miejscowości w dwóch różnych częściach Polski, np. "Chałupy" z półwyspu
+  helskiego trafiające na Śląsk). Znaleziono i wyczyszczono tak ok. 300
+  błędnych wpisów ze starej bazy; podejrzany wpis skasowany w jednym
+  uruchomieniu dostaje szansę na poprawę z lepszego źródła w następnym,
+  zamiast trwale zaśmiecać cache błędną współrzędną.
+
+  Kolejność uzgadniania w `run_geocode()` ma znaczenie: OSM najpierw, PLK
+  na końcu, żeby ono miało ostatnie słowo (`_reconcile` nadpisuje
+  bezwarunkowo) - odwrotna kolejność niż intuicyjna "najpierw najlepsze
+  źródło" jest tu celowa; pierwotna wersja (PLK→OSM) miała realnego buga,
+  znalezionego i naprawionego w tej samej sesji - mniej wiarygodne OSM
+  nadpisywało właśnie ustawione dane PLK przy każdym uruchomieniu.
+
+  Dwa dodatkowe, ręcznie potwierdzone przypadki, których żadne z powyższych
+  źródeł nie łapie automatycznie: `NAME_OVERRIDES` (nazwy stacji PKP bywają
+  URWANE, nie tylko z literówką - "Berlin Zoolog Garten" zamiast "Berlin
+  Zoologischer Garten" nie złapie żadne dopasowanie tekstowe; poprawka na
+  wejściu do geokodowania w `_read_stations`, tylko dla zapytań - nazwa
+  wyświetlana w aplikacji zostaje bez zmian) i `_name_matches_abroad`
+  (dopasowanie zagraniczne bez węzła kolejowego wybierało dotąd PIERWSZY
+  wynik rankingu Nominatim bez sprawdzania, czy w ogóle pasuje nazwą -
+  "Vac" trafiało na niemieckie lotnisko zamiast węgierskiego Vác, "Rijeka"
+  na plac w Neuss zamiast Chorwacji; naprawione filtrem po nazwie bez
+  znaków diakrytycznych, z przepustką dla alfabetów niełacińskich, gdzie
+  porównanie litera-w-literę jest z definicji niemożliwe - patrz nagłówek
+  `_geocode_one_abroad`).
+
+  Wynik: pokrycie 3242/3266 stacji (99,2%).
+
+- **2026-08-29** — plakietka "PKP" przy nazwach stacji kolejowych na liście
+  podpowiedzi i na mapie, odróżniająca je od przystanków MPK - wyłącznie
+  warstwa wyświetlania (`routes.py`: dane podpowiedzi i markerów niosą
+  `{name, kind}` zamiast gołej nazwy; `static/app.js`/`static/style.css`:
+  `.ac-tag`) - nazwa w bazie (`stations.name`) zostaje czysta, żeby nie
+  zepsuć dopasowywania w wyszukiwarce.
+
+- **2026-08-29** — wyszukiwarka kolejowa (`pkp.py`) przebudowana z osobnego
+  silnika (własne zapytania SQL o połączenia bezpośrednie, sklejane
+  z wynikiem MPK w `routes.py` specjalnymi gałęziami — `rail_only`,
+  „stacja-brama") na PRAWDZIWE połączenie z Connection Scanem w
+  `planner.py`: `pkp.augment_day()` dokleja kursy kolejowe wprost do tej
+  samej tablicy połączeń (`gtfs.DayData.conns`), którą wczytuje
+  `gtfs.load_day()` — dla CSA stacja PKP to od tej pory zwykły przystanek,
+  a przesiadka pociąg↔MPK to zwykła przesiadka (przez `siblings`, gdy
+  stacja PKP leży bliżej niż `pkp.TRANSFER_RADIUS_M`=500 m od przystanku
+  MPK — ten sam mechanizm i ten sam bufor czasowy co przesiadka między
+  słupkami jednego miejsca, żaden nowy). Powód: poprzednia wersja umiała
+  tylko połączenia BEZPOŚREDNIE i wymagała w `routes.py` trzech osobnych
+  gałęzi (`_pkp_point_fallback`, `_combined_journeys`, `_rail_only_result`)
+  próbujących z zewnątrz odtworzyć to, co scalony CSA dostaje za darmo -
+  w tym przesiadki MIĘDZY pociągami, których stara wersja w ogóle nie
+  widziała. `/api/flow` woła teraz `plan_flow` dokładnie tak samo, jak przed
+  PKP - żadnego pola `rail_only` w odpowiedzi, żadnej wiedzy o PKP
+  w `routes.py`.
+
+  Stacja PKP dostaje syntetyczny stop_id `PKP:<id>` (prefiks jak
+  `siechnice.ID_PREFIX`) i wchodzi do rozkładu tylko z ustalonymi
+  współrzędnymi (geokodowanie, patrz wpis niżej) - stacje pośrednie kursu
+  bez współrzędnych są pomijane w sekwencji (pociąg "przeskakuje" przez nie
+  w grafie połączeń; realny rozkład się nie zmienia, zmienia się tylko to,
+  co da się pokazać). Czas kursu liczony jest z narastającą korektą +24h przy
+  przejściu przez północ (ten sam pomysł co `gtfs.PREV_DAY_SEC`, liczony
+  w locie, bo API PKP nie zapisuje godzin >23:59 tak jak GTFS).
+  `gtfs.trip_path()` dostał drugie źródło danych dla kursów `PKP:` -
+  sekwencję przystanków zapisaną przy doklejaniu (`day.pkp_trip_stops`),
+  bez drugiego zapytania do żadnej bazy (patrz `pkp.trip_path`) - dzięki
+  temu etap kolejowy w liście propozycji ma teraz dokładną liczbę stacji
+  (`stops_count`), a nie zgadywaną.
+
+  Przy okazji naprawiony realny bug znaleziony w trakcie tej przebudowy:
+  `gtfs.load_day()` woła teraz `pkp.augment_day()` bezwarunkowo, co bez
+  zabezpieczenia sprawiało, że KAŻDY test wołający `load_day` (nie tylko
+  testy PKP) sięgał po prawdziwy `data/pkp.sqlite` i prawdziwy
+  `PKP_API_KEY` ze środowiska uruchamiającego pytest - łamało to
+  hermetyczność całego zestawu testów i spowalniało go dziesięciokrotnie.
+  Naprawka: `tests/conftest.py` dostał autouse fixture wyłączający PKP
+  domyślnie dla wszystkich testów; testy, którym PKP jest faktycznie
+  potrzebne (`tests/test_pkp.py`), same je z powrotem włączają.
+- **2026-08-29** — dokładność geokodowania stacji PKP (`update_pkp.py`,
+  patrz `_geocode_one`) - dwa niezależne błędy znalezione na żywo, oba
+  naprawione zmianą samej strategii zapytań do Nominatim, bez nowej
+  zależności:
+  1. Samo imię stacji ("Augustów") trafiało w GRANICĘ ADMINISTRACYJNĄ
+     miasta (Nominatim zwraca ją jako najważniejszy wynik), nie w sam
+     dworzec - dla stacji nazwanych tak samo jak miejscowość (większość)
+     błąd bywał rzędu 1-2 km, czasem po drugiej stronie miasta. Naprawione
+     pytaniem wprost o STACJĘ KOLEJOWĄ ("stacja kolejowa {name}" - fraza
+     specjalna Nominatim, ogranicza wynik do węzłów `railway=station`);
+     sama nazwa zostaje tylko awaryjnym drugim poziomem, gdy to nic nie da
+     (małe przystanki bywają w OSM otagowane inaczej).
+  2. Na tym drugim, awaryjnym poziomie ujawnił się kolejny błąd: miejscowości
+     o tej samej nazwie w RÓŻNYCH częściach Polski (sprawdzone na żywo:
+     dwie „Widuchowa” - jedna pod Kielcami, druga pod Szczecinem, gdzie
+     naprawdę jest ta stacja) - Nominatim ocenia GRANICĘ administracyjną
+     złej miejscowości wyżej niż PUNKT osiedla właściwej. Naprawione
+     preferencją `class == "place"` nad `class == "boundary"` na tym
+     poziomie - dopiero gdy żadnego "place" nie ma, bierzemy cokolwiek się
+     trafiło.
+
+  Oba błędy wymagają pełnego przegeokodowania (stara baza
+  `data/pkp_station_coords.json` skasowana i budowana od zera - patrz
+  `geocode_missing_stations`, uzupełnia tylko BRAKUJĄCE wpisy, więc raz
+  zapisany błędny wynik nigdy by się sam nie poprawił). Przy okazji
+  znaleziona i naprawiona usterka we własnym kodzie: `_geocode_one` umie
+  wysłać DWA zapytania do Nominatim na stację (najpierw o stację kolejową,
+  potem - dopiero gdy to nic nie da - o samą nazwę), a limit tempa
+  (1 zapytanie/s, polityka użytkowania Nominatim) był pilnowany tylko RAZ
+  NA STACJĘ, nie raz na zapytanie - dwa zapytania dla tej samej stacji
+  potrafiły więc wyjść bez odstępu. Limit przeniesiony do samego
+  `_nominatim_search` (tuż przed wysłaniem żądania), więc pilnuje każdego
+  zapytania z osobna, niezależnie od tego, ile ich potrzebuje jedna stacja.
+- **2026-08-29** — dwie luki w wyszukiwarce kolejowej (patrz wpisy niżej),
+  obie w `routes.py`, obie bez zmian w planner.py:
+  1. Wpisanie nazwy, która jest stacją PKP, ale nie przystankiem MPK
+     (np. „Warszawa Centralna”), kończyło się błędem „nie znam przystanku” -
+     nawet jeśli druga strona relacji była zwykłym przystankiem MPK.
+     `plan_flow` już umiał przyjąć PUNKT zamiast nazwy (klik w mapę - MPK
+     samo szuka najbliższych swoich przystanków), więc `_pkp_point_fallback`
+     po prostu podaje mu współrzędne stacji PKP zamiast nazwy, której MPK
+     nie zna - bez dotykania planner.py. Błąd wraca dopiero, gdy ANI MPK
+     (nawet po tych współrzędnych), ANI PKP nie znajdą nic dla żadnej ze
+     stron.
+  2. Relacja, w której start jest stacją PKP bez ŻADNEGO przystanku MPK
+     w pobliżu (mała miejscowość bez komunikacji miejskiej), a cel jest
+     zwykłym przystankiem MPK bez stacji PKP w pobliżu, nie dawała nic - PKP
+     zna tylko połączenia BEZPOŚREDNIE (patrz pkp.py), a taki cel nigdy nie
+     jest stacją PKP. `_combined_journeys` szuka więc stacji-BRAMY: spośród
+     wszystkich stacji osiągalnych bezpośrednim pociągiem ze startu
+     (`pkp._direct_destinations`) bierze te, które mają choć jeden przystanek
+     MPK w pobliżu (`gtfs.nearby_stops`), i dokleja do najwcześniejszego
+     takiego pociągu najlepszą trasę MPK od bramy do celu (`plan_flow`
+     z punktem startowym = współrzędne bramy, wywołane na czas przyjazdu
+     pociągu + 8 min zapasu na przesiadkę) - jeden `journey` z etapami obu
+     trybów na liście, bez zmian we froncie (etapy już są generyczne po
+     `kind`/`mode`). Sprawdzanie samych współrzędnych (tanie: `nearby_stops`)
+     jest celowo hojniejsze (do 600 różnych stacji docelowych) niż próby
+     pełnego zapytania `plan_flow` do konkretnej bramy (tylko 6, bo to już
+     kosztowne) - z dużego węzła (Warszawa Centralna: 431 różnych stacji
+     docelowych tego samego dnia) większość bezpośrednich pociągów jedzie
+     gdzieś, gdzie MPK w ogóle nie kursuje, więc pierwszy, tańszy sufit musi
+     przejrzeć ich sporo, zanim w ogóle trafi na prawdziwą bramę.
+- **2026-08-29** — wyszukiwarka kolejowa (patrz wpis niżej) przepięta
+  z odpytywania API PKP przy KAŻDYM wyszukiwaniu na lokalny pipeline
+  (`update_pkp.py`), tym samym schematem co GTFS dla MPK: jedno zapytanie
+  o rozkład całego kraju na okno `SCHEDULE_WINDOW_DAYS` dni (dziś, sprawdzone
+  na żywo: ~26 MB, 18,6 tys. tras, 8 s budowy lokalnej bazy `data/pkp.sqlite`)
+  zamiast osobnego zapytania na każdą wpisaną parę stacji — `pkp.py` czyta
+  już tylko SQL do pliku na dysku, bez sieci. Powód: przy limicie 100
+  zapytań/h w planie Basic i suwakach panelu deweloperskiego (każdy ruch
+  suwaka odpala `/api/flow` od nowa) osobne zapytanie na wyszukiwanie
+  wyczerpałoby limit w kilka minut używania. `operatingDates` w odpowiedzi
+  API działa jak GTFS-owy `calendar.txt` (jeden wpis trasy niesie od razu
+  wszystkie daty w oknie, więc szersze okno nie mnoży liczby tras) —
+  harmonogram odświeżania (`PKP_AUTO_UPDATE_HOUR`/`PKP_UPDATE_ON_START`,
+  domyślnie jak GTFS) i atomowa podmiana (`os.replace`) są więc dosłownie
+  tym samym mechanizmem co `update_gtfs.py`, tylko osobnym plikiem — bo to
+  niezależny pipeline nad niezależnym źródłem.
+
+  Przy okazji: nazwy stacji PKP trafiły do TEJ SAMEJ listy podpowiedzi
+  w formularzu co przystanki MPK (`pkp.all_station_names()` dokładane
+  w `routes.py`/`index()`) — wcześniej dało się o nie zapytać przez API, ale
+  nie dało się ich wpisać z podpowiedzią na stronie. I stacje PKP dostały
+  markery na mapie (`/api/stops`, pole `kind: "train"`, styl w
+  `static/app.js`) — czego wcześniej nie było wcale, bo słownik stacji PKP
+  (jak cała reszta tego API — sprawdzone pole po polu w
+  `/api/v1/fields/schedules`) nie ma NIGDZIE współrzędnych. Jedyny sposób,
+  żeby jednak je zdobyć, to DRUGIE, niezależne źródło: `update_pkp.py`
+  geokoduje nazwy stacji przez publiczne, darmowe Nominatim (OpenStreetMap),
+  z limitem uprzejmościowym 1 zapytanie/s i trwałym cache'em na dysku
+  (`data/pkp_station_coords.json`) — raz znaleziona stacja nigdy nie jest
+  odpytywana drugi raz, więc pierwsze wypełnienie cache'u (~3266 stacji, ok.
+  godziny) jest zarazem jedynym kosztownym; kolejne przebudowy rozkładu
+  dogadują już tylko naprawdę nowe stacje. Współrzędne z geokodowania są
+  przybliżeniem (czasem trafiają w środek miasta zamiast w sam dworzec) -
+  stacja bez trafienia po prostu nie ma markera, reszta (wyszukiwanie,
+  podpowiedzi) działa dla niej mimo to.
+- **2026-08-29** — bezpośrednie połączenia kolejowe (`pkp.py`, PKP PLK
+  OpenData API, `pdp-api.plk-sa.pl`) dokładane do tej samej listy propozycji
+  co tramwaje i autobusy, bez osobnego formularza — działa na tych samych
+  polach „skąd"/„dokąd". Zakres świadomie ograniczony do połączeń BEZ
+  przesiadek: to API ma tylko rozkład per stacja i dzień (`/schedules`), nie
+  gotowy planer trasy, a własny CSA nad krajowym rozkładem (setki tysięcy
+  kursów dziennie) to osobny, dużo większy projekt. Kierunek pociągu
+  (start → cel, nie odwrotnie) czyta się z `orderNumber` — pozycji
+  przystanku w całej trasie — bo `/schedules?stations=A,B` oddaje wpisy
+  tylko dla stacji A i B, nie całą trasę. Etapy kolejowe nie mają geometrii
+  (słownik stacji PKP nie niesie współrzędnych) — trafiają na listę z pełnymi
+  godzinami i nazwami stacji, ale bez linii na mapie (`static/app.js`
+  dostał stąd guard na brakujący `leg.path`, wcześniej zakładany jako zawsze
+  obecny). Gdy MPK nie zna żadnej z podanych nazw (typowa relacja
+  międzymiastowa, np. do „Warszawa Centralna"), ale PKP zna obie stacje i
+  znalazło połączenie, `/api/flow` mimo to zwraca sukces (`rail_only: true`,
+  `segments: []`) zamiast błędu „nie znam przystanku" — błąd tramwajowo-
+  -autobusowy nie ma prawa ukryć wyniku kolejowego. Słownik stacji PKP
+  (3266 pozycji) cache'owany na dysku i odświeżany raz na dobę — przy
+  limicie 100 zapytań/h w planie Basic nie da się odpytywać go przy każdym
+  wyszukiwaniu; sam rozkład cache'owany w pamięci na kilka minut, bo panel
+  deweloperski odpala `/api/flow` przy każdym ruchu suwaka. Brak klucza
+  `PKP_API_KEY` (patrz `config.py`) wyłącza funkcję po cichu, tak samo jak
+  Siechnice bez `SIECHNICE_ENABLED` — awaria albo brak konfiguracji tego
+  kroku nie ma prawa wywrócić wyszukiwania tramwajowo-autobusowego.
 - **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
   z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
   niej), z wypełnionym celem odpala wyszukiwanie od razu, bez celu przesuwa
@@ -571,9 +877,27 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - Brak tras pieszych po mieście — przesiadka tylko między słupkami
   o identycznej nazwie przystanku.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
+- Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
+  bo CSA widzi jedną tablicę połączeń (patrz wpis w changelogu) - ale bez
+  opóźnień na żywo (API ma je w `/operations`, ale wyszukiwarka czyta tylko
+  rozkład planowy z `/schedules`). Wymaga skonfigurowanego `PKP_API_KEY` —
+  bez klucza ta część wyników po prostu nie dochodzi. Stacje mają markery na
+  mapie (geokodowanie DWOMA źródłami - wyłącznie mapa PLK i portal
+  pasażera, oba oficjalne/PKP-owe, na wyraźną prośbę użytkownika - patrz
+  wpis w changelogu i nagłówek `update_pkp.py`), ale sama trasa przejazdu
+  (`legs[].path`) nie ma geometrii — słownik stacji PKP nie ma współrzędnych
+  torów, tylko nazwy, więc geokodowanie daje punkt stacji, nie kształt
+  trasy. Pokrycie ok. 98% (3202/3266 na 2026-08-30); stacja ZA GRANICĄ
+  (żadne z dwóch źródeł nie obejmuje zagranicy) albo stacja, której żadne
+  z dwóch źródeł nie ma (lub znajdzie coś, co automatyczna walidacja
+  odrzuci jako niespójne z sąsiadami na trasie - patrz
+  `find_suspect_coords`), po prostu nie ma markera, zamiast dostać
+  zgadniętą, złą pozycję.
 
 ## Pomysły na dalej
 
 - Dymki na węzłach przesiadkowych: „w co mogę się tu przesiąść i o której".
 - Więcej odjazdów tej samej trasy na liście („następny kurs o…").
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
+- Opóźnienia pociągów na żywo z `/api/v1/operations` (patrz `pkp.py`) -
+  dziś wyszukiwarka kolejowa czyta tylko rozkład planowy.

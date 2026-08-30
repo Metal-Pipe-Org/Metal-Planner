@@ -328,8 +328,9 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
     etapów w _stay_seated i są z odpowiedzi zdejmowane.
     """
     line, headsign = day.trip_info[trip]
-    # Pełna lista przystanków etapu - do narysowania linii na mapie.
-    path_rows = gtfs.trip_path(trip, board_stop, board_dep, exit_stop, exit_arr, geo_db)
+    # Pełna lista przystanków etapu - do narysowania linii na mapie. `data=day`
+    # jest potrzebne wyłącznie kursom kolejowym (patrz gtfs.trip_path).
+    path_rows = gtfs.trip_path(trip, board_stop, board_dep, exit_stop, exit_arr, geo_db, day)
     coords = [day.stop_coords[s] for s, _, _ in path_rows]
     if geo_db is not None and len(coords) >= 2:
         coords = gtfs.shape_slice(day.trip_shape.get(trip), coords, geo_db)
@@ -382,7 +383,7 @@ def _walk_leg(day, from_stop, to_stop):
     }
 
 
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus"}
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
 
 
 def _line_parts(label):
