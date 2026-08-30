@@ -7,6 +7,7 @@ from flask import Flask
 # którykolwiek moduł sięgnie po os.environ.
 import config  # noqa: F401
 import update_gtfs
+import update_pkp
 from routes import init_routes
 
 # Python nie zna tego rozszerzenia, a manifest podany jako octet-stream bywa
@@ -37,6 +38,11 @@ if __name__ == "__main__":
         # żeby zachowanie obu sposobów uruchomienia było jedno, a harmonogram
         # dało się sprawdzić bez kontenera.
         update_gtfs.start_daily_scheduler()
+        # To samo dla rozkładu kolejowego (patrz update_pkp.py) - bez
+        # PKP_API_KEY obie funkcje są no-opami, więc bezpiecznie wołać je
+        # zawsze, tak samo jak update_gtfs powyżej.
+        update_pkp.refresh_on_start()
+        update_pkp.start_daily_scheduler()
 
     # Domyślnie 5001, bo 5000 na macOS zajmuje AirPlay Receiver.
     app.run(debug=True, port=int(os.environ.get("PORT", 5001)))

@@ -141,7 +141,8 @@ class DayData:
         "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
         "display_name", "stops_by_norm_key", "norm_display_name",
         "siblings", "trip_info", "trip_shape",
-        "stops_by_place", "place_of", "conns_by_trip", "deps_by_stop",
+        "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
+        "pkp_stations", "deps_by_stop",
     )
 
     def __init__(self):
@@ -163,6 +164,23 @@ class DayData:
         self.place_of = {}           # stop_id -> klucz miejsca
         self.conns_by_trip = None    # kurs -> indeksy w conns (leniwie, patrz trip_conns)
         self.deps_by_stop = None     # słupek -> odjazdy (leniwie, patrz stop_departures)
+        # trip_id "PKP:..." -> [(stop_id, przyjazd, odjazd), ...] po kolei -
+        # odpowiednik stop_times.txt dla kursów kolejowych (patrz pkp.py:
+        # augment_day/trip_path). GTFS-owe kursy tego nie używają - mają
+        # własne stop_times w SQLite, stąd osobne pole zamiast rozszerzania
+        # istniejącego mechanizmu.
+        self.pkp_trip_stops = {}
+        # (nazwa, stop_id) TYLKO dla prawdziwych stacji PKP (patrz
+        # pkp.augment_day - to dokładnie te same station_id, co trafiają
+        # do used_ids: mają choć jeden kurs w rozkładzie TEGO dnia i ustalone
+        # współrzędne) - osobna, czysto kolejowa lista, NIE mieszana
+        # z przystankami MPK jak stops_by_key/stops_by_norm_key. Używana
+        # WYŁĄCZNIE przez match_stop do rozwijania zapytań w kształcie
+        # "Miasto -" (patrz _match_pkp_city_group) na wszystkie prawdziwe
+        # stacje PKP w tym mieście naraz - świadomie osobna struktura, żeby
+        # takie rozwinięcie nigdy przypadkiem nie złapało przystanku MPK
+        # o zbieżnym przedrostku nazwy.
+        self.pkp_stations = []
 
 
 def _connect():
@@ -205,8 +223,21 @@ def load_day(day):
     o -24 h. Dzięki temu odjazd o 00:46 to 2760 niezależnie od tego, w czyim
     kalendarzu kurs siedzi, i skan CSA nie musi wiedzieć o istnieniu północy
     (patrz PREV_DAY_SEC).
+
+    Import pkp lokalny (nie na górze pliku): pkp.py sam importuje gtfs (żeby
+    dociągnąć gtfs._merge_bridges/_haversine_m przy doklejaniu połączeń
+    kolejowych - patrz pkp.augment_day) - import na górze obu plików
+    zapętliłby się przy starcie procesu. W środku funkcji cyklu nie ma: oba
+    moduły są już w pełni załadowane, zanim load_day() zostanie wywołane.
     """
-    key = (day.isoformat(), DB_PATH.stat().st_mtime if DB_PATH.exists() else 0)
+    import pkp
+
+    pkp_mtime = pkp.DB_PATH.stat().st_mtime if pkp.DB_PATH.exists() else 0
+    pkp_coords_mtime = pkp.COORDS_PATH.stat().st_mtime if pkp.COORDS_PATH.exists() else 0
+    key = (
+        day.isoformat(), DB_PATH.stat().st_mtime if DB_PATH.exists() else 0,
+        pkp_mtime, pkp_coords_mtime,
+    )
     if key in _day_cache:
         return _day_cache[key]
 
@@ -304,6 +335,13 @@ def load_day(day):
     conns.sort(key=lambda c: c[0])
     data.dep_times = [c[0] for c in conns]
 
+    # Kursy kolejowe (PKP) doklejone do TEJ SAMEJ tablicy połączeń - CSA
+    # w planner.py widzi więc jedną sieć, bez wiedzy o dwóch źródłach danych
+    # (patrz pkp.augment_day). Po MPK, bo dokłada connections do już
+    # zbudowanej (i posortowanej) tablicy i sam ją domyka ponownym
+    # sortowaniem.
+    pkp.augment_day(data, day)
+
     _day_cache[key] = data
     if len(_day_cache) > 2:                      # trzymamy najwyżej 2 dni w RAM
         _day_cache.pop(next(iter(_day_cache)))
@@ -371,6 +409,54 @@ def stop_at(lat, lon, data, max_m=STOP_SNAP_M):
     return data.stop_names[best_stop], _expand_to_places(data, [best_stop])
 
 
+def _match_city_group(key, norm_key, data):
+    """Dopasowuje "zbiorczą" stację PKP typu "Warszawa -" (patrz
+    update_pkp._is_city_wildcard) - PKP oznacza tak w słowniku stacji
+    "dowolną stację w tym mieście", zawsze bez żadnego WŁASNEGO kursu
+    (sprawdzone na żywo: 0 wpisów w stops dla każdej z nich) - żadne
+    z wcześniejszych dopasowań w match_stop nigdy jej więc nie złapie,
+    rozkład po prostu nie ma czego z nią połączyć.
+
+    Rozpoznanie PO WZORCU zapytania (kończy się myślnikiem), nie po
+    sztywnej liście nazw miast - i szukamy WSZYSTKICH prawdziwych, znanych
+    stacji zaczynających się od tej nazwy jako CAŁE SŁOWO (nie podciąg -
+    "Warszawa" nie ma złapać hipotetycznej "Warszawskiej"), łącząc ich
+    słupki w JEDNO zapytanie do CSA zamiast zwracać błąd "nie znaleziono" -
+    skan i tak sam wybierze najlepszą z nich (patrz _scan/plan_route:
+    przyjmuje ZBIÓR stacji startowych/końcowych z definicji, to nie nowy
+    mechanizm, tylko ten sam co przy zwykłym "miejscu" z wielu słupków).
+
+    PRZESZUKUJE WYŁĄCZNIE data.pkp_stations (patrz jej nagłówek w
+    DayData.__init__), NIE ogólne stops_by_key/stops_by_norm_key (tam MPK
+    i PKP są zmieszane) - "Wrocław -" ma trafić w prawdziwe stacje PKP
+    zaczynające się na "Wrocław", nie przypadkiem też w jakiś przystanek
+    MPK o zbieżnym przedrostku nazwy. data.pkp_stations to z definicji
+    tylko stacje z co najmniej jednym kursem TEGO dnia (patrz
+    pkp.augment_day, used_ids) - dokładnie to, co "przystanek" ma znaczyć.
+
+    Zwraca (nazwa_do_wyświetlenia, [stop_id, ...]) albo (None, None), gdy
+    nic nie pasuje - wołane jako OSTATNI fallback w match_stop."""
+    if not key.endswith("-"):
+        return None, None
+    city = key[:-1].strip()
+    if not city:
+        return None, None
+    norm_city = norm_key[:-1].strip() if norm_key.endswith("-") else _strip_diacritics(city)
+
+    group = set()
+    for name, stop_id in data.pkp_stations:
+        name_cf = name.casefold()
+        if name_cf == city or name_cf.startswith(city + " "):
+            group.add(stop_id)
+            continue
+        norm_name = _strip_diacritics(name_cf)
+        if norm_name == norm_city or norm_name.startswith(norm_city + " "):
+            group.add(stop_id)
+    if not group:
+        return None, None
+    return f"{city.title()} (dowolna stacja)", _expand_to_places(data, list(group))
+
+
 def match_stop(query, data):
     """Dopasowuje wpisaną nazwę do przystanku.
 
@@ -382,6 +468,11 @@ def match_stop(query, data):
     Dopasowanie ignoruje wielkość liter i - dopiero gdy dokładna pisownia
     zawiedzie - polskie znaki diakrytyczne (patrz _strip_diacritics), więc
     "Zabia" trafia w "Żabia", a "Dworzec Glowny" w "Dworzec Główny".
+
+    "Zbiorcza" stacja typu "Warszawa -" (patrz _match_city_group) trafia
+    we WSZYSTKIE prawdziwe stacje danego miasta na raz - dopiero gdy nic
+    innego wyżej nie pasuje, żeby nie odbierać pierwszeństwa zwykłemu,
+    dokładnemu dopasowaniu.
     """
     key = " ".join(query.split()).casefold()
     if not key:
@@ -396,6 +487,10 @@ def match_stop(query, data):
             _expand_to_places(data, data.stops_by_norm_key[norm_key]),
             None,
         )
+
+    city_name, city_stops = _match_city_group(key, norm_key, data)
+    if city_name is not None:
+        return city_name, city_stops, None
 
     candidates = [k for k in data.stops_by_key if key in k]
     if len(candidates) == 1:
@@ -671,7 +766,7 @@ def departures_between(data, stop_ids, from_sec, to_sec):
     return out
 
 
-def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None):
+def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None, data=None):
     """Kolejne przystanki kursu od wsiadania do wysiadania (stop_id, przyjazd, odjazd).
 
     Czasy - i te na wejściu, i te w wyniku - są na osi wczytanego dnia, więc
@@ -680,7 +775,17 @@ def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None):
 
     Z podanym `db` korzysta z cudzego połączenia (jedno na całe zapytanie);
     bez niego otwiera i zamyka własne.
+
+    Kursy kolejowe (PKP, prefiks "PKP:" - patrz pkp.augment_day) nie mają
+    wpisu w stop_times.txt - `data` (DayData już wczytana dla tego dnia)
+    daje dostęp do sekwencji przystanków dociągniętej przy budowie dnia, bez
+    drugiego zapytania do żadnej bazy. Bez `data` (stare wywołania, testy)
+    kurs kolejowy po prostu nie ma tu czego zwrócić - patrz pkp.trip_path.
     """
+    if trip_id.startswith("PKP:"):
+        import pkp
+        return pkp.trip_path(data, trip_id, board_stop, board_dep, exit_stop, exit_arr)
+
     trip_id, shift = db_trip(trip_id)
     own_db = db is None
     db = db or _connect()
