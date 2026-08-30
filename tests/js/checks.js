@@ -593,4 +593,98 @@ checks.nagranie_nie_gra_na_pelnej_glosnosci = (() => {
     return {ok: app.PIPE_VOLUME > 0 && app.PIPE_VOLUME < 0.6, glosnosc: app.PIPE_VOLUME};
 })();
 
+/* --- kropki węzłów: gdzie stoją i która jest startowa ------------------- */
+
+/* Węzeł to jedno MIEJSCE o kilku słupkach. Przełącznik wybiera między
+   peronem (ten, z którego wzięta jest godzina) a środkiem wszystkich
+   słupków - obie liczby przychodzą z backendu, front tylko sięga po jedną. */
+checks.kropka_peron_albo_srodek = (() => {
+    const node = {lat: 51.11422, lon: 17.05046, clat: 51.11368, clon: 17.05069};
+    const bylo = app.dotOpts.center;
+
+    app.dotOpts.center = false;
+    const peron = app.nodePoint(node);
+    app.dotOpts.center = true;
+    const srodek = app.nodePoint(node);
+    // Odpowiedź sprzed zmiany w plannerze nie ma clat - kropka ma wtedy
+    // stanąć na peronie, a nie zniknąć z mapy na undefined.
+    const stary = app.nodePoint({lat: 51.11422, lon: 17.05046});
+
+    app.dotOpts.center = bylo;
+    return {
+        ok: peron[0] === node.lat && peron[1] === node.lon
+            && srodek[0] === node.clat && srodek[1] === node.clon
+            && stary[0] === node.lat && stary[1] === node.lon,
+        peron, srodek, stary,
+    };
+})();
+
+/* Kropka przystanku, z którego wyruszamy, jest rozpoznawana ZAWSZE - także
+   przy wyłączonym wyróżnieniu, bo okienko w rogu musi wiedzieć, od czyjego
+   rozkładu zacząć. */
+checks.kropka_startowa_rozpoznana = (() => {
+    const bylo = app.dotOpts.start;
+    app.dotOpts.start = false;            // wyróżnienie wyłączone...
+    const dots = app.flowStopDots([
+        {name: 'PILCZYCE', lat: 51.13, lon: 16.95, sec: 48720, lines: [], start: true},
+        {name: 'Rondo', lat: 51.11, lon: 17.01, sec: 49000, lines: []},
+    ]);
+    const zielona = dots[0].options.color === '#1b5e20';
+    app.dotOpts.start = bylo;
+    return {
+        // ...ale kropka i tak wie, że jest startowa - tylko nie jest zielona.
+        ok: dots[0].isStart === true && dots[1].isStart === false && !zielona,
+        start: dots[0].isStart, drugi: dots[1].isStart, zielona,
+    };
+})();
+
+/* Na wybranej trasie startu nie trzeba rozpoznawać w ogóle: to wsiadanie do
+   pierwszego przejazdu. Kropka wysiadania z niego - już nie. */
+checks.kropka_startowa_na_trasie = (() => {
+    const dots = dotsOf(app.legLayers(LEGS, {preview: false}));
+    return {
+        ok: dots.filter(d => d.isStart).length === 1 && dots[0].isStart === true,
+        startowych: dots.filter(d => d.isStart).length,
+        pierwsza: dots[0].isStart,
+    };
+})();
+
+/* Okienko w rogu otwiera się samo, z tablicą przystanku startowego - tak,
+   jakby ktoś od razu najechał na jego kropkę. (fetch w emulatorze nigdy nie
+   odpowiada, więc do okienka trafia stan "Ładowanie..." - to wystarcza, żeby
+   sprawdzić, że w ogóle zostało zaadresowane.) */
+checks.okienko_startuje_od_przystanku_startowego = (() => {
+    const bylPanel = app.dotOpts.tipPanel;
+    const nodes = [
+        {name: 'PILCZYCE', lat: 51.13, lon: 16.95, sec: 48720, lines: [], start: true},
+        {name: 'Rondo', lat: 51.11, lon: 17.01, sec: 49000, lines: []},
+    ];
+    const bezFlagi = nodes.map(n => ({...n, start: undefined}));
+
+    app.dotOpts.tipPanel = false;
+    app.flowPanel.hidden = true;
+    app.drawFlow({...FLOW_FIXTURE, nodes}, false);
+    const przyWylaczonym = app.flowPanel.hidden;
+
+    app.dotOpts.tipPanel = true;
+    app.drawFlow({...FLOW_FIXTURE, nodes}, false);
+    const przyWlaczonym = app.flowPanel.hidden;
+    const tresc = String(app.flowPanelBody.innerHTML || '');
+
+    // Odpowiedź bez oznaczonego startu nie ma czego pokazać - okienko milczy.
+    app.flowPanel.hidden = true;
+    app.drawFlow({...FLOW_FIXTURE, nodes: bezFlagi}, false);
+    const bezStartu = app.flowPanel.hidden;
+
+    app.dotOpts.tipPanel = bylPanel;
+    return {
+        ok: przyWylaczonym === true && przyWlaczonym === false
+            && tresc.length > 0 && bezStartu === true,
+        przy_wylaczonym_schowane: przyWylaczonym,
+        przy_wlaczonym_schowane: przyWlaczonym,
+        bez_startu_schowane: bezStartu,
+        tresc: tresc.slice(0, 60),
+    };
+})();
+
 JSON.stringify(checks);

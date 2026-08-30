@@ -302,3 +302,31 @@ def test_departures_that_cannot_make_it_are_dropped(front):
     się w oknie mapy" (warunek konieczny), tylko „czy TYM kursem w ogóle się
     dojedzie" - serwer podaje przy linii ostatni taki odjazd."""
     _check(front, "odjazd_ktorym_sie_nie_zdazy_wypada")
+
+
+def test_the_node_dot_stands_where_the_switch_says(front):
+    """Węzeł to jedno miejsce o kilku słupkach: kropka stoi albo na peronie,
+    z którego wzięta jest godzina, albo pośrodku wszystkich słupków. Obie
+    liczby liczy planner (_place_center), front tylko wybiera - a odpowiedź
+    sprzed tej zmiany, bez `clat`, ma dalej działać po staremu."""
+    _check(front, "kropka_peron_albo_srodek")
+
+
+def test_the_start_dot_is_known_even_when_not_marked(front):
+    """Rozpoznanie przystanku startowego nie może zależeć od tego, czy jest
+    on wyróżniony zielenią: okienko w rogu musi wiedzieć, od czyjego rozkładu
+    zacząć, także przy wyłączonym wyróżnieniu."""
+    _check(front, "kropka_startowa_rozpoznana")
+
+
+def test_the_start_dot_on_a_route_needs_no_recognising(front):
+    """Na wybranej trasie startem jest wsiadanie do pierwszego przejazdu -
+    to wynika z samej trasy, więc nie ma tu czego dopasowywać po nazwie."""
+    _check(front, "kropka_startowa_na_trasie")
+
+
+def test_the_corner_window_opens_on_the_start_stop(front):
+    """Okienko w rogu startuje z tablicą odjazdów przystanku, z którego się
+    wyrusza - bez najeżdżania na cokolwiek. Przy wyłączonym okienku i bez
+    wybranego startu nie otwiera się wcale."""
+    _check(front, "okienko_startuje_od_przystanku_startowego")
