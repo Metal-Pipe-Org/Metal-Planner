@@ -5,6 +5,7 @@
 :root {
     --tram: #c62828;
     --bus: #1565c0;
+    --train: #2e7d32;
     --other: #6a1b9a;
     --accent: #2563eb;
     --ink: #16202b;
@@ -359,6 +360,15 @@ body.panel-hidden #sidebar {
     font-weight: 700;
 }
 
+/* Plakietka przy podpowiedzi stacji kolejowej (patrz STOP_KIND w app.js) -
+   odróżnia ją od zwykłego przystanku MPK, zanim jeszcze ktoś ją wybierze. */
+.ac-tag {
+    color: var(--train);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
 .search-row {
     display: flex;
     align-items: center;
@@ -553,6 +563,7 @@ body.panel-hidden #sidebar {
 
 .badge.tram { background: var(--tram); }
 .badge.bus { background: var(--bus); }
+.badge.train { background: var(--train); }
 
 /* Łącznik między plakietkami: ciągły = przesiadka na miejscu,
    kropkowany = trzeba przejść na inne stanowisko. */
@@ -628,6 +639,7 @@ body.panel-hidden #sidebar {
 .tl-ride .tl-dot { background: var(--other); }
 .tl-ride.tram .tl-dot { background: var(--tram); }
 .tl-ride.bus .tl-dot { background: var(--bus); }
+.tl-ride.train .tl-dot { background: var(--train); }
 
 .tl-ride .tl-body {
     display: flex;

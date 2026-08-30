@@ -162,15 +162,21 @@ function esc(text) {
     return div.innerHTML;
 }
 
-const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', other: '#6a1b9a'};
-const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', other: 'Linia'};
+const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32', other: '#6a1b9a'};
+const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg', other: 'Linia'};
 
 // ------------------------------------------------------- markery na mapie ----
 
 const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
+const stopKind = new Map();               // nazwa -> 'stop' (MPK) | 'train' (PKP)
 
 const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
                     fillColor: '#42a5f5', fillOpacity: 0.8};
+// Stacje PKP (patrz pkp.py) - kolor spójny z plakietką linii kolejowej
+// (--train w style.css), żeby na pierwszy rzut oka było widać, że to nie
+// zwykły słupek MPK, zanim jeszcze ktoś najedzie kursorem na nazwę.
+const TRAIN_STYLE = {radius: 5, weight: 1, color: '#1b5e20',
+                     fillColor: '#2e7d32', fillOpacity: 0.85};
 // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
 const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
                    fillColor: '#90a4ae', fillOpacity: 0.25};
@@ -181,7 +187,8 @@ function styleFor(name) {
                                     fillColor: '#4caf50', fillOpacity: 1};
     if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
                                   fillColor: '#ef5350', fillOpacity: 1};
-    return baseDimmed ? DIM_STYLE : BASE_STYLE;
+    if (baseDimmed) return DIM_STYLE;
+    return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
 }
 
 function setBaseDim(dim) {
@@ -230,8 +237,12 @@ const stopsReady = fetch('/api/stops')
     .then(stops => {
         if (stops.error) { showError(stops.error); return; }
         for (const s of stops) {
-            const m = L.circleMarker([s.lat, s.lon], BASE_STYLE).addTo(map);
-            m.bindTooltip(s.name);
+            stopKind.set(s.name, s.kind);
+            const m = L.circleMarker([s.lat, s.lon], styleFor(s.name)).addTo(map);
+            // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
+            // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
+            // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
+            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP` : s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
             m.on('click', e => { L.DomEvent.stop(e); pickEndpoint(s.name); });
@@ -1638,6 +1649,10 @@ function legLayers(legs, {preview}) {
     const rideWeight = preview ? 5 : 7;
 
     for (const leg of legs) {
+        // Etapy kolejowe (patrz pkp.py) nie mają geometrii - słownik stacji
+        // PKP nie niesie współrzędnych, więc nie ma czego narysować. Karta
+        // na liście propozycji i tak pokazuje pełne godziny i nazwy stacji.
+        if (!leg.path || leg.path.length < 2) continue;
         if (leg.kind === 'walk') {
             lines.push(L.polyline(leg.path, {
                 color: '#455a64', weight: 3, opacity: preview ? 0.7 : 1,
@@ -1671,7 +1686,7 @@ function legLayers(legs, {preview}) {
         // pokazuje tablicę odjazdów tego przystanku (patrz stopDot).
         const firstRide = legs.find(l => l.kind === 'ride');
         for (const leg of legs) {
-            if (leg.kind !== 'ride') continue;
+            if (leg.kind !== 'ride' || !leg.path || leg.path.length < 2) continue;
             const style = journeyDotStyle();
             // Wsiadanie do PIERWSZEGO przejazdu to z definicji przystanek,
             // z którego się wyrusza - nie ma tu czego rozpoznawać.
@@ -1693,7 +1708,7 @@ function drawJourney(index, keepView) {
     seedStartPanel();
     // Przy przerysowaniu w miejscu (suwaki wyglądu) nie wyrywamy widoku -
     // kadrujemy tylko wtedy, gdy trasa i tak nie mieści się w kadrze.
-    const points = [...journey.legs.flatMap(leg => leg.path), ...endpointPoints()];
+    const points = [...journey.legs.flatMap(leg => leg.path || []), ...endpointPoints()];
     if (!keepView || !map.getBounds().contains(L.latLngBounds(points))) fitTo(points);
 }
 
@@ -1789,13 +1804,15 @@ function detailHtml(journey) {
             );
             return;
         }
+        const stopWord = leg.mode === 'train'
+            ? plural(leg.stops_count, 'stacja', 'stacje', 'stacji')
+            : plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków');
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
-            `<span class="tl-info">${leg.stops_count} ` +
-            `${plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków')} · ` +
+            `<span class="tl-info">${leg.stops_count} ${stopWord} · ` +
             `${leg.minutes} min</span></span></li>`,
         );
         // Wysiadanie wypisujemy tylko wtedy, gdy nie zaraz po nim następuje
@@ -2004,6 +2021,19 @@ function showDegradedNotice() {
         + '</p></div>');
 }
 
+/** Informacja przy relacji poza obszarem MPK Wrocławia (pole `rail_only`
+    w odpowiedzi /api/flow, patrz routes.py) - lista pokazuje same
+    bezpośrednie połączenia kolejowe, bez mapy przepływów (nie ma jej z
+    czego złożyć: MPK w ogóle nie zna jednego z dwóch miejsc). To nie błąd
+    (styl neutralny, nie czerwony jak showDegradedNotice), tylko wyjaśnienie,
+    czemu mapa jest pusta, mimo że lista poniżej ma wyniki. */
+function showRailOnlyNotice() {
+    resultsBox.insertAdjacentHTML('afterbegin',
+        '<div class="notice"><p>Relacja poza obszarem MPK Wrocławia - '
+        + 'pokazano tylko bezpośrednie połączenia kolejowe, bez przesiadek.'
+        + '</p></div>');
+}
+
 /** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
     dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
 function renderPlan(data, refit) {
@@ -2028,6 +2058,7 @@ function renderPlan(data, refit) {
         renderJourneys();
     }
     if (data.degraded) showDegradedNotice();
+    if (data.rail_only) showRailOnlyNotice();
 }
 
 function loadPlan(token, refit) {
@@ -2142,7 +2173,15 @@ endInput.addEventListener('input', () => {
 // Własna lista zamiast <datalist>: natywna wygląda inaczej w każdej
 // przeglądarce, nie da się jej ostylować ani sterować kolejnością trafień,
 // a do tego wymaga dokładnych ogonków - "lesnica" nie znajdowało "LEŚNICA".
-const STOP_NAMES = JSON.parse($('stop-names').textContent);
+//
+// Serwer daje {name, kind} (patrz routes.py/index) - `kind` jedzie OSOBNO
+// od nazwy, nie doklejone do stringa: plakietka "PKP" w podpowiedziach
+// (patrz open() niżej) ma tylko odróżnić stację kolejową na oko, a pole
+// wyszukiwania i tak dostaje samą nazwę - z doklejonym "PKP" wyszukiwarka
+// nie znalazłaby stacji, bo zna ją tylko pod prawdziwą nazwą.
+const STOP_ENTRIES = JSON.parse($('stop-names').textContent);
+const STOP_NAMES = STOP_ENTRIES.map(e => e.name);
+const STOP_KIND = new Map(STOP_ENTRIES.map(e => [e.name, e.kind]));
 const MAX_SUGGESTIONS = 8;
 
 // Składanie nazwy: bez ogonków i wielkości liter, ale ZNAK W ZNAK - długość
@@ -2187,10 +2226,12 @@ function attachAutocomplete(input, onPick) {
         if (!items.length) { close(); return; }
         list.innerHTML = items.map((item, i) => {
             const hit = esc(item.name.slice(item.at, item.at + item.len));
+            const tag = STOP_KIND.get(item.name) === 'train'
+                ? ' <span class="ac-tag">PKP</span>' : '';
             return `<li class="ac-item" role="option" aria-selected="false"
                         id="${list.id}-${i}" data-index="${i}">` +
                    `${esc(item.name.slice(0, item.at))}<mark>${hit}</mark>` +
-                   `${esc(item.name.slice(item.at + item.len))}</li>`;
+                   `${esc(item.name.slice(item.at + item.len))}${tag}</li>`;
         }).join('');
         list.hidden = false;
         list.classList.remove('kb');
