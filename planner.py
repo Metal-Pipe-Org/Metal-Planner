@@ -723,7 +723,8 @@ def plan_flow(start_query, end_query, when=None,
         degraded = False
         if kept:
             seg_list, nodes = _finalize_segments(
-                day, kept, ranges, geo_db, earliest, profile[2], deadline)
+                day, kept, ranges, geo_db, earliest, profile[2], deadline,
+                source_stops)
             graph = _extract_transfer_graph(day, kept, ranges, source_stops, target_set)
             journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                            limit=journey_limit, gain_sec=gain_sec)
@@ -1645,7 +1646,7 @@ def _corridor_lines(pieces, hop_members):
 
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
-                       board_value=None, deadline=None):
+                       board_value=None, deadline=None, source_stops=None):
     """Krok 4: tnie każdy zatrzymany kurs na kawałki DOKŁADNIE tam, gdzie po
     drodze mijamy realną, lepszą kontynuację, z której nie korzystamy (patrz
     seg["exit_q"] w _refine_brightness) - jeden fizyczny kurs może więc
@@ -1779,7 +1780,8 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
             item["corridor"] = corridor
         seg_list.append(item)
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
-    return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline)
+    return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline,
+                                    source_stops)
 
 
 def _rides_back(earliest, board, alight):
@@ -1848,7 +1850,26 @@ def _line_deadlines(day, stops, board_value, from_sec, deadline):
     return out
 
 
-def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None):
+def _place_center(day, place_key, fallback_stop):
+    """Środek wszystkich słupków jednego miejsca.
+
+    Zwykła średnia współrzędnych, nie mediana ani środek prostokąta: miejsce
+    to z definicji słupki w promieniu PLACE_MAX_SPAN_M (patrz
+    gtfs._build_places), więc nie ma tu rozrzutu, który średnią mógłby
+    przesunąć gdziekolwiek poza sam węzeł.
+    """
+    stops = day.stops_by_place.get(place_key) or [fallback_stop]
+    coords = [day.stop_coords[s] for s in stops if s in day.stop_coords]
+    if not coords:
+        return _round_path([day.stop_coords[fallback_stop]])[0]
+    return _round_path([(
+        sum(lat for lat, _ in coords) / len(coords),
+        sum(lon for _, lon in coords) / len(coords),
+    )])[0]
+
+
+def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
+                    source_stops=None):
     """Węzły przesiadkowe mapy - to, na czym front stawia kropki z tablicą
     odjazdów.
 
@@ -1862,9 +1883,22 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None)
     pokazywałaby tramwaj jadący dokładnie tam, skąd się przyjechało.
 
     `sec` to najwcześniejsza godzina, o której można tu być - od niej liczy się
-    "co stąd jeszcze odjedzie". Współrzędne bierzemy z tego samego słupka, co
-    ta godzina, żeby kropka stanęła na peronie, a nie w środku skrzyżowania.
+    "co stąd jeszcze odjedzie".
+
+    Współrzędne idą DWIE, bo obie odpowiadają na to samo pytanie inaczej,
+    a wybór między nimi to sprawa gustu (przełącznik w panelu ⚙):
+    `lat`/`lon` to słupek, z którego wzięta jest godzina - kropka stoi wtedy
+    na peronie; `clat`/`clon` to środek WSZYSTKICH słupków miejsca - kropka
+    stoi wtedy pośrodku węzła, którego dotyczy, zamiast na losowo wybranym
+    jego krańcu. Liczymy obie tutaj, więc przełącznik nic nie dopytuje.
     """
+    # Które miejsce jest startem, wiadomo WPROST: `source_stops` to słupki,
+    # z których rozwiązano zapytanie (patrz gtfs.match_stop), a węzły i tak
+    # idą po kluczu miejsca. Front nie ma tego z czego odtwarzać - nazwa węzła
+    # to nazwa jednego z jego słupków, więc zgadywanie po niej myliłoby się
+    # dokładnie tam, gdzie plac ma słupki o różnych nazwach.
+    start_places = {day.place_of.get(s, s) for s in (source_stops or ())}
+
     nodes = {}
     for (label, stops_seq), (_q, _shape, times, _reach, _ok, headsign) in pieces.items():
         if times is None:
@@ -1903,13 +1937,19 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None)
         if not lines:
             continue
         lat, lon = _round_path([day.stop_coords[node["stop"]]])[0]
-        out.append({
+        clat, clon = _place_center(day, key, node["stop"])
+        entry = {
             "name": day.stop_names[node["stop"]],
             "lat": lat,
             "lon": lon,
+            "clat": clat,
+            "clon": clon,
             "sec": node["sec"],
             "lines": lines,
-        })
+        }
+        if key in start_places:
+            entry["start"] = True     # tylko przy tym jednym - pole ma nie puchnąć
+        out.append(entry)
     return out
 
 

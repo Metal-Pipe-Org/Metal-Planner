@@ -959,6 +959,27 @@ body.panel-hidden #sidebar {
 
 .timetable-tip.leaflet-tooltip-top::before { border-top-color: var(--surface); }
 
+/* Tablica przystanku, z którego wyruszamy. Zielony pasek u góry i ta sama
+   zieleń w nazwie, co na kropce i markerze startu - to ma być rozpoznane
+   jednym spojrzeniem, bez czytania nazwy. */
+.tt-start {
+    border-top: 3px solid #1b5e20;
+    margin: -8px -10px 0;
+    padding: 7px 10px 0;
+    border-radius: 10px 10px 0 0;
+}
+
+.tt-start .tt-stop { color: #1b5e20; }
+
+.tt-start .tt-stop::before {
+    content: "start · ";
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 10px;
+    opacity: 0.75;
+}
+
 .tt-head {
     display: flex;
     align-items: baseline;
@@ -1065,6 +1086,46 @@ body.panel-hidden #sidebar {
     transition: transform 0.2s ease, opacity 0.2s ease, visibility 0s;
 }
 
+/* ------------------------------------ okienko z rozkładem w rogu ekranu --- */
+
+/* Ten sam róg co panel ⚙, ale niżej w stosie: przy otwartym panelu patrzy się
+   na suwaki, nie na mapę. Szerokość jak dymka tablicy, żeby ta sama tablica
+   nie łamała się inaczej w każdym z dwóch miejsc. */
+#flow-panel {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 900;
+    width: 340px;
+    max-width: calc(100vw - 32px);
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    color: var(--ink);
+}
+
+#flow-panel[hidden] { display: none; }
+
+/* Panel ⚙ ma 290 px plus marginesy - okienko odsuwa się o tyle w lewo zamiast
+   chować się pod nim, bo jego własne przełączniki siedzą właśnie w tym panelu. */
+body.dev-open #flow-panel { right: 322px; }
+
+#flow-panel-close {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+}
+
+#flow-panel-body { padding-right: 16px; }
+
+/* Podpowiedź o linii jest w dymku pozycjonowana przez Leaflet - w okienku
+   musi stać sama z siebie. */
+#flow-panel .flow-tip-row { --chip-scale: 1; }
+
 #dev-panel.hidden {
     transform: translateX(20px);
     opacity: 0;
@@ -1164,6 +1225,17 @@ body.panel-hidden #sidebar {
 }
 
 #dev-panel .dev-check input { margin: 0; flex: none; }
+
+/* Podpodział wewnątrz rozwiniętej sekcji - lżejszy niż <summary>, bo to wciąż
+   ta sama sekcja, tylko druga jej połowa. */
+.dev-section-head {
+    margin: 14px 0 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
 
 #dev-panel select {
     width: 100%;
@@ -1381,5 +1453,16 @@ body.panel-hidden #sidebar {
         width: auto;
         max-height: 70vh;
         overflow-y: auto;
+    }
+
+    /* Wąski ekran: panel ⚙ zajmuje całą szerokość, więc odsuwanie w bok nic
+       nie da - okienko schodzi nad dolne zakładki. */
+    #flow-panel,
+    body.dev-open #flow-panel {
+        top: auto;
+        right: 8px;
+        left: 8px;
+        width: auto;
+        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
     }
 }

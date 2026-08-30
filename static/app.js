@@ -62,6 +62,10 @@ if (devPanel) {
         devPanel.classList.toggle('hidden', !open);
         devToggle.classList.toggle('active', open);
         devToggle.setAttribute('aria-expanded', String(open));
+        // Panel ⚙ i okienko z rozkładem zajmują ten sam róg - klasa na <body>
+        // odsuwa okienko, żeby dało się widzieć oba naraz (jego własne
+        // przełączniki siedzą właśnie w tym panelu).
+        document.body.classList.toggle('dev-open', open);
         if (persist) saveUiState({devOpen: open});
     };
     setDev(!!uiState.devOpen, false);
@@ -446,6 +450,37 @@ function loadTimePrefs() {
 
 const timeOpts = {...TIME_DEFAULTS, ...loadTimePrefs()};
 
+// Kropki przystanków i to, gdzie ląduje ich rozkład. Osobny klucz od
+// TIME_PREFS_KEY, bo tamto jest eksperymentem na czas strojenia, a to nie.
+// Wartości dobrane na żywo, na realnej mapie (2026-08-30).
+const DOT_DEFAULTS = {
+    size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
+    center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
+    start: false,      // wyróżnienie przystanku startowego
+    tipCursor: true,   // dymek przy kursorze
+    tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
+};
+
+const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
+
+function loadDotPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(DOT_PREFS_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+const dotOpts = {...DOT_DEFAULTS, ...loadDotPrefs()};
+
+function saveDotPrefs() {
+    try {
+        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(dotOpts));
+    } catch {
+        // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
+    }
+}
+
 function saveTimePrefs() {
     try {
         localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(timeOpts));
@@ -588,6 +623,8 @@ function clearFlow() {
     flowHits = [];
     lastFlow = null;
     clearFlowHover();
+    hideSidePanel();
+    timetableTarget = null;
     renderTimeHeadline();
     setBaseDim(false);
 }
@@ -653,6 +690,7 @@ function drawFlow(flow, refit) {
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
+    seedStartPanel();
     if (!refit) return;
 
     // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać do widoku
@@ -1185,15 +1223,25 @@ function renderFlowPick() {
     // Liczone RAZ: ta sama chwila opisuje i dymek, i kropke na linii.
     const when = timeOpts.hover ? timeAtHover(sel.hit, flowPickPoint) : null;
     showTimeDot(when);
-    if (!flowTooltip) {
-        // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
-        // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
-        // przez co dymek nigdy nie powstawał (a każdy ruch myszy nad korytarzem
-        // próbował go stworzyć od nowa i wysypywał się w tym samym miejscu).
-        flowTooltip = L.tooltip({direction: 'top', offset: [0, -6]})
-            .setLatLng(flowPickAt).addTo(map);
+    const html = flowPickHtml(when);
+    if (dotOpts.tipCursor) {
+        if (!flowTooltip) {
+            // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
+            // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
+            // przez co dymek nigdy nie powstawał (a każdy ruch myszy nad korytarzem
+            // próbował go stworzyć od nowa i wysypywał się w tym samym miejscu).
+            flowTooltip = L.tooltip({direction: 'top', offset: [0, -6]})
+                .setLatLng(flowPickAt).addTo(map);
+        }
+        flowTooltip.setLatLng(flowPickAt).setContent(html);
+    } else if (flowTooltip) {
+        map.removeLayer(flowTooltip);
+        flowTooltip = null;
     }
-    flowTooltip.setLatLng(flowPickAt).setContent(flowPickHtml(when));
+    // Korytarz przejmuje okienko od kropki - inaczej po zejściu z kropki na
+    // linię w rogu wisiałaby dalej tablica odjazdów sprzed ruchu myszy.
+    timetableTarget = null;
+    showSidePanel(html);
 }
 
 function clearFlowHover() {
@@ -1267,6 +1315,54 @@ let hoverLayer = null;
 
 // ---------------------------------------- tablica odjazdów pod kropką ----
 
+// Okienko w rogu ekranu - drugie miejsce, w którym może wyjść to samo, co
+// w dymku przy kursorze: tablica odjazdów spod kropki albo podpowiedź o linii
+// spod kursora na trasie. Różnica jest jedna, ale w niej cały sens: dymek
+// znika razem z kursorem, a okienko ZOSTAJE - podmienia je najechanie na coś
+// innego, zamyka krzyżyk albo nowe wyszukiwanie. Dzięki temu da się odczytać
+// rozkład, nie trzymając myszy nieruchomo nad kropką.
+const flowPanel = $('flow-panel');
+const flowPanelBody = $('flow-panel-body');
+
+function showSidePanel(html) {
+    if (!flowPanel || !dotOpts.tipPanel) return;
+    flowPanelBody.innerHTML = html;
+    flowPanel.hidden = false;
+}
+
+function hideSidePanel() {
+    if (flowPanel) flowPanel.hidden = true;
+}
+
+/** Okienko w rogu otwiera się z tablicą przystanku, z którego wyruszamy -
+    tak, jakby ktoś od razu najechał na jego kropkę.
+
+    To ten jeden rozkład, który interesuje zawsze: pytanie "o której stąd coś
+    jedzie" pada, zanim jeszcze spojrzy się na trasę. Reszta działa jak
+    dotąd - najechanie na cokolwiek innego podmienia treść, krzyżyk zamyka.
+
+    Kropki startowej szukamy najpierw w wybranej trasie, potem w wachlarzu:
+    przy wybranej trasie kropki wachlarza są zdjęte z mapy (patrz dimFlow),
+    więc pytanie ich o cokolwiek pokazywałoby rozkład punktu, którego nie
+    widać. */
+function seedStartPanel() {
+    if (!dotOpts.tipPanel || !flowPanel) return;
+    // Nie wyrywamy okienka spod ręki: przerysowanie w trakcie najeżdżania
+    // (suwaki wyglądu) ma zostawić to, na co użytkownik właśnie patrzy.
+    if (hoveredStopDot || flowPick) return;
+    const dot = startDotIn(journeyLayer) || startDotIn(flowDotLayer);
+    if (!dot) return;
+    timetableTarget = dot;
+    loadTimetable(dot, dot.where, dot.sec);
+}
+
+function startDotIn(layer) {
+    if (!layer) return null;
+    return layer.getLayers().find(l => l.isStart && l.where) || null;
+}
+
+if (flowPanel) $('flow-panel-close').addEventListener('click', hideSidePanel);
+
 // Odpowiedzi /api/timetable trzymamy pod (przystanek, doba, godzina) - ta
 // sama kropka pytana drugi raz (powrót kursorem, przerysowanie trasy po
 // suwaku) pokazuje dymek od razu, bez mrugnięcia "Ładowanie...".
@@ -1275,8 +1371,16 @@ const timetableCache = new Map();
 // Która kropka jest pod kursorem - patrz handleFlowHover.
 let hoveredStopDot = null;
 
+// Promienie idą z ustawień (sekcja „Kropki i rozkład"), więc to nie są stałe,
+// tylko wartości czytane przy każdym rysowaniu - stąd funkcje, nie obiekty.
 const STOP_DOT_STYLE = {radius: 5, weight: 3, color: '#263238',
                         fillColor: '#fff', fillOpacity: 1};
+
+const journeyDotStyle = () => ({
+    ...STOP_DOT_STYLE,
+    radius: dotOpts.size,
+    weight: Math.min(4, Math.max(2, Math.round(dotOpts.size * 0.5))),
+});
 
 const TIP_LOADING = '<div class="tt-note">Ładowanie…</div>';
 
@@ -1392,19 +1496,33 @@ function medianGapMin(list) {
     z etapu, a mapa przepływów stawia kropki z geometrii kawałków i zna tylko
     położenie słupka (nazwę dopowiada backend, patrz gtfs.stop_at).
     `where.lines` (tylko wachlarz) zawęża tablicę do tego, co mapa proponuje. */
+/** Jedno ujście dla gotowego HTML-a tablicy: dymek kropki (jeśli w ogóle
+    jest - przy wyłączonym dymku kropka nie dostaje go wcale) i okienko
+    w rogu, ale to drugie TYLKO dla kropki, która jest teraz wskazywana.
+    Bez tego warunku odpowiedź, która przyszła po zejściu kursora na inną
+    kropkę, nadpisywałaby w okienku świeższą treść. */
+function emitTimetable(dot, html) {
+    const out = dot.isStart && dotOpts.start ? `<div class="tt-start">${html}</div>` : html;
+    if (dot.getTooltip()) dot.setTooltipContent(out);
+    if (timetableTarget === dot) showSidePanel(out);
+}
+
+// Kropka, której tablicę pokazujemy teraz - patrz emitTimetable.
+let timetableTarget = null;
+
 function loadTimetable(dot, where, sec) {
     const date = $('date').value;
     const filtr = where.lines ? where.lines.map(lineKey).join('|') : '';
     const key = `${where.name || where.lat + ',' + where.lon}`
         + `@${date}@${sec}@${filtr}@${where.deadline || ''}`;
     const cached = timetableCache.get(key);
-    if (cached !== undefined) { dot.setTooltipContent(cached); return; }
+    if (cached !== undefined) { emitTimetable(dot, cached); return; }
 
     const query = where.name
         ? {stop: where.name, date, from_sec: sec}
         : {lat: where.lat, lon: where.lon, date, from_sec: sec};
     if (where.lines) query.limit = TIMETABLE_FETCH;
-    dot.setTooltipContent(TIP_LOADING);
+    emitTimetable(dot, TIP_LOADING);
     fetch('/api/timetable?' + new URLSearchParams(query))
         .then(r => r.json())
         .then(data => {
@@ -1414,9 +1532,9 @@ function loadTimetable(dot, where, sec) {
             // nie: offline z service workera wraca jako {error}, a po powrocie
             // sieci kropka miałaby go w pamięci na zawsze.
             if (!data.error) timetableCache.set(key, html);
-            dot.setTooltipContent(html);
+            emitTimetable(dot, html);
         })
-        .catch(() => dot.setTooltipContent(
+        .catch(() => emitTimetable(dot,
             '<div class="tt-note">Nie udało się pobrać rozkładu.</div>'));
 }
 
@@ -1433,32 +1551,64 @@ function loadTimetable(dot, where, sec) {
     jedynym sposobem otwarcia dymka - i nie może przy okazji sprzątać tego,
     czego dotyczy. */
 function stopDot(point, where, sec, style) {
-    const dot = L.circleMarker(point, style || STOP_DOT_STYLE);
-    dot.bindTooltip(TIP_LOADING, {
-        direction: 'top', offset: [0, -6], opacity: 1,
-        className: 'timetable-tip',
+    // Że to start, MÓWI ŹRÓDŁO: przy węźle wachlarza flaga z backendu (ten
+    // rozwiązał zapytanie do konkretnych słupków, patrz planner._transfer_nodes),
+    // przy wybranej trasie - miejsce w niej samej (wsiadanie pierwszego
+    // przejazdu). Front niczego tu nie odtwarza z nazw ani z odległości.
+    const isStart = !!where.start;
+    const dot = L.circleMarker(point, {
+        ...(style || STOP_DOT_STYLE),
+        ...(isStart && dotOpts.start ? START_DOT_STYLE : {}),
     });
+    dot.isStart = isStart;
+    // Czym ta kropka jest - żeby dało się ją "najechać" bez kursora.
+    dot.where = where;
+    dot.sec = sec;
+    // Dymek istnieje tylko wtedy, gdy jest włączony: Leaflet otwiera związany
+    // dymek sam, na mouseover, więc "nie pokazuj go" nie da się zrobić inaczej
+    // niż nie wiążąc go wcale. Przełącznik przerysowuje mapę (patrz applyDots),
+    // więc kropki powstają od nowa z aktualnym ustawieniem.
+    if (dotOpts.tipCursor) {
+        dot.bindTooltip(TIP_LOADING, {
+            direction: 'top', offset: [0, -6], opacity: 1,
+            className: 'timetable-tip',
+        });
+    }
     dot.on('mouseover', () => {
         hoveredStopDot = dot;
+        timetableTarget = dot;
         clearFlowHover();
         loadTimetable(dot, where, sec);
     });
     dot.on('mouseout', () => {
         if (hoveredStopDot === dot) hoveredStopDot = null;
+        // timetableTarget zostaje: okienko w rogu ma przeczekać zejście kursora.
     });
     dot.on('click', e => {
         L.DomEvent.stop(e);
+        timetableTarget = dot;
         loadTimetable(dot, where, sec);
-        dot.openTooltip();
+        if (dot.getTooltip()) dot.openTooltip();
     });
     return dot;
 }
+
+
+// Przystanek startowy - ta sama zieleń, co marker startu i szyna w formularzu,
+// żeby to była oczywiście ta sama rzecz, a nie kolejny kolor do nauczenia.
+const START_DOT_STYLE = {color: '#1b5e20', weight: 4, fillColor: '#c8f0cd'};
 
 // Kropki wachlarza są mniejsze od tych na wybranej trasie: jest ich kilkanaście
 // naraz i mają nie przykryć samej mapy - a trasa, gdy się ją wybierze, ma być
 // tym, co rzuca się w oczy.
 const FLOW_DOT_STYLE = {radius: 4, weight: 2, color: '#263238',
                         fillColor: '#fff', fillOpacity: 1};
+
+const flowDotStyle = () => ({
+    ...FLOW_DOT_STYLE,
+    radius: Math.max(2, dotOpts.size - 1),
+    weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
+});
 
 /** Kropki węzłów wachlarza - jedna na MIEJSCE, nie na słupek.
 
@@ -1469,8 +1619,18 @@ const FLOW_DOT_STYLE = {radius: 4, weight: 2, color: '#263238',
     z czego odtworzyć - i nie powinien zgadywać po odległości na ekranie. */
 function flowStopDots(nodes, deadline) {
     return (nodes || []).map(n => stopDot(
-        [n.lat, n.lon], {name: n.name, lines: n.lines, deadline}, n.sec,
-        FLOW_DOT_STYLE));
+        nodePoint(n), {name: n.name, lines: n.lines, deadline, start: n.start},
+        n.sec, flowDotStyle()));
+}
+
+/** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
+    planner._transfer_nodes): `lat`/`lon` to słupek, z którego wzięta jest
+    godzina, `clat`/`clon` - środek wszystkich słupków tego miejsca.
+    Przełącznik tylko wybiera, bo nie ma tu czego dopytywać. */
+function nodePoint(node) {
+    return dotOpts.center && node.clat !== undefined
+        ? [node.clat, node.clon]
+        : [node.lat, node.lon];
 }
 
 function legLayers(legs, {preview}) {
@@ -1509,11 +1669,16 @@ function legLayers(legs, {preview}) {
         // Kropki na wsiadaniu i wysiadaniu każdego etapu - widać, gdzie się
         // przesiadamy, bez czytania listy. Każda jest do najechania: dymek
         // pokazuje tablicę odjazdów tego przystanku (patrz stopDot).
+        const firstRide = legs.find(l => l.kind === 'ride');
         for (const leg of legs) {
             if (leg.kind !== 'ride') continue;
-            marks.push(stopDot(leg.path[0], {name: leg.from}, leg.dep_sec));
+            const style = journeyDotStyle();
+            // Wsiadanie do PIERWSZEGO przejazdu to z definicji przystanek,
+            // z którego się wyrusza - nie ma tu czego rozpoznawać.
+            const start = leg === firstRide;
+            marks.push(stopDot(leg.path[0], {name: leg.from, start}, leg.dep_sec, style));
             marks.push(stopDot(leg.path[leg.path.length - 1],
-                               {name: leg.to}, leg.arr_sec));
+                               {name: leg.to}, leg.arr_sec, style));
         }
     }
     return [...casings, ...lines, ...marks];
@@ -1525,6 +1690,7 @@ function drawJourney(index, keepView) {
     if (!journey) return;
     journeyLayer = L.layerGroup(legLayers(journey.legs, {preview: false})).addTo(map);
     dimFlow(true);
+    seedStartPanel();
     // Przy przerysowaniu w miejscu (suwaki wyglądu) nie wyrywamy widoku -
     // kadrujemy tylko wtedy, gdy trasa i tak nie mieści się w kadrze.
     const points = [...journey.legs.flatMap(leg => leg.path), ...endpointPoints()];
@@ -2413,13 +2579,63 @@ function bindTimeToggles() {
 }
 bindTimeToggles();
 
+// --- kropki przystanków i miejsce na rozkład -------------------------------
+//
+// Też bez zapytania do serwera: obie współrzędne węzła i cała tablica odjazdów
+// są już w odpowiedziach, więc wystarczy przemalować z lastFlow i przerysować
+// wybraną trasę w miejscu (keepView - kadr ma się nie ruszyć).
+const DOT_TOGGLES = {
+    'dot-center': 'center',
+    'dot-start': 'start',
+    'tip-cursor': 'tipCursor',
+    'tip-panel': 'tipPanel',
+};
+
+function applyDotOpts() {
+    if (lastFlow) drawFlow(lastFlow, false);
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+    if (!dotOpts.tipPanel) hideSidePanel();
+    if (!dotOpts.tipCursor && flowTooltip) {
+        map.removeLayer(flowTooltip);
+        flowTooltip = null;
+    }
+}
+
+function bindDotOpts() {
+    const size = $('dot-size');
+    const sizeOut = $('dot-size-value');
+    if (size) {
+        size.value = dotOpts.size;
+        if (sizeOut) sizeOut.textContent = size.value;
+        let timer = null;
+        size.addEventListener('input', () => {
+            dotOpts.size = Number(size.value);
+            if (sizeOut) sizeOut.textContent = size.value;
+            saveDotPrefs();
+            clearTimeout(timer);      // przeciąganie suwaka: jedno przemalowanie na klatkę
+            timer = setTimeout(applyDotOpts, 60);
+        });
+    }
+    for (const [id, key] of Object.entries(DOT_TOGGLES)) {
+        const input = $(id);
+        if (!input) continue;
+        input.checked = !!dotOpts[key];
+        input.addEventListener('change', () => {
+            dotOpts[key] = input.checked;
+            saveDotPrefs();
+            applyDotOpts();
+        });
+    }
+}
+bindDotOpts();
+
 // --- rozwijane sekcje panelu -----------------------------------------------
 //
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer', 'fold-range',
-    'fold-sound', 'look-section', 'fold-version',
+    'fold-sound', 'fold-dots', 'look-section', 'fold-version',
 ];
 
 function bindDevFolds() {

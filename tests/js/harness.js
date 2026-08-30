@@ -133,6 +133,9 @@ const layerBase = extra => Object.assign({
         if (this._tooltip) this._tooltip.content = content;
         return this;
     },
+    // Kropka bez rozkladu pod kursorem nie dostaje dymka w ogole (przelacznik
+    // "Dymek przy kursorze"), wiec front pyta, czy jakis jest.
+    getTooltip() { return this._tooltip || null; },
     openTooltip() { return this; },
     closeTooltip() { return this; },
     setStyle(style) { Object.assign(this.options, style); return this; },
@@ -161,7 +164,11 @@ const L = {
     }),
     divIcon: options => ({...options}),
     tooltip: options => layerBase({kind: 'tooltip', options: {...(options || {})}}),
-    layerGroup: layers => layerBase({kind: 'group', layers: (layers || []).slice()}),
+    layerGroup: layers => layerBase({
+        kind: 'group', layers: (layers || []).slice(),
+        // Front szuka po warstwach grupy kropki startowej (seedStartPanel).
+        getLayers() { return this.layers; },
+    }),
     tileLayer: () => layerBase({kind: 'tiles', options: {}}),
     control: {zoom: () => layerBase({kind: 'control', options: {}})},
     DomEvent: {on: () => L.DomEvent, off: () => L.DomEvent, stop: () => {},
@@ -419,6 +426,9 @@ const INJECTION = `
     get flowLabelLayer() { return flowLabelLayer; },
     get flowPick() { return flowPick; },
     get flowParts() { return flowParts; },
+    nodePoint, dotOpts, seedStartPanel,
+    get flowPanel() { return flowPanel; },
+    get flowPanelBody() { return flowPanelBody; },
 };
 `;
 

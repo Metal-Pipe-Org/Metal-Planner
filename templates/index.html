@@ -300,6 +300,62 @@
     </details>
 
     {#
+      Kropki przystanków na mapie i to, gdzie pokazuje się ich rozkład.
+      Nic tutaj nie rusza serwera: obie współrzędne kropki i cała tablica
+      odjazdów są już w odpowiedziach, przełącznik tylko przemalowuje.
+    #}
+    <details class="dev-fold" id="fold-dots">
+    <summary>Kropki i rozkład</summary>
+
+        <div class="field compact">
+            <label for="dot-size">
+                Wielkość kropek <output id="dot-size-value">8</output> px
+            </label>
+            <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
+            <p class="field-hint">
+                Kropki przystanków — na wybranej trasie i, o jeden mniejsze,
+                na węzłach wachlarza. To te do najechania: pokazują tablicę
+                odjazdów.
+            </p>
+        </div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
+        </label>
+        <p class="field-hint">
+            Węzeł wachlarza to jedno MIEJSCE, często o kilku słupkach.
+            Wyłączone — kropka stoi na tym słupku, z którego wzięta jest
+            godzina (peron). Włączone — pośrodku wszystkich słupków tego
+            miejsca, więc nie ląduje na jego przypadkowym krańcu.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="dot-start"> Wyróżnij przystanek startowy
+        </label>
+        <p class="field-hint">
+            Kropka na przystanku, z którego się wyrusza, dostaje zieloną
+            obwódkę, a jej tablica odjazdów — zielony nagłówek. To z niej
+            wsiada się naprawdę, więc nie ma jej gubić wśród przesiadek.
+        </p>
+
+        <div class="dev-section-head">Gdzie pokazać rozkład</div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="tip-cursor" checked> Dymek przy kursorze
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
+        </label>
+        <p class="field-hint">
+            Dotyczy obu rzeczy naraz: tablicy odjazdów spod kropki i
+            podpowiedzi o linii spod kursora na trasie. Dymek znika, gdy
+            kursor zejdzie; okienko zostaje, podmienia się przy najechaniu na
+            coś innego i zamyka się krzyżykiem. Można mieć oba, można żaden.
+        </p>
+
+    </details>
+
+    {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
       Sekcja jest WIDOCZNA (LOOK_TUNING = true w app.js) — strojenie trwa.
       Atrybut `hidden` niżej to tylko stan startowy: app.js zdejmuje go albo
@@ -388,6 +444,17 @@
         </p>
     </details>
 
+</div>
+
+{#
+  Okienko z rozkładem/linią w rogu ekranu - alternatywa dla dymka przy
+  kursorze (przełączniki w panelu ⚙, sekcja „Kropki i rozkład"). Poza #map
+  celowo: ma nie łapać zdarzeń myszy mapy ani nie znikać razem z warstwami.
+#}
+<div id="flow-panel" hidden>
+    <button id="flow-panel-close" class="icon-button" title="Zamknij okienko"
+            aria-label="Zamknij okienko z rozkładem">✕</button>
+    <div id="flow-panel-body"></div>
 </div>
 {% endif %}
 
