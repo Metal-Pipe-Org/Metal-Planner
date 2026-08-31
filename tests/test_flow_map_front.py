@@ -304,6 +304,44 @@ def test_departures_that_cannot_make_it_are_dropped(front):
     _check(front, "odjazd_ktorym_sie_nie_zdazy_wypada")
 
 
+# --- punkt 11: trzy rzeczy, które mogą się tu dziać z linią ----------------
+
+
+def test_each_row_says_what_happens_here_with_that_line(front):
+    """Wiersz tablicy niesie znak: wsiadasz tu pierwszy raz, jedziesz dalej
+    czymś, czym można już jechać, czy właśnie tym przyjechałeś. Trzy RÓŻNE
+    znaki jednej rodziny - nieznany przepływ nie zgaduje żadnego, ale zostawia
+    kolumnę, żeby godziny stały w jednej osi."""
+    _check(front, "trzy_znaki_przeplywu")
+
+
+def test_lines_that_only_bring_you_here_get_their_own_row(front):
+    """Pojazd, którym się tu dojechało, nie jest odjazdem i w tablicy
+    przystanku go nie ma - wiersz dokłada węzeł, z godziny przyjazdu odczytanej
+    z rozkładu tego samego kursu, z którego narysowano kawałek."""
+    _check(front, "przyjazdy_dokladaja_wiersze")
+
+
+def test_an_arrival_never_masquerades_as_a_departure(front):
+    """Linia, którą mapa tu tylko przywozi, wypisana z najbliższym ODJAZDEM
+    udawałaby opcję, której mapa nie proponuje. Z listy odjazdów wypada, a
+    wraca osobnym wierszem i z inną godziną."""
+    _check(front, "przyjazd_nie_udaje_odjazdu")
+
+
+def test_an_arrival_and_a_departure_are_not_one_cadence(front):
+    """Przyjazd i odjazd tej samej linii to dwa różne zdarzenia na tym
+    przystanku - zwinięte w jeden wiersz udawałyby takt kursowania."""
+    _check(front, "przyjazd_nie_zwija_sie_z_odjazdem")
+
+
+def test_the_board_mixes_arrivals_into_the_departures_by_time(front):
+    """Tablica przestała być listą samych odjazdów: przyjazd stoi w niej tam,
+    gdzie wypada na osi czasu. Kolumna ze znakiem pojawia się tylko tam, gdzie
+    jest czym ją wypełnić - pod kropką wybranej trasy nie ma jej wcale."""
+    _check(front, "tablica_miesza_przyjazdy_z_odjazdami")
+
+
 def test_the_node_dot_stands_where_the_switch_says(front):
     """Węzeł to jedno miejsce o kilku słupkach: kropka stoi albo na peronie,
     z którego wzięta jest godzina, albo pośrodku wszystkich słupków. Obie

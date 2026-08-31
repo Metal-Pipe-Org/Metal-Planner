@@ -1878,10 +1878,43 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     kropką mówiącą wszystko, a nie trzema, z których każda mówi co innego
     (patrz gtfs._build_places).
 
-    `lines` to linie, w które da się tu WSIĄŚĆ WEDŁUG MAPY - czyli te, których
-    kawałek z tego miejsca się zaczyna. Z kierunkiem, bo ta sama linia mija
-    węzeł w obie strony, a mapa proponuje jedną: bez headsigna tablica
-    pokazywałaby tramwaj jadący dokładnie tam, skąd się przyjechało.
+    `lines` to linie, o których węzeł ma coś do powiedzenia - z kierunkiem, bo
+    ta sama linia mija węzeł w obie strony, a mapa mówi o jednej. Każda niesie
+    `flow`, czyli CO SIĘ TU Z NIĄ DZIEJE - trzy rzeczy, nie jedna
+    (patrz punkt 11 kontraktu):
+
+      "start"   - mapa wiezie tą linią DALEJ stąd, ale nie wiezie nią DO tego
+                  miejsca. Wsiadasz tu pierwszy raz - wcześniej nie było jak.
+      "through" - mapa wiezie tą linią i DO tego miejsca, i DALEJ. Tym
+                  pojazdem można już jechać, więc wsiadanie tutaj to jedna
+                  z możliwości, a nie jedyna.
+      "end"     - mapa wiezie tą linią DO tego miejsca i dalej nią nie wiezie.
+                  Tu się z niej wysiada.
+
+    GDZIE w ogóle stoi kropka: tam, gdzie coś się ZACZYNA albo KOŃCZY - jakaś
+    linia staje się stąd dostępna, albo mapa przestaje którąś dalej wieźć.
+    Przystanek, przez który wszystko tylko przejeżdża, kropki nie dostaje,
+    choćby leżał na styku dwóch narysowanych kawałków.
+
+    Czytane z KAŻDEGO przystanku kawałka, nie tylko z jego końców. Kawałek
+    "Galeria Dominikańska -> Urząd Wojewódzki -> Katedra" przejeżdża przez
+    urząd w połowie swojej długości: patrzenie na same końce mówiło, że tej
+    linii tam nie ma, choć mapa rysuje ją przez ten przystanek i można w nią
+    tam wsiąść (zgłoszone 2026-08-31). Ta sama wąska miara kasowała całe
+    kropki - na Katedrze kończyły się kawałki 5 i N, a 10 i 111 tylko tamtędy
+    przejeżdżały, więc węzeł orzekał "tylko się tu wysiada" i znikał, mimo że
+    to jest dokładnie ta przesiadka, po którą się tam jedzie.
+
+    Wcześniej węzeł niósł wyłącznie pierwsze dwa przypadki zlane w jedno
+    ("w co da się tu wsiąść"), więc tablica milczała o tym, czym się tu w ogóle
+    przyjechało - a to połowa odpowiedzi na "gdzie ja jestem i co dalej".
+
+    `arrive` (tylko przy "end") to godzina, o której się tu tą linią jest -
+    z rozkładu tego samego kursu, z którego narysowano kawałek. Wiersz "end"
+    nie jest odjazdem, więc front nie ma go skąd wziąć z tablicy przystanku.
+
+    `depart_by` (tylko przy "start"/"through") to ostatni odjazd, którym
+    jeszcze się zdąży (patrz _line_deadlines).
 
     `sec` to najwcześniejsza godzina, o której można tu być - od niej liczy się
     "co stąd jeszcze odjedzie".
@@ -1900,42 +1933,96 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     # dokładnie tam, gdzie plac ma słupki o różnych nazwach.
     start_places = {day.place_of.get(s, s) for s in (source_stops or ())}
 
-    nodes = {}
+    # Każde dotknięcie przystanku przez narysowany kawałek: (miejsce, linia,
+    # słupek, godzina, czy wiezie DALEJ, czy dowozi TU, czy to koniec kawałka).
+    touches = []
     for (label, stops_seq), (_q, _shape, times, _reach, _ok, headsign) in pieces.items():
         if times is None:
             continue                     # bez godzin nie ma o co pytać
         num, mode = _line_parts(label)
-        ends = ((stops_seq[0], times[0], True), (stops_seq[-1], times[-1], False))
-        for stop, when, boarding in ends:
-            key = day.place_of.get(stop, stop)
-            node = nodes.setdefault(key, {"sec": None, "stop": None, "lines": set()})
-            if node["sec"] is None or when < node["sec"]:
-                node["sec"], node["stop"] = when, stop
-            if boarding and not _rides_back(earliest, stops_seq[0], stops_seq[-1]):
-                node["lines"].add((num, mode, headsign))
+        line = (num, mode, headsign)
+        last = len(stops_seq) - 1
+        for i, stop in enumerate(stops_seq):
+            touches.append((
+                day.place_of.get(stop, stop), line, stop, times[i],
+                # Wiezie dalej - chyba że dalej znaczy Z POWROTEM (patrz
+                # _rides_back). Pytamy o KAWAŁEK JAKO CAŁOŚĆ, nie o drogę od
+                # tego przystanku: `_rides_back` uznaje za cofnięcie także
+                # RÓWNE godziny, a na przedostatnim przystanku przed celem
+                # "najwcześniej tutaj" i "najwcześniej u celu" są zwykle
+                # identyczne - pytany per przystanek orzekłby, że linia się tu
+                # kończy, choć jedzie jeszcze przystanek do celu (Reja, 111).
+                # Kawałek zawracający i tak nie ma prawa być narysowany
+                # (punkt 4), więc miara na całości niczego nie przepuszcza.
+                i < last and not _rides_back(earliest, stops_seq[0], stops_seq[-1]),
+                i > 0,                   # dowozi tu - czyli można już nim jechać
+                i == 0 or i == last,     # koniec kawałka - to on stawia kropkę
+            ))
+
+    nodes = {}
+    for key, line, stop, when, onward, arriving, _is_end in touches:
+        node = nodes.setdefault(
+            key, {"sec": None, "stop": None, "boards": set(), "arrivals": {}})
+        # Najwcześniej, kiedy mapa potrafi tu kogoś postawić - także pojazdem,
+        # który tędy tylko przejeżdża: siedząc w nim, jest się tu o tej godzinie.
+        if node["sec"] is None or when < node["sec"]:
+            node["sec"], node["stop"] = when, stop
+        if onward:
+            node["boards"].add(line)
+        # Kilka kawałków tej samej linii może tu dowozić (różne kursy w oknie).
+        # Liczy się NAJWCZEŚNIEJSZY przyjazd - ta sama zasada, co przy `sec`.
+        if arriving and when < node["arrivals"].get(line, INF):
+            node["arrivals"][line] = when
 
     out = []
     for key, node in nodes.items():
-        if not node["lines"]:
-            continue                     # tylko się tu wysiada - nie ma przesiadki
         # Ostatni odjazd każdej linii, którym jeszcze się zdąży. Liczone dla
         # WSZYSTKICH słupków miejsca, bo dymek i tak scala je w jedną tablicę.
         limits = {}
-        if board_value is not None and deadline is not None:
+        if node["boards"] and board_value is not None and deadline is not None:
             limits = _line_deadlines(
                 day, day.stops_by_place.get(key, [node["stop"]]),
                 board_value, node["sec"], deadline,
             )
         lines = []
-        for num, kind, headsign in sorted(node["lines"]):
-            depart_by = limits.get((num, kind, headsign))
-            if limits and depart_by is None:
-                continue      # tą linią stąd nie dojedzie się już wcale
+        for line in sorted(node["boards"] | set(node["arrivals"])):
+            num, kind, headsign = line
+            depart_by = limits.get(line)
+            # Linia, którą stąd już się nie dojedzie, przestaje być opcją do
+            # wsiadania - ale jeśli mapa nią tu PRZYWOZI, wciąż jest czym
+            # innym niż niczym: zostaje jako "end".
+            boards = line in node["boards"] and not (limits and depart_by is None)
+            arrive = node["arrivals"].get(line)
+            if not boards and arrive is None:
+                continue
             entry = {"num": num, "kind": kind, "headsign": headsign}
-            if depart_by is not None:
-                entry["depart_by"] = depart_by
+            if boards:
+                entry["flow"] = "through" if arrive is not None else "start"
+                if depart_by is not None:
+                    entry["depart_by"] = depart_by
+            else:
+                entry["flow"] = "end"
+                entry["arrive"] = arrive
             lines.append(entry)
-        if not lines:
+        # Miejsce, w którym da się tylko wysiąść, nie jest przesiadką i nie
+        # dostaje kropki.
+        if not any(l["flow"] != "end" for l in lines):
+            continue
+        # ...a miejsce, przez które WSZYSTKO tylko przejeżdża, też nie: nic się
+        # tu nie staje dostępne i nic nie przestaje, więc nie ma o czym
+        # decydować - to przystanek, który się mija siedząc (punkt 11: "nie na
+        # każdym mijanym przystanku").
+        #
+        # To jest właściwa miara "sensownego wysiadania" - i celowo NIE jest nią
+        # koniec narysowanego kawałka. Kawałki tnie też zmiana składu korytarza
+        # (punkt 7, patrz `crosses` w _refine_brightness), czyli sprawa czysto
+        # rysunkowa: na Urzędzie Wojewódzkim (Impart) D i 146 schodzą się w
+        # jeden korytarz, więc oba kawałki dostały tam szew przy IDENTYCZNEJ
+        # jasności po obu stronach. Kropka dziedziczyła ten szew i stawała
+        # w miejscu, w którym nie da się zrobić nic (zgłoszone 2026-08-31).
+        # Linia przecięta z powodu korytarza wychodzi tu jako "through" -
+        # i tu dowozi, i dalej wiezie - więc sama z siebie kropki nie stawia.
+        if not any(l["flow"] != "through" for l in lines):
             continue
         lat, lon = _round_path([day.stop_coords[node["stop"]]])[0]
         clat, clon = _place_center(day, key, node["stop"])

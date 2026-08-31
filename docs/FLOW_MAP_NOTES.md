@@ -47,6 +47,18 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
 - **9** — `test_brightness_uses_full_range_regardless_of_window_width`,
   `test_previously_worst_option_brightens_when_a_new_worse_one_appears`,
   oraz pośrednio `test_single_course_splits_brightness_at_a_real_skipped_transfer`
+- **11** — backend (od 2026-08-30):
+  `test_a_node_says_which_of_three_things_happens_with_each_line` (sedno
+  punktu), `test_only_boardable_lines_carry_a_deadline_and_only_arrivals_a_time`,
+  `test_the_node_hour_is_the_earliest_you_can_be_here`,
+  `test_a_place_where_you_only_get_off_is_still_not_a_transfer`.
+  Front, przez emulator: `test_each_row_says_what_happens_here_with_that_line`,
+  `test_lines_that_only_bring_you_here_get_their_own_row`,
+  `test_an_arrival_never_masquerades_as_a_departure`,
+  `test_an_arrival_and_a_departure_are_not_one_cadence`,
+  `test_the_board_mixes_arrivals_into_the_departures_by_time`.
+  Wcześniej (od 2026-08-29) tylko odsiew oferty: `..._only_what_the_map_offers_here`,
+  `..._departures_that_cannot_make_it_are_dropped`, `..._past_the_map_horizon_are_dropped`
 
 ## Otwarte pytania
 
@@ -684,3 +696,130 @@ wprowadzenia, a znaczek renderować tylko wtedy, gdy od tej daty minęło mniej
 niż ~7 dni. Wtedy „nowe" gaśnie samo i nie zostawia po sobie długu.
 
 Nie zrobione — zanotowane na wyraźną prośbę, do decyzji później.
+
+## Tablica przesiadki przestaje być listą samych odjazdów (2026-08-30)
+
+**Czego brakowało.** Kropka przesiadki odpowiadała wyłącznie na „czym stąd
+pojechać". Człowiek, który na nią patrzy, stoi jednak w konkretnym miejscu i
+w konkretnej sytuacji: czymś tu przyjechał, coś go tu mija, a w coś dopiero
+wsiada — i te trzy rzeczy znaczą dla niego co innego. Tablica zlewała je w
+jedno („odjazdy"), a pojazd, którym się tu dojechało, w ogóle w niej nie
+istniał, bo przyjazd nie jest odjazdem i w rozkładzie przystanku go nie ma.
+
+**Co zrobiono.** Węzeł (`planner._transfer_nodes`) niesie teraz przy każdej
+linii pole `flow` o trzech wartościach:
+
+| `flow` | znaczy | skąd się bierze |
+|---|---|---|
+| `start` | wsiadasz tu pierwszy raz | kawałek tej linii tu się ZACZYNA i nigdzie wcześniej mapa nią nie wiozła |
+| `through` | możesz już nim jechać | kawałek tu się KOŃCZY i ZACZYNA |
+| `end` | tu wysiadasz | kawałek tu się tylko KOŃCZY |
+
+Do `end` dochodzi `arrive` — godzina przyjazdu z rozkładu TEGO kursu, z
+którego narysowano kawałek (front nie ma jej skąd wziąć: w tablicy odjazdów
+przystanku tej godziny nie ma). `depart_by` zostaje przy `start`/`through`,
+bo odpowiada na inne pytanie („którym ostatnim odjazdem jeszcze zdążę").
+Kilka kawałków tej samej linii kończących się w węźle daje jedną godzinę —
+NAJWCZEŚNIEJSZĄ, tą samą zasadą, co `sec` całego węzła.
+
+Linia, którą stąd już się nie dojedzie (brak `depart_by`), przestaje być
+ofertą do wsiadania — ale jeśli mapa nią tu dowozi, nie znika, tylko schodzi
+do `end`. To zamiana jednego zdania w tablicy na inne, nie skasowanie wiersza.
+
+**Front.** `keepOfferedLines` wypuszcza `end` z listy odjazdów (wypisana z
+najbliższym odjazdem udawałaby opcję, której mapa nie proponuje), a
+`withArrivals` dokłada jej własny wiersz z `arrive` — PO obu sitach, bo oba
+pytają „czy tym odjazdem jeszcze się dojedzie", a przyjazd nie jest odjazdem.
+Kolejność w tablicy robi `sec`, więc przyjazd stoi tam, gdzie wypada na osi
+czasu, a nie doklejony na końcu. `summariseRepeats` ma `flow` w kluczu grupy:
+przyjazd i odjazd tej samej linii to dwa zdarzenia, zwinięte w jeden wiersz
+udawałyby takt kursowania, którego nie ma.
+
+**Znaki.** Jedna rodzina, czytana zawsze tak samo — lewy koniec mówi, skąd
+ten pojazd tu jest (kreska „stąd rusza", grot „już jedzie"), prawy mówi, co
+z nim dalej (grot „jedzie dalej", kreska „tu koniec jazdy"):
+`|→` start, `→→` through, `→|` end. Wąska kolumna PRZED godziną, bo
+odpowiada wcześniej niż ona. Kolumna pojawia się tylko tam, gdzie jest czym
+ją wypełnić: tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie
+o węzeł mapy, więc nie wie, co się tu z którą linią dzieje — i zostaje bez
+znaków, zamiast je zgadywać. Tak samo odpowiedź bez `flow` (cache sprzed
+zmiany, tryb awaryjny): brak znaku, nie znak domyślny.
+
+**Czego to NIE zmieniło.** Kropek nie przybyło. Miejsce, w którym da się
+tylko wysiąść, nadal nie jest przesiadką i kropki nie dostaje
+(`test_a_place_where_you_only_get_off_is_still_not_a_transfer`) — zmieniło
+się to, co kropka mówi, a nie to, gdzie stoi. Rysowanej mapy (jasność,
+grubość, geometria) nie tknięto.
+
+**Testy:** 141 przechodzi (było 132; +4 backend, +5 front).
+
+**Tekst punktu 11 kontraktu** — draft przekazany użytkownikowi i zatwierdzony
+2026-08-30, wpisany do FLOW_MAP_CONTRACT.md. Na jego prośbę bez zdania
+otwierającego („wachlarz rysuje przejazdy, ale przesiadka jest w nim
+punktem…") — punkt zaczyna się od razu od „Gdzie stoi kropka". Tytuł też
+nowy: obietnicą nie jest już samo „w co się przesiąść", tylko „co się tu
+z każdą linią dzieje".
+
+## Kropki przestają dziedziczyć cięcia rysowania (2026-08-31)
+
+**Zgłoszenie.** Trzy rzeczy naraz, na trasie Galeria Dominikańska →
+pl. Grunwaldzki: (1) przez Urząd Wojewódzki (Muzeum Narodowe) mapa rysuje
+autobus N, ale kropka go nie wymieniała; (2) koło Katedry nie było kropki,
+choć piątką dojeżdża się tam wyłącznie po to, żeby przesiąść się dalej;
+(3) na Urzędzie Wojewódzkim (Impart) kropka stała i nie miała nic do
+powiedzenia — D i 146 tylko tamtędy przejeżdżały.
+
+**Jedna przyczyna, nie trzy.** `_transfer_nodes` czytał wyłącznie KOŃCE
+narysowanych kawałków. Z tego wynikało wszystko:
+
+- kawałek N to `GALERIA DOMINIKAŃSKA → Urząd Wojewódzki → Katedra` — urząd
+  leży w jego ŚRODKU, więc dla węzła ta linia tam nie istniała;
+- na Katedrze kończyły się kawałki 5 i N, a 10 i 111 tylko przejeżdżały
+  (`Pl. Bema → Ogród Botaniczny → Katedra → Reja → PL. GRUNWALDZKI`) — skoro
+  nic się tam nie ZACZYNAŁO, reguła „tylko się tu wysiada" kasowała kropkę
+  razem z całą przesiadką;
+- na Impart kropka stała, bo tam był KONIEC kawałka. Tyle że kawałki tnie
+  również zmiana składu korytarza (`crosses` w _refine_brightness, punkt 7) —
+  sprawa czysto rysunkowa. Widać to po jasnościach: D dostał tam szew przy
+  w=1.00 po OBU stronach, 146 przy 0.40 po obu. Nic się nie zmieniało.
+
+**Naprawa.** Węzeł czyta teraz KAŻDY przystanek kawałka i pyta o dwie rzeczy
+osobno: czy mapa tą linią DO tego miejsca dowozi (jest wcześniejszy przystanek
+w kawałku) i czy wiezie DALEJ (jest późniejszy). Z tego wychodzą trzy `flow`
+bez zmiany ich znaczenia. Kropka stoi tam, gdzie coś się ZACZYNA albo KOŃCZY —
+gdzie linia staje się dostępna albo przestaje. Miejsce, przez które wszystko
+tylko przejeżdża, kropki nie dostaje, choćby leżało na styku dwóch kawałków:
+linia przecięta z powodu korytarza wychodzi jako „through" i sama z siebie
+kropki nie stawia. Placement przestał więc zależeć od tego, gdzie cutter
+akurat postawił szew.
+
+**Pułapka po drodze (Reja).** Pierwsze podejście pytało `_rides_back`
+o drogę OD TEGO przystanku do końca kawałka. Ta funkcja uznaje za cofnięcie
+także RÓWNE godziny, a na Rei „najwcześniej tutaj" i „najwcześniej u celu"
+wypadały identycznie (11:01) — więc 111 zostawał ogłoszony jako kończący się
+na Rei, choć jedzie stamtąd jeszcze przystanek do celu, i pojawiała się kropka
+na wyssanej z palca przesiadce. `_rides_back` została NIETKNIĘTA (pilnuje
+przypadku Kamiennogórskiej z 2026-08-29); pytamy nią o kawałek jako całość,
+dokładnie jak przedtem. Kawałek zawracający i tak nie ma prawa być narysowany
+(punkt 4), więc miara na całości niczego nie przepuszcza.
+
+**Wynik na zgłoszonej trasie:** 7 kropek → 6. Doszła Katedra
+(10 i 111 „through", 5 i N „end"), Urząd Wojewódzki (Muzeum Narodowe) dostał
+brakujące N, zniknęły Urząd Wojewódzki (Impart) i most Grunwaldzki — oba
+były szwami korytarza D/146. Ogród Botaniczny i Reja, mijane w środku
+kawałków, kropki nadal nie dostają.
+
+**Testy:** 149 przechodzi (było 145). Cztery nowe, sprawdzone trzema
+mutacjami `planner.py` — każda złapana przez właściwy test:
+
+| mutacja | złapana przez |
+|---|---|
+| czytaj tylko końce kawałków (stan sprzed naprawy) | `..._passing_through_the_middle_of_a_piece_is_still_listed`, `..._gets_a_dot_even_if_nothing_starts_there`, `..._does_not_claim_the_line_ends_there` |
+| kropka dziedziczy każdy szew rysowania | `..._a_seam_between_two_pieces_is_not_a_transfer` |
+| `_rides_back` pytany o drogę od tego przystanku | `..._the_stop_before_the_target_does_not_claim_the_line_ends_there` |
+
+**Kontrakt.** Punkt 11 opisywał to dobrze od początku („mapa dowozi tu tą
+linią i wiezie nią dalej") — to kod był węższy niż obietnica. Reguła stawiania
+kropki zyskała za to drugą połowę i na zgodę użytkownika (2026-08-31) doszło
+do „Gdzie stoi kropka" jedno zdanie: miejsce, przez które wszystko tylko
+przejeżdża, też nie jest przesiadką.

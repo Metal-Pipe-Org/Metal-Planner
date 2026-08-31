@@ -1035,6 +1035,33 @@ body.panel-hidden #sidebar {
     font-size: 12.5px;
 }
 
+/* Wąska kolumna z lewej na znak "co się tu z tą linią dzieje" (patrz
+   FLOW_ICONS w app.js). Dokładana tylko tam, gdzie jest czym ją wypełnić -
+   tablica pod kropką wybranej trasy pyta o cały przystanek i tego nie wie,
+   a pusta kolumna przesuwałaby jej wiersze bez powodu. */
+.tt-rows.has-flow li {
+    grid-template-columns: 15px 38px 34px 1fr auto;
+    column-gap: 6px;
+}
+
+/* Znak stoi PRZED godziną, bo odpowiada wcześniej niż ona: najpierw
+   "wsiadasz / jedziesz / wysiadasz", dopiero potem "o której". */
+.tt-flow {
+    display: block;
+    width: 15px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    color: var(--ink-soft);
+}
+
+/* Przyjazd to nie jest opcja do wyboru, tylko fakt - bledszy, żeby oko
+   najpierw trafiało w to, czym MOŻNA stąd pojechać. */
+.tt-flow-end { color: var(--ink-faint); }
+
 .tt-time {
     font-weight: 700;
     font-variant-numeric: tabular-nums;

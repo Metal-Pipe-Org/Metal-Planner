@@ -421,6 +421,7 @@ const INJECTION = `
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
     legLayers, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
     summariseRepeats, TIMETABLE_ROWS, keepWithinHorizon,
+    withArrivals, flowIcon, FLOW_ICONS,
     playPipeDrop, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },
     get flowLabelLayer() { return flowLabelLayer; },

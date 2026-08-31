@@ -23,6 +23,9 @@ Numeracja testów odpowiada numeracji punktów kontraktu:
   9. pełny zakres jasności zawsze wykorzystany - liczony względem
      najgorszej FAKTYCZNIE pokazanej opcji, nie względem pełnej szerokości
      okna czasowego (poszerzanie okna nie rozjaśnia już pokazanych opcji)
+ 11. węzeł przesiadkowy mówi, co się tu dzieje z każdą linią - wsiadasz tu
+     pierwszy raz, jedziesz dalej czymś, czym można już jechać, czy właśnie
+     tym przyjechałeś (planner._transfer_nodes, pole `flow`)
 """
 
 import datetime
@@ -971,3 +974,202 @@ def test_two_stops_of_one_place_in_a_row_are_not_a_turn_back(install_day):
     install_day(day)
     stops = _discovered(day)
     assert stops["Tramwaj 7"] == ["S", "K1", "K2", "E"], stops["Tramwaj 7"]
+
+
+# ---------------------------------------------------------------------- 11 -
+
+def _three_flows_at_one_node_day():
+    """Węzeł X, na którym dzieją się wszystkie trzy rzeczy naraz.
+
+    Tramwaj 1 wiezie z S przez X do celu (wolno, ale w oknie) - w X można
+    w niego wsiąść, ale można też już nim jechać: PRZEJAZD.
+    Autobus 2 zaczyna się w X i dowozi najszybciej - WSIADANIE.
+    Autobus 3 dowozi z S do X i tam się kończy - PRZYJAZD: mapa nim dalej
+    nie wiezie, ale to nim najwcześniej da się tu być.
+    """
+    return make_day([
+        {"trip_id": "tA", "label": "Tramwaj 1", "headsign": "CEL",
+         "stops": [("S", 0, 0), ("X", 600, 600), ("T", 1500, 1500)]},
+        {"trip_id": "tB", "label": "Autobus 2", "headsign": "CEL",
+         "stops": [("X", 900, 900), ("T", 1200, 1200)]},
+        {"trip_id": "tD", "label": "Autobus 3", "headsign": "WEZEL",
+         "stops": [("S", 0, 0), ("X", 500, 500)]},
+    ])
+
+
+def _node_named(result, name):
+    for node in result["nodes"]:
+        if node["name"] == name:
+            return node
+    raise AssertionError(
+        f"brak węzła {name!r}; są: {[n['name'] for n in result['nodes']]}")
+
+
+def _flow_of(node, num):
+    for line in node["lines"]:
+        if line["num"] == num:
+            return line
+    raise AssertionError(
+        f"węzeł {node['name']!r} nie wymienia linii {num!r}; ma: "
+        + str([f"{l['num']}/{l['flow']}" for l in node["lines"]]))
+
+
+def test_a_node_says_which_of_three_things_happens_with_each_line(install_day):
+    """Punkt 11: przesiadka to nie tylko "w co tu wsiąść". Ta sama kropka
+    odpowiada na trzy różne pytania i przy każdej linii mówi, o które chodzi -
+    inaczej pojazd, którym się tu właśnie przyjechało, w ogóle nie istnieje."""
+    install_day(_three_flows_at_one_node_day())
+    result = planner.plan_flow("S", "T", WHEN)
+    wezel = _node_named(result, "X")
+
+    assert _flow_of(wezel, "1")["flow"] == "through"
+    assert _flow_of(wezel, "2")["flow"] == "start"
+    assert _flow_of(wezel, "3")["flow"] == "end"
+
+
+def test_only_boardable_lines_carry_a_deadline_and_only_arrivals_a_time(install_day):
+    """Te dwie liczby odpowiadają na różne pytania i nie mają prawa się
+    pomylić: `depart_by` to "którym ostatnim odjazdem jeszcze zdążę"
+    (tylko dla linii do wsiadania), `arrive` to "o której tu tą linią jestem"
+    (tylko dla przyjazdu - w tablicy odjazdów przystanku tej godziny NIE MA,
+    bo przyjazd nie jest odjazdem)."""
+    install_day(_three_flows_at_one_node_day())
+    wezel = _node_named(planner.plan_flow("S", "T", WHEN), "X")
+
+    for num in ("1", "2"):
+        assert "depart_by" in _flow_of(wezel, num)
+        assert "arrive" not in _flow_of(wezel, num)
+
+    przyjazd = _flow_of(wezel, "3")
+    assert "depart_by" not in przyjazd
+    # 500 to godzina z rozkładu TEGO kursu, którym narysowano kawałek -
+    # nie najbliższy kurs tej linii i nie godzina węzła "tak w ogóle".
+    assert przyjazd["arrive"] == 500
+
+
+def test_the_node_hour_is_the_earliest_you_can_be_here(install_day):
+    """Od tej godziny liczy się "co stąd jeszcze odjedzie" i "za ile" w każdym
+    wierszu - także w wierszu przyjazdu. Najwcześniej da się tu być
+    autobusem 3 (500), nie tramwajem 1 (600)."""
+    install_day(_three_flows_at_one_node_day())
+    assert _node_named(planner.plan_flow("S", "T", WHEN), "X")["sec"] == 500
+
+
+def test_a_place_where_you_only_get_off_is_still_not_a_transfer(install_day):
+    """Dokładanie przyjazdów NIE rozsiewa kropek po mapie: miejsce, z którego
+    nie da się już nigdzie pojechać, nie jest przesiadką i kropki nie dostaje.
+    Zmienia się to, co mówi kropka, a nie to, gdzie stoi."""
+    install_day(_three_flows_at_one_node_day())
+    result = planner.plan_flow("S", "T", WHEN)
+
+    assert "T" not in [n["name"] for n in result["nodes"]]
+    # ...a węzeł, na którym da się wsiąść, zostaje - razem z przyjazdem.
+    assert {"S", "X"} == {n["name"] for n in result["nodes"]}
+
+
+def _passing_line_day():
+    """Odwzorowanie zgłoszenia z 2026-08-31 (Galeria Dominikańska -> pl. Grunwaldzki).
+
+    Autobus 10 jedzie B -> K -> T jednym, NIEPRZECIĘTYM kawałkiem, więc przez K
+    tylko PRZEJEŻDŻA - tak jak tramwaj 10 i autobus 111 przez Katedrę. Tramwaj 5
+    i tramwaj 3 na K się kończą - tak jak tam 5 i N. Na K nie zaczyna się nic.
+    """
+    return make_day([
+        {"trip_id": "t5", "label": "Tramwaj 5", "headsign": "PETLA",
+         "stops": [("S", 0, 0), ("U", 300, 300), ("K", 500, 500)]},
+        {"trip_id": "t7", "label": "Autobus 7", "headsign": "B",
+         "stops": [("S", 0, 0), ("B", 200, 200)]},
+        {"trip_id": "t10", "label": "Autobus 10", "headsign": "CEL",
+         "stops": [("B", 400, 400), ("K", 900, 900), ("T", 1200, 1200)]},
+        {"trip_id": "t3", "label": "Tramwaj 3", "headsign": "CEL",
+         "stops": [("U", 500, 500), ("K", 750, 750)]},
+    ])
+
+
+def test_a_line_passing_through_the_middle_of_a_piece_is_still_listed(install_day):
+    """Zgłoszone 2026-08-31: przez Urząd Wojewódzki mapa rysowała autobus N,
+    ale kropka go nie widziała - kawałek N miał tam swój ŚRODEK, a węzeł czytał
+    wyłącznie końce kawałków. Linia rysowana przez przystanek jest przy nim
+    opcją i ma być wypisana."""
+    install_day(_passing_line_day())
+    wezel = _node_named(planner.plan_flow("S", "T", WHEN), "K")
+
+    assert _flow_of(wezel, "10")["flow"] == "through"
+
+
+def test_a_stop_you_change_at_gets_a_dot_even_if_nothing_starts_there(install_day):
+    """Zgłoszone 2026-08-31: koło Katedry nie było kropki, choć dojeżdża się tam
+    piątką wyłącznie po to, żeby przesiąść się dalej. Kończyły się tam kawałki
+    5 i N, a 10 i 111 tylko tamtędy PRZEJEŻDŻAŁY - więc "nic się tu nie
+    zaczyna" kasowało kropkę razem z całą przesiadką."""
+    install_day(_passing_line_day())
+    result = planner.plan_flow("S", "T", WHEN)
+    wezel = _node_named(result, "K")
+
+    assert _flow_of(wezel, "3")["flow"] == "end"
+    assert _flow_of(wezel, "5")["flow"] == "end"
+    # ...i to przejeżdżająca dziesiątka jest tym, po co się tu wysiada
+    assert any(l["flow"] != "end" for l in wezel["lines"])
+
+
+def _drawing_seam_day():
+    """Kawałki tramwaju 10 i 20 stykają się na K, bo zmienia się tam wartość
+    jazdy dalej - ale ŻADNA z tych linii się na K nie zaczyna ani nie kończy:
+    obie tamtędy przejeżdżają. Tak wygląda Urząd Wojewódzki (Impart), gdzie D
+    i 146 dostały szew od zmiany składu korytarza."""
+    return make_day([
+        {"trip_id": "t7", "label": "Autobus 7", "headsign": "B",
+         "stops": [("S", 0, 0), ("B", 100, 100)]},
+        {"trip_id": "t8", "label": "Autobus 8", "headsign": "C",
+         "stops": [("S", 0, 0), ("C", 100, 100)]},
+        {"trip_id": "t10", "label": "Tramwaj 10", "headsign": "CEL",
+         "stops": [("B", 300, 300), ("K", 600, 600), ("T", 1250, 1250)]},
+        {"trip_id": "t20", "label": "Tramwaj 20", "headsign": "CEL",
+         "stops": [("C", 300, 300), ("K", 800, 800), ("T", 1000, 1000)]},
+    ])
+
+
+def test_a_seam_between_two_pieces_is_not_a_transfer(install_day):
+    """Zgłoszone 2026-08-31: kropka stała na Urzędzie Wojewódzkim (Impart)
+    i nie miała nic do powiedzenia - D i 146 tylko tamtędy przejeżdżały.
+    Kawałki tnie także zmiana składu korytarza (punkt 7), czyli sprawa czysto
+    rysunkowa, a kropka dziedziczyła ten szew. Miejsce, przez które wszystko
+    tylko przejeżdża, nie jest przesiadką."""
+    install_day(_drawing_seam_day())
+    result = planner.plan_flow("S", "T", WHEN)
+
+    # Szew NAPRAWDĘ tam jest - inaczej test przechodziłby na pusto.
+    assert len(_segs_by_num(result, "10", "tram")) > 1
+    assert "K" not in [n["name"] for n in result["nodes"]]
+
+
+def _penultimate_stop_day():
+    """Na K da się być najwcześniej o 3600 - i o 3600 da się też być U CELU
+    (autobusem 9). Tramwaj 10 jedzie przez K DO celu, a autobus 4 na K się
+    kończy, więc kropka na K ma prawo stać."""
+    return make_day([
+        {"trip_id": "t9", "label": "Autobus 9", "headsign": "CEL",
+         "stops": [("S", 0, 0), ("T", 3600, 3600)]},
+        {"trip_id": "t4", "label": "Autobus 4", "headsign": "K",
+         "stops": [("S", 0, 0), ("K", 3600, 3600)]},
+        {"trip_id": "t7", "label": "Autobus 7", "headsign": "B",
+         "stops": [("S", 0, 0), ("B", 200, 200)]},
+        {"trip_id": "t10", "label": "Tramwaj 10", "headsign": "CEL",
+         "stops": [("B", 400, 400), ("K", 3800, 3800), ("T", 4100, 4100)]},
+    ])
+
+
+def test_the_stop_before_the_target_does_not_claim_the_line_ends_there(install_day):
+    """O to, czy kawałek wiezie Z POWROTEM, pytamy o niego JAKO CAŁOŚĆ.
+
+    `_rides_back` uznaje za cofnięcie także RÓWNE godziny, a tuż przed celem
+    "najwcześniej tutaj" i "najwcześniej u celu" bywają identyczne. Pytany
+    o drogę OD TEGO przystanku orzekłby, że tramwaj 10 kończy się na K - choć
+    jedzie stamtąd jeszcze przystanek do celu - i skasowałby całą kropkę,
+    bo z K nie zostałoby już nic, czym da się jechać dalej (Reja, 2026-08-31).
+    """
+    install_day(_penultimate_stop_day())
+    wezel = _node_named(planner.plan_flow("S", "T", WHEN), "K")
+
+    assert _flow_of(wezel, "10")["flow"] == "through"
+    assert _flow_of(wezel, "4")["flow"] == "end"
