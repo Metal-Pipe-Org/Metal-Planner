@@ -118,8 +118,9 @@ def init_routes(app):
 
     @app.route("/api/vehicles")
     def api_vehicles():
-        """Żywe pozycje autobusów/tramwajów (portal open-data, patrz vehicles.py) -
-        warstwa włączana przyciskiem ◉ w nagłówku, zamiennie ze słupkami."""
+        """Żywe pozycje autobusów/tramwajów (mpk.wroc.pl/bus_position, patrz
+        vehicles.py) - warstwa włączana przyciskiem ◉ w nagłówku, zamiennie
+        ze słupkami."""
         try:
             return jsonify({"vehicles": vehicles.get_vehicles()})
         except FileNotFoundError as e:

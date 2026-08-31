@@ -420,8 +420,8 @@ _line_kind_generation = None
 
 
 def line_kind_map():
-    """route_short_name -> "tram"/"bus"/"other" (patrz vehicles.py: dopasowanie
-    pozycji pojazdów z open-data do koloru/rodzaju linii).
+    """route_short_name -> "tram"/"bus"/"other" (patrz vehicles.py: lista
+    numerów linii, o które pyta się API pozycji pojazdów).
 
     Z tabeli routes, niezależne od dnia (w przeciwieństwie do _day_cache) -
     jeden wpis starcza na całą wersję bazy, więc cache jest kluczowany samym

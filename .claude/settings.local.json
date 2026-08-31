@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -sv \"https://api.open-data.cui.wroclaw.pl/od3-records/data/14\" -o /tmp/resp.json -w \"HTTP_STATUS:%{http_code} SIZE:%{size_download}\\\\n\")",
+      "Bash(curl *)",
+      "Bash(python3 *)",
+      "Bash(node --check static/app.js)",
+      "Bash(venv/Scripts/python.exe --version)",
+      "Bash(venv/Scripts/python.exe *)",
+      "Bash(venv/Scripts/pip.exe show *)",
+      "Bash(PORT=5099 venv/Scripts/python.exe app.py)",
+      "Bash(echo \"started PID $!\")",
+      "Bash(jobs -l)",
+      "Bash(pkill -f \"python.exe app.py\")",
+      "Bash(PORT=5099 PYTHONIOENCODING=utf-8 venv/Scripts/python.exe app.py)"
+    ]
+  }
+}

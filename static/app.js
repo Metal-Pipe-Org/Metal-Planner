@@ -206,8 +206,8 @@ function updatePointMarker(slot, value) {
 //
 // Druga warstwa markerów, wykluczająca się ze słupkami: przycisk ◉ w
 // nagłówku chowa stopsLayer i pokazuje żywe pozycje autobusów/tramwajów
-// z /api/vehicles (backend odpytuje portal open-data - CORS nie pozwala
-// zrobić tego wprost z przeglądarki, patrz vehicles.py). Wybór propozycji
+// z /api/vehicles (backend odpytuje mpk.wroc.pl/bus_position - CORS nie
+// pozwala zrobić tego wprost z przeglądarki, patrz vehicles.py). Wybór propozycji
 // trasy zawęża warstwę do linii, którymi się jedzie - reszta miasta by ją
 // tylko zasłaniała (patrz vehiclesFilter, wołane z openJourney/
 // deselectJourney/loadPlan/resetResults niżej w pliku).
@@ -232,13 +232,7 @@ function vehicleIcon(v) {
 
 function vehicleTooltipHtml(v) {
     const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
-    const rows = [];
-    // side_number bywa 0 - to prawdziwy numer boczny, nie "brak danych".
-    if (v.side_number !== null && v.side_number !== undefined) {
-        rows.push(`Numer boczny: ${esc(String(v.side_number))}`);
-    }
-    if (v.brigade) rows.push(`Brygada: ${esc(v.brigade)}`);
-    return `<b>${esc(mode)} ${esc(v.line)}</b>` + (rows.length ? '<br>' + rows.join('<br>') : '');
+    return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
 }
 
 /** Gdy wybrana jest propozycja trasy, warstwa pojazdów zawęża się do linii,
