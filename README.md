@@ -1,5 +1,8 @@
 # Metal-Planner
 
+wszystko z brancha testing jest na https://metal-testing.sze.one/
+wszystko z brancha main jest na https://metal.sze.one/
+
 Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej
 wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz** —
 główne korytarze jaskrawo, niszowe objazdy ledwo widocznie — a obok, w panelu,
@@ -19,12 +22,14 @@ Wymagany Python ≥ 3.9 (Flask 3.x nie działa na 3.8).
 ```bash
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python update_gtfs.py   # pobiera rozkład (~12 MB) i buduje bazę, ~10 s
-.venv/bin/python app.py           # http://localhost:5001
+.venv/bin/python update_gtfs.py
+.venv/bin/python app.py
 ```
 
-Port to domyślnie 5001 (5000 zajmuje AirPlay na macOS); można zmienić
-zmienną `PORT`.
+`update_gtfs.py` pobiera rozkład (~12 MB) i buduje z niego bazę — zajmuje to
+około 10 sekund. `app.py` wystawia serwer na http://localhost:5001; port to
+domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
+`PORT`.
 
 ## Instalacja jako aplikacja (PWA)
 
@@ -73,6 +78,31 @@ aktualizuje zawsze.
 
 `GTFS_UPDATE_ON_START=off` wyłącza to w obu miejscach (w kontenerze przez
 `docker-compose.yml`).
+
+### Autobusy gminy Siechnice
+
+Linii 800, 810, 83–89, 860, 870, 890 **nie ma w żadnych otwartych danych** —
+ani we wrocławskim GTFS, ani na dane.gov.pl, ani w Krajowym Punkcie
+Dostępowym. Jedyne strukturalne źródło to niedokumentowane API systemu
+kiedyPrzyjedzie, którym gmina obsługuje informację pasażerską; `siechnice.py`
+umie z niego złożyć kompletne kursy i dokleić je do bazy.
+
+Jest to **domyślnie wyłączone**, bo `robots.txt` tego serwisu to `Disallow: /`
+i nie ma tam żadnego regulaminu ani zgody na ponowne wykorzystanie danych.
+Włącza się świadomie:
+
+```
+SIECHNICE_ENABLED=on .venv/bin/python update_gtfs.py
+```
+
+Kosztuje to ok. 1,5 minuty na każdy dzień rozkładu (237 słupków × jedno
+zapytanie), czyli ok. 10 minut przy domyślnym oknie tygodniowym. Awaria tego
+kroku nie przerywa aktualizacji — rozkład Wrocławia wjeżdża na miejsce
+niezależnie.
+
+Docelowe rozwiązanie to poprosić gminę o eksport GTFS — dlaczego to prośba
+o włączenie istniejącej funkcji, do kogo pisać i co w tym piśmie napisać,
+opisuje [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
 
 ## Testy
 

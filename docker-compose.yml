@@ -55,6 +55,22 @@ services:
       # "off" wylacza odswiezanie przy starcie (zostaje GTFS_AUTO_UPDATE_HOUR).
       GTFS_UPDATE_ON_START: "on"
 
+      # To samo dla rozkladu kolejowego (PKP PLK OpenData, patrz
+      # update_pkp.py) - dziala tylko, gdy w data/.env jest PKP_API_KEY, bez
+      # klucza obie zmienne ponizej nie robia nic. Rozklad pobiera sie na
+      # okno kilku dni naraz (jedno zapytanie), wiec kosztuje to jedno
+      # pobranie dziennie, nie jedno na kazde wyszukiwanie uzytkownika.
+      PKP_AUTO_UPDATE_HOUR: "3"
+      PKP_UPDATE_ON_START: "on"
+
+      # Autobusow gminy Siechnice (800, 810, 83-89, 860, 870, 890) nie ma
+      # w zadnych otwartych danych - jedyne strukturalne zrodlo to
+      # niedokumentowane API systemu kiedyPrzyjedzie, ktorego robots.txt
+      # brzmi "Disallow: /" i ktore nie ma zadnego regulaminu. Dlatego "off":
+      # wlaczenie jest swiadoma decyzja, nie ustawieniem domyslnym.
+      # Patrz docs/SIECHNICE_DANE.md.
+      SIECHNICE_ENABLED: "off"
+
       # Rozklad jest liczony wg zegara kontenera.
       TZ: "Europe/Warsaw"
 
@@ -77,7 +93,11 @@ services:
     volumes:
       # Zwykly folder obok tego pliku, tworzony przy pierwszym starcie.
       # Wszystkie dane aplikacji sa w nim widoczne wprost z serwera:
-      #   ./data/gtfs.sqlite      - baza rozkladow (~80 MB)
+      #   ./data/gtfs.sqlite            - baza rozkladu MPK (~80 MB)
+      #   ./data/pkp.sqlite             - baza rozkladu PKP, tylko z kluczem
+      #                                   PKP_API_KEY (kilkadziesiat MB)
+      #   ./data/pkp_station_coords.json - wspolrzedne stacji PKP
+      #                                   (dogadywane osobno, patrz update_pkp.py)
       #   ./data/dev_token.txt    - token menu deweloperskiego
       #   ./data/.env             - sekrety, m.in. PKP_API_KEY
       #                             (wzor: data/.env.example z repo)

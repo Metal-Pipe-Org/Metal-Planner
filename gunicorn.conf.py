@@ -16,8 +16,15 @@ import os
 
 # Wczytuje data/.env - konfiguracja gunicorna czyta os.environ poniżej,
 # a to jest pierwszy kod aplikacji, jaki master wykonuje w kontenerze.
-import config  # noqa: F401
+#
+# Alias jest konieczny: gunicorn po wykonaniu tego pliku przechodzi po jego
+# nazwach modułowych i każdą pokrywającą się z nazwą swojego ustawienia
+# próbuje ustawić. "config" to jego własna opcja -c/--config (typu string),
+# więc goły `import config` podstawiłby jej obiekt modułu i master padłby na
+# "Not a string" - w kółko, bo compose restartuje kontener.
+import config as _config  # noqa: F401
 import update_gtfs
+import update_pkp
 
 bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
@@ -43,3 +50,4 @@ def on_starting(server):
     i tyle równoległych przebudów bazy o 3:00.
     """
     update_gtfs.start_daily_scheduler()
+    update_pkp.start_daily_scheduler()  # no-op bez PKP_API_KEY - patrz update_pkp.py

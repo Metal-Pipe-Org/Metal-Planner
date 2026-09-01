@@ -134,6 +134,131 @@ opcję, to poprzednio-najgorsze trasy mogą się realnie rozjaśnić — dół
 skali przesunął się niżej. To drugie nie jest błędem, to ta sama zasada
 działająca w drugą stronę.
 
+## 10. Mapa mówi, ile to trwa i o której się tam będzie
+
+Mapa odpowiada nie tylko na „jak dojechać”, ale też na „ile to trwa” i
+„o której”. Trzema warstwami, od najogólniejszej:
+
+**Bez ruszania myszą** widać czas całej podróży: najszybszy możliwy dojazd
+i najpóźniejszy, jaki mapa jeszcze rysuje.
+
+**Pod kursorem, dla punktu pod kursorem** — nie dla całej linii i nie dla
+jakiegoś jej kawałka — widać dwie godziny: o której tym pojazdem jest się
+dokładnie tutaj, i o której jest się w celu, jadąc dalej najszybszą możliwą
+kontynuacją. Do tego ile to jeszcze zajmie.
+
+**Skąd te godziny.** Z rozkładu tego samego kursu, z którego narysowano ten
+odcinek. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
+proporcjonalnie do przebytej drogi, nie średnią: bliżej następnego
+przystanku znaczy bliżej jego godziny. Wolno wyłącznie to: interpolacja
+**między dwiema godzinami odczytanymi z rozkładu tego samego kursu**. Nie
+wolno szacować ze średniej prędkości, z odległości w linii prostej ani
+sklejać czasów z dwóch różnych kursów.
+
+**Czego czas nie rusza.** Nie zajmuje żadnego kanału zarezerwowanego dla
+jakości trasy — nie zmienia jasności, grubości ani koloru linii (punkty 1,
+6, 8, 9). Wchodzi wyłącznie jako liczba dopisana obok. Wyłączenie czasu
+zostawia mapę dokładnie taką, jaka była, zanim czas się na niej pojawił.
+
+## 11. Mapa pokazuje, gdzie się przesiąść — i co się tu z każdą linią dzieje
+
+**Gdzie stoi kropka.** Tam, gdzie mapa widzi sensowne wysiadanie — nie na
+każdym mijanym przystanku. Miejsce, z którego mapa już nigdzie dalej nie
+wiezie, nie jest przesiadką i kropki nie dostaje, choćby coś tam przyjeżdżało.
+Tak samo miejsce, przez które wszystko tylko przejeżdża: skoro nic się tu nie
+staje dostępne ani nie przestaje, nie ma o czym decydować.
+**Jedna na MIEJSCE, nie na słupek:** plac z trzema peronami to jedna
+przesiadka, a grupowanie jest to samo, którym rozkład rozpoznaje miejsce —
+nie odległość na ekranie.
+
+**Trzy rzeczy, nie jedna.** O każdej linii trzeba tu wiedzieć jedno z trzech —
+i to ma być widać, zanim się przeczyta godzinę:
+
+- **wsiadasz tu pierwszy raz** — mapa wcześniej tą linią nie wiozła, więc nie
+  było jak wsiąść przed tym miejscem;
+- **możesz już nim jechać** — mapa dowozi tu tą linią i wiezie nią dalej, więc
+  wsiadanie tutaj jest jedną z możliwości, a nie jedyną;
+- **tu z niego wysiadasz** — mapa dowozi tu tą linią i dalej nią nie wiezie.
+
+Znaki są jedną rodziną, czytaną zawsze tak samo: lewy koniec mówi, skąd ten
+pojazd tu jest, prawy — co z nim dalej.
+
+**Co pokazuje.** Godzinę, linię, kierunek i za ile — wszystko w jednej
+kolejności, po czasie. To nie jest lista samych odjazdów: pojazd, którym się
+tu przyjeżdża, jest częścią odpowiedzi na „gdzie ja jestem", nawet gdy się nim
+dalej nie jedzie — a jego godzina to godzina PRZYJAZDU, nie najbliższego
+odjazdu tej linii.
+
+**Tylko to, o czym mapa coś wie.** Ani odjazd, którego mapa stąd nie proponuje,
+ani przyjazd, którym mapa tu nie dowozi — wypisane, wyglądają jak część
+podróży, a nią nie są. Kierunek jest częścią tożsamości linii: ta sama linia
+mija węzeł w obie strony, a mapa mówi o jednej.
+
+**Tylko to, co jeszcze zdąży.** Odjazd, którym nie da się dojechać do celu
+w oknie, które mapa rysuje, to szum udający opcję. Linia, którą stąd już się
+nie dojedzie, przestaje być odjazdem — ale jeśli mapa nią tu dowozi, zostaje
+jako przyjazd.
+
+**Powtórzenia to jeden wiersz.** Kolejne kursy tej samej linii nie są kolejnymi
+opcjami, tylko rytmem jednej: najbliższy odjazd i „co X min". Ani wypisywania
+wszystkich, ani gubienia części. Przyjazd nie jest powtórzeniem odjazdu tej
+samej linii — to dwa różne zdarzenia i dwa wiersze.
+
+**Godzina, od której liczymy.** Najwcześniejsza, o której według mapy można tu
+być — nie „teraz" i nie godzina z formularza. Na osi doby rozkładowej, nie
+zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
+
+**Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
+ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne
+kursy — rozstrzyga jedna, jawna reguła, nie to, który jest bliżej w pikselach.
+
+**Czego kropka nie rusza.** Tak jak czas (punkt 10): nie zajmuje żadnego
+kanału zarezerwowanego dla jakości trasy — nie zmienia jasności, grubości ani
+koloru. Zdjęcie kropek zostawia mapę dokładnie taką, jaka była.
+
+## 12. Jeden rodzaj rzeczy: tramwaj, autobus, pociąg
+
+**Tramwaj, autobus, pociąg to ten sam rodzaj rzeczy.** Wyszukiwanie nie ma
+i nie będzie miało gałęzi „a jeśli pociąg". Kurs to kurs, przystanek to
+przystanek, przesiadka to przesiadka — niezależnie od tego, z którego źródła
+przyszły.
+
+**Osobne jest wyłącznie pobieranie.** Każde źródło ma swoje API, swój klucz
+i swój aktualizator, i to jedyne miejsce, w którym wolno wiedzieć, skąd dane
+pochodzą. Poniżej importu nie ma już typów transportu, są kursy. Typ pojazdu
+zostaje tylko jako etykieta do pokazania — nigdy jako powód, żeby policzyć
+coś inaczej.
+
+**Jedna oś czasu, jedna dokładność.** Wszystkie godziny to pełne minuty.
+Źródło podające sekundy jest do nich ucinane ostrożnie — odjazd w dół,
+przyjazd w górę — żeby plan bywał pesymistyczny co do sekund, nigdy
+optymistyczny.
+
+**Jedno miejsce to jedno miejsce.** Słupki i stacje o tej samej nazwie są tym
+samym miejscem, o ile naprawdę stoją obok siebie. Ta sama reguła dla
+wszystkich źródeł: nazwa mówi, że to może być to samo, odległość rozstrzyga,
+czy jest. Nazwa bez odległości robi z „Mokrej" trzyminutowy spacer przez pół
+Polski.
+
+**Czego to nie obiecuje.** Że każda stacja ma przesiadkę do miasta. Dopóki
+łączy je wyłącznie nazwa, stykają się rzadko — i to jest znany brak, nie
+usterka.
+
+## 13. Zawsze jakaś trasa, choćby za godzinę
+
+**„Nie znaleziono połączenia" to nie odpowiedź na pytanie „jak tam dojadę".**
+Jeśli o podaną godzinę nic nie jedzie, mapa pokazuje najbliższą trasę, jaka
+jedzie — choćby za godzinę, choćby dopiero rano następnego dnia — i mówi
+wprost, o której ona wyrusza. Pusta mapa z komunikatem należy się wyłącznie
+relacji, której nie da się przejechać w ogóle.
+
+**Czekanie jest widoczne, nie schowane.** Trasa zaczynająca się później niż
+pytanie ma to napisane przy sobie. Mapa nigdy nie udaje, że coś jedzie teraz.
+
+**Okno czasowe liczy się od wyjazdu, nie od pytania.** Wachlarz wariantów
+wokół takiej trasy jest tak samo szeroki jak wokół każdej innej — godzina
+czekania nie zawęża wyboru, bo nie jest częścią podróży.
+
 ## Priorytet: poprawność przed szybkością
 
 Rozsądna szybkość działania jest pożądana, ale nigdy kosztem poprawności.

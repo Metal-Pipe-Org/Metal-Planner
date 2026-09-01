@@ -23,6 +23,12 @@
 
 <div id="map"></div>
 
+{#
+  Pasek nad mapą: ile w ogóle trwa ta podróż (patrz renderTimeHeadline
+  w app.js). Treść wstawia front z odpowiedzi serwera - tu tylko miejsce.
+#}
+<div id="time-headline" class="time-headline" hidden></div>
+
 <button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
         aria-label="Pokaż/ukryj panel">&larr;</button>
 
@@ -86,16 +92,17 @@
 
         <div class="search-row">
             <div class="time-field">
-                <div>
-                      <span>Odjazd</span>
-                    <input type="time" id="time" value="{{ form_time }}">
+                <div class="time-row">
+                    <span>Odjazd</span>
+                    <input type="text" id="time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
+                           maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
                     <button type="button" id="time-now" class="time-now-button">teraz</button>
                     <button type="button" id="day-toggle" class="icon-button" title="Więcej opcji czasu"
                             aria-label="Więcej opcji czasu" aria-expanded="false" aria-controls="day-panel">⌵</button>
                 </div>
-                <div id="day-panel" class="day-panel hidden">
-                <span>Data</span>
-                <input type="date" id="date" value="{{ form_date }}">
+                <div id="day-panel" class="day-panel hidden time-row">
+                    <span>Data</span>
+                    <input type="date" id="date" value="{{ form_date }}">
                 </div>
             </div>
             <button id="search" class="button primary">
@@ -134,6 +141,49 @@
                 aria-label="Zamknij panel deweloperski">✕</button>
     </header>
 
+    {#
+      Czas na mapie — cała sekcja jest jednym eksperymentem (2026-08-27).
+      Każda rzecz osobno, bo to wciąż szukanie formy: co ma być widać zawsze,
+      co dopiero pod kursorem. Nic tutaj nie rusza serwera — liczby są już
+      w odpowiedzi, przełącznik tylko przemalowuje mapę.
+    #}
+    <details class="dev-fold" id="fold-time" open>
+        <summary>Czas na mapie</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-hover"> Godzina w punkcie pod kursorem
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-bar"> …z paskiem „ile do celu zostało”
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-ends"> …i kropką dokładnie w tym punkcie
+        </label>
+        <p class="field-hint">
+            Duża godzina to moment, w którym ten pojazd jest dokładnie pod
+            kursorem — interpolowany między dwoma sąsiednimi przystankami tego
+            kursu. Pod nią przyjazd do celu, jeśli jedzie się dalej stąd; to ta
+            sama liczba, z której policzona jest jasność, więc kolor i godzina
+            nie mogą powiedzieć czegoś innego. Kawałek bez odczytanej dalszej
+            drogi nie pokazuje jej wcale.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-show-headline"> Pasek nad mapą z czasem podróży
+        </label>
+        <p class="field-hint">
+            Pasek podaje godzinę i czas najszybszego dojazdu oraz granicę,
+            do jakiej mapa jeszcze rysuje. Najechanie na pierwszą liczbę
+            pokazuje, którą trasą się ten czas osiąga.
+        </p>
+    </details>
+
+    <details class="dev-fold" id="fold-window" open>
+    <summary>Okno czasowe</summary>
+
     <div class="field">
         <label for="extra">
             Ile dłużej niż najszybsza trasa <output id="extra-value">125</output>%
@@ -170,6 +220,15 @@
         </p>
     </div>
 
+    </details>
+
+    <details class="dev-fold" id="fold-transfer">
+    <summary>Przesiadki</summary>
+
+    <p class="field-hint strong">
+        Ten suwak NIE zmienia mapy — dotyczy wyłącznie listy „Propozycje tras”.
+    </p>
+
     <div class="field">
         <label for="transfer-gain">
             Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
@@ -183,9 +242,14 @@
             do celu. Nocne linie ruszają z węzła tą samą minutą tą samą
             ulicą, więc różnica na końcu bywa zaokrągleniem dwóch rozkładów,
             a wysiadanie kosztuje przejście na inny peron. 0 = liczy się sam
-            przyjazd.
+            przyjazd. Wachlarz na mapie rysuje się niezależnie od tej wartości.
         </p>
     </div>
+
+    </details>
+
+    <details class="dev-fold" id="fold-range">
+    <summary>Szukanie punktu</summary>
 
     <div class="field">
         <label for="range">
@@ -198,8 +262,31 @@
         </p>
     </div>
 
+    </details>
+
+    {#
+      SEKCJA SCHOWANA (SOUND_TUNING = false w app.js) — na razie dźwięk po
+      prostu jest, bez ustawienia. Atrybut `hidden` niżej to tylko stan
+      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
+    #}
+    <details class="dev-fold" id="fold-sound" hidden>
+    <summary>Dźwięk</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="sound-pipe"> Metalowa rura po znalezieniu trasy
+        </label>
+        <p class="field-hint">
+            Spadająca rura. Milczy, gdy system prosi o ograniczenie animacji
+            (<code>prefers-reduced-motion</code>) i gdy przeglądarka nie
+            pozwala jeszcze grać.
+        </p>
+
+    </details>
+
+    <details class="dev-fold" id="fold-version">
+    <summary>Wersja aplikacji</summary>
+
     <div class="field" id="sw-field">
-        <label>Wersja aplikacji</label>
         <div class="sw-row">
             <code id="sw-version">—</code>
             <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
@@ -212,6 +299,76 @@
         </p>
     </div>
 
+    </details>
+
+    {#
+      Kropki przystanków na mapie i to, gdzie pokazuje się ich rozkład.
+      Nic tutaj nie rusza serwera: obie współrzędne kropki i cała tablica
+      odjazdów są już w odpowiedziach, przełącznik tylko przemalowuje.
+    #}
+    <details class="dev-fold" id="fold-dots">
+    <summary>Kropki i rozkład</summary>
+
+        <div class="field compact">
+            <label for="dot-size">
+                Wielkość kropek <output id="dot-size-value">8</output> px
+            </label>
+            <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
+            <p class="field-hint">
+                Kropki przystanków — na wybranej trasie i, o jeden mniejsze,
+                na węzłach wachlarza. To te do najechania: pokazują tablicę
+                odjazdów.
+            </p>
+        </div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
+        </label>
+        <p class="field-hint">
+            Węzeł wachlarza to jedno MIEJSCE, często o kilku słupkach.
+            Wyłączone — kropka stoi na tym słupku, z którego wzięta jest
+            godzina (peron). Włączone — pośrodku wszystkich słupków tego
+            miejsca, więc nie ląduje na jego przypadkowym krańcu.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="dot-start"> Wyróżnij przystanek startowy
+        </label>
+        <p class="field-hint">
+            Kropka na przystanku, z którego się wyrusza, dostaje zieloną
+            obwódkę, a jej tablica odjazdów — zielony nagłówek. To z niej
+            wsiada się naprawdę, więc nie ma jej gubić wśród przesiadek.
+        </p>
+
+        <div class="field compact">
+            <label for="dot-rows">
+                Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
+            </label>
+            <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
+            <p class="field-hint">
+                Tablica spod kropki. Powyżej dwudziestu dymek zasłania mapę,
+                o którą się właśnie pyta — stąd sufit. Dalsze odjazdy i tak są
+                poza horyzontem decyzji „czym stąd pojechać”.
+            </p>
+        </div>
+
+        <div class="dev-section-head">Gdzie pokazać rozkład</div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="tip-cursor" checked> Dymek przy kursorze
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
+        </label>
+        <p class="field-hint">
+            Dotyczy obu rzeczy naraz: tablicy odjazdów spod kropki i
+            podpowiedzi o linii spod kursora na trasie. Dymek znika, gdy
+            kursor zejdzie; okienko zostaje, podmienia się przy najechaniu na
+            coś innego i zamyka się krzyżykiem. Można mieć oba, można żaden.
+        </p>
+
+    </details>
+
     {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
       Sekcja jest WIDOCZNA (LOOK_TUNING = true w app.js) — strojenie trwa.
@@ -220,8 +377,8 @@
       LOOK_DEFAULTS w app.js i to one są domyślne, gdy sekcja jest schowana.
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
-    <div class="dev-section" id="look-section" hidden>
-        <h3>Wygląd mapy <span class="dev-temp">tymczasowe</span></h3>
+    <details class="dev-fold" id="look-section" hidden>
+        <summary>Wygląd mapy</summary>
 
         <div class="field compact">
             <label for="look-min-op">
@@ -299,8 +456,19 @@
             Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
             i skasuję tę sekcję.
         </p>
-    </div>
+    </details>
 
+</div>
+
+{#
+  Okienko z rozkładem/linią w rogu ekranu - alternatywa dla dymka przy
+  kursorze (przełączniki w panelu ⚙, sekcja „Kropki i rozkład"). Poza #map
+  celowo: ma nie łapać zdarzeń myszy mapy ani nie znikać razem z warstwami.
+#}
+<div id="flow-panel" hidden>
+    <button id="flow-panel-close" class="icon-button" title="Zamknij okienko"
+            aria-label="Zamknij okienko z rozkładem">✕</button>
+    <div id="flow-panel-body"></div>
 </div>
 {% endif %}
 

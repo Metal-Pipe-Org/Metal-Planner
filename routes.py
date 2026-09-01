@@ -5,9 +5,11 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
-import vehicles
-from planner import plan_flow, plan_route
 
+import pkp
+import vehicles
+from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
+                     stop_timetable)
 
 def _frontend_digest(app):
     """Odcisk zawartości frontu - wersja cache'ów service workera.
@@ -51,6 +53,14 @@ def _point_arg(prefix):
         return None
 
 
+def _latlon_arg():
+    """Para (lat, lon) z `lat`/`lon` - punkt wskazany wprost, bez prefiksu."""
+    try:
+        return float(request.args["lat"]), float(request.args["lon"])
+    except (KeyError, ValueError):
+        return None
+
+
 def _parse_when(time_str,data_str):
     """Godzina 'HH:MM' z formularza -> datetime dzisiaj o tej porze (domyślnie teraz)."""
     when = datetime.now()
@@ -82,6 +92,31 @@ def init_routes(app):
             stops = []
             data_error = str(e)
 
+        # Stacje PKP (patrz pkp.py) w tej samej liście podpowiedzi co
+        # przystanki MPK - to jedyne miejsce, gdzie formularz w ogóle
+        # dowiaduje się, że taka nazwa istnieje (samo wyszukiwanie już zna
+        # obie sieci jednakowo - patrz gtfs.load_day/pkp.augment_day - to
+        # tu tylko podpowiedzi, zanim ktokolwiek cokolwiek wpisze).
+        # `pkp.all_station_names()` nigdy nie rzuca (pusta lista bez
+        # bazy/klucza), więc bez try/except.
+        #
+        # `kind` jedzie osobno od samej nazwy (nie doklejone do stringa) -
+        # front dokłada z niego plakietkę "PKP" w podpowiedziach (patrz
+        # static/app.js), ale do pola wyszukiwania i tak wstawia samą nazwę:
+        # doklejenie "PKP" wprost do nazwy zepsułoby dopasowanie po stronie
+        # wyszukiwarki, która zna stację tylko pod jej prawdziwą nazwą.
+        # Nazwa, która trafia do OBU list (MPK i PKP - w praktyce nie
+        # zdarza się w tych danych, ale nie ma gwarancji, że nigdy), zostaje
+        # bez plakietki: to nie tylko stacja kolejowa, więc oznaczenie
+        # "PKP" byłoby mylące.
+        gtfs_names = set(stops)
+        pkp_names = set(pkp.all_station_names())
+        train_only = pkp_names - gtfs_names
+        stops = [
+            {"name": name, "kind": "train" if name in train_only else "stop"}
+            for name in sorted(gtfs_names | pkp_names)
+        ]
+
         return render_template(
             "index.html",
             stops=stops,
@@ -112,9 +147,17 @@ def init_routes(app):
     @app.route("/api/stops")
     def api_stops():
         try:
-            return jsonify(gtfs.all_stops_geo())
+            stops = [{**s, "kind": "stop"} for s in gtfs.all_stops_geo()]
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
+        # Stacje PKP z ustalonymi współrzędnymi (patrz pkp.all_stations_geo -
+        # dogadane osobno przez geokodowanie, update_pkp.py) dostają marker
+        # na mapie tak jak słupki MPK, tylko oznaczone `kind: "train"`, żeby
+        # front mógł je odróżnić stylem (patrz static/app.js). To jedyne
+        # miejsce, gdzie PKP i MPK są traktowane inaczej - bo tylko to
+        # naprawdę je różni (markery), nie samo wyszukiwanie tras.
+        stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
+        return jsonify(stops)
 
     @app.route("/api/vehicles")
     def api_vehicles():
@@ -137,8 +180,31 @@ def init_routes(app):
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
         ))
 
+    @app.route("/api/timetable")
+    def api_timetable():
+        """Tablica odjazdów przystanku - dymek pod kropką przesiadki na mapie.
+
+        `from_sec` to godzina na osi doby rozkładowej (patrz gtfs.load_day):
+        front podaje ją wprost z etapu trasy, żeby przesiadka po północy
+        pytała o właściwą dobę.
+        """
+        # `limit` z zapytania: mapa przepływów odsiewa potem linie, których
+        # z tego miejsca i tak nie proponuje, więc musi dostać z zapasem.
+        limit = _float_arg("limit")
+        return jsonify(stop_timetable(
+            request.args.get("stop", ""),
+            _parse_when(request.args.get("time"), request.args.get("date")),
+            _float_arg("from_sec"),
+            limit=min(int(limit), TIMETABLE_MAX) if limit else TIMETABLE_LIMIT,
+            point=_latlon_arg(),
+        ))
+
     @app.route("/api/flow")
     def api_flow():
+        # Ani jedna wzmianka o PKP tutaj - patrz pkp.py: kursy kolejowe są
+        # doklejone wprost do tablicy połączeń, którą wczytuje gtfs.load_day
+        # (wołane z wnętrza plan_flow), więc dla tego endpointu to zwykłe
+        # wyszukiwanie MPK, tylko z szerszą siecią pod spodem.
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
