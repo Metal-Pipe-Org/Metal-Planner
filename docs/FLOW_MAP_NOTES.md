@@ -47,6 +47,18 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
 - **9** — `test_brightness_uses_full_range_regardless_of_window_width`,
   `test_previously_worst_option_brightens_when_a_new_worse_one_appears`,
   oraz pośrednio `test_single_course_splits_brightness_at_a_real_skipped_transfer`
+- **11** — backend (od 2026-08-30):
+  `test_a_node_says_which_of_three_things_happens_with_each_line` (sedno
+  punktu), `test_only_boardable_lines_carry_a_deadline_and_only_arrivals_a_time`,
+  `test_the_node_hour_is_the_earliest_you_can_be_here`,
+  `test_a_place_where_you_only_get_off_is_still_not_a_transfer`.
+  Front, przez emulator: `test_each_row_says_what_happens_here_with_that_line`,
+  `test_lines_that_only_bring_you_here_get_their_own_row`,
+  `test_an_arrival_never_masquerades_as_a_departure`,
+  `test_an_arrival_and_a_departure_are_not_one_cadence`,
+  `test_the_board_mixes_arrivals_into_the_departures_by_time`.
+  Wcześniej (od 2026-08-29) tylko odsiew oferty: `..._only_what_the_map_offers_here`,
+  `..._departures_that_cannot_make_it_are_dropped`, `..._past_the_map_horizon_are_dropped`
 
 ## Otwarte pytania
 
@@ -684,3 +696,306 @@ wprowadzenia, a znaczek renderować tylko wtedy, gdy od tej daty minęło mniej
 niż ~7 dni. Wtedy „nowe" gaśnie samo i nie zostawia po sobie długu.
 
 Nie zrobione — zanotowane na wyraźną prośbę, do decyzji później.
+
+## Tablica przesiadki przestaje być listą samych odjazdów (2026-08-30)
+
+**Czego brakowało.** Kropka przesiadki odpowiadała wyłącznie na „czym stąd
+pojechać". Człowiek, który na nią patrzy, stoi jednak w konkretnym miejscu i
+w konkretnej sytuacji: czymś tu przyjechał, coś go tu mija, a w coś dopiero
+wsiada — i te trzy rzeczy znaczą dla niego co innego. Tablica zlewała je w
+jedno („odjazdy"), a pojazd, którym się tu dojechało, w ogóle w niej nie
+istniał, bo przyjazd nie jest odjazdem i w rozkładzie przystanku go nie ma.
+
+**Co zrobiono.** Węzeł (`planner._transfer_nodes`) niesie teraz przy każdej
+linii pole `flow` o trzech wartościach:
+
+| `flow` | znaczy | skąd się bierze |
+|---|---|---|
+| `start` | wsiadasz tu pierwszy raz | kawałek tej linii tu się ZACZYNA i nigdzie wcześniej mapa nią nie wiozła |
+| `through` | możesz już nim jechać | kawałek tu się KOŃCZY i ZACZYNA |
+| `end` | tu wysiadasz | kawałek tu się tylko KOŃCZY |
+
+Do `end` dochodzi `arrive` — godzina przyjazdu z rozkładu TEGO kursu, z
+którego narysowano kawałek (front nie ma jej skąd wziąć: w tablicy odjazdów
+przystanku tej godziny nie ma). `depart_by` zostaje przy `start`/`through`,
+bo odpowiada na inne pytanie („którym ostatnim odjazdem jeszcze zdążę").
+Kilka kawałków tej samej linii kończących się w węźle daje jedną godzinę —
+NAJWCZEŚNIEJSZĄ, tą samą zasadą, co `sec` całego węzła.
+
+Linia, którą stąd już się nie dojedzie (brak `depart_by`), przestaje być
+ofertą do wsiadania — ale jeśli mapa nią tu dowozi, nie znika, tylko schodzi
+do `end`. To zamiana jednego zdania w tablicy na inne, nie skasowanie wiersza.
+
+**Front.** `keepOfferedLines` wypuszcza `end` z listy odjazdów (wypisana z
+najbliższym odjazdem udawałaby opcję, której mapa nie proponuje), a
+`withArrivals` dokłada jej własny wiersz z `arrive` — PO obu sitach, bo oba
+pytają „czy tym odjazdem jeszcze się dojedzie", a przyjazd nie jest odjazdem.
+Kolejność w tablicy robi `sec`, więc przyjazd stoi tam, gdzie wypada na osi
+czasu, a nie doklejony na końcu. `summariseRepeats` ma `flow` w kluczu grupy:
+przyjazd i odjazd tej samej linii to dwa zdarzenia, zwinięte w jeden wiersz
+udawałyby takt kursowania, którego nie ma.
+
+**Znaki.** Jedna rodzina, czytana zawsze tak samo — lewy koniec mówi, skąd
+ten pojazd tu jest (kreska „stąd rusza", grot „już jedzie"), prawy mówi, co
+z nim dalej (grot „jedzie dalej", kreska „tu koniec jazdy"):
+`|→` start, `→→` through, `→|` end. Wąska kolumna PRZED godziną, bo
+odpowiada wcześniej niż ona. Kolumna pojawia się tylko tam, gdzie jest czym
+ją wypełnić: tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie
+o węzeł mapy, więc nie wie, co się tu z którą linią dzieje — i zostaje bez
+znaków, zamiast je zgadywać. Tak samo odpowiedź bez `flow` (cache sprzed
+zmiany, tryb awaryjny): brak znaku, nie znak domyślny.
+
+**Czego to NIE zmieniło.** Kropek nie przybyło. Miejsce, w którym da się
+tylko wysiąść, nadal nie jest przesiadką i kropki nie dostaje
+(`test_a_place_where_you_only_get_off_is_still_not_a_transfer`) — zmieniło
+się to, co kropka mówi, a nie to, gdzie stoi. Rysowanej mapy (jasność,
+grubość, geometria) nie tknięto.
+
+**Testy:** 141 przechodzi (było 132; +4 backend, +5 front).
+
+**Tekst punktu 11 kontraktu** — draft przekazany użytkownikowi i zatwierdzony
+2026-08-30, wpisany do FLOW_MAP_CONTRACT.md. Na jego prośbę bez zdania
+otwierającego („wachlarz rysuje przejazdy, ale przesiadka jest w nim
+punktem…") — punkt zaczyna się od razu od „Gdzie stoi kropka". Tytuł też
+nowy: obietnicą nie jest już samo „w co się przesiąść", tylko „co się tu
+z każdą linią dzieje".
+
+## Kropki przestają dziedziczyć cięcia rysowania (2026-08-31)
+
+**Zgłoszenie.** Trzy rzeczy naraz, na trasie Galeria Dominikańska →
+pl. Grunwaldzki: (1) przez Urząd Wojewódzki (Muzeum Narodowe) mapa rysuje
+autobus N, ale kropka go nie wymieniała; (2) koło Katedry nie było kropki,
+choć piątką dojeżdża się tam wyłącznie po to, żeby przesiąść się dalej;
+(3) na Urzędzie Wojewódzkim (Impart) kropka stała i nie miała nic do
+powiedzenia — D i 146 tylko tamtędy przejeżdżały.
+
+**Jedna przyczyna, nie trzy.** `_transfer_nodes` czytał wyłącznie KOŃCE
+narysowanych kawałków. Z tego wynikało wszystko:
+
+- kawałek N to `GALERIA DOMINIKAŃSKA → Urząd Wojewódzki → Katedra` — urząd
+  leży w jego ŚRODKU, więc dla węzła ta linia tam nie istniała;
+- na Katedrze kończyły się kawałki 5 i N, a 10 i 111 tylko przejeżdżały
+  (`Pl. Bema → Ogród Botaniczny → Katedra → Reja → PL. GRUNWALDZKI`) — skoro
+  nic się tam nie ZACZYNAŁO, reguła „tylko się tu wysiada" kasowała kropkę
+  razem z całą przesiadką;
+- na Impart kropka stała, bo tam był KONIEC kawałka. Tyle że kawałki tnie
+  również zmiana składu korytarza (`crosses` w _refine_brightness, punkt 7) —
+  sprawa czysto rysunkowa. Widać to po jasnościach: D dostał tam szew przy
+  w=1.00 po OBU stronach, 146 przy 0.40 po obu. Nic się nie zmieniało.
+
+**Naprawa.** Węzeł czyta teraz KAŻDY przystanek kawałka i pyta o dwie rzeczy
+osobno: czy mapa tą linią DO tego miejsca dowozi (jest wcześniejszy przystanek
+w kawałku) i czy wiezie DALEJ (jest późniejszy). Z tego wychodzą trzy `flow`
+bez zmiany ich znaczenia. Kropka stoi tam, gdzie coś się ZACZYNA albo KOŃCZY —
+gdzie linia staje się dostępna albo przestaje. Miejsce, przez które wszystko
+tylko przejeżdża, kropki nie dostaje, choćby leżało na styku dwóch kawałków:
+linia przecięta z powodu korytarza wychodzi jako „through" i sama z siebie
+kropki nie stawia. Placement przestał więc zależeć od tego, gdzie cutter
+akurat postawił szew.
+
+**Pułapka po drodze (Reja).** Pierwsze podejście pytało `_rides_back`
+o drogę OD TEGO przystanku do końca kawałka. Ta funkcja uznaje za cofnięcie
+także RÓWNE godziny, a na Rei „najwcześniej tutaj" i „najwcześniej u celu"
+wypadały identycznie (11:01) — więc 111 zostawał ogłoszony jako kończący się
+na Rei, choć jedzie stamtąd jeszcze przystanek do celu, i pojawiała się kropka
+na wyssanej z palca przesiadce. `_rides_back` została NIETKNIĘTA (pilnuje
+przypadku Kamiennogórskiej z 2026-08-29); pytamy nią o kawałek jako całość,
+dokładnie jak przedtem. Kawałek zawracający i tak nie ma prawa być narysowany
+(punkt 4), więc miara na całości niczego nie przepuszcza.
+
+**Wynik na zgłoszonej trasie:** 7 kropek → 6. Doszła Katedra
+(10 i 111 „through", 5 i N „end"), Urząd Wojewódzki (Muzeum Narodowe) dostał
+brakujące N, zniknęły Urząd Wojewódzki (Impart) i most Grunwaldzki — oba
+były szwami korytarza D/146. Ogród Botaniczny i Reja, mijane w środku
+kawałków, kropki nadal nie dostają.
+
+**Testy:** 149 przechodzi (było 145). Cztery nowe, sprawdzone trzema
+mutacjami `planner.py` — każda złapana przez właściwy test:
+
+| mutacja | złapana przez |
+|---|---|
+| czytaj tylko końce kawałków (stan sprzed naprawy) | `..._passing_through_the_middle_of_a_piece_is_still_listed`, `..._gets_a_dot_even_if_nothing_starts_there`, `..._does_not_claim_the_line_ends_there` |
+| kropka dziedziczy każdy szew rysowania | `..._a_seam_between_two_pieces_is_not_a_transfer` |
+| `_rides_back` pytany o drogę od tego przystanku | `..._the_stop_before_the_target_does_not_claim_the_line_ends_there` |
+
+**Kontrakt.** Punkt 11 opisywał to dobrze od początku („mapa dowozi tu tą
+linią i wiezie nią dalej") — to kod był węższy niż obietnica. Reguła stawiania
+kropki zyskała za to drugą połowę i na zgodę użytkownika (2026-08-31) doszło
+do „Gdzie stoi kropka" jedno zdanie: miejsce, przez które wszystko tylko
+przejeżdża, też nie jest przesiadką.
+
+---
+
+## Liczba wierszy dymka wraca z pliku środowiska pod zębatkę (2026-08-31)
+
+**Zgłoszenie:** „co to robi w .env? to powinno być w ustawieniach tak jak
+wszystko inne".
+
+Racja i to podwójna. Plik środowiska w tym projekcie istnieje dla JEDNEGO
+sekretu — klucza do API PKP — i tylko dlatego leży poza repozytorium, na tym
+samym wolumenie co baza. Liczba wierszy tablicy pod kropką nie jest sekretem,
+tylko pokrętłem wyglądu, a wszystkie inne takie pokrętła (wielkość kropek,
+gdzie pokazać rozkład, całe okno czasowe) siedzą pod zębatką. Do tego to samo
+ustawienie żyło w trzech miejscach naraz: w pliku środowiska, w funkcji
+konfiguracji z własnym sufitem i jako atrybut `data-` na `<body>`, skąd front
+je odczytywał — a osiem było jeszcze osobno wpisane w serwerowy limit tablicy.
+
+**Co się zmieniło.** Suwak „Ile odjazdów w tablicy" w sekcji „Kropki
+i rozkład", obok wielkości kropek, zapamiętywany w tym samym kluczu
+`localStorage` co reszta tej sekcji. Sufit dwudziestu został tam, gdzie był
+sensowny — ale teraz obowiązuje przy ODCZYCIE, nie przy zapisie: atrybut
+suwaka pilnuje przeciągania, a z pamięci przeglądarki może wrócić wartość
+z czasów innego zakresu albo w ogóle nie liczba. Serwer o tej liczbie nie
+wie już nic; nie musi, bo i tak pobieramy z zapasem (40) i odsiewamy na
+froncie. Zmiana suwaka czyści pamięć podręczną dymków — leży w niej gotowy
+HTML, przycięty do STAREJ liczby wierszy — i przeładowuje ten otwarty.
+
+**Domyślną ustawiliśmy na 20**, czyli na sam sufit (decyzja użytkownika,
+2026-08-31). Wyszła przy tym druga rzecz: o zapas prosiła dotąd tylko kropka
+węzła wachlarza, bo tylko ona coś odsiewa — kropka na WYBRANEJ trasie pytała
+bez limitu i dostawała serwerową ósemkę. Przy domyślnej ósemce nie było tego
+widać; przy dwudziestce byłby to cichy sufit mocniejszy od suwaka. Teraz
+o zapas prosi każda kropka.
+
+**Testy:** 150 (było 149; jeden stary sprawdzian pytał o atrybut z serwera,
+więc zniknął razem z nim, doszły dwa). Obie mutacje złapane:
+
+| mutacja | złapana przez |
+|---|---|
+| odczyt bez sufitu i podłogi | `test_row_count_is_a_panel_setting` |
+| tablica przycinana na sztywno do ośmiu | `test_the_slider_actually_trims_the_table` |
+
+---
+
+## Kolej przestaje być doklejką (2026-08-31)
+
+**Zgłoszenie:** „nie znaleziono połączenia DWORZEC GŁÓWNY → Wojszyce po 11:02",
+na localu, z danymi kolejowymi. Ta sama relacja bez kolei działała.
+
+**Przyczyna, jedno zdanie.** Skan pytał „czy to już cel" WYŁĄCZNIE przy
+wysiadaniu z pojazdu, nigdy po przejściu na sąsiedni słupek. Pociąg dowoził
+na stację Wrocław Wojszyce o 11:21:42, trzy minuty pieszo dawały przystanek
+Wojszyce o 11:24:42 — czyli cel, i to szybciej niż autobusem 113 o 11:27.
+Ta godzina wpisywała się do tabeli najwcześniejszych dojazdów, przez co
+odrzucała późniejszy dojazd autobusem (ten BYŁBY zauważony) — i sama nie
+była zauważana. Zostawało „nie znaleziono połączenia" na relacji, którą
+skan miał policzoną.
+
+Dziura była we wspólnym silniku od zawsze, tylko nieosiągalna: dopóki
+wszystkie słupki jednego miejsca obsługiwały te same linie, przejście nigdy
+nie było JEDYNYM wejściem w cel. Kolej była pierwszą siecią, która to
+potrafi. Naprawa to jedno miejsce, w którym pada pytanie o cel — wołane
+i przy wysiadaniu, i po przejściu.
+
+**Przy okazji: audyt „czy kolej to naprawdę trzeci typ".** Silnik tak —
+w wyszukiwarce nie ma ani jednej gałęzi „a jeśli pociąg". Poniżej silnika
+było osiem miejsc, które wiedzą, że pociąg to pociąg: osobna baza scalana
+przy każdym budowaniu dnia, dwa pola dnia tylko dla kolei, rozgałęzienie po
+prefiksie w rysowaniu, DRUGI mechanizm przesiadki (własny promień 500 m),
+brak przynależności do miejsca, osobne doklejanie podpowiedzi i markerów,
+osobny plik współrzędnych, sekundy na osi czasu bez sekund.
+
+**Co z tego zrobiliśmy (decyzja użytkownika).** Wszystko ma być to samo poza
+pobieraniem. Trzy rzeczy weszły od razu:
+
+1. **Stacja przechodzi przez to samo sklejanie w miejsce co przystanek.**
+   Kolej dokładana do dnia PRZED budowaniem miejsc, nie po. Wcześniej stacja
+   nie należała do żadnego miejsca (zmierzone: 0 z 2974) i właśnie dlatego
+   musiała mieć drugi mechanizm przesiadki.
+2. **Własny promień przesiadkowy usunięty** razem z funkcją, która go liczył.
+   Przesiadka bierze się wyłącznie z miejsca: ta sama nazwa = to samo miejsce.
+3. **Czas kolejowy ucinany do pełnych minut**, ostrożnie: odjazd w dół,
+   przyjazd w górę. Jedna oś czasu nie może mieć dwóch dokładności.
+
+**Pułapka po drodze (postoje).** Ucięcie w dwie strony potrafi na jednej
+stacji odwrócić postój krótszy niż minuta (10:14:42 → 10:15 przyjazdu,
+10:14:48 → 10:14 odjazdu). Cofnięcie czasu jest niżej brane za przejście
+przez północ i dokładało do kursu CAŁĄ DOBĘ. Zmierzone: dotyczy 14,1%
+postojów (36 155 z 257 049). Odjazd nie może wypaść przed przyjazdem.
+
+**Druga pułapka (nazwa to za mało).** Reguła „ta sama nazwa" była zaufana bez
+sprawdzania odległości, bo wszystkie dane pochodziły z jednego miasta.
+Ogólnopolski słownik stacji łamie to założenie. Zmierzone: 11 nazw wspólnych
+z miastem, z czego **naprawdę to samo miejsce tylko 2** (Wrocław Szczepin
+200 m, Ramiszów 500 m); reszta to wsie 77–354 km stąd. Bez zabezpieczenia
+„Mokra" we Wrocławiu skleiłaby się ze stacją 242 km dalej i wyszedłby
+trzyminutowy spacer przez pół Polski. Zabezpieczenie to ta sama miara, której
+miejsce używa już przy doklejaniu peronów — jedna reguła dla wszystkich
+źródeł, bez gałęzi „a jeśli kolej".
+
+Pierwsza wersja tego zabezpieczenia rozwiązywała CAŁĄ rozjechaną grupę i przez
+to karała miasto za kolizję kolei: dwa wrocławskie słupki „Wiśniowa" traciły
+wspólne miejsce, bo do ich nazwy dopisała się stacja spod Kielc. Poprawione:
+odstający wypada sam, spójny rdzeń zostaje.
+
+**Bilans zmierzony.** Miejskich słupków tracących miejsce: 2 (C.H. Korona,
+Tarczyński Arena (Aleja Śląska)) — oba stoją naprawdę dalej niż 400 m od
+swojego imiennika, więc to nie regresja po kolei. Stacji bez miejsca: 10
+z 3023 (dokładnie te kolizje nazw). Stacji dzielących miejsce z przystankiem
+miejskim: **1** (Wrocław Szczepin). To znaczy, że dziś obie sieci stykają się
+w jednym punkcie — zamierzone: porządne łączenie stacji z przystankami to
+osobne zadanie, nie ten kod.
+
+**Testy:** 160 (było 150), dziesięć nowych, pięć mutacji — każda złapana
+przez właściwy test:
+
+| mutacja | złapana przez |
+|---|---|
+| cel sprawdzany tylko przy wysiadaniu z pojazdu | `test_a_target_reached_only_on_foot_is_still_a_connection` + 2 |
+| nazwa wystarczy, odległość nieważna | `test_the_same_name_far_away_is_not_the_same_place` + 1 |
+| rozjechana grupa rozwiązana w całości | `test_the_far_stop_is_dropped_not_the_whole_place` |
+| brak zabezpieczenia postoju | `test_a_dwell_shorter_than_a_minute_does_not_rewind_the_clock` |
+| czas kolei bez ucinania | `test_rail_connections_land_on_whole_minutes` + 1 |
+
+**Zostaje do zrobienia.** Cztery szwy z ośmiu wciąż są: osobna baza scalana
+przy każdym budowaniu dnia, dwa pola dnia tylko dla kolei, rozgałęzienie po
+prefiksie w rysowaniu, osobne doklejanie podpowiedzi i markerów. Wszystkie
+znikają jedną zmianą — import kolei do wspólnych tabel rozkładu przy budowie
+bazy, dokładnie jak Siechnice, które są scalane właśnie tam i poniżej importu
+nikt już o nich nie wie.
+
+---
+
+## Zawsze jakaś trasa — punkt 13 wchodzi w życie (2026-08-31)
+
+**Punkty 12 i 13 wpisane do kontraktu** na wyraźną zgodę użytkownika.
+Dwunastka opisuje stan już wprowadzony (patrz notatka wyżej). Trzynastka
+wymagała kodu.
+
+**Co było.** Wyszukiwanie przeszukiwało całą dobę rozkładową i poddawało się
+dopiero na jej końcu — sprawdzone: pytanie o 03:30 znajdowało trasę o 04:08,
+więc „za godzinę" działało już wcześniej. Nie działało przejście przez
+północ: pytanie o 23:59 o relację bez kursów nocnych dostawało „nie
+znaleziono połączenia tego dnia", choć rano jedzie.
+
+**Co jest.** Gdy w dobie z pytania nic nie jedzie, szukamy w kolejnych —
+do siedmiu, bo rozkład jest tygodniowy i relacja bez kursu przez tydzień
+naprawdę go nie ma. Odpowiedź niesie godzinę wyjazdu, ile dni do niego
+i ile się czeka; front pisze to nad wynikami neutralnym komunikatem (nie
+czerwonym — to nie błąd, tylko odpowiedź „za jakiś czas").
+
+**Okno przestało liczyć się od pytania.** Naddatek brał dotąd za podstawę
+`przyjazd − godzina pytania`, więc godzina czekania rozdymała wachlarz:
+przy pytaniu o 10:00 i autobusie 12:00→12:30 podstawą było 150 minut zamiast
+30, a naddatek dobijał do sufitu. Teraz podstawą jest odjazd pierwszego
+przejazdu. Dotyczy to każdej trasy, nie tylko tych „na jutro" — czekanie
+nigdy nie było częścią podróży.
+
+**Próg widoczności czekania** to 20 minut, ta sama miara, którą mapa uznaje
+już za „przesiadka jeszcze łączy odcinki". Nie nowa, dobrana liczba — jedna
+z dwóch, które w tym projekcie znaczą „czekanie, które jeszcze uchodzi".
+
+**Pułapka po drodze (oś czasu czekania).** Po zejściu na kolejną dobę
+godzina pytania zostaje w poprzedniej, a wyjazd liczy się od zera nowej.
+Zwykła różnica pokazywała 3 minuty czekania tam, gdzie w rzeczywistości
+było prawie tyle samo — ale w innym dniu, więc przy większej odległości
+wyszłaby bzdura. Czekanie liczy się od pytania, przez granicę doby.
+
+**Testy:** 166 (było 160), sześć nowych, cztery mutacje — każda złapana:
+
+| mutacja | złapana przez |
+|---|---|
+| okno liczone od pytania | `test_the_map_window_itself_starts_at_the_departure` |
+| brak zejścia na kolejną dobę | `test_nothing_today_is_answered_with_tomorrow` |
+| odjazd trasy = godzina pytania | `test_the_window_is_measured_from_the_departure_not_the_question` + 2 |
+| czekanie nigdy nie pokazane | `test_a_route_that_starts_much_later_says_so` |

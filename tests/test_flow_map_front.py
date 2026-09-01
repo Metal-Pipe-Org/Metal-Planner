@@ -257,10 +257,23 @@ def test_the_cadence_keeps_directions_apart(front):
     _check(front, "notka_rozroznia_kierunki")
 
 
-def test_row_count_comes_from_config(front):
-    """Ile odjazdów pokazuje dymek, ustawia się w konfigu (TIMETABLE_ROWS
-    w .env), a nie w kodzie frontu."""
-    _check(front, "liczba_wierszy_z_konfigu")
+def test_row_count_is_a_panel_setting(front):
+    """Ile odjazdów pokazuje dymek, ustawia się suwakiem w panelu - tam, gdzie
+    widać mapę, którą dymek zasłania. Sufit obowiązuje też wartość wracającą
+    z pamięci przeglądarki, bo tam może leżeć cokolwiek."""
+    _check(front, "liczba_wierszy_to_ustawienie")
+
+
+def test_the_slider_actually_trims_the_table(front):
+    """Suwak ma przycinać tablicę, a nie tylko zmieniać liczbę w ustawieniach."""
+    _check(front, "suwak_przycina_tablice")
+
+
+def test_a_route_that_starts_much_later_says_so(front):
+    """Trasa ruszająca wyraźnie później niż godzina z pytania ma to napisane
+    przy sobie - inaczej wygląda jak każda inna, a o godzinie czekania
+    pasażer dowiaduje się dopiero z godzin przy etapach (punkt 13)."""
+    _check(front, "czekanie_jest_widoczne")
 
 
 def test_departures_past_the_map_horizon_are_dropped(front):
@@ -302,6 +315,44 @@ def test_departures_that_cannot_make_it_are_dropped(front):
     się w oknie mapy" (warunek konieczny), tylko „czy TYM kursem w ogóle się
     dojedzie" - serwer podaje przy linii ostatni taki odjazd."""
     _check(front, "odjazd_ktorym_sie_nie_zdazy_wypada")
+
+
+# --- punkt 11: trzy rzeczy, które mogą się tu dziać z linią ----------------
+
+
+def test_each_row_says_what_happens_here_with_that_line(front):
+    """Wiersz tablicy niesie znak: wsiadasz tu pierwszy raz, jedziesz dalej
+    czymś, czym można już jechać, czy właśnie tym przyjechałeś. Trzy RÓŻNE
+    znaki jednej rodziny - nieznany przepływ nie zgaduje żadnego, ale zostawia
+    kolumnę, żeby godziny stały w jednej osi."""
+    _check(front, "trzy_znaki_przeplywu")
+
+
+def test_lines_that_only_bring_you_here_get_their_own_row(front):
+    """Pojazd, którym się tu dojechało, nie jest odjazdem i w tablicy
+    przystanku go nie ma - wiersz dokłada węzeł, z godziny przyjazdu odczytanej
+    z rozkładu tego samego kursu, z którego narysowano kawałek."""
+    _check(front, "przyjazdy_dokladaja_wiersze")
+
+
+def test_an_arrival_never_masquerades_as_a_departure(front):
+    """Linia, którą mapa tu tylko przywozi, wypisana z najbliższym ODJAZDEM
+    udawałaby opcję, której mapa nie proponuje. Z listy odjazdów wypada, a
+    wraca osobnym wierszem i z inną godziną."""
+    _check(front, "przyjazd_nie_udaje_odjazdu")
+
+
+def test_an_arrival_and_a_departure_are_not_one_cadence(front):
+    """Przyjazd i odjazd tej samej linii to dwa różne zdarzenia na tym
+    przystanku - zwinięte w jeden wiersz udawałyby takt kursowania."""
+    _check(front, "przyjazd_nie_zwija_sie_z_odjazdem")
+
+
+def test_the_board_mixes_arrivals_into_the_departures_by_time(front):
+    """Tablica przestała być listą samych odjazdów: przyjazd stoi w niej tam,
+    gdzie wypada na osi czasu. Kolumna ze znakiem pojawia się tylko tam, gdzie
+    jest czym ją wypełnić - pod kropką wybranej trasy nie ma jej wcale."""
+    _check(front, "tablica_miesza_przyjazdy_z_odjazdami")
 
 
 def test_the_node_dot_stands_where_the_switch_says(front):

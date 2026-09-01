@@ -466,6 +466,7 @@ const timeOpts = {...TIME_DEFAULTS, ...loadTimePrefs()};
 // Wartości dobrane na żywo, na realnej mapie (2026-08-30).
 const DOT_DEFAULTS = {
     size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
+    rows: 20,          // ile odjazdów wypisuje tablica pod kropką
     center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
     start: false,      // wyróżnienie przystanku startowego
     tipCursor: true,   // dymek przy kursorze
@@ -1395,6 +1396,43 @@ const journeyDotStyle = () => ({
 
 const TIP_LOADING = '<div class="tt-note">Ładowanie…</div>';
 
+/** Co się tu dzieje z tą linią - trzy rzeczy, nie jedna (punkt 11 kontraktu,
+    liczy je planner._transfer_nodes). Jedna rodzina znaków, czytana zawsze tak
+    samo: LEWY koniec mówi, skąd ten pojazd tu jest - kreska "stąd rusza (dla
+    Ciebie)", grot "już jedzie"; PRAWY mówi, co dalej - grot "jedzie dalej",
+    kreska "tu koniec jazdy".
+
+      |->   start    wsiadasz tu pierwszy raz; wcześniej mapa tą linią nie
+                     wiozła, więc nie było jak wsiąść taniej
+      ->->  through  tym pojazdem można już jechać - wsiadanie tutaj to jedna
+                     z możliwości, a nie jedyna
+      ->|   end      tą linią się tu PRZYJEŻDŻA i wysiada; dalej nie wiezie */
+const FLOW_ICONS = {
+    start: {
+        d: ['M2 2.5v7', 'M2 6h11.5', 'M10.5 3.2 13.5 6l-3 2.8'],
+        title: 'stąd wsiadasz — wcześniej mapa tą linią nie wiozła',
+    },
+    through: {
+        d: ['M1 6h12.5', 'M4 3.2 7 6l-3 2.8', 'M10.5 3.2 13.5 6l-3 2.8'],
+        title: 'tędy przejeżdża — możesz już nim jechać',
+    },
+    end: {
+        d: ['M1 6h12.5', 'M4 3.2 7 6l-3 2.8', 'M13.5 2.5v7'],
+        title: 'tu wysiadasz — dalej mapa tą linią nie wiezie',
+    },
+};
+
+function flowIcon(flow) {
+    const icon = FLOW_ICONS[flow];
+    // Pusty znacznik, nie brak znacznika: kolumna ma zostać na miejscu, żeby
+    // godziny w kolejnych wierszach stały w jednej osi.
+    if (!icon) return '<span class="tt-flow"></span>';
+    return `<svg class="tt-flow tt-flow-${flow}" viewBox="0 0 15 12" role="img">`
+        + `<title>${esc(icon.title)}</title>`
+        + icon.d.map(d => `<path d="${d}"/>`).join('')
+        + '</svg>';
+}
+
 function timetableHtml(data) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
     const head = `<div class="tt-head"><span class="tt-stop">${esc(data.stop)}</span>` +
@@ -1402,8 +1440,15 @@ function timetableHtml(data) {
     if (!data.departures.length) {
         return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
     }
-    const rows = summariseRepeats(data.departures).slice(0, TIMETABLE_ROWS).map(d =>
-        `<li><span class="tt-time">${esc(d.time)}</span>` +
+    const list = summariseRepeats(data.departures).slice(0, timetableRows());
+    // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
+    // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
+    // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
+    // przesuwałaby jej wiersze bez powodu.
+    const flows = list.some(d => FLOW_ICONS[d.flow]);
+    const rows = list.map(d =>
+        `<li>` + (flows ? flowIcon(d.flow) : '') +
+        `<span class="tt-time">${esc(d.time)}</span>` +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
         `<span class="tt-dir">${esc(d.headsign)}</span>` +
         // "0 min", nie "teraz": nagłówek mówi "od 16:57", a to nie jest
@@ -1415,13 +1460,22 @@ function timetableHtml(data) {
         (d.every_min ? `<small> · co ${esc(d.every_min)} min</small>` : '') +
         `</span></li>`
     ).join('');
-    return head + `<ul class="tt-rows">${rows}</ul>`;
+    return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
 }
 
-// Ile wierszy pokazuje dymek - z konfigu serwera (TIMETABLE_ROWS w .env,
-// patrz config.timetable_rows), bo to rzecz do dostrojenia bez ruszania kodu.
-const TIMETABLE_ROWS = Number(document.body.dataset.timetableRows) || 8;
+// Ile wierszy pokazuje dymek - suwak w panelu, sekcja „Kropki i rozkład”.
+// Rzecz do dostrojenia PRZY MAPIE, bo o tym, ile wierszy jest za dużo,
+// decyduje to, ile z niej zasłaniają - a tego nie widać z pliku konfiguracji.
+const TIMETABLE_ROWS_MAX = 20;  // wyżej dymek przykrywa mapę, o którą się pyta
 const TIMETABLE_FETCH = 40;     // ...a tyle pobieramy, bo część odsiewamy
+
+/** Suwak ma swój sufit w atrybucie, ale wartość wraca też z localStorage -
+    a tam może leżeć cokolwiek, również z czasów, gdy zakres był inny. */
+function timetableRows() {
+    const rows = Math.round(Number(dotOpts.rows));
+    if (!Number.isFinite(rows)) return DOT_DEFAULTS.rows;
+    return Math.max(1, Math.min(rows, TIMETABLE_ROWS_MAX));
+}
 
 const lineKey = l => `${l.kind} ${l.num} ${l.headsign}`;
 
@@ -1439,15 +1493,62 @@ function keepOfferedLines(data, lines) {
     // (patrz planner._line_deadlines). Wcześniej front sprawdzał tylko, czy
     // sam odjazd mieści się w oknie: warunek konieczny, nie wystarczający -
     // autobus ruszający minutę przed jego zamknięciem do celu nie dowiezie.
-    const limit = new Map(lines.map(
-        l => [lineKey(l), l.depart_by === undefined ? Infinity : l.depart_by]));
-    return {...data, departures: data.departures.filter(d => {
+    const limit = new Map(), flow = new Map();
+    for (const l of lines) {
+        // "end" to linia, KTÓRĄ SIĘ TU PRZYJEŻDŻA, a nie którą się stąd jedzie.
+        // Jej wiersz dokłada withArrivals z godziny przyjazdu; zostawiona tutaj
+        // dostałaby najbliższy ODJAZD, czyli opcję, której mapa nie proponuje.
+        if (l.flow === 'end') continue;
+        limit.set(lineKey(l), l.depart_by === undefined ? Infinity : l.depart_by);
+        // Bez `flow` (odpowiedź z cache'u sprzed zmiany, tryb awaryjny) wiersz
+        // zostaje BEZ ikonki - lepiej nie powiedzieć nic, niż zgadnąć.
+        flow.set(lineKey(l), l.flow);
+    }
+    const kept = [];
+    for (const d of data.departures) {
         const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign});
         // Negacja, nie proste `<=`: oferta bez `depart_by` daje Infinity,
         // a odjazd bez `sec` - NaN. Każde porównanie z NaN jest fałszem, więc
         // przy `<=` wypadłyby wtedy WSZYSTKIE wiersze zamiast żadnego.
-        return limit.has(key) && !(d.sec > limit.get(key));
-    })};
+        if (!limit.has(key) || d.sec > limit.get(key)) continue;
+        kept.push({...d, flow: flow.get(key)});
+    }
+    return {...data, departures: kept};
+}
+
+/** Dokłada wiersze linii, KTÓRYMI SIĘ TU PRZYJEŻDŻA (`flow: "end"`).
+
+    Tablica przystanku odpowiada na pytanie "co stąd odjeżdża", ale człowiek
+    stojący pod kropką pyta o coś szerszego: "co się tu ze mną dzieje". Pojazd,
+    którym się tu dojechało i z którego się wysiada, nie jest odjazdem i w
+    tablicy przystanku go nie ma - a bez niego trzecia ikonka (patrz FLOW_ICONS)
+    nie miałaby przy czym stanąć i tablica dalej pokazywałaby tylko odjazdy.
+
+    Godzina bierze się z węzła (`arrive`, patrz planner._transfer_nodes), czyli
+    z rozkładu tego samego kursu, z którego narysowano kawałek - nie z
+    najbliższego kursu tej linii, bo tym akurat się tu nie przyjechało.
+
+    `fromSec` to ta sama godzina, od której liczy nagłówek ("od 16:06"), więc
+    "za ile" znaczy w każdym wierszu to samo. */
+function withArrivals(data, lines, fromSec) {
+    if (!lines) return data;
+    const rows = [];
+    for (const l of lines) {
+        if (l.flow !== 'end' || l.arrive === undefined) continue;
+        rows.push({
+            time: fmtClock(l.arrive),
+            sec: l.arrive,
+            in_min: Math.round((l.arrive - fromSec) / 60),
+            num: l.num,
+            mode: l.kind,
+            headsign: l.headsign,
+            flow: 'end',
+        });
+    }
+    if (!rows.length) return data;
+    // Kolejność robi summariseRepeats (sortuje po `sec`) - przyjazd ląduje
+    // między odjazdami tam, gdzie naprawdę jest na osi czasu.
+    return {...data, departures: [...data.departures, ...rows]};
 }
 
 /** Wycina odjazdy zza horyzontu mapy.
@@ -1483,7 +1584,11 @@ function keepWithinHorizon(data, deadline) {
 function summariseRepeats(departures) {
     const groups = new Map();
     for (const d of departures) {
-        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign});
+        // `flow` w kluczu, bo przyjazd i odjazd tej samej linii to dwa różne
+        // zdarzenia na tym przystanku - zwinięte w jeden wiersz udawałyby
+        // rytm kursowania tam, gdzie go nie ma.
+        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
+            + '|' + (d.flow || '');
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(d);
     }
@@ -1523,7 +1628,12 @@ let timetableTarget = null;
 
 function loadTimetable(dot, where, sec) {
     const date = $('date').value;
-    const filtr = where.lines ? where.lines.map(lineKey).join('|') : '';
+    // Do klucza wchodzi też `flow` i `arrive`: ta sama linia raz jest ofertą
+    // do wsiadania, a raz pojazdem, którym się tu przyjechało - i wtedy dymek
+    // ma pokazać co innego, choć przystanek i godzina się nie zmieniły.
+    const filtr = where.lines
+        ? where.lines.map(l => `${lineKey(l)}/${l.flow || ''}/${l.arrive || ''}`).join('|')
+        : '';
     const key = `${where.name || where.lat + ',' + where.lon}`
         + `@${date}@${sec}@${filtr}@${where.deadline || ''}`;
     const cached = timetableCache.get(key);
@@ -1532,13 +1642,21 @@ function loadTimetable(dot, where, sec) {
     const query = where.name
         ? {stop: where.name, date, from_sec: sec}
         : {lat: where.lat, lon: where.lon, date, from_sec: sec};
-    if (where.lines) query.limit = TIMETABLE_FETCH;
+    // Z zapasem PRZY KAŻDEJ kropce, nie tylko przy węźle wachlarza: przy
+    // węźle część odjazdów odsiewamy, a przy kropce wybranej trasy pytamy
+    // o tyle, ile suwak w ogóle pozwala pokazać. Bez tego serwerowa domyślna
+    // ósemka byłaby cichym sufitem mocniejszym od suwaka.
+    query.limit = TIMETABLE_FETCH;
     emitTimetable(dot, TIP_LOADING);
     fetch('/api/timetable?' + new URLSearchParams(query))
         .then(r => r.json())
         .then(data => {
-            const html = timetableHtml(data.error ? data : keepWithinHorizon(
-                keepOfferedLines(data, where.lines), where.deadline));
+            // Przyjazdy doklejamy PO obu sitach: oba pytają "czy tym odjazdem
+            // jeszcze się dojedzie", a wiersz przyjazdu nie jest odjazdem -
+            // to fakt z samej mapy, więc nie ma go czym odsiewać.
+            const html = timetableHtml(data.error ? data : withArrivals(
+                keepWithinHorizon(keepOfferedLines(data, where.lines), where.deadline),
+                where.lines, sec));
             // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
             // nie: offline z service workera wraca jako {error}, a po powrocie
             // sieci kropka miałaby go w pamięci na zawsze.
@@ -2034,6 +2152,35 @@ function showRailOnlyNotice() {
         + '</p></div>');
 }
 
+// Od ilu minut czekania mówimy o nim wprost. Ta sama miara, którą mapa uznaje
+// za "przesiadka jeszcze łączy odcinki" (WAIT_CAP_SEC w planner.py): czekanie
+// dłuższe niż to nie jest już częścią płynnej podróży i pasażer ma prawo
+// wiedzieć, że siedzi, a nie jedzie.
+const WAIT_NOTICE_SEC = 20 * 60;
+
+/** Informacja, że trasa rusza wyraźnie później niż godzina z pytania -
+    czekanie ma być widoczne, nie schowane (punkt 13 kontraktu).
+
+    Styl neutralny, nie czerwony: to nie błąd, tylko odpowiedź na pytanie
+    "jak tam dojadę", gdy odpowiedź brzmi "za jakiś czas". Bez tego mapa
+    pokazywałaby trasę wyglądającą jak każda inna, a pasażer dowiadywałby się
+    o godzinie czekania dopiero z godzin przy etapach. */
+function waitNoticeHtml(data) {
+    if (!data.day_offset && !(data.waits_sec > WAIT_NOTICE_SEC)) return '';
+    const dzien = data.day_offset === 1 ? 'jutro'
+        : data.day_offset > 1 ? `za ${data.day_offset} dni` : '';
+    const kiedy = dzien ? `${dzien} o ${esc(data.starts)}` : `o ${esc(data.starts)}`;
+    const ile = Math.round((data.waits_sec || 0) / 60);
+    const czekanie = !dzien && ile ? ` — to za ${ile} min` : '';
+    return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
+        + `Najbliższy wyjazd ${kiedy}${czekanie}.</p></div>`;
+}
+
+function showWaitNotice(data) {
+    const html = waitNoticeHtml(data);
+    if (html) resultsBox.insertAdjacentHTML('afterbegin', html);
+}
+
 /** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
     dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
 function renderPlan(data, refit) {
@@ -2057,6 +2204,7 @@ function renderPlan(data, refit) {
     } else {
         renderJourneys();
     }
+    showWaitNotice(data);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
@@ -2655,6 +2803,23 @@ function bindDotOpts() {
             saveDotPrefs();
             clearTimeout(timer);      // przeciąganie suwaka: jedno przemalowanie na klatkę
             timer = setTimeout(applyDotOpts, 60);
+        });
+    }
+    const rows = $('dot-rows');
+    const rowsOut = $('dot-rows-value');
+    if (rows) {
+        rows.value = dotOpts.rows;
+        if (rowsOut) rowsOut.textContent = rows.value;
+        rows.addEventListener('input', () => {
+            dotOpts.rows = Number(rows.value);
+            if (rowsOut) rowsOut.textContent = rows.value;
+            saveDotPrefs();
+            // W pamięci leży GOTOWY html, przycięty do starej liczby wierszy -
+            // bez tego suwak działałby dopiero na kropkach jeszcze nietkniętych.
+            timetableCache.clear();
+            if (timetableTarget) {
+                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
+            }
         });
     }
     for (const [id, key] of Object.entries(DOT_TOGGLES)) {

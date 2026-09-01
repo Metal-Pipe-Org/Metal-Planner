@@ -28,11 +28,22 @@ dałoby. Stacje pośrednie kursu bez współrzędnych są pomijane w SEKWENCJI
 (pociąg "przeskakuje" przez nie w naszym grafie połączeń) - realny rozkład
 się nie zmienia, zmienia się tylko to, co potrafimy pokazać.
 
-PRZESIADKA stacja PKP <-> przystanek MPK działa przez ten sam mechanizm co
-przesiadka między słupkami tego samego miejsca (siblings, patrz
-gtfs._merge_bridges): stacja PKP w promieniu TRANSFER_RADIUS_M od przystanku
-MPK to jego "sąsiad" - bufor przesiadki jest więc dokładnie taki sam
-(WALK_SEC w planner.py), bez osobnego mechanizmu do utrzymania.
+PRZESIADKA stacja PKP <-> przystanek MPK nie ma tu ŻADNEGO własnego
+mechanizmu (2026-08-31). Stacja jest dokładana do dnia PRZED budowaniem
+miejsc (gtfs.load_day), więc przechodzi przez to samo grupowanie co każdy
+słupek miejski: ta sama nazwa = to samo miejsce = przejście pieszo między
+nimi. Wcześniej było inaczej - stacja dostawała sąsiadów z własnego promienia
+500 m, obok mechanizmu miejsca - i to był drugi mechanizm odpowiadający na to
+samo pytanie. Skutek uboczny usunięcia jest znany i zamierzony: nazwy stacji
+i przystanków prawie nigdy się nie pokrywają ("Wrocław Główny" vs "DWORZEC
+GŁÓWNY"), więc dziś obie sieci stykają się w pojedynczych punktach. Porządne
+łączenie stacji z przystankami to osobne zadanie, nie ten plik.
+
+CZAS jest ucinany do pełnych minut (patrz _sec_of): API kolei podaje sekundy,
+rozkład miejski nie, a jedna oś czasu nie może mieć dwóch dokładności - inaczej
+"11:24:42" wygrywa z "11:25" o czterdzieści dwie sekundy, których pasażer
+nigdzie nie zobaczy. Zaokrąglenie jest OSTROŻNE, nie najbliższe: odjazd w dół,
+przyjazd w górę - plan może być pesymistyczny co do sekund, nigdy optymistyczny.
 
 WŁĄCZANIE. Jak przy PKP_API_KEY (patrz config.py): brak klucza wyłącza tę
 funkcję po cichu (i update_pkp.py w ogóle nie buduje bazy), tak samo jak
@@ -50,12 +61,6 @@ import config
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "pkp.sqlite"
 COORDS_PATH = Path(__file__).resolve().parent / "data" / "pkp_station_coords.json"
-
-# Promień, w którym stacja PKP i przystanek MPK liczą się za "to samo
-# miejsce" do przesiadki pieszej (patrz nagłówek modułu). Stacje kolejowe
-# bywają dalej od najbliższego przystanku MPK niż dwa słupki tego samego
-# miejsca (PLACE_MAX_SPAN_M=400 w gtfs.py), stąd nieco większy promień.
-TRANSFER_RADIUS_M = 500
 
 _DIACRITIC_MAP = str.maketrans({
     "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
@@ -271,9 +276,16 @@ def station_coords(station_id):
     return _coords().get(station_id)
 
 
-def _sec_of(hms):
+def _sec_of(hms, round_up=False):
+    """Godzina "HH:MM:SS" na sekundy, uciętE do pełnej minuty - patrz nagłówek.
+
+    round_up rozstrzyga stronę: przyjazd w górę, odjazd w dół, żeby ucięcie
+    nigdy nie obiecało pasażerowi sekund, których nie ma.
+    """
     h, m, s = hms.split(":")
-    return int(h) * 3600 + int(m) * 60 + int(s)
+    sec = int(h) * 3600 + int(m) * 60 + int(s)
+    minuta = sec // 60 * 60
+    return minuta + 60 if round_up and sec != minuta else minuta
 
 
 def augment_day(day, date):
@@ -358,8 +370,14 @@ def augment_day(day, date):
                 f"Pociąg {label}" if label else "Pociąg", name or "",
             )
 
-        raw_arr = _sec_of(arrival_time) if arrival_time else None
+        raw_arr = _sec_of(arrival_time, round_up=True) if arrival_time else None
         raw_dep = _sec_of(departure_time) if departure_time else None
+        # Postój krótszy niż minuta znika po ucięciu i odjazd potrafi wypaść
+        # PRZED przyjazdem na tę samą stację (11:21:42 -> 11:22 przyjazdu,
+        # 11:21:48 -> 11:21 odjazdu). Nietknięte, cofnięcie czasu zostałoby
+        # niżej wzięte za przejście przez północ i dodałoby całą dobę.
+        if raw_arr is not None and raw_dep is not None and raw_dep < raw_arr:
+            raw_dep = raw_arr
 
         # Skorygowany czas rośnie monotonicznie wzdłuż CAŁEGO kursu - jeśli
         # surowy czas (0-86399, API PKP nie zna godzin >23:59 jak GTFS) spadł
@@ -398,11 +416,11 @@ def augment_day(day, date):
         else:
             prev_stop = None   # koniec trasy (sama arrival) - nie da się jechać dalej
 
-    if added:
-        day.conns.sort(key=lambda c: c[0])
-        day.dep_times = [c[0] for c in day.conns]
-
-    _add_transfer_bridges(day)
+    # Ani sortowania, ani własnego mostu przesiadkowego: kursy dokładają się
+    # do tablicy PRZED kursami miejskimi, a gtfs.load_day sortuje ją raz, gdy
+    # są już w niej obie sieci. Przesiadka stacja <-> przystanek bierze się
+    # wyłącznie z tego, że stacja przechodzi przez to samo budowanie miejsc
+    # co przystanek (ta sama nazwa = to samo miejsce).
 
 
 def trip_path(day, trip_id, board_stop, board_dep, exit_stop, exit_arr):
@@ -420,51 +438,3 @@ def trip_path(day, trip_id, board_stop, board_dep, exit_stop, exit_arr):
         elif stop_id == exit_stop and arrival_sec == exit_arr:
             return rows[start_i:i + 1]
     return []
-
-
-def _add_transfer_bridges(day):
-    """Krawędzie "przesiadka piesza" między stacjami PKP a przystankami MPK
-    w promieniu TRANSFER_RADIUS_M - patrz nagłówek modułu.
-
-    Zgrubny odsiew po ramce (bounding box) sieci MPK PRZED liczeniem
-    odległości: bez niego każda z (zwykle setek) aktywnych danego dnia
-    stacji PKP liczyłaby haversine do KAŻDEGO z ~2500 przystanków MPK, choć
-    w ogromnej większości leży setki kilometrów od Wrocławia. Ramka jest
-    tania (raz policzone min/max, potem cztery porównania), haversine nie.
-    """
-    import gtfs   # lokalny import - patrz komentarz przy gtfs.load_day
-
-    mpk_stops = [
-        (sid, lat, lon) for sid, (lat, lon) in day.stop_coords.items()
-        if not sid.startswith("PKP:")
-    ]
-    if not mpk_stops:
-        return
-
-    lats = [s[1] for s in mpk_stops]
-    lons = [s[2] for s in mpk_stops]
-    lat_pad = TRANSFER_RADIUS_M / 111_320
-    mean_lat = sum(lats) / len(lats)
-    lon_pad = TRANSFER_RADIUS_M / (111_320 * max(math.cos(math.radians(mean_lat)), 0.1))
-    lat_min, lat_max = min(lats) - lat_pad, max(lats) + lat_pad
-    lon_min, lon_max = min(lons) - lon_pad, max(lons) + lon_pad
-
-    bridges = {}
-    for stop_id, (lat, lon) in day.stop_coords.items():
-        if not stop_id.startswith("PKP:"):
-            continue
-        if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
-            continue
-        near = [
-            other_id for other_id, other_lat, other_lon in mpk_stops
-            if gtfs._haversine_m(lat, lon, other_lat, other_lon) <= TRANSFER_RADIUS_M
-        ]
-        if near:
-            bridges[stop_id] = tuple(near)
-            for other_id in near:
-                existing = bridges.get(other_id, ())
-                if stop_id not in existing:
-                    bridges[other_id] = existing + (stop_id,)
-
-    if bridges:
-        day.siblings = gtfs._merge_bridges(day.siblings, bridges)

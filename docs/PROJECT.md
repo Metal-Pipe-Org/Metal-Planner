@@ -444,7 +444,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   kolejowe są doklejone WPROST do tablicy połączeń, którą skanuje CSA
   (`gtfs.load_day` → `pkp.augment_day`, patrz `pkp.py`) — dla wyszukiwarki
   stacja PKP to zwykły przystanek, a przesiadka pociąg↔MPK to zwykła
-  przesiadka (przez `siblings`, jeśli są bliżej niż `pkp.TRANSFER_RADIUS_M`).
+  przesiadka — przez to samo `siblings`, co przejście między słupkami jednego
+  miejsca, bo stacja przechodzi przez to samo sklejanie w miejsce
+  (`gtfs._build_places`) co każdy słupek: TA SAMA NAZWA = to samo miejsce.
+  Własnego promienia przesiadkowego kolej nie ma (usunięty 2026-08-31).
   Efekt: relacja „Warszawa Centralna → Rynek” po prostu działa — jedna trasa,
   etapy kolejowe i miejskie razem, bez żadnego specjalnego pola w odpowiedzi.
   Stacja PKP bez ustalonych współrzędnych (geokodowanie w toku - patrz
@@ -458,7 +461,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   kolejowe są doklejone WPROST do tablicy połączeń, którą skanuje CSA
   (`gtfs.load_day` → `pkp.augment_day`, patrz `pkp.py`) — dla wyszukiwarki
   stacja PKP to zwykły przystanek, a przesiadka pociąg↔MPK to zwykła
-  przesiadka (przez `siblings`, jeśli są bliżej niż `pkp.TRANSFER_RADIUS_M`).
+  przesiadka — przez to samo `siblings`, co przejście między słupkami jednego
+  miejsca, bo stacja przechodzi przez to samo sklejanie w miejsce
+  (`gtfs._build_places`) co każdy słupek: TA SAMA NAZWA = to samo miejsce.
+  Własnego promienia przesiadkowego kolej nie ma (usunięty 2026-08-31).
   Efekt: relacja „Warszawa Centralna → Rynek” po prostu działa — jedna trasa,
   etapy kolejowe i miejskie razem, bez żadnego specjalnego pola w odpowiedzi.
   Stacja PKP bez ustalonych współrzędnych (geokodowanie w toku - patrz
@@ -513,6 +519,21 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-08-31** — kolej przestała być doklejką: stacje dokładane do dnia
+  PRZED budowaniem miejsc, więc przechodzą przez to samo sklejanie po nazwie
+  co przystanki, a ich własny promień przesiadkowy (500 m) usunięty razem
+  z funkcją, która go liczyła. Czas kolejowy ucinany do pełnych minut
+  (odjazd w dół, przyjazd w górę), bo jedna oś czasu nie może mieć dwóch
+  dokładności. Reguła „ta sama nazwa" dostała zabezpieczenie odległością
+  (`gtfs._one_spot`) — ogólnopolski słownik stacji sklejał wrocławską
+  „Wiśniową" ze stacją 354 km dalej. Skutek uboczny zamierzony: dziś obie
+  sieci stykają się w JEDNYM punkcie (Wrocław Szczepin); porządne łączenie
+  stacji z przystankami to osobne zadanie.
+- **2026-08-31** — skan przestał gubić cel osiągalny wyłącznie przejściem
+  pieszo. Pytanie „czy to już cel" zadawało się tylko przy wysiadaniu
+  z pojazdu, więc relacja kończąca się przejściem na sąsiedni słupek była
+  ogłaszana jako nieistniejąca — mimo policzonej godziny.
 
 - **2026-08-30** — geokodowanie stacji PKP uproszczone na wyraźną prośbę
   użytkownika do DWÓCH źródeł: WYŁĄCZNIE mapa PLK i portal pasażera -

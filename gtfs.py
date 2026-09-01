@@ -70,6 +70,41 @@ def _haversine_m(lat1, lon1, lat2, lon2):
     return 2 * r * math.asin(math.sqrt(a))
 
 
+def _one_spot(stop_ids, stop_coords):
+    """Te ze słupków tej nazwy, które naprawdę stoją w jednym miejscu.
+
+    Identyczna nazwa wystarczała, dopóki wszystkie dane pochodziły z jednego
+    miasta - tam dwie "Kwiskie" to zawsze ta sama Kwiska. Ogólnopolski słownik
+    stacji łamie to założenie: "Wiśniowa" we Wrocławiu i stacja "Wiśniowa"
+    354 km dalej to ta sama nazwa i zupełnie inne miejsce, a sklejone dałyby
+    trzyminutowe przejście przez pół Polski. Miara jest ta sama, której miejsce
+    używa już przy doklejaniu peronów (PLACE_MAX_SPAN_M) - jedna reguła dla
+    wszystkich źródeł, bez gałęzi "a jeśli kolej".
+
+    Odstający jest ODRZUCANY, a nie rozwiązuje całej grupy: dwa wrocławskie
+    słupki "Wiśniowa" mają zostać jednym miejscem także wtedy, gdy do ich
+    nazwy dopisze się stacja spod Kielc. Odrzucamy po kolei tego, który jest
+    za daleko od największej liczby pozostałych, aż zostanie sam spójny rdzeń.
+    Przy remisie (dwa słupki, jeden za daleko od drugiego - nic nie wskazuje,
+    który jest "prawdziwy") zostaje jeden i miejsce po prostu się nie sklei.
+    """
+    kept = [s for s in stop_ids if s in stop_coords]
+    while len(kept) > 1:
+        za_daleko = {
+            s: sum(
+                1 for o in kept
+                if o != s
+                and _haversine_m(*stop_coords[s], *stop_coords[o]) > PLACE_MAX_SPAN_M
+            )
+            for s in kept
+        }
+        odstajacy = max(za_daleko, key=lambda s: (za_daleko[s], s))
+        if za_daleko[odstajacy] == 0:
+            break
+        kept.remove(odstajacy)
+    return kept
+
+
 def _build_places(stop_names, stop_coords, stops_by_key):
     """Grupuje słupki w kanoniczne 'miejsca' - jednostkę, o którą pyta reszta
     systemu (dojechaliśmy? można się tu przesiąść?), zamiast surowej nazwy
@@ -79,7 +114,11 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     miejsca, o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
     zabezpieczenie przed przypadkową kolizją nazw gdzie indziej w mieście.
     """
-    places = {key: list(ids) for key, ids in stops_by_key.items()}
+    places = {}
+    for key, ids in stops_by_key.items():
+        kept = _one_spot(ids, stop_coords)
+        if kept:
+            places[key] = kept
     for stop_id, name in stop_names.items():
         base = _platform_base_name(name)
         if base is None:
@@ -292,6 +331,13 @@ def load_day(day):
         data.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
         data.norm_display_name.setdefault(norm_key, stop_name)
 
+    # Kolej PRZED budowaniem miejsc: stacja ma przejść przez dokładnie ten
+    # sam młynek co przystanek miejski (ta sama nazwa -> to samo miejsce ->
+    # przejście pieszo między słupkami). Doklejona po miejscach - tak było
+    # do 2026-08-31 - nie należała do żadnego miejsca i musiała mieć własny,
+    # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
+    pkp.augment_day(data, day)
+
     # Kanoniczne miejsce (patrz _build_places) i most pieszy między jego
     # słupkami (patrz _walking_bridges) - _merge_bridges scala go tu z
     # dowolnymi innymi dostawcami transferu, gdyby doszły.
@@ -334,13 +380,6 @@ def load_day(day):
 
     conns.sort(key=lambda c: c[0])
     data.dep_times = [c[0] for c in conns]
-
-    # Kursy kolejowe (PKP) doklejone do TEJ SAMEJ tablicy połączeń - CSA
-    # w planner.py widzi więc jedną sieć, bez wiedzy o dwóch źródłach danych
-    # (patrz pkp.augment_day). Po MPK, bo dokłada connections do już
-    # zbudowanej (i posortowanej) tablicy i sam ją domyka ponownym
-    # sortowaniem.
-    pkp.augment_day(data, day)
 
     _day_cache[key] = data
     if len(_day_cache) > 2:                      # trzymamy najwyżej 2 dni w RAM
