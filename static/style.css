@@ -722,6 +722,28 @@ body.panel-hidden #sidebar {
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.other { background: var(--other); }
 
+/* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
+   patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
+   linii, nie pigułka jak .line-badge: użytkownik prosił wprost o kropki. */
+.vehicle-marker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: -0.3px;
+    line-height: 1;
+    overflow: hidden;
+}
+
+.vehicle-marker.tram { background: var(--tram); }
+.vehicle-marker.bus { background: var(--bus); }
+.vehicle-marker.other { background: var(--other); }
+
 /* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
    wszystkimi jego numerami obok siebie - nie osobna plakietka dla każdej
    linii rozrzucona gdzie indziej (patrz placeLineLabels w app.js). Kotwica

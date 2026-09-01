@@ -168,6 +168,7 @@ const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg', other: 'L
 // ------------------------------------------------------- markery na mapie ----
 
 const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
+const stopsLayer = L.layerGroup();        // wszystkie słupki naraz - włącznik ◉ chowa je razem
 const stopKind = new Map();               // nazwa -> 'stop' (MPK) | 'train' (PKP)
 
 const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
@@ -230,6 +231,97 @@ function updatePointMarker(slot, value) {
     }
 }
 
+// -------------------------------------------------- pojazdy na mapie ----
+//
+// Druga warstwa markerów, wykluczająca się ze słupkami: przycisk ◉ w
+// nagłówku chowa stopsLayer i pokazuje żywe pozycje autobusów/tramwajów
+// z /api/vehicles (backend odpytuje mpk.wroc.pl/bus_position - CORS nie
+// pozwala zrobić tego wprost z przeglądarki, patrz vehicles.py). Wybór propozycji
+// trasy zawęża warstwę do linii, którymi się jedzie - reszta miasta by ją
+// tylko zasłaniała (patrz vehiclesFilter, wołane z openJourney/
+// deselectJourney/loadPlan/resetResults niżej w pliku).
+
+const vehiclesLayer = L.layerGroup();
+const vehiclesToggle = $('vehicles-toggle');
+let vehiclesOn = !!uiState.vehiclesOn;
+let lastVehicles = [];
+let vehiclesTimer = null;
+// Portal sam aktualizuje dane co kilkanaście-kilkadziesiąt sekund - częstsze
+// odpytywanie tylko obciążałoby serwer bez świeższych danych.
+const VEHICLES_REFRESH_MS = 15000;
+
+function vehicleIcon(v) {
+    return L.divIcon({
+        className: `vehicle-marker ${esc(v.kind)}`,
+        html: esc(v.line),
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+    });
+}
+
+function vehicleTooltipHtml(v) {
+    const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
+    return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
+}
+
+/** Gdy wybrana jest propozycja trasy, warstwa pojazdów zawęża się do linii,
+    którymi ona jedzie - bez wybranej trasy widać wszystko, co akurat
+    przyjechało z /api/vehicles. */
+function vehiclesFilter() {
+    if (selectedJourney === null) return null;
+    const journey = journeys[selectedJourney];
+    if (!journey) return null;
+    const keys = new Set();
+    for (const leg of journey.legs) {
+        if (leg.kind === 'ride') keys.add(leg.mode + ' ' + leg.num.trim());
+    }
+    return keys;
+}
+
+function renderVehicles() {
+    vehiclesLayer.clearLayers();
+    if (!vehiclesOn) return;
+    const only = vehiclesFilter();
+    for (const v of lastVehicles) {
+        if (only && !only.has(v.kind + ' ' + v.line.trim())) continue;
+        L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
+            .bindTooltip(vehicleTooltipHtml(v))
+            .addTo(vehiclesLayer);
+    }
+}
+
+function loadVehicles() {
+    fetch('/api/vehicles').then(r => r.json()).then(data => {
+        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
+        lastVehicles = data.vehicles;
+        renderVehicles();
+    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+}
+
+function setVehiclesOn(on) {
+    vehiclesOn = on;
+    saveUiState({vehiclesOn: on});
+    if (vehiclesToggle) {
+        vehiclesToggle.classList.toggle('active', on);
+        vehiclesToggle.setAttribute('aria-pressed', String(on));
+    }
+    clearInterval(vehiclesTimer);
+    vehiclesTimer = null;
+    if (on) {
+        map.removeLayer(stopsLayer);
+        vehiclesLayer.addTo(map);
+        loadVehicles();
+        vehiclesTimer = setInterval(loadVehicles, VEHICLES_REFRESH_MS);
+    } else {
+        map.removeLayer(vehiclesLayer);
+        stopsLayer.addTo(map);
+    }
+}
+
+if (vehiclesToggle) {
+    vehiclesToggle.addEventListener('click', () => setVehiclesOn(!vehiclesOn));
+}
+
 // Kadrowanie wyniku potrzebuje współrzędnych startu i celu, a te znamy
 // dopiero z markerów - kto rysuje, czeka na to zapytanie.
 const stopsReady = fetch('/api/stops')
@@ -238,7 +330,7 @@ const stopsReady = fetch('/api/stops')
         if (stops.error) { showError(stops.error); return; }
         for (const s of stops) {
             stopKind.set(s.name, s.kind);
-            const m = L.circleMarker([s.lat, s.lon], styleFor(s.name)).addTo(map);
+            const m = L.circleMarker([s.lat, s.lon], styleFor(s.name));
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
             // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
@@ -246,9 +338,14 @@ const stopsReady = fetch('/api/stops')
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
             m.on('click', e => { L.DomEvent.stop(e); pickEndpoint(s.name); });
+            m.addTo(stopsLayer);
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
         }
+        // Stan włącznika ◉ wraca z localStorage (patrz saveUiState) - dopiero
+        // teraz, gdy stopsLayer ma już swoje markery, żeby "wyłączone" nie
+        // mignęło pustą mapą przed ich wczytaniem.
+        setVehiclesOn(vehiclesOn);
     });
 
 /** Klik w mapę (pusty punkt albo słupek) uzupełnia brakujący koniec relacji.
@@ -1871,6 +1968,7 @@ function deselectJourney() {
     clearJourney();
     dimFlow(false);
     renderJourneys();
+    renderVehicles();
 }
 
 /** Otwiera propozycję z listy - w przeciwieństwie do kliknięcia w kartę nigdy
@@ -1884,6 +1982,7 @@ function openJourney(index) {
     selectedJourney = index;
     drawJourney(index);
     renderJourneys();
+    renderVehicles();
 }
 
 function badgeHtml(leg) {
@@ -2066,6 +2165,7 @@ function resetResults() {
     clearJourney();
     clearPreview();
     clearFlow();
+    renderVehicles();
     resultsBox.innerHTML = '';
     setTabCount(0);
 }
@@ -2192,6 +2292,7 @@ function renderPlan(data, refit) {
     clearJourney();
     clearPreview();
     dimFlow(false);
+    renderVehicles();            // odtąd nic nie jest zawężone do trasy
     if (!journeys.length) {
         // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu

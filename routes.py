@@ -5,10 +5,11 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
+
 import pkp
+import vehicles
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
                      stop_timetable)
-
 
 def _frontend_digest(app):
     """Odcisk zawartości frontu - wersja cache'ów service workera.
@@ -157,6 +158,18 @@ def init_routes(app):
         # naprawdę je różni (markery), nie samo wyszukiwanie tras.
         stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
         return jsonify(stops)
+
+    @app.route("/api/vehicles")
+    def api_vehicles():
+        """Żywe pozycje autobusów/tramwajów (mpk.wroc.pl/bus_position, patrz
+        vehicles.py) - warstwa włączana przyciskiem ◉ w nagłówku, zamiennie
+        ze słupkami."""
+        try:
+            return jsonify({"vehicles": vehicles.get_vehicles()})
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+        except (OSError, ValueError) as e:
+            return jsonify({"error": f"Nie udało się pobrać pozycji pojazdów: {e}"}), 503
 
     @app.route("/api/plan")
     def api_plan():
