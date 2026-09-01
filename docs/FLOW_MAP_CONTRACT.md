@@ -216,6 +216,49 @@ kursy — rozstrzyga jedna, jawna reguła, nie to, który jest bliżej w piksela
 kanału zarezerwowanego dla jakości trasy — nie zmienia jasności, grubości ani
 koloru. Zdjęcie kropek zostawia mapę dokładnie taką, jaka była.
 
+## 12. Jeden rodzaj rzeczy: tramwaj, autobus, pociąg
+
+**Tramwaj, autobus, pociąg to ten sam rodzaj rzeczy.** Wyszukiwanie nie ma
+i nie będzie miało gałęzi „a jeśli pociąg". Kurs to kurs, przystanek to
+przystanek, przesiadka to przesiadka — niezależnie od tego, z którego źródła
+przyszły.
+
+**Osobne jest wyłącznie pobieranie.** Każde źródło ma swoje API, swój klucz
+i swój aktualizator, i to jedyne miejsce, w którym wolno wiedzieć, skąd dane
+pochodzą. Poniżej importu nie ma już typów transportu, są kursy. Typ pojazdu
+zostaje tylko jako etykieta do pokazania — nigdy jako powód, żeby policzyć
+coś inaczej.
+
+**Jedna oś czasu, jedna dokładność.** Wszystkie godziny to pełne minuty.
+Źródło podające sekundy jest do nich ucinane ostrożnie — odjazd w dół,
+przyjazd w górę — żeby plan bywał pesymistyczny co do sekund, nigdy
+optymistyczny.
+
+**Jedno miejsce to jedno miejsce.** Słupki i stacje o tej samej nazwie są tym
+samym miejscem, o ile naprawdę stoją obok siebie. Ta sama reguła dla
+wszystkich źródeł: nazwa mówi, że to może być to samo, odległość rozstrzyga,
+czy jest. Nazwa bez odległości robi z „Mokrej" trzyminutowy spacer przez pół
+Polski.
+
+**Czego to nie obiecuje.** Że każda stacja ma przesiadkę do miasta. Dopóki
+łączy je wyłącznie nazwa, stykają się rzadko — i to jest znany brak, nie
+usterka.
+
+## 13. Zawsze jakaś trasa, choćby za godzinę
+
+**„Nie znaleziono połączenia" to nie odpowiedź na pytanie „jak tam dojadę".**
+Jeśli o podaną godzinę nic nie jedzie, mapa pokazuje najbliższą trasę, jaka
+jedzie — choćby za godzinę, choćby dopiero rano następnego dnia — i mówi
+wprost, o której ona wyrusza. Pusta mapa z komunikatem należy się wyłącznie
+relacji, której nie da się przejechać w ogóle.
+
+**Czekanie jest widoczne, nie schowane.** Trasa zaczynająca się później niż
+pytanie ma to napisane przy sobie. Mapa nigdy nie udaje, że coś jedzie teraz.
+
+**Okno czasowe liczy się od wyjazdu, nie od pytania.** Wachlarz wariantów
+wokół takiej trasy jest tak samo szeroki jak wokół każdej innej — godzina
+czekania nie zawęża wyboru, bo nie jest częścią podróży.
+
 ## Priorytet: poprawność przed szybkością
 
 Rozsądna szybkość działania jest pożądana, ale nigdy kosztem poprawności.

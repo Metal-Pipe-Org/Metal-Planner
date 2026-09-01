@@ -257,10 +257,23 @@ def test_the_cadence_keeps_directions_apart(front):
     _check(front, "notka_rozroznia_kierunki")
 
 
-def test_row_count_comes_from_config(front):
-    """Ile odjazdów pokazuje dymek, ustawia się w konfigu (TIMETABLE_ROWS
-    w .env), a nie w kodzie frontu."""
-    _check(front, "liczba_wierszy_z_konfigu")
+def test_row_count_is_a_panel_setting(front):
+    """Ile odjazdów pokazuje dymek, ustawia się suwakiem w panelu - tam, gdzie
+    widać mapę, którą dymek zasłania. Sufit obowiązuje też wartość wracającą
+    z pamięci przeglądarki, bo tam może leżeć cokolwiek."""
+    _check(front, "liczba_wierszy_to_ustawienie")
+
+
+def test_the_slider_actually_trims_the_table(front):
+    """Suwak ma przycinać tablicę, a nie tylko zmieniać liczbę w ustawieniach."""
+    _check(front, "suwak_przycina_tablice")
+
+
+def test_a_route_that_starts_much_later_says_so(front):
+    """Trasa ruszająca wyraźnie później niż godzina z pytania ma to napisane
+    przy sobie - inaczej wygląda jak każda inna, a o godzinie czekania
+    pasażer dowiaduje się dopiero z godzin przy etapach (punkt 13)."""
+    _check(front, "czekanie_jest_widoczne")
 
 
 def test_departures_past_the_map_horizon_are_dropped(front):

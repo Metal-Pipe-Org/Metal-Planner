@@ -466,6 +466,7 @@ const timeOpts = {...TIME_DEFAULTS, ...loadTimePrefs()};
 // Wartości dobrane na żywo, na realnej mapie (2026-08-30).
 const DOT_DEFAULTS = {
     size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
+    rows: 20,          // ile odjazdów wypisuje tablica pod kropką
     center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
     start: false,      // wyróżnienie przystanku startowego
     tipCursor: true,   // dymek przy kursorze
@@ -1439,7 +1440,7 @@ function timetableHtml(data) {
     if (!data.departures.length) {
         return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
     }
-    const list = summariseRepeats(data.departures).slice(0, TIMETABLE_ROWS);
+    const list = summariseRepeats(data.departures).slice(0, timetableRows());
     // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
     // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
     // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
@@ -1462,10 +1463,19 @@ function timetableHtml(data) {
     return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
 }
 
-// Ile wierszy pokazuje dymek - z konfigu serwera (TIMETABLE_ROWS w .env,
-// patrz config.timetable_rows), bo to rzecz do dostrojenia bez ruszania kodu.
-const TIMETABLE_ROWS = Number(document.body.dataset.timetableRows) || 8;
+// Ile wierszy pokazuje dymek - suwak w panelu, sekcja „Kropki i rozkład”.
+// Rzecz do dostrojenia PRZY MAPIE, bo o tym, ile wierszy jest za dużo,
+// decyduje to, ile z niej zasłaniają - a tego nie widać z pliku konfiguracji.
+const TIMETABLE_ROWS_MAX = 20;  // wyżej dymek przykrywa mapę, o którą się pyta
 const TIMETABLE_FETCH = 40;     // ...a tyle pobieramy, bo część odsiewamy
+
+/** Suwak ma swój sufit w atrybucie, ale wartość wraca też z localStorage -
+    a tam może leżeć cokolwiek, również z czasów, gdy zakres był inny. */
+function timetableRows() {
+    const rows = Math.round(Number(dotOpts.rows));
+    if (!Number.isFinite(rows)) return DOT_DEFAULTS.rows;
+    return Math.max(1, Math.min(rows, TIMETABLE_ROWS_MAX));
+}
 
 const lineKey = l => `${l.kind} ${l.num} ${l.headsign}`;
 
@@ -1632,7 +1642,11 @@ function loadTimetable(dot, where, sec) {
     const query = where.name
         ? {stop: where.name, date, from_sec: sec}
         : {lat: where.lat, lon: where.lon, date, from_sec: sec};
-    if (where.lines) query.limit = TIMETABLE_FETCH;
+    // Z zapasem PRZY KAŻDEJ kropce, nie tylko przy węźle wachlarza: przy
+    // węźle część odjazdów odsiewamy, a przy kropce wybranej trasy pytamy
+    // o tyle, ile suwak w ogóle pozwala pokazać. Bez tego serwerowa domyślna
+    // ósemka byłaby cichym sufitem mocniejszym od suwaka.
+    query.limit = TIMETABLE_FETCH;
     emitTimetable(dot, TIP_LOADING);
     fetch('/api/timetable?' + new URLSearchParams(query))
         .then(r => r.json())
@@ -2138,6 +2152,35 @@ function showRailOnlyNotice() {
         + '</p></div>');
 }
 
+// Od ilu minut czekania mówimy o nim wprost. Ta sama miara, którą mapa uznaje
+// za "przesiadka jeszcze łączy odcinki" (WAIT_CAP_SEC w planner.py): czekanie
+// dłuższe niż to nie jest już częścią płynnej podróży i pasażer ma prawo
+// wiedzieć, że siedzi, a nie jedzie.
+const WAIT_NOTICE_SEC = 20 * 60;
+
+/** Informacja, że trasa rusza wyraźnie później niż godzina z pytania -
+    czekanie ma być widoczne, nie schowane (punkt 13 kontraktu).
+
+    Styl neutralny, nie czerwony: to nie błąd, tylko odpowiedź na pytanie
+    "jak tam dojadę", gdy odpowiedź brzmi "za jakiś czas". Bez tego mapa
+    pokazywałaby trasę wyglądającą jak każda inna, a pasażer dowiadywałby się
+    o godzinie czekania dopiero z godzin przy etapach. */
+function waitNoticeHtml(data) {
+    if (!data.day_offset && !(data.waits_sec > WAIT_NOTICE_SEC)) return '';
+    const dzien = data.day_offset === 1 ? 'jutro'
+        : data.day_offset > 1 ? `za ${data.day_offset} dni` : '';
+    const kiedy = dzien ? `${dzien} o ${esc(data.starts)}` : `o ${esc(data.starts)}`;
+    const ile = Math.round((data.waits_sec || 0) / 60);
+    const czekanie = !dzien && ile ? ` — to za ${ile} min` : '';
+    return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
+        + `Najbliższy wyjazd ${kiedy}${czekanie}.</p></div>`;
+}
+
+function showWaitNotice(data) {
+    const html = waitNoticeHtml(data);
+    if (html) resultsBox.insertAdjacentHTML('afterbegin', html);
+}
+
 /** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
     dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
 function renderPlan(data, refit) {
@@ -2161,6 +2204,7 @@ function renderPlan(data, refit) {
     } else {
         renderJourneys();
     }
+    showWaitNotice(data);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
@@ -2759,6 +2803,23 @@ function bindDotOpts() {
             saveDotPrefs();
             clearTimeout(timer);      // przeciąganie suwaka: jedno przemalowanie na klatkę
             timer = setTimeout(applyDotOpts, 60);
+        });
+    }
+    const rows = $('dot-rows');
+    const rowsOut = $('dot-rows-value');
+    if (rows) {
+        rows.value = dotOpts.rows;
+        if (rowsOut) rowsOut.textContent = rows.value;
+        rows.addEventListener('input', () => {
+            dotOpts.rows = Number(rows.value);
+            if (rowsOut) rowsOut.textContent = rows.value;
+            saveDotPrefs();
+            // W pamięci leży GOTOWY html, przycięty do starej liczby wierszy -
+            // bez tego suwak działałby dopiero na kropkach jeszcze nietkniętych.
+            timetableCache.clear();
+            if (timetableTarget) {
+                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
+            }
         });
     }
     for (const [id, key] of Object.entries(DOT_TOGGLES)) {

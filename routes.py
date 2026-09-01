@@ -4,7 +4,6 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request
 
-import config
 import gtfs
 import pkp
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
@@ -121,7 +120,6 @@ def init_routes(app):
             "index.html",
             stops=stops,
             data_error=data_error,
-            timetable_rows=config.timetable_rows(),
             form_time=datetime.now().strftime("%H:%M"),
             form_date=datetime.now().strftime("%d.%m.%y"),
         )

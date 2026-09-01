@@ -517,11 +517,39 @@ checks.notka_rozroznia_kierunki = (() => {
     };
 })();
 
-/* Liczba wierszy przychodzi z konfigu serwera, nie jest wpisana w kod. */
-checks.liczba_wierszy_z_konfigu = (() => ({
-    ok: app.TIMETABLE_ROWS === 8,          // harness podaje data-timetable-rows="8"
-    rows: app.TIMETABLE_ROWS,
-}))();
+/* Liczba wierszy to ustawienie panelu, a nie stała wpisana w kod - i ma swój
+   sufit, bo w pamięci przeglądarki może leżeć wartość z czasów innego zakresu
+   (albo w ogóle nie liczba). */
+checks.liczba_wierszy_to_ustawienie = (() => {
+    const bylo = app.dotOpts.rows;
+    const odczyt = [];
+    for (const ile of [3, 8, 999, 0, 'iks']) {
+        app.dotOpts.rows = ile;
+        odczyt.push(app.timetableRows());
+    }
+    app.dotOpts.rows = bylo;
+    return {
+        ok: odczyt[0] === 3 && odczyt[1] === 8
+            && odczyt[2] === app.TIMETABLE_ROWS_MAX && odczyt[3] === 1
+            && odczyt[4] === app.DOT_DEFAULTS.rows,
+        odczyt,
+    };
+})();
+
+/* Suwak naprawdę przycina tablicę - nie tylko zmienia liczbę w ustawieniach. */
+checks.suwak_przycina_tablice = (() => {
+    const dep = min => ({time: '00:0' + min, sec: min * 60, in_min: min,
+                         num: String(min), mode: 'bus', headsign: 'PRACZE'});
+    const data = {stop: 'Halicka', from_time: '14:21',
+                  departures: [1, 2, 3, 4, 5].map(dep)};
+    const bylo = app.dotOpts.rows;
+    app.dotOpts.rows = 2;
+    const krotka = (app.timetableHtml(data).match(/<li>/g) || []).length;
+    app.dotOpts.rows = 5;
+    const dluga = (app.timetableHtml(data).match(/<li>/g) || []).length;
+    app.dotOpts.rows = bylo;
+    return {ok: krotka === 2 && dluga === 5, krotka, dluga};
+})();
 
 /* Odjazd po zamknięciu okna mapy nie należy do żadnego rysowanego wariantu.
    Warunek konieczny, nie wystarczający - mocniejszy odsiew wymagałby godzin
@@ -796,6 +824,23 @@ checks.tablica_miesza_przyjazdy_z_odjazdami = (() => {
             && !bezPrzeplywu.includes('has-flow')
             && !bezPrzeplywu.includes('<svg'),
         html: html.slice(0, 160),
+    };
+})();
+
+/* Czekanie jest widoczne, nie schowane (punkt 13 kontraktu). */
+checks.czekanie_jest_widoczne = (() => {
+    const jutro = app.waitNoticeHtml(
+        {day_offset: 1, starts: '00:03', waits_sec: 240});
+    const dzis = app.waitNoticeHtml(
+        {day_offset: 0, starts: '12:30', waits_sec: 88 * 60});
+    const zaraz = app.waitNoticeHtml(
+        {day_offset: 0, starts: '11:10', waits_sec: 8 * 60});
+    return {
+        ok: jutro.includes('jutro') && jutro.includes('00:03')
+            && dzis.includes('12:30') && dzis.includes('88 min')
+            && !dzis.includes('jutro')
+            && zaraz === '',
+        jutro, dzis, zaraz,
     };
 })();
 

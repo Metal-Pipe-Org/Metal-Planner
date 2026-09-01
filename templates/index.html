@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body data-timetable-rows="{{ timetable_rows }}">
+<body>
 
 <div id="map"></div>
 
@@ -337,6 +337,18 @@
             obwódkę, a jej tablica odjazdów — zielony nagłówek. To z niej
             wsiada się naprawdę, więc nie ma jej gubić wśród przesiadek.
         </p>
+
+        <div class="field compact">
+            <label for="dot-rows">
+                Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
+            </label>
+            <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
+            <p class="field-hint">
+                Tablica spod kropki. Powyżej dwudziestu dymek zasłania mapę,
+                o którą się właśnie pyta — stąd sufit. Dalsze odjazdy i tak są
+                poza horyzontem decyzji „czym stąd pojechać”.
+            </p>
+        </div>
 
         <div class="dev-section-head">Gdzie pokazać rozkład</div>
 

@@ -269,7 +269,7 @@ function fakeElement(id) {
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         },
         offsetWidth: 320, offsetHeight: 40, scrollTop: 0, scrollHeight: 0,
-        dataset: {timetableRows: '8'},
+        dataset: {},
         style: {
             _props: new Map(),
             setProperty(k, v) { this._props.set(k, v); },
@@ -420,7 +420,9 @@ const INJECTION = `
     flowHitsAt, corridorOptions, pickFromCluster, handleFlowHover, clearFlowHover,
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
     legLayers, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
-    summariseRepeats, TIMETABLE_ROWS, keepWithinHorizon,
+    waitNoticeHtml,
+    summariseRepeats, timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
+    keepWithinHorizon,
     withArrivals, flowIcon, FLOW_ICONS,
     playPipeDrop, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },

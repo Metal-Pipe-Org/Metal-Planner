@@ -823,3 +823,179 @@ linią i wiezie nią dalej") — to kod był węższy niż obietnica. Reguła st
 kropki zyskała za to drugą połowę i na zgodę użytkownika (2026-08-31) doszło
 do „Gdzie stoi kropka" jedno zdanie: miejsce, przez które wszystko tylko
 przejeżdża, też nie jest przesiadką.
+
+---
+
+## Liczba wierszy dymka wraca z pliku środowiska pod zębatkę (2026-08-31)
+
+**Zgłoszenie:** „co to robi w .env? to powinno być w ustawieniach tak jak
+wszystko inne".
+
+Racja i to podwójna. Plik środowiska w tym projekcie istnieje dla JEDNEGO
+sekretu — klucza do API PKP — i tylko dlatego leży poza repozytorium, na tym
+samym wolumenie co baza. Liczba wierszy tablicy pod kropką nie jest sekretem,
+tylko pokrętłem wyglądu, a wszystkie inne takie pokrętła (wielkość kropek,
+gdzie pokazać rozkład, całe okno czasowe) siedzą pod zębatką. Do tego to samo
+ustawienie żyło w trzech miejscach naraz: w pliku środowiska, w funkcji
+konfiguracji z własnym sufitem i jako atrybut `data-` na `<body>`, skąd front
+je odczytywał — a osiem było jeszcze osobno wpisane w serwerowy limit tablicy.
+
+**Co się zmieniło.** Suwak „Ile odjazdów w tablicy" w sekcji „Kropki
+i rozkład", obok wielkości kropek, zapamiętywany w tym samym kluczu
+`localStorage` co reszta tej sekcji. Sufit dwudziestu został tam, gdzie był
+sensowny — ale teraz obowiązuje przy ODCZYCIE, nie przy zapisie: atrybut
+suwaka pilnuje przeciągania, a z pamięci przeglądarki może wrócić wartość
+z czasów innego zakresu albo w ogóle nie liczba. Serwer o tej liczbie nie
+wie już nic; nie musi, bo i tak pobieramy z zapasem (40) i odsiewamy na
+froncie. Zmiana suwaka czyści pamięć podręczną dymków — leży w niej gotowy
+HTML, przycięty do STAREJ liczby wierszy — i przeładowuje ten otwarty.
+
+**Domyślną ustawiliśmy na 20**, czyli na sam sufit (decyzja użytkownika,
+2026-08-31). Wyszła przy tym druga rzecz: o zapas prosiła dotąd tylko kropka
+węzła wachlarza, bo tylko ona coś odsiewa — kropka na WYBRANEJ trasie pytała
+bez limitu i dostawała serwerową ósemkę. Przy domyślnej ósemce nie było tego
+widać; przy dwudziestce byłby to cichy sufit mocniejszy od suwaka. Teraz
+o zapas prosi każda kropka.
+
+**Testy:** 150 (było 149; jeden stary sprawdzian pytał o atrybut z serwera,
+więc zniknął razem z nim, doszły dwa). Obie mutacje złapane:
+
+| mutacja | złapana przez |
+|---|---|
+| odczyt bez sufitu i podłogi | `test_row_count_is_a_panel_setting` |
+| tablica przycinana na sztywno do ośmiu | `test_the_slider_actually_trims_the_table` |
+
+---
+
+## Kolej przestaje być doklejką (2026-08-31)
+
+**Zgłoszenie:** „nie znaleziono połączenia DWORZEC GŁÓWNY → Wojszyce po 11:02",
+na localu, z danymi kolejowymi. Ta sama relacja bez kolei działała.
+
+**Przyczyna, jedno zdanie.** Skan pytał „czy to już cel" WYŁĄCZNIE przy
+wysiadaniu z pojazdu, nigdy po przejściu na sąsiedni słupek. Pociąg dowoził
+na stację Wrocław Wojszyce o 11:21:42, trzy minuty pieszo dawały przystanek
+Wojszyce o 11:24:42 — czyli cel, i to szybciej niż autobusem 113 o 11:27.
+Ta godzina wpisywała się do tabeli najwcześniejszych dojazdów, przez co
+odrzucała późniejszy dojazd autobusem (ten BYŁBY zauważony) — i sama nie
+była zauważana. Zostawało „nie znaleziono połączenia" na relacji, którą
+skan miał policzoną.
+
+Dziura była we wspólnym silniku od zawsze, tylko nieosiągalna: dopóki
+wszystkie słupki jednego miejsca obsługiwały te same linie, przejście nigdy
+nie było JEDYNYM wejściem w cel. Kolej była pierwszą siecią, która to
+potrafi. Naprawa to jedno miejsce, w którym pada pytanie o cel — wołane
+i przy wysiadaniu, i po przejściu.
+
+**Przy okazji: audyt „czy kolej to naprawdę trzeci typ".** Silnik tak —
+w wyszukiwarce nie ma ani jednej gałęzi „a jeśli pociąg". Poniżej silnika
+było osiem miejsc, które wiedzą, że pociąg to pociąg: osobna baza scalana
+przy każdym budowaniu dnia, dwa pola dnia tylko dla kolei, rozgałęzienie po
+prefiksie w rysowaniu, DRUGI mechanizm przesiadki (własny promień 500 m),
+brak przynależności do miejsca, osobne doklejanie podpowiedzi i markerów,
+osobny plik współrzędnych, sekundy na osi czasu bez sekund.
+
+**Co z tego zrobiliśmy (decyzja użytkownika).** Wszystko ma być to samo poza
+pobieraniem. Trzy rzeczy weszły od razu:
+
+1. **Stacja przechodzi przez to samo sklejanie w miejsce co przystanek.**
+   Kolej dokładana do dnia PRZED budowaniem miejsc, nie po. Wcześniej stacja
+   nie należała do żadnego miejsca (zmierzone: 0 z 2974) i właśnie dlatego
+   musiała mieć drugi mechanizm przesiadki.
+2. **Własny promień przesiadkowy usunięty** razem z funkcją, która go liczył.
+   Przesiadka bierze się wyłącznie z miejsca: ta sama nazwa = to samo miejsce.
+3. **Czas kolejowy ucinany do pełnych minut**, ostrożnie: odjazd w dół,
+   przyjazd w górę. Jedna oś czasu nie może mieć dwóch dokładności.
+
+**Pułapka po drodze (postoje).** Ucięcie w dwie strony potrafi na jednej
+stacji odwrócić postój krótszy niż minuta (10:14:42 → 10:15 przyjazdu,
+10:14:48 → 10:14 odjazdu). Cofnięcie czasu jest niżej brane za przejście
+przez północ i dokładało do kursu CAŁĄ DOBĘ. Zmierzone: dotyczy 14,1%
+postojów (36 155 z 257 049). Odjazd nie może wypaść przed przyjazdem.
+
+**Druga pułapka (nazwa to za mało).** Reguła „ta sama nazwa" była zaufana bez
+sprawdzania odległości, bo wszystkie dane pochodziły z jednego miasta.
+Ogólnopolski słownik stacji łamie to założenie. Zmierzone: 11 nazw wspólnych
+z miastem, z czego **naprawdę to samo miejsce tylko 2** (Wrocław Szczepin
+200 m, Ramiszów 500 m); reszta to wsie 77–354 km stąd. Bez zabezpieczenia
+„Mokra" we Wrocławiu skleiłaby się ze stacją 242 km dalej i wyszedłby
+trzyminutowy spacer przez pół Polski. Zabezpieczenie to ta sama miara, której
+miejsce używa już przy doklejaniu peronów — jedna reguła dla wszystkich
+źródeł, bez gałęzi „a jeśli kolej".
+
+Pierwsza wersja tego zabezpieczenia rozwiązywała CAŁĄ rozjechaną grupę i przez
+to karała miasto za kolizję kolei: dwa wrocławskie słupki „Wiśniowa" traciły
+wspólne miejsce, bo do ich nazwy dopisała się stacja spod Kielc. Poprawione:
+odstający wypada sam, spójny rdzeń zostaje.
+
+**Bilans zmierzony.** Miejskich słupków tracących miejsce: 2 (C.H. Korona,
+Tarczyński Arena (Aleja Śląska)) — oba stoją naprawdę dalej niż 400 m od
+swojego imiennika, więc to nie regresja po kolei. Stacji bez miejsca: 10
+z 3023 (dokładnie te kolizje nazw). Stacji dzielących miejsce z przystankiem
+miejskim: **1** (Wrocław Szczepin). To znaczy, że dziś obie sieci stykają się
+w jednym punkcie — zamierzone: porządne łączenie stacji z przystankami to
+osobne zadanie, nie ten kod.
+
+**Testy:** 160 (było 150), dziesięć nowych, pięć mutacji — każda złapana
+przez właściwy test:
+
+| mutacja | złapana przez |
+|---|---|
+| cel sprawdzany tylko przy wysiadaniu z pojazdu | `test_a_target_reached_only_on_foot_is_still_a_connection` + 2 |
+| nazwa wystarczy, odległość nieważna | `test_the_same_name_far_away_is_not_the_same_place` + 1 |
+| rozjechana grupa rozwiązana w całości | `test_the_far_stop_is_dropped_not_the_whole_place` |
+| brak zabezpieczenia postoju | `test_a_dwell_shorter_than_a_minute_does_not_rewind_the_clock` |
+| czas kolei bez ucinania | `test_rail_connections_land_on_whole_minutes` + 1 |
+
+**Zostaje do zrobienia.** Cztery szwy z ośmiu wciąż są: osobna baza scalana
+przy każdym budowaniu dnia, dwa pola dnia tylko dla kolei, rozgałęzienie po
+prefiksie w rysowaniu, osobne doklejanie podpowiedzi i markerów. Wszystkie
+znikają jedną zmianą — import kolei do wspólnych tabel rozkładu przy budowie
+bazy, dokładnie jak Siechnice, które są scalane właśnie tam i poniżej importu
+nikt już o nich nie wie.
+
+---
+
+## Zawsze jakaś trasa — punkt 13 wchodzi w życie (2026-08-31)
+
+**Punkty 12 i 13 wpisane do kontraktu** na wyraźną zgodę użytkownika.
+Dwunastka opisuje stan już wprowadzony (patrz notatka wyżej). Trzynastka
+wymagała kodu.
+
+**Co było.** Wyszukiwanie przeszukiwało całą dobę rozkładową i poddawało się
+dopiero na jej końcu — sprawdzone: pytanie o 03:30 znajdowało trasę o 04:08,
+więc „za godzinę" działało już wcześniej. Nie działało przejście przez
+północ: pytanie o 23:59 o relację bez kursów nocnych dostawało „nie
+znaleziono połączenia tego dnia", choć rano jedzie.
+
+**Co jest.** Gdy w dobie z pytania nic nie jedzie, szukamy w kolejnych —
+do siedmiu, bo rozkład jest tygodniowy i relacja bez kursu przez tydzień
+naprawdę go nie ma. Odpowiedź niesie godzinę wyjazdu, ile dni do niego
+i ile się czeka; front pisze to nad wynikami neutralnym komunikatem (nie
+czerwonym — to nie błąd, tylko odpowiedź „za jakiś czas").
+
+**Okno przestało liczyć się od pytania.** Naddatek brał dotąd za podstawę
+`przyjazd − godzina pytania`, więc godzina czekania rozdymała wachlarz:
+przy pytaniu o 10:00 i autobusie 12:00→12:30 podstawą było 150 minut zamiast
+30, a naddatek dobijał do sufitu. Teraz podstawą jest odjazd pierwszego
+przejazdu. Dotyczy to każdej trasy, nie tylko tych „na jutro" — czekanie
+nigdy nie było częścią podróży.
+
+**Próg widoczności czekania** to 20 minut, ta sama miara, którą mapa uznaje
+już za „przesiadka jeszcze łączy odcinki". Nie nowa, dobrana liczba — jedna
+z dwóch, które w tym projekcie znaczą „czekanie, które jeszcze uchodzi".
+
+**Pułapka po drodze (oś czasu czekania).** Po zejściu na kolejną dobę
+godzina pytania zostaje w poprzedniej, a wyjazd liczy się od zera nowej.
+Zwykła różnica pokazywała 3 minuty czekania tam, gdzie w rzeczywistości
+było prawie tyle samo — ale w innym dniu, więc przy większej odległości
+wyszłaby bzdura. Czekanie liczy się od pytania, przez granicę doby.
+
+**Testy:** 166 (było 160), sześć nowych, cztery mutacje — każda złapana:
+
+| mutacja | złapana przez |
+|---|---|
+| okno liczone od pytania | `test_the_map_window_itself_starts_at_the_departure` |
+| brak zejścia na kolejną dobę | `test_nothing_today_is_answered_with_tomorrow` |
+| odjazd trasy = godzina pytania | `test_the_window_is_measured_from_the_departure_not_the_question` + 2 |
+| czekanie nigdy nie pokazane | `test_a_route_that_starts_much_later_says_so` |

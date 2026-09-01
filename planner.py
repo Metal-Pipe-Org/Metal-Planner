@@ -8,7 +8,7 @@ na jego odjazd na przystanku startowym.
 
 from bisect import bisect_left, bisect_right
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import gtfs
 
@@ -189,6 +189,22 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
     best_legs = INF
     limit = INF if deadline is None else deadline
 
+    def note_target(stop, when, ride_count):
+        """Jedyne miejsce, w którym pada pytanie "czy to już cel".
+
+        Pyta i pojazd, i przejście na sąsiedni słupek - bo celem można
+        stanąć na oba sposoby. Rozdzielenie tych dwóch dróg było źródłem
+        błędu: cel osiągalny WYŁĄCZNIE przejściem (stacja kolejowa obok
+        przystanku, patrz pkp.py) nie był w ogóle zauważany, a jego godzina,
+        raz wpisana do `earliest`, blokowała jeszcze późniejszy dojazd
+        pojazdem - ten JEDEN zostałby zauważony. Wychodziło z tego
+        "nie znaleziono połączenia" na relacji, którą skan miał policzoną.
+        """
+        nonlocal best_arr, best_stop, best_legs
+        if stop in targets and (when < best_arr or
+                                (when == best_arr and ride_count < best_legs)):
+            best_arr, best_stop, best_legs = when, stop, ride_count
+
     for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
         dep_t, arr_t, dep_s, arr_s, trip = conns[i]
         if dep_t > best_arr or dep_t > limit:
@@ -236,11 +252,7 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
             earliest[arr_s] = arr_t
             journey[arr_s] = ("ride", trip_board[trip], i)
             legs[arr_s] = ride_legs
-            if arr_s in targets and (arr_t < best_arr or
-                                     (arr_t == best_arr and ride_legs < best_legs)):
-                best_arr = arr_t
-                best_stop = arr_s
-                best_legs = ride_legs
+            note_target(arr_s, arr_t, ride_legs)
             # Relaksacja pieszo na pozostałe słupki tego samego miejsca.
             for sibling in day.siblings.get(arr_s, ()):
                 walk_arr = arr_t + WALK_SEC
@@ -250,6 +262,7 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
                     earliest[sibling] = walk_arr
                     journey[sibling] = ("walk", arr_s)
                     legs[sibling] = ride_legs
+                    note_target(sibling, walk_arr, ride_legs)
 
     return best_stop, best_arr, journey
 
@@ -546,6 +559,34 @@ def _resolve_endpoints(day, start_query, end_query, start_point, end_point, rang
     return resolved
 
 
+# Ile dób do przodu wolno szukać, gdy o podaną godzinę nie jedzie już nic
+# (punkt 13 kontraktu). Tydzień, bo rozkład jest tygodniowy: relacja, która
+# nie ma kursu przez siedem dni, nie ma go w ogóle - i wtedy "nie znaleziono"
+# jest prawdziwą odpowiedzią, a nie poddaniem się po pierwszej próbie.
+SEARCH_AHEAD_DAYS = 7
+
+
+def _journey_start(day, journey, last_stop):
+    """Godzina, o której trasa naprawdę RUSZA - odjazd pierwszego przejazdu.
+
+    Nie to samo co godzina pytania: między jednym a drugim może być godzina
+    czekania, a czekanie nie jest częścią podróży. Okno mapy liczy się od
+    wyjazdu (punkt 13 kontraktu), inaczej trasa, na którą czeka się godzinę,
+    dostawałaby wachlarz rozdęty o tę godzinę.
+    """
+    stop = last_stop
+    start = None
+    while journey[stop][0] != "origin":
+        entry = journey[stop]
+        if entry[0] == "walk":
+            stop = entry[1]
+        else:
+            _, board_i, _ = entry
+            start = day.conns[board_i][0]
+            stop = day.conns[board_i][2]
+    return start
+
+
 def _deadline(best_arr, dep_sec, extra_pct=None, extra_floor_sec=None, extra_cap_sec=None):
     """Granica sensowności: najlepszy przyjazd + naddatek (trzy suwaki w UI,
     patrz DEFAULT_EXTRA_PCT/FLOOR/CAP powyżej) - naddatek to procent czasu
@@ -673,9 +714,40 @@ def plan_flow(start_query, end_query, when=None,
     # Najszybsza trasa wyznacza skalę ("większość mrówek") i jest zapasowym
     # planem, gdyby kotwiczenie (patrz niżej) przycięło wszystko do zera.
     best_stop, best_arr, best_journey = _scan(day, source_stops, target_stops, dep_sec)
+
+    # Nic już dziś nie jedzie - szukamy w kolejnych dobach (punkt 13:
+    # "nie znaleziono połączenia" nie jest odpowiedzią na pytanie "jak tam
+    # dojadę"). Doba rozkładowa zaczyna się o północy, więc pytamy od zera;
+    # przystanki rozwiązujemy w niej od nowa, bo to dane tamtego dnia.
+    day_offset = 0
+    asked_sec = dep_sec        # godzina z pytania - `dep_sec` zaraz może się przesunąć
+    while best_stop is None and day_offset < SEARCH_AHEAD_DAYS:
+        day_offset += 1
+        try:
+            later = gtfs.load_day(when.date() + timedelta(days=day_offset))
+        except FileNotFoundError:
+            break
+        ends = _resolve_endpoints(later, start_query, end_query,
+                                  start_point, end_point, range_m)
+        if "error" in ends:
+            break
+        day = later
+        start_name, source_stops = ends["start"], ends["source_stops"]
+        end_name, target_stops = ends["end"], ends["target_stops"]
+        dep_sec = 0
+        best_stop, best_arr, best_journey = _scan(
+            day, source_stops, target_stops, dep_sec)
+
     if best_stop is None:
         return _no_connection(start_name, end_name, dep_sec)
-    deadline = _deadline(best_arr, dep_sec, extra_pct, extra_floor_sec, extra_cap_sec)
+
+    # Okno liczone od WYJAZDU, nie od pytania - czekanie nie jest podróżą
+    # i nie ma rozdymać wachlarza (punkt 13).
+    best_dep = _journey_start(day, best_journey, best_stop)
+    if best_dep is None:
+        best_dep = dep_sec
+    deadline = _deadline(best_arr, best_dep, extra_pct, extra_floor_sec,
+                         extra_cap_sec)
 
     earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, target_stops, dep_sec, deadline)
@@ -810,6 +882,15 @@ def plan_flow(start_query, end_query, when=None,
         # (skan CSA), więc nie zależy od szacowanych przyjazdów kawałków.
         "deadline_sec": deadline,
         "fastest": fastest,
+        # Kiedy ta trasa RUSZA i za ile dni - czekanie ma być widoczne, nie
+        # schowane (punkt 13). `day_offset` 0 to dzień z pytania.
+        "starts": _fmt_time(best_dep),
+        "starts_sec": best_dep,
+        # Czekanie liczone od PYTANIA, przez granicę doby: po zejściu na
+        # kolejny dzień `dep_sec` jest już zerem tamtej doby, więc sama
+        # różnica pokazywałaby kilka minut zamiast prawie doby.
+        "waits_sec": max(0, day_offset * 24 * 3600 + best_dep - asked_sec),
+        "day_offset": day_offset,
         "segments": seg_list,
         # Węzły przesiadkowe: po jednym na miejsce, z liniami, w które MAPA
         # pozwala tu wsiąść (patrz _transfer_nodes).

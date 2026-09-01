@@ -1173,3 +1173,80 @@ def test_the_stop_before_the_target_does_not_claim_the_line_ends_there(install_d
 
     assert _flow_of(wezel, "10")["flow"] == "through"
     assert _flow_of(wezel, "4")["flow"] == "end"
+
+
+# ---- 13 - zawsze jakaś trasa, choćby za godzinę --------------------------
+
+def _dzien_z_jednym_kursem(odjazd, przyjazd):
+    """START -> CEL jednym autobusem, o zadanej godzinie i tylko o niej."""
+    return make_day([{
+        "trip_id": "T1", "label": "Autobus 1",
+        "stops": [("START", odjazd, odjazd), ("CEL", przyjazd, przyjazd)],
+    }])
+
+
+def test_the_window_is_measured_from_the_departure_not_the_question():
+    """Godzina czekania nie jest podróżą i nie ma rozdymać wachlarza.
+    Pytanie o 10:00 i wyjazd o 12:00 dają dokładnie to samo okno, co pytanie
+    zadane tuż przed wyjazdem - bo trasa trwa tyle samo."""
+    day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
+    stop, arr, journey = planner._scan(day, ["START"], ["CEL"], 10 * 3600)
+    assert stop == "CEL"
+    wyjazd = planner._journey_start(day, journey, stop)
+    assert wyjazd == 12 * 3600, "odczytany ma być odjazd pojazdu, nie godzina pytania"
+    od_wyjazdu = planner._deadline(arr, wyjazd)
+    od_pytania = planner._deadline(arr, 10 * 3600)
+    assert od_wyjazdu < od_pytania, "czekanie rozdmuchało okno mapy"
+
+
+def test_a_journey_that_starts_with_a_walk_still_reports_its_departure():
+    """Odjazdem trasy jest odjazd PIERWSZEGO PRZEJAZDU, nie moment wyjścia
+    z domu - przejście na sąsiedni słupek nie ma godziny w rozkładzie."""
+    day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
+    day.stop_names["OBOK"] = "OBOK"
+    day.stop_coords["OBOK"] = (51.11, 17.03)
+    day.siblings = {"OBOK": ("START",), "START": ("OBOK",)}
+    stop, _, journey = planner._scan(day, ["START"], ["CEL"], 10 * 3600)
+    assert planner._journey_start(day, journey, stop) == 12 * 3600
+
+
+def test_nothing_today_is_answered_with_tomorrow(monkeypatch):
+    """"Nie znaleziono połączenia" nie jest odpowiedzią na pytanie "jak tam
+    dojadę". Gdy o podaną godzinę nic już nie jedzie, odpowiedzią jest
+    najbliższy wyjazd - choćby dopiero rano następnego dnia."""
+    dzis = _dzien_z_jednym_kursem(8 * 3600, 8 * 3600 + 1800)     # było o 8:00
+    jutro = _dzien_z_jednym_kursem(6 * 3600, 6 * 3600 + 1800)    # jest o 6:00
+    dni = {datetime.date(2026, 8, 31): dzis, datetime.date(2026, 9, 1): jutro}
+    monkeypatch.setattr(gtfs, "load_day", lambda d: dni[d])
+
+    wynik = planner.plan_flow("START", "CEL",
+                              datetime.datetime(2026, 8, 31, 22, 0))
+    assert "error" not in wynik, wynik.get("error")
+    assert wynik["day_offset"] == 1, "odpowiedź ma sięgnąć następnej doby"
+    assert wynik["starts"] == "06:00"
+    # Czekanie liczone od pytania, przez granicę doby: 22:00 -> 06:00 nazajutrz
+    # to osiem godzin, a nie sześć (tyle wyszłoby na osi samej nowej doby).
+    assert wynik["waits_sec"] == 8 * 3600
+
+
+def test_the_map_window_itself_starts_at_the_departure(monkeypatch):
+    """To samo, ale przez całą ścieżkę: okno RYSOWANEJ mapy ma być policzone
+    od wyjazdu. Autobus 12:00 -> 12:30 przy pytaniu o 10:00 daje naddatek
+    z trzydziestu minut jazdy (7,5 min), a nie ze stu pięćdziesięciu minut
+    czekania i jazdy razem (wtedy naddatek dobiłby do sufitu)."""
+    day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
+    monkeypatch.setattr(gtfs, "load_day", lambda d: day)
+    wynik = planner.plan_flow("START", "CEL",
+                              datetime.datetime(2026, 8, 31, 10, 0))
+    assert "error" not in wynik, wynik.get("error")
+    assert wynik["starts_sec"] == 12 * 3600
+    assert wynik["deadline_sec"] == 12 * 3600 + 1800 + 450
+
+
+def test_a_relation_with_no_service_at_all_still_says_so():
+    """Pusta mapa z komunikatem należy się relacji, której nie da się
+    przejechać w ogóle - obietnica "zawsze jakaś trasa" nie może zmienić się
+    w zmyślanie połączeń, których nie ma."""
+    day = _dzien_z_jednym_kursem(8 * 3600, 8 * 3600 + 1800)
+    stop, _, _ = planner._scan(day, ["CEL"], ["START"], 0)
+    assert stop is None
