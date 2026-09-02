@@ -5,7 +5,7 @@
 :root {
     --tram: #c62828;
     --bus: #1565c0;
-    --train: #2e7d32;
+    --train: #2e7d33;
     --other: #6a1b9a;
     --accent: #2563eb;
     --ink: #16202b;
@@ -707,6 +707,7 @@ body.panel-hidden #sidebar {
 
 .line-badge.tram { color: var(--tram); border-color: var(--tram); }
 .line-badge.bus { color: var(--bus); border-color: var(--bus); }
+.line-badge.train { color: var(--train); border-color: var(--train); }
 .line-badge.other { color: var(--other); border-color: var(--other); }
 
 .line-badge.solid {
@@ -720,6 +721,7 @@ body.panel-hidden #sidebar {
 
 .line-badge.solid.tram { background: var(--tram); }
 .line-badge.solid.bus { background: var(--bus); }
+.line-badge.solid.train { background: var(--train); }
 .line-badge.solid.other { background: var(--other); }
 
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
@@ -742,6 +744,7 @@ body.panel-hidden #sidebar {
 
 .vehicle-marker.tram { background: var(--tram); }
 .vehicle-marker.bus { background: var(--bus); }
+.vehicle-marker.train { background: var(--train); }
 .vehicle-marker.other { background: var(--other); }
 
 /* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
@@ -793,6 +796,7 @@ body.panel-hidden #sidebar {
 
 .line-chip.tram { color: var(--tram); }
 .line-chip.bus { color: var(--bus); }
+.line-chip.train { color: var(--train); }
 .line-chip.other { color: var(--other); }
 
 .line-chip.picked,
@@ -801,6 +805,8 @@ body.panel-hidden #sidebar {
 .line-cluster .line-chip.tram:hover { background: var(--tram); }
 .line-chip.picked.bus,
 .line-cluster .line-chip.bus:hover { background: var(--bus); }
+.line-chip.picked.train,
+.line-cluster .line-chip.train:hover { background: var(--train); }
 .line-chip.picked.other,
 .line-cluster .line-chip.other:hover { background: var(--other); }
 
@@ -816,6 +822,7 @@ body.panel-hidden #sidebar {
 
 .flow-tip-line.tram { color: var(--tram); }
 .flow-tip-line.bus { color: var(--bus); }
+.flow-tip-line.train { color: var(--train); }
 .flow-tip-line.other { color: var(--other); }
 
 .flow-tip-row {
@@ -909,6 +916,7 @@ body.panel-hidden #sidebar {
 .line-cluster .line-chip-slot:hover .line-chip { color: #fff; }
 .line-cluster .line-chip-slot:hover .line-chip.tram { background: var(--tram); }
 .line-cluster .line-chip-slot:hover .line-chip.bus { background: var(--bus); }
+.line-cluster .line-chip-slot:hover .line-chip.train { background: var(--train); }
 .line-cluster .line-chip-slot:hover .line-chip.other { background: var(--other); }
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 

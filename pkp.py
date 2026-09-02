@@ -365,7 +365,8 @@ def augment_day(day, date):
             prev_corrected = None
             prev_stop = None
             prev_dep_c = None
-            label = f"{category or ''} {national_number or ''}".strip()
+            number_digits = "".join(c for c in national_number or "" if c.isdigit())
+            label = f"{carrier_code or ''} {number_digits}".strip()
             day.trip_info[trip_id] = (
                 f"Pociąg {label}" if label else "Pociąg", name or "",
             )
