@@ -475,7 +475,20 @@ def _match_city_group(key, norm_key, data):
     pkp.augment_day, used_ids) - dokładnie to, co "przystanek" ma znaczyć.
 
     Zwraca (nazwa_do_wyświetlenia, [stop_id, ...]) albo (None, None), gdy
-    nic nie pasuje - wołane jako OSTATNI fallback w match_stop."""
+    nic nie pasuje - wołane jako OSTATNI fallback w match_stop.
+
+    Nazwa do wyświetlenia to "MIASTO -" (WIELKIMI LITERAMI + myślnik) - TA
+    SAMA postać, którą trzeba wpisać, żeby w ogóle trafić w tę gałąź (patrz
+    wyżej) i identyczna z etykietami podpowiedzi (pkp._city_group_labels).
+    To celowe, nie kosmetyka: zgłoszony przez użytkownika na żywo błąd -
+    front pokazuje/odsyła z powrotem nazwę zwróconą stąd (np. przy
+    ponownym wyszukaniu tej samej trasy), więc jeśli ta nazwa NIE pasuje
+    z powrotem do tego samego dopasowania (np. dawne "Wrocław (dowolna
+    stacja)" - bez myślnika na końcu, więc `key.endswith("-")` wyżej od
+    razu odrzuca), drugie wyszukanie kończy się fałszywym "nie znaleziono
+    przystanku", mimo że dane się nie zmieniły. Zwracana nazwa musi więc
+    być NIEZMIENNIKIEM tej funkcji (round-trip: wynik podany z powrotem na
+    wejściu daje ten sam wynik), nie tylko czytelną etykietą."""
     if not key.endswith("-"):
         return None, None
     city = key[:-1].strip()
@@ -494,55 +507,7 @@ def _match_city_group(key, norm_key, data):
             group.add(stop_id)
     if not group:
         return None, None
-    return f"{city.title()} (dowolna stacja)", _expand_to_places(data, list(group))
-
-
-def _match_city_group(key, norm_key, data):
-    """Dopasowuje "zbiorczą" stację PKP typu "Warszawa -" (patrz
-    update_pkp._is_city_wildcard) - PKP oznacza tak w słowniku stacji
-    "dowolną stację w tym mieście", zawsze bez żadnego WŁASNEGO kursu
-    (sprawdzone na żywo: 0 wpisów w stops dla każdej z nich) - żadne
-    z wcześniejszych dopasowań w match_stop nigdy jej więc nie złapie,
-    rozkład po prostu nie ma czego z nią połączyć.
-
-    Rozpoznanie PO WZORCU zapytania (kończy się myślnikiem), nie po
-    sztywnej liście nazw miast - i szukamy WSZYSTKICH prawdziwych, znanych
-    stacji zaczynających się od tej nazwy jako CAŁE SŁOWO (nie podciąg -
-    "Warszawa" nie ma złapać hipotetycznej "Warszawskiej"), łącząc ich
-    słupki w JEDNO zapytanie do CSA zamiast zwracać błąd "nie znaleziono" -
-    skan i tak sam wybierze najlepszą z nich (patrz _scan/plan_route:
-    przyjmuje ZBIÓR stacji startowych/końcowych z definicji, to nie nowy
-    mechanizm, tylko ten sam co przy zwykłym "miejscu" z wielu słupków).
-
-    PRZESZUKUJE WYŁĄCZNIE data.pkp_stations (patrz jej nagłówek w
-    DayData.__init__), NIE ogólne stops_by_key/stops_by_norm_key (tam MPK
-    i PKP są zmieszane) - "Wrocław -" ma trafić w prawdziwe stacje PKP
-    zaczynające się na "Wrocław", nie przypadkiem też w jakiś przystanek
-    MPK o zbieżnym przedrostku nazwy. data.pkp_stations to z definicji
-    tylko stacje z co najmniej jednym kursem TEGO dnia (patrz
-    pkp.augment_day, used_ids) - dokładnie to, co "przystanek" ma znaczyć.
-
-    Zwraca (nazwa_do_wyświetlenia, [stop_id, ...]) albo (None, None), gdy
-    nic nie pasuje - wołane jako OSTATNI fallback w match_stop."""
-    if not key.endswith("-"):
-        return None, None
-    city = key[:-1].strip()
-    if not city:
-        return None, None
-    norm_city = norm_key[:-1].strip() if norm_key.endswith("-") else _strip_diacritics(city)
-
-    group = set()
-    for name, stop_id in data.pkp_stations:
-        name_cf = name.casefold()
-        if name_cf == city or name_cf.startswith(city + " "):
-            group.add(stop_id)
-            continue
-        norm_name = _strip_diacritics(name_cf)
-        if norm_name == norm_city or norm_name.startswith(norm_city + " "):
-            group.add(stop_id)
-    if not group:
-        return None, None
-    return f"{city.title()} (dowolna stacja)", _expand_to_places(data, list(group))
+    return f"{city.upper()} -", _expand_to_places(data, list(group))
 
 
 def match_stop(query, data):
