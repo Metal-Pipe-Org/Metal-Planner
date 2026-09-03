@@ -971,10 +971,17 @@ body.panel-hidden #sidebar {
 
 .headline-sep { color: var(--ink-faint); }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
-       pod niego i zwęża się do samych liczb. */
-    .time-headline { top: auto; bottom: 64px; font-size: 12px; }
+       pod niego i zwęża się do samych liczb. Odsunięty o tyle co zakładki
+       Mapa/Trasy (patrz #view-tabs/.toast) plus wcięcie ekranu na dole -
+       bez tego pasek chował się pod zakładkami na telefonach z home
+       indicatorem (np. w zainstalowanej aplikacji). */
+    .time-headline {
+        top: auto;
+        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+        font-size: 12px;
+    }
 }
 
 /* ------------------------------------ tablica odjazdów przesiadki --- */
