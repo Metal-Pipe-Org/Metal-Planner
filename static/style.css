@@ -35,6 +35,13 @@ body {
     inset: 0;
 }
 
+/* Blokada zoomu strony w zainstalowanej PWA (patrz pwa.js, klasa dodawana
+   tylko w display-mode: standalone) - mapa dostaje touch-action: none już z
+   leaflet.css (.leaflet-container), więc jej gest przybliżania działa dalej. */
+html.standalone-app body {
+    touch-action: pan-x pan-y;
+}
+
 /* --------------------------------------------------- elementy wspólne --- */
 
 .card {

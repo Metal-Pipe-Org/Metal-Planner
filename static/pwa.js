@@ -62,6 +62,37 @@ window.addEventListener('appinstalled', () => {
     if (installButton) installButton.hidden = true;
 });
 
+/* W zainstalowanej aplikacji (PWA) na telefonie pinch/double-tap zoom całej
+   strony psuje układ: #map jest position:fixed na cały ekran, a panel/pasek
+   zakładek leżą nad nim jako osobne elementy - po oddaleniu/przybliżeniu
+   strony przestają się z mapą pokrywać. Mapa ma własny gest przybliżania
+   (Leaflet zarządza nim sam przez JS, niezależnie od zoomu strony), więc go
+   nie ruszamy - blokujemy zoom tylko poza elementem #map. W zwykłej karcie
+   przeglądarki zostawiamy natywny zoom strony, bo tam ten problem nie
+   występuje (nie ma paska zakładek/panelu przyklejonych do ekranu). */
+const isStandaloneApp = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+
+if (isStandaloneApp) {
+    document.documentElement.classList.add('standalone-app');
+
+    const viewportMeta = document.querySelector('meta[name="viewport"]');
+    if (viewportMeta && !/user-scalable/.test(viewportMeta.content)) {
+        viewportMeta.content += ', maximum-scale=1, user-scalable=no';
+    }
+
+    const isOutsideMap = target => !(target instanceof Element) || !target.closest('#map');
+
+    // Awaryjnie, na wypadek przeglądarek ignorujących user-scalable=no.
+    document.addEventListener('touchmove', event => {
+        if (event.touches.length > 1 && isOutsideMap(event.target)) event.preventDefault();
+    }, {passive: false});
+
+    document.addEventListener('gesturestart', event => {
+        if (isOutsideMap(event.target)) event.preventDefault();
+    });
+}
+
 /* Panel ⚙ - wymuszenie sprawdzenia aktualizacji.
 
    Aktualizacja wchodzi sama przy wejściu na stronę. Tutaj można ją wymusić
