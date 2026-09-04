@@ -33,7 +33,7 @@ domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
 
 ## Instalacja jako aplikacja (PWA)
 
-Planer instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
+Metal Planner instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
 głównego", na pulpicie ikoną ⤓ w nagłówku albo z paska adresu przeglądarki.
 Działa wtedy we własnym oknie, a raz odwiedzona okolica mapy jest dostępna
 też bez internetu (samo wyszukiwanie połączeń wymaga sieci).
