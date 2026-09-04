@@ -483,12 +483,16 @@ function endpointPoints() {
 // suwakami w panelu deweloperskim - sekcja jest z powrotem WIDOCZNA
 // (LOOK_TUNING niżej), żeby dało się stroić dalej.
 //
-// minWeight = maxWeight to świadomy wybór: grubość jest STAŁA, a różnicę
-// zapasu czasu niesie samo krycie (0.4 -> 1).
+// Grubość i krycie niosą tę samą różnicę razem: najbledszy kawałek jest i
+// cieńszy, i bardziej przezroczysty (2 px / 0.3), najjaśniejszy - grubszy i
+// pełny (3 px / 1). Do 2026-09-04 grubość była STAŁA (3 px) i całą różnicę
+// niosło samo krycie; przy szerokim oknie setka bladych kresek o tej samej
+// grubości sumowała się w plamę cięższą niż korytarz, który naprawdę
+// prowadzi do celu.
 const LOOK_DEFAULTS = {
-    minOpacity: 0.4,      // krycie najbledszego kawałka (w=0)
+    minOpacity: 0.3,      // krycie najbledszego kawałka (w=0)
     maxOpacity: 1,        // krycie najjaśniejszego (w=1)
-    minWeight: 3,         // grubość najbledszego kawałka [px]
+    minWeight: 2,         // grubość najbledszego kawałka [px]
     maxWeight: 3,         // grubość najjaśniejszego [px]
     casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
     dimFactor: 0.22,      // ile zostaje z krycia, gdy wybrana jest jedna trasa
@@ -848,6 +852,40 @@ function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
 }
 
+// Ręczne przedłużanie zakresu: "+X min" tuż za granicą okna. X to POŁOWA
+// tego, co mapa pokazuje w tej chwili, więc klik rozciąga zakres o połowę
+// (razy 1,5), kolejny znów - a przy suficie X jest już tylko tym, co do
+// sufitu zostało, żeby przycisk nie obiecywał minut, których nie doda.
+// Sufit (2 h) stoi po obu stronach: tutaj, żeby przycisk zniknął, i w
+// plannerze (MAX_HORIZON_SEC), bo szerokość okna to wprost koszt skanu i nie
+// może zależeć od frontu. Przedłużenie żyje do NASTĘPNEGO wyszukiwania -
+// nowa relacja zaczyna od okna z suwaków.
+const MAX_HORIZON_SEC = 2 * 3600;
+const HORIZON_GROWTH = 0.5;        // razy 1,5 na klik: dokładamy połowę okna
+const MIN_HORIZON_STEP_SEC = 60;   // mniej niż minuta to przycisk bez treści
+let mapHorizonSec = null;          // null = zakres z suwaków, bez przedłużenia
+let horizonBusy = false;           // klik w locie - drugi klik ma poczekać
+
+/** Ile jeszcze da się dołożyć: połowa tego, co mapa pokazuje teraz, ale nie
+    ponad sufit. W pełnych minutach, bo w minutach jest podpisany przycisk -
+    inaczej etykieta obiecywałaby co innego, niż dokłada klik. */
+function horizonStep(limitSec) {
+    const krok = Math.round(limitSec * HORIZON_GROWTH / 60) * 60;
+    const doSufitu = Math.floor((MAX_HORIZON_SEC - limitSec) / 60) * 60;
+    return Math.min(krok, doSufitu);
+}
+
+function extendHorizon(limitSec, stepSec) {
+    if (horizonBusy) return;
+    horizonBusy = true;
+    mapHorizonSec = limitSec + stepSec;
+    // Kadru NIE przestawiamy - tak samo jak przy suwakach okna czasowego:
+    // szersze okno dokłada linie, nie zmienia tego, na co user patrzy.
+    loadPlan(requestToken, false)
+        .catch(() => showError('Nie udało się połączyć z serwerem.'))
+        .finally(() => { horizonBusy = false; });
+}
+
 function renderTimeHeadline() {
     const el = $('time-headline');
     if (!el) return;
@@ -860,18 +898,28 @@ function renderTimeHeadline() {
     }
     const chips = ((flow.fastest && flow.fastest.legs) || []).map(leg =>
         `<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`).join('');
+    const step = horizonStep(flow.limit_sec);
+    const more = step >= MIN_HORIZON_STEP_SEC
+        ? `<button type="button" class="headline-more" title="Rysuj też trasy `
+          + `odjeżdżające później - zakres mapy do ${esc(fmtMins(flow.limit_sec + step))}">`
+          + `+${esc(fmtMins(step))}</button>`
+        : '';
     el.innerHTML =
         `<span class="headline-best" tabindex="0">Najszybciej o `
         + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
         + `<span class="headline-sep">·</span>`
         + `<span class="headline-limit">mapa pokazuje do `
-        + `<b>${esc(flow.deadline)}</b>, w <b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
+        + `<b>${esc(flow.deadline)}</b>, w <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
+        + more;
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
     best.addEventListener('mouseleave', hideFastest);
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
+    const moreBtn = el.querySelector('.headline-more');
+    if (moreBtn) moreBtn.addEventListener('click',
+        () => extendHorizon(flow.limit_sec, step));
 }
 
 // --- numery linii: jedna grupka na cały wspólny korytarz -------------------
@@ -1537,7 +1585,10 @@ function timetableHtml(data) {
     if (!data.departures.length) {
         return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
     }
-    const list = summariseRepeats(data.departures).slice(0, timetableRows());
+    // `all_departures` to tablica sprzed odsiewu - stąd bierze się takt
+    // linii, patrz summariseRepeats.
+    const list = summariseRepeats(data.departures, data.all_departures)
+        .slice(0, timetableRows());
     // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
     // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
     // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
@@ -1673,12 +1724,20 @@ function keepWithinHorizon(data, deadline) {
     "za 4 min, potem co 15 min" mówi to samo, w jednym wierszu i bez zgadywania,
     czy pominięte kursy w ogóle istnieją.
 
+    Takt bierze się z `rhythmSource` - PEŁNEJ tablicy przystanku, sprzed
+    odsiewu - więc pisze się go także wtedy, gdy następny kurs wypada już poza
+    zakresem mapy. To informacja o LINII, nie o oknie: "co 20 min" tak samo
+    trzeba wiedzieć, gdy ten kolejny kurs mapa jeszcze rysuje, jak i gdy już
+    nie. Liczony z listy po odsiewie znikał dokładnie tam, gdzie był
+    najpotrzebniejszy - na rzadkim węźle blisko granicy okna.
+
     Odstęp to MEDIANA przerw, nie średnia: jeden nocny przeskok o godzinę nie
     ma prawa przesunąć liczby opisującej normalny takt.
 
     Kierunek jest częścią tożsamości linii - ta sama linia w drugą stronę to
     osobna opcja i osobny wiersz. */
-function summariseRepeats(departures) {
+function summariseRepeats(departures, rhythmSource) {
+    const rytm = lineRhythms(rhythmSource || departures);
     const groups = new Map();
     for (const d of departures) {
         // `flow` w kluczu, bo przyjazd i odjazd tej samej linii to dwa różne
@@ -1691,11 +1750,34 @@ function summariseRepeats(departures) {
     }
     const out = [];
     for (const list of groups.values()) {
-        out.push(list.length > 1
-            ? {...list[0], every_min: medianGapMin(list)}
-            : list[0]);
+        const d = list[0];
+        // Wiersz przyjazdu to jedno zdarzenie z mapy, a nie oferta - takt
+        // przy nim mówiłby o odjazdach, o które nikt tu nie pyta.
+        const every = d.flow === 'end' ? undefined
+            : rytm.get(lineKey({kind: d.mode, num: d.num, headsign: d.headsign}));
+        out.push(every ? {...d, every_min: every} : d);
     }
     return out.sort((a, b) => a.sec - b.sec);
+}
+
+/** Takt każdej linii z tablicy: klucz linii -> mediana przerw w minutach.
+    Linie z jednym tylko odjazdem nie trafiają tu wcale - jeden kurs nie ma
+    rytmu, a "co 0 min" byłoby zdaniem o niczym. */
+function lineRhythms(departures) {
+    const groups = new Map();
+    for (const d of departures) {
+        // Przyjazd nie jest odjazdem: doklejony wiersz "end" tej samej linii
+        // stanąłby w rytmie obok jej odjazdów i zrobiłby takt z jednego kursu.
+        if (d.flow === 'end') continue;
+        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign});
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(d);
+    }
+    const out = new Map();
+    for (const [key, list] of groups) {
+        if (list.length > 1) out.set(key, medianGapMin(list));
+    }
+    return out;
 }
 
 function medianGapMin(list) {
@@ -1751,8 +1833,12 @@ function loadTimetable(dot, where, sec) {
             // Przyjazdy doklejamy PO obu sitach: oba pytają "czy tym odjazdem
             // jeszcze się dojedzie", a wiersz przyjazdu nie jest odjazdem -
             // to fakt z samej mapy, więc nie ma go czym odsiewać.
+            // Pełna tablica jedzie przez oba sita nietknięta (dokładamy ją
+            // do odpowiedzi, a sita przepisują tylko `departures`): takt linii
+            // ma się liczyć z rozkładu, nie z tego, co przeżyło odsiew.
+            const pelna = {...data, all_departures: data.departures};
             const html = timetableHtml(data.error ? data : withArrivals(
-                keepWithinHorizon(keepOfferedLines(data, where.lines), where.deadline),
+                keepWithinHorizon(keepOfferedLines(pelna, where.lines), where.deadline),
                 where.lines, sec));
             // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
             // nie: offline z service workera wraca jako {error}, a po powrocie
@@ -1830,11 +1916,21 @@ const START_DOT_STYLE = {color: '#1b5e20', weight: 4, fillColor: '#c8f0cd'};
 const FLOW_DOT_STYLE = {radius: 4, weight: 2, color: '#263238',
                         fillColor: '#fff', fillOpacity: 1};
 
-const flowDotStyle = () => ({
-    ...FLOW_DOT_STYLE,
-    radius: Math.max(2, dotOpts.size - 1),
-    weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
-});
+// Kropka waży tyle, co to, co przy niej leży: jej krycie idzie z jasności
+// węzła (backend, patrz planner._transfer_nodes) przez tę samą skalę, co
+// krycie kawałków - więc suwak „najbledsza linia" rusza jedno i drugie razem.
+// Bez tego blada okolica dostawała kropki tak samo mocne, jak najszybsza
+// trasa, i to one niosły ciężar obrazka zamiast linii.
+const flowDotStyle = (w = 1) => {
+    const krycie = lookOpacity(Math.max(0, Math.min(1, Number(w) || 0)));
+    return {
+        ...FLOW_DOT_STYLE,
+        radius: Math.max(2, dotOpts.size - 1),
+        weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
+        opacity: krycie,
+        fillOpacity: krycie,
+    };
+};
 
 /** Kropki węzłów wachlarza - jedna na MIEJSCE, nie na słupek.
 
@@ -1846,7 +1942,9 @@ const flowDotStyle = () => ({
 function flowStopDots(nodes, deadline) {
     return (nodes || []).map(n => stopDot(
         nodePoint(n), {name: n.name, lines: n.lines, deadline, start: n.start},
-        n.sec, flowDotStyle()));
+        // Start nigdy nie blednie: to nie jest jedna z opcji, tylko miejsce,
+        // w którym stoisz.
+        n.sec, flowDotStyle(n.start ? 1 : n.w)));
 }
 
 /** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
@@ -2190,6 +2288,9 @@ function queryParams() {
         extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
+    // Ręczne przedłużenie zakresu ("+X min" nad mapą) - tylko gdy user je
+    // kliknął; bez niego o szerokości okna decydują wyłącznie suwaki.
+    if (mapHorizonSec !== null) params.set('horizon_sec', mapHorizonSec.toFixed(0));
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
@@ -2231,12 +2332,32 @@ function adoptNames(data) {
     samą najszybszą trasę (pole `degraded` w odpowiedzi /api/flow, patrz
     plan_flow). Bez tego komunikatu rzadka mapa wygląda dokładnie tak samo
     jak "tędy naprawdę nic nie jedzie" i nie da się tych dwóch rzeczy
-    odróżnić na ekranie. */
+    odróżnić na ekranie.
+
+    Mówi też, CO z tym zrobić. Najczęstsza przyczyna to nie awaria, tylko za
+    wąskie okno na rzadkim kierunku: Bielany Wrocławskie - PKP -> Wojszyce
+    o 13:29 mieści w oknie z suwaków (12 min naddatku) dokładnie jeden kurs,
+    bo następny jedzie pół godziny później - wachlarz nie ma z czego powstać.
+    Poszerzenie zakresu jest wtedy jedynym wyjściem i to ono ma stać
+    w komunikacie, a nie sam fakt porażki. */
 function showDegradedNotice() {
     resultsBox.insertAdjacentHTML('afterbegin',
-        '<div class="notice error degraded"><p>Tryb awaryjny: nie udało się '
-        + 'ułożyć wachlarza połączeń, mapa pokazuje tylko najszybszą trasę.'
+        '<div class="notice error degraded"><p>Tryb awaryjny: w tym oknie '
+        + 'czasowym nie ułożył się wachlarz połączeń — mapa pokazuje samą '
+        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „+X min” nad mapą.'
         + '</p></div>');
+}
+
+/** Mapa narysowana, lista obok pusta. To NIE jest błąd i nie ma go udawać:
+    czerwona ramka nad kompletem połączeń mówiła "coś się zepsuło", a mapa
+    pod nią była w porządku. Do 2026-09-04 kazała w dodatku zawęzić okno
+    czasowe - czyli odwrócić dokładnie to, co użytkownik przed chwilą zrobił
+    przyciskiem "+X min". Zostaje sam fakt, neutralnym stylem, bez polecenia
+    (tak samo jak showRailOnlyNotice niżej: wyjaśnienie, nie awaria). */
+function showWideWindowNotice() {
+    resultsBox.innerHTML = '<div class="notice"><p>Mapa pokazuje wszystkie '
+        + 'połączenia z tego okna czasowego. Przy tak szerokim oknie nie '
+        + 'ułożyła się z nich lista tras obok.</p></div>';
 }
 
 /** Informacja przy relacji poza obszarem MPK Wrocławia (pole `rail_only`
@@ -2298,10 +2419,8 @@ function renderPlan(data, refit) {
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
         // przeczyć (zdarza się przy szerokim oknie, gdy graf urośnie
         // ponad budżet szukania w _enumerate_journeys).
-        showError(data.segments.length
-            ? 'Mapa pokazuje połączenia, ale przy tak szerokim oknie nie '
-              + 'udało się z nich złożyć listy tras. Zawęź okno czasowe.'
-            : 'Nie znaleziono żadnego połączenia w tym oknie czasowym.');
+        if (data.segments.length) showWideWindowNotice();
+        else showError('Nie znaleziono żadnego połączenia w tym oknie czasowym.');
     } else {
         renderJourneys();
     }
@@ -2384,6 +2503,7 @@ function setSearching(on) {
 function search() {
     if (!startInput.value || !endInput.value) return;
     const token = ++requestToken;
+    mapHorizonSec = null;      // nowa relacja zaczyna od okna z suwaków
     clearJourney();
     clearPreview();
     setSearching(true);
@@ -2630,12 +2750,16 @@ function applyStoredDevPrefs() {
     }
 }
 
-function liveSlider(inputId, valueId) {
+function liveSlider(inputId, valueId, dropsHorizon) {
     const input = $(inputId);
     const valueEl = $(valueId);
     let timer = null;
     input.addEventListener('input', () => {
         valueEl.textContent = input.value;
+        // Ruszenie suwakiem okna to powrót do okna liczonego z suwaków -
+        // inaczej ręczne przedłużenie (szersze) i tak by je przykryło, a
+        // suwak wyglądałby na zepsuty.
+        if (dropsHorizon) mapHorizonSec = null;
         saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
@@ -2647,9 +2771,9 @@ function liveSlider(inputId, valueId) {
 }
 applyStoredDevPrefs();
 liveSlider('range', 'range-value');
-liveSlider('extra', 'extra-value');
-liveSlider('extra-floor', 'extra-floor-value');
-liveSlider('extra-cap', 'extra-cap-value');
+liveSlider('extra', 'extra-value', true);
+liveSlider('extra-floor', 'extra-floor-value', true);
+liveSlider('extra-cap', 'extra-cap-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
 
 // --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------

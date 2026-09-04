@@ -437,6 +437,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
   to, to_time, minutes, stops, stops_count, path}`; etap pieszy:
   `{kind: "walk", text, minutes, from, to, path}`.
+  `horizon_sec` (opcjonalny) to ręczne przedłużenie zakresu mapy — przycisk
+  „+X min" przy pasku nad mapą: żądana szerokość CAŁEGO okna w sekundach,
+  liczona od godziny z zapytania. Może okno tylko poszerzyć (suwaki
+  `extra_*` zostają jedynym sposobem na jego przycięcie) i jest przycinany
+  do `planner.MAX_HORIZON_SEC` (2 h) — szerokość okna to wprost koszt skanu,
+  więc sufit stoi po stronie serwera. Efekt widać w `limit_sec`/`deadline`.
   Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
   akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
   (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
@@ -519,6 +525,40 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-04** — ciężar obrazka: najbledsza linia chudnie (2 px zamiast
+  stałych 3) i blednie mocniej (krycie 0.3 zamiast 0.4), a kropki przesiadkowe
+  przestały mieć krycie wpisane na sztywno — biorą jasność najjaśniejszego
+  kawałka, który ich dotyka, przez to samo przeskalowanie co segmenty (nowe
+  pole `w` przy węźle). Powód: przy szerokim oknie 240 z 271 kawałków siedzi
+  przy bladym końcu skali, ale przy jednakowej grubości sumują się w plamę
+  cięższą niż korytarz, który naprawdę prowadzi do celu; 66 jednakowo mocnych
+  kropek dokładało ten ciężar tam, gdzie było ich najwięcej. Kropka startowa
+  zostaje pełna zawsze. Kontrakt nietknięty — to wygląd, nie wybór.
+- **2026-09-04** — reguła zawracania przestała ucinać kursy, które zahaczają
+  o pętelkę PO DRODZE i jadą dalej (punkt 4 kontraktu: intencja bez zmian,
+  poprawiona miara — pętla kończy kurs tylko wtedy, gdy po powrocie nie ma już
+  nic nowego). Na Bielanach ucinała jedyne wyjście ze startu, przez co mapa
+  rysowała kawałki niepołączone z przystankiem startowym i wpadała w tryb
+  awaryjny. Przemiot 24 relacji: 22 bez zmian, 2 naprawione, zero regresji.
+- **2026-09-04** — komunikaty nad mapą przestały jej przeczyć: tryb awaryjny
+  wskazuje wyjście (poszerzenie zakresu przyciskiem „+X min"), a narysowana
+  mapa z pustą listą obok dostaje neutralną ramkę zamiast czerwonej i nie każe
+  już zawężać okna czasowego — było to dokładne odwrócenie tego, co użytkownik
+  robi tym przyciskiem. Zmiana dotyczy samych komunikatów, nie liczenia mapy.
+- **2026-09-04** — notka o takcie w dymku przystanku („co 20 min") liczy się
+  z PEŁNEJ tablicy przystanku, a nie z listy po odsiewie: takt jest cechą
+  linii, nie okna mapy, więc zostaje także wtedy, gdy kolejny kurs wypada
+  już poza zakresem. Wcześniej znikał dokładnie tam, gdzie był
+  najpotrzebniejszy — na rzadkim węźle blisko granicy okna.
+- **2026-09-04** — przycisk „+X min" przy pasku nad mapą (zgłoszenie #79):
+  X to połowa tego, co mapa pokazuje w tej chwili, więc klik rozciąga zakres
+  rysowania w przód razy 1,5, a kolejne klikają dalej — do twardego sufitu
+  2 h (`planner.MAX_HORIZON_SEC`), przy którym przycisk znika. W API nowy
+  parametr `horizon_sec`; może okno tylko poszerzyć, przycinanie zostaje
+  w gestii suwaków pod zębatką. Przy okazji naprawiony emulator frontu
+  (`tests/js/harness.js`), który od jakiegoś czasu w ogóle nie wstawał —
+  atrapie grupy warstw brakowało `clearLayers`.
 
 - **2026-08-31** — kolej przestała być doklejką: stacje dokładane do dnia
   PRZED budowaniem miejsc, więc przechodzą przez to samo sklejanie po nazwie

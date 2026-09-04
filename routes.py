@@ -216,4 +216,7 @@ def init_routes(app):
             extra_floor_sec=_float_arg("extra_floor_sec"),
             extra_cap_sec=_float_arg("extra_cap_sec"),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
+            # Ręczne "+X min" przy pasku nad mapą - żądana szerokość całego
+            # okna. Sufit i to, że może okno tylko poszerzyć, pilnuje planner.
+            horizon_sec=_float_arg("horizon_sec"),
         ))

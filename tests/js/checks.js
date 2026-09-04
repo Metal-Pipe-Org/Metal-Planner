@@ -228,6 +228,27 @@ checks.przelacznik_czasu_zmienia_grupki = (() => {
     };
 })();
 
+/* Mapa z połączeniami + pusta lista obok = wyjaśnienie, nie awaria. Nade
+   wszystko: żadnego "zawęź okno" - to dokładne odwrócenie tego, co użytkownik
+   robi przyciskiem "+X min". Pusta mapa to co innego i dalej jest błędem. */
+checks.pelna_mapa_bez_listy_nie_jest_bledem = (() => {
+    app.renderPlan({...FLOW_FIXTURE, journeys: []}, false);
+    const zMapa = app.resultsBox.innerHTML;
+
+    app.renderPlan({...FLOW_FIXTURE, journeys: [], segments: []}, false);
+    const bezMapy = app.resultsBox.innerHTML;
+
+    app.renderPlan(FLOW_FIXTURE, false);   // stan z fixture'a wraca na miejsce
+    return {
+        ok: !zMapa.includes('notice error')       // nie czerwone
+            && !zMapa.toLowerCase().includes('zawęź')
+            && zMapa.includes('notice')
+            && bezMapy.includes('notice error')   // pusta mapa to nadal błąd
+            && bezMapy.includes('Nie znaleziono'),
+        zMapa: zMapa.slice(0, 200), bezMapy: bezMapy.slice(0, 160),
+    };
+})();
+
 // --- tryb awaryjny widoczny na ekranie ------------------------------------
 
 checks.tryb_awaryjny_mowi_o_sobie_na_ekranie = (() => {
@@ -421,6 +442,25 @@ checks.kropki_wachlarza = (() => {
     };
 })();
 
+/* Kropka waży tyle, co to, co przy niej leży: krycie idzie z jasności węzła
+   przez tę samą skalę, co krycie linii. Start jest wyjątkiem - to nie jedna
+   z opcji, tylko miejsce, w którym stoisz (zgłoszone 2026-09-04). */
+checks.kropka_bierze_jasnosc_z_otoczenia = (() => {
+    const dots = app.flowStopDots([
+        {name: 'Jasny', lat: 51.13, lon: 16.95, sec: 48720, lines: [], w: 1},
+        {name: 'Blady', lat: 51.11, lon: 17.01, sec: 49000, lines: [], w: 0},
+        {name: 'Start', lat: 51.10, lon: 17.00, sec: 48000, lines: [],
+         w: 0, start: true},
+    ]);
+    const [jasny, blady, start] = dots.map(d => d.options.opacity);
+    return {
+        ok: jasny === app.lookOpacity(1) && blady === app.lookOpacity(0)
+            && blady < jasny && start === app.lookOpacity(1)
+            && dots.every(d => d.options.fillOpacity === d.options.opacity),
+        jasny, blady, start,
+    };
+})();
+
 /* Tablica pokazuje tylko to, w co MAPA pozwala tu wsiąść - z kierunkiem,
    bo ta sama linia mija węzeł w obie strony (zgłoszone 2026-08-29:
    dymek na Pilczycach wypisywał tramwaj jadący tam, skąd się przyjechało). */
@@ -503,6 +543,31 @@ checks.rytm_z_mediany_nie_ze_sredniej = (() => {
     // przerwy: 10, 10, 10, 120 -> mediana 10, średnia 37,5
     const wynik = app.summariseRepeats([dep(0), dep(10), dep(20), dep(30), dep(150)]);
     return {ok: wynik[0].every_min === 10, every_min: wynik[0].every_min};
+})();
+
+/* Takt pisze się także wtedy, gdy kolejny kurs wypada już POZA zakresem mapy:
+   "co 20 min" to informacja o linii, nie o oknie. Sprawdzane przez cały dymek,
+   bo chodzi też o to, czy pełna tablica w ogóle dochodzi tam, gdzie liczy się
+   rytm. */
+checks.rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem = (() => {
+    const dep = (min, num) => ({time: '00:00', sec: min * 60, in_min: min,
+                               num, mode: 'bus', headsign: 'KRZYKI'});
+    const kursy = [dep(3, '112'), dep(23, '112'), dep(43, '112'), dep(63, '112')];
+    const pelna = {stop: 'Sosnowiecka', from_time: '12:00',
+                   departures: kursy, all_departures: kursy};
+    // Przez PRAWDZIWE sito, nie obok niego: pełna tablica ma przez nie
+    // przejść nietknięta. W oknie zostaje tylko pierwszy kurs.
+    const poOdsiewie = app.keepWithinHorizon(pelna, 10 * 60);
+    const html = app.timetableHtml(poOdsiewie);
+    // ...a bez pełnej tablicy nie ma z czego policzyć rytmu i notki nie ma.
+    const bezPelnej = app.timetableHtml({
+        stop: 'Sosnowiecka', from_time: '12:00', departures: [kursy[0]],
+    });
+    return {
+        ok: poOdsiewie.departures.length === 1
+            && html.includes('co 20 min') && !bezPelnej.includes('co '),
+        html: html.slice(-160), bezPelnej: bezPelnej.slice(-160),
+    };
 })();
 
 /* Kierunek to osobna opcja - i osobny wiersz z własnym rytmem. */
@@ -841,6 +906,43 @@ checks.czekanie_jest_widoczne = (() => {
             && !dzis.includes('jutro')
             && zaraz === '',
         jutro, dzis, zaraz,
+    };
+})();
+
+/* Przycisk "+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
+   TERAZ (klik rozciąga zakres razy 1,5), klik przekazuje nowy zakres do
+   serwera, a przy suficie 2 h przycisku nie ma wcale - nie ma już czego
+   dokładać. */
+checks.przycisk_przedluza_zakres_mapy = (() => {
+    const pasek = () => document.getElementById('time-headline').innerHTML;
+    const etykieta = html => (html.match(/headline-more[^>]*>\+([^<]*)</) || [])[1] || '';
+
+    const krok = app.horizonStep(FLOW_FIXTURE.limit_sec);
+    const naStarcie = etykieta(pasek());
+
+    app.extendHorizon(FLOW_FIXTURE.limit_sec, krok);
+    const zapytanie = app.queryParams().toString();
+
+    // Sufit: zakres już na 2 h - nie ma czego dokładać, przycisk znika.
+    app.drawFlow({...FLOW_FIXTURE, limit_sec: app.MAX_HORIZON_SEC}, false);
+    const przySuficie = pasek();
+    // ...a tuż pod sufitem przycisk obiecuje tylko to, co zostało do sufitu,
+    // nie pełną połowę okna.
+    const podSufitem = app.horizonStep(app.MAX_HORIZON_SEC - 600);
+    app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
+
+    return {
+        ok: krok === FLOW_FIXTURE.limit_sec / 2          // połowa okna
+            && naStarcie === '35 min'                    // połowa z 1 h 10 min
+            && app.mapHorizonSec === 1.5 * FLOW_FIXTURE.limit_sec
+            && zapytanie.includes('horizon_sec=6300')    // i to leci do serwera
+            && !przySuficie.includes('headline-more')    // przy 2 h nie ma przycisku
+            && podSufitem === 600                        // przy 1h50 dokłada 10 min
+            && app.horizonStep(app.MAX_HORIZON_SEC) === 0,
+        krok, naStarcie, podSufitem,
+        horizon: app.mapHorizonSec,
+        zapytanie: zapytanie.slice(0, 200),
+        sufit: przySuficie.slice(0, 200),
     };
 })();
 

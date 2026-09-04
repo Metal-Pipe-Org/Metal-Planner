@@ -230,6 +230,13 @@ def test_flow_map_has_hoverable_dots_of_its_own(front):
     _check(front, "kropki_wachlarza")
 
 
+def test_a_dot_takes_its_brightness_from_its_surroundings(front):
+    """Kropka niczego nie rusza (punkt 11), więc jasność BIERZE: krycie idzie
+    z jasności węzła przez tę samą skalę, co krycie linii. Start zostaje pełny
+    - to nie jedna z opcji, tylko miejsce, w którym stoisz."""
+    _check(front, "kropka_bierze_jasnosc_z_otoczenia")
+
+
 def test_the_bubble_lists_only_what_the_map_offers_here(front):
     """Zgłoszone 2026-08-29: dymek na Pilczycach wypisywał wszystko, co przez
     nie przejeżdża - z tramwajem jadącym tam, skąd się przyjechało. Zostaje
@@ -249,6 +256,14 @@ def test_the_cadence_is_a_median_not_a_mean(front):
     """Jeden nocny przeskok o godzinę nie ma prawa przesunąć liczby opisującej
     normalny takt."""
     _check(front, "rytm_z_mediany_nie_ze_sredniej")
+
+
+def test_the_cadence_shows_even_past_the_map_range(front):
+    """„co 20 min" mówi o LINII, nie o oknie mapy: notka zostaje także wtedy,
+    gdy kolejny kurs wypada już poza zakresem. Takt liczy się z pełnej tablicy
+    przystanku, sprzed odsiewu - inaczej znikał dokładnie tam, gdzie był
+    najpotrzebniejszy: na rzadkim węźle blisko granicy okna."""
+    _check(front, "rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem")
 
 
 def test_the_cadence_keeps_directions_apart(front):
@@ -381,3 +396,21 @@ def test_the_corner_window_opens_on_the_start_stop(front):
     wyrusza - bez najeżdżania na cokolwiek. Przy wyłączonym okienku i bez
     wybranego startu nie otwiera się wcale."""
     _check(front, "okienko_startuje_od_przystanku_startowego")
+
+
+# ------------------------------------------------- przedłużanie zakresu ---
+
+def test_a_full_map_without_a_list_is_not_an_error(front):
+    """Narysowana mapa z pustą listą obok to wyjaśnienie, nie awaria -
+    czerwona ramka nad kompletem połączeń mówiła, że coś się zepsuło. I nie
+    każe zawężać okna czasowego: to dokładne odwrócenie tego, co użytkownik
+    przed chwilą zrobił przyciskiem „+X min". Pusta mapa zostaje błędem."""
+    _check(front, "pelna_mapa_bez_listy_nie_jest_bledem")
+
+
+def test_the_button_stretches_the_map_range_up_to_the_ceiling(front):
+    """„+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
+    w tej chwili (klik rozciąga zakres razy 1,5 i wysyła go do serwera jako
+    horizon_sec), a przy suficie 2 h przycisku nie ma - nie ma już czego
+    dokładać. Tuż pod sufitem obiecuje tylko resztę do sufitu."""
+    _check(front, "przycisk_przedluza_zakres_mapy")

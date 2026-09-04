@@ -111,7 +111,14 @@ function Bounds(latlngs) {
 
 const layerBase = extra => Object.assign({
     _added: false,
-    addTo(m) { this._added = true; if (m && m._layers) m._layers.add(this); return this; },
+    // Celem addTo bywa mapa ALBO grupa warstw (markery pojazdow wchodza
+    // wprost do vehiclesLayer) - stub musi umiec jedno i drugie.
+    addTo(m) {
+        this._added = true;
+        if (m && m._layers) m._layers.add(this);
+        else if (m && m.addLayer) m.addLayer(this);
+        return this;
+    },
     remove() { this._added = false; return this; },
     // Uchwyty pamiętane, nie wyrzucane: bez tego nie da się odegrać
     // najechania na kropkę (patrz checks.js, pierwszenstwo_kropki).
@@ -168,6 +175,14 @@ const L = {
         kind: 'group', layers: (layers || []).slice(),
         // Front szuka po warstwach grupy kropki startowej (seedStartPanel).
         getLayers() { return this.layers; },
+        // Warstwa pojazdow jest czyszczona i napelniana od nowa przy kazdym
+        // odswiezeniu (renderVehicles) - bez tych trzech emulator nie wstaje.
+        clearLayers() { this.layers = []; return this; },
+        addLayer(layer) { this.layers.push(layer); return this; },
+        removeLayer(layer) {
+            this.layers = this.layers.filter(l => l !== layer);
+            return this;
+        },
     }),
     tileLayer: () => layerBase({kind: 'tiles', options: {}}),
     control: {zoom: () => layerBase({kind: 'control', options: {}})},
@@ -430,6 +445,8 @@ const INJECTION = `
     get flowPick() { return flowPick; },
     get flowParts() { return flowParts; },
     nodePoint, dotOpts, seedStartPanel,
+    horizonStep, extendHorizon, queryParams, MAX_HORIZON_SEC,
+    get mapHorizonSec() { return mapHorizonSec; },
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },
 };

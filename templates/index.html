@@ -177,7 +177,9 @@
         <p class="field-hint">
             Pasek podaje godzinę i czas najszybszego dojazdu oraz granicę,
             do jakiej mapa jeszcze rysuje. Najechanie na pierwszą liczbę
-            pokazuje, którą trasą się ten czas osiąga.
+            pokazuje, którą trasą się ten czas osiąga. Przycisk „+X min” na
+            końcu paska rozciąga ten zakres o połowę (razy 1,5, do 2 h) —
+            kolejne wyszukiwanie wraca do okna z suwaków niżej.
         </p>
     </details>
 
@@ -382,9 +384,9 @@
 
         <div class="field compact">
             <label for="look-min-op">
-                Najbledsza linia — krycie <output id="look-min-op-value">0.4</output>
+                Najbledsza linia — krycie <output id="look-min-op-value">0.3</output>
             </label>
-            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.4">
+            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.3">
             <p class="field-hint">
                 Dolny próg widoczności (punkt 8 kontraktu). Najbledszy kawałek
                 ma być widoczny bez najeżdżania myszką.
@@ -393,9 +395,9 @@
 
         <div class="field compact">
             <label for="look-min-w">
-                Najbledsza linia — grubość <output id="look-min-w-value">3</output> px
+                Najbledsza linia — grubość <output id="look-min-w-value">2</output> px
             </label>
-            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="3">
+            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="2">
         </div>
 
         <div class="field compact">

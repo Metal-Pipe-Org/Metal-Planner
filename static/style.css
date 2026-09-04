@@ -963,6 +963,25 @@ body.panel-hidden #sidebar {
 
 .headline-sep { color: var(--ink-faint); }
 
+/* "+X min" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie jak
+   przycisk formularza: stoi w pasku, w którym wszystko inne jest tekstem. */
+.headline-more {
+    flex: none;
+    margin: -2px -6px -2px 0;
+    padding: 3px 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface-alt);
+    color: var(--ink);
+    font: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+
+.headline-more:hover { background: var(--ink); color: #fff; }
+.headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
 @media (max-width: 900px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
        pod niego i zwęża się do samych liczb. */

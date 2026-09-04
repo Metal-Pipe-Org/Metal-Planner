@@ -502,6 +502,14 @@ DEFAULT_EXTRA_CAP_SEC = 900     # domyślnie: najwyżej 15 min naddatku
 MIN_EXTRA_CAP_SEC = 600
 MAX_EXTRA_CAP_SEC = 7200        # (suwak w UI go nadpisuje) - sufit 120 min
 
+# Ręczne przedłużenie zakresu mapy ("+X min" przy pasku nad mapą). Suwaki
+# wyżej opisują okno WZGLĘDEM najszybszej trasy - to jest zamiast tego
+# ŻĄDANIE KONKRETNEJ SZEROKOŚCI: "rysuj wszystko, co startuje w ciągu tylu
+# sekund od godziny z zapytania". Może okno tylko POSZERZYĆ, nigdy przyciąć
+# (przycinanie ma zostać wyłącznie w gestii suwaków), a sufit jest twardy,
+# bo szerokość okna to wprost koszt skanu.
+MAX_HORIZON_SEC = 2 * 3600
+
 Q_ANCHOR_TOL = 0.10     # tolerancja jasności przy porównaniu segmentów
                         # (patrz _extract_transfer_graph; kotwica końca mapy
                         # już jej nie używa - patrz _select_and_anchor)
@@ -632,7 +640,7 @@ def _summarize_journey(legs, rides, arrival, dep_sec):
 def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, range_m=None, extra_pct=None,
               extra_floor_sec=None, extra_cap_sec=None, journey_limit=None,
-              transfer_gain_sec=None):
+              transfer_gain_sec=None, horizon_sec=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -680,6 +688,11 @@ def plan_flow(start_query, end_query, when=None,
     (bardzo krótkie albo bardzo długie trasy). Nie ma osobnego progu
     jasności - wszystko w oknie czasowym jest pokazywane, jasność (q) służy
     już tylko do intensywności rysowania.
+    horizon_sec to ręczne przedłużenie zakresu ("+X min" przy pasku nad
+    mapą, patrz MAX_HORIZON_SEC): żądana szerokość CAŁEGO okna w sekundach,
+    liczona od godziny z zapytania, przycięta do sufitu i brana tylko wtedy,
+    gdy jest szersza niż okno z suwaków - przycinać okno mogą dalej wyłącznie
+    suwaki.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -748,6 +761,9 @@ def plan_flow(start_query, end_query, when=None,
         best_dep = dep_sec
     deadline = _deadline(best_arr, best_dep, extra_pct, extra_floor_sec,
                          extra_cap_sec)
+    if horizon_sec is not None:
+        wanted = max(0, min(int(horizon_sec), MAX_HORIZON_SEC))
+        deadline = max(deadline, dep_sec + wanted)
 
     earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, target_stops, dep_sec, deadline)
@@ -1028,7 +1044,8 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
             # czyli odległość co najmniej dwóch kroków.
             arr_place = day.place_of.get(arr_s, arr_s)
             wczesniej = seen_places.get(arr_place)
-            if wczesniej is not None and len(stops_seq) - wczesniej >= 2:
+            if wczesniej is not None and len(stops_seq) - wczesniej >= 2 \
+                    and not _rides_on(day, conns, idxs, i, seen_places):
                 break
             seen_places.setdefault(arr_place, len(stops_seq))
             departures.append((dep_s, dep_t))
@@ -1084,6 +1101,35 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
         for stop, dep in departures:
             entry["dep_times"].setdefault(stop, []).append(dep)
     return list(raw.values())
+
+
+def _rides_on(day, conns, idxs, i, seen_places):
+    """Czy kurs PO zawróceniu wiezie jeszcze dokądkolwiek, gdzie jeszcze nie
+    był - czy pętla jest jego końcem.
+
+    Reguła zawracania (patrz _discover_segments) miała ucinać OGON wjeżdżający
+    na pętlę końcową tylko po to, żeby zaraz z niej wrócić. Sama w sobie tnie
+    jednak na PIERWSZYM powrocie do minionego miejsca, więc trafiała też
+    w kursy, które zahaczają o pętelkę W ŚRODKU trasy i jadą dalej.
+
+    Zmierzone na zgłoszeniu z 2026-09-04 (Bielany Wrocławskie - PKP ->
+    Wojszyce, 13:29): Autobus 612 obsługuje osiedlową pętelkę Boczna ->
+    Kwiatowa -> Boczna, a dopiero potem jedzie na Partynice, gdzie jest
+    jedyna przesiadka w stronę celu. Cięcie na powrocie na Boczną zabierało
+    Partynice, czyli JEDYNE wyjście ze startu - mapa zostawała bez ani jednego
+    kawałka dotykającego przystanku startowego (mierzone: 24 narysowane
+    kawałki, zero przy starcie) i wchodziła w tryb awaryjny.
+
+    Intencja zostaje, zmienia się miara: pętla kończy kurs tylko wtedy, gdy po
+    powrocie nie ma już ani jednego NOWEGO miejsca. Miara jest czysto
+    topologiczna (kolejność miejsc w rozkładzie), a szersze okno może
+    najwyżej ujawnić dalsze przystanki tego samego kursu - więc poszerzenie
+    suwaka może kawałków tylko dołożyć, nigdy zabrać (punkt 9)."""
+    for j in idxs[idxs.index(i) + 1:]:
+        arr_s = conns[j][3]
+        if day.place_of.get(arr_s, arr_s) not in seen_places:
+            return True
+    return False
 
 
 def _sibling_places(day, stop):
@@ -1863,7 +1909,7 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
         seg_list.append(item)
     seg_list.sort(key=lambda s: s["w"])   # blade rysujemy pierwsze, jaskrawe na wierzchu
     return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline,
-                                    source_stops)
+                                    source_stops, rescale)
 
 
 def _rides_back(earliest, board, alight):
@@ -1951,7 +1997,7 @@ def _place_center(day, place_key, fallback_stop):
 
 
 def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
-                    source_stops=None):
+                    source_stops=None, rescale=None):
     """Węzły przesiadkowe mapy - to, na czym front stawia kropki z tablicą
     odjazdów.
 
@@ -2017,7 +2063,7 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     # Każde dotknięcie przystanku przez narysowany kawałek: (miejsce, linia,
     # słupek, godzina, czy wiezie DALEJ, czy dowozi TU, czy to koniec kawałka).
     touches = []
-    for (label, stops_seq), (_q, _shape, times, _reach, _ok, headsign) in pieces.items():
+    for (label, stops_seq), (q, _shape, times, _reach, _ok, headsign) in pieces.items():
         if times is None:
             continue                     # bez godzin nie ma o co pytać
         num, mode = _line_parts(label)
@@ -2025,7 +2071,7 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         last = len(stops_seq) - 1
         for i, stop in enumerate(stops_seq):
             touches.append((
-                day.place_of.get(stop, stop), line, stop, times[i],
+                day.place_of.get(stop, stop), line, stop, times[i], q,
                 # Wiezie dalej - chyba że dalej znaczy Z POWROTEM (patrz
                 # _rides_back). Pytamy o KAWAŁEK JAKO CAŁOŚĆ, nie o drogę od
                 # tego przystanku: `_rides_back` uznaje za cofnięcie także
@@ -2041,9 +2087,17 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
             ))
 
     nodes = {}
-    for key, line, stop, when, onward, arriving, _is_end in touches:
+    for key, line, stop, when, q, onward, arriving, _is_end in touches:
         node = nodes.setdefault(
-            key, {"sec": None, "stop": None, "boards": set(), "arrivals": {}})
+            key, {"sec": None, "stop": None, "boards": set(), "arrivals": {},
+                  "q": 0.0})
+        # Jasność MIEJSCA to jasność najlepszego kawałka, który go dotyka.
+        # Kropka ma ważyć tyle, co to, co przy niej leży (punkt 11: kropka
+        # niczego nie rusza, więc bierze jasność, a nie nadaje jej) - a
+        # miejsce jest tak dobre, jak NAJLEPSZA rzecz, którą się z niego
+        # jedzie; minimum gasiłoby węzeł na najszybszej trasie za każdym
+        # razem, gdy tędy przejeżdża też cokolwiek bladego.
+        node["q"] = max(node["q"], q)
         # Najwcześniej, kiedy mapa potrafi tu kogoś postawić - także pojazdem,
         # który tędy tylko przejeżdża: siedząc w nim, jest się tu o tej godzinie.
         if node["sec"] is None or when < node["sec"]:
@@ -2114,6 +2168,11 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
             "clat": clat,
             "clon": clon,
             "sec": node["sec"],
+            # Ta sama skala co przy kawałkach ("w" segmentu) - z tym samym
+            # przeskalowaniem (punkt 9), inaczej kropka i linia pod nią
+            # mówiłyby dwie różne rzeczy o tej samej jasności. Front przelicza
+            # to na krycie tym samym suwakiem, co linie.
+            "w": round(rescale(node["q"]) if rescale else node["q"], 3),
             "lines": lines,
         }
         if key in start_places:
