@@ -35,6 +35,13 @@ body {
     inset: 0;
 }
 
+/* Blokada zoomu strony w zainstalowanej PWA (patrz pwa.js, klasa dodawana
+   tylko w display-mode: standalone) - mapa dostaje touch-action: none już z
+   leaflet.css (.leaflet-container), więc jej gest przybliżania działa dalej. */
+html.standalone-app body {
+    touch-action: pan-x pan-y;
+}
+
 /* --------------------------------------------------- elementy wspólne --- */
 
 .card {
@@ -971,10 +978,17 @@ body.panel-hidden #sidebar {
 
 .headline-sep { color: var(--ink-faint); }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
-       pod niego i zwęża się do samych liczb. */
-    .time-headline { top: auto; bottom: 64px; font-size: 12px; }
+       pod niego i zwęża się do samych liczb. Odsunięty o tyle co zakładki
+       Mapa/Trasy (patrz #view-tabs/.toast) plus wcięcie ekranu na dole -
+       bez tego pasek chował się pod zakładkami na telefonach z home
+       indicatorem (np. w zainstalowanej aplikacji). */
+    .time-headline {
+        top: auto;
+        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+        font-size: 12px;
+    }
 }
 
 /* ------------------------------------ tablica odjazdów przesiadki --- */
@@ -1207,7 +1221,15 @@ body.dev-open #flow-panel { right: 322px; }
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 6px;
+    /* Panel przewija się w sobie (#dev-panel, overflow-y: auto) - bez sticky
+       nagłówek z przyciskiem ✕ znika ze scrollem razem z suwakami, i nie da
+       się już zamknąć panelu bez przewijania z powrotem na sam wierzch. */
+    position: sticky;
+    top: -14px;
+    margin: -14px -14px 6px;
+    padding: 14px 14px 6px;
+    background: var(--surface);
+    z-index: 1;
 }
 
 .dev-head h2 {
@@ -1517,10 +1539,14 @@ body.dev-open #flow-panel { right: 322px; }
     }
 
     #dev-panel {
+        /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu, tak jak
+           #sidebar - bez tego górna krawędź panelu (z przyciskiem ✕) chowa
+           się pod notchem/paskiem statusu. */
+        top: calc(16px + env(safe-area-inset-top, 0px));
         left: 8px;
         right: 8px;
         width: auto;
-        max-height: 70vh;
+        max-height: calc(70vh - env(safe-area-inset-top, 0px));
         overflow-y: auto;
     }
 

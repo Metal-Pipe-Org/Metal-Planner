@@ -872,6 +872,14 @@ function renderTimeHeadline() {
     best.addEventListener('mouseleave', hideFastest);
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
+    // Na dotyku nie ma "mouseenter" - to jedyny sposób, żeby zobaczyć trasę
+    // najszybszego dojazdu na telefonie. Toggle, nie show: drugie stuknięcie
+    // (albo stuknięcie gdzie indziej, które i tak odpala renderTimeHeadline
+    // od nowa) chowa trasę z powrotem.
+    best.addEventListener('click', event => {
+        event.stopPropagation();
+        if (fastestLayer) hideFastest(); else showFastest();
+    });
 }
 
 // --- numery linii: jedna grupka na cały wspólny korytarz -------------------
