@@ -1,5 +1,5 @@
 ---
-description: Rozwiąż proste issue z GitHuba i otwórz PR
+description: Rozwiąż proste issue z GitHuba na gałęzi zgłoszenia
 ---
 
 Rozwiąż zgłoszenie z GitHuba podane w argumentach: $ARGUMENTS
@@ -53,15 +53,22 @@ Muszą przechodzić wszystkie testy, nie tylko nowy. Jeśli po dwóch podejścia
 nadal jest czerwono — nie obchodź problemu obejściem: opisz w komentarzu do
 issue, co się nie udało, i zakończ.
 
-## 5. Otwórz PR
+## 5. Zamknij pracę
 
 - Bazą jest zawsze gałąź `testing` — nigdy `main`.
-- Pracuj na gałęzi przygotowanej przez workflow (jeśli już jesteś na `claude/...`),
-  w przeciwnym razie załóż `claude/issue-<ISSUE_NUMBER>-<krótki-opis>` z `testing`.
+- Pracuj na gałęzi, którą przygotował workflow, i tylko na niej. Nie zakładaj
+  własnej gałęzi: workflow po Twoim zakończeniu przeniesie commity na trwałą
+  gałąź zgłoszenia (`claude/issue-<ISSUE_NUMBER>`), na której zbiera się cała
+  praca z tego wątku. Jeśli zastajesz w drzewie roboczym poprawki dotyczące
+  tego zgłoszenia — to Twoja własna praca z wcześniejszego wpisu w wątku.
+  Dopracuj ją zgodnie z najnowszym komentarzem, nie zaczynaj od nowa.
 - Commit **po angielsku**, w trybie rozkazującym, np. `Fix transfer time after midnight`
   (sam kod, komentarze i opisy pozostają po polsku — po angielsku są tylko commity).
-- `gh pr create --base testing`, opis: co było źle, co zmieniasz, jak to
-  sprawdzono. W treści PR daj `Closes #<ISSUE_NUMBER>`.
-- Na koniec napisz w komentarzu do issue jednym zdaniem, co zrobiłeś, i podlinkuj PR.
+- Wypchnij gałąź, na której pracujesz.
+- Nie zakładaj PR-a (`gh pr create`) i nie podawaj linku do jego utworzenia —
+  robi to workflow, który jako jedyny zna gałąź docelową. Gdy PR już istnieje,
+  Twoje commity trafią do niego same.
+- Na koniec napisz w komentarzu do zgłoszenia jednym–dwoma zdaniami, co było źle
+  i co zmieniłeś.
 
 PR zostaje do przejrzenia przez człowieka — nie merguj go samodzielnie.

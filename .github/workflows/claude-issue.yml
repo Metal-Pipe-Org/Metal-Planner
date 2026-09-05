@@ -1,30 +1,69 @@
 name: Claude - rozwiąż issue
 
 # Odpala się, gdy ktoś z zespołu wspomni @claude — w treści nowego zgłoszenia
-# albo w komentarzu pod nim. Claude czyta zgłoszenie wraz z dyskusją,
-# wprowadza poprawkę, uruchamia testy i otwiera PR.
+# albo w komentarzu pod nim. Claude czyta zgłoszenie wraz z dyskusją, wprowadza
+# poprawkę, uruchamia testy i dokłada ją do gałęzi tego zgłoszenia. Zgłoszenia,
+# którymi się zajmował, oznacza etykietą "claude" — to sam znacznik, etykieta
+# niczego nie uruchamia.
+#
+# Cała praca z jednego zgłoszenia ląduje na jednej gałęzi `claude/issue-<numer>`.
+# Akcja nie umie wznowić pracy na istniejącej gałęzi (dla zgłoszeń zawsze robi
+# `checkout -b` od nowa), więc obchodzimy to tak: podajemy jej gałąź zgłoszenia
+# jako `base_branch`, żeby odgałęziła się od dotychczasowej pracy, a po biegu
+# przewijamy gałąź zgłoszenia na to, co wyszło. Gałąź robocza akcji jest
+# tymczasowa i znika przy następnym biegu.
 on:
   issues:
     types: [opened]
   issue_comment:
     types: [created]
 
-# Jeden bieg na issue — kolejne wywołania czekają, zamiast deptać sobie po gałęzi.
+# Jeden bieg na zgłoszenie. `cancel-in-progress` sprawia, że dwa wołania pod
+# rząd nie mielą się równolegle na dwóch gałęziach — nowsze ubija starsze.
+# Realizuje przy okazji zasadę „najświeższy wpis jest wiążący" z promptu.
 concurrency:
   group: claude-issue-${{ github.event.issue.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  solve-issue:
-    # Wstępne odsianie: wołanie @claude pod issue (nie pod PR-em) i nie od bota.
-    # Uprawnień NIE sprawdzamy przez `author_association` — przy prywatnym
-    # członkostwie w organizacji GitHub zwraca tam CONTRIBUTOR albo NONE nawet
-    # dla osoby z prawem zapisu. Kto ma write, rozstrzyga sama akcja
+  # Tania bramka. Warunek `if` odsiewa bez uruchamiania runnera; sam job dokłada
+  # to, czego w wyrażeniach GitHuba nie da się zrobić — odróżnienie prawdziwego
+  # wołania od @claude przepisanego w cytacie.
+  gate:
+    # Wstępne odsianie: wołanie @claude pod zgłoszeniem (nie pod PR-em) i nie
+    # od bota. Uprawnień NIE sprawdzamy przez `author_association` — przy
+    # prywatnym członkostwie w organizacji GitHub zwraca tam CONTRIBUTOR albo
+    # NONE nawet dla osoby z prawem zapisu. Kto ma write, rozstrzyga sama akcja
     # (checkWritePermissions) i to ona odbija obcych.
     if: >-
       !github.event.issue.pull_request
-      && contains(github.event.comment.body || github.event.issue.body || '', '@claude')
       && github.event.sender.type != 'Bot'
+      && contains(github.event.comment.body || github.event.issue.body || '', '@claude')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - name: Odsiej wołania z cytatu
+        id: check
+        env:
+          BODY: ${{ github.event.comment.body || github.event.issue.body }}
+        run: |
+          # Odpowiedź cytująca poprzedni wpis Claude'a przepisuje razem z nim
+          # każde @claude, które w nim padło — łącznie z tym z tego pliku.
+          # Liczy się więc tylko @claude poza liniami cytatu.
+          if printf '%s\n' "$BODY" | grep -v '^[[:space:]]*>' | grep -q '@claude'; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "Wszystkie @claude w tym wpisie są w cytacie — pomijam." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  solve-issue:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -33,12 +72,52 @@ jobs:
       pull-requests: write
       id-token: write
 
+    env:
+      REPO: ${{ github.repository }}
+      N: ${{ github.event.issue.number }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: testing
           fetch-depth: 0
+
+      - name: Ustal gałąź bazową i posprzątaj gałęzie robocze
+        id: base
+        run: |
+          STABLE="claude/issue-${N}"
+          echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
+
+          if ! git ls-remote --exit-code --heads origin "$STABLE" >/dev/null 2>&1; then
+            echo "Brak gałęzi $STABLE — pierwszy bieg dla tego zgłoszenia."
+            echo "branch=testing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Gałąź zgłoszenia już jest — odgałęziamy się od niej, żeby Claude
+          # zastał w drzewie dotychczasową pracę i ją poprawiał, zamiast
+          # zaczynać od `testing` i pisać wszystko od nowa.
+          echo "Kontynuacja pracy na $STABLE."
+          echo "branch=$STABLE" >> "$GITHUB_OUTPUT"
+          git fetch --no-tags origin "+refs/heads/${STABLE}:refs/remotes/origin/${STABLE}"
+
+          # Gałąź robocza z poprzedniego biegu zostaje celowo, żeby link
+          # „View branch" w tamtym komentarzu nie umarł od razu. Kasujemy ją
+          # dopiero teraz i tylko wtedy, gdy jej treść jest już w gałęzi
+          # zgłoszenia — niedokończona praca z ubitego biegu zostaje do
+          # ręcznej decyzji.
+          git ls-remote --heads origin \
+            | awk '{print $2}' | sed 's|refs/heads/||' | grep "^${STABLE}-" \
+          | while read -r B; do
+              git fetch --no-tags origin "+refs/heads/${B}:refs/remotes/origin/${B}" || continue
+              if git merge-base --is-ancestor "origin/${B}" "origin/${STABLE}"; then
+                echo "Kasuję zbędną gałąź roboczą: $B"
+                git push origin --delete "$B" || true
+              else
+                echo "Zostawiam $B — ma commity spoza $STABLE."
+              fi
+            done
 
       - name: Python
         uses: actions/setup-python@v5
@@ -51,26 +130,88 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Claude
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          base_branch: testing
+          base_branch: ${{ steps.base.outputs.branch }}
           track_progress: true
           prompt: |
             /solve-issue REPO: ${{ github.repository }} ISSUE_NUMBER: ${{ github.event.issue.number }}
 
-            Zawołał Cię @${{ github.event.sender.login }}, wspominając @claude
-            w wątku. Przeczytaj całą dyskusję: najświeższy wpis jest wiążący —
-            jeśli doprecyzowuje albo zmienia treść zgłoszenia, trzymaj się jego.
+            Zawołał Cię @${{ github.event.sender.login }} w wątku zgłoszenia.
+            Przeczytaj całą dyskusję: najświeższy wpis jest wiążący — jeśli
+            doprecyzowuje albo zmienia treść zgłoszenia, trzymaj się jego.
 
-            PR-a nie zakładaj sam. Wypchnij gałąź i podaj link „Create PR"
-            z wypełnionym tytułem i opisem — otwiera go człowiek. Opis w tym
-            linku (parametr `body`) ma się zaczynać od linijki
-            `Closes #${{ github.event.issue.number }}`, dopiero pod nią opisz,
-            co było źle i co zmieniasz. Bez słowa kluczowego GitHub nie wiąże
-            PR-a ze zgłoszeniem: samo `#${{ github.event.issue.number }}` ani
-            nagłówek `# ${{ github.event.issue.number }}` nie wystarczą.
+            Gałąź, na której pracujesz, jest tymczasowa. Trwałą gałęzią tego
+            zgłoszenia jest `claude/issue-${{ github.event.issue.number }}`
+            i workflow przeniesie tam Twoje commity, gdy skończysz. Jeśli
+            zastajesz w drzewie roboczym poprawki dotyczące tego zgłoszenia, to
+            Twoja własna praca z wcześniejszego wpisu w tym wątku — dopracuj ją
+            zgodnie z najnowszym komentarzem, zamiast pisać wszystko od nowa.
+
+            Nie zakładaj PR-a i nie podawaj do niego linku — robi to workflow,
+            który jako jedyny zna docelową gałąź. Twoje wyjście to commity na
+            bieżącej gałęzi (wypchnij ją) i jeden komentarz pod zgłoszeniem:
+            co było źle i co zmieniłeś.
           claude_args: |
             --model claude-sonnet-5
             --max-turns 40
             --allowedTools 'Read,Glob,Grep,Edit,MultiEdit,Write,Bash(python:*),Bash(python3:*),Bash(pytest:*),Bash(pip:*),Bash(git:*),Bash(gh:*)'
+
+      - name: Przenieś pracę na gałąź zgłoszenia
+        id: ff
+        if: always() && steps.claude.outputs.branch_name != ''
+        env:
+          TMP: ${{ steps.claude.outputs.branch_name }}
+          STABLE: ${{ steps.base.outputs.stable }}
+        run: |
+          # Bieg bez commitów: akcja sama kasuje swoją pustą gałąź roboczą,
+          # więc nie ma czego przenosić. Sprawdzamy to osobnym `ls-remote`,
+          # żeby awaria samego `fetch` (sieć, uprawnienia) wywaliła krok,
+          # zamiast zostać wzięta za „nie było zmian".
+          if ! git ls-remote --exit-code --heads origin "$TMP" >/dev/null 2>&1; then
+            echo "Gałąź $TMP nie istnieje — ten bieg nie zmienił kodu."
+            exit 0
+          fi
+          git fetch --no-tags origin "+refs/heads/${TMP}:refs/remotes/origin/${TMP}"
+
+          # Bez --force: gałąź robocza została odcięta od $STABLE na starcie
+          # tego biegu, więc to zawsze fast-forward. Gdyby ktoś w międzyczasie
+          # pushnął na $STABLE, push się wywali i lepiej, żeby to było widać.
+          echo "Fast-forward $STABLE <- $TMP"
+          git push origin "refs/remotes/origin/${TMP}:refs/heads/${STABLE}"
+          echo "moved=true" >> "$GITHUB_OUTPUT"
+
+      - name: Podaj link do PR-a (tylko gdy jeszcze go nie ma)
+        if: steps.ff.outputs.moved == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STABLE: ${{ steps.base.outputs.stable }}
+        run: |
+          PR=$(gh pr list --repo "$REPO" --head "$STABLE" --state open \
+                 --json number -q '.[0].number')
+          if [ -n "$PR" ]; then
+            echo "PR #$PR już istnieje i sam się zaktualizował — bez komentarza."
+            exit 0
+          fi
+          # `body` wstawia workflow, więc `Closes #N` jest tu pewne — nie zależy
+          # od tego, czy model pamiętał o wpisaniu słowa kluczowego.
+          LINK="https://github.com/${REPO}/compare/testing...${STABLE}?expand=1&body=Closes+%23${N}"
+          gh issue comment "$N" --repo "$REPO" --body \
+            "Praca czeka na gałęzi \`${STABLE}\`. [Otwórz PR do \`testing\`](${LINK}) — kolejne poprawki z tego wątku będą się dokładać do niego automatycznie."
+
+      - name: Oznacz zgłoszenie etykietą "claude"
+        # Sam znacznik „Claude się tym zajmował" — nic nie uruchamia.
+        # Warunek na krok `claude`, a nie `always()`: gdy wołający nie ma prawa
+        # zapisu, akcja go odbija i zgłoszenie ma wtedy zostać nieoznaczone.
+        # Późniejsza awaria (np. nieudany fast-forward) etykiety już nie cofa.
+        if: ${{ !cancelled() && steps.claude.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create claude --repo "$REPO" \
+            --color BFD4F2 --description "Obsługiwane przez Claude" || true
+          gh issue edit "$N" --repo "$REPO" --add-label claude
