@@ -433,11 +433,13 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   to, to_time, minutes, stops, stops_count, path}`; etap pieszy:
   `{kind: "walk", text, minutes, from, to, path}`.
 - `GET /api/line?num=17&mode=tram&date=YYYY-MM-DD` — rozkład jednej linii:
-  `{num, mode, label, date, variants: [{headsign, from, to, stops:
-  [{id, name, lat, lon}, …], path: [[lat,lon], …], trips: [{id, dep: "05:12",
-  sec, times: ["05:12", …]}, …]}, …]}`. Wariant = jeden ciąg przystanków
-  (kierunek albo kurs skrócony), warianty posortowane po liczbie kursów
-  malejąco; `times` ma tyle pozycji, co `stops`. `stops[].id` to słupek —
+  `{num, mode, label, date, variants: [{headsign, from, to, trips: 55,
+  stops: [{id, name, lat, lon}, …], path: [[lat,lon], …]}, …]}`. Wariant =
+  jeden ciąg przystanków (kierunek albo kurs skrócony), warianty posortowane
+  po liczbie kursów malejąco. `trips` to LICZBA kursów, nie ich lista:
+  godziny wiszą na słupku i pyta się o nie `/api/stop_board` — tu zostaje
+  tylko to, po czym odróżnia się kierunek jeżdżący cały dzień od zjazdu do
+  zajezdni raz na dobę. `stops[].id` to słupek —
   tym samym identyfikatorem posługuje się `points` z `/api/stop_board`, więc
   front umie przeskoczyć z rozkładu linii na tablicę tej właśnie krawędzi.
 - `GET /api/stop_board?stop=&date=YYYY-MM-DD` — tablica odjazdów:
@@ -487,6 +489,18 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-05** — rozkład linii przestał być rozkładem GODZIN. Zostaje
+  wybór wariantu i lista przystanków — czyli odpowiedź na „którędy jedzie";
+  zniknął pasek godzin kursów i kolumna czasu przy przystankach. Powód jest
+  ten sam, co przy słupkach: rozkład wisi na SŁUPKU, a nie na trasie, więc
+  „o której to jedzie" ma sens dopiero razem z „skąd" — a od poprzedniej
+  zmiany jest na to przycisk przy każdym przystanku trasy. Wariant niesie
+  teraz samą liczbę kursów (`trips: 55`), po której odróżnia się kierunek
+  jeżdżący cały dzień od zjazdu do zajezdni; `/api/line` schudło o ~40 %
+  (linia 113: 195 → 112 kB), a zapytanie do SQLite przestało czytać godziny,
+  bo ciąg przystanków wystarczy za klucz wariantu. Przy okazji kierunki
+  zawijają się do drugiego rzędu — trzy naraz w szerokości panelu zostawiały
+  na nazwę tyle miejsca, że widać było pierwsze słowo.
 - **2026-09-05** — z rozkładu linii da się przejść **wprost na tablicę
   przystanku**: przy każdym przystanku trasy (poza ostatnim — tam kurs się
   kończy) stoi przycisk „odjazdy", który otwiera tablicę tego przystanku

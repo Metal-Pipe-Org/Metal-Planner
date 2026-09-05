@@ -3,10 +3,11 @@
 Co tu jest naprawdę sprawdzane - czyli co w tym module może pójść nie tak,
 a nie widać tego z ekranu:
 
-  * kursy jednej linii NIE są jedną tablicą godzin. Linia ma dwa kierunki
-    i do tego kursy skrócone; wariant to ciąg przystanków, nie headsign,
-    bo dwa różne przebiegi z tym samym napisem na czole to dwa różne
-    rozkłady;
+  * kursy jednej linii NIE są jedną trasą. Linia ma dwa kierunki i do tego
+    kursy skrócone; wariant to ciąg przystanków, nie headsign, bo dwa różne
+    przebiegi z tym samym napisem na czole to dwie różne listy przystanków.
+    Wariant niesie LICZBĘ swoich kursów - po niej odróżnia się kierunek
+    jeżdżący cały dzień od zjazdu do zajezdni raz na dobę;
   * odjazd z przystanku to połączenie, które się w nim ZACZYNA - ostatni
     przystanek kursu nie jest odjazdem, bo nie da się tam wsiąść;
   * tablica dnia D obejmuje ogon doby D-1 (autobus nocny o 00:20 należy do
@@ -115,17 +116,21 @@ def test_kurs_skrocony_to_osobny_wariant(feed):
     połowa tych kursów nie przejeżdża."""
     rozklad = timetables.line_timetable("17", SUNDAY)
     warianty = rozklad["variants"]
-    assert [len(w["trips"]) for w in warianty] == [2, 1]      # pełny przed skróconym
+    assert [w["trips"] for w in warianty] == [2, 1]           # pełny przed skróconym
     assert [len(w["stops"]) for w in warianty] == [3, 2]
     assert all(w["headsign"] == "CENTRUM" for w in warianty)
 
 
-def test_wariant_niesie_godziny_kazdego_kursu_po_przystankach(feed):
+def test_wariant_niesie_pelna_liste_przystankow_bez_godzin(feed):
+    """Rozkład linii odpowiada na "którędy jedzie", a nie "o której" - godziny
+    wiszą na słupku (stop_board) i to on odpowiada na to drugie. Bez tego
+    odpowiedź na jedną linię to kilkaset kursów razy kilkadziesiąt godzin,
+    z których front nie rysuje ani jednej."""
     pelny = timetables.line_timetable("17", SUNDAY)["variants"][0]
-    assert [t["dep"] for t in pelny["trips"]] == ["06:00", "07:00"]
-    assert pelny["trips"][0]["times"] == ["06:00", "06:10", "06:20"]
-    assert len(pelny["trips"][0]["times"]) == len(pelny["stops"])
     assert [s["name"] for s in pelny["stops"]] == ["RYNEK", "BROCHÓW", "CENTRUM"]
+    assert pelny["trips"] == 2
+    assert not any(isinstance(w.get("trips"), list)
+                   for w in timetables.line_timetable("17", SUNDAY)["variants"])
 
 
 def test_przystanek_wariantu_niesie_swoj_slupek(feed):
@@ -140,13 +145,14 @@ def test_przystanek_wariantu_niesie_swoj_slupek(feed):
     assert wariant["stops"][0]["id"] in [p["id"] for p in tablica["points"]]
 
 
-def test_kurs_po_polnocy_ma_godzine_z_tarczy_zegara(feed):
-    """24:20 w GTFS to dla pasażera 00:20 - i to on ma zobaczyć."""
+def test_kurs_po_polnocy_nalezy_do_doby_ktora_wyjechal(feed):
+    """Zjazd o 24:20 siedzi w kalendarzu SOBOTY i w sobotnim rozkładzie linii
+    ma być - jednostką jest tu doba rozkładowa, a nie kalendarzowa (inaczej
+    niż na tablicy przystanku, patrz test niżej)."""
     sobota = timetables.line_timetable("17", SATURDAY)
     zjazd = [w for w in sobota["variants"] if w["to"] == "Zajezdnia GAJ"]
-    assert len(zjazd) == 1
-    assert zjazd[0]["trips"][0]["dep"] == "00:20"
-    assert zjazd[0]["trips"][0]["times"] == ["00:20", "00:50"]
+    assert len(zjazd) == 1 and zjazd[0]["trips"] == 1
+    assert [s["name"] for s in zjazd[0]["stops"]] == ["RYNEK", "Zajezdnia GAJ"]
 
 
 def test_linia_bez_kursow_tego_dnia_nie_jest_bledem(feed):

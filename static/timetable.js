@@ -70,9 +70,7 @@ let data = null;          // ostatnia odpowiedź serwera
 let token = 0;            // odsiewa odpowiedzi na nieaktualne zapytania
 
 let variantIndex = 0;     // wybrany kierunek linii
-let courseIndex = null;   // wybrany kurs tej linii
 let sideOpen = false;     // rozwinięte warianty skrócone
-let recenter = false;     // przewinąć pasek godzin do wybranego kursu
 
 let picked = new Set();   // zaznaczone linie tablicy ("bus|8")
 let pickedPoint = null;   // wybrany słupek miejsca (null = wszystkie)
@@ -267,7 +265,6 @@ function reset() {
     kind = null;
     data = null;
     variantIndex = 0;
-    courseIndex = null;
     sideOpen = false;
     picked = new Set();
     pickedPoint = null;
@@ -344,13 +341,10 @@ function load(forced) {
         openDep = null;
         boardLimit = BOARD_PAGE;
         if (kind === 'line') {
-            // Rozkład otwiera się na najbliższym kursie, a nie na pustej
-            // liście przystanków: pytanie brzmi "o której to jedzie",
-            // więc jakaś godzina musi być na ekranie od razu.
-            const first = mainVariants()[0] || payload.variants[0];
-            variantIndex = payload.variants.indexOf(first);
-            courseIndex = nextCourseIndex(first);
-            recenter = true;
+            // Otwieramy na wariancie, którym linia jeździ cały dzień - a nie
+            // na pierwszym z brzegu zjeździe do zajezdni.
+            variantIndex = payload.variants.indexOf(
+                mainVariants()[0] || payload.variants[0]);
         } else {
             picked = new Set(payload.lines.map(lineKey));
             pickedPoint = null;
@@ -384,17 +378,12 @@ $('tt-now').addEventListener('click', () => {
     retime();
 });
 
-/** Zmiana godziny nie odpytuje serwera - dobę mamy w całości. Rozkład linii
-    przeskakuje na kurs najbliższy nowej godzinie (i pasek godzin przewija się
-    na niego), tablica po prostu zaczyna się gdzie indziej. */
+/** Zmiana godziny nie odpytuje serwera - dobę mamy w całości, więc tablica
+    po prostu zaczyna się gdzie indziej. Rozkładu linii to nie dotyczy: nie
+    ma tam żadnej godziny, na którą godzina odniesienia mogłaby wskazać. */
 function retime() {
-    if (!data) return;
-    if (kind === 'line') {
-        courseIndex = nextCourseIndex(variantOf());
-        recenter = true;
-    } else {
-        boardLimit = BOARD_PAGE;
-    }
+    if (!data || kind !== 'stop') return;
+    boardLimit = BOARD_PAGE;
     render();
     draw(false);
 }
@@ -471,28 +460,11 @@ const variantOf = () => (data && data.variants ? data.variants[variantIndex] : n
     której trzeba szukać tej właściwej. */
 function mainVariants() {
     if (!data.variants.length) return [];
-    const top = data.variants[0].trips.length;
-    return data.variants.filter(v => v.trips.length >= top * SIDE_VARIANT_RATIO);
+    const top = data.variants[0].trips;
+    return data.variants.filter(v => v.trips >= top * SIDE_VARIANT_RATIO);
 }
 
 const sideVariants = () => data.variants.filter(v => !mainVariants().includes(v));
-
-/** Pierwszy kurs po godzinie odniesienia (albo ostatni w dobie, gdy już po
-    wszystkim). Bez tego rozkład otwiera się na liście przystanków bez godzin. */
-function nextCourseIndex(variant) {
-    if (!variant || !variant.trips.length) return null;
-    const from = referenceSec();
-    if (from === null) return 0;
-    const found = variant.trips.findIndex(trip => trip.sec >= from);
-    return found === -1 ? variant.trips.length - 1 : found;
-}
-
-function courseTimes() {
-    const variant = variantOf();
-    if (!variant || courseIndex === null) return null;
-    const course = variant.trips[courseIndex];
-    return course ? course.times : null;
-}
 
 function drawLine(refit) {
     const variant = variantOf();
@@ -501,7 +473,7 @@ function drawLine(refit) {
     dimBase(true);
     showRoutes(
         routeLines(variant.path, data.mode),
-        [...stopDots(variant.stops, data.mode, courseTimes()),
+        [...stopDots(variant.stops, data.mode),
          ...terminusDots(variant.stops, data.mode)],
         refit,
         variant.path,
@@ -514,30 +486,23 @@ function renderLine() {
         return;
     }
     const variant = variantOf();
-    const times = courseTimes();
-    const course = courseIndex === null ? null : variant.trips[courseIndex];
 
     const directionButton = v => {
         const i = data.variants.indexOf(v);
         return `<button type="button" class="tt-dir${i === variantIndex ? ' active' : ''}"
                         data-variant="${i}" aria-pressed="${i === variantIndex}">
                     <span class="tt-dir-to">${esc(v.headsign)}</span>
-                    <span class="tt-dir-sub">z ${esc(v.from)}</span>
+                    <span class="tt-dir-sub">z ${esc(v.from)} ·
+                        ${v.trips} ${plural(v.trips, 'kurs', 'kursy', 'kursów')}</span>
                 </button>`;
     };
     const side = sideVariants();
-
-    const courses = variant.trips.map((trip, i) => `
-        <button type="button" class="tt-course${i === courseIndex ? ' active' : ''}"
-                data-course="${i}" aria-pressed="${i === courseIndex}">${esc(trip.dep)}</button>`
-    ).join('');
 
     // Na ostatnim przystanku wariantu przycisku nie ma: kurs się tam kończy,
     // więc żaden odjazd TEJ linii stamtąd nie wychodzi.
     const last = variant.stops.length - 1;
     const stops = variant.stops.map((stop, i) => `
         <li class="tt-stop" data-stop="${i}">
-            <span class="tt-t">${times ? esc(times[i]) : ''}</span>
             <span class="tt-dot"></span>
             <span class="tt-name">${esc(stop.name)}</span>
             ${i < last && stop.id ? `
@@ -567,37 +532,13 @@ function renderLine() {
 
         <div class="card tt-card">
             <div class="tt-card-head">
-                <h3 class="tt-h3">Odjazdy z „${esc(variant.from)}"</h3>
-                <span class="tt-count">${variant.trips.length}</span>
-            </div>
-            <div class="tt-chips tt-courses">${courses}</div>
-        </div>
-
-        <div class="card tt-card">
-            <div class="tt-card-head">
-                <h3 class="tt-h3">${course
-                    ? `Kurs ${esc(course.dep)} → ${esc(variant.headsign)}`
-                    : 'Przystanki'}</h3>
+                <h3 class="tt-h3">Przystanki</h3>
                 <span class="tt-count">${variant.stops.length}</span>
             </div>
             <ol class="tt-stops ${esc(data.mode)}">${stops}</ol>
+            <p class="field-hint">Kliknij przystanek, żeby go przybliżyć —
+                a „odjazdy", żeby zobaczyć godziny tej linii z tego słupka.</p>
         </div>`;
-
-    scrollCoursesToActive();
-}
-
-/** Pasek godzin jest długi (doba to i sto kursów), a interesująca jest ta
-    jedna wybrana - więc pasek ustawia się na niej, zamiast zaczynać od 4 rano.
-    Tylko po zmianie rozkładu albo kierunku: przy klikaniu godzin pasek ma
-    stać w miejscu, w którym użytkownik go zostawił. */
-function scrollCoursesToActive() {
-    if (!recenter) return;
-    recenter = false;
-    const strip = resultsBox.querySelector('.tt-courses');
-    const chip = strip && strip.querySelector('.tt-course.active');
-    if (!chip) return;
-    strip.scrollTop = Math.max(
-        0, chip.offsetTop - strip.clientHeight / 2 + chip.offsetHeight / 2);
 }
 
 // ------------------------------------------------ tablica przystanku ----
@@ -1085,21 +1026,8 @@ resultsBox.addEventListener('click', event => {
         const index = Number(variant.dataset.variant);
         sideOpen = !mainVariants().includes(data.variants[index]);
         variantIndex = index;
-        // Kierunek zmienia zestaw kursów - trzymanie numeru poprzedniego
-        // pokazałoby przypadkową godzinę, więc wracamy do najbliższej.
-        courseIndex = nextCourseIndex(variantOf());
-        recenter = true;
         render();
         draw(true);
-        return;
-    }
-
-    const course = event.target.closest('[data-course]');
-    if (course) {
-        const index = Number(course.dataset.course);
-        courseIndex = courseIndex === index ? null : index;
-        render();
-        draw(false);
         return;
     }
 

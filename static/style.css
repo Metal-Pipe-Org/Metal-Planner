@@ -1467,14 +1467,18 @@ body.tt-searching .tt-spinner { display: inline-block; }
 .tt-card-head .tt-mini:not(.tt-switch .tt-mini) { margin-left: auto; }
 
 /* Kierunek linii: dwa duże przyciski obok siebie - to jest wybór "w którą
-   stronę", a nie pozycja z listy. */
+   stronę", a nie pozycja z listy. Powyżej dwóch (linia bywa ma trzy warianty
+   dość częste, żeby wszystkie były "główne") zawijają się do drugiego rzędu:
+   trzy w szerokości panelu zostawiają na podpis tyle miejsca, że z nazwy
+   kierunku widać pierwsze słowo. */
 .tt-dirs {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
 }
 
 .tt-dir {
-    flex: 1 1 0;
+    flex: 1 1 45%;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -1542,50 +1546,18 @@ body.tt-searching .tt-spinner { display: inline-block; }
     cursor: pointer;
 }
 
-.tt-side .tt-dirs {
-    flex-wrap: wrap;
-    margin-top: 6px;
-}
-
-.tt-side .tt-dir { flex: 1 1 45%; }
-
+.tt-side .tt-dirs,
 .tt-side .tt-points { margin-top: 6px; }
-.tt-side .tt-point { flex: 0 0 auto; }
 
-/* Godziny odjazdów i numery linii - jedno i drugie to gęsta siatka małych
-   przycisków, więc wspólny pojemnik z własnym przewijaniem. */
+/* Numery linii dużego węzła - gęsta siatka małych przycisków, więc pojemnik
+   z własnym przewijaniem: samych plakietek bywa ze trzydzieści. */
 .tt-chips {
-    /* Pozycjonowany, żeby offsetTop plakietki liczył się WZGLĘDEM paska -
-       na tym stoi przewinięcie do wybranego kursu (patrz timetable.js). */
-    position: relative;
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
     max-height: 168px;
     overflow-y: auto;
     overscroll-behavior: contain;
-}
-
-.tt-course {
-    min-width: 52px;
-    padding: 5px 7px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--ink);
-    font: inherit;
-    font-size: 13px;
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-}
-
-.tt-course:hover { background: var(--surface-alt); }
-
-.tt-course.active {
-    border-color: var(--accent);
-    background: var(--accent);
-    color: #fff;
-    font-weight: 700;
 }
 
 /* Plakietka linii jako przełącznik: odhaczona traci kolor, ale zostaje na
@@ -1776,7 +1748,7 @@ ul.tt-legend {
 
 /* Skok z rozkładu linii na tablicę tego słupka. Cichy, bo stoi przy KAŻDYM
    przystanku trasy - trzydzieści kolorowych przycisków w kolumnie zasłoniłoby
-   to, po co się tu przyszło, czyli samą listę przystanków z godzinami. */
+   to, po co się tu przyszło, czyli samą listę przystanków. */
 .tt-stop-board {
     margin-left: auto;
     padding: 1px 7px;

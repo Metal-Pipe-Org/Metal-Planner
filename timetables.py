@@ -4,9 +4,8 @@ Drugi tryb tej samej aplikacji - obok wyszukiwarki połączeń, która odpowiada
 na pytanie "jak dojechać stąd tam", ten moduł odpowiada na dwa inne, zadawane
 równie często:
 
-  * "co robi linia 17 dzisiaj" - warianty trasy (kierunki), pełna lista
-    przystanków i godziny każdego kursu, razem z geometrią do narysowania
-    na mapie;
+  * "co robi linia 17 dzisiaj" - warianty trasy (kierunki) i pełna lista
+    przystanków każdego z nich, razem z geometrią do narysowania na mapie;
   * "co odjeżdża z Galerii Dominikańskiej" - tablica odjazdów wszystkich
     linii z jednego przystanku, z możliwością wybrania, które z nich mają
     być w niej złączone.
@@ -82,8 +81,12 @@ def all_lines():
     ]
 
 
-def _stop_times_of(db, trip_ids):
-    """trip_id -> [(stop_id, przyjazd, odjazd), ...] po kolei przystanków.
+def _stop_sequences(db, trip_ids):
+    """trip_id -> [stop_id, ...] po kolei przystanków.
+
+    Same przystanki, bez godzin: rozkład linii odpowiada na "którędy jedzie",
+    a ciąg przystanków jest tu KLUCZEM wariantu (patrz line_timetable) - godzin
+    kursu nie ma już czym pokazać, bo pyta się o nie tablicę przystanku.
 
     Pytamy porcjami, bo SQLite ma sufit na liczbę parametrów zapytania,
     a popularna linia potrafi mieć kilkaset kursów dziennie.
@@ -93,12 +96,12 @@ def _stop_times_of(db, trip_ids):
     for start in range(0, len(ids), 400):
         chunk = ids[start:start + 400]
         placeholders = ",".join("?" * len(chunk))
-        for trip_id, stop_id, arrival_sec, departure_sec in db.execute(
-            f"SELECT trip_id, stop_id, arrival_sec, departure_sec FROM stop_times "
+        for trip_id, stop_id in db.execute(
+            f"SELECT trip_id, stop_id FROM stop_times "
             f"WHERE trip_id IN ({placeholders}) ORDER BY trip_id, stop_sequence",
             chunk,
         ):
-            rows.setdefault(trip_id, []).append((stop_id, arrival_sec, departure_sec))
+            rows.setdefault(trip_id, []).append(stop_id)
     return rows
 
 
@@ -122,13 +125,18 @@ def _path_of(shape_id, coords, db):
 
 
 def line_timetable(num, day, mode=None):
-    """Rozkład jednej linii na dany dzień.
+    """Rozkład jednej linii na dany dzień: którędy jedzie i przez co.
 
     Kursy grupujemy po CIĄGU PRZYSTANKÓW, nie po samym kierunku: linia ma
     zwykle dwa kierunki, ale prawie zawsze też kursy skrócone (do zajezdni,
-    do pętli w połowie trasy). Zlanie ich w jedno dałoby tablicę godzin,
-    pod którą podpisany jest przystanek, przez który połowa tych kursów
-    nie przejeżdża.
+    do pętli w połowie trasy). Zlanie ich w jedno dałoby listę przystanków,
+    przez połowę której połowa tych kursów nie przejeżdża.
+
+    Godzin tu nie ma - wariant niesie tylko LICZBĘ swoich kursów, po której
+    odróżnia się kierunek jeżdżący cały dzień od zjazdu do zajezdni raz na
+    dobę. O godziny pyta się tablicę konkretnego przystanku (stop_board),
+    bo rozkład wiszący na słupku dotyczy jednego słupka, a nie całej trasy:
+    "o której to jedzie" ma sens dopiero razem z "skąd".
     """
     num = " ".join((num or "").split())
     if not num:
@@ -178,23 +186,21 @@ def line_timetable(num, day, mode=None):
                 "note": "Tego dnia ta linia nie kursuje.",
             }
 
-        times = _stop_times_of(db, (t[0] for t in trips))
+        sequences = _stop_sequences(db, (t[0] for t in trips))
         geo = _stops_geo(db)
 
         variants = {}
         for trip_id, headsign, shape_id, _ in trips:
-            sequence = times.get(trip_id)
+            sequence = sequences.get(trip_id)
             if not sequence or len(sequence) < 2:
                 continue
-            key = tuple(stop_id for stop_id, _, _ in sequence)
-            variant = variants.setdefault(key, {
-                "headsign": headsign, "shape": shape_id, "trips": [],
+            variant = variants.setdefault(tuple(sequence), {
+                "headsign": headsign, "shape": shape_id, "trips": 0,
             })
-            variant["trips"].append((sequence[0][2], trip_id, sequence))
+            variant["trips"] += 1
 
         out = []
         for key, variant in variants.items():
-            variant["trips"].sort()
             # `id` niesie słupek, a nie samą nazwę: to nim front przeskakuje
             # z rozkładu linii na tablicę odjazdów TEJ krawędzi, a nie
             # przeciwnej (patrz stop_board i jej `points`).
@@ -208,28 +214,18 @@ def line_timetable(num, day, mode=None):
                 "headsign": variant["headsign"] or stops[-1]["name"],
                 "from": stops[0]["name"],
                 "to": stops[-1]["name"],
+                # Ile kursów jedzie tym wariantem - tym odróżnia się kierunek,
+                # którym linia jeździ cały dzień, od zjazdu do zajezdni raz na
+                # dobę (patrz front: mainVariants).
+                "trips": variant["trips"],
                 "stops": stops,
                 "path": _path_of(variant["shape"],
                                  [(geo[s][1], geo[s][2]) for s in key], db),
-                "trips": [
-                    {
-                        "id": trip_id,
-                        "dep": _hhmm(dep_sec),
-                        "sec": dep_sec,
-                        # Jedna godzina na przystanek: odjazd, a na ostatnim
-                        # (skąd już nic nie odjeżdża) przyjazd.
-                        "times": [
-                            _hhmm(departure_sec if i < len(sequence) - 1 else arrival_sec)
-                            for i, (_, arrival_sec, departure_sec) in enumerate(sequence)
-                        ],
-                    }
-                    for dep_sec, trip_id, sequence in variant["trips"]
-                ],
             })
 
         # Najpierw warianty pełne (najwięcej kursów) - to one są "tą linią",
         # a kursy skrócone dopisują się pod nimi.
-        out.sort(key=lambda v: (-len(v["trips"]), v["headsign"]))
+        out.sort(key=lambda v: (-v["trips"], v["headsign"]))
         return {
             "num": num, "mode": line_mode,
             "label": f"{MODE_LABEL[line_mode]} {num}",

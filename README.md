@@ -46,16 +46,21 @@ i nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko
 przesuwa to, od czego zaczyna się tablica, i to, który kurs linii jest
 „ten najbliższy".
 
-**Linia.** Dwa kierunki podstawowe stoją obok siebie, a kursy skrócone
-(do zajezdni, z pętli w połowie trasy) chowają się pod rozwijaniem — jest
-ich zwykle więcej niż samych kierunków i równorzędnie pokazane zamieniają
-wybór kierunku w szukanie w liście. Rozkład otwiera się od razu na
-**najbliższym kursie**, z godzinami przy każdym przystanku i przebiegiem
-na mapie; pasek godzin jest przewinięty na tę właśnie porę.
+**Linia** odpowiada na „którędy jedzie": wybór wariantu i lista jego
+przystanków, z przebiegiem na mapie. Kierunki podstawowe stoją obok siebie,
+a kursy skrócone (do zajezdni, z pętli w połowie trasy) chowają się pod
+rozwijaniem — jest ich zwykle więcej niż samych kierunków i równorzędnie
+pokazane zamieniają wybór kierunku w szukanie w liście. Przy każdym
+kierunku widać, ile kursów nim jedzie — to po tym poznaje się ten, którym
+linia jeździ cały dzień.
+
+Godzin tu nie ma i to jest wybór, nie brak: rozkład wisi na słupku, a nie
+na trasie, więc „o której to jedzie" ma sens dopiero razem z „skąd" — i tam
+się o nie pyta, przyciskiem opisanym niżej.
 
 Kursy są grupowane po ciągu przystanków, nie po samym napisie na czole:
-zlanie ich w jedną tablicę godzin dałoby rozkład, pod którym podpisany
-jest przystanek, przez który połowa tych kursów nie przejeżdża.
+zlanie ich w jedną listę dałoby trasę, przez połowę której połowa tych
+kursów nie przejeżdża.
 
 Kliknięcie przystanku na liście przybliża go na mapie, a przycisk
 **„odjazdy"** z prawej strony wiersza przeskakuje na tablicę tego
