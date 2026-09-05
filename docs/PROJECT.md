@@ -499,11 +499,16 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
   Szerszy przycisk wyszedł na pasek „ile trwa podróż", który wjeżdżał pod
   niego lewą połową — i przy okazji pokazał, że pasek stał źle od początku:
-  wyśrodkowany nad OKNEM, choć jego własny komentarz mówił „nad mapą", więc
-  przy otwartym panelu leżał o pół panelu za daleko w lewo. Teraz liczy
-  środek od krawędzi panelu i stoi POD rzędem pływających przycisków, a nie
-  obok: pasek bywa szeroki na pół ekranu i przy węższym oknie nie ma
-  szerokości, w której dałoby się je minąć w jednym wierszu.
+  wyśrodkowany przez `left: 50%`, czyli nad OKNEM, choć jego własny komentarz
+  mówił „nad mapą" — a środek okna leży o pół panelu za daleko w lewo. Pasek
+  zostaje w górnym rzędzie, ale zamiast liczyć środek dostaje WYCINEK ekranu
+  (`left` za przyciskami, `right: 16px`) i centruje się w nim przez
+  `width: fit-content` z automatycznymi marginesami — to `margin: 0 auto`
+  dla elementu `position: fixed`. Samo liczenie środka mapy nie wystarczyło:
+  pasek bywa szeroki na pół ekranu i przy oknie 950 px między przyciskami
+  a prawą krawędzią zostaje mniej miejsca, niż on zajmuje. Wycinek go wtedy
+  przesuwa, a gdy i to nie starcza — pozwala mu się zawinąć na dwie linijki
+  (`flex-wrap`), zamiast wylać tekst poza własne tło.
 - **2026-09-05** — **godzina obok daty** i **pełny rozkład**. Pole godziny
   jest jedno na oba rozkłady i nic nie dociąga (odpowiedź niesie całą dobę):
   przesuwa tylko to, od czego zaczyna się tablica, i to, który kurs linii jest

@@ -905,29 +905,41 @@ body.panel-hidden #sidebar {
 .line-cluster .line-chip-slot:hover .line-chip.other { background: var(--other); }
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 
-/* Pasek nad mapą - jedyna liczba, której nie trzeba szukać kursorem.
-   Nad panelem wyszukiwania (z lewej) i pod panelem deweloperskim (z prawej),
-   żeby nie wchodzić żadnemu w drogę.
+/* Pasek nad mapą - jedyna liczba, której nie trzeba szukać kursorem. Stoi
+   w górnym rzędzie, nad panelem wyszukiwania (z lewej) i pod panelem
+   deweloperskim (z prawej), żeby nie wchodzić żadnemu w drogę.
 
-   Dwie rzeczy trzymają go z dala od pływających przycisków (← i ◷ Rozkłady):
+   Wyśrodkowany, ale NIE przez `left: 50%` - środek okna leży o pół panelu za
+   daleko w lewo i pasek wjeżdżał nim na panel, a od kiedy przełącznik trybu
+   jest podpisany („◷ Rozkłady", ~105 px zamiast kwadraciku), także na
+   pływające przyciski. Zamiast tego dostaje wycinek ekranu: od miejsca, w
+   którym kończą się przyciski, do prawej krawędzi - a w nim `width:
+   fit-content` z automatycznymi marginesami stawia go pośrodku. To ta sama
+   sztuczka, co `margin: 0 auto` w zwykłym przepływie, tyle że dla elementu
+   position: fixed z podanym `left` i `right`.
 
-   - stoi POD ich rzędem, nie obok. Pasek bywa szeroki na pół ekranu, a
-     przyciski kończą się grubo za lewą krawędzią mapy - przy węższym oknie
-     nie ma szerokości, w której dałoby się je minąć w tym samym wierszu;
-   - jest wyśrodkowany nad MAPĄ, nie nad oknem. Przy schowanym panelu to
-     jedno i to samo, ale przy otwartym środek okna leży o pół panelu za
-     daleko w lewo i pasek wjeżdża lewą połową na panel. */
+   Dlaczego wycinek, a nie samo liczenie środka mapy: pasek bywa szeroki na
+   pół ekranu i przy węższym oknie nie zmieściłby się wyśrodkowany, tylko
+   wystawałby lewą połową pod przyciski. Tak zamiast tego przesuwa się w
+   prawo, a gdy i to nie starcza - zawija się na dwie linijki (flex-wrap),
+   zamiast wylewać tekst poza własne tło. */
 .time-headline {
     position: fixed;
-    top: 68px;
-    left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
-    transform: translateX(-50%);
+    top: 16px;
+    /* Za pływającymi przyciskami: ich prawa krawędź + odstęp. Zależy od
+       szerokości podpisu na #mode-toggle - zmiana napisu to zmiana tej
+       liczby. */
+    left: calc(var(--sidebar-w) + 190px);
+    right: 16px;
+    width: fit-content;
+    margin-inline: auto;
     transition: left 0.25s ease;
     z-index: 900;
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     align-items: center;
     gap: 7px;
-    max-width: calc(100vw - 32px);
     padding: 6px 12px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.94);
@@ -935,7 +947,6 @@ body.panel-hidden #sidebar {
     box-shadow: var(--shadow);
     font-size: 12.5px;
     color: var(--ink-soft);
-    white-space: nowrap;
 }
 
 .time-headline b {
@@ -966,13 +977,17 @@ body.panel-hidden #sidebar {
 
 .headline-sep { color: var(--ink-faint); }
 
-/* Schowany panel = mapa na całe okno, więc jej środek to środek okna. */
-body.panel-hidden .time-headline { left: 50%; }
+/* Schowany panel = przyciski przy lewej krawędzi okna, więc wycinek zaczyna
+   się odpowiednio bliżej. */
+body.panel-hidden .time-headline { left: 180px; }
 
 @media (max-width: 900px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
-       pod niego i zwęża się do samych liczb. */
-    .time-headline { top: auto; bottom: 64px; font-size: 12px; }
+       pod niego i zwęża się do samych liczb. Nie ma już nad sobą przycisków,
+       więc wycinek nie musi ich omijać - liczy się tylko to, żeby pasek nie
+       leżał na panelu. */
+    .time-headline { top: auto; bottom: 64px; font-size: 12px; left: var(--sidebar-w); }
+    body.panel-hidden .time-headline { left: 16px; }
 }
 
 /* ------------------------------------------------ panel deweloperski --- */
@@ -1795,8 +1810,9 @@ ul.tt-legend {
     #view-tabs { display: flex; }
 
     /* Panel jest tu nakładką na całą szerokość, a nie kolumną obok mapy -
-       "środek mapy" znaczy więc znowu środek okna. */
-    .time-headline { left: 50%; }
+       nie ma czego omijać, pasek bierze całą szerokość okna. */
+    .time-headline,
+    body.panel-hidden .time-headline { left: 16px; }
 
     #sidebar {
         /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu
