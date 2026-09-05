@@ -30,6 +30,7 @@ const $ = id => document.getElementById(id);
 
 const queryInput = $('tt-query');
 const dateInput = $('tt-date');
+const timeInput = $('tt-time');
 const clearButton = $('tt-clear');
 const resultsBox = $('tt-results');
 const hintBox = $('tt-hint');
@@ -76,7 +77,8 @@ let recenter = false;     // przewinąć pasek godzin do wybranego kursu
 let picked = new Set();   // zaznaczone linie tablicy ("bus|8")
 let pickedPoint = null;   // wybrany słupek miejsca (null = wszystkie)
 let pointsOpen = false;   // rozwinięta reszta słupków
-let fromSec = null;       // od której godziny pokazujemy odjazdy (null = doba)
+let boardMode = 'time';   // 'time' - odjazdy od podanej godziny; 'full' - cała doba siatką
+let pickedBeforeFull = null;   // zaznaczenie linii sprzed wejścia w pełny rozkład
 let boardLimit = BOARD_PAGE;
 let openDep = null;       // rozwinięty odjazd (indeks) - jego kurs jest na mapie
 let tripCache = new Map();
@@ -269,7 +271,8 @@ function reset() {
     picked = new Set();
     pickedPoint = null;
     pointsOpen = false;
-    fromSec = null;
+    boardMode = 'time';
+    pickedBeforeFull = null;
     boardLimit = BOARD_PAGE;
     openDep = null;
     tripCache = new Map();
@@ -346,7 +349,8 @@ function load(forced) {
             picked = new Set(payload.lines.map(lineKey));
             pickedPoint = null;
             pointsOpen = false;
-            fromSec = defaultFromSec(payload);
+            boardMode = 'time';
+            pickedBeforeFull = null;
         }
         // Widok PRZED treścią: na telefonie zakładka "Mapa" trzyma listę
         // wyników w display:none, a wtedy pasek godzin ma zerową wysokość
@@ -367,6 +371,26 @@ $('tt-today').addEventListener('click', () => {
     dateInput.value = isoToday();
     if (data) load(kind);
 });
+if (timeInput) timeInput.addEventListener('input', retime);
+$('tt-now').addEventListener('click', () => {
+    timeInput.value = isoNow();
+    retime();
+});
+
+/** Zmiana godziny nie odpytuje serwera - dobę mamy w całości. Rozkład linii
+    przeskakuje na kurs najbliższy nowej godzinie (i pasek godzin przewija się
+    na niego), tablica po prostu zaczyna się gdzie indziej. */
+function retime() {
+    if (!data) return;
+    if (kind === 'line') {
+        courseIndex = nextCourseIndex(variantOf());
+        recenter = true;
+    } else {
+        boardLimit = BOARD_PAGE;
+    }
+    render();
+    draw(false);
+}
 clearButton.addEventListener('click', () => {
     queryInput.value = '';
     reset();
@@ -395,15 +419,23 @@ function isoToday() {
          + `-${String(now.getDate()).padStart(2, '0')}`;
 }
 
-const nowSec = () => {
+function isoNow() {
     const now = new Date();
-    return now.getHours() * 3600 + now.getMinutes() * 60;
-};
+    return `${String(now.getHours()).padStart(2, '0')}`
+         + `:${String(now.getMinutes()).padStart(2, '0')}`;
+}
 
-/** Godzina odniesienia dla rozkładu - "teraz", ale tylko dla dnia
-    dzisiejszego. Rozkład na inny dzień czyta się od początku doby, bo
-    bieżąca godzina nic o nim nie mówi. */
-const referenceSec = () => (data.date === isoToday() ? nowSec() : null);
+/** Godzina odniesienia obu rozkładów - ta z pola, nie ta z zegara. Serwer
+    daje całą dobę, więc jej zmiana niczego nie dociąga: przesuwa tylko to,
+    od czego zaczyna się tablica i który kurs linii jest "ten najbliższy".
+    Puste albo połamane pole = od początku doby. */
+function referenceSec() {
+    const match = /^\s*(\d{1,2})[:.]?(\d{2})\s*$/.exec(timeInput ? timeInput.value : '');
+    if (!match) return null;
+    const hours = Number(match[1]), minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) return null;
+    return hours * 3600 + minutes * 60;
+}
 
 const DAY_NAMES = ['niedziela', 'poniedziałek', 'wtorek', 'środa',
                    'czwartek', 'piątek', 'sobota'];
@@ -558,9 +590,6 @@ function scrollCoursesToActive() {
 
 const lineKey = line => `${line.mode}|${line.num}`;
 
-const defaultFromSec = payload =>
-    (payload.date === isoToday() ? nowSec() : null);
-
 /** Ile kursów każdej pary (linia, kierunek) odjeżdża z WYBRANEGO słupka.
     Bez wyboru to gotowy licznik z serwera; z wyborem trzeba przeliczyć, bo
     linia spod przeciwnej krawędzi nie ma tu ani jednego odjazdu - i nie ma
@@ -626,6 +655,28 @@ function stopPoints() {
 const pointDirs = point => point.dirs.slice(0, 2).join(' · ')
     + (point.dirs.length > 2 ? ` +${point.dirs.length - 2}` : '');
 
+/** Przełączenie na pełny rozkład zawęża zaznaczenie do JEDNEJ linii - siatka
+    godzin ma sens tylko dla jednej, bo inaczej pod ciągiem minut nie wiadomo,
+    co podjedzie. Wybór sprzed przełączenia wraca przy powrocie do listy:
+    zajrzenie w rozkład nie ma kasować tego, co było poodhaczane. */
+function setBoardMode(mode) {
+    if (mode === boardMode) return;
+    if (mode === 'full') {
+        pickedBeforeFull = new Set(picked);
+        const groups = lineGroups();
+        const one = groups.find(group => picked.has(group.key)) || groups[0];
+        picked = one ? new Set([one.key]) : new Set();
+    } else if (pickedBeforeFull) {
+        picked = pickedBeforeFull;
+        pickedBeforeFull = null;
+    }
+    boardMode = mode;
+    openDep = null;
+    boardLimit = BOARD_PAGE;
+    render();
+    draw(true);
+}
+
 function pickPoint(id) {
     pickedPoint = pickedPoint === id ? null : (id || null);
     // Wybór z mapy albo z rozwiniętego ogona ma zostać widoczny na liście.
@@ -642,10 +693,13 @@ const isPicked = line => picked.has(lineKey(line));
 /** Indeksy odjazdów do pokazania - indeksy, nie obiekty, bo rozwinięty kurs
     jest zapamiętany pozycją w PEŁNEJ liście (ta się nie zmienia przy filtrach). */
 function visibleDepartures() {
+    // Pełny rozkład to cała doba z definicji - próg godziny obowiązuje tylko
+    // listę odjazdów "od podanej godziny".
+    const from = boardMode === 'full' ? null : referenceSec();
     const out = [];
     data.departures.forEach((dep, i) => {
         if (pickedPoint !== null && dep.stop !== pickedPoint) return;
-        if (isPicked(data.lines[dep.line]) && (fromSec === null || dep.sec >= fromSec)) {
+        if (isPicked(data.lines[dep.line]) && (from === null || dep.sec >= from)) {
             out.push(i);
         }
     });
@@ -734,8 +788,9 @@ function representative(lineIndex) {
     const list = data.departures.filter(dep => dep.line === lineIndex
         && (pickedPoint === null || dep.stop === pickedPoint));
     if (!list.length) return null;
-    if (fromSec === null) return list[0];
-    return list.find(dep => dep.sec >= fromSec) || list[list.length - 1];
+    const from = referenceSec();
+    if (from === null) return list[0];
+    return list.find(dep => dep.sec >= from) || list[list.length - 1];
 }
 
 const tripKey = dep => `${currentDate()}|${dep.trip}|${dep.stop}|${dep.sec}`;
@@ -818,11 +873,69 @@ function pointsCard(points) {
         </div>`;
 }
 
+/** Pełny rozkład - ten sam zapis, co na słupku: wiersz na godzinę, w wierszu
+    minuty kolejnych kursów. Doba mieści się wtedy na jednym ekranie, ale ma to
+    sens tylko dla JEDNEJ linii: dwie zlane w tę samą siatkę dałyby ciąg minut,
+    pod którym nie wiadomo, co podjedzie.
+
+    Kierunek odróżniają odnośniki, tak samo jak na papierze: kurs jadący tam,
+    gdzie większość, jest bez znaczka, a każdy inny kierunek dostaje swój -
+    rozwinięty w legendzie pod siatką. */
+function fullTable(shown) {
+    // Kierunek wiodący bez odnośnika, reszta po kolejności malejącej.
+    const counts = new Map();
+    for (const index of shown) {
+        const headsign = data.lines[data.departures[index].line].headsign;
+        counts.set(headsign, (counts.get(headsign) || 0) + 1);
+    }
+    const order = [...counts].sort((a, b) => b[1] - a[1]).map(([headsign]) => headsign);
+    const mark = new Map(order.map((headsign, i) => [headsign, '*'.repeat(i)]));
+
+    // Tablica trzyma się jednej doby zegarowej (patrz timetables.stop_board),
+    // więc godzina to po prostu początek "GG:MM" - kolejne wiersze wychodzą
+    // z kolejności odjazdów, bez sortowania.
+    const hours = [];
+    for (const index of shown) {
+        const dep = data.departures[index];
+        const hour = dep.t.slice(0, 2);
+        if (!hours.length || hours[hours.length - 1].hour !== hour) {
+            hours.push({hour, cells: []});
+        }
+        hours[hours.length - 1].cells.push({index, dep});
+    }
+
+    const rows = hours.map(row => {
+        const cells = row.cells.map(({index, dep}) => {
+            const suffix = mark.get(data.lines[dep.line].headsign);
+            return `<button type="button" class="tt-min${index === openDep ? ' open' : ''}"
+                            data-dep="${index}" aria-expanded="${index === openDep}">
+                        <span>${esc(dep.t.slice(3))}</span>${suffix
+                            ? `<sup>${esc(suffix)}</sup>` : ''}
+                    </button>`;
+        }).join('');
+        return `<tr><th scope="row">${esc(row.hour)}</th><td>${cells}</td></tr>`;
+    }).join('');
+
+    const legend = order.slice(1).map(headsign =>
+        `<li><span class="tt-legend-mark">${esc(mark.get(headsign))}</span>
+             ${esc(headsign)}</li>`).join('');
+
+    return `
+        <table class="tt-grid"><tbody>${rows}</tbody></table>
+        ${openDep !== null && shown.includes(openDep)
+            ? `<div class="tt-trip">${tripStopsHtml(data.departures[openDep])}</div>` : ''}
+        ${order.length ? `<p class="field-hint tt-legend">${legend
+            ? `Kursy bez znaczka jadą → ${esc(order[0])}.`
+            : `Wszystkie kursy → ${esc(order[0])}.`}</p>` : ''}
+        ${legend ? `<ul class="tt-legend">${legend}</ul>` : ''}`;
+}
+
 function renderBoard() {
+    const full = boardMode === 'full';
     const points = stopPoints();
     const groups = lineGroups();
     const shown = visibleDepartures();
-    const page = shown.slice(0, boardLimit);
+    const page = full ? shown : shown.slice(0, boardLimit);
     const pickedLines = groups.filter(group => picked.has(group.key)).length;
     const all = pickedLines === groups.length;
 
@@ -833,7 +946,7 @@ function renderBoard() {
                 >${esc(group.num)}</button>`
     ).join('');
 
-    const rows = page.map(index => {
+    const rows = (full ? [] : page).map(index => {
         const dep = data.departures[index];
         const line = data.lines[dep.line];
         const open = index === openDep;
@@ -865,12 +978,15 @@ function renderBoard() {
         <div class="card tt-card">
             <div class="tt-card-head">
                 <h3 class="tt-h3">Linie</h3>
-                <button type="button" class="tt-mini" data-pick="${all ? 'none' : 'all'}">
-                    ${all ? 'odznacz wszystkie' : 'zaznacz wszystkie'}
-                </button>
+                ${full ? '' : `
+                    <button type="button" class="tt-mini" data-pick="${all ? 'none' : 'all'}">
+                        ${all ? 'odznacz wszystkie' : 'zaznacz wszystkie'}
+                    </button>`}
             </div>
             <div class="tt-chips">${chips}</div>
-            <p class="field-hint">${esc(mapNote)}</p>
+            <p class="field-hint">${esc(full
+                ? 'Pełny rozkład czyta się dla jednej linii — klik przełącza na inną.'
+                : mapNote)}</p>
         </div>
 
         <div class="card tt-card">
@@ -878,14 +994,14 @@ function renderBoard() {
                 <h3 class="tt-h3">Odjazdy</h3>
                 <span class="tt-count">${shown.length}</span>
                 <div class="tt-switch">
-                    <button type="button" class="tt-mini${fromSec === null ? '' : ' active'}"
-                            data-from="now">od teraz</button>
-                    <button type="button" class="tt-mini${fromSec === null ? ' active' : ''}"
-                            data-from="day">cała doba</button>
+                    <button type="button" class="tt-mini${full ? '' : ' active'}"
+                            data-board="time">podana godzina</button>
+                    <button type="button" class="tt-mini${full ? ' active' : ''}"
+                            data-board="full">pełny rozkład</button>
                 </div>
             </div>
-            <ol class="tt-board">${rows}</ol>
-            ${shown.length > page.length ? `
+            ${full ? fullTable(shown) : `<ol class="tt-board">${rows}</ol>`}
+            ${!full && shown.length > page.length ? `
                 <button type="button" class="button tt-more" data-more="1">
                     Pokaż kolejne ${Math.min(BOARD_PAGE, shown.length - page.length)}
                     z ${shown.length - page.length}
@@ -894,19 +1010,20 @@ function renderBoard() {
         </div>`;
 }
 
-function tripHtml(dep) {
+const tripHtml = dep => `<li class="tt-trip">${tripStopsHtml(dep)}</li>`;
+
+function tripStopsHtml(dep) {
     const trip = tripCache.get(tripKey(dep));
-    if (!trip) return '<li class="tt-trip"><span class="field-hint">Czytam kurs…</span></li>';
+    if (!trip) return '<span class="field-hint">Czytam kurs…</span>';
     const stops = trip.stops.slice(trip.board_index).map((stop, i) => `
         <li class="tt-stop${i === 0 ? ' first' : ''}">
             <span class="tt-t">${esc(stop.t)}</span>
             <span class="tt-dot"></span>
             <span class="tt-name">${esc(stop.name)}</span>
         </li>`).join('');
-    return `<li class="tt-trip">
+    return `
         <ol class="tt-stops ${esc(trip.mode)}">${stops}</ol>
-        <p class="field-hint">Kliknij godzinę ponownie, żeby zwinąć ten kurs.</p>
-    </li>`;
+        <p class="field-hint">Kliknij godzinę ponownie, żeby zwinąć ten kurs.</p>`;
 }
 
 // --------------------------------------------------------- zdarzenia ----
@@ -946,7 +1063,10 @@ resultsBox.addEventListener('click', event => {
     const line = event.target.closest('[data-line]');
     if (line) {
         const key = line.dataset.line;
-        if (picked.has(key)) picked.delete(key);
+        if (boardMode === 'full') {
+            picked = new Set([key]);
+            openDep = null;     // rozwinięty kurs należał do poprzedniej linii
+        } else if (picked.has(key)) picked.delete(key);
         else picked.add(key);
         boardLimit = BOARD_PAGE;
         render();
@@ -970,12 +1090,9 @@ resultsBox.addEventListener('click', event => {
         return;
     }
 
-    const from = event.target.closest('[data-from]');
-    if (from) {
-        fromSec = from.dataset.from === 'day' ? null : (referenceSec() ?? 0);
-        boardLimit = BOARD_PAGE;
-        render();
-        draw(false);
+    const board = event.target.closest('[data-board]');
+    if (board) {
+        setBoardMode(board.dataset.board);
         return;
     }
 

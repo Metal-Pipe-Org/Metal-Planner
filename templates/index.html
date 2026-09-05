@@ -159,10 +159,25 @@
 
         <script id="line-names" type="application/json">{{ lines|tojson }}</script>
 
-        <div class="tt-day time-row">
-            <span>Dzień</span>
-            <input type="date" id="tt-date" value="{{ form_date }}">
-            <button type="button" id="tt-today" class="time-now-button">dziś</button>
+        {#
+          Dzień i godzina w jednym polu, w takiej samej ramce, co czas
+          wyszukiwarki. Godzina nie odpytuje serwera - odpowiedź niesie całą
+          dobę, więc jest punktem odniesienia dla obu rozkładów naraz: od niej
+          lecą odjazdy tablicy i na niej otwiera się rozkład linii.
+        #}
+        <div class="tt-when">
+            <span class="tt-when-part">
+                <label for="tt-date">Dzień</label>
+                <input type="date" id="tt-date" value="{{ form_date }}">
+                <button type="button" id="tt-today" class="time-now-button">dziś</button>
+            </span>
+            <span class="tt-when-part">
+                <label for="tt-time">Godzina</label>
+                <input type="text" id="tt-time" inputmode="numeric"
+                       pattern="[0-9]{2}:[0-9]{2}" maxlength="5" size="5"
+                       placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
+                <button type="button" id="tt-now" class="time-now-button">teraz</button>
+            </span>
             <span class="spinner tt-spinner" aria-hidden="true"></span>
         </div>
 

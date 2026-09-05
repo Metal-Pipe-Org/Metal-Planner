@@ -444,7 +444,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   sec, trip, stop, platform?}, …]}`. `departures[].line` to indeks w `lines`.
   `points` to słupki miejsca, z których cokolwiek odjeżdża — same nazwy
   i współrzędne, bo co z którego jedzie, widać już po `departures[].stop`;
-  front składa z tego wybór „skąd dokładnie". Bez geometrii
+  front składa z tego wybór „skąd dokładnie". Odjazdy obejmują jedną dobę
+  ZEGAROWĄ: ogon nocy z dnia poprzedniego wchodzi (autobus o 00:20 należy do
+  kalendarza soboty, ale odjeżdża w niedzielę), a nadwyżka tej doby
+  rozkładowej ponad 24 h już nie — stoi na tablicy następnego dnia. Bez tego
+  linia nocna byłaby na jednej tablicy dwa razy. Bez geometrii
   — na dużym węźle jest ponad sto par (linia, kierunek), a naraz widać z
   nich parę; trasy dociąga front przez `/api/trip`, dla linii faktycznie
   zaznaczonych.
@@ -481,6 +485,31 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-05** — **godzina obok daty** i **pełny rozkład**. Pole godziny
+  jest jedno na oba rozkłady i nic nie dociąga (odpowiedź niesie całą dobę):
+  przesuwa tylko to, od czego zaczyna się tablica, i to, który kurs linii jest
+  „ten najbliższy". Zastąpiło regułę „teraz, ale tylko dla dzisiaj" — rozkład
+  na czwartek za tydzień też ma się od czegoś zaczynać. Przy okazji dzień
+  i godzina dostały ramkę pola czasu wyszukiwarki; surowy `<input type="date">`
+  na tle karty wyglądał jak nie z tej aplikacji.
+
+  Przełącznik tablicy to teraz **„podana godzina" / „pełny rozkład"** zamiast
+  „od teraz / cała doba". Pełny rozkład to zapis ze słupka: wiersz na godzinę,
+  w wierszu minuty kolejnych kursów — doba mieści się na jednym ekranie. Ma to
+  sens tylko dla JEDNEJ linii (pod zlanym ciągiem minut nie wiadomo, co
+  podjedzie), więc przełączenie zawęża zaznaczenie do jednej, a plakietki
+  linii stają się wyborem jednokrotnym; poprzednie zaznaczenie wraca przy
+  powrocie do listy. Kierunek odróżniają odnośniki, tak jak na papierze: kurs
+  jadący tam, gdzie większość, jest bez znaczka, każdy inny dostaje swój,
+  rozwinięty w legendzie pod siatką. Klik w minutę rozwija kurs, tak samo jak
+  klik w wiersz listy.
+
+  Ta siatka od razu pokazała błąd, którego w liście nie było widać: linia
+  nocna stała na tablicy **dwa razy**. Oś doby sięga poza 24 h, bo kurs
+  wyjeżdżający o 25:10 musi dać się doskanować wyszukiwarce — ale on odjeżdża
+  już następnego dnia i to tam ma stać, jako ogon nocy. `stop_board` tnie więc
+  odjazdy na 24 h (`gtfs.PREV_DAY_SEC`); rozkładu LINII to nie dotyczy, bo tam
+  jednostką jest doba rozkładowa, a nie kalendarzowa.
 - **2026-09-05** — tablica odjazdów daje się zawęzić do jednego **słupka**.
   Nazwa taka jak „Wojszyce" to jedno miejsce scalone z kilku słupków (patrz
   `gtfs._build_places`), a z każdego jedzie się gdzie indziej — tablica ze

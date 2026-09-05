@@ -214,6 +214,20 @@ def test_ogon_nocy_wchodzi_na_tablice_nastepnego_dnia(feed):
 
 # ------------------------------------------------------------- jeden kurs ----
 
+def test_kurs_zza_polnocy_nie_stoi_na_tablicy_dwa_razy(feed):
+    """Zjazd o 24:20 należy do kalendarza SOBOTY, ale odjeżdża w niedzielę -
+    i tylko na tablicy niedzieli ma prawo stać. Oś doby sięga poza 24 h dla
+    wyszukiwarki (patrz gtfs.load_day), więc bez odcięcia ten sam kurs byłby
+    na obu tablicach: raz jako własna nadwyżka soboty, raz jako ogon nocy
+    w niedzielę."""
+    sobota = timetables.stop_board("RYNEK", SATURDAY)
+    assert all(d["sec"] < gtfs.PREV_DAY_SEC for d in sobota["departures"])
+    assert "00:20" not in [d["t"] for d in sobota["departures"]]
+
+    niedziela = timetables.stop_board("RYNEK", SUNDAY)
+    assert [d["t"] for d in niedziela["departures"]].count("00:20") == 1
+
+
 def test_kurs_pokazuje_przebieg_od_wskazanego_slupka(feed):
     tablica = timetables.stop_board("RYNEK", SUNDAY)
     odjazd = _o_godzinie(tablica, "06:00")            # linia 17 z R1

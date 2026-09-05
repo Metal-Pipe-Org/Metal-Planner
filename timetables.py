@@ -309,9 +309,16 @@ def stop_board(query, day):
     # przystanek kursu żadnego takiego nie ma - i słusznie, nie da się tam
     # wsiąść. Skan po całej tablicy dnia zamiast zapytania do SQLite: baza
     # nie ma indeksu po stop_id, a tablica dnia i tak jest w pamięci.
+    #
+    # Oś doby sięga poza 24 h, bo kurs tej doby rozkładowej wyjeżdżający o
+    # 25:10 musi dać się doskanować wyszukiwarce (patrz gtfs.load_day). Ale
+    # on odjeżdża już NASTĘPNEGO DNIA i to na tablicy następnego dnia stoi -
+    # jako ogon doby poprzedniej, o 01:10. Bez tego odcięcia linia nocna
+    # byłaby na tablicy dwa razy: raz jako ogon wczoraj, raz jako własna
+    # nadwyżka ponad dobę.
     found = []
     for departure_sec, _, from_stop, _, trip in data.conns:
-        if from_stop in stop_set:
+        if from_stop in stop_set and departure_sec < gtfs.PREV_DAY_SEC:
             found.append((departure_sec, trip, from_stop))
     found.sort()
 
