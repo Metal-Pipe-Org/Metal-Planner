@@ -195,8 +195,12 @@ def line_timetable(num, day, mode=None):
         out = []
         for key, variant in variants.items():
             variant["trips"].sort()
+            # `id` niesie słupek, a nie samą nazwę: to nim front przeskakuje
+            # z rozkładu linii na tablicę odjazdów TEJ krawędzi, a nie
+            # przeciwnej (patrz stop_board i jej `points`).
             stops = [
-                {"name": geo[stop_id][0], "lat": round(geo[stop_id][1], 5),
+                {"id": stop_id, "name": geo[stop_id][0],
+                 "lat": round(geo[stop_id][1], 5),
                  "lon": round(geo[stop_id][2], 5)}
                 for stop_id in key
             ]

@@ -109,6 +109,21 @@ body.panel-hidden .icon-button.floating { left: 16px; }
 .icon-button.floating.second { left: calc(var(--sidebar-w) + 76px); }
 body.panel-hidden .icon-button.floating.second { left: 64px; }
 
+/* Przełącznik trybu jest podpisany słowem, nie samą tarczą zegara: sama ikona
+   nie mówi, dokąd się klika, a to jest wejście w drugą połowę aplikacji.
+   Na telefonie i tak go nie widać (pływające przyciski są tam schowane),
+   więc podpis nie musi się nigdzie zwijać. */
+#mode-toggle {
+    width: auto;
+    gap: 7px;
+    padding: 0 14px 0 12px;
+}
+
+#mode-toggle span {
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
 /* Włączony tryb ma być widoczny na samym przycisku - a białe tło pływających
    przycisków jest specyficzniejsze niż samo .active i by je przykryło. */
 .icon-button.floating.active {
@@ -1730,6 +1745,29 @@ ul.tt-legend {
 .tt-stops.bus .tt-stop:last-child .tt-dot { background: var(--bus); }
 
 .tt-name { font-size: 13.5px; }
+
+/* Skok z rozkładu linii na tablicę tego słupka. Cichy, bo stoi przy KAŻDYM
+   przystanku trasy - trzydzieści kolorowych przycisków w kolumnie zasłoniłoby
+   to, po co się tu przyszło, czyli samą listę przystanków z godzinami. */
+.tt-stop-board {
+    margin-left: auto;
+    padding: 1px 7px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
+    color: var(--ink-faint);
+    font: inherit;
+    font-size: 11.5px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.tt-stop:hover .tt-stop-board,
+.tt-stop-board:focus-visible {
+    border-color: var(--line);
+    background: var(--surface);
+    color: var(--accent);
+}
 
 .tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
 .tt-more:hover { background: #e8edf3; }

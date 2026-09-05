@@ -82,6 +82,7 @@ let pickedBeforeFull = null;   // zaznaczenie linii sprzed wejścia w pełny roz
 let boardLimit = BOARD_PAGE;
 let openDep = null;       // rozwinięty odjazd (indeks) - jego kurs jest na mapie
 let tripCache = new Map();
+let pendingBoard = null;  // wybór przyniesiony z rozkładu linii: {point, num, mode}
 
 // ------------------------------------------------------ warstwy mapy ----
 
@@ -276,6 +277,7 @@ function reset() {
     boardLimit = BOARD_PAGE;
     openDep = null;
     tripCache = new Map();
+    pendingBoard = null;
     resultsBox.innerHTML = '';
     clearMap();
     dimBase(false);
@@ -302,6 +304,10 @@ function load(forced) {
     const query = queryInput.value.trim();
     if (!query) { reset(); return; }
     const wanted = forced || kindOf(query);
+    // Oczekujący wybór zużywa PIERWSZE zapytanie i tylko ono - inaczej
+    // przeżyłby porzucone szukanie i wskoczył do zupełnie innej tablicy.
+    const pending = pendingBoard;
+    pendingBoard = null;
     const mine = ++token;
     clearMap();
     setBusy(true);
@@ -351,6 +357,7 @@ function load(forced) {
             pointsOpen = false;
             boardMode = 'time';
             pickedBeforeFull = null;
+            applyPending(pending);
         }
         // Widok PRZED treścią: na telefonie zakładka "Mapa" trzyma listę
         // wyników w display:none, a wtedy pasek godzin ma zerową wysokość
@@ -525,11 +532,18 @@ function renderLine() {
                 data-course="${i}" aria-pressed="${i === courseIndex}">${esc(trip.dep)}</button>`
     ).join('');
 
+    // Na ostatnim przystanku wariantu przycisku nie ma: kurs się tam kończy,
+    // więc żaden odjazd TEJ linii stamtąd nie wychodzi.
+    const last = variant.stops.length - 1;
     const stops = variant.stops.map((stop, i) => `
         <li class="tt-stop" data-stop="${i}">
             <span class="tt-t">${times ? esc(times[i]) : ''}</span>
             <span class="tt-dot"></span>
             <span class="tt-name">${esc(stop.name)}</span>
+            ${i < last && stop.id ? `
+                <button type="button" class="tt-stop-board" data-board-stop="${i}"
+                        title="Odjazdy linii ${esc(data.num)} z przystanku ${esc(stop.name)}"
+                        >odjazdy</button>` : ''}
         </li>`).join('');
 
     resultsBox.innerHTML = `
@@ -589,6 +603,35 @@ function scrollCoursesToActive() {
 // ------------------------------------------------ tablica przystanku ----
 
 const lineKey = line => `${line.mode}|${line.num}`;
+
+/** "Odjazdy tej linii z tego przystanku" - to samo, co wpisanie przystanku
+    ręcznie, wybranie właściwego słupka i odznaczenie reszty linii, tylko bez
+    tych trzech kroków. Słupek bierze się z rozkładu linii (wariant zna swój
+    stop_id), więc trafia w tę krawędź, którą linia faktycznie jedzie, a nie
+    w przeciwną. */
+function boardFor(index) {
+    const variant = variantOf();
+    const stop = variant && variant.stops[index];
+    if (!stop || !stop.id) return;
+    pendingBoard = {point: stop.id, num: data.num, mode: data.mode};
+    queryInput.value = stop.name;
+    load('stop');
+}
+
+/** Wybór przyniesiony z rozkładu linii nakłada się PO odpowiedzi: dopiero ona
+    mówi, czy ten słupek i ta linia są na tablicy. Gdy któregoś nie ma (rozkład
+    z innego dnia, kurs wycofany), zostaje zwykła tablica całego przystanku -
+    to wciąż odpowiedź na pytanie, które padło. */
+function applyPending(want) {
+    if (!want) return;
+    if ((data.points || []).some(point => point.id === want.point)) {
+        pickedPoint = want.point;
+        pointsOpen = stopPoints().slice(POINTS_HEAD)
+            .some(point => point.id === pickedPoint);
+    }
+    const key = `${want.mode}|${want.num}`;
+    if (data.lines.some(line => lineKey(line) === key)) picked = new Set([key]);
+}
 
 /** Ile kursów każdej pary (linia, kierunek) odjeżdża z WYBRANEGO słupka.
     Bez wyboru to gotowy licznik z serwera; z wyborem trzeba przeliczyć, bo
@@ -1118,6 +1161,12 @@ resultsBox.addEventListener('click', event => {
                 if (openDep === index) render();
             });
         }
+        return;
+    }
+
+    const boardStop = event.target.closest('[data-board-stop]');
+    if (boardStop) {
+        boardFor(Number(boardStop.dataset.boardStop));
         return;
     }
 

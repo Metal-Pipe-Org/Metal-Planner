@@ -434,10 +434,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `{kind: "walk", text, minutes, from, to, path}`.
 - `GET /api/line?num=17&mode=tram&date=YYYY-MM-DD` — rozkład jednej linii:
   `{num, mode, label, date, variants: [{headsign, from, to, stops:
-  [{name, lat, lon}, …], path: [[lat,lon], …], trips: [{id, dep: "05:12",
+  [{id, name, lat, lon}, …], path: [[lat,lon], …], trips: [{id, dep: "05:12",
   sec, times: ["05:12", …]}, …]}, …]}`. Wariant = jeden ciąg przystanków
   (kierunek albo kurs skrócony), warianty posortowane po liczbie kursów
-  malejąco; `times` ma tyle pozycji, co `stops`.
+  malejąco; `times` ma tyle pozycji, co `stops`. `stops[].id` to słupek —
+  tym samym identyfikatorem posługuje się `points` z `/api/stop_board`, więc
+  front umie przeskoczyć z rozkładu linii na tablicę tej właśnie krawędzi.
 - `GET /api/stop_board?stop=&date=YYYY-MM-DD` — tablica odjazdów:
   `{stop, date, center: [lat, lon], points: [{id, name, lat, lon}, …],
   lines: [{mode, num, headsign, count}, …], departures: [{line, t: "12:03",
@@ -485,6 +487,15 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-05** — z rozkładu linii da się przejść **wprost na tablicę
+  przystanku**: przy każdym przystanku trasy (poza ostatnim — tam kurs się
+  kończy) stoi przycisk „odjazdy", który otwiera tablicę tego przystanku
+  z wybranym słupkiem i zaznaczoną tylko tą linią. Słupek bierze się z `id`
+  w wariancie, nie z nazwy — oba słupki „RYNKU" nazywają się tak samo,
+  a linia jedzie jednym z nich. Wybór nakłada się po odpowiedzi serwera: gdy
+  tej linii albo tego słupka na tablicy nie ma (inny dzień, kurs wycofany),
+  zostaje zwykła tablica całego przystanku. Przy okazji przełącznik trybu
+  dostał podpis „Rozkłady" — sama tarcza zegara nie mówiła, dokąd się klika.
 - **2026-09-05** — **godzina obok daty** i **pełny rozkład**. Pole godziny
   jest jedno na oba rozkłady i nic nie dociąga (odpowiedź niesie całą dobę):
   przesuwa tylko to, od czego zaczyna się tablica, i to, który kurs linii jest

@@ -128,6 +128,18 @@ def test_wariant_niesie_godziny_kazdego_kursu_po_przystankach(feed):
     assert [s["name"] for s in pelny["stops"]] == ["RYNEK", "BROCHÓW", "CENTRUM"]
 
 
+def test_przystanek_wariantu_niesie_swoj_slupek(feed):
+    """Rozkład linii i tablica przystanku muszą mówić o tym samym słupku -
+    na tym stoi skok "odjazdy tej linii stąd": front bierze `id` z wariantu
+    i podstawia je jako wybrany słupek tablicy. Nazwa by nie wystarczyła,
+    bo oba słupki RYNKU nazywają się tak samo, a linia jedzie jednym z nich."""
+    wariant = timetables.line_timetable("17", SUNDAY)["variants"][0]
+    assert [s["id"] for s in wariant["stops"]] == ["R1", "B", "C"]
+
+    tablica = timetables.stop_board("RYNEK", SUNDAY)
+    assert wariant["stops"][0]["id"] in [p["id"] for p in tablica["points"]]
+
+
 def test_kurs_po_polnocy_ma_godzine_z_tarczy_zegara(feed):
     """24:20 w GTFS to dla pasażera 00:20 - i to on ma zobaczyć."""
     sobota = timetables.line_timetable("17", SATURDAY)
