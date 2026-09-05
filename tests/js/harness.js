@@ -404,6 +404,11 @@ function fakeAudio() {
     return el;
 }
 
+/* Zegary globalne: emulator nie płynie w czasie (fetch nigdy nie odpowiada),
+   a cykliczne odświeżanie warstwy pojazdów ma tu po prostu nie wybuchać. */
+function setInterval() { return 0; }
+function clearInterval() {}
+
 const window = {
     // Zapytania o szerokość mają wychodzić na prawdę (panel liczy na "szeroko"),
     // ale prefers-reduced-motion domyślnie NIE - inaczej syntezator milczałby
@@ -444,6 +449,10 @@ const INJECTION = `
     get flowLabelLayer() { return flowLabelLayer; },
     get flowPick() { return flowPick; },
     get flowParts() { return flowParts; },
+    // Warstwa pojazdów zawęża się do linii Z MAPY - żeby to sprawdzić, trzeba
+    // móc podstawić pozycje (fetch w emulatorze nie odpowiada) i zgasić mapę.
+    vehiclesLayer, stopsLayer, setVehiclesOn, renderVehicles, vehiclesFilter, clearFlow,
+    set lastVehicles(v) { lastVehicles = v; },
     nodePoint, dotOpts, seedStartPanel,
     horizonStep, extendHorizon, queryParams, MAX_HORIZON_SEC,
     get mapHorizonSec() { return mapHorizonSec; },

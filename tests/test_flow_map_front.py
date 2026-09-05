@@ -414,3 +414,13 @@ def test_the_button_stretches_the_map_range_up_to_the_ceiling(front):
     horizon_sec), a przy suficie 2 h przycisku nie ma - nie ma już czego
     dokładać. Tuż pod sufitem obiecuje tylko resztę do sufitu."""
     _check(front, "przycisk_przedluza_zakres_mapy")
+
+
+# ------------------------------------------------- pojazdy na żywo -
+
+def test_live_vehicles_are_narrowed_to_the_drawn_lines(front):
+    """Warstwa żywych pojazdów (◉) idzie za MAPĄ: przy narysowanym wachlarzu
+    pokazuje wyłącznie linie, które na nim są - pojazd linii, której mapa nie
+    rysuje, tylko by ją zasłaniał. Bez mapy nie ma czego zawężać i widać
+    wszystko, co jeździ. Słupki zostają widoczne - włącznik ich nie chowa."""
+    _check(front, "pojazdy_zawezone_do_linii_z_mapy")

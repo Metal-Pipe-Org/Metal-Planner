@@ -168,7 +168,7 @@ const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg', other: 'L
 // ------------------------------------------------------- markery na mapie ----
 
 const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
-const stopsLayer = L.layerGroup();        // wszystkie słupki naraz - włącznik ◉ chowa je razem
+const stopsLayer = L.layerGroup();        // wszystkie słupki naraz
 const stopKind = new Map();               // nazwa -> 'stop' (MPK) | 'train' (PKP)
 
 const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
@@ -233,13 +233,17 @@ function updatePointMarker(slot, value) {
 
 // -------------------------------------------------- pojazdy na mapie ----
 //
-// Druga warstwa markerów, wykluczająca się ze słupkami: przycisk ◉ w
-// nagłówku chowa stopsLayer i pokazuje żywe pozycje autobusów/tramwajów
-// z /api/vehicles (backend odpytuje mpk.wroc.pl/bus_position - CORS nie
-// pozwala zrobić tego wprost z przeglądarki, patrz vehicles.py). Wybór propozycji
-// trasy zawęża warstwę do linii, którymi się jedzie - reszta miasta by ją
-// tylko zasłaniała (patrz vehiclesFilter, wołane z openJourney/
-// deselectJourney/loadPlan/resetResults niżej w pliku).
+// Warstwa markerów dokładana NAD słupkami: przycisk ◉ w nagłówku pokazuje
+// żywe pozycje autobusów/tramwajów z /api/vehicles (backend odpytuje
+// mpk.wroc.pl/bus_position - CORS nie pozwala zrobić tego wprost z
+// przeglądarki, patrz vehicles.py). Słupki zostają na mapie: mówią, gdzie
+// można wsiąść, a to inne pytanie niż to, co akurat jedzie.
+//
+// Punktem odniesienia jest MAPA: gdy stoi na niej wachlarz przepływów,
+// warstwa zawęża się do linii, które są na nim narysowane (patrz
+// vehiclesFilter). Reszta miasta odpowiada na inne pytanie niż to, które
+// zadał ktoś, rysując tę mapę - i tylko ją zasłania. Bez mapy (przed
+// wyszukaniem) nie ma czego zawężać i widać wszystko, co jeździ.
 
 const vehiclesLayer = L.layerGroup();
 const vehiclesToggle = $('vehicles-toggle');
@@ -264,16 +268,16 @@ function vehicleTooltipHtml(v) {
     return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
 }
 
-/** Gdy wybrana jest propozycja trasy, warstwa pojazdów zawęża się do linii,
-    którymi ona jedzie - bez wybranej trasy widać wszystko, co akurat
-    przyjechało z /api/vehicles. */
+/** Linie narysowane na mapie przepływów - do nich zawęża się warstwa
+    pojazdów (patrz komentarz nad sekcją). null = mapa pusta, nie ma czego
+    zawężać. Liczone z flowHits, czyli z tego, co NAPRAWDĘ jest na ekranie,
+    a nie z odpowiedzi serwera - to ta sama lista, którą kursor rozstrzyga
+    korytarze. */
 function vehiclesFilter() {
-    if (selectedJourney === null) return null;
-    const journey = journeys[selectedJourney];
-    if (!journey) return null;
+    if (!flowHits.length) return null;
     const keys = new Set();
-    for (const leg of journey.legs) {
-        if (leg.kind === 'ride') keys.add(leg.mode + ' ' + leg.num.trim());
+    for (const hit of flowHits) {
+        if (hit.seg.num) keys.add(hit.seg.kind + ' ' + hit.seg.num.trim());
     }
     return keys;
 }
@@ -308,13 +312,11 @@ function setVehiclesOn(on) {
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
     if (on) {
-        map.removeLayer(stopsLayer);
         vehiclesLayer.addTo(map);
         loadVehicles();
         vehiclesTimer = setInterval(loadVehicles, VEHICLES_REFRESH_MS);
     } else {
         map.removeLayer(vehiclesLayer);
-        stopsLayer.addTo(map);
     }
 }
 
@@ -342,9 +344,8 @@ const stopsReady = fetch('/api/stops')
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
         }
-        // Stan włącznika ◉ wraca z localStorage (patrz saveUiState) - dopiero
-        // teraz, gdy stopsLayer ma już swoje markery, żeby "wyłączone" nie
-        // mignęło pustą mapą przed ich wczytaniem.
+        stopsLayer.addTo(map);
+        // Stan włącznika ◉ wraca z localStorage (patrz saveUiState).
         setVehiclesOn(vehiclesOn);
     });
 
@@ -804,6 +805,9 @@ function drawFlow(flow, refit) {
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
     seedStartPanel();
+    // Nowa mapa = inny zestaw linii, więc i inne pojazdy dotyczą tego, co
+    // widać (patrz vehiclesFilter). Przy zgaszonej warstwie to nic nie kosztuje.
+    renderVehicles();
     if (!refit) return;
 
     // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać do widoku
@@ -2413,7 +2417,7 @@ function renderPlan(data, refit) {
     clearJourney();
     clearPreview();
     dimFlow(false);
-    renderVehicles();            // odtąd nic nie jest zawężone do trasy
+    renderVehicles();            // nowa mapa - inne linie, inne pojazdy
     if (!journeys.length) {
         // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu

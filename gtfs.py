@@ -885,40 +885,6 @@ def departures_between(data, stop_ids, from_sec, to_sec):
     return out
 
 
-def trip_stops(trip_id, db=None, data=None):
-    """CAŁY kurs, po kolei: [(stop_id, przyjazd, odjazd), ...] - od pierwszego
-    przystanku do pętli, niezależnie od tego, gdzie ktoś wsiada.
-
-    Tym różni się od trip_path, które wycina sam przejazd pasażera. Pełnego
-    przebiegu potrzebuje dopasowanie żywych pozycji do wybranej trasy (patrz
-    journey_live.py): autobus, w który dopiero mamy wsiąść, jest jeszcze
-    PRZED naszym przystankiem, czyli poza etapem trasy - żeby go rozpoznać,
-    trzeba znać trasę jego kursu także tam.
-
-    Czasy są na osi wczytanego dnia (patrz db_trip), tak jak w trip_path.
-    """
-    if trip_id.startswith("PKP:"):
-        # Kursy kolejowe nie mają wpisu w stop_times - sekwencja przystanków
-        # jest dociągnięta przy budowie dnia (patrz pkp.augment_day).
-        return list(data.pkp_trip_stops.get(trip_id, ())) if data is not None else []
-
-    trip_id, shift = db_trip(trip_id)
-    own_db = db is None
-    db = db or _connect()
-    try:
-        return [
-            (stop_id, arrival_sec - shift, departure_sec - shift)
-            for stop_id, arrival_sec, departure_sec in db.execute(
-                "SELECT stop_id, arrival_sec, departure_sec FROM stop_times "
-                "WHERE trip_id = ? ORDER BY stop_sequence",
-                (trip_id,),
-            )
-        ]
-    finally:
-        if own_db:
-            db.close()
-
-
 def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None, data=None):
     """Kolejne przystanki kursu od wsiadania do wysiadania (stop_id, przyjazd, odjazd).
 
@@ -939,7 +905,21 @@ def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None, data
         import pkp
         return pkp.trip_path(data, trip_id, board_stop, board_dep, exit_stop, exit_arr)
 
-    rows = trip_stops(trip_id, db, data)
+    trip_id, shift = db_trip(trip_id)
+    own_db = db is None
+    db = db or _connect()
+    try:
+        rows = [
+            (stop_id, arrival_sec - shift, departure_sec - shift)
+            for stop_id, arrival_sec, departure_sec in db.execute(
+                "SELECT stop_id, arrival_sec, departure_sec FROM stop_times "
+                "WHERE trip_id = ? ORDER BY stop_sequence",
+                (trip_id,),
+            )
+        ]
+    finally:
+        if own_db:
+            db.close()
 
     start_i = None
     for i, (stop_id, arrival_sec, departure_sec) in enumerate(rows):

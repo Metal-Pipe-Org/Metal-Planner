@@ -946,4 +946,40 @@ checks.przycisk_przedluza_zakres_mapy = (() => {
     };
 })();
 
+/* Warstwa żywych pojazdów (przycisk ◉) przy narysowanej mapie przepływów:
+   pokazuje TYLKO linie, które są na tej mapie. Pojazd linii, której mapa nie
+   rysuje, odpowiada na inne pytanie i ma jej nie zasłaniać; bez mapy nie ma
+   czego zawężać i widać wszystko. */
+checks.pojazdy_zawezone_do_linii_z_mapy = (function () {
+    app.drawFlow(FLOW_FIXTURE, false);
+    app.stopsLayer.addTo(app.map);      // w emulatorze /api/stops nie odpowiada
+    const zMapy = app.flowHits[0].seg;                  // linia, którą mapa rysuje
+    app.lastVehicles = [
+        {line: zMapy.num, kind: zMapy.kind, lat: 51.10, lon: 17.00},
+        {line: '999', kind: 'bus', lat: 51.11, lon: 17.02},   // spoza mapy
+    ];
+
+    // renderVehicles wprost: w emulatorze fetch nigdy nie odpowiada, więc samo
+    // włączenie warstwy nie doczekałoby się rysowania.
+    app.setVehiclesOn(true);
+    app.renderVehicles();
+    const przyMapie = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const slupki = app.map.hasLayer(app.stopsLayer);   // włącznik ich nie chowa
+
+    // Zgaszona mapa = brak powodu do zawężania.
+    app.clearFlow();
+    app.renderVehicles();
+    const bezMapy = app.vehiclesLayer.layers.length;
+    const filtrBezMapy = app.vehiclesFilter();
+
+    app.setVehiclesOn(false);
+    app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
+
+    return {
+        ok: przyMapie.length === 1 && przyMapie[0] === zMapy.num
+            && bezMapy === 2 && filtrBezMapy === null && slupki === true,
+        linia: zMapy.num, przyMapie, bezMapy, filtrBezMapy, slupki,
+    };
+})();
+
 JSON.stringify(checks);
