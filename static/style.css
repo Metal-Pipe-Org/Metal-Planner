@@ -906,13 +906,23 @@ body.panel-hidden #sidebar {
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 
 /* Pasek nad mapą - jedyna liczba, której nie trzeba szukać kursorem.
-   Wysrodkowany nad mapą, nad panelem wyszukiwania (z lewej) i pod panelem
-   deweloperskim (z prawej), żeby nie wchodzić żadnemu w drogę. */
+   Nad panelem wyszukiwania (z lewej) i pod panelem deweloperskim (z prawej),
+   żeby nie wchodzić żadnemu w drogę.
+
+   Dwie rzeczy trzymają go z dala od pływających przycisków (← i ◷ Rozkłady):
+
+   - stoi POD ich rzędem, nie obok. Pasek bywa szeroki na pół ekranu, a
+     przyciski kończą się grubo za lewą krawędzią mapy - przy węższym oknie
+     nie ma szerokości, w której dałoby się je minąć w tym samym wierszu;
+   - jest wyśrodkowany nad MAPĄ, nie nad oknem. Przy schowanym panelu to
+     jedno i to samo, ale przy otwartym środek okna leży o pół panelu za
+     daleko w lewo i pasek wjeżdża lewą połową na panel. */
 .time-headline {
     position: fixed;
-    top: 16px;
-    left: 50%;
+    top: 68px;
+    left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
     transform: translateX(-50%);
+    transition: left 0.25s ease;
     z-index: 900;
     display: flex;
     align-items: center;
@@ -955,6 +965,9 @@ body.panel-hidden #sidebar {
 }
 
 .headline-sep { color: var(--ink-faint); }
+
+/* Schowany panel = mapa na całe okno, więc jej środek to środek okna. */
+body.panel-hidden .time-headline { left: 50%; }
 
 @media (max-width: 900px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
@@ -1780,6 +1793,10 @@ ul.tt-legend {
 
 @media (max-width: 760px) {
     #view-tabs { display: flex; }
+
+    /* Panel jest tu nakładką na całą szerokość, a nie kolumną obok mapy -
+       "środek mapy" znaczy więc znowu środek okna. */
+    .time-headline { left: 50%; }
 
     #sidebar {
         /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu

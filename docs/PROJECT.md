@@ -496,6 +496,14 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   tej linii albo tego słupka na tablicy nie ma (inny dzień, kurs wycofany),
   zostaje zwykła tablica całego przystanku. Przy okazji przełącznik trybu
   dostał podpis „Rozkłady" — sama tarcza zegara nie mówiła, dokąd się klika.
+
+  Szerszy przycisk wyszedł na pasek „ile trwa podróż", który wjeżdżał pod
+  niego lewą połową — i przy okazji pokazał, że pasek stał źle od początku:
+  wyśrodkowany nad OKNEM, choć jego własny komentarz mówił „nad mapą", więc
+  przy otwartym panelu leżał o pół panelu za daleko w lewo. Teraz liczy
+  środek od krawędzi panelu i stoi POD rzędem pływających przycisków, a nie
+  obok: pasek bywa szeroki na pół ekranu i przy węższym oknie nie ma
+  szerokości, w której dałoby się je minąć w jednym wierszu.
 - **2026-09-05** — **godzina obok daty** i **pełny rozkład**. Pole godziny
   jest jedno na oba rozkłady i nic nie dociąga (odpowiedź niesie całą dobę):
   przesuwa tylko to, od czego zaczyna się tablica, i to, który kurs linii jest
