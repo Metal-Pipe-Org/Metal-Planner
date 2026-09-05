@@ -1072,7 +1072,7 @@ body.panel-hidden #sidebar {
    z góry na dół, a nie każdy wiersz od nowa. */
 .tt-rows li {
     display: grid;
-    grid-template-columns: 38px 34px 1fr auto;
+    grid-template-columns: 38px minmax(34px, max-content) 1fr auto;
     align-items: center;
     column-gap: 7px;
     padding: 2px 0;
@@ -1084,7 +1084,7 @@ body.panel-hidden #sidebar {
    tablica pod kropką wybranej trasy pyta o cały przystanek i tego nie wie,
    a pusta kolumna przesuwałaby jej wiersze bez powodu. */
 .tt-rows.has-flow li {
-    grid-template-columns: 15px 38px 34px 1fr auto;
+    grid-template-columns: 15px 38px minmax(34px, max-content) 1fr auto;
     column-gap: 6px;
 }
 
@@ -1112,14 +1112,19 @@ body.panel-hidden #sidebar {
 }
 
 /* Plakietka z listy propozycji, tylko mniejsza - w dymku obok niej stoi
-   jeszcze kierunek, a ten musi się zmieścić bez zawijania. */
+   jeszcze kierunek, a ten musi się zmieścić bez zawijania. Szerokość tylko
+   MINIMALNA: numery pociągów (np. "PR 46545") są dłuższe niż numery linii
+   tramwajowych/autobusowych i przy sztywnej szerokości wychodziły poza
+   plakietkę (patrz #86) - kolumna w .tt-rows li rośnie razem z nią. */
 .tt-rows .badge {
-    min-width: 0;
-    width: 34px;
+    min-width: 34px;
+    width: auto;
+    max-width: 100%;
     height: 18px;
     padding: 0 4px;
     border-radius: 5px;
     font-size: 11.5px;
+    white-space: nowrap;
 }
 
 .tt-dir {
