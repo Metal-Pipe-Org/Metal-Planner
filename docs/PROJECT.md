@@ -439,9 +439,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   (kierunek albo kurs skrócony), warianty posortowane po liczbie kursów
   malejąco; `times` ma tyle pozycji, co `stops`.
 - `GET /api/stop_board?stop=&date=YYYY-MM-DD` — tablica odjazdów:
-  `{stop, date, center: [lat, lon], platforms: […], lines: [{mode, num,
-  headsign, count}, …], departures: [{line, t: "12:03", sec, trip, stop,
-  platform?}, …]}`. `departures[].line` to indeks w `lines`. Bez geometrii
+  `{stop, date, center: [lat, lon], points: [{id, name, lat, lon}, …],
+  lines: [{mode, num, headsign, count}, …], departures: [{line, t: "12:03",
+  sec, trip, stop, platform?}, …]}`. `departures[].line` to indeks w `lines`.
+  `points` to słupki miejsca, z których cokolwiek odjeżdża — same nazwy
+  i współrzędne, bo co z którego jedzie, widać już po `departures[].stop`;
+  front składa z tego wybór „skąd dokładnie". Bez geometrii
   — na dużym węźle jest ponad sto par (linia, kierunek), a naraz widać z
   nich parę; trasy dociąga front przez `/api/trip`, dla linii faktycznie
   zaznaczonych.
@@ -477,6 +480,18 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-05** — tablica odjazdów daje się zawęzić do jednego **słupka**.
+  Nazwa taka jak „Wojszyce" to jedno miejsce scalone z kilku słupków (patrz
+  `gtfs._build_places`), a z każdego jedzie się gdzie indziej — tablica ze
+  wszystkich odpowiadała na „co tu odjeżdża", ale nie na „co odjeżdża stąd,
+  gdzie stoję". Karta „Słupki" wypisuje je kierunkami, nie nazwami, bo
+  nazywają się zwykle tak samo; nazwa dochodzi do podpisu tylko tam, gdzie
+  faktycznie rozróżnia (nazwane perony kierunkowe węzła). Wybór zawęża
+  tablicę, listę linii i trasy na mapie, a słupki są też punktami na mapie —
+  klik w przygaszony przełącza tablicę na niego. Serwer dokłada do
+  odpowiedzi samo `points` (nazwa + współrzędne); liczniki, kierunki i numery
+  liczy front z tablicy, którą i tak ma w całości.
 
 - **2026-08-29** — drugi tryb panelu: **rozkłady jazdy**, przełączane
   przyciskiem ◷ obok chowania panelu (na telefonie w pasku zakładek).

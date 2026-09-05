@@ -7,6 +7,8 @@
    - PRZYSTANEK ("co odjeżdża z Katedry") - tablica odjazdów wszystkich linii,
      z zaznaczaniem, KTÓRE z nich mają być w tej tablicy złączone; trasy
      zaznaczonych linii - od tego przystanku dalej - rysują się na mapie.
+     Nazwa przystanku to zwykle kilka słupków, a z każdego jedzie się w inną
+     stronę - tablicę można zawęzić do jednego z nich.
 
    Jedno pole na jedno i drugie. Rodzaj rozkładu wynika z tego, co się wpisało,
    a nie z przełącznika ustawianego wcześniej: "17" to linia, "Katedra" to
@@ -46,6 +48,10 @@ const MAX_ROUTES_ON_MAP = 8;
 // Ile kierunków jednej linii rysujemy. Linia ma dwa podstawowe, a poza nimi
 // garść kursów skróconych - te leżą na trasie podstawowej i nic nie wnoszą.
 const MAX_DIRS_PER_LINE = 2;
+// Ile słupków widać bez rozwijania. Duży węzeł ma ich kilkanaście, a lista
+// wszystkich zepchnęłaby tablicę odjazdów poza ekran - reszta jest o jeden
+// klik dalej, tak samo jak kursy skrócone przy rozkładzie linii.
+const POINTS_HEAD = 5;
 // Ile odjazdów pokazujemy od razu. Doba na dużym węźle to ~2000 wierszy.
 const BOARD_PAGE = 40;
 // Przybliżenie tablicy bez tras: sam przystanek to punkt, a punkt kadruje się
@@ -68,6 +74,8 @@ let sideOpen = false;     // rozwinięte warianty skrócone
 let recenter = false;     // przewinąć pasek godzin do wybranego kursu
 
 let picked = new Set();   // zaznaczone linie tablicy ("bus|8")
+let pickedPoint = null;   // wybrany słupek miejsca (null = wszystkie)
+let pointsOpen = false;   // rozwinięta reszta słupków
 let fromSec = null;       // od której godziny pokazujemy odjazdy (null = doba)
 let boardLimit = BOARD_PAGE;
 let openDep = null;       // rozwinięty odjazd (indeks) - jego kurs jest na mapie
@@ -259,6 +267,8 @@ function reset() {
     courseIndex = null;
     sideOpen = false;
     picked = new Set();
+    pickedPoint = null;
+    pointsOpen = false;
     fromSec = null;
     boardLimit = BOARD_PAGE;
     openDep = null;
@@ -334,6 +344,8 @@ function load(forced) {
             recenter = true;
         } else {
             picked = new Set(payload.lines.map(lineKey));
+            pickedPoint = null;
+            pointsOpen = false;
             fromSec = defaultFromSec(payload);
         }
         // Widok PRZED treścią: na telefonie zakładka "Mapa" trzyma listę
@@ -549,21 +561,80 @@ const lineKey = line => `${line.mode}|${line.num}`;
 const defaultFromSec = payload =>
     (payload.date === isoToday() ? nowSec() : null);
 
+/** Ile kursów każdej pary (linia, kierunek) odjeżdża z WYBRANEGO słupka.
+    Bez wyboru to gotowy licznik z serwera; z wyborem trzeba przeliczyć, bo
+    linia spod przeciwnej krawędzi nie ma tu ani jednego odjazdu - i nie ma
+    czego zaznaczać. */
+function countsPerLine() {
+    if (pickedPoint === null) return data.lines.map(line => line.count);
+    const counts = data.lines.map(() => 0);
+    for (const dep of data.departures) {
+        if (dep.stop === pickedPoint) counts[dep.line]++;
+    }
+    return counts;
+}
+
 /** Linie tablicy pogrupowane po numerze - kierunki tej samej linii są jednym
     przełącznikiem. Zaznaczanie ma odpowiadać na "chcę widzieć 8, 9 i 17",
     a nie kazać odhaczać osobno każdego headsigna. */
 function lineGroups() {
+    const counts = countsPerLine();
     const groups = new Map();
     data.lines.forEach((line, i) => {
+        if (!counts[i]) return;
         const key = lineKey(line);
         if (!groups.has(key)) {
             groups.set(key, {key, num: line.num, mode: line.mode, count: 0, indexes: []});
         }
         const group = groups.get(key);
-        group.count += line.count;
+        group.count += counts[i];
         group.indexes.push(i);
     });
     return [...groups.values()];
+}
+
+/** Słupki miejsca z tym, co z każdego widać: ile stąd odjeżdża, dokąd i czym.
+    Serwer daje same nazwy i współrzędne (patrz timetables.stop_board) - resztę
+    liczymy z tablicy, którą front i tak trzyma w całości. */
+function stopPoints() {
+    const points = (data.points || []).map(point => ({
+        ...point, count: 0, heads: new Map(), keys: new Set(),
+    }));
+    const byId = new Map(points.map(point => [point.id, point]));
+    for (const dep of data.departures) {
+        const point = byId.get(dep.stop);
+        if (!point) continue;
+        const line = data.lines[dep.line];
+        point.count++;
+        point.heads.set(line.headsign, (point.heads.get(line.headsign) || 0) + 1);
+        point.keys.add(lineKey(line));
+    }
+    return points.map(point => ({
+        ...point,
+        // Kierunki od najczęstszego: pierwszy mówi o słupku najwięcej, a ogon
+        // to pojedyncze kursy skrócone i zjazdy do zajezdni.
+        dirs: [...point.heads].sort((a, b) => b[1] - a[1]).map(([head]) => head),
+        nums: [...new Set(data.lines
+            .filter(line => point.keys.has(lineKey(line)))
+            .map(line => line.num))],
+    })).sort((a, b) => b.count - a.count);
+}
+
+/** Krótki opis słupka: dokąd się z niego jedzie. Dwa kierunki plus licznik
+    reszty - pełna lista dużego węzła nie zmieściłaby się w jednej linijce
+    i tak. */
+const pointDirs = point => point.dirs.slice(0, 2).join(' · ')
+    + (point.dirs.length > 2 ? ` +${point.dirs.length - 2}` : '');
+
+function pickPoint(id) {
+    pickedPoint = pickedPoint === id ? null : (id || null);
+    // Wybór z mapy albo z rozwiniętego ogona ma zostać widoczny na liście.
+    pointsOpen = stopPoints().slice(POINTS_HEAD)
+        .some(point => point.id === pickedPoint);
+    boardLimit = BOARD_PAGE;
+    openDep = null;         // rozwinięty kurs mógł odjeżdżać z innego słupka
+    render();
+    draw(true);
 }
 
 const isPicked = line => picked.has(lineKey(line));
@@ -573,6 +644,7 @@ const isPicked = line => picked.has(lineKey(line));
 function visibleDepartures() {
     const out = [];
     data.departures.forEach((dep, i) => {
+        if (pickedPoint !== null && dep.stop !== pickedPoint) return;
         if (isPicked(data.lines[dep.line]) && (fromSec === null || dep.sec >= fromSec)) {
             out.push(i);
         }
@@ -584,13 +656,38 @@ function visibleDepartures() {
 // zmienić w trakcie - numer rysowania odsiewa odpowiedzi na poprzedni wybór.
 let boardDraw = 0;
 
+/** Przystanek na mapie. Jeden słupek to jeden punkt; kilka - każdy osobno,
+    bo to one są wyborem. Słupek poza tablicą zostaje przygaszony (widać, że
+    jest i że da się na niego przełączyć), a klik w niego zawęża tablicę tak
+    samo, jak klik w pozycję na liście. */
+function boardDots() {
+    const points = stopPoints();
+    if (points.length < 2) {
+        return [L.circleMarker(data.center, {
+            radius: 9, weight: 3, color: '#263238',
+            fillColor: '#ffd54f', fillOpacity: 1,
+        }).bindTooltip(data.stop)];
+    }
+    return points.map(point => {
+        const on = pickedPoint === null || pickedPoint === point.id;
+        return L.circleMarker([point.lat, point.lon], {
+            radius: on ? 9 : 6, weight: on ? 3 : 2,
+            color: on ? '#263238' : '#546e7a',
+            fillColor: on ? '#ffd54f' : '#fff', fillOpacity: 1,
+        }).bindTooltip(`${data.stop} → ${pointDirs(point)}`)
+          .on('click', () => pickPoint(point.id));
+    });
+}
+
+/** Środek widoku tablicy: wybrany słupek, a bez wyboru środek całego miejsca. */
+function boardCenter() {
+    const point = (data.points || []).find(point => point.id === pickedPoint);
+    return point ? [point.lat, point.lon] : data.center;
+}
+
 function drawBoard(refit) {
     const mine = ++boardDraw;
     focusLayer = dropLayer(focusLayer);
-    const stopDot = L.circleMarker(data.center, {
-        radius: 9, weight: 3, color: '#263238',
-        fillColor: '#ffd54f', fillOpacity: 1,
-    }).bindTooltip(data.stop);
 
     // Trasy zaznaczonych linii - po jednej na kierunek, liczone z kursu
     // najbliższego wybranej godzinie: to on odpowiada na pytanie "dokąd
@@ -604,13 +701,13 @@ function drawBoard(refit) {
         for (const i of main) chosen.push({line: data.lines[i], i});
     }
 
-    showRoutes([], [stopDot], false, null);
+    showRoutes([], boardDots(), false, null);
 
     if (!chosen.length || groups.length > MAX_ROUTES_ON_MAP) {
         // Bez tras na mapie zostaje sam przystanek - a wtedy reszta słupków
         // jest tym, po czym się do niego trafia, więc ma być widoczna.
         dimBase(openDep !== null);
-        if (refit) map.setView(data.center, BOARD_ZOOM);
+        if (refit) map.setView(boardCenter(), BOARD_ZOOM);
         if (openDep !== null) drawOpenDeparture();
         return;
     }
@@ -618,7 +715,7 @@ function drawBoard(refit) {
 
     // Każda trasa dokłada się do mapy sama, gdy tylko dojdzie - kadrujemy
     // dopiero po wszystkich, żeby widok nie skakał przy każdej odpowiedzi.
-    const points = [data.center];
+    const points = [boardCenter()];
     Promise.all(chosen.map(({line, i}) => {
         const dep = representative(i);
         if (!dep) return null;
@@ -634,7 +731,8 @@ function drawBoard(refit) {
 }
 
 function representative(lineIndex) {
-    const list = data.departures.filter(dep => dep.line === lineIndex);
+    const list = data.departures.filter(dep => dep.line === lineIndex
+        && (pickedPoint === null || dep.stop === pickedPoint));
     if (!list.length) return null;
     if (fromSec === null) return list[0];
     return list.find(dep => dep.sec >= fromSec) || list[list.length - 1];
@@ -672,11 +770,61 @@ function drawOpenDeparture() {
     });
 }
 
+/** Wybór słupka - karta pojawia się tylko tam, gdzie jest z czego wybierać.
+    Etykietą jest ciąg kierunków, a nie nazwa: słupki jednego miejsca nazywają
+    się zwykle tak samo (albo prawie), a różnią się właśnie tym, dokąd stąd
+    jedzie. Nazwa dochodzi do podpisu dopiero tam, gdzie faktycznie rozróżnia
+    (nazwane perony kierunkowe dużego węzła). */
+function pointsCard(points) {
+    if (points.length < 2) return '';
+    const named = new Set(points.map(point => point.name)).size > 1;
+    const departures = n => `${n} ${plural(n, 'odjazd', 'odjazdy', 'odjazdów')}`;
+    const option = (id, title, sub, on) => `
+        <button type="button" class="tt-dir tt-point${on ? ' active' : ''}"
+                data-point="${esc(id)}" aria-pressed="${on}">
+            <span class="${id ? 'tt-dir-to' : 'tt-point-all'}">${esc(title)}</span>
+            <span class="tt-dir-sub">${esc(sub)}</span>
+        </button>`;
+
+    const row = point => option(
+        point.id,
+        pointDirs(point),
+        (named ? `${point.name} · ` : '')
+            + `${departures(point.count)} · ${point.nums.join(' ')}`,
+        pickedPoint === point.id,
+    );
+    const tail = points.slice(POINTS_HEAD);
+
+    return `
+        <div class="card tt-card">
+            <div class="tt-card-head">
+                <h3 class="tt-h3">Słupki</h3>
+                <span class="tt-count">${points.length}</span>
+            </div>
+            <div class="tt-points">
+                ${option('', 'Wszystkie', departures(data.departures.length),
+                         pickedPoint === null)}
+                ${points.slice(0, POINTS_HEAD).map(row).join('')}
+            </div>
+            ${tail.length ? `
+                <details class="tt-side"${pointsOpen ? ' open' : ''}>
+                    <summary>jeszcze ${tail.length}
+                        ${plural(tail.length, 'słupek', 'słupki', 'słupków')}
+                        — z mniejszą liczbą odjazdów</summary>
+                    <div class="tt-points">${tail.map(row).join('')}</div>
+                </details>` : ''}
+            <p class="field-hint">Jedna nazwa to kilka słupków — z każdego jedzie
+                się w inną stronę. Wybrany widać na mapie.</p>
+        </div>`;
+}
+
 function renderBoard() {
+    const points = stopPoints();
     const groups = lineGroups();
     const shown = visibleDepartures();
     const page = shown.slice(0, boardLimit);
-    const all = picked.size === groups.length;
+    const pickedLines = groups.filter(group => picked.has(group.key)).length;
+    const all = pickedLines === groups.length;
 
     const chips = groups.map(group => `
         <button type="button" class="tt-line badge ${esc(group.mode)}${picked.has(group.key) ? '' : ' off'}"
@@ -699,9 +847,9 @@ function renderBoard() {
         </li>${open ? tripHtml(dep) : ''}`;
     }).join('');
 
-    const mapNote = picked.size === 0
+    const mapNote = pickedLines === 0
         ? 'Nic nie zaznaczone — tablica jest pusta.'
-        : groups.length > MAX_ROUTES_ON_MAP && picked.size > MAX_ROUTES_ON_MAP
+        : groups.length > MAX_ROUTES_ON_MAP && pickedLines > MAX_ROUTES_ON_MAP
             ? `Zostaw najwyżej ${MAX_ROUTES_ON_MAP} linii, a ich trasy pokażą się na mapie.`
             : 'Trasy zaznaczonych linii — stąd dalej — widać na mapie.';
 
@@ -711,6 +859,8 @@ function renderBoard() {
             <span class="tt-title-main">${esc(data.stop)}</span>
             <span class="tt-title-sub">${esc(dayLabel())}</span>
         </div>
+
+        ${pointsCard(points)}
 
         <div class="card tt-card">
             <div class="tt-card-head">
@@ -801,6 +951,12 @@ resultsBox.addEventListener('click', event => {
         boardLimit = BOARD_PAGE;
         render();
         draw(true);
+        return;
+    }
+
+    const point = event.target.closest('[data-point]');
+    if (point) {
+        pickPoint(point.dataset.point);
         return;
     }
 

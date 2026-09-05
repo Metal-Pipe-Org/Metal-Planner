@@ -161,6 +161,25 @@ def test_tablica_laczy_slupki_jednego_miejsca(feed):
     assert {d["stop"] for d in tablica["departures"]} == {"R1", "R2"}
 
 
+def test_tablica_wymienia_slupki_z_ktorych_cos_odjezdza(feed):
+    """Scalone miejsce trzeba dać się rozłożyć z powrotem na słupki - to one
+    są grupami kierunków ("z tego jedzie się do centrum, z tamtego na pętlę").
+    Front filtruje tablicę po `departures[].stop`, więc serwer dokłada do
+    słupka tylko to, czego z odjazdów nie policzy: nazwę i współrzędne."""
+    tablica = timetables.stop_board("RYNEK", SUNDAY)
+    assert [p["id"] for p in tablica["points"]] == ["R1", "R2"]
+    assert {p["name"] for p in tablica["points"]} == {"RYNEK"}
+    assert tablica["points"][0]["lat"] == 51.1
+    # Każdy odjazd wskazuje swój słupek - inaczej nie dałoby się zawęzić.
+    assert {d["stop"] for d in tablica["departures"]} <= {p["id"] for p in tablica["points"]}
+
+
+def test_slupek_bez_odjazdow_nie_wchodzi_do_wyboru(feed):
+    """CENTRUM jest końcem trasy - nie da się tam wsiąść, więc nie ma czego
+    wybierać (i pusta pozycja nie ma się z czego wziąć)."""
+    assert timetables.stop_board("CENTRUM", SUNDAY)["points"] == []
+
+
 def test_ostatni_przystanek_kursu_nie_jest_odjazdem(feed):
     """Do kursu, który się tu kończy, nie da się wsiąść - i nie ma go na
     tablicy odjazdów."""

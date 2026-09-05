@@ -281,6 +281,15 @@ def stop_board(query, day):
     Filtrowanie i łączenie linii zostaje po stronie frontu: jedno zapytanie
     niesie komplet odjazdów, więc odhaczanie kolejnych autobusów w tej samej
     tablicy dzieje się natychmiast, bez chodzenia po sieć.
+
+    W odpowiedzi jest też lista SŁUPKÓW, z których cokolwiek tu odjeżdża
+    (`points`) - same nazwy i współrzędne, bo co z którego odjeżdża, widać
+    już w samych odjazdach (każdy niesie swój `stop`). Słupek jest w praktyce
+    grupą kierunków: nazwa taka jak "Wojszyce" to jedno miejsce (patrz
+    gtfs._build_places), ale stoi na nim kilka słupków i z każdego jedzie się
+    gdzie indziej - tablica scalona z wszystkich odpowiada na pytanie "co tu
+    odjeżdża", a nie na "co odjeżdża stąd, gdzie stoję". Wybór jednego z nich
+    zostaje po stronie frontu, tak samo jak wybór linii.
     """
     try:
         data = gtfs.load_day(day)
@@ -320,6 +329,10 @@ def stop_board(query, day):
     index_of = {key: i for i, key in enumerate(order)}
     platform_of = {s: data.stop_names[s] for s in stop_ids}
     multi_platform = len(set(platform_of.values())) > 1
+    # Słupek, z którego nic nie odjeżdża (koniec trasy - można tylko wysiąść),
+    # nie ma czego pokazać w tablicy i nie ma go w wyborze.
+    used = sorted({from_stop for _, _, _, from_stop in rows},
+                  key=lambda s: (platform_of[s], s))
 
     departures = [
         {
@@ -344,7 +357,12 @@ def stop_board(query, day):
         "stop": name,
         "date": day.isoformat(),
         "center": center,
-        "platforms": sorted(set(platform_of.values())),
+        "points": [
+            {"id": stop_id, "name": platform_of[stop_id],
+             "lat": round(data.stop_coords[stop_id][0], 5),
+             "lon": round(data.stop_coords[stop_id][1], 5)}
+            for stop_id in used
+        ],
         "lines": [
             {"mode": mode, "num": line_num, "headsign": headsign,
              "count": lines[(mode, line_num, headsign)]}

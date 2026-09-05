@@ -1438,6 +1438,23 @@ body.tt-searching .tt-spinner { display: inline-block; }
     white-space: nowrap;
 }
 
+/* Słupki jednego przystanku - ten sam wybór, co kierunek linii, więc i ten
+   sam przycisk, tylko w kolumnie: etykietą jest tu ciąg kierunków, a nie
+   jedno słowo, i obok siebie nie miałby jak się zmieścić. */
+.tt-points {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tt-point { flex: 0 0 auto; }
+
+/* "Wszystkie" nie jest kierunkiem - bez strzałki, którą tt-dir-to dokleja. */
+.tt-point-all {
+    font-weight: 600;
+    font-size: 13.5px;
+}
+
 /* Kursy skrócone schowane pod rozwijaniem - są, ale nie zabierają miejsca
    kierunkom, którymi linia jeździ cały dzień. */
 .tt-side { margin-top: 8px; }
@@ -1454,6 +1471,9 @@ body.tt-searching .tt-spinner { display: inline-block; }
 }
 
 .tt-side .tt-dir { flex: 1 1 45%; }
+
+.tt-side .tt-points { margin-top: 6px; }
+.tt-side .tt-point { flex: 0 0 auto; }
 
 /* Godziny odjazdów i numery linii - jedno i drugie to gęsta siatka małych
    przycisków, więc wspólny pojemnik z własnym przewijaniem. */
