@@ -62,6 +62,14 @@ jobs:
             Zawołał Cię @${{ github.event.sender.login }}, wspominając @claude
             w wątku. Przeczytaj całą dyskusję: najświeższy wpis jest wiążący —
             jeśli doprecyzowuje albo zmienia treść zgłoszenia, trzymaj się jego.
+
+            PR-a nie zakładaj sam. Wypchnij gałąź i podaj link „Create PR"
+            z wypełnionym tytułem i opisem — otwiera go człowiek. Opis w tym
+            linku (parametr `body`) ma się zaczynać od linijki
+            `Closes #${{ github.event.issue.number }}`, dopiero pod nią opisz,
+            co było źle i co zmieniasz. Bez słowa kluczowego GitHub nie wiąże
+            PR-a ze zgłoszeniem: samo `#${{ github.event.issue.number }}` ani
+            nagłówek `# ${{ github.event.issue.number }}` nie wystarczą.
           claude_args: |
             --model claude-sonnet-5
             --max-turns 40
