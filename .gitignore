@@ -136,6 +136,9 @@ yarn-error.log*
 secrets/
 credentials/
 
+# AI
+
+CLAUDE.md
 # =========================
 # Claude Code - stan lokalny
 # (settings.json i launch.json sa wersjonowane, reszta jest per-maszyna)
@@ -151,3 +154,4 @@ credentials/
 .claude/agent-memory-local/
 .claude/first-run
 .claude/assistant-daemon-state.json
+/.mcp.json

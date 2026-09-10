@@ -62,6 +62,10 @@ if (devPanel) {
         devPanel.classList.toggle('hidden', !open);
         devToggle.classList.toggle('active', open);
         devToggle.setAttribute('aria-expanded', String(open));
+        // Panel ⚙ i okienko z rozkładem zajmują ten sam róg - klasa na <body>
+        // odsuwa okienko, żeby dało się widzieć oba naraz (jego własne
+        // przełączniki siedzą właśnie w tym panelu).
+        document.body.classList.toggle('dev-open', open);
         if (persist) saveUiState({devOpen: open});
     };
     setDev(!!uiState.devOpen, false);
@@ -158,15 +162,22 @@ function esc(text) {
     return div.innerHTML;
 }
 
-const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', other: '#6a1b9a'};
-const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', other: 'Linia'};
+const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32', other: '#6a1b9a'};
+const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg', other: 'Linia'};
 
 // ------------------------------------------------------- markery na mapie ----
 
 const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
+const stopsLayer = L.layerGroup();        // wszystkie słupki naraz - włącznik ◉ chowa je razem
+const stopKind = new Map();               // nazwa -> 'stop' (MPK) | 'train' (PKP)
 
 const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
                     fillColor: '#42a5f5', fillOpacity: 0.8};
+// Stacje PKP (patrz pkp.py) - kolor spójny z plakietką linii kolejowej
+// (--train w style.css), żeby na pierwszy rzut oka było widać, że to nie
+// zwykły słupek MPK, zanim jeszcze ktoś najedzie kursorem na nazwę.
+const TRAIN_STYLE = {radius: 5, weight: 1, color: '#1b5e20',
+                     fillColor: '#2e7d32', fillOpacity: 0.85};
 // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
 const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
                    fillColor: '#90a4ae', fillOpacity: 0.25};
@@ -177,7 +188,8 @@ function styleFor(name) {
                                     fillColor: '#4caf50', fillOpacity: 1};
     if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
                                   fillColor: '#ef5350', fillOpacity: 1};
-    return baseDimmed ? DIM_STYLE : BASE_STYLE;
+    if (baseDimmed) return DIM_STYLE;
+    return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
 }
 
 function setBaseDim(dim) {
@@ -219,6 +231,97 @@ function updatePointMarker(slot, value) {
     }
 }
 
+// -------------------------------------------------- pojazdy na mapie ----
+//
+// Druga warstwa markerów, wykluczająca się ze słupkami: przycisk ◉ w
+// nagłówku chowa stopsLayer i pokazuje żywe pozycje autobusów/tramwajów
+// z /api/vehicles (backend odpytuje mpk.wroc.pl/bus_position - CORS nie
+// pozwala zrobić tego wprost z przeglądarki, patrz vehicles.py). Wybór propozycji
+// trasy zawęża warstwę do linii, którymi się jedzie - reszta miasta by ją
+// tylko zasłaniała (patrz vehiclesFilter, wołane z openJourney/
+// deselectJourney/loadPlan/resetResults niżej w pliku).
+
+const vehiclesLayer = L.layerGroup();
+const vehiclesToggle = $('vehicles-toggle');
+let vehiclesOn = !!uiState.vehiclesOn;
+let lastVehicles = [];
+let vehiclesTimer = null;
+// Portal sam aktualizuje dane co kilkanaście-kilkadziesiąt sekund - częstsze
+// odpytywanie tylko obciążałoby serwer bez świeższych danych.
+const VEHICLES_REFRESH_MS = 15000;
+
+function vehicleIcon(v) {
+    return L.divIcon({
+        className: `vehicle-marker ${esc(v.kind)}`,
+        html: esc(v.line),
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+    });
+}
+
+function vehicleTooltipHtml(v) {
+    const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
+    return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
+}
+
+/** Gdy wybrana jest propozycja trasy, warstwa pojazdów zawęża się do linii,
+    którymi ona jedzie - bez wybranej trasy widać wszystko, co akurat
+    przyjechało z /api/vehicles. */
+function vehiclesFilter() {
+    if (selectedJourney === null) return null;
+    const journey = journeys[selectedJourney];
+    if (!journey) return null;
+    const keys = new Set();
+    for (const leg of journey.legs) {
+        if (leg.kind === 'ride') keys.add(leg.mode + ' ' + leg.num.trim());
+    }
+    return keys;
+}
+
+function renderVehicles() {
+    vehiclesLayer.clearLayers();
+    if (!vehiclesOn) return;
+    const only = vehiclesFilter();
+    for (const v of lastVehicles) {
+        if (only && !only.has(v.kind + ' ' + v.line.trim())) continue;
+        L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
+            .bindTooltip(vehicleTooltipHtml(v))
+            .addTo(vehiclesLayer);
+    }
+}
+
+function loadVehicles() {
+    fetch('/api/vehicles').then(r => r.json()).then(data => {
+        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
+        lastVehicles = data.vehicles;
+        renderVehicles();
+    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+}
+
+function setVehiclesOn(on) {
+    vehiclesOn = on;
+    saveUiState({vehiclesOn: on});
+    if (vehiclesToggle) {
+        vehiclesToggle.classList.toggle('active', on);
+        vehiclesToggle.setAttribute('aria-pressed', String(on));
+    }
+    clearInterval(vehiclesTimer);
+    vehiclesTimer = null;
+    if (on) {
+        map.removeLayer(stopsLayer);
+        vehiclesLayer.addTo(map);
+        loadVehicles();
+        vehiclesTimer = setInterval(loadVehicles, VEHICLES_REFRESH_MS);
+    } else {
+        map.removeLayer(vehiclesLayer);
+        stopsLayer.addTo(map);
+    }
+}
+
+if (vehiclesToggle) {
+    vehiclesToggle.addEventListener('click', () => setVehiclesOn(!vehiclesOn));
+}
+
 // Kadrowanie wyniku potrzebuje współrzędnych startu i celu, a te znamy
 // dopiero z markerów - kto rysuje, czeka na to zapytanie.
 const stopsReady = fetch('/api/stops')
@@ -226,8 +329,12 @@ const stopsReady = fetch('/api/stops')
     .then(stops => {
         if (stops.error) { showError(stops.error); return; }
         for (const s of stops) {
-            const m = L.circleMarker([s.lat, s.lon], BASE_STYLE).addTo(map);
-            m.bindTooltip(s.name);
+            stopKind.set(s.name, s.kind);
+            const m = L.circleMarker([s.lat, s.lon], styleFor(s.name));
+            // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
+            // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
+            // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
+            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP` : s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
             m.on('click', e => {
@@ -236,9 +343,14 @@ const stopsReady = fetch('/api/stops')
                 // tylko pokazuje jego tablicę odjazdów (static/timetable.js).
                 if (!timetableTook(s.name)) pickEndpoint(s.name);
             });
+            m.addTo(stopsLayer);
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
         }
+        // Stan włącznika ◉ wraca z localStorage (patrz saveUiState) - dopiero
+        // teraz, gdy stopsLayer ma już swoje markery, żeby "wyłączone" nie
+        // mignęło pustą mapą przed ich wczytaniem.
+        setVehiclesOn(vehiclesOn);
     });
 
 /** Klik w mapę (pusty punkt albo słupek) uzupełnia brakujący koniec relacji.
@@ -444,8 +556,8 @@ const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * r
 // wciaz szukanie formy, a nie gotowa decyzja.
 const TIME_DEFAULTS = {
     hover: true,        // godzina w punkcie pod kursorem + przyjazd do celu
-    bar: true,          // ...razem z paskiem: jaka to czesc najszybszej trasy
-    ends: true,         // kropka dokladnie w punkcie, ktorego dotyczy godzina
+    bar: false,         // ...razem z paskiem: jaka to czesc najszybszej trasy
+    ends: false,        // kropka dokladnie w punkcie, ktorego dotyczy godzina
     chips: false,       // godzina malym drukiem pod numerkiem w grupce
     headline: true,     // pasek nad mapa: najszybciej tyle, pokazane do tyle
 };
@@ -461,6 +573,38 @@ function loadTimePrefs() {
 }
 
 const timeOpts = {...TIME_DEFAULTS, ...loadTimePrefs()};
+
+// Kropki przystanków i to, gdzie ląduje ich rozkład. Osobny klucz od
+// TIME_PREFS_KEY, bo tamto jest eksperymentem na czas strojenia, a to nie.
+// Wartości dobrane na żywo, na realnej mapie (2026-08-30).
+const DOT_DEFAULTS = {
+    size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
+    rows: 20,          // ile odjazdów wypisuje tablica pod kropką
+    center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
+    start: false,      // wyróżnienie przystanku startowego
+    tipCursor: true,   // dymek przy kursorze
+    tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
+};
+
+const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
+
+function loadDotPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(DOT_PREFS_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+const dotOpts = {...DOT_DEFAULTS, ...loadDotPrefs()};
+
+function saveDotPrefs() {
+    try {
+        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(dotOpts));
+    } catch {
+        // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
+    }
+}
 
 function saveTimePrefs() {
     try {
@@ -593,14 +737,19 @@ let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania be
 // też przy starcie).
 let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
 let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
+let flowDotLayer = null;    // węzły przesiadkowe wachlarza (patrz flowStopDots)
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
+    if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
+    hoveredStopDot = null;
     flowParts = [];
     flowHits = [];
     lastFlow = null;
     clearFlowHover();
+    hideSidePanel();
+    timetableTarget = null;
     renderTimeHeadline();
     setBaseDim(false);
 }
@@ -658,9 +807,15 @@ function drawFlow(flow, refit) {
 
     // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
     flowLayer = L.layerGroup([...faint, ...casings, ...bright]).addTo(map);
+    // Osobna warstwa, dodana PO korytarzach: kropka ma łapać kursor przed
+    // linią, na której leży.
+    if (flowDotLayer) map.removeLayer(flowDotLayer);
+    hoveredStopDot = null;
+    flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
+    seedStartPanel();
     if (!refit) return;
 
     // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać do widoku
@@ -683,7 +838,8 @@ function drawFlow(flow, refit) {
 // jeszcze rysuje (czyli dokładnie to, co ustawia suwak okna czasowego).
 // Najechanie na najszybszy czas pokazuje, KTÓRĄ trasą się go osiąga - obie
 // liczby przychodzą z serwera (best_sec/limit_sec/fastest), razem z gotową
-// geometrią tej trasy.
+// geometrią tej trasy. Obie strony paska podają godzinę i czas jazdy w tej
+// samej kolejności, żeby dało się je czytać jednym spojrzeniem.
 
 function showFastest() {
     hideFastest();
@@ -725,13 +881,21 @@ function renderTimeHeadline() {
         + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
         + `<span class="headline-sep">·</span>`
         + `<span class="headline-limit">mapa pokazuje do `
-        + `<b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
+        + `<b>${esc(flow.deadline)}</b>, w <b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
     best.addEventListener('mouseleave', hideFastest);
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
+    // Na dotyku nie ma "mouseenter" - to jedyny sposób, żeby zobaczyć trasę
+    // najszybszego dojazdu na telefonie. Toggle, nie show: drugie stuknięcie
+    // (albo stuknięcie gdzie indziej, które i tak odpala renderTimeHeadline
+    // od nowa) chowa trasę z powrotem.
+    best.addEventListener('click', event => {
+        event.stopPropagation();
+        if (fastestLayer) hideFastest(); else showFastest();
+    });
 }
 
 // --- numery linii: jedna grupka na cały wspólny korytarz -------------------
@@ -899,10 +1063,32 @@ function placeLineLabels() {
     roznych porach, wiec jedna liczba na cala grupke bylaby godzina tylko
     jednej z nich. Liczy sie tylko przy wlaczonym przelaczniku, bo to
     dodatkowe trafienie w geometrie na kazda postawiona grupke. */
+/** Kawałek, o którym mówimy, gdy pod kursorem leży kilka kawałków TEJ SAMEJ
+    linii. To różne KURSY: ten sam przystanek potrafi wypaść u nich o godzinach
+    różniących się o kwadrans. `flowHits` są posortowane po odległości w
+    pikselach, a kursy leżą dokładnie jeden na drugim, więc branie pierwszego
+    z brzegu (tak było do 2026-08-29) sprawiało, że drgnięcie kursora o piksel
+    przestawiało "tu jesteś" z 13:01 na 13:16 - w tym samym miejscu.
+
+    Wygrywa kurs dowożący DO CELU najwcześniej: tą samą miarą mapa liczy
+    jasność, więc dymek mówi o tym kursie, który jest tu najlepszą opcją.
+    Kawałek bez odczytanej godziny u celu nie wygrywa z takim, który ją ma. */
+function hitFor(hits, num, kind) {
+    let best = null;
+    for (const h of hits) {
+        if (h.seg.num !== num || h.seg.kind !== kind) continue;
+        if (best === null) { best = h; continue; }
+        const mine = h.seg.arrive, its = best.seg.arrive;
+        if (mine === undefined) continue;
+        if (its === undefined || mine < its) best = h;
+    }
+    return best;
+}
+
 function chipTimesAt(at, roster) {
     const hits = flowHitsAt(at);
     return roster.map(l => {
-        const hit = hits.find(h => h.seg.num === l.num && h.seg.kind === l.kind);
+        const hit = hitFor(hits, l.num, l.kind);
         const when = hit ? timeAtHover(hit, at) : null;
         return when ? when.now : null;
     });
@@ -958,6 +1144,12 @@ function dimFlow(dim) {
     flowDimmed = dim;
     for (const part of flowParts) {
         part.layer.setStyle({opacity: dim ? part.opacity * look.dimFactor : part.opacity});
+    }
+    // Wybrana trasa ma własne kropki na swoich przystankach - te z wachlarza
+    // leżałyby na nich i pytały o to samo dwa razy.
+    if (flowDotLayer) {
+        if (dim) { map.removeLayer(flowDotLayer); hoveredStopDot = null; }
+        else flowDotLayer.addTo(map);
     }
     if (flowLabelLayer) placeLineLabels();   // grupki przeliczają własną widoczność
 }
@@ -1047,7 +1239,7 @@ function corridorOptions(hits) {
     return corridorOf(hits[0].seg).map(l => ({
         num: l.num,
         kind: l.kind,
-        hit: hits.find(h => h.seg.num === l.num && h.seg.kind === l.kind) || null,
+        hit: hitFor(hits, l.num, l.kind),
     }));
 }
 
@@ -1164,15 +1356,25 @@ function renderFlowPick() {
     // Liczone RAZ: ta sama chwila opisuje i dymek, i kropke na linii.
     const when = timeOpts.hover ? timeAtHover(sel.hit, flowPickPoint) : null;
     showTimeDot(when);
-    if (!flowTooltip) {
-        // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
-        // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
-        // przez co dymek nigdy nie powstawał (a każdy ruch myszy nad korytarzem
-        // próbował go stworzyć od nowa i wysypywał się w tym samym miejscu).
-        flowTooltip = L.tooltip({direction: 'top', offset: [0, -6]})
-            .setLatLng(flowPickAt).addTo(map);
+    const html = flowPickHtml(when);
+    if (dotOpts.tipCursor) {
+        if (!flowTooltip) {
+            // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
+            // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
+            // przez co dymek nigdy nie powstawał (a każdy ruch myszy nad korytarzem
+            // próbował go stworzyć od nowa i wysypywał się w tym samym miejscu).
+            flowTooltip = L.tooltip({direction: 'top', offset: [0, -6]})
+                .setLatLng(flowPickAt).addTo(map);
+        }
+        flowTooltip.setLatLng(flowPickAt).setContent(html);
+    } else if (flowTooltip) {
+        map.removeLayer(flowTooltip);
+        flowTooltip = null;
     }
-    flowTooltip.setLatLng(flowPickAt).setContent(flowPickHtml(when));
+    // Korytarz przejmuje okienko od kropki - inaczej po zejściu z kropki na
+    // linię w rogu wisiałaby dalej tablica odjazdów sprzed ruchu myszy.
+    timetableTarget = null;
+    showSidePanel(html);
 }
 
 function clearFlowHover() {
@@ -1206,6 +1408,9 @@ function handleFlowHover(e) {
     // dopiero co wskazany numer.
     const target = e.originalEvent && e.originalEvent.target;
     if (target && target.closest && target.closest('.line-cluster')) return;
+    // Nad kropką przystanku rządzi kropka: leży na narysowanej linii, więc bez
+    // tego tablica odjazdów i dymek "tu jesteś" wychodzą jeden na drugim.
+    if (hoveredStopDot) { clearFlowHover(); return; }
     const hits = flowHits.length ? flowHitsAt(e.containerPoint) : [];
     if (!hits.length) { clearFlowHover(); return; }
     setFlowPick(corridorOptions(hits), e.latlng, undefined, e.containerPoint);
@@ -1219,7 +1424,7 @@ function pickFromCluster(marker, index) {
     const options = marker.roster.map(l => ({
         num: l.num,
         kind: l.kind,
-        hit: hits.find(h => h.seg.num === l.num && h.seg.kind === l.kind) || null,
+        hit: hitFor(hits, l.num, l.kind),
     }));
     setFlowPick(options, at, index, point);
 }
@@ -1241,11 +1446,452 @@ map.on('mouseout', clearFlowHover);
 let journeyLayer = null;
 let hoverLayer = null;
 
+// ---------------------------------------- tablica odjazdów pod kropką ----
+
+// Okienko w rogu ekranu - drugie miejsce, w którym może wyjść to samo, co
+// w dymku przy kursorze: tablica odjazdów spod kropki albo podpowiedź o linii
+// spod kursora na trasie. Różnica jest jedna, ale w niej cały sens: dymek
+// znika razem z kursorem, a okienko ZOSTAJE - podmienia je najechanie na coś
+// innego, zamyka krzyżyk albo nowe wyszukiwanie. Dzięki temu da się odczytać
+// rozkład, nie trzymając myszy nieruchomo nad kropką.
+const flowPanel = $('flow-panel');
+const flowPanelBody = $('flow-panel-body');
+
+function showSidePanel(html) {
+    if (!flowPanel || !dotOpts.tipPanel) return;
+    flowPanelBody.innerHTML = html;
+    flowPanel.hidden = false;
+}
+
+function hideSidePanel() {
+    if (flowPanel) flowPanel.hidden = true;
+}
+
+/** Okienko w rogu otwiera się z tablicą przystanku, z którego wyruszamy -
+    tak, jakby ktoś od razu najechał na jego kropkę.
+
+    To ten jeden rozkład, który interesuje zawsze: pytanie "o której stąd coś
+    jedzie" pada, zanim jeszcze spojrzy się na trasę. Reszta działa jak
+    dotąd - najechanie na cokolwiek innego podmienia treść, krzyżyk zamyka.
+
+    Kropki startowej szukamy najpierw w wybranej trasie, potem w wachlarzu:
+    przy wybranej trasie kropki wachlarza są zdjęte z mapy (patrz dimFlow),
+    więc pytanie ich o cokolwiek pokazywałoby rozkład punktu, którego nie
+    widać. */
+function seedStartPanel() {
+    if (!dotOpts.tipPanel || !flowPanel) return;
+    // Nie wyrywamy okienka spod ręki: przerysowanie w trakcie najeżdżania
+    // (suwaki wyglądu) ma zostawić to, na co użytkownik właśnie patrzy.
+    if (hoveredStopDot || flowPick) return;
+    const dot = startDotIn(journeyLayer) || startDotIn(flowDotLayer);
+    if (!dot) return;
+    timetableTarget = dot;
+    loadTimetable(dot, dot.where, dot.sec);
+}
+
+function startDotIn(layer) {
+    if (!layer) return null;
+    return layer.getLayers().find(l => l.isStart && l.where) || null;
+}
+
+if (flowPanel) $('flow-panel-close').addEventListener('click', hideSidePanel);
+
+// Odpowiedzi /api/timetable trzymamy pod (przystanek, doba, godzina) - ta
+// sama kropka pytana drugi raz (powrót kursorem, przerysowanie trasy po
+// suwaku) pokazuje dymek od razu, bez mrugnięcia "Ładowanie...".
+const timetableCache = new Map();
+
+// Która kropka jest pod kursorem - patrz handleFlowHover.
+let hoveredStopDot = null;
+
+// Promienie idą z ustawień (sekcja „Kropki i rozkład"), więc to nie są stałe,
+// tylko wartości czytane przy każdym rysowaniu - stąd funkcje, nie obiekty.
+const STOP_DOT_STYLE = {radius: 5, weight: 3, color: '#263238',
+                        fillColor: '#fff', fillOpacity: 1};
+
+const journeyDotStyle = () => ({
+    ...STOP_DOT_STYLE,
+    radius: dotOpts.size,
+    weight: Math.min(4, Math.max(2, Math.round(dotOpts.size * 0.5))),
+});
+
+const TIP_LOADING = '<div class="tt-note">Ładowanie…</div>';
+
+/** Co się tu dzieje z tą linią - trzy rzeczy, nie jedna (punkt 11 kontraktu,
+    liczy je planner._transfer_nodes). Jedna rodzina znaków, czytana zawsze tak
+    samo: LEWY koniec mówi, skąd ten pojazd tu jest - kreska "stąd rusza (dla
+    Ciebie)", grot "już jedzie"; PRAWY mówi, co dalej - grot "jedzie dalej",
+    kreska "tu koniec jazdy".
+
+      |->   start    wsiadasz tu pierwszy raz; wcześniej mapa tą linią nie
+                     wiozła, więc nie było jak wsiąść taniej
+      ->->  through  tym pojazdem można już jechać - wsiadanie tutaj to jedna
+                     z możliwości, a nie jedyna
+      ->|   end      tą linią się tu PRZYJEŻDŻA i wysiada; dalej nie wiezie */
+const FLOW_ICONS = {
+    start: {
+        d: ['M2 2.5v7', 'M2 6h11.5', 'M10.5 3.2 13.5 6l-3 2.8'],
+        title: 'stąd wsiadasz — wcześniej mapa tą linią nie wiozła',
+    },
+    through: {
+        d: ['M1 6h12.5', 'M4 3.2 7 6l-3 2.8', 'M10.5 3.2 13.5 6l-3 2.8'],
+        title: 'tędy przejeżdża — możesz już nim jechać',
+    },
+    end: {
+        d: ['M1 6h12.5', 'M4 3.2 7 6l-3 2.8', 'M13.5 2.5v7'],
+        title: 'tu wysiadasz — dalej mapa tą linią nie wiezie',
+    },
+};
+
+function flowIcon(flow) {
+    const icon = FLOW_ICONS[flow];
+    // Pusty znacznik, nie brak znacznika: kolumna ma zostać na miejscu, żeby
+    // godziny w kolejnych wierszach stały w jednej osi.
+    if (!icon) return '<span class="tt-flow"></span>';
+    return `<svg class="tt-flow tt-flow-${flow}" viewBox="0 0 15 12" role="img">`
+        + `<title>${esc(icon.title)}</title>`
+        + icon.d.map(d => `<path d="${d}"/>`).join('')
+        + '</svg>';
+}
+
+function timetableHtml(data) {
+    if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
+    const head = `<div class="tt-head"><span class="tt-stop">${esc(data.stop)}</span>` +
+                 `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
+    if (!data.departures.length) {
+        return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
+    }
+    const list = summariseRepeats(data.departures).slice(0, timetableRows());
+    // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
+    // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
+    // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
+    // przesuwałaby jej wiersze bez powodu.
+    const flows = list.some(d => FLOW_ICONS[d.flow]);
+    const rows = list.map(d =>
+        `<li>` + (flows ? flowIcon(d.flow) : '') +
+        `<span class="tt-time">${esc(d.time)}</span>` +
+        `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
+        `<span class="tt-dir">${esc(d.headsign)}</span>` +
+        // "0 min", nie "teraz": nagłówek mówi "od 16:57", a to nie jest
+        // godzina zegarowa, tylko najwcześniejsza, o której da się tu być -
+        // "teraz" obok niej znaczyłoby coś innego niż znaczy. Rytm dopisany
+        // W TEJ SAMEJ linii, żeby powtarzająca się linia nie miała wiersza
+        // wyższego od pozostałych.
+        `<span class="tt-in">${esc(d.in_min < 1 ? 0 : d.in_min)} min` +
+        (d.every_min ? `<small> · co ${esc(d.every_min)} min</small>` : '') +
+        `</span></li>`
+    ).join('');
+    return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
+}
+
+// Ile wierszy pokazuje dymek - suwak w panelu, sekcja „Kropki i rozkład”.
+// Rzecz do dostrojenia PRZY MAPIE, bo o tym, ile wierszy jest za dużo,
+// decyduje to, ile z niej zasłaniają - a tego nie widać z pliku konfiguracji.
+const TIMETABLE_ROWS_MAX = 20;  // wyżej dymek przykrywa mapę, o którą się pyta
+const TIMETABLE_FETCH = 40;     // ...a tyle pobieramy, bo część odsiewamy
+
+/** Suwak ma swój sufit w atrybucie, ale wartość wraca też z localStorage -
+    a tam może leżeć cokolwiek, również z czasów, gdy zakres był inny. */
+function timetableRows() {
+    const rows = Math.round(Number(dotOpts.rows));
+    if (!Number.isFinite(rows)) return DOT_DEFAULTS.rows;
+    return Math.max(1, Math.min(rows, TIMETABLE_ROWS_MAX));
+}
+
+const lineKey = l => `${l.kind} ${l.num} ${l.headsign}`;
+
+/** Zostawia tylko to, w co MAPA pozwala tu wsiąść.
+
+    Węzeł wachlarza niesie swoją listę linii (patrz planner._transfer_nodes),
+    bo inaczej dymek na Pilczycach wypisywał wszystko, co przez nie przejeżdża -
+    razem z tramwajem jadącym dokładnie tam, skąd się przyjechało. Kierunek
+    jest częścią tożsamości linii: sam numer za mało mówi, ta sama trójka mija
+    węzeł w obie strony. */
+function keepOfferedLines(data, lines) {
+    if (!lines) return data;
+    // `depart_by` to OSTATNI odjazd tej linii, którym da się jeszcze dojechać
+    // do celu w oknie mapy - policzony na serwerze z rozkładu, nie zgadnięty
+    // (patrz planner._line_deadlines). Wcześniej front sprawdzał tylko, czy
+    // sam odjazd mieści się w oknie: warunek konieczny, nie wystarczający -
+    // autobus ruszający minutę przed jego zamknięciem do celu nie dowiezie.
+    const limit = new Map(), flow = new Map();
+    for (const l of lines) {
+        // "end" to linia, KTÓRĄ SIĘ TU PRZYJEŻDŻA, a nie którą się stąd jedzie.
+        // Jej wiersz dokłada withArrivals z godziny przyjazdu; zostawiona tutaj
+        // dostałaby najbliższy ODJAZD, czyli opcję, której mapa nie proponuje.
+        if (l.flow === 'end') continue;
+        limit.set(lineKey(l), l.depart_by === undefined ? Infinity : l.depart_by);
+        // Bez `flow` (odpowiedź z cache'u sprzed zmiany, tryb awaryjny) wiersz
+        // zostaje BEZ ikonki - lepiej nie powiedzieć nic, niż zgadnąć.
+        flow.set(lineKey(l), l.flow);
+    }
+    const kept = [];
+    for (const d of data.departures) {
+        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign});
+        // Negacja, nie proste `<=`: oferta bez `depart_by` daje Infinity,
+        // a odjazd bez `sec` - NaN. Każde porównanie z NaN jest fałszem, więc
+        // przy `<=` wypadłyby wtedy WSZYSTKIE wiersze zamiast żadnego.
+        if (!limit.has(key) || d.sec > limit.get(key)) continue;
+        kept.push({...d, flow: flow.get(key)});
+    }
+    return {...data, departures: kept};
+}
+
+/** Dokłada wiersze linii, KTÓRYMI SIĘ TU PRZYJEŻDŻA (`flow: "end"`).
+
+    Tablica przystanku odpowiada na pytanie "co stąd odjeżdża", ale człowiek
+    stojący pod kropką pyta o coś szerszego: "co się tu ze mną dzieje". Pojazd,
+    którym się tu dojechało i z którego się wysiada, nie jest odjazdem i w
+    tablicy przystanku go nie ma - a bez niego trzecia ikonka (patrz FLOW_ICONS)
+    nie miałaby przy czym stanąć i tablica dalej pokazywałaby tylko odjazdy.
+
+    Godzina bierze się z węzła (`arrive`, patrz planner._transfer_nodes), czyli
+    z rozkładu tego samego kursu, z którego narysowano kawałek - nie z
+    najbliższego kursu tej linii, bo tym akurat się tu nie przyjechało.
+
+    `fromSec` to ta sama godzina, od której liczy nagłówek ("od 16:06"), więc
+    "za ile" znaczy w każdym wierszu to samo. */
+function withArrivals(data, lines, fromSec) {
+    if (!lines) return data;
+    const rows = [];
+    for (const l of lines) {
+        if (l.flow !== 'end' || l.arrive === undefined) continue;
+        rows.push({
+            time: fmtClock(l.arrive),
+            sec: l.arrive,
+            in_min: Math.round((l.arrive - fromSec) / 60),
+            num: l.num,
+            mode: l.kind,
+            headsign: l.headsign,
+            flow: 'end',
+        });
+    }
+    if (!rows.length) return data;
+    // Kolejność robi summariseRepeats (sortuje po `sec`) - przyjazd ląduje
+    // między odjazdami tam, gdzie naprawdę jest na osi czasu.
+    return {...data, departures: [...data.departures, ...rows]};
+}
+
+/** Wycina odjazdy zza horyzontu mapy.
+
+    Siatka bezpieczeństwa POD odsiewem z keepOfferedLines, nie zamiast niego:
+    mocna reguła ("czy tym kursem w ogóle się dojedzie") działa przez
+    `depart_by` przy linii, a tu zostaje słabszy, ale zawsze prawdziwy warunek
+    na wypadek oferty bez tej liczby - odpowiedzi z cache'u sprzed zmiany albo
+    z trybu awaryjnego.
+
+    Bez tego na rzadko obsługiwanym węźle dymek wypisywał odjazdy o 17:51 na
+    mapie kończącej się o 15:12 - godziny prawdziwe, tylko bez związku
+    z podróżą, o którą pytamy. */
+function keepWithinHorizon(data, deadline) {
+    if (!deadline) return data;
+    return {...data, departures: data.departures.filter(d => d.sec <= deadline)};
+}
+
+/** Zwija powtórzenia tej samej linii w JEDEN wiersz z częstotliwością.
+
+    Osiem odjazdów jednej linii to nie osiem opcji, tylko jedna opcja i jej
+    rytm - a po odsianiu linii, których mapa stąd nie proponuje, na rzadkim
+    węźle zostawała dokładnie taka lista. Zamiast wypisywać je wszystkie albo
+    część z nich gubić, zostaje najbliższy odjazd i notka "co X min":
+    "za 4 min, potem co 15 min" mówi to samo, w jednym wierszu i bez zgadywania,
+    czy pominięte kursy w ogóle istnieją.
+
+    Odstęp to MEDIANA przerw, nie średnia: jeden nocny przeskok o godzinę nie
+    ma prawa przesunąć liczby opisującej normalny takt.
+
+    Kierunek jest częścią tożsamości linii - ta sama linia w drugą stronę to
+    osobna opcja i osobny wiersz. */
+function summariseRepeats(departures) {
+    const groups = new Map();
+    for (const d of departures) {
+        // `flow` w kluczu, bo przyjazd i odjazd tej samej linii to dwa różne
+        // zdarzenia na tym przystanku - zwinięte w jeden wiersz udawałyby
+        // rytm kursowania tam, gdzie go nie ma.
+        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
+            + '|' + (d.flow || '');
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(d);
+    }
+    const out = [];
+    for (const list of groups.values()) {
+        out.push(list.length > 1
+            ? {...list[0], every_min: medianGapMin(list)}
+            : list[0]);
+    }
+    return out.sort((a, b) => a.sec - b.sec);
+}
+
+function medianGapMin(list) {
+    const gaps = [];
+    for (let i = 1; i < list.length; i++) gaps.push(list[i].sec - list[i - 1].sec);
+    gaps.sort((a, b) => a - b);
+    return Math.round(gaps[(gaps.length - 1) >> 1] / 60);
+}
+
+/** `where` to {name} albo {lat, lon}: trasa zna nazwę przystanku wprost
+    z etapu, a mapa przepływów stawia kropki z geometrii kawałków i zna tylko
+    położenie słupka (nazwę dopowiada backend, patrz gtfs.stop_at).
+    `where.lines` (tylko wachlarz) zawęża tablicę do tego, co mapa proponuje. */
+/** Jedno ujście dla gotowego HTML-a tablicy: dymek kropki (jeśli w ogóle
+    jest - przy wyłączonym dymku kropka nie dostaje go wcale) i okienko
+    w rogu, ale to drugie TYLKO dla kropki, która jest teraz wskazywana.
+    Bez tego warunku odpowiedź, która przyszła po zejściu kursora na inną
+    kropkę, nadpisywałaby w okienku świeższą treść. */
+function emitTimetable(dot, html) {
+    const out = dot.isStart && dotOpts.start ? `<div class="tt-start">${html}</div>` : html;
+    if (dot.getTooltip()) dot.setTooltipContent(out);
+    if (timetableTarget === dot) showSidePanel(out);
+}
+
+// Kropka, której tablicę pokazujemy teraz - patrz emitTimetable.
+let timetableTarget = null;
+
+function loadTimetable(dot, where, sec) {
+    const date = $('date').value;
+    // Do klucza wchodzi też `flow` i `arrive`: ta sama linia raz jest ofertą
+    // do wsiadania, a raz pojazdem, którym się tu przyjechało - i wtedy dymek
+    // ma pokazać co innego, choć przystanek i godzina się nie zmieniły.
+    const filtr = where.lines
+        ? where.lines.map(l => `${lineKey(l)}/${l.flow || ''}/${l.arrive || ''}`).join('|')
+        : '';
+    const key = `${where.name || where.lat + ',' + where.lon}`
+        + `@${date}@${sec}@${filtr}@${where.deadline || ''}`;
+    const cached = timetableCache.get(key);
+    if (cached !== undefined) { emitTimetable(dot, cached); return; }
+
+    const query = where.name
+        ? {stop: where.name, date, from_sec: sec}
+        : {lat: where.lat, lon: where.lon, date, from_sec: sec};
+    // Z zapasem PRZY KAŻDEJ kropce, nie tylko przy węźle wachlarza: przy
+    // węźle część odjazdów odsiewamy, a przy kropce wybranej trasy pytamy
+    // o tyle, ile suwak w ogóle pozwala pokazać. Bez tego serwerowa domyślna
+    // ósemka byłaby cichym sufitem mocniejszym od suwaka.
+    query.limit = TIMETABLE_FETCH;
+    emitTimetable(dot, TIP_LOADING);
+    fetch('/api/timetable?' + new URLSearchParams(query))
+        .then(r => r.json())
+        .then(data => {
+            // Przyjazdy doklejamy PO obu sitach: oba pytają "czy tym odjazdem
+            // jeszcze się dojedzie", a wiersz przyjazdu nie jest odjazdem -
+            // to fakt z samej mapy, więc nie ma go czym odsiewać.
+            const html = timetableHtml(data.error ? data : withArrivals(
+                keepWithinHorizon(keepOfferedLines(data, where.lines), where.deadline),
+                where.lines, sec));
+            // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
+            // nie: offline z service workera wraca jako {error}, a po powrocie
+            // sieci kropka miałaby go w pamięci na zawsze.
+            if (!data.error) timetableCache.set(key, html);
+            emitTimetable(dot, html);
+        })
+        .catch(() => emitTimetable(dot,
+            '<div class="tt-note">Nie udało się pobrać rozkładu.</div>'));
+}
+
+/** Kropka przystanku na narysowanej trasie: po najechaniu pokazuje, co stąd
+    odjeżdża - bez tego przesiadka jest punktem, o którym wiadomo tylko, że
+    się na nim wysiada.
+
+    Godzinę bierzemy z etapu (`sec` na osi doby rozkładowej, nie "HH:MM"),
+    więc przesiadka po północy pyta o rozkład swojej doby, a nie o 00:40
+    dnia obok (patrz gtfs.load_day).
+
+    Klik NIE przechodzi do mapy, choć klik w to samo miejsce obok kropki
+    zamyka trasę: na telefonie nie ma najeżdżania, dotknięcie kropki jest
+    jedynym sposobem otwarcia dymka - i nie może przy okazji sprzątać tego,
+    czego dotyczy. */
+function stopDot(point, where, sec, style) {
+    // Że to start, MÓWI ŹRÓDŁO: przy węźle wachlarza flaga z backendu (ten
+    // rozwiązał zapytanie do konkretnych słupków, patrz planner._transfer_nodes),
+    // przy wybranej trasie - miejsce w niej samej (wsiadanie pierwszego
+    // przejazdu). Front niczego tu nie odtwarza z nazw ani z odległości.
+    const isStart = !!where.start;
+    const dot = L.circleMarker(point, {
+        ...(style || STOP_DOT_STYLE),
+        ...(isStart && dotOpts.start ? START_DOT_STYLE : {}),
+    });
+    dot.isStart = isStart;
+    // Czym ta kropka jest - żeby dało się ją "najechać" bez kursora.
+    dot.where = where;
+    dot.sec = sec;
+    // Dymek istnieje tylko wtedy, gdy jest włączony: Leaflet otwiera związany
+    // dymek sam, na mouseover, więc "nie pokazuj go" nie da się zrobić inaczej
+    // niż nie wiążąc go wcale. Przełącznik przerysowuje mapę (patrz applyDots),
+    // więc kropki powstają od nowa z aktualnym ustawieniem.
+    if (dotOpts.tipCursor) {
+        dot.bindTooltip(TIP_LOADING, {
+            direction: 'top', offset: [0, -6], opacity: 1,
+            className: 'timetable-tip',
+        });
+    }
+    dot.on('mouseover', () => {
+        hoveredStopDot = dot;
+        timetableTarget = dot;
+        clearFlowHover();
+        loadTimetable(dot, where, sec);
+    });
+    dot.on('mouseout', () => {
+        if (hoveredStopDot === dot) hoveredStopDot = null;
+        // timetableTarget zostaje: okienko w rogu ma przeczekać zejście kursora.
+    });
+    dot.on('click', e => {
+        L.DomEvent.stop(e);
+        timetableTarget = dot;
+        loadTimetable(dot, where, sec);
+        if (dot.getTooltip()) dot.openTooltip();
+    });
+    return dot;
+}
+
+
+// Przystanek startowy - ta sama zieleń, co marker startu i szyna w formularzu,
+// żeby to była oczywiście ta sama rzecz, a nie kolejny kolor do nauczenia.
+const START_DOT_STYLE = {color: '#1b5e20', weight: 4, fillColor: '#c8f0cd'};
+
+// Kropki wachlarza są mniejsze od tych na wybranej trasie: jest ich kilkanaście
+// naraz i mają nie przykryć samej mapy - a trasa, gdy się ją wybierze, ma być
+// tym, co rzuca się w oczy.
+const FLOW_DOT_STYLE = {radius: 4, weight: 2, color: '#263238',
+                        fillColor: '#fff', fillOpacity: 1};
+
+const flowDotStyle = () => ({
+    ...FLOW_DOT_STYLE,
+    radius: Math.max(2, dotOpts.size - 1),
+    weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
+});
+
+/** Kropki węzłów wachlarza - jedna na MIEJSCE, nie na słupek.
+
+    Węzły liczy backend (patrz planner._transfer_nodes), a nie front z
+    geometrii: plac z trzema peronami dostawał wtedy trzy kropki, każdą z inną
+    zawartością, bo każdy peron to inne współrzędne i inna godzina. Grupowanie
+    po miejscu jest w rozkładzie (gtfs._build_places), więc front nie ma go
+    z czego odtworzyć - i nie powinien zgadywać po odległości na ekranie. */
+function flowStopDots(nodes, deadline) {
+    return (nodes || []).map(n => stopDot(
+        nodePoint(n), {name: n.name, lines: n.lines, deadline, start: n.start},
+        n.sec, flowDotStyle()));
+}
+
+/** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
+    planner._transfer_nodes): `lat`/`lon` to słupek, z którego wzięta jest
+    godzina, `clat`/`clon` - środek wszystkich słupków tego miejsca.
+    Przełącznik tylko wybiera, bo nie ma tu czego dopytywać. */
+function nodePoint(node) {
+    return dotOpts.center && node.clat !== undefined
+        ? [node.clat, node.clon]
+        : [node.lat, node.lon];
+}
+
 function legLayers(legs, {preview}) {
     const casings = [], lines = [], marks = [];
     const rideWeight = preview ? 5 : 7;
 
     for (const leg of legs) {
+        // Etapy kolejowe (patrz pkp.py) nie mają geometrii - słownik stacji
+        // PKP nie niesie współrzędnych, więc nie ma czego narysować. Karta
+        // na liście propozycji i tak pokazuje pełne godziny i nazwy stacji.
+        if (!leg.path || leg.path.length < 2) continue;
         if (leg.kind === 'walk') {
             lines.push(L.polyline(leg.path, {
                 color: '#455a64', weight: 3, opacity: preview ? 0.7 : 1,
@@ -1275,15 +1921,18 @@ function legLayers(legs, {preview}) {
 
     if (!preview) {
         // Kropki na wsiadaniu i wysiadaniu każdego etapu - widać, gdzie się
-        // przesiadamy, bez czytania listy.
+        // przesiadamy, bez czytania listy. Każda jest do najechania: dymek
+        // pokazuje tablicę odjazdów tego przystanku (patrz stopDot).
+        const firstRide = legs.find(l => l.kind === 'ride');
         for (const leg of legs) {
-            if (leg.kind !== 'ride') continue;
-            for (const point of [leg.path[0], leg.path[leg.path.length - 1]]) {
-                marks.push(L.circleMarker(point, {
-                    radius: 5, weight: 3, color: '#263238',
-                    fillColor: '#fff', fillOpacity: 1, interactive: false,
-                }));
-            }
+            if (leg.kind !== 'ride' || !leg.path || leg.path.length < 2) continue;
+            const style = journeyDotStyle();
+            // Wsiadanie do PIERWSZEGO przejazdu to z definicji przystanek,
+            // z którego się wyrusza - nie ma tu czego rozpoznawać.
+            const start = leg === firstRide;
+            marks.push(stopDot(leg.path[0], {name: leg.from, start}, leg.dep_sec, style));
+            marks.push(stopDot(leg.path[leg.path.length - 1],
+                               {name: leg.to}, leg.arr_sec, style));
         }
     }
     return [...casings, ...lines, ...marks];
@@ -1295,14 +1944,18 @@ function drawJourney(index, keepView) {
     if (!journey) return;
     journeyLayer = L.layerGroup(legLayers(journey.legs, {preview: false})).addTo(map);
     dimFlow(true);
+    seedStartPanel();
     // Przy przerysowaniu w miejscu (suwaki wyglądu) nie wyrywamy widoku -
     // kadrujemy tylko wtedy, gdy trasa i tak nie mieści się w kadrze.
-    const points = [...journey.legs.flatMap(leg => leg.path), ...endpointPoints()];
+    const points = [...journey.legs.flatMap(leg => leg.path || []), ...endpointPoints()];
     if (!keepView || !map.getBounds().contains(L.latLngBounds(points))) fitTo(points);
 }
 
 function clearJourney() {
     if (journeyLayer) { map.removeLayer(journeyLayer); journeyLayer = null; }
+    // Zdjęta warstwa nie wyśle już mouseout, a wskaźnik na nieistniejącą
+    // kropkę blokowałby dymek przepływów na zawsze (patrz handleFlowHover).
+    hoveredStopDot = null;
 }
 
 // Podgląd pod kursorem. Indeks pamiętamy, bo mouseover leci z każdego
@@ -1339,6 +1992,7 @@ function deselectJourney() {
     clearJourney();
     dimFlow(false);
     renderJourneys();
+    renderVehicles();
 }
 
 /** Otwiera propozycję z listy - w przeciwieństwie do kliknięcia w kartę nigdy
@@ -1352,6 +2006,7 @@ function openJourney(index) {
     selectedJourney = index;
     drawJourney(index);
     renderJourneys();
+    renderVehicles();
 }
 
 function badgeHtml(leg) {
@@ -1390,13 +2045,15 @@ function detailHtml(journey) {
             );
             return;
         }
+        const stopWord = leg.mode === 'train'
+            ? plural(leg.stops_count, 'stacja', 'stacje', 'stacji')
+            : plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków');
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
-            `<span class="tl-info">${leg.stops_count} ` +
-            `${plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków')} · ` +
+            `<span class="tl-info">${leg.stops_count} ${stopWord} · ` +
             `${leg.minutes} min</span></span></li>`,
         );
         // Wysiadanie wypisujemy tylko wtedy, gdy nie zaraz po nim następuje
@@ -1532,6 +2189,7 @@ function resetResults() {
     clearJourney();
     clearPreview();
     clearFlow();
+    renderVehicles();
     resultsBox.innerHTML = '';
     setTabCount(0);
 }
@@ -1605,6 +2263,48 @@ function showDegradedNotice() {
         + '</p></div>');
 }
 
+/** Informacja przy relacji poza obszarem MPK Wrocławia (pole `rail_only`
+    w odpowiedzi /api/flow, patrz routes.py) - lista pokazuje same
+    bezpośrednie połączenia kolejowe, bez mapy przepływów (nie ma jej z
+    czego złożyć: MPK w ogóle nie zna jednego z dwóch miejsc). To nie błąd
+    (styl neutralny, nie czerwony jak showDegradedNotice), tylko wyjaśnienie,
+    czemu mapa jest pusta, mimo że lista poniżej ma wyniki. */
+function showRailOnlyNotice() {
+    resultsBox.insertAdjacentHTML('afterbegin',
+        '<div class="notice"><p>Relacja poza obszarem MPK Wrocławia - '
+        + 'pokazano tylko bezpośrednie połączenia kolejowe, bez przesiadek.'
+        + '</p></div>');
+}
+
+// Od ilu minut czekania mówimy o nim wprost. Ta sama miara, którą mapa uznaje
+// za "przesiadka jeszcze łączy odcinki" (WAIT_CAP_SEC w planner.py): czekanie
+// dłuższe niż to nie jest już częścią płynnej podróży i pasażer ma prawo
+// wiedzieć, że siedzi, a nie jedzie.
+const WAIT_NOTICE_SEC = 20 * 60;
+
+/** Informacja, że trasa rusza wyraźnie później niż godzina z pytania -
+    czekanie ma być widoczne, nie schowane (punkt 13 kontraktu).
+
+    Styl neutralny, nie czerwony: to nie błąd, tylko odpowiedź na pytanie
+    "jak tam dojadę", gdy odpowiedź brzmi "za jakiś czas". Bez tego mapa
+    pokazywałaby trasę wyglądającą jak każda inna, a pasażer dowiadywałby się
+    o godzinie czekania dopiero z godzin przy etapach. */
+function waitNoticeHtml(data) {
+    if (!data.day_offset && !(data.waits_sec > WAIT_NOTICE_SEC)) return '';
+    const dzien = data.day_offset === 1 ? 'jutro'
+        : data.day_offset > 1 ? `za ${data.day_offset} dni` : '';
+    const kiedy = dzien ? `${dzien} o ${esc(data.starts)}` : `o ${esc(data.starts)}`;
+    const ile = Math.round((data.waits_sec || 0) / 60);
+    const czekanie = !dzien && ile ? ` — to za ${ile} min` : '';
+    return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
+        + `Najbliższy wyjazd ${kiedy}${czekanie}.</p></div>`;
+}
+
+function showWaitNotice(data) {
+    const html = waitNoticeHtml(data);
+    if (html) resultsBox.insertAdjacentHTML('afterbegin', html);
+}
+
 /** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
     dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
 function renderPlan(data, refit) {
@@ -1616,6 +2316,7 @@ function renderPlan(data, refit) {
     clearJourney();
     clearPreview();
     dimFlow(false);
+    renderVehicles();            // odtąd nic nie jest zawężone do trasy
     if (!journeys.length) {
         // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
@@ -1628,20 +2329,23 @@ function renderPlan(data, refit) {
     } else {
         renderJourneys();
     }
+    showWaitNotice(data);
     if (data.degraded) showDegradedNotice();
+    if (data.rail_only) showRailOnlyNotice();
 }
 
 function loadPlan(token, refit) {
     const params = queryParams();
     return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
         .then(([data]) => {
-            if (token !== requestToken) return;
+            if (token !== requestToken) return false;
             if (data.error) {
                 clearFlow();
                 showError(data.error, data.suggestions);
-                return;
+                return false;
             }
             renderPlan(data, refit);
+            return true;      // znaleziono - patrz search() i playPipeDrop
         });
 }
 
@@ -1654,6 +2358,15 @@ function saveLastSearch() {
         }));
     } catch {
         // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
+    }
+}
+
+/** Wołane przy X - zapomniana trasa nie ma wracać po odświeżeniu strony. */
+function forgetLastSearch() {
+    try {
+        localStorage.removeItem(LAST_SEARCH_KEY);
+    } catch {
+        // localStorage niedostępny - nie ma czego czyścić
     }
 }
 
@@ -1706,6 +2419,9 @@ function search() {
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
     // zakładce „Trasy".
     loadPlan(token, true)
+        // Rura spada tylko po WYSZUKANIU, nie po każdym przeliczeniu: suwaki
+        // w panelu ⚙ wołają loadPlan bezpośrednio i mają zostać ciche.
+        .then(found => { if (found) playPipeDrop(); })
         .catch(() => showError('Nie udało się połączyć z serwerem.'))
         // Kółko gasi tylko odpowiedź na AKTUALNE zapytanie - przy szybkiej
         // zmianie relacji stare, odsiane zapytanie nie może udawać, że nowe
@@ -1730,7 +2446,15 @@ endInput.addEventListener('input', () => {
 // Własna lista zamiast <datalist>: natywna wygląda inaczej w każdej
 // przeglądarce, nie da się jej ostylować ani sterować kolejnością trafień,
 // a do tego wymaga dokładnych ogonków - "lesnica" nie znajdowało "LEŚNICA".
-const STOP_NAMES = JSON.parse($('stop-names').textContent);
+//
+// Serwer daje {name, kind} (patrz routes.py/index) - `kind` jedzie OSOBNO
+// od nazwy, nie doklejone do stringa: plakietka "PKP" w podpowiedziach
+// (patrz open() niżej) ma tylko odróżnić stację kolejową na oko, a pole
+// wyszukiwania i tak dostaje samą nazwę - z doklejonym "PKP" wyszukiwarka
+// nie znalazłaby stacji, bo zna ją tylko pod prawdziwą nazwą.
+const STOP_ENTRIES = JSON.parse($('stop-names').textContent);
+const STOP_NAMES = STOP_ENTRIES.map(e => e.name);
+const STOP_KIND = new Map(STOP_ENTRIES.map(e => [e.name, e.kind]));
 const MAX_SUGGESTIONS = 8;
 
 // Składanie nazwy: bez ogonków i wielkości liter, ale ZNAK W ZNAK - długość
@@ -1758,9 +2482,12 @@ function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIO
 /** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów
     podstawia własny (plakietka linii albo znaczek przystanku). */
 function suggestionHtml(item) {
+    // "PKP" tylko jako etykieta wiersza - do pola wpisuje się sama nazwa.
+    const tag = STOP_KIND.get(item.name) === 'train'
+        ? ' <span class="ac-tag">PKP</span>' : '';
     return esc(item.name.slice(0, item.at))
          + `<mark>${esc(item.name.slice(item.at, item.at + item.len))}</mark>`
-         + esc(item.name.slice(item.at + item.len));
+         + esc(item.name.slice(item.at + item.len)) + tag;
 }
 
 /** Klawiatura, ARIA i zamykanie listy są tu raz; co dokładnie się podpowiada
@@ -1899,6 +2626,7 @@ $('clear').addEventListener('click', () => {
     resetResults();
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
+    forgetLastSearch();
 });
 
 // Suwaki panelu deweloperskiego: etykieta od razu, mapa i lista propozycji
@@ -2042,6 +2770,114 @@ function bindLookSliders() {
 bindLookSliders();
 document.documentElement.style.setProperty('--chip-scale', look.labelScale);
 
+// --- dźwięk: spadająca metalowa rura ---------------------------------------
+//
+// Nagranie, nie synteza - chodzi o TEN konkretny dźwięk, a nie o coś, co
+// brzmi podobnie.
+//
+// Dwa formaty, bo jeden nie wystarcza: Ogg Opus (Chrome, Firefox, Edge)
+// i AAC w kontenerze m4a dla Safari, które Ogg umie dopiero od niedawna
+// i nie na każdym systemie. Wybiera `canPlayType`, nie zgadywanie po nazwie
+// przeglądarki - ta kłamie, a canPlayType odpowiada za konkretny dekoder.
+// Oba pliki ważą po ~38 kB, więc wpadają do cache'u service workera razem
+// z resztą statyki i działają offline.
+//
+// Ustawienie jest SCHOWANE (SOUND_TUNING = false) - dźwięk po prostu jest.
+// Przełącznik zostaje w kodzie i w panelu, więc pokazanie go to zmiana
+// jednej stałej (ten sam układ, co przy LOOK_TUNING).
+
+const SOUND_TUNING = false;      // czy pokazywać sekcję "Dźwięk" w panelu ⚙
+
+const PIPE_SOURCES = [
+    ['audio/ogg; codecs=opus', '/static/sounds/metal-pipe.ogg'],
+    ['audio/mp4; codecs="mp4a.40.2"', '/static/sounds/metal-pipe.m4a'],
+];
+
+// Nagranie jest głośne (szczyt ponad 0 dBFS), a to ma być żart w tle,
+// nie alarm.
+const PIPE_VOLUME = 0.35;
+
+const SOUND_DEFAULTS = {
+    pipe: true,
+};
+
+const SOUND_PREFS_KEY = 'metal-planner:sound-prefs';
+
+function loadSoundPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(SOUND_PREFS_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+// Zapamiętany wybór czytamy tylko wtedy, gdy przełącznik jest widoczny -
+// inaczej ktoś, kto wyłączył dźwięk, gdy sekcja była na wierzchu, zostałby
+// z ciszą i bez czegokolwiek, czym da się ją cofnąć.
+const soundOpts = {...SOUND_DEFAULTS, ...(SOUND_TUNING ? loadSoundPrefs() : {})};
+
+function saveSoundPrefs() {
+    try {
+        localStorage.setItem(SOUND_PREFS_KEY, JSON.stringify(soundOpts));
+    } catch {
+        // localStorage niedostępny - przełącznik działa dalej, tylko się nie zapamięta
+    }
+}
+
+let pipeAudio = null;
+
+/** Element audio powstaje przy pierwszym użyciu i zostaje - jeden na stronę.
+    Zwraca null, gdy przeglądarka nie umie żadnego z naszych formatów. */
+function pipeElement() {
+    if (pipeAudio) return pipeAudio;
+    const element = document.createElement('audio');
+    if (!element.canPlayType) return null;
+    const pick = PIPE_SOURCES.find(([type]) => element.canPlayType(type));
+    if (!pick) return null;
+    element.src = pick[1];
+    element.preload = 'auto';
+    element.volume = PIPE_VOLUME;
+    pipeAudio = element;
+    return pipeAudio;
+}
+
+function prefersLessMotion() {
+    return !!(window.matchMedia
+              && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+/** Cicho, gdy przełącznik wyłączony, gdy system prosi o ograniczenie
+    animacji albo gdy przeglądarka nie umie żadnego z formatów. */
+function playPipeDrop() {
+    if (!soundOpts.pipe || prefersLessMotion()) return;
+    const audio = pipeElement();
+    if (!audio) return;
+    // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,
+    // a nie zostać po cichu pominięte.
+    audio.currentTime = 0;
+    const started = audio.play();
+    // Przeglądarka odmawia, dopóki strona nie dostała gestu. Tu zawsze
+    // jesteśmy po kliknięciu, ale odrzucona obietnica nie może wywalić
+    // reszty łańcucha.
+    if (started && started.catch) started.catch(() => {});
+}
+
+function bindSoundToggle() {
+    const fold = $('fold-sound');
+    if (fold) fold.hidden = !SOUND_TUNING;
+    const input = $('sound-pipe');
+    if (!input) return;
+    input.checked = !!soundOpts.pipe;
+    input.addEventListener('change', () => {
+        soundOpts.pipe = input.checked;
+        saveSoundPrefs();
+        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
+        // co się właśnie włączyło.
+        if (input.checked) playPipeDrop();
+    });
+}
+bindSoundToggle();
+
 // --- przełączniki "czasu na mapie" -----------------------------------------
 //
 // Nic tu nie rusza serwera: wszystkie liczby są już w ostatniej odpowiedzi
@@ -2074,13 +2910,80 @@ function bindTimeToggles() {
 }
 bindTimeToggles();
 
+// --- kropki przystanków i miejsce na rozkład -------------------------------
+//
+// Też bez zapytania do serwera: obie współrzędne węzła i cała tablica odjazdów
+// są już w odpowiedziach, więc wystarczy przemalować z lastFlow i przerysować
+// wybraną trasę w miejscu (keepView - kadr ma się nie ruszyć).
+const DOT_TOGGLES = {
+    'dot-center': 'center',
+    'dot-start': 'start',
+    'tip-cursor': 'tipCursor',
+    'tip-panel': 'tipPanel',
+};
+
+function applyDotOpts() {
+    if (lastFlow) drawFlow(lastFlow, false);
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+    if (!dotOpts.tipPanel) hideSidePanel();
+    if (!dotOpts.tipCursor && flowTooltip) {
+        map.removeLayer(flowTooltip);
+        flowTooltip = null;
+    }
+}
+
+function bindDotOpts() {
+    const size = $('dot-size');
+    const sizeOut = $('dot-size-value');
+    if (size) {
+        size.value = dotOpts.size;
+        if (sizeOut) sizeOut.textContent = size.value;
+        let timer = null;
+        size.addEventListener('input', () => {
+            dotOpts.size = Number(size.value);
+            if (sizeOut) sizeOut.textContent = size.value;
+            saveDotPrefs();
+            clearTimeout(timer);      // przeciąganie suwaka: jedno przemalowanie na klatkę
+            timer = setTimeout(applyDotOpts, 60);
+        });
+    }
+    const rows = $('dot-rows');
+    const rowsOut = $('dot-rows-value');
+    if (rows) {
+        rows.value = dotOpts.rows;
+        if (rowsOut) rowsOut.textContent = rows.value;
+        rows.addEventListener('input', () => {
+            dotOpts.rows = Number(rows.value);
+            if (rowsOut) rowsOut.textContent = rows.value;
+            saveDotPrefs();
+            // W pamięci leży GOTOWY html, przycięty do starej liczby wierszy -
+            // bez tego suwak działałby dopiero na kropkach jeszcze nietkniętych.
+            timetableCache.clear();
+            if (timetableTarget) {
+                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
+            }
+        });
+    }
+    for (const [id, key] of Object.entries(DOT_TOGGLES)) {
+        const input = $(id);
+        if (!input) continue;
+        input.checked = !!dotOpts[key];
+        input.addEventListener('change', () => {
+            dotOpts[key] = input.checked;
+            saveDotPrefs();
+            applyDotOpts();
+        });
+    }
+}
+bindDotOpts();
+
 // --- rozwijane sekcje panelu -----------------------------------------------
 //
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer', 'fold-range',
-    'look-section', 'fold-version',
+    'fold-sound', 'fold-dots', 'look-section', 'fold-version',
 ];
 
 function bindDevFolds() {

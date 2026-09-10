@@ -1,5 +1,8 @@
 # Metal-Planner
 
+wszystko z brancha testing jest na https://metal-testing.sze.one/
+wszystko z brancha main jest na https://metal.sze.one/
+
 Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej
 wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz** —
 główne korytarze jaskrawo, niszowe objazdy ledwo widocznie — a obok, w panelu,
@@ -89,7 +92,7 @@ a kierunek odróżniają odnośniki, tak jak na papierze.
 
 ## Instalacja jako aplikacja (PWA)
 
-Planer instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
+Metal Planner instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
 głównego", na pulpicie ikoną ⤓ w nagłówku albo z paska adresu przeglądarki.
 Działa wtedy we własnym oknie, a raz odwiedzona okolica mapy jest dostępna
 też bez internetu (samo wyszukiwanie połączeń wymaga sieci).
