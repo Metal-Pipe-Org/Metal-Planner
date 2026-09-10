@@ -13,18 +13,22 @@ a nie widać tego z ekranu:
   * tablica dnia D obejmuje ogon doby D-1 (autobus nocny o 00:20 należy do
     kalendarza soboty, ale odjeżdża w niedzielę) - to samo, co gwarantuje
     test_service_day.py dla wyszukiwarki, tylko widziane od strony tablicy;
-  * godziny po północy pokazujemy na tarczy zegara: 24:20 to 00:20.
+  * godziny po północy pokazujemy na tarczy zegara: 24:20 to 00:20;
+  * kurs KOLEJOWY jest w tym trybie tym samym, co autobusowy - mimo że jego
+    przystanków nie ma w stop_times (patrz sekcja na końcu pliku).
 
 Baza jest prawdziwym SQLite (jak w test_service_day.py), bo rozkład linii
 czyta z niej wprost - syntetyczny DayData by tego nie pokrył.
 """
 
 import datetime
+import json
 import sqlite3
 
 import pytest
 
 import gtfs
+import pkp
 import timetables
 import update_gtfs
 
@@ -269,3 +273,97 @@ def test_kurs_wsiadany_w_srodku_ma_krotszy_ogon(feed):
 
 def test_nieznany_kurs_to_blad_a_nie_wyjatek(feed):
     assert "error" in timetables.trip_detail("nie_ma_takiego", SUNDAY)
+
+
+# --------------------------------------------------------------- kolej ----
+#
+# Pociąg dokłada się do dnia poza GTFS-em (pkp.augment_day), więc każde
+# miejsce, które pyta o kurs BAZĘ zamiast dnia, widzi kurs kolejowy jako
+# pusty. Tak było z tablicą odjazdów: stacja wypisywała godziny, ale klik
+# w odjazd nie miał czego pokazać - ani przystanków, ani trasy na mapie.
+
+RAIL_STATIONS = {1: "Stacja A", 2: "Stacja B", 3: "Stacja C"}
+
+
+@pytest.fixture
+def kolej(feed, tmp_path, monkeypatch):
+    """Rozkład miejski z `feed` plus jeden pociąg A -> B -> C w niedzielę.
+
+    `routes.name` celowo wypełnione ("GALICJA"): to nazwa WŁASNA pociągu,
+    nie jego kierunek - patrz test niżej.
+    """
+    path = tmp_path / "pkp.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE stations (station_id INTEGER, name TEXT);"
+        "CREATE TABLE routes (schedule_id INTEGER, order_id INTEGER, name TEXT,"
+        " carrier_code TEXT, national_number TEXT, category TEXT);"
+        "CREATE TABLE stops (schedule_id INTEGER, order_id INTEGER,"
+        " station_id INTEGER, order_number INTEGER, arrival_time TEXT,"
+        " departure_time TEXT);"
+        "CREATE TABLE operating_dates (schedule_id INTEGER, order_id INTEGER, date TEXT);"
+    )
+    db.executemany("INSERT INTO stations VALUES (?,?)", RAIL_STATIONS.items())
+    db.execute("INSERT INTO routes VALUES (7, 1, 'GALICJA', 'PR', '111', 'Os')")
+    db.execute("INSERT INTO operating_dates VALUES (7, 1, ?)", (SUNDAY.isoformat(),))
+    db.executemany(
+        "INSERT INTO stops VALUES (7,1,?,?,?,?)",
+        [(1, 1, None, "10:00:00"),
+         (2, 2, "10:15:00", "10:16:00"),
+         (3, 3, "10:30:00", None)],
+    )
+    db.commit()
+    db.close()
+
+    coords = tmp_path / "coords.json"
+    coords.write_text(json.dumps(
+        {"1": [51.20, 17.10], "2": [51.22, 17.12], "3": [51.24, 17.14]}))
+    monkeypatch.setattr(pkp, "DB_PATH", path)
+    monkeypatch.setattr(pkp, "COORDS_PATH", coords)
+    monkeypatch.setattr(pkp, "enabled", lambda: True)
+    monkeypatch.setattr(pkp, "_stations_cache", {})
+    gtfs._day_cache.clear()
+    yield path
+    gtfs._day_cache.clear()
+
+
+def test_pociag_na_tablicy_jest_pociagiem_a_nie_linia(kolej):
+    """Rodzaj kursu wychodzi z jego etykiety, a etykiety kolejowej nie ma
+    w MODE_OF_TYPE (kolej nie przechodzi przez GTFS) - bez wpisu "Pociąg"
+    w MODE_OF_LABEL pociąg dostawał na tablicy fioletową plakietkę "Linia"
+    zamiast swojej."""
+    tablica = timetables.stop_board("Stacja A", SUNDAY)
+    assert [(l["mode"], l["num"]) for l in tablica["lines"]] == [("train", "PR 111")]
+
+
+def test_kierunek_pociagu_to_jego_ostatnia_stacja(kolej):
+    """Kierunek jest tym, czym na tablicy dworcowej - stacją końcową.
+    `routes.name` ("GALICJA") to nazwa własna pociągu: u większości kursów
+    pusta, a tam, gdzie jest, nie mówi, dokąd on jedzie."""
+    tablica = timetables.stop_board("Stacja A", SUNDAY)
+    assert tablica["lines"][0]["headsign"] == "Stacja C"
+
+
+def test_kurs_kolejowy_pokazuje_stacje_i_przebieg(kolej):
+    """Sedno: przystanków pociągu nie ma w stop_times, więc pytanie o nie
+    BAZY zwracało pustą listę - tablica odjeżdżała, a klik w odjazd nie
+    pokazywał ani jednej stacji. Sekwencja leży w dniu (day.pkp_trip_stops),
+    doklejona przy jego budowaniu."""
+    odjazd = timetables.stop_board("Stacja A", SUNDAY)["departures"][0]
+    kurs = timetables.trip_detail(odjazd["trip"], SUNDAY, odjazd["stop"], odjazd["sec"])
+
+    assert kurs["mode"] == "train" and kurs["num"] == "PR 111"
+    assert [s["name"] for s in kurs["stops"]] == ["Stacja A", "Stacja B", "Stacja C"]
+    assert [s["t"] for s in kurs["stops"]] == ["10:00", "10:16", "10:30"]
+    # Kolej nie ma shapes.txt - przebieg jest łamaną po stacjach, ale JEST.
+    assert len(kurs["path"]) == 3
+
+
+def test_pociag_wsiadany_w_srodku_ma_krotszy_ogon(kolej):
+    """To samo, co przy autobusie wsiadanym w połowie trasy - inna gałąź
+    kodu, więc osobno."""
+    odjazd = timetables.stop_board("Stacja B", SUNDAY)["departures"][0]
+    kurs = timetables.trip_detail(odjazd["trip"], SUNDAY, odjazd["stop"], odjazd["sec"])
+    assert kurs["board_index"] == 1
+    assert len(kurs["path"]) == 3
+    assert len(kurs["tail"]) == 2
