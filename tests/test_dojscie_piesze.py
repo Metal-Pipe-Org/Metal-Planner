@@ -234,3 +234,54 @@ def test_the_origin_itself_is_never_delayed_by_a_walk():
     day.siblings["START"]["PERON2"] = 180
     day.siblings["PERON2"] = {"START": 180}
     assert "PERON2" not in planner._origin_walk(day, ["START", "PERON2"])
+
+
+# ---- dojście pieszo DO celu ---------------------------------------------
+
+def _day_z_celem_za_dojsciem():
+    """Kurs dowozi pod STACJA, a celem jest CEL - inny przystanek, trzy
+    minuty pieszo stamtąd. Nic nie dojeżdża pod sam CEL."""
+    day = make_day([
+        {"trip_id": "T1", "label": "Pociąg KD 1",
+         "stops": [("START", 0, 0), ("STACJA", 600, 600)]},
+    ], names={"STACJA": "Wrocław Główny"})
+    day.stop_names["CEL"] = "DWORZEC GŁÓWNY"
+    day.stop_coords["CEL"] = (51.1, 17.03)
+    day.place_of["CEL"] = "dworzec główny"
+    day.stops_by_place["dworzec główny"] = ["CEL"]
+    day.siblings = {"STACJA": {"CEL": 180}, "CEL": {"STACJA": 180}}
+    return day
+
+
+def test_the_target_is_reachable_on_foot_from_a_nearby_stop():
+    """_target_reach zna nie tylko słupki celu, ale i te o jedno przejście
+    od niego - z czasem dojścia i wskazaniem, DO KTÓREGO słupka celu."""
+    day = _day_z_celem_za_dojsciem()
+    reach = planner._target_reach(day, {"CEL"})
+    assert reach["CEL"] == (0, "CEL")
+    assert reach["STACJA"] == (180, "CEL")
+
+
+def test_the_backward_scan_seeds_the_walk_to_the_target():
+    """Skan wstecz cofa się POŁĄCZENIAMI, więc bez zasiewu nie wie, że stojąc
+    trzy minuty od celu jest się właściwie na miejscu. Skutek był cichy:
+    `latest` na takim przystanku brało się z przypadkowego objazdu, a reguła
+    cofnięcia kasowała przez to cały dowożący tam kurs."""
+    day = _day_z_celem_za_dojsciem()
+    deadline = 3600
+    latest = planner._backward(day, {"CEL"}, 0, deadline)
+    assert latest["CEL"] == deadline
+    assert latest["STACJA"] == deadline - 180, "dojście do celu nie zasiane"
+
+
+def test_a_journey_may_END_with_a_walk_to_the_target():
+    """Trasa dowożąca pod przystanek obok celu jest gotowa po dojściu - lista
+    nie ma doklejać kolejnego przejazdu tylko po to, żeby skończyć na słupku
+    celu (patrz _target_reach)."""
+    day = _day_z_celem_za_dojsciem()
+    stop, arr, journey = planner._scan(day, ["START"], ["CEL"], 0)
+    assert stop == "CEL"
+    assert arr == 600 + 180, "przyjazd liczy się DO CELU, razem z dojściem"
+    legs = planner._reconstruct(day, journey, stop)
+    assert [leg["kind"] for leg in legs] == ["ride", "walk"]
+    assert legs[-1]["to"] == "DWORZEC GŁÓWNY"

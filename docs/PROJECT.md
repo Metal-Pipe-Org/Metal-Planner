@@ -552,6 +552,25 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-10** — **„jestem u celu" przestało znaczyć „stoję na słupku
+  celu"**. Pięć miejsc pytało o to przynależnością do `target_set`, i przez
+  długi czas było to poprawne: most pieszy łączył wyłącznie słupki tej samej
+  nazwy, a cel to całe MIEJSCE, więc sąsiedzi celu sami byli celem. Po
+  rozszerzeniu mostu na różne przystanki przestało się zgadzać — i sypało
+  się cicho, każde miejsce inaczej. Skan wstecz nie zasiewał dojścia do celu,
+  więc stacja Wrocław Wojszyce dostawała `latest` z przypadkowego objazdu
+  (09:28 zamiast 09:39); reguła cofnięcia uznawała przez to wsiadanie tam za
+  oddalanie się od celu i kasowała cały dowożący kurs, ZANIM cokolwiek zdążyło
+  go zobaczyć. Lista propozycji nie umiała ZAKOŃCZYĆ trasy dojściem, więc
+  doklejała jeszcze jeden autobus, byle skończyć na słupku celu. Wspólny
+  `_target_reach` odpowiada teraz „ile stąd pieszo do celu i do którego jego
+  słupka", a propozycja może zamknąć się etapem pieszym — z przyjazdem
+  liczonym DO CELU. Wyjścia „do celu" sortują się po faktycznym przyjeździe
+  (razem z dojściem), bo deduplikacja łańcuchów patrzy na linię i miejsce
+  wsiadania: bez tego wariant „wysiądź wcześniej i idź" wypierał szybszy
+  „dojedź pod sam cel" jako rzekomy duplikat. Efekt na zgłoszonej relacji
+  „Wojszyce → Dworzec Główny": pociąg KD 60252 wreszcie jest na liście,
+  remisując z autobusem 113 na 09:49.
 - **2026-09-10** — **pieszo wychodzi się też ze STARTU relacji**, nie tylko
   przy przesiadce. Do tej pory przejście relaksowało się wyłącznie po
   wysiadaniu z pojazdu, więc z przystanku startowego nie dawało się nigdzie
@@ -570,9 +589,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   do segmentów dojeżdżających do celu — „Wrocław Główny → Warszawa Centralna"
   dawało PUSTĄ listę mimo mapy z 1300 segmentów. Podniesienie jest darmowe
   (2,30 s → 2,38 s na pięciu relacjach); koszt zapytania siedzi gdzie indziej.
-  Promienia NIE ruszono: pomiar pokazał, że 400 m nie zmienia relacji, od
-  której się zaczęło (pociąg z Wojszyc przegrywa z autobusem 113 o każdej
-  porze), a kosztuje propozycje na trasach miejskich.
+  Promienia NIE ruszono — patrz wpis wyżej i znane ograniczenia: przy 300 m
+  pociąg z Wojszyc jest na liście (po jednym przystanku autobusem pod stację),
+  a 400 m dokłada tylko wariant „wyjdź z domu prosto na stację", za to
+  dwukrotnie wydłuża najcięższe zapytania i zabiera propozycje na LEŚNICY.
 - **2026-09-10** — **pieszo przechodzi się teraz między RÓŻNYMI przystankami**,
   a nie tylko między słupkami o identycznej nazwie. Krawędź piesza bierze się
   z odległości (`gtfs._nearby_bridges`, 300 m), więc dwa przystanki po dwóch
@@ -1254,7 +1274,13 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   w linii prostej ze współczynnikiem nadłożenia drogi. Skutek uboczny widać
   np. z „Wojszyc": stacja Wrocław Wojszyce leży 359 m od słupka, czyli poza
   promieniem, choć od sąsiedniej „Przystankowej" dzieli ją 106 m — dwoma
-  krokami byłaby osiągalna, jednym nie jest.
+  krokami byłaby osiągalna, jednym nie jest. Trasa przez ten pociąg i tak
+  jest na liście, ale musi zacząć się jednym przystankiem autobusu pod
+  stację; wariantu „wyjdź z domu prosto na peron" nie ma. Podniesienie
+  `WALK_MAX_M` do 400 m by go dołożyło (i podpięło 3 peryferyjne stacje
+  więcej — 44 z 61 zamiast 41), ale zmierzony koszt to dwukrotnie dłuższe
+  najcięższe zapytania (2,33 s → 4,90 s na pięciu relacjach) i utrata dwóch
+  propozycji na „Dworzec Główny → Leśnica".
 - Samo dojście pieszo NIGDY nie jest propozycją trasy: wyszukiwarka planuje
   przejazdy, a trasa bez ani jednego przejazdu nie ma godziny wyjazdu, na
   której opiera się okno mapy (`_journey_start`).

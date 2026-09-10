@@ -165,6 +165,33 @@ def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs):
     return reached + buffer <= dep_t
 
 
+def _target_reach(day, target_set):
+    """{słupek: (sekundy pieszo do celu, który słupek celu)} - cel sam w sobie
+    ma (0, on sam).
+
+    "Jestem u celu" znaczyło w tym pliku dosłownie "stoję na słupku celu",
+    i przez długi czas było to prawdą, bo most pieszy łączył wyłącznie słupki
+    tej samej nazwy - a cel to całe MIEJSCE (patrz gtfs.match_stop), więc
+    sąsiedzi celu sami byli celem. Od kiedy pieszo przechodzi się między
+    RÓŻNYMI przystankami (gtfs._nearby_bridges), to przestało się zgadzać:
+    stacja Wrocław Wojszyce leży trzy minuty od Dworca Głównego, ale celem
+    nie jest - a każde z pięciu miejsc pytających "czy to już cel" odpowiadało
+    "nie" i traktowało dojazd pod sam dworzec jak trasę donikąd. Skutki były
+    ciche i różne: skan wstecz liczył `latest` z przypadkowego objazdu,
+    reguła cofnięcia kasowała przez to cały kurs, a lista propozycji nie
+    umiała ZAKOŃCZYĆ trasy dojściem i doklejała jeszcze jeden autobus.
+
+    Jedna tablica na zapytanie zamiast przeglądania sąsiadów w każdej z tych
+    pętli - część z nich chodzi po wszystkich połączeniach doby.
+    """
+    reach = {stop: (0, stop) for stop in target_set}
+    for stop in target_set:
+        for other, sec in day.siblings.get(stop, {}).items():
+            if sec < reach.get(other, (INF, None))[0]:
+                reach[other] = (sec, stop)
+    return reach
+
+
 def _origin_walk(day, source_stops):
     """Słupki osiągalne pieszo WPROST ze startu relacji: {słupek: (skąd, sek)}.
 
@@ -1064,6 +1091,7 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
     maszynerii niżej w potoku - i to on, nie ona, był źródłem niestabilności.
     """
     conns = day.conns
+    near_target = _target_reach(day, target_set)
     trip_conns = {}   # kurs -> indeksy jego połączeń w oknie [dep_sec, deadline)
     for i in range(
         bisect_left(day.dep_times, dep_sec),
@@ -1163,7 +1191,14 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
                 arr_t, arr_s,
             ))
             if arr_s in target_set:
-                break    # dojechaliśmy do celu - dalej nie rysujemy
+                break    # dojechaliśmy pod SAM cel - dalej nie rysujemy.
+                         # Celowo `target_set`, nie `near_target`: przystanek,
+                         # z którego cel jest o jedno przejście, bywa mijany
+                         # PO DRODZE, a kurs jedzie jeszcze pod sam cel.
+                         # Ucięcie go tam kazałoby wysiadać wcześniej i iść
+                         # pieszo tam, dokąd ten sam autobus dowozi. Wyjście
+                         # jest już zapisane wyżej, więc opcja "wysiądź tu
+                         # i dojdź" i tak zostaje - obie konkurują w rankingu.
         if not exits:
             continue     # kurs bez użytecznego wyjścia - nie rysujemy go wcale
         best_bound = min(e[1] for e in exits)
@@ -1278,11 +1313,14 @@ def _refine_brightness(day, segs, target_set, deadline, best_arr, profile):
         for times in seg["dep_times"].values():
             times.sort()
 
+    near_target = _target_reach(day, target_set)
     for seg in segs:
         vals, exact = [], []
         for _pos, _raw, arr_t, stop in seg["exits"]:
-            if stop in target_set:
-                vals.append(arr_t)        # wyjście na sam cel: wartość = przyjazd
+            if stop in near_target:
+                # Wyjście na cel: wartość = przyjazd, powiększony o dojście,
+                # jeśli cel jest stąd o jedno przejście (patrz _target_reach).
+                vals.append(arr_t + near_target[stop][0])
                 exact.append(True)
                 continue
             # INF znaczy tu coś konkretnego, nie "nie wiem": WYSIADANIE TUTAJ
@@ -1404,6 +1442,7 @@ def _target_profile(day, target_set, dep_sec, deadline):
         i = bisect_right(times, -t) - 1
         return arrs[stop][i] if i >= 0 else INF
 
+    near_target = _target_reach(day, target_set)
     # Malejąco po odjeździe: zanim dojdziemy do połączenia, wszystko, na co da
     # się z niego przesiąść, jest już policzone (tak samo jak w _backward).
     for i in range(bisect_left(day.dep_times, deadline) - 1, -1, -1):
@@ -1412,7 +1451,7 @@ def _target_profile(day, target_set, dep_sec, deadline):
             break
         # Trzy sposoby dojechania do celu tym połączeniem: wysiąść w celu,
         # jechać dalej tym samym kursem, przesiąść się na przystanku dojazdu.
-        best = arr_t if arr_s in target_set else INF
+        best = arr_t + near_target[arr_s][0] if arr_s in near_target else INF
         stay = trip_arr.get(trip, INF)
         if stay < best:
             best = stay
@@ -1582,6 +1621,7 @@ def _select_and_anchor(day, segs, source_stops, target_set):
     Zwraca (kept, ranges) - listę segmentów i ich (start_pos, cut).
     """
     passing_index = _board_index(day, segs)
+    near_target = _target_reach(day, target_set)
 
     kept = list(segs)
     ranges = {id(seg): (0, len(seg["stops"])) for seg in kept}
@@ -1644,7 +1684,7 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                     ridden += 1
                 if pos <= start_pos + 1:
                     continue                 # wyjście przed/na starcie segmentu
-                if stop in target_set:
+                if stop in near_target:
                     cut = max(cut, pos)      # cel jest "widoczny" z definicji
                     continue
                 for other in passing_index.get(stop, ()):
@@ -1726,6 +1766,7 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set,
     przesiadek w propozycji trasy.
     """
     passing_index = _board_index(day, kept)
+    near_target = _target_reach(day, target_set)
     drawn_stops = {
         id(seg): set(seg["stops"][ranges[id(seg)][0]:ranges[id(seg)][1]])
         for seg in kept
@@ -1750,8 +1791,12 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set,
         for j, (pos, _, arr_t, stop) in enumerate(seg["exits"]):
             if not (start_pos < pos <= cut):
                 continue                        # wyjście poza narysowaną częścią
-            if stop in target_set:
-                edges.append(("target", pos, arr_t, stop, None, None, None))
+            if stop in near_target:
+                # Slot 5/6 krawędzi "target" niesie DOJŚCIE do celu: ile
+                # sekund i do którego słupka. Dla wyjścia na sam cel to
+                # (0, ten sam słupek) i nic się nie zmienia.
+                sec, cel_stop = near_target[stop]
+                edges.append(("target", pos, arr_t, stop, None, sec, cel_stop))
                 continue
             for other in passing_index.get(stop, ()):
                 if other is seg:
@@ -2414,9 +2459,17 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
     visit_cap = max(MAX_JOURNEY_VISITS, limit * VISITS_PER_JOURNEY)
 
     def edge_priority(edge):
-        kind, _, _, _, other_id, _, _ = edge
+        kind, _, arr_t, _, other_id, dojscie, _ = edge
         if kind == "target":
-            return (0, 0.0)
+            # Po FAKTYCZNYM przyjeździe do celu, czyli razem z dojściem.
+            # Ten sam kurs wsiadany w tym samym miejscu daje dziś kilka wyjść
+            # "do celu" - pod sam cel i wcześniejsze, z dojściem pieszo
+            # (patrz _target_reach) - a deduplikacja łańcuchów patrzy na
+            # linię i miejsce wsiadania, więc zachowa TEN, który trafi tu
+            # pierwszy. Bez tego klucza pierwszy bywał wariant "wysiądź
+            # wcześniej i idź", a wariant "dojedź pod sam cel" przepadał
+            # jako rzekomy duplikat - mimo że jest po prostu szybszy.
+            return (0, arr_t + dojscie)
         return (1, -seg_by_id[other_id]["q"])
 
     queue = deque(
@@ -2432,7 +2485,7 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
         seg = seg_by_id[sid]
         edges = sorted(exit_edges.get(sid, ()), key=edge_priority)
         for edge in edges:
-            kind, alight_pos, _, _, other_id, other_start, _ = edge
+            kind, alight_pos, _, _, other_id, other_start, cel_stop = edge
             new_chain = chain + [(seg, board_pos, alight_pos)]
             if kind == "target":
                 signature = tuple(
@@ -2442,29 +2495,35 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
                 if signature in seen:
                     continue
                 seen.add(signature)
-                candidates.append(new_chain)
+                # `other_start` niesie tu DOJŚCIE do celu (patrz
+                # _extract_transfer_graph): zero dla wyjścia na sam cel.
+                candidates.append((new_chain, other_start, cel_stop))
                 if len(candidates) >= candidate_cap:
                     break
             elif other_id not in visited and len(new_chain) < MAX_JOURNEY_CHAIN_LEGS:
                 queue.append((new_chain, other_id, other_start, visited | {other_id}))
 
     ranked = []
-    for chain in candidates:
+    for chain, dojscie_sec, cel_stop in candidates:
         first_dep = chain[0][0]["best_deps"][chain[0][0]["stops"][chain[0][1]]]
         last_seg, _, last_alight = chain[-1]
-        arrival = last_seg["arr_times"][last_seg["stops"][last_alight - 1]]
+        # Przyjazd liczy się DO CELU, nie do przystanku, na którym się wysiada:
+        # trasa kończąca się dojściem jest gotowa dopiero po tym dojściu.
+        arrival = (last_seg["arr_times"][last_seg["stops"][last_alight - 1]]
+                   + dojscie_sec)
         # Przesiadka kosztuje gain_sec: propozycja z przesiadką musi tyle
         # oszczędzić, żeby wyprzedzić jazdę bez niej (patrz TRANSFER_GAIN_SEC).
         # Sortujemy po koszcie z karą, ale pokazujemy prawdziwy przyjazd.
         # Liczba przesiadek zostaje rozstrzygnięciem remisu, więc przy progu 0
         # klucz jest dokładnie taki jak przed wprowadzeniem kary.
         przesiadki = len(chain) - 1
-        ranked.append((arrival + przesiadki * gain_sec,
-                       przesiadki, -first_dep, chain, arrival))
+        ranked.append((arrival + przesiadki * gain_sec, przesiadki, -first_dep,
+                       chain, arrival, dojscie_sec, cel_stop))
     ranked.sort(key=lambda item: item[:3])
 
     journeys = []
-    for _cost, _przesiadki, neg_dep, chain, arrival in ranked[:limit]:
+    for (_cost, _przesiadki, neg_dep, chain, arrival,
+         dojscie_sec, cel_stop) in ranked[:limit]:
         legs = []
         for i, (seg, board_pos, alight_pos) in enumerate(chain):
             if i > 0:
@@ -2482,6 +2541,14 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
                     day, origin_walk[seg["stops"][board_pos]][0],
                     seg["stops"][board_pos]))
             legs.append(_segment_ride_leg(day, seg, board_pos, alight_pos, geo_db))
+        if dojscie_sec:
+            # Dojście z ostatniego przystanku pod sam cel - bez tego etapu
+            # trasa urywa się kilkaset metrów wcześniej, a lista musiałaby
+            # doklejać jeszcze jeden przejazd tylko po to, żeby skończyć na
+            # słupku celu (patrz _target_reach).
+            last_seg, _, last_alight = chain[-1]
+            legs.append(_walk_leg(day, last_seg["stops"][last_alight - 1],
+                                  cel_stop))
         rides = [leg for leg in legs if leg["kind"] == "ride"]
         # Odjazd trasy otwartej dojściem to moment WYJŚCIA, nie odjazd
         # pojazdu: pasażer, który wyjdzie o godzinie z karty, ma zdążyć.
@@ -2547,6 +2614,19 @@ def _backward(day, target_set, dep_sec, deadline):
     """
     conns = day.conns
     latest = {stop: deadline for stop in target_set}
+    # Dojście pieszo DO celu. Skan wstecz cofa się połączeniami, więc bez
+    # tego zasiewu w ogóle nie wie, że stojąc kilkaset metrów od celu jest
+    # się już właściwie na miejscu. Dopóki most pieszy łączył wyłącznie
+    # słupki jednej nazwy, nie było czego zasiewać - sąsiedzi celu SAMI byli
+    # celem (match_stop oddaje całe miejsce). Od kiedy pieszo przechodzi się
+    # między różnymi przystankami (gtfs._nearby_bridges), przestało tak być,
+    # a skutek był dotkliwy i cichy: stacja Wrocław Wojszyce dostawała
+    # `latest` policzone z jakiegoś objazdu autobusem zamiast z pociągu,
+    # który stąd dowozi wprost pod Dworzec Główny, więc reguła cofnięcia
+    # w _discover_segments uznawała wsiadanie tam za oddalanie się od celu
+    # i kasowała cały kurs, ZANIM cokolwiek zdążyło go zobaczyć.
+    for stop, (sec, _cel) in _target_reach(day, target_set).items():
+        latest[stop] = deadline - sec
     trip_ok = set()
 
     for i in range(bisect_left(day.dep_times, deadline) - 1, -1, -1):

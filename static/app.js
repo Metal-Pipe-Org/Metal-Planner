@@ -2057,6 +2057,14 @@ function detailHtml(journey) {
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
                 `<span class="tl-body">${body}</span></li>`,
             );
+            // Trasa ZAMKNIETA dojsciem (patrz planner._target_reach): wiersz
+            // z przyjazdem do celu nie ma juz skad wyjsc, bo emituje go
+            // przejazd, a po tym dojsciu zadnego przejazdu nie ma. Bez tego
+            // os konczy sie na "przejdz do X", nie mowiac o ktorej sie tam
+            // jest - a to jest godzina z naglowka karty.
+            if (i === journey.legs.length - 1) {
+                rows.push(stopRow(journey.arrival, leg.to, 'last'));
+            }
             return;
         }
         const stopWord = leg.mode === 'train'
