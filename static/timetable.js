@@ -202,7 +202,7 @@ for (const button of modeButtons) {
 window.timetableMode = {
     pickStop(name) {
         if (!active() || !name) return false;
-        queryInput.value = name;
+        queryInput.value = B.prettyStopName(name);
         load('stop');
         return true;
     },
@@ -219,7 +219,7 @@ const LINE_LIMIT = 5, STOP_LIMIT = 6;
 function suggest(query) {
     const lines = B.suggestionsFor(query, LINE_NUMS, null, LINE_LIMIT)
         .map(item => ({...item, kind: 'line', mode: MODE_OF_NUM.get(item.name)}));
-    const stops = B.suggestionsFor(query, B.STOP_NAMES, null, STOP_LIMIT)
+    const stops = B.suggestionsFor(query, B.STOP_LABELS, null, STOP_LIMIT)
         .map(item => ({...item, kind: 'stop'}));
     return [...lines, ...stops];
 }
@@ -290,9 +290,10 @@ function syncField() {
 function fail(message, suggestions) {
     let html = `<div class="notice error"><p>${esc(message)}</p>`;
     if (suggestions && suggestions.length) {
-        html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(name =>
-            `<li><a href="#" data-suggest="${esc(name)}">${esc(name)}</a></li>`
-        ).join('') + '</ul>';
+        html += '<p>Czy chodziło o:</p><ul>'
+             + suggestions.map(B.prettyStopName).map(name =>
+                   `<li><a href="#" data-suggest="${esc(name)}">${esc(name)}</a></li>`
+               ).join('') + '</ul>';
     }
     resultsBox.innerHTML = html + '</div>';
 }
@@ -320,7 +321,10 @@ function load(forced) {
         if (mode) params.set('mode', mode);
         url = '/api/line?' + params;
     } else {
-        params.set('stop', query);
+        // W polu stoi ETYKIETA (patrz B.prettyStopName), a /api/stop_board
+        // pyta tym samym match_stop, co planer - zna więc grupę stacji tylko
+        // pod kanoniczną nazwą z myślnikiem.
+        params.set('stop', B.rawStopName(query));
         url = '/api/stop_board?' + params;
     }
 
@@ -555,7 +559,7 @@ function boardFor(index) {
     const stop = variant && variant.stops[index];
     if (!stop || !stop.id) return;
     pendingBoard = {point: stop.id, num: data.num, mode: data.mode};
-    queryInput.value = stop.name;
+    queryInput.value = B.prettyStopName(stop.name);
     load('stop');
 }
 
@@ -704,7 +708,7 @@ function boardDots() {
         return [L.circleMarker(data.center, {
             radius: 9, weight: 3, color: '#263238',
             fillColor: '#ffd54f', fillOpacity: 1,
-        }).bindTooltip(data.stop)];
+        }).bindTooltip(B.prettyStopName(data.stop))];
     }
     return points.map(point => {
         const on = pickedPoint === null || pickedPoint === point.id;
@@ -712,7 +716,7 @@ function boardDots() {
             radius: on ? 9 : 6, weight: on ? 3 : 2,
             color: on ? '#263238' : '#546e7a',
             fillColor: on ? '#ffd54f' : '#fff', fillOpacity: 1,
-        }).bindTooltip(`${data.stop} → ${pointDirs(point)}`)
+        }).bindTooltip(`${B.prettyStopName(data.stop)} → ${pointDirs(point)}`)
           .on('click', () => pickPoint(point.id));
     });
 }
@@ -953,7 +957,7 @@ function renderBoard() {
     resultsBox.innerHTML = `
         <div class="tt-title">
             <span class="ac-pin big" aria-hidden="true"></span>
-            <span class="tt-title-main">${esc(data.stop)}</span>
+            <span class="tt-title-main">${esc(B.prettyStopName(data.stop))}</span>
             <span class="tt-title-sub">${esc(dayLabel())}</span>
         </div>
 

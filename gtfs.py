@@ -449,7 +449,22 @@ def stop_at(lat, lon, data, max_m=STOP_SNAP_M):
     return data.stop_names[best_stop], _expand_to_places(data, [best_stop])
 
 
-def _match_city_group(key, norm_key, data):
+# Ta sama etykieta, co prettyStopName w static/app.js - front pokazuje ją
+# zamiast myślnika ze słownika PKP (patrz _match_city_group).
+CITY_GROUP_LABEL = "(dowolna stacja)"
+
+
+def _city_of_group_query(key):
+    """Nazwa miasta z zapytania o grupę stacji - "wrocław -" albo
+    "wrocław (dowolna stacja)" -> "wrocław". None, gdy to nie jest pytanie
+    o grupę. `key` jest już złożony przez casefold (patrz match_stop)."""
+    for suffix in ("-", CITY_GROUP_LABEL):
+        if key.endswith(suffix):
+            return key[: -len(suffix)].strip()
+    return None
+
+
+def _match_city_group(key, data):
     """Dopasowuje "zbiorczą" stację PKP typu "Warszawa -" (patrz
     update_pkp._is_city_wildcard) - PKP oznacza tak w słowniku stacji
     "dowolną stację w tym mieście", zawsze bez żadnego WŁASNEGO kursu
@@ -457,9 +472,10 @@ def _match_city_group(key, norm_key, data):
     z wcześniejszych dopasowań w match_stop nigdy jej więc nie złapie,
     rozkład po prostu nie ma czego z nią połączyć.
 
-    Rozpoznanie PO WZORCU zapytania (kończy się myślnikiem), nie po
-    sztywnej liście nazw miast - i szukamy WSZYSTKICH prawdziwych, znanych
-    stacji zaczynających się od tej nazwy jako CAŁE SŁOWO (nie podciąg -
+    Rozpoznanie PO WZORCU zapytania (kończy się myślnikiem albo etykietą
+    CITY_GROUP_LABEL - patrz _city_of_group_query), nie po sztywnej liście
+    nazw miast - i szukamy WSZYSTKICH prawdziwych, znanych stacji
+    zaczynających się od tej nazwy jako CAŁE SŁOWO (nie podciąg -
     "Warszawa" nie ma złapać hipotetycznej "Warszawskiej"), łącząc ich
     słupki w JEDNO zapytanie do CSA zamiast zwracać błąd "nie znaleziono" -
     skan i tak sam wybierze najlepszą z nich (patrz _scan/plan_route:
@@ -488,13 +504,22 @@ def _match_city_group(key, norm_key, data):
     razu odrzuca), drugie wyszukanie kończy się fałszywym "nie znaleziono
     przystanku", mimo że dane się nie zmieniły. Zwracana nazwa musi więc
     być NIEZMIENNIKIEM tej funkcji (round-trip: wynik podany z powrotem na
-    wejściu daje ten sam wynik), nie tylko czytelną etykietą."""
-    if not key.endswith("-"):
-        return None, None
-    city = key[:-1].strip()
+    wejściu daje ten sam wynik), nie tylko czytelną etykietą.
+
+    CZYTELNĄ etykietę robi z niej front (prettyStopName w static/app.js:
+    "WROCŁAW -" -> "Wrocław (dowolna stacja)") i on też zamienia ją z powrotem
+    przed wysłaniem zapytania. Przyjmowanie TU obu form jest tylko siatką pod
+    tamtym: gdyby któreś wywołanie na froncie przegapiło zamianę wstecz, ma
+    z tego wyjść brzydka nazwa w URL-u, a nie fałszywe "nie znaleziono
+    przystanku" (czyli dokładnie ten błąd, przez który etykieta wróciła kiedyś
+    do myślnika - patrz akapit wyżej). Zwracana nazwa zostaje przy myślniku:
+    to postać KANONICZNA, w niej front trzyma stan i zapisuje ostatnie
+    wyszukiwanie, więc jej zmiana unieważniłaby to, co ludzie mają już
+    zapisane w przeglądarce."""
+    city = _city_of_group_query(key)
     if not city:
         return None, None
-    norm_city = norm_key[:-1].strip() if norm_key.endswith("-") else _strip_diacritics(city)
+    norm_city = _strip_diacritics(city)
 
     group = set()
     for name, stop_id in data.pkp_stations:
@@ -541,7 +566,7 @@ def match_stop(query, data):
             None,
         )
 
-    city_name, city_stops = _match_city_group(key, norm_key, data)
+    city_name, city_stops = _match_city_group(key, data)
     if city_name is not None:
         return city_name, city_stops, None
 

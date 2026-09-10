@@ -153,8 +153,29 @@ const isPoint = v => v !== null && typeof v === 'object';
 const samePlace = (a, b) => isPoint(a) || isPoint(b)
     ? isPoint(a) === isPoint(b) && a.lat === b.lat && a.lon === b.lon
     : a === b;
+
+// Grupa stacji jednego miasta (patrz gtfs._match_city_group) przyjeżdża
+// z serwera jako "WROCŁAW -". Myślnik to konwencja słownika PKP i ZARAZEM
+// kształt, po którym wyszukiwarka rozpoznaje takie zapytanie, więc nazwa nie
+// może zmienić postaci w drodze na serwer - zmieniamy tylko to, co widać:
+// prettyStopName na ekran, rawStopName z powrotem przed wysłaniem.
+//
+// Zawsze PARĄ, nigdy samo prettyStopName: samo ładne wyświetlanie oznacza, że
+// ładna nazwa siedzi w polu formularza, a stamtąd leci prosto do /api/flow -
+// i wraca jako "nie znaleziono przystanku" (błąd zgłoszony na żywo, przez
+// który etykieta wróciła kiedyś do myślnika - patrz docstring
+// gtfs._match_city_group). Stan (`sel`), klucze markerów i zapis ostatniego
+// wyszukiwania zostają przy postaci KANONICZNEJ, z myślnikiem.
+const CITY_GROUP_LABEL = '(dowolna stacja)';
+const prettyStopName = name => typeof name === 'string' && name.trimEnd().endsWith('-')
+    ? `${name.trimEnd().slice(0, -1).trimEnd()} ${CITY_GROUP_LABEL}`
+    : name;
+const rawStopName = name => typeof name === 'string' && name.trimEnd().endsWith(CITY_GROUP_LABEL)
+    ? `${name.trimEnd().slice(0, -CITY_GROUP_LABEL.length).trimEnd()} -`
+    : name;
+
 const displayValue = v => !v ? ''
-    : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : v;
+    : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : prettyStopName(v);
 
 function esc(text) {
     const div = document.createElement('div');
@@ -2150,7 +2171,8 @@ resultsBox.addEventListener('click', event => {
     if (!name) return;
     event.preventDefault();
     const known = new Set([...markersByName.keys()].map(n => n.toLowerCase()));
-    if (!isPoint(sel.start) && !known.has(startInput.value.trim().toLowerCase())) {
+    if (!isPoint(sel.start)
+            && !known.has(rawStopName(startInput.value.trim()).toLowerCase())) {
         startInput.value = name;
         sel.start = null;
         updatePointMarker('start', null);
@@ -2197,7 +2219,10 @@ function resetResults() {
 function showError(message, suggestions) {
     let html = `<div class="notice error"><p>${esc(message)}</p>`;
     if (suggestions && suggestions.length) {
-        html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(name =>
+        // I napis, i data-name to ETYKIETA (patrz prettyStopName) - klik
+        // wstawia ją wprost do pola, a rawStopName w queryParams zamienia ją
+        // z powrotem przy wysyłaniu.
+        html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(prettyStopName).map(name =>
             `<li><a href="#" data-name="${esc(name)}">${esc(name)}</a></li>`
         ).join('') + '</ul>';
     }
@@ -2218,13 +2243,16 @@ function queryParams() {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
     } else {
-        params.set('start', startInput.value);
+        // rawStopName, nie surowa wartość pola: w polu stoi ETYKIETA
+        // (patrz prettyStopName), a wyszukiwarka zna grupę stacji tylko
+        // pod jej kanoniczną postacią z myślnikiem.
+        params.set('start', rawStopName(startInput.value));
     }
     if (isPoint(sel.end)) {
         params.set('end_lat', sel.end.lat);
         params.set('end_lon', sel.end.lon);
     } else {
-        params.set('end', endInput.value);
+        params.set('end', rawStopName(endInput.value));
     }
     return params;
 }
@@ -2234,8 +2262,8 @@ function queryParams() {
     nadpisujemy nazwą z odpowiedzi. */
 function adoptNames(data) {
     const previous = [sel.start, sel.end];
-    if (!isPoint(sel.start)) { sel.start = data.start; startInput.value = data.start; }
-    if (!isPoint(sel.end)) { sel.end = data.end; endInput.value = data.end; }
+    if (!isPoint(sel.start)) { sel.start = data.start; startInput.value = displayValue(data.start); }
+    if (!isPoint(sel.end)) { sel.end = data.end; endInput.value = displayValue(data.end); }
     // Poprzednie końce muszą wrócić do zwykłego stylu. Przemalowanie tylko
     // nowych wystarczało przy PIERWSZYM wyszukiwaniu, bo setBaseDim(true)
     // przechodził wtedy przez wszystkie słupki - przy kolejnych mapa jest
@@ -2454,7 +2482,6 @@ endInput.addEventListener('input', () => {
 // nie znalazłaby stacji, bo zna ją tylko pod prawdziwą nazwą.
 const STOP_ENTRIES = JSON.parse($('stop-names').textContent);
 const STOP_NAMES = STOP_ENTRIES.map(e => e.name);
-const STOP_KIND = new Map(STOP_ENTRIES.map(e => [e.name, e.kind]));
 const MAX_SUGGESTIONS = 8;
 
 // Składanie nazwy: bez ogonków i wielkości liter, ale ZNAK W ZNAK - długość
@@ -2462,12 +2489,19 @@ const MAX_SUGGESTIONS = 8;
 // fragment oryginalnej nazwy (do podświetlenia).
 const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                          .toLowerCase().replace(/ł/g, 'l');
-const FOLDED_NAMES = STOP_NAMES.map(fold);
+// Podpowiedzi żyją w ETYKIETACH (patrz prettyStopName), nie w nazwach
+// kanonicznych: to etykieta się pokazuje, to ją wybrany wiersz wpisuje do pola
+// i po niej szuka wpisany tekst - więc "dowolna" znajduje grupy stacji, choć
+// w kanonicznej nazwie tego słowa nie ma. Na kanoniczną wraca dopiero
+// rawStopName przy wysyłaniu (patrz queryParams).
+const STOP_LABELS = STOP_NAMES.map(prettyStopName);
+const STOP_KIND = new Map(STOP_ENTRIES.map(e => [prettyStopName(e.name), e.kind]));
+const FOLDED_LABELS = STOP_LABELS.map(fold);
 
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
     chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
-function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIONS) {
-    folded = folded || (names === STOP_NAMES ? FOLDED_NAMES : names.map(fold));
+function suggestionsFor(query, names = STOP_LABELS, folded, limit = MAX_SUGGESTIONS) {
+    folded = folded || (names === STOP_LABELS ? FOLDED_LABELS : names.map(fold));
     const needle = fold(query.trim());
     if (!needle) return [];
     const prefix = [], inside = [];
@@ -3031,7 +3065,11 @@ function resumePlanner() {
 window.plannerBridge = {
     map, esc, fitTo, setView, setBaseDim,
     attachAutocomplete, suggestionsFor, suggestionHtml,
-    LINE_COLORS, MODE_LABEL, STOP_NAMES,
+    // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
+    // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
+    // tablice w jednym API to zaproszenie do sięgnięcia po złą.
+    LINE_COLORS, MODE_LABEL, STOP_LABELS,
+    prettyStopName, rawStopName,
     suspendPlanner, resumePlanner,
 };
 

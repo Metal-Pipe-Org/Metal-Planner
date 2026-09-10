@@ -381,3 +381,14 @@ def test_the_corner_window_opens_on_the_start_stop(front):
     wyrusza - bez najeżdżania na cokolwiek. Przy wyłączonym okienku i bez
     wybranego startu nie otwiera się wcale."""
     _check(front, "okienko_startuje_od_przystanku_startowego")
+
+
+# ------------------------------------------------------- grupa stacji PKP -
+
+def test_a_station_group_travels_to_the_server_under_its_canonical_name(front):
+    """Na ekranie "WROCŁAW (dowolna stacja)", w zapytaniu "WROCŁAW -".
+    Para prettyStopName/rawStopName musi się znosić: samo ładne wyświetlanie
+    posyła ładną nazwę do /api/flow, a stamtąd wraca fałszywe "nie znaleziono
+    przystanku" (błąd zgłoszony na żywo, przez który etykieta wróciła kiedyś
+    do myślnika - patrz docstring gtfs._match_city_group)."""
+    _check(front, "grupa_stacji_wraca_kanoniczna")
