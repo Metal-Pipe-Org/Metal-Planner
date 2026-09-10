@@ -1,31 +1,101 @@
-name: Zamknij issue po merge do testing
+name: "PR-y: etykieta recenzji i zamykanie zgłoszeń"
 
-# Słowa kluczowe GitHuba (`Fix #78`) zamykają zgłoszenie dopiero, gdy commit
-# trafi na gałąź domyślną, czyli `main`. PR-y solvera idą do `testing`, więc
-# zgłoszenia wisiałyby otwarte aż do wydania. Ten workflow zamyka je od razu
-# po merge do `testing` i zostawia w wątku notkę, że na `main` zmiana dopiero
-# czeka.
+# Dwie sprawy wokół PR-ów, obsługiwane z jednego pliku, bo obie wiszą na tym
+# samym zdarzeniu i tej samej parze gałęzi:
+#
+#  1. Etykieta "waiting for PR review". Dostaje ją każdy otwarty PR, który
+#     czeka na recenzję i merge. Znika, gdy PR zostanie zamknięty (zmergowany
+#     albo nie) i gdy wróci do wersji roboczej — lista PR-ów pokazuje wtedy
+#     jednym rzutem oka, co jeszcze wymaga czyjejś decyzji.
+#
+#  2. Zamykanie zgłoszeń po merge do `testing`. Słowa kluczowe GitHuba
+#     (`Fix #78`) zamykają zgłoszenie dopiero, gdy commit trafi na gałąź
+#     domyślną, czyli `main`. PR-y solvera idą do `testing`, więc zgłoszenia
+#     wisiałyby otwarte aż do wydania. Zamykamy je od razu po merge do
+#     `testing` i zostawiamy w wątku notkę, że na `main` zmiana dopiero czeka.
 #
 # Plik żyje na `main`: przy `pull_request_target` GitHub bierze workflow
 # z gałęzi domyślnej repozytorium (GITHUB_REF wskazuje default branch),
 # niezależnie od tego, do której gałęzi celuje PR. Za odsianie PR-ów
-# odpowiada filtr `branches`, który działa na gałęzi bazowej.
+# odpowiada filtr `branches`, działający na gałęzi bazowej: etykietujemy
+# PR-y do `testing` i do `main`, zgłoszenia zamykamy tylko przy `testing`
+# (do `main` idzie wydanie, a te zgłoszenia są już dawno zamknięte).
 on:
   pull_request_target:
-    types: [closed]
-    branches: [testing]
+    types: [opened, reopened, ready_for_review, converted_to_draft, closed]
+    branches: [testing, main]
 
 # Kodu z PR-a nie pobieramy (żadnego checkoutu), więc `pull_request_target`
 # jest tu bezpieczny. Tytuł i treść PR-a wchodzą do skryptu przez env,
-# nigdy przez podstawienie ${{ }} w środku basha.
-permissions:
-  issues: write
+# nigdy przez podstawienie ${{ }} w środku basha. Uprawnienia nadajemy
+# per job — każdy dostaje tylko to, czego naprawdę używa.
+
+env:
+  LABEL: "waiting for PR review"
 
 jobs:
-  close-issues:
-    if: github.event.pull_request.merged == true
+  # Etykieta jest czystym znacznikiem stanu — niczego nie uruchamia.
+  #
+  # Świadomie NIE reagujemy na `synchronize`: kolejny push nie ma przywracać
+  # etykiety zdjętej ręcznie (np. gdy ktoś odłożył PR na później). Wraca ona
+  # dopiero przy zamknięciu i ponownym otwarciu albo przy „Ready for review".
+  review-label:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      pull-requests: write  # etykiety na PR-ze
+      issues: write         # założenie etykiety w repo, gdy jeszcze jej nie ma
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+
+    steps:
+      - name: Nadaj etykietę czekającemu PR-owi
+        # Wersje robocze pomijamy — zgłasza je do recenzji dopiero
+        # „Ready for review", które przychodzi tu osobnym zdarzeniem.
+        if: >-
+          github.event.action != 'closed'
+          && github.event.action != 'converted_to_draft'
+          && github.event.pull_request.draft == false
+        run: |
+          set -euo pipefail
+
+          # Pierwszy bieg w repo zakłada etykietę; przy kolejnych `gh` zgłasza
+          # „already exists" i to jest w porządku.
+          gh label create "$LABEL" --repo "$REPO" \
+            --color FBCA04 --description "PR czeka na recenzję i merge" || true
+
+          gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL"
+          echo "PR #$PR: nadano etykietę \"$LABEL\"." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Zdejmij etykietę z zamkniętego PR-a
+        if: >-
+          github.event.action == 'closed'
+          || github.event.action == 'converted_to_draft'
+        run: |
+          set -euo pipefail
+
+          # Etykiety mogło nigdy nie być: PR sprzed tego workflow, PR otwarty
+          # jako wersja robocza, etykieta zdjęta ręcznie. Brak etykiety to nie
+          # awaria, więc nie wywracamy na tym całego biegu.
+          if gh pr edit "$PR" --repo "$REPO" --remove-label "$LABEL"; then
+            echo "PR #$PR: zdjęto etykietę \"$LABEL\"." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "PR #$PR: nie udało się zdjąć etykiety \"$LABEL\" — najpewniej jej nie miał." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  close-issues:
+    if: >-
+      github.event.action == 'closed'
+      && github.event.pull_request.merged == true
+      && github.event.pull_request.base.ref == 'testing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
 
     steps:
       - name: Zamknij powiązane zgłoszenia
