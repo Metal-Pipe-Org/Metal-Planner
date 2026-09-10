@@ -1071,6 +1071,17 @@ body.panel-hidden .time-headline { left: 180px; }
 
 .timetable-tip.leaflet-tooltip-top::before { border-top-color: var(--surface); }
 
+/* Dymek Leafleta jest poza zdarzeniami myszy - przycisku "trasa" nie dałoby
+   się w nim kliknąć, więc go tam nie ma (tablica jest jedna, ten sam HTML
+   idzie do dymka i do okienka w rogu - patrz emitTimetable w app.js).
+   Razem z przyciskiem znika jego kolumna: pusty tor zostawiłby po prawej
+   odstęp, przez który ta sama tablica łamałaby się w dwóch miejscach inaczej. */
+.timetable-tip .tt-route { display: none; }
+.timetable-tip .tt-rows li { grid-template-columns: 38px minmax(34px, max-content) 1fr auto; }
+.timetable-tip .tt-rows.has-flow li {
+    grid-template-columns: 15px 38px minmax(34px, max-content) 1fr auto;
+}
+
 /* Tablica przystanku, z którego wyruszamy. Zielony pasek u góry i ta sama
    zieleń w nazwie, co na kropce i markerze startu - to ma być rozpoznane
    jednym spojrzeniem, bez czytania nazwy. */
@@ -1081,9 +1092,9 @@ body.panel-hidden .time-headline { left: 180px; }
     border-radius: 10px 10px 0 0;
 }
 
-.tt-start .tt-stop { color: #1b5e20; }
+.tt-start .tip-stop { color: #1b5e20; }
 
-.tt-start .tt-stop::before {
+.tt-start .tip-stop::before {
     content: "start · ";
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -1092,7 +1103,14 @@ body.panel-hidden .time-headline { left: 180px; }
     opacity: 0.75;
 }
 
-.tt-head {
+/* Prefiks `tip-`, nie `tt-`: dymek i rozkłady to dwie różne tablice, a obie
+   miały ochotę na te same trzy nazwy (`tt-head`, `tt-stop`, `tt-dir`). Przy
+   równej specyficzności wygrywała ta reguła, która stoi w pliku niżej - czyli
+   zawsze rozkładowa, choć chodziło o dymek: nagłówek dostawał doklejone „→",
+   kierunek ramkę przycisku wyboru wariantu, a nazwa przystanku kursor łapki.
+   Widać to było dopiero na ekranie, bo żadna z tych rzeczy nie pokazuje się
+   naraz z drugą - arkusz jest jednak wspólny. */
+.tip-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -1102,7 +1120,7 @@ body.panel-hidden .time-headline { left: 180px; }
     font-weight: 700;
 }
 
-.tt-stop {
+.tip-stop {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1128,7 +1146,7 @@ body.panel-hidden .time-headline { left: 180px; }
    z góry na dół, a nie każdy wiersz od nowa. */
 .tt-rows li {
     display: grid;
-    grid-template-columns: 38px minmax(34px, max-content) 1fr auto;
+    grid-template-columns: 38px minmax(34px, max-content) 1fr auto auto;
     align-items: center;
     column-gap: 7px;
     padding: 2px 0;
@@ -1140,7 +1158,7 @@ body.panel-hidden .time-headline { left: 180px; }
    tablica pod kropką wybranej trasy pyta o cały przystanek i tego nie wie,
    a pusta kolumna przesuwałaby jej wiersze bez powodu. */
 .tt-rows.has-flow li {
-    grid-template-columns: 15px 38px minmax(34px, max-content) 1fr auto;
+    grid-template-columns: 15px 38px minmax(34px, max-content) 1fr auto auto;
     column-gap: 6px;
 }
 
@@ -1183,7 +1201,7 @@ body.panel-hidden .time-headline { left: 180px; }
     white-space: nowrap;
 }
 
-.tt-dir {
+.tip-dir {
     overflow: hidden;
     color: var(--ink-soft);
     text-overflow: ellipsis;
@@ -1264,7 +1282,13 @@ body.dev-open #flow-panel { right: 322px; }
     font-size: 11px;
 }
 
-#flow-panel-body { padding-right: 16px; }
+/* Miejsce na ✕ robi tylko PIERWSZA linijka, a nie każdy wiersz pod nią:
+   krzyżyk siedzi w prawym górnym rogu, a tablica ma pod nim własną prawą
+   kolumnę („za ile" i przycisk „trasa") - odsuwanie jej o szerokość krzyżyka
+   w każdym wierszu zjada kierunek, który i tak bywa przycinany. */
+#flow-panel .tip-head,
+#flow-panel .tt-note,
+#flow-panel .flow-tip-line { padding-right: 16px; }
 
 /* Podpowiedź o linii jest w dymku pozycjonowana przez Leaflet - w okienku
    musi stać sama z siebie. */
@@ -2051,6 +2075,74 @@ ul.tt-legend {
     background: var(--surface);
     color: var(--accent);
 }
+
+/* --------------------------------------------- przycisk „trasa" --- */
+
+/* Bliźniak „odjazdów": ten sam przycisk w wierszu, tylko wiedzie w drugą
+   stronę - z propozycji i z tablicy odjazdów w rozkład całej linii. Wygląda
+   tak samo, bo robi to samo: przeskakuje tam, gdzie stoi reszta odpowiedzi.
+   Stoi w trzech miejscach naraz (wiersz przejazdu w propozycji, tablica pod
+   słupkiem na mapie, rozwinięty kurs na tablicy), więc styl jest jeden, a
+   ustawienie w wierszu dokłada każde z nich osobno. */
+.tt-route {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
+    color: var(--ink-faint);
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.tt-route:hover,
+.tt-route:focus-visible {
+    border-color: var(--line);
+    background: var(--surface);
+    color: var(--accent);
+}
+
+/* Nitka kreską, krańce wypełnione - tak samo, jak trasa wygląda na mapie:
+   przystanki po drodze są obwódkami, a końce kropkami pełnymi. */
+.tt-route-icon {
+    width: 12px;
+    height: 10px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.tt-route-icon circle {
+    fill: currentColor;
+    stroke: none;
+}
+
+/* W tablicy odjazdów przycisk budzi się razem z całym wierszem: sama godzina
+   nie jest do klikania, więc podświetlenie mówi, co w tym wierszu nią jest. */
+.tt-rows li:hover .tt-route {
+    border-color: var(--line);
+    color: var(--accent);
+}
+
+/* Wiersz przejazdu w rozwiniętej propozycji: przycisk na prawą krawędź, tak
+   samo jak „odjazdy" w liście przystanków linii. */
+.tl-ride .tt-route { margin-left: auto; }
+
+/* Stopka rozwiniętego kursu: podpowiedź z lewej, przycisk z prawej. */
+.tt-trip-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tt-trip-foot .tt-route { margin-left: auto; }
 
 .tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
 .tt-more:hover { background: #e8edf3; }

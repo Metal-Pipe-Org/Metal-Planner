@@ -1496,6 +1496,11 @@ function startDotIn(layer) {
 
 if (flowPanel) $('flow-panel-close').addEventListener('click', hideSidePanel);
 
+// Okienko w rogu jest jedynym miejscem, w którym tę tablicę da się KLIKNĄĆ:
+// dymek przy kursorze Leaflet trzyma poza zdarzeniami myszy (pointer-events),
+// więc przycisk "trasa" jest tam schowany stylem (patrz style.css).
+if (flowPanelBody) flowPanelBody.addEventListener('click', routeClick);
+
 // Odpowiedzi /api/timetable trzymamy pod (przystanek, doba, godzina) - ta
 // sama kropka pytana drugi raz (powrót kursorem, przerysowanie trasy po
 // suwaku) pokazuje dymek od razu, bez mrugnięcia "Ładowanie...".
@@ -1556,7 +1561,7 @@ function flowIcon(flow) {
 
 function timetableHtml(data) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
-    const head = `<div class="tt-head"><span class="tt-stop">${esc(data.stop)}</span>` +
+    const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
                  `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
     if (!data.departures.length) {
         return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
@@ -1571,7 +1576,7 @@ function timetableHtml(data) {
         `<li>` + (flows ? flowIcon(d.flow) : '') +
         `<span class="tt-time">${esc(d.time)}</span>` +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
-        `<span class="tt-dir">${esc(d.headsign)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}</span>` +
         // "0 min", nie "teraz": nagłówek mówi "od 16:57", a to nie jest
         // godzina zegarowa, tylko najwcześniejsza, o której da się tu być -
         // "teraz" obok niej znaczyłoby coś innego niż znaczy. Rytm dopisany
@@ -1579,7 +1584,7 @@ function timetableHtml(data) {
         // wyższego od pozostałych.
         `<span class="tt-in">${esc(d.in_min < 1 ? 0 : d.in_min)} min` +
         (d.every_min ? `<small> · co ${esc(d.every_min)} min</small>` : '') +
-        `</span></li>`
+        `</span>` + routeButtonHtml(d, 'trasa') + `</li>`
     ).join('');
     return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
 }
@@ -2013,6 +2018,53 @@ function badgeHtml(leg) {
     return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
 }
 
+/** Znak trasy: nitka z krańcami na końcach - to samo, co przycisk rysuje na
+    mapie, tylko w 11 pikselach. Ta sama rodzina co FLOW_ICONS: kreska bierze
+    `currentColor`, więc chodzi za kolorem przycisku (przygaszony w spoczynku,
+    akcentowy pod kursorem), zamiast mieć własny, który trzeba by osobno
+    pamiętać przy każdej zmianie stanu. */
+const ROUTE_ICON =
+    '<svg class="tt-route-icon" viewBox="0 0 15 12" aria-hidden="true">'
+    + '<path d="M2.5 9.5h2.6l4.8-7h2.6"/>'
+    + '<circle cx="2.5" cy="9.5" r="1.5"/>'
+    + '<circle cx="12.5" cy="2.5" r="1.5"/></svg>';
+
+/** "A którędy ta linia jedzie w ogóle" - pytanie, na które wyszukiwarka nie
+    odpowiada wcale: propozycja pokazuje kawałek od wsiadania do wysiadania,
+    a tablica pod słupkiem sam moment odjazdu. Przycisk przeskakuje w rozkład
+    linii, tak jak "odjazdy" w rozkładzie linii przeskakuje w tablicę słupka.
+
+    Rysowany TYLKO dla linii, które rozkład zna (patrz timetableMode.hasLine):
+    pociągi PKP nie są w bazie rozkładów, więc ich wiersze zostają bez
+    przycisku zamiast prowadzić w komunikat o nieznanej linii. Kierunek jedzie
+    razem z numerem - rozkład ma się otworzyć na tym wariancie, którym jedzie
+    ten kurs, a nie na przeciwnym. */
+function routeButtonHtml(line, label) {
+    const tt = window.timetableMode;
+    if (!tt || !tt.hasLine || !tt.hasLine(line.num, line.mode)) return '';
+    return `<button type="button" class="tt-route"
+                    data-route-num="${esc(line.num)}"
+                    data-route-mode="${esc(line.mode)}"
+                    data-route-headsign="${esc(line.headsign || '')}"
+                    title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
+                    >${ROUTE_ICON}${esc(label)}</button>`;
+}
+
+/** Klik w "trasę" nigdy nie ma znaczyć tego, co klik w wiersz pod nią -
+    ani rozwinięcia propozycji, ani zamknięcia okienka. */
+function routeClick(event) {
+    const button = event.target.closest('[data-route-num]');
+    if (!button) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    window.timetableMode.openLine({
+        num: button.dataset.routeNum,
+        mode: button.dataset.routeMode,
+        headsign: button.dataset.routeHeadsign,
+    });
+    return true;
+}
+
 function summaryHtml(legs) {
     const parts = [];
     let pendingWalk = false;
@@ -2059,7 +2111,12 @@ function detailHtml(journey) {
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
+            // Przycisk PRZED liczbą przystanków, choć czyta się go po niej:
+            // .tl-info zajmuje całą szerokość (flex-basis: 100%), więc wszystko
+            // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
+            // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
+            routeButtonHtml(leg, 'trasa') +
             `<span class="tl-info">${leg.stops_count} ${stopWord} · ` +
             `${leg.minutes} min</span></span></li>`,
         );
@@ -2141,6 +2198,8 @@ function scrollToSelected() {
 }
 
 resultsBox.addEventListener('click', event => {
+    if (routeClick(event)) return;
+
     if (event.target.closest('#results-toggle')) {
         resultsCollapsed = !resultsCollapsed;
         saveUiState({resultsCollapsed});
@@ -2170,6 +2229,7 @@ resultsBox.addEventListener('click', event => {
 });
 
 resultsBox.addEventListener('keydown', event => {
+    if (event.target.closest('[data-route-num]')) return;
     const card = event.target.closest('.journey');
     if (card && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault();
@@ -3051,6 +3111,10 @@ function suspendPlanner() {
     setBaseDim(false);          // przystanki wracają do pełnej widoczności - w
     const headline = $('time-headline');   // rozkładach to one są treścią mapy
     if (headline) headline.hidden = true;
+    // Okienko w rogu opisuje przystanek na mapie, którą właśnie zdejmujemy -
+    // zostawione, wisiałoby nad rozkładami z tablicą sprzed przejścia (a od
+    // niedawna również z przyciskiem „trasa", którym się tu weszło).
+    hideSidePanel();
 }
 
 function resumePlanner() {
@@ -3062,7 +3126,7 @@ function resumePlanner() {
 window.plannerBridge = {
     map, esc, fitTo, setView, setBaseDim,
     attachAutocomplete, suggestionsFor, suggestionHtml,
-    LINE_COLORS, MODE_LABEL, STOP_NAMES,
+    LINE_COLORS, MODE_LABEL, STOP_NAMES, ROUTE_ICON,
     suspendPlanner, resumePlanner,
 };
 
