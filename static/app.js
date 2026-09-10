@@ -2039,9 +2039,16 @@ function detailHtml(journey) {
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
+            // Miejsce potrafi zbierać słupki o różnych nazwach (stacja PKP
+            // i przystanek MPK przy niej - patrz naming.py), a wtedy
+            // "inne stanowisko" nie mówi wysiadającemu z pociągu, dokąd ma
+            // iść. Ta sama zasada co w planner._walk_leg.
+            const dokad = leg.from === leg.to
+                ? 'Przejście na inne stanowisko'
+                : `Przejście do ${esc(leg.to)}`;
             rows.push(
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
-                `<span class="tl-body">Przejście na inne stanowisko · ok. ${leg.minutes} min</span></li>`,
+                `<span class="tl-body">${dokad} · ok. ${leg.minutes} min</span></li>`,
             );
             return;
         }
@@ -2464,19 +2471,43 @@ const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                          .toLowerCase().replace(/ł/g, 'l');
 const FOLDED_NAMES = STOP_NAMES.map(fold);
 
+// Drugie złożenie: bez kropek i z rozwiniętymi skrótami, żeby "Plac
+// Grunwaldzki" podpowiadało "PL. GRUNWALDZKI". Tabela przychodzi z serwera
+// (patrz naming.ABBREVIATIONS, templates/index.html) - przepisana tutaj
+// rozjechałaby się z wyszukiwarką przy pierwszym dopisanym skrócie.
+//
+// To OSOBNY, ostatni przebieg, a nie zamiennik fold(): rozwinięcie zmienia
+// długość ("pl" -> "plac"), więc pozycja trafienia nie wskazuje już tego
+// samego fragmentu oryginalnej nazwy i nie ma czego podświetlić.
+const ABBREV = new Map(Object.entries(JSON.parse($('stop-abbrev').textContent)));
+const expand = folded => folded.replace(/\./g, ' ').split(/\s+/)
+                               .filter(Boolean)
+                               .map(word => ABBREV.get(word) || word).join(' ');
+const ALIAS_NAMES = STOP_NAMES.map(name => expand(fold(name)));
+
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
-    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
+    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie.
+    Trafienia po rozwinięciu skrótu idą na koniec: są najluźniejsze, tak samo
+    jak po stronie serwera (patrz gtfs.match_stop). */
 function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIONS) {
-    folded = folded || (names === STOP_NAMES ? FOLDED_NAMES : names.map(fold));
     const needle = fold(query.trim());
     if (!needle) return [];
-    const prefix = [], inside = [];
+    const own = names === STOP_NAMES;
+    folded = folded || (own ? FOLDED_NAMES : names.map(fold));
+    // Złożenia aliasowe idą tą samą drogą co `folded`: gotowe dla domyślnej
+    // listy przystanków, liczone w locie dla każdej innej (tryb rozkładów
+    // podaje własną listę numerów linii - patrz timetable.js).
+    const aliases = own ? ALIAS_NAMES : folded.map(expand);
+    const alias = expand(needle);
+    const prefix = [], inside = [], aliased = [];
     names.forEach((name, i) => {
         const at = folded[i].indexOf(needle);
         if (at === 0) prefix.push({name, at, len: needle.length});
         else if (at > 0) inside.push({name, at, len: needle.length});
+        // at/len na zero = nic nie podświetlamy (patrz wyżej, dlaczego).
+        else if (alias && aliases[i].includes(alias)) aliased.push({name, at: 0, len: 0});
     });
-    return [...prefix, ...inside].slice(0, limit);
+    return [...prefix, ...inside, ...aliased].slice(0, limit);
 }
 
 /** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów

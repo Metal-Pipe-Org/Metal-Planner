@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
+import naming
 import pkp
 import timetables
 import vehicles
@@ -138,6 +139,7 @@ def init_routes(app):
         return render_template(
             "index.html",
             stops=stops,
+            abbreviations=naming.ABBREVIATIONS,
             lines=lines,
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),

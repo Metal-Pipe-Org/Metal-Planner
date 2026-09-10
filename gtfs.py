@@ -13,6 +13,8 @@ from bisect import bisect_left
 from datetime import timedelta
 from pathlib import Path
 
+import naming
+
 DB_PATH = Path(__file__).resolve().parent / "data" / "gtfs.sqlite"
 
 WEEKDAY_COLUMNS = [
@@ -41,6 +43,7 @@ PREV_DAY_PREFIX = "~"
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
 
+
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
 # polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
 # unicodedata.normalize, więc jawna tabela zamiast NFKD.
@@ -52,6 +55,51 @@ _DIACRITIC_MAP = str.maketrans({
 
 def _strip_diacritics(casefolded):
     return casefolded.translate(_DIACRITIC_MAP)
+
+
+def _alias_key(name):
+    """Klucz "ta sama nazwa, inna pisownia": bez ogonków, bez kropek,
+    z rozwiniętymi skrótami (patrz naming.ABBREVIATIONS).
+
+    Składany TAK SAMO z nazwy przystanku i z zapytania, więc "PL. GRUNWALDZKI",
+    "Plac Grunwaldzki" i "pl grunwaldzki" dają jeden klucz - bez wpisywania
+    czegokolwiek do tabeli wyjątków. Kropka leci przez SPACJĘ, nie przez pustkę
+    ("C.H.Korona" -> "c h korona"), żeby skrót bez odstępu rozpadł się na te
+    same słowa co ze spacją.
+
+    To NAJSŁABSZY z kluczy dokładnych (patrz match_stop): różne nazwy schodzą
+    się tu częściej niż przy samym zdjęciu ogonków, więc pyta się o niego
+    dopiero, gdy dokładna pisownia i ogonki zawiodły."""
+    key = _strip_diacritics(name.casefold()).replace(".", " ")
+    return " ".join(naming.ABBREVIATIONS.get(word, word) for word in key.split())
+
+
+def _register_stop_name(data, stop_id, name):
+    """Wpisuje słupek do wszystkich indeksów nazw naraz (patrz match_stop).
+
+    Jedno miejsce dla obu sieci: MPK i PKP jadą tędy tak samo, więc dołożenie
+    poziomu kluczy jest zmianą w JEDNEJ funkcji, a nie w dwóch trzymanych
+    ręcznie w zgodzie (do 2026-09-10 pkp.augment_day powtarzało ten kod razem
+    z własną kopią _strip_diacritics).
+
+    `setdefault` przy pisowni wyświetlanej znaczy "pierwszy wygrywa", a dzień
+    budujemy od słupków MPK - nazwa z rozkładu miejskiego ma więc
+    pierwszeństwo przed kolejową, gdy obie schodzą się do jednego klucza.
+
+    Samego `stop_names` NIE dotyka - to indeksy nazw, nie zapis słupka; dzięki
+    temu wolno tym przejechać po `stop_names` bez modyfikowania go w trakcie."""
+    name_key = name.casefold()
+    data.stops_by_key.setdefault(name_key, []).append(stop_id)
+    data.display_name.setdefault(name_key, name)
+
+    norm_key = _strip_diacritics(name_key)
+    data.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
+    data.norm_display_name.setdefault(norm_key, name)
+
+    alias_key = _alias_key(name)
+    data.stops_by_alias_key.setdefault(alias_key, []).append(stop_id)
+    data.alias_display_name.setdefault(alias_key, name)
+
 
 _day_cache = {}
 
@@ -106,6 +154,42 @@ def _one_spot(stop_ids, stop_coords):
     return kept
 
 
+def _merge_named_places(places, stop_coords):
+    """Skleja w jedno miejsce pary nazw wskazane ręcznie (patrz naming.py).
+
+    To ostatni krok budowy miejsc, po dolepieniu peronów kierunkowych -
+    scalona stacja ma dostać całe miejsce razem z nimi, a nie sam rdzeń.
+
+    Strażnik odległości jest ten sam, co przy peronie (PLACE_MAX_SPAN_M),
+    tylko sprawdzany na WSZYSTKICH parach słupków obu grup: literówka
+    w tabeli albo dopisanie do rozkładu innego miasta kończy się wtedy
+    BRAKIEM scalenia, a nie trzyminutowym przejściem przez pół Polski.
+    Ręczna lista nie jest tu powodem, żeby ufać bardziej niż automatowi -
+    jest powodem, żeby sprawdzać tak samo.
+
+    Zwycięski klucz to nazwa MPK; klucz stacji ZNIKA z `places`, żeby nie
+    został osierocony obok scalonej grupy (ten sam powód co przy peronie
+    w _build_places). Wyszukiwarki to nie dotyczy: `stops_by_key` zostaje
+    nietknięte, więc "Wrocław Główny" dalej jest znaną nazwą, tylko rozwija
+    się teraz (przez _expand_to_places) na całe miejsce razem z tramwajami.
+    """
+    for canon, other in naming.PLACE_MERGES.items():
+        canon_key, other_key = canon.casefold(), other.casefold()
+        target = places.get(canon_key)
+        group = places.get(other_key)
+        if not target or not group or canon_key == other_key:
+            continue
+        if not all(
+            _haversine_m(*stop_coords[a], *stop_coords[b])
+            <= PLACE_MAX_SPAN_M
+            for a in group for b in target
+        ):
+            continue
+        places[canon_key] = target + [s for s in group if s not in target]
+        del places[other_key]
+    return places
+
+
 def _build_places(stop_names, stop_coords, stops_by_key):
     """Grupuje słupki w kanoniczne 'miejsca' - jednostkę, o którą pyta reszta
     systemu (dojechaliśmy? można się tu przesiąść?), zamiast surowej nazwy
@@ -114,6 +198,8 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     dolepiamy perony kierunkowe o nazwie bazowej pasującej do istniejącego
     miejsca, o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
     zabezpieczenie przed przypadkową kolizją nazw gdzie indziej w mieście.
+    Na koniec scalamy pary nazw z ręcznej tabeli (patrz _merge_named_places)
+    - tam, gdzie to samo miejsce nosi w obu sieciach inną nazwę.
     """
     places = {}
     for key, ids in stops_by_key.items():
@@ -143,7 +229,7 @@ def _build_places(stop_names, stop_coords, stops_by_key):
                 del places[own_key]
             elif own_group and stop_id in own_group:
                 places[own_key] = [s for s in own_group if s != stop_id]
-    return places
+    return _merge_named_places(places, stop_coords)
 
 
 def _walking_bridges(place_groups):
@@ -180,6 +266,7 @@ class DayData:
     __slots__ = (
         "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
         "display_name", "stops_by_norm_key", "norm_display_name",
+        "stops_by_alias_key", "alias_display_name",
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
         "pkp_stations", "deps_by_stop",
@@ -197,6 +284,8 @@ class DayData:
         self.display_name = {}       # nazwa.casefold() -> oryginalna pisownia
         self.stops_by_norm_key = {}  # jw. bez polskich znaków diakrytycznych
         self.norm_display_name = {}  # jw. bez polskich znaków diakrytycznych
+        self.stops_by_alias_key = {}   # jw. + bez kropek, skróty rozwinięte
+        self.alias_display_name = {}   # jw. (patrz _alias_key)
         self.siblings = {}           # stop_id -> inne słupki tego samego miejsca
         self.trip_info = {}          # trip_id -> (etykieta linii, kierunek)
         self.trip_shape = {}         # trip_id -> shape_id (geometria z shapes.txt)
@@ -325,12 +414,6 @@ def load_day(day):
         stop_id = sys.intern(stop_id)
         data.stop_names[stop_id] = stop_name
         data.stop_coords[stop_id] = (lat, lon)
-        name_key = stop_name.casefold()
-        data.stops_by_key.setdefault(name_key, []).append(stop_id)
-        data.display_name.setdefault(name_key, stop_name)
-        norm_key = _strip_diacritics(name_key)
-        data.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
-        data.norm_display_name.setdefault(norm_key, stop_name)
 
     # Kolej PRZED budowaniem miejsc: stacja ma przejść przez dokładnie ten
     # sam młynek co przystanek miejski (ta sama nazwa -> to samo miejsce ->
@@ -338,6 +421,15 @@ def load_day(day):
     # do 2026-08-31 - nie należała do żadnego miejsca i musiała mieć własny,
     # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
     pkp.augment_day(data, day)
+
+    # Indeksy nazw dopiero TERAZ, gdy w dniu są już obie sieci - jednym
+    # przebiegiem po wszystkich słupkach, zamiast raz tutaj i drugi raz
+    # w pkp.augment_day (tak było do 2026-09-10, z osobną kopią składania
+    # klucza po każdej stronie). Kolejność jest ta sama co wtedy: MPK
+    # wchodzi do stop_names pierwsze, więc przy wspólnym kluczu to jego
+    # pisownia zostaje wyświetlana (patrz _register_stop_name).
+    for stop_id, stop_name in data.stop_names.items():
+        _register_stop_name(data, stop_id, stop_name)
 
     # Kanoniczne miejsce (patrz _build_places) i most pieszy między jego
     # słupkami (patrz _walking_bridges) - _merge_bridges scala go tu z
@@ -521,6 +613,13 @@ def match_stop(query, data):
     Dopasowanie ignoruje wielkość liter i - dopiero gdy dokładna pisownia
     zawiedzie - polskie znaki diakrytyczne (patrz _strip_diacritics), więc
     "Zabia" trafia w "Żabia", a "Dworzec Glowny" w "Dworzec Główny".
+    Krok niżej odpuszcza jeszcze kropki i skróty (patrz _alias_key), więc
+    "Plac Grunwaldzki" i "pl grunwaldzki" trafiają w "PL. GRUNWALDZKI".
+
+    Kolejność poziomów NIE jest przypadkowa i nowy poziom dokłada się na
+    DOLE, nigdy w środku: każdy następny skleja ze sobą więcej różnych
+    napisów, więc pytany wcześniej odbierałby trafienie czemuś, co pasuje
+    dokładniej.
 
     "Zbiorcza" stacja typu "Warszawa -" (patrz _match_city_group) trafia
     we WSZYSTKIE prawdziwe stacje danego miasta na raz - dopiero gdy nic
@@ -538,6 +637,14 @@ def match_stop(query, data):
         return (
             data.norm_display_name[norm_key],
             _expand_to_places(data, data.stops_by_norm_key[norm_key]),
+            None,
+        )
+
+    alias_key = _alias_key(key)
+    if alias_key in data.stops_by_alias_key:
+        return (
+            data.alias_display_name[alias_key],
+            _expand_to_places(data, data.stops_by_alias_key[alias_key]),
             None,
         )
 
@@ -560,7 +667,22 @@ def match_stop(query, data):
             _expand_to_places(data, data.stops_by_norm_key[k]),
             None,
         )
-    return None, None, sorted({data.norm_display_name[k] for k in norm_candidates})[:8]
+    if norm_candidates:
+        return None, None, sorted({data.norm_display_name[k] for k in norm_candidates})[:8]
+
+    # Ten sam kaskadowy układ co wyżej, tylko na kluczach aliasowych: bez
+    # tego "plac grun" nie podpowiedziałby NICZEGO, bo "plac" nie występuje
+    # w żadnej surowej nazwie przystanku - a to dokładnie ta połowa
+    # zapytania, którą użytkownik zdążył wpisać.
+    alias_candidates = [k for k in data.stops_by_alias_key if alias_key in k]
+    if len(alias_candidates) == 1:
+        k = alias_candidates[0]
+        return (
+            data.alias_display_name[k],
+            _expand_to_places(data, data.stops_by_alias_key[k]),
+            None,
+        )
+    return None, None, sorted({data.alias_display_name[k] for k in alias_candidates})[:8]
 
 
 def all_stop_names():

@@ -34,10 +34,13 @@ miejsc (gtfs.load_day), więc przechodzi przez to samo grupowanie co każdy
 słupek miejski: ta sama nazwa = to samo miejsce = przejście pieszo między
 nimi. Wcześniej było inaczej - stacja dostawała sąsiadów z własnego promienia
 500 m, obok mechanizmu miejsca - i to był drugi mechanizm odpowiadający na to
-samo pytanie. Skutek uboczny usunięcia jest znany i zamierzony: nazwy stacji
-i przystanków prawie nigdy się nie pokrywają ("Wrocław Główny" vs "DWORZEC
-GŁÓWNY"), więc dziś obie sieci stykają się w pojedynczych punktach. Porządne
-łączenie stacji z przystankami to osobne zadanie, nie ten plik.
+samo pytanie. Nazwy stacji i przystanków prawie nigdy się nie pokrywają
+("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc sama reguła "ta sama nazwa"
+zostawiała obie sieci stykające się w pojedynczych punktach; największe
+wrocławskie węzły są dziś sklejone ręczną tabelą naming.PLACE_MERGES
+(2026-09-10). Tabela i tak żyje TAM, nie tutaj: to część budowania miejsc,
+a nie czytania rozkładu kolejowego - ten plik dalej nie wie o przesiadkach
+nic poza tym, że dokłada stacje PRZED budowaniem miejsc.
 
 CZAS jest ucinany do pełnych minut (patrz _sec_of): API kolei podaje sekundy,
 rozkład miejski nie, a jedna oś czasu nie może mieć dwóch dokładności - inaczej
@@ -62,11 +65,6 @@ import config
 DB_PATH = Path(__file__).resolve().parent / "data" / "pkp.sqlite"
 COORDS_PATH = Path(__file__).resolve().parent / "data" / "pkp_station_coords.json"
 
-_DIACRITIC_MAP = str.maketrans({
-    "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
-    "ó": "o", "ś": "s", "ź": "z", "ż": "z",
-})
-
 # Klucz cache'a to mtime pliku bazy - ten sam trik co gtfs._day_cache: po
 # nocnej podmianie (update_pkp.py) dane przeładują się same, bez restartu
 # procesu, i trzymamy naraz tylko jedną (aktualną) wersję.
@@ -76,10 +74,6 @@ _stations_cache = {}
 def enabled():
     """Czy skonfigurowano klucz PKP - brak klucza wyłącza funkcję po cichu."""
     return config.pkp_api_key() is not None
-
-
-def _strip_diacritics(casefolded):
-    return casefolded.translate(_DIACRITIC_MAP)
 
 
 def _connect():
@@ -333,15 +327,13 @@ def augment_day(day, date):
         stop_of[station_id] = stop_id
         name = stations.get(station_id, f"Stacja {station_id}")
         lat, lon = coords[station_id]
+        # Sama nazwa i współrzędne - indeksy wyszukiwania buduje gtfs.load_day
+        # jednym przebiegiem po WSZYSTKICH słupkach, już po tym doklejeniu
+        # (patrz gtfs._register_stop_name). Do 2026-09-10 stało tu drugie,
+        # ręcznie utrzymywane w zgodzie kopiuj-wklej tamtego kodu.
         day.stop_names[stop_id] = name
         day.stop_coords[stop_id] = (lat, lon)
         day.pkp_stations.append((name, stop_id))
-        name_key = name.casefold()
-        day.stops_by_key.setdefault(name_key, []).append(stop_id)
-        day.display_name.setdefault(name_key, name)
-        norm_key = _strip_diacritics(name_key)
-        day.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
-        day.norm_display_name.setdefault(norm_key, name)
 
     # Jedno przejście po wierszach (posortowanych SQL-em wg schedule_id,
     # order_id, order_number) buduje i połączenia (day.conns), i sekwencję
