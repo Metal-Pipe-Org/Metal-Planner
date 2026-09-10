@@ -1561,7 +1561,7 @@ function flowIcon(flow) {
 
 function timetableHtml(data) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
-    const head = `<div class="tt-head"><span class="tt-stop">${esc(data.stop)}</span>` +
+    const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
                  `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
     if (!data.departures.length) {
         return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
@@ -1576,7 +1576,7 @@ function timetableHtml(data) {
         `<li>` + (flows ? flowIcon(d.flow) : '') +
         `<span class="tt-time">${esc(d.time)}</span>` +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
-        `<span class="tt-dir">${esc(d.headsign)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}</span>` +
         // "0 min", nie "teraz": nagłówek mówi "od 16:57", a to nie jest
         // godzina zegarowa, tylko najwcześniejsza, o której da się tu być -
         // "teraz" obok niej znaczyłoby coś innego niż znaczy. Rytm dopisany

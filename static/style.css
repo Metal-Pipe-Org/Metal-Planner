@@ -1092,9 +1092,9 @@ body.panel-hidden .time-headline { left: 180px; }
     border-radius: 10px 10px 0 0;
 }
 
-.tt-start .tt-stop { color: #1b5e20; }
+.tt-start .tip-stop { color: #1b5e20; }
 
-.tt-start .tt-stop::before {
+.tt-start .tip-stop::before {
     content: "start · ";
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -1103,7 +1103,14 @@ body.panel-hidden .time-headline { left: 180px; }
     opacity: 0.75;
 }
 
-.tt-head {
+/* Prefiks `tip-`, nie `tt-`: dymek i rozkłady to dwie różne tablice, a obie
+   miały ochotę na te same trzy nazwy (`tt-head`, `tt-stop`, `tt-dir`). Przy
+   równej specyficzności wygrywała ta reguła, która stoi w pliku niżej - czyli
+   zawsze rozkładowa, choć chodziło o dymek: nagłówek dostawał doklejone „→",
+   kierunek ramkę przycisku wyboru wariantu, a nazwa przystanku kursor łapki.
+   Widać to było dopiero na ekranie, bo żadna z tych rzeczy nie pokazuje się
+   naraz z drugą - arkusz jest jednak wspólny. */
+.tip-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -1113,7 +1120,7 @@ body.panel-hidden .time-headline { left: 180px; }
     font-weight: 700;
 }
 
-.tt-stop {
+.tip-stop {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1194,7 +1201,7 @@ body.panel-hidden .time-headline { left: 180px; }
     white-space: nowrap;
 }
 
-.tt-dir {
+.tip-dir {
     overflow: hidden;
     color: var(--ink-soft);
     text-overflow: ellipsis;
@@ -1279,7 +1286,7 @@ body.dev-open #flow-panel { right: 322px; }
    krzyżyk siedzi w prawym górnym rogu, a tablica ma pod nim własną prawą
    kolumnę („za ile" i przycisk „trasa") - odsuwanie jej o szerokość krzyżyka
    w każdym wierszu zjada kierunek, który i tak bywa przycinany. */
-#flow-panel .tt-head,
+#flow-panel .tip-head,
 #flow-panel .tt-note,
 #flow-panel .flow-tip-line { padding-right: 16px; }
 
