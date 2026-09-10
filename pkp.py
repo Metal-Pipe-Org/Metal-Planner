@@ -300,7 +300,7 @@ def augment_day(day, date):
     try:
         rows = db.execute(
             """
-            SELECT r.name, r.carrier_code, r.national_number, r.category,
+            SELECT r.carrier_code, r.national_number, r.category,
                    s.schedule_id, s.order_id, s.station_id, s.order_number,
                    s.arrival_time, s.departure_time
             FROM stops s
@@ -317,7 +317,7 @@ def augment_day(day, date):
     if not rows:
         return
 
-    used_ids = {row[6] for row in rows if row[6] in coords}
+    used_ids = {row[5] for row in rows if row[5] in coords}
     if not used_ids:
         return
 
@@ -335,6 +335,24 @@ def augment_day(day, date):
         day.stop_coords[stop_id] = (lat, lon)
         day.pkp_stations.append((name, stop_id))
 
+    # Kierunek kursu to jego OSTATNIA stacja - to samo, co headsign
+    # autobusu i to samo, co stoi na tablicy dworcowej. Liczony osobnym
+    # przejściem, bo wiersze idą od początku trasy, a nazwa kierunku jest
+    # potrzebna już przy pierwszej z nich (niżej, na granicy kursu); wiersze
+    # są posortowane po order_number, więc wygrywa ostatni wpis kursu.
+    #
+    # NIE `routes.name`: to nazwa WŁASNA pociągu ("GALICJA", "ORZESZKOWA"),
+    # u większości kursów pusta - w polu kierunku dawała albo nic, albo
+    # słowo, które nie mówi, dokąd ten pociąg jedzie.
+    #
+    # Bez oglądania się na współrzędne: pociąg dojeżdża do swojej ostatniej
+    # stacji niezależnie od tego, czy umiemy ją postawić na mapie. Kierunek
+    # ucięty do ostatniej stacji, którą akurat znamy, kłamałby.
+    destination = {}
+    for row in rows:
+        _, _, _, schedule_id, order_id, station_id = row[:6]
+        destination[(schedule_id, order_id)] = stations.get(station_id, "")
+
     # Jedno przejście po wierszach (posortowanych SQL-em wg schedule_id,
     # order_id, order_number) buduje i połączenia (day.conns), i sekwencję
     # przystanków do rysowania (day.pkp_trip_stops) - jeden spójny czas dla
@@ -347,7 +365,7 @@ def augment_day(day, date):
     prev_stop = None
     prev_dep_c = None
     for row in rows:
-        (name, carrier_code, national_number, category, schedule_id, order_id,
+        (carrier_code, national_number, category, schedule_id, order_id,
          station_id, order_number, arrival_time, departure_time) = row
         key = (schedule_id, order_id)
         if key != prev_key:
@@ -360,7 +378,8 @@ def augment_day(day, date):
             number_digits = "".join(c for c in national_number or "" if c.isdigit())
             label = f"{carrier_code or ''} {number_digits}".strip()
             day.trip_info[trip_id] = (
-                f"Pociąg {label}" if label else "Pociąg", name or "",
+                f"Pociąg {label}" if label else "Pociąg",
+                destination.get(key, ""),
             )
 
         raw_arr = _sec_of(arrival_time, round_up=True) if arrival_time else None

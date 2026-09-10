@@ -85,6 +85,7 @@ let boardMode = 'time';   // 'time' - odjazdy od podanej godziny; 'full' - cała
 let pickedBeforeFull = null;   // zaznaczenie linii sprzed wejścia w pełny rozkład
 let boardLimit = BOARD_PAGE;
 let openDep = null;       // rozwinięty odjazd (indeks) - jego kurs jest na mapie
+let viewBeforeTrip = null;   // widok mapy sprzed rozwinięcia kursu, do odtworzenia
 let tripCache = new Map();
 let pendingBoard = null;  // wybór przyniesiony z rozkładu linii: {point, num, mode}
 let pendingLine = null;   // to samo w drugą stronę: {mode, headsign} spoza rozkładów
@@ -308,6 +309,7 @@ function reset() {
     pickedBeforeFull = null;
     boardLimit = BOARD_PAGE;
     openDep = null;
+    viewBeforeTrip = null;
     tripCache = new Map();
     pendingBoard = null;
     pendingLine = null;
@@ -1167,11 +1169,27 @@ resultsBox.addEventListener('click', event => {
     const dep = event.target.closest('[data-dep]');
     if (dep) {
         const index = Number(dep.dataset.dep);
+        // Widok zapamiętujemy w chwili ROZWIJANIA i tylko wtedy, gdy nic nie
+        // było rozwinięte: przeskok z kursu na kurs ma pamiętać tablicę,
+        // a nie poprzedni kurs.
+        if (openDep === null) {
+            viewBeforeTrip = {center: map.getCenter(), zoom: map.getZoom()};
+        }
         openDep = openDep === index ? null : index;
         render();
         if (openDep === null) {
+            // Kurs zawiózł mapę tam, dokąd jedzie - a pociąg jedzie o sto
+            // kilometrów dalej niż autobus. Po zwinięciu wraca pytanie
+            // sprzed kliknięcia ("co odjeżdża z tego przystanku"), więc ma
+            // wrócić i jego widok - DOKŁADNIE ten, a nie policzony na nowo:
+            // przybliżenie jest jego częścią tak samo jak środek, a kadr
+            // liczony od zera zna tylko jedno, stałe (BOARD_ZOOM) i gubi to,
+            // które ktoś sobie ustawił sam.
             focusLayer = dropLayer(focusLayer);
-            draw(false);
+            const back = viewBeforeTrip;
+            viewBeforeTrip = null;
+            draw(!back);                 // bez zapamiętanego widoku zostaje kadr tablicy
+            if (back) map.setView(back.center, back.zoom);
         } else {
             // Kurs bywa jeszcze w drodze - rysujemy i przerysowujemy listę,
             // gdy odpowiedź dojdzie (tripHtml czyta z tego samego cache).
