@@ -11,8 +11,11 @@ def make_day(trips, names=None, siblings=None):
     """trips: [{"trip_id", "label", "headsign"?, "shape_id"?,
                 "stops": [(stop_id, arrival_sec, departure_sec), ...]}, ...]
     names: {stop_id: nazwa wyświetlana} (domyślnie = stop_id)
-    siblings: {stop_id: (inny_stop_id, ...)} - most pieszy między słupkami
-    tego samego miejsca (patrz gtfs.DayData.siblings / _walking_bridges).
+    siblings: most pieszy (patrz gtfs.DayData.siblings). Wolno podać sam
+    kształt sąsiedztwa - {stop_id: (inny_stop_id, ...)} - i wtedy każda
+    krawędź kosztuje gtfs.WALK_MIN_SEC, bo syntetyczne współrzędne z tego
+    pliku i tak nie odwzorowują żadnej prawdziwej odległości. Test, któremu
+    zależy na konkretnym czasie przejścia, podaje pełne {stop_id: {inny: sek}}.
     """
     day = gtfs.DayData()
 
@@ -35,7 +38,11 @@ def make_day(trips, names=None, siblings=None):
         day.stops_by_place.setdefault(key, []).append(stop_id)
         day.place_of[stop_id] = key
 
-    day.siblings = dict(siblings or {})
+    day.siblings = {
+        stop_id: (dict(neighbors) if isinstance(neighbors, dict)
+                  else {n: gtfs.WALK_MIN_SEC for n in neighbors})
+        for stop_id, neighbors in (siblings or {}).items()
+    }
 
     conns = []
     for trip in trips:

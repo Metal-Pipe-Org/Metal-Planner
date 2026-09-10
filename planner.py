@@ -13,7 +13,10 @@ from datetime import datetime, timedelta
 import gtfs
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
-WALK_SEC = 180       # przejście między słupkami tego samego miejsca (patrz gtfs.py)
+# Czasu przejścia pieszo nie ma tu jako stałej: krawędź piesza niesie własny
+# koszt, policzony z odległości przy budowie dnia (patrz gtfs.walk_seconds
+# i gtfs._nearby_bridges). Bufora przesiadki krawędź piesza NIE dostaje -
+# gtfs.WALK_MIN_SEC jest od niego większe, więc jest w nim zawarty.
 
 # Ile MUSI oszczędzić przesiadka, żeby w ogóle warto ją było proponować.
 # Nocne linie zjeżdżają się w węźle i ruszają z niego tą samą minutą tą samą
@@ -253,9 +256,14 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
             journey[arr_s] = ("ride", trip_board[trip], i)
             legs[arr_s] = ride_legs
             note_target(arr_s, arr_t, ride_legs)
-            # Relaksacja pieszo na pozostałe słupki tego samego miejsca.
+            # Relaksacja pieszo na wszystko, dokąd stąd się dojdzie
+            # (patrz gtfs.DayData.siblings) - sąsiedni peron, przystanek po
+            # drugiej stronie ulicy, stacja kolejowa obok. JEDEN krok:
+            # sąsiad zapisuje się jako osiągnięty pieszo, ale sam już
+            # pieszo dalej nie relaksuje, więc nie da się złożyć trasy
+            # z dwóch przejść pod rząd.
             for sibling in day.siblings.get(arr_s, ()):
-                walk_arr = arr_t + WALK_SEC
+                walk_arr = arr_t + gtfs.walk_seconds(day, arr_s, sibling)
                 known_sib = earliest.get(sibling, INF)
                 if walk_arr < known_sib or (walk_arr == known_sib
                                             and ride_legs < legs[sibling]):
@@ -451,16 +459,31 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
 
 
 def _walk_leg(day, from_stop, to_stop):
-    """Etap pieszy między słupkami tego samego miejsca (patrz gtfs.siblings) -
-    współdzielony przez _reconstruct (rekonstrukcja CSA) i _enumerate_journeys
-    (przesiadka między segmentami mapy przepływów)."""
+    """Etap pieszy krawędzią mostu (patrz gtfs.siblings) - współdzielony przez
+    _reconstruct (rekonstrukcja CSA) i _enumerate_journeys (przesiadka między
+    segmentami mapy przepływów).
+
+    Dwa różne przejścia, jeden etap. Zmiana stanowiska w obrębie jednego
+    przystanku to dla pasażera co innego niż marsz na przystanek o innej
+    nazwie albo pod dworzec - pierwsze się "robi po drodze", drugie trzeba
+    ŚWIADOMIE przejść i trzeba wiedzieć DOKĄD. Rozstrzyga o tym miejsce
+    (gtfs._build_places), nie sama nazwa: perony jednego placu bywają nazwane
+    różnie, a i tak są tym samym przystankiem. Front dostaje `same_place`
+    gotowe, żeby nie odtwarzać tego z porównania nazw (patrz static/app.js).
+    """
+    same_place = (day.place_of.get(from_stop, from_stop)
+                  == day.place_of.get(to_stop, to_stop))
+    minutes = round(gtfs.walk_seconds(day, from_stop, to_stop) / 60)
+    to_name = day.stop_names[to_stop]
     return {
         "kind": "walk",
-        "text": f"Zmiana stanowiska na przystanku "
-                f"{day.stop_names[to_stop]} (ok. {WALK_SEC // 60} min)",
-        "minutes": WALK_SEC // 60,
+        "text": (f"Zmiana stanowiska na przystanku {to_name} (ok. {minutes} min)"
+                 if same_place else
+                 f"Przejście pieszo do: {to_name} (ok. {minutes} min)"),
+        "minutes": minutes,
+        "same_place": same_place,
         "from": day.stop_names[from_stop],
-        "to": day.stop_names[to_stop],
+        "to": to_name,
         "dep_sec": 0,
         "path": _round_path([day.stop_coords[from_stop], day.stop_coords[to_stop]]),
     }
@@ -1087,11 +1110,44 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
 
 
 def _sibling_places(day, stop):
-    """Ten sam przystanek plus jego siblingi - dosłownie ten sam słupek albo
-    sąsiedni w tym samym miejscu (patrz gtfs._walking_bridges). Jedyne
-    miejsce, które rozwija "przystanek -> te same fizyczne miejsce", żeby
-    _refine_brightness i _select_and_anchor nie robiły tego niezależnie."""
+    """Ten sam przystanek plus wszystko, do czego stąd się dojdzie pieszo
+    (patrz gtfs.DayData.siblings) - dziś także słupki o innej nazwie i stacje
+    kolejowe, nie tylko "bracia" z jednego miejsca, od których wzięła się
+    nazwa. Jedyne miejsce, które rozwija "przystanek -> skąd jeszcze mogę
+    tu wsiąść", żeby _refine_brightness i _select_and_anchor nie robiły tego
+    niezależnie. Dla samych identyfikatorów; gdy potrzebny jest też koszt
+    dojścia, patrz _reach_from."""
     return (stop, *day.siblings.get(stop, ()))
+
+
+def _same_place_stops(day, stop):
+    """Słupki tego samego FIZYCZNEGO miejsca co `stop` (patrz
+    gtfs._build_places) - i nic poza tym.
+
+    Odpowiada na pytanie "czy to jest ten sam przystanek", a nie "czy da się
+    tam dojść". Rozróżnienie było bez znaczenia, dopóki most pieszy łączył
+    wyłącznie słupki jednego miejsca - wtedy oba pytania miały tę samą
+    odpowiedź i wszędzie wystarczało _sibling_places. Od kiedy pieszo
+    przechodzi się też między RÓŻNYMI przystankami (gtfs._nearby_bridges),
+    to są dwa różne pytania i mylenie ich kosztuje: reguła zawracania
+    (_leads_onward) uznawała za "już przejechane" wszystko w promieniu
+    marszu od trasy, więc każda kontynuacja biegnąca nieopodal wypadała
+    z mapy jako rzekomy nawrót.
+    """
+    key = day.place_of.get(stop)
+    if key is None:
+        return (stop,)
+    return day.stops_by_place.get(key, (stop,))
+
+
+def _reach_from(day, stop):
+    """To samo co _sibling_places, ale z BUFOREM, jaki kosztuje wsiadanie
+    w każdym z tych punktów: na własnym słupku to bufor przesiadki, u sąsiada
+    - czas dojścia, który krawędź piesza niesie już ze sobą (patrz
+    gtfs.DayData.siblings; bufora przesiadki nie dokładamy, bo podłoga
+    gtfs.WALK_MIN_SEC jest od niego większa)."""
+    yield stop, TRANSFER_SEC
+    yield from day.siblings.get(stop, {}).items()
 
 
 def _board_index(day, segs):
@@ -1280,8 +1336,7 @@ def _target_profile(day, target_set, dep_sec, deadline):
         stay = trip_arr.get(trip, INF)
         if stay < best:
             best = stay
-        for stop2 in _sibling_places(day, arr_s):
-            buffer = TRANSFER_SEC if stop2 == arr_s else WALK_SEC
+        for stop2, buffer in _reach_from(day, arr_s):
             value = value_at(stop2, arr_t + buffer)
             if value < best:
                 best = value
@@ -1308,8 +1363,7 @@ def _profile_value(day, profile, stop, arr_t):
     kontynuacją jest ten sam pojazd, na przesiadkę nie ma nawet bufora)."""
     neg_deps, arrs, _board = profile
     best = INF
-    for stop2 in _sibling_places(day, stop):
-        buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+    for stop2, buffer in _reach_from(day, stop):
         times = neg_deps.get(stop2)
         if times is None:
             continue
@@ -1326,14 +1380,24 @@ def _catchable(arr_t, buffer, dep_list):
 
 def _joins(day, arr_t, stop, other, drawn=None):
     """Czy z przyjazdu (arr_t, stop) da się wskoczyć w segment `other`
-    (na tym samym słupku lub sąsiednim tego samego miejsca), opcjonalnie
-    tylko w jego narysowanej części `drawn`."""
-    for stop2 in _sibling_places(day, stop):
+    (na tym samym słupku albo na dowolnym, do którego stąd się dojdzie
+    pieszo), opcjonalnie tylko w jego narysowanej części `drawn`.
+
+    Słupek własny i piesi sąsiedzi są tu rozpisani osobno, zamiast wspólnej
+    pętli po _sibling_places: to jedna z najgorętszych ścieżek mapy (rzędu
+    miliona wywołań na zapytanie), a rozdzielenie zdejmuje z niej i budowę
+    krotki, i osobne wyszukanie czasu przejścia - sąsiad przychodzi ze
+    swoim kosztem, bo to wartość w tym samym słowniku.
+    """
+    times = other["dep_times"].get(stop)
+    if (times is not None and (drawn is None or stop in drawn)
+            and _catchable(arr_t, TRANSFER_SEC, times)):
+        return True
+    for stop2, walk_sec in day.siblings.get(stop, {}).items():
         times = other["dep_times"].get(stop2)
         if times is None or (drawn is not None and stop2 not in drawn):
             continue
-        buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
-        if _catchable(arr_t, buffer, times):
+        if _catchable(arr_t, walk_sec, times):
             return True
     return False
 
@@ -1356,9 +1420,8 @@ def _can_board(day, arr_t, stop, other, other_board):
         return False
     if other_board == stop:
         return arr_t + TRANSFER_SEC <= dep_t
-    if other_board in _sibling_places(day, stop):
-        return arr_t + WALK_SEC <= dep_t
-    return False
+    walk_sec = day.siblings.get(stop, {}).get(other_board)
+    return walk_sec is not None and arr_t + walk_sec <= dep_t
 
 
 def _exit_index(day, kept, ranges):
@@ -1388,7 +1451,9 @@ def _leads_onward(day, other, stop, behind, drawn=None):
     prowadzi donikąd, mimo że technicznie da się tam "przesiąść".
 
     `behind` to CAŁA przejechana dotąd droga tego kursu (wszystkie
-    przystanki przed tym wyjściem, wraz z siblingami), nie tylko poprzedni
+    przystanki przed tym wyjściem, wraz ze słupkami TYCH SAMYCH miejsc -
+    patrz _same_place_stops; celowo nie z zasięgiem marszu, bo "już tu
+    byłem" to co innego niż "da się tu dojść"), nie tylko poprzedni
     przystanek. Wersja "tylko poprzedni" (2026-08-15, pierwsza) łapała samą
     czołową pętlę, ale przepuszczała każdą, która zawraca choć jeden
     przystanek dalej - a to jest w realnej siatce regułą, nie wyjątkiem:
@@ -1482,7 +1547,8 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                     for other, _, arr_t, stop in exit_index.get(stop2, ()):
                         if other is seg:
                             continue
-                        buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+                        buffer = (TRANSFER_SEC if stop2 == stop
+                                  else gtfs.walk_seconds(day, stop, stop2))
                         if _catchable(arr_t, buffer, times):
                             if start_pos is None or p < start_pos:
                                 start_pos = p
@@ -1494,7 +1560,7 @@ def _select_and_anchor(day, segs, source_stops, target_set):
             ridden = 0         # dokąd `behind` jest już wypełnione
             for j, (pos, _, arr_t, stop) in enumerate(seg["exits"]):
                 while ridden < pos:
-                    behind.update(_sibling_places(day, seg["stops"][ridden]))
+                    behind.update(_same_place_stops(day, seg["stops"][ridden]))
                     ridden += 1
                 if pos <= start_pos + 1:
                     continue                 # wyjście przed/na starcie segmentu
@@ -2358,7 +2424,7 @@ def _forward(day, source_stops, dep_sec, deadline):
             earliest[arr_s] = arr_t
             arrived_by[arr_s] = "ride"
             for sibling in day.siblings.get(arr_s, ()):
-                walk_arr = arr_t + WALK_SEC
+                walk_arr = arr_t + gtfs.walk_seconds(day, arr_s, sibling)
                 if walk_arr < earliest.get(sibling, INF):
                     earliest[sibling] = walk_arr
                     arrived_by[sibling] = "walk"
@@ -2392,7 +2458,7 @@ def _backward(day, target_set, dep_sec, deadline):
         if dep_t > latest.get(dep_s, -1):
             latest[dep_s] = dep_t
             for sibling in day.siblings.get(dep_s, ()):
-                walk_dep = dep_t - WALK_SEC
+                walk_dep = dep_t - gtfs.walk_seconds(day, sibling, dep_s)
                 if walk_dep > latest.get(sibling, -1):
                     latest[sibling] = walk_dep
     return latest

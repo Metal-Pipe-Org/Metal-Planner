@@ -2039,9 +2039,18 @@ function detailHtml(journey) {
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
+            // Zmiana stanowiska w obrebie jednego przystanku vs marsz na
+            // przystanek o innej nazwie (albo pod dworzec) - w drugim
+            // przypadku trzeba powiedziec DOKAD, bo bez nazwy taki etap jest
+            // nie do wykonania. `same_place` liczy serwer (patrz
+            // planner._walk_leg); z samych nazw nie da sie tego odtworzyc,
+            // bo perony jednego placu bywaja nazwane roznie.
+            const body = leg.same_place === false
+                ? `Przejście pieszo do: ${esc(leg.to)} · ok. ${leg.minutes} min`
+                : `Przejście na inne stanowisko · ok. ${leg.minutes} min`;
             rows.push(
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
-                `<span class="tl-body">Przejście na inne stanowisko · ok. ${leg.minutes} min</span></li>`,
+                `<span class="tl-body">${body}</span></li>`,
             );
             return;
         }

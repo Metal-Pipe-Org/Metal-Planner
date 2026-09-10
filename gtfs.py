@@ -41,6 +41,41 @@ PREV_DAY_PREFIX = "~"
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
 
+# CHODZENIE. Zasięg przejścia pieszo między słupkami - NIE mylić
+# z PLACE_MAX_SPAN_M, który mówi tylko, jak szeroki może być jeden przystanek
+# o wspólnej nazwie. Ten promień odpowiada na inne pytanie: dokąd stąd da się
+# dojść, niezależnie od tego, jak to się nazywa i czyja to sieć (patrz
+# _nearby_bridges). 300 m to około cztery minuty marszu - tyle, ile pasażer
+# realnie przejdzie dla przesiadki, i tyle, ile dzieli dworzec kolejowy od
+# stojących przy nim przystanków MPK.
+#
+# Wartość jest DOBRANA POMIAREM, nie z sufitu. 400 m dokłada głównie pary
+# przystanków wzdłuż tej samej ulicy (mało komu potrzebne), za to dwukrotnie
+# wydłuża najcięższe zapytania i - co gorsza - rozpycha kotwice mapy
+# przepływów tak, że z listy propozycji znikają dobre trasy (patrz
+# _extract_transfer_graph: w segment wsiada się wyłącznie w jego
+# zakotwiczonym początku, więc przesuwanie kotwic zabiera punkty przesiadki).
+# 250 m z kolei gubi już realne dojścia. Stycznych z koleją, które są tu
+# celem, 300 m nie traci: Wrocław Główny nadal ma pieszo DWORZEC GŁÓWNY,
+# DWORZEC AUTOBUSOWY i SUCHĄ.
+WALK_MAX_M = 300
+# Prędkość marszu w linii prostej liczymy z zapasem: haversine mierzy przez
+# budynki, a chodnik obchodzi kwartał, więc 1,3 m/s (spokojny krok) dzielimy
+# przez współczynnik nadłożenia drogi. Efektywnie ~0,96 m/s - plan ma być
+# pesymistyczny co do czasu przejścia, nigdy optymistyczny (ta sama zasada,
+# co przy zaokrąglaniu godzin kolejowych - patrz pkp.py).
+WALK_SPEED_MPS = 1.3
+WALK_DETOUR = 1.35
+# Podłoga: żadne przejście nie kosztuje mniej niż trzy minuty. Dwa powody,
+# oba istotne. Po pierwsze, sam dystans nie jest całym kosztem - trzeba
+# jeszcze ZNALEŹĆ właściwe stanowisko, co przy zmianie peronu potrafi być
+# droższe niż te trzydzieści metrów. Po drugie, krawędź piesza jako jedyna
+# NIE dostaje bufora przesiadki (planner.TRANSFER_SEC): ta podłoga jest od
+# niego większa, więc bufor jest w niej zawarty. Zejście poniżej trzech minut
+# rozstroiłoby oba te założenia naraz.
+WALK_MIN_SEC = 180
+_LAT_DEG_M = 111_320   # metrów na stopień szerokości (siatka w _nearby_bridges)
+
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
 # polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
 # unicodedata.normalize, więc jawna tabela zamiast NFKD.
@@ -146,31 +181,130 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     return places
 
 
-def _walking_bridges(place_groups):
-    """Krawędzie 'przejście pieszym' między słupkami tego samego miejsca.
+def walk_time_sec(meters):
+    """Ile trwa przejście pieszo na dystansie `meters` w linii prostej
+    (patrz WALK_SPEED_MPS/WALK_DETOUR/WALK_MIN_SEC - tam całe uzasadnienie)."""
+    return max(WALK_MIN_SEC, round(meters * WALK_DETOUR / WALK_SPEED_MPS))
 
-    To jest most (bridge): kształt stop_id -> (sąsiad, ...) jest ogólnym
+
+def walk_seconds(day, from_stop, to_stop):
+    """Koszt krawędzi pieszej między dwoma słupkami połączonymi mostem.
+
+    JEDNO miejsce, w którym cała reszta systemu pyta "ile to trwa" - planner
+    nie zna już żadnej stałej czasu przejścia, bo od kiedy krawędzie biorą
+    się z odległości (patrz _nearby_bridges), stałej po prostu nie ma.
+
+    WALK_MIN_SEC dla pary bez zapisanej krawędzi: syntetyczny dzień z testów
+    podaje same sąsiedztwa, bez kosztów, i ma dostawać dokładnie to samo
+    trzyminutowe przejście, co przed wprowadzeniem odległości.
+    """
+    return day.siblings.get(from_stop, {}).get(to_stop, WALK_MIN_SEC)
+
+
+def _walking_bridges(place_groups, stop_coords):
+    """Krawędzie 'przejście pieszo' między słupkami tego samego MIEJSCA.
+
+    To jest most (bridge): kształt stop_id -> {sąsiad: sekundy} jest ogólnym
     kontraktem transferu w tym systemie, nie czymś specyficznym dla chodzenia
     - każdy przyszły typ transferu (rower, hulajnoga, ...) dostarcza własne
     krawędzie w tym samym kształcie i scala się z resztą przez _merge_bridges,
     bez zmiany logiki skanowania w planner.py.
+
+    Dostawca "to samo miejsce" jest tu dalej, obok _nearby_bridges, i nie jest
+    jego duplikatem - miejsce wolno rozciągnąć na PLACE_MAX_SPAN_M (400 m),
+    czyli DALEJ, niż sięga promień marszu (WALK_MAX_M, 300 m). Rozległy plac
+    z peronami na obu krańcach trzymają więc razem te krawędzie, a nie tamte.
+    Tak ma być: peron jest dostępny z peronu dlatego, że to jeden przystanek,
+    a nie dlatego, że akurat mieści się w promieniu.
     """
     bridges = {}
     for group in place_groups:
-        if len(group) > 1:
-            for stop_id in group:
-                bridges[stop_id] = tuple(s for s in group if s != stop_id)
+        if len(group) <= 1:
+            continue
+        for stop_id in group:
+            if stop_id not in stop_coords:
+                continue
+            edges = {
+                other: walk_time_sec(
+                    _haversine_m(*stop_coords[stop_id], *stop_coords[other]))
+                for other in group
+                if other != stop_id and other in stop_coords
+            }
+            if edges:
+                bridges[stop_id] = edges
+    return bridges
+
+
+def _nearby_bridges(stop_coords, max_m=WALK_MAX_M):
+    """Krawędzie 'przejście pieszo' między słupkami po prostu BLISKIMI siebie,
+    bez oglądania się na nazwę - drugi dostawca mostów obok _walking_bridges.
+
+    To jest ta krawędź, której do 2026-09-10 nie było w ogóle. Wcześniej
+    pieszo dawało się przejść WYŁĄCZNIE między słupkami o tej samej nazwie,
+    więc dwa przystanki po dwóch stronach skrzyżowania - osiemdziesiąt metrów
+    i różne nazwy - były dla wyszukiwarki punktami niepołączonymi. Najdotkliwiej
+    widać to było na styku sieci: stacja kolejowa prawie nigdy nie nazywa się
+    tak, jak przystanki pod nią ("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc
+    kolej i MPK stykały się tylko tam, gdzie nazwy przypadkiem się pokryły.
+
+    Siatka zamiast porównywania każdego z każdym: słupków jest kilka tysięcy
+    (miasto plus wszystkie stacje kolejowe w kraju), więc pełne O(n^2) to
+    dziesiątki milionów haversine'ów przy każdym przeładowaniu dnia. Komórka
+    ma bok NIE MNIEJSZY niż max_m, więc wszystko w zasięgu leży w niej samej
+    albo w ośmiu przyległych i wystarczy sprawdzić sąsiedztwo 3x3.
+    """
+    if not stop_coords:
+        return {}
+
+    lat_step = max_m / _LAT_DEG_M
+    # Krok w stopniach długości liczymy dla NAJDALEJ NA PÓŁNOC położonego
+    # słupka - tam południki są najbliżej siebie, więc komórka wychodzi
+    # najwęższa w metrach. Ten sam krok użyty niżej na południu daje komórkę
+    # szerszą, czyli po bezpiecznej stronie; odwrotnie (krok liczony na
+    # południu) komórki na północy zrobiłyby się CIAŚNIEJSZE niż max_m
+    # i sąsiedztwo 3x3 przestałoby obejmować cały promień.
+    najdalej = max(abs(lat) for lat, _ in stop_coords.values())
+    lon_step = max_m / (_LAT_DEG_M * max(math.cos(math.radians(najdalej)), 0.01))
+
+    def cell(lat, lon):
+        return int(lat / lat_step), int(lon / lon_step)
+
+    cells = {}
+    for stop_id, (lat, lon) in stop_coords.items():
+        cells.setdefault(cell(lat, lon), []).append(stop_id)
+
+    bridges = {}
+    for stop_id, (lat, lon) in stop_coords.items():
+        cx, cy = cell(lat, lon)
+        edges = {}
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for other in cells.get((cx + dx, cy + dy), ()):
+                    if other == stop_id:
+                        continue
+                    dist = _haversine_m(lat, lon, *stop_coords[other])
+                    if dist <= max_m:
+                        edges[other] = walk_time_sec(dist)
+        if edges:
+            bridges[stop_id] = edges
     return bridges
 
 
 def _merge_bridges(*bridge_maps):
-    """Scala mosty z kilku dostawców (na razie tylko chodzenie) w jedną
-    relację. Kolejny typ transferu dokłada się tu, a nie osobną ścieżką."""
+    """Scala mosty z kilku dostawców (na razie same rodzaje chodzenia) w jedną
+    relację. Kolejny typ transferu dokłada się tu, a nie osobną ścieżką.
+
+    Ta sama krawędź od dwóch dostawców zostaje z TAŃSZYM czasem: dostawcy
+    odpowiadają na to samo pytanie ("da się tędy przejść i ile to trwa"),
+    więc gdy się nie zgadzają, wierzymy temu, który zna krótszą drogę.
+    """
     merged = {}
     for bridges in bridge_maps:
         for stop_id, neighbors in bridges.items():
-            existing = merged.get(stop_id, ())
-            merged[stop_id] = existing + tuple(n for n in neighbors if n not in existing)
+            into = merged.setdefault(stop_id, {})
+            for neighbor, sec in neighbors.items():
+                if sec < into.get(neighbor, math.inf):
+                    into[neighbor] = sec
     return merged
 
 
@@ -197,7 +331,13 @@ class DayData:
         self.display_name = {}       # nazwa.casefold() -> oryginalna pisownia
         self.stops_by_norm_key = {}  # jw. bez polskich znaków diakrytycznych
         self.norm_display_name = {}  # jw. bez polskich znaków diakrytycznych
-        self.siblings = {}           # stop_id -> inne słupki tego samego miejsca
+        # stop_id -> {sąsiad: sekundy} - słupki, do których stąd DA SIĘ DOJŚĆ
+        # pieszo, z czasem przejścia (patrz _merge_bridges i jego dostawcy).
+        # Nazwa jest starsza niż relacja: kiedyś byli to wyłącznie "bracia",
+        # czyli słupki tego samego miejsca. Dziś sąsiadem jest też przystanek
+        # o zupełnie innej nazwie po drugiej stronie skrzyżowania i stacja
+        # kolejowa obok - patrz _nearby_bridges.
+        self.siblings = {}
         self.trip_info = {}          # trip_id -> (etykieta linii, kierunek)
         self.trip_shape = {}         # trip_id -> shape_id (geometria z shapes.txt)
         self.stops_by_place = {}     # klucz miejsca -> [stop_id, ...] (patrz _build_places)
@@ -339,14 +479,19 @@ def load_day(day):
     # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
     pkp.augment_day(data, day)
 
-    # Kanoniczne miejsce (patrz _build_places) i most pieszy między jego
-    # słupkami (patrz _walking_bridges) - _merge_bridges scala go tu z
-    # dowolnymi innymi dostawcami transferu, gdyby doszły.
+    # Kanoniczne miejsce (patrz _build_places) i mosty piesze: między słupkami
+    # jednego miejsca (_walking_bridges) oraz między słupkami po prostu
+    # bliskimi siebie, bez względu na nazwę i sieć (_nearby_bridges).
+    # _merge_bridges scala obu dostawców w jedną relację - i przyjmie tu
+    # każdego następnego, gdyby doszedł.
     data.stops_by_place = _build_places(data.stop_names, data.stop_coords, data.stops_by_key)
     data.place_of = {
         sid: key for key, ids in data.stops_by_place.items() for sid in ids
     }
-    data.siblings = _merge_bridges(_walking_bridges(data.stops_by_place.values()))
+    data.siblings = _merge_bridges(
+        _walking_bridges(data.stops_by_place.values(), data.stop_coords),
+        _nearby_bridges(data.stop_coords),
+    )
 
     # stop_times czytamy w kolejności (trip_id, stop_sequence) - to indeks,
     # więc bez sortowania - i sklejamy sąsiednie przystanki kursu w połączenia.

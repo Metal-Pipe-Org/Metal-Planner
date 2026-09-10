@@ -30,14 +30,20 @@ się nie zmienia, zmienia się tylko to, co potrafimy pokazać.
 
 PRZESIADKA stacja PKP <-> przystanek MPK nie ma tu ŻADNEGO własnego
 mechanizmu (2026-08-31). Stacja jest dokładana do dnia PRZED budowaniem
-miejsc (gtfs.load_day), więc przechodzi przez to samo grupowanie co każdy
-słupek miejski: ta sama nazwa = to samo miejsce = przejście pieszo między
-nimi. Wcześniej było inaczej - stacja dostawała sąsiadów z własnego promienia
-500 m, obok mechanizmu miejsca - i to był drugi mechanizm odpowiadający na to
-samo pytanie. Skutek uboczny usunięcia jest znany i zamierzony: nazwy stacji
-i przystanków prawie nigdy się nie pokrywają ("Wrocław Główny" vs "DWORZEC
-GŁÓWNY"), więc dziś obie sieci stykają się w pojedynczych punktach. Porządne
-łączenie stacji z przystankami to osobne zadanie, nie ten plik.
+miejsc i mostów pieszych (gtfs.load_day), więc przechodzi przez dokładnie to
+samo, co każdy słupek miejski - i stamtąd, nie stąd, bierze się jej
+przesiadka. Wcześniej było inaczej: stacja dostawała sąsiadów z własnego
+promienia 500 m, obok mechanizmu miejsca, czyli drugim mechanizmem na to samo
+pytanie.
+
+Przez pewien czas kosztowało to naprawdę dużo. Wspólnym mechanizmem było
+wtedy WYŁĄCZNIE sklejanie po nazwie, a nazwy stacji i przystanków prawie
+nigdy się nie pokrywają ("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc obie
+sieci stykały się tylko w przypadkowych pojedynczych punktach. Od 2026-09-10
+wspólny mechanizm jest szerszy: most pieszy powstaje z ODLEGŁOŚCI, bez
+oglądania się na nazwę (patrz gtfs._nearby_bridges), i to on łączy dworzec
+z przystankami pod nim. Kolej nadal nie ma tu nic własnego - po prostu to,
+co jest wspólne, wreszcie na to wystarcza.
 
 CZAS jest ucinany do pełnych minut (patrz _sec_of): API kolei podaje sekundy,
 rozkład miejski nie, a jedna oś czasu nie może mieć dwóch dokładności - inaczej
