@@ -552,6 +552,18 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-10** — **przejście otwierające albo zamykające trasę ma na karcie
+  własną plakietkę** (ikona idącego + minuty, kreskowany obrys w kolorze
+  dojścia z mapy). Rząd plakietek pod godzinami niósł dotąd przejście jako
+  KRESKOWANY ŁĄCZNIK między liniami — dobre dla przesiadki („tu trzeba
+  przejść"), ale bezużyteczne, gdy przejścia nie ma między czym postawić:
+  trasa „dojdź na stację i wsiądź w pociąg" wyglądała na karcie jak sam
+  pociąg. Zgłoszone na żywo. Przejścia MIĘDZY pojazdami zostają łącznikiem —
+  wersja, w której plakietkę dostawało każde przejście, była wierna, ale
+  nieczytelna: odkąd przesiadka między różnymi słupkami niemal zawsze kosztuje
+  minimalne trzy minuty, trasa z trzema przesiadkami rozrastała się do
+  „3 – 18 – 3 – 14 – 3 – 4 – 3 – 146" i zawijała do dwóch linii. Etykieta dla
+  czytnika ekranu wymienia teraz przejścia razem z liniami.
 - **2026-09-10** — **dojście na KRAŃCACH relacji dostało własny promień**
   (`gtfs.WALK_ACCESS_M` = 400 m, obok `WALK_MAX_M` = 300 m dla przesiadek).
   To są dwie różne gotowości do marszu: do pociągu wychodzi się z domu i idzie

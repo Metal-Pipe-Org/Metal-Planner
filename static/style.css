@@ -7,6 +7,8 @@
     --bus: #1565c0;
     --train: #2e7d33;
     --other: #6a1b9a;
+    --walk: #455a64;   /* przejście pieszo - ten sam kolor, co kreskowana
+                          linia dojścia na mapie (patrz legLayers) */
     --accent: #2563eb;
     --ink: #16202b;
     --ink-soft: #5b6b7c;
@@ -599,8 +601,27 @@ body.panel-hidden #sidebar {
 .badge.bus { background: var(--bus); }
 .badge.train { background: var(--train); }
 
+/* Przejście pieszo NIE jest pojazdem, więc nie dostaje wypełnionej pigułki:
+   kreskowany obrys w kolorze dojścia z mapy odróżnia je od linii na pierwszy
+   rzut oka, bez czytania. Liczba obok ikony to minuty marszu. */
+.badge.walk {
+    gap: 3px;
+    padding: 0 6px;
+    background: none;
+    border: 1px dashed var(--walk);
+    color: var(--walk);
+    font-weight: 600;
+}
+
+.walk-icon {
+    width: 13px;
+    height: 13px;
+    flex: none;
+}
+
 /* Łącznik między plakietkami: ciągły = przesiadka na miejscu,
-   kropkowany = trzeba przejść na inne stanowisko. */
+   kreskowany = trzeba przejść pieszo. Przejście OTWIERAJĄCE albo ZAMYKAJĄCE
+   trasę łącznika nie ma - dostaje własną plakietkę (patrz summaryHtml). */
 .hop {
     width: 14px;
     height: 2px;

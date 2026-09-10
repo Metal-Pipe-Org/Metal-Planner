@@ -2013,15 +2013,60 @@ function badgeHtml(leg) {
     return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
 }
 
+/** Ludzik idacy - monochromatyczny SVG, nie emoji: reszta ikon w interfejsie
+    (◉ ⚙ ⇅ ✕ ◷) tez jest jednobarwna, a kolorowe 🚶 wygladaloby jak wklejka
+    z innego programu i renderowaloby sie inaczej na kazdym systemie. */
+const WALK_ICON =
+    '<svg class="walk-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+    '<circle cx="9" cy="2.5" r="1.9" fill="currentColor"/>' +
+    '<path d="M9.2 5.4 6.4 7.2 5.1 10.4M9.2 5.4 11.2 7.6 11.6 10.8 12.9 13.6' +
+    'M9.2 5.4 7.1 9.8 4.4 13.4" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+
+function walkBadgeHtml(leg) {
+    const dokad = leg.same_place === false ? ` do: ${leg.to}` : ' na inne stanowisko';
+    return `<span class="badge walk" title="Przejście pieszo${esc(dokad)}` +
+           ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`;
+}
+
+function hopHtml(walk) {
+    if (!walk) return '<span class="hop"></span>';
+    return `<span class="hop walk" title="Przesiadka z przejściem pieszo` +
+           ` · ok. ${walk.minutes} min"></span>`;
+}
+
+/** Rzad plakietek pod godzinami karty: obraz trasy, etap po etapie.
+
+    Przejscie MIEDZY pojazdami zostaje kreska lacznika - jest wlasnoscia
+    przesiadki ("tu trzeba przejsc"), a nie osobnym przystankiem podrozy.
+    Wersja, w ktorej kazde przejscie dostawalo wlasna plakietke, byla wierna,
+    ale nieczytelna: odkad przesiadka miedzy roznymi slupkami niemal zawsze
+    kosztuje minimalne trzy minuty, trasa z trzema przesiadkami rozrastala sie
+    do "3 - 18 - 3 - 14 - 3 - 4 - 3 - 146" i zawijala do dwoch linii.
+
+    Plakietke dostaje przejscie OTWIERAJACE albo ZAMYKAJACE trase - i to jest
+    ta luka, ktora tu naprawiamy. Takie przejscie nie jest przesiadka, tylko
+    wlasnym etapem do/od sieci, i nie ma sasiedniego lacznika, ktory moglby je
+    ponies: karta "dojdz na stacje i wsiadz w pociag" wygladala przez to jak
+    sam pociag. Zglaszone na zywo. */
 function summaryHtml(legs) {
     const parts = [];
-    let pendingWalk = false;
-    for (const leg of legs) {
-        if (leg.kind === 'walk') { pendingWalk = true; continue; }
-        if (parts.length) parts.push(`<span class="hop${pendingWalk ? ' walk' : ''}"></span>`);
-        pendingWalk = false;
+    let pendingWalk = null;
+    legs.forEach((leg, i) => {
+        if (leg.kind === 'walk') {
+            if (i === 0 || i === legs.length - 1) {
+                if (parts.length) parts.push(hopHtml(null));
+                parts.push(walkBadgeHtml(leg));
+            } else {
+                pendingWalk = leg;
+            }
+            return;
+        }
+        if (parts.length) parts.push(hopHtml(pendingWalk));
+        pendingWalk = null;
         parts.push(badgeHtml(leg));
-    }
+    });
     return parts.join('');
 }
 
@@ -2105,8 +2150,11 @@ function renderJourneys() {
             transfers,
             j.wait_min > 0 ? `odjazd za ${j.wait_min} min` : 'odjazd teraz',
         ];
-        const lines = j.legs.filter(leg => leg.kind === 'ride')
-                            .map(leg => leg.line).join(', ');
+        // Etykieta dla czytnika ekranu opowiada te sama trase, co plakietki -
+        // razem z przejsciami, bo to one decyduja, czy trasa jest wykonalna.
+        const lines = j.legs.map(leg => leg.kind === 'walk'
+            ? `pieszo ${leg.minutes} min`
+            : leg.line).join(', ');
         const label = `${j.departure} – ${j.arrival}, ${j.duration_min} min, ` +
                       `${transfers}, ${lines}`;
         return `
