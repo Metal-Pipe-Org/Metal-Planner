@@ -111,7 +111,14 @@ function Bounds(latlngs) {
 
 const layerBase = extra => Object.assign({
     _added: false,
-    addTo(m) { this._added = true; if (m && m._layers) m._layers.add(this); return this; },
+    // `m` bywa i mapa (zbiór `_layers`), i grupa warstw (tablica `layers`) -
+    // front wrzuca słupki do `stopsLayer`, a pojazdy do `vehiclesLayer`.
+    addTo(m) {
+        this._added = true;
+        if (m && m._layers) m._layers.add(this);
+        else if (m && m.layers) m.layers.push(this);
+        return this;
+    },
     remove() { this._added = false; return this; },
     // Uchwyty pamiętane, nie wyrzucane: bez tego nie da się odegrać
     // najechania na kropkę (patrz checks.js, pierwszenstwo_kropki).
@@ -168,6 +175,9 @@ const L = {
         kind: 'group', layers: (layers || []).slice(),
         // Front szuka po warstwach grupy kropki startowej (seedStartPanel).
         getLayers() { return this.layers; },
+        addLayer(layer) { this.layers.push(layer); return this; },
+        // Warstwa pojazdów przerysowuje się od zera przy każdym odświeżeniu.
+        clearLayers() { this.layers.length = 0; return this; },
     }),
     tileLayer: () => layerBase({kind: 'tiles', options: {}}),
     control: {zoom: () => layerBase({kind: 'control', options: {}})},

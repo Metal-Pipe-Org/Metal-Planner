@@ -113,6 +113,33 @@ html.standalone-app body {
 
 body.panel-hidden .icon-button.floating { left: 16px; }
 
+/* Przełącznik trybu stoi tuż obok chowania panelu - jeden odstęp przycisku. */
+.icon-button.floating.second { left: calc(var(--sidebar-w) + 76px); }
+body.panel-hidden .icon-button.floating.second { left: 64px; }
+
+/* Przełącznik trybu jest podpisany słowem, nie samą tarczą zegara: sama ikona
+   nie mówi, dokąd się klika, a to jest wejście w drugą połowę aplikacji.
+   Na telefonie i tak go nie widać (pływające przyciski są tam schowane),
+   więc podpis nie musi się nigdzie zwijać. */
+#mode-toggle {
+    width: auto;
+    gap: 7px;
+    padding: 0 14px 0 12px;
+}
+
+#mode-toggle span {
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+/* Włączony tryb ma być widoczny na samym przycisku - a białe tło pływających
+   przycisków jest specyficzniejsze niż samo .active i by je przykryło. */
+.icon-button.floating.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
 /* Kółko ładowania - pierścień z wyciętym fragmentem, w kolorze tekstu, więc
    ten sam element działa i na przycisku (biały), i w komunikacie (szary). */
 .spinner {
@@ -927,19 +954,41 @@ body.panel-hidden #sidebar {
 .line-cluster .line-chip-slot:hover .line-chip.other { background: var(--other); }
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 
-/* Pasek nad mapą - jedyna liczba, której nie trzeba szukać kursorem.
-   Wysrodkowany nad mapą, nad panelem wyszukiwania (z lewej) i pod panelem
-   deweloperskim (z prawej), żeby nie wchodzić żadnemu w drogę. */
+/* Pasek nad mapą - jedyna liczba, której nie trzeba szukać kursorem. Stoi
+   w górnym rzędzie, nad panelem wyszukiwania (z lewej) i pod panelem
+   deweloperskim (z prawej), żeby nie wchodzić żadnemu w drogę.
+
+   Wyśrodkowany, ale NIE przez `left: 50%` - środek okna leży o pół panelu za
+   daleko w lewo i pasek wjeżdżał nim na panel, a od kiedy przełącznik trybu
+   jest podpisany („◷ Rozkłady", ~105 px zamiast kwadraciku), także na
+   pływające przyciski. Zamiast tego dostaje wycinek ekranu: od miejsca, w
+   którym kończą się przyciski, do prawej krawędzi - a w nim `width:
+   fit-content` z automatycznymi marginesami stawia go pośrodku. To ta sama
+   sztuczka, co `margin: 0 auto` w zwykłym przepływie, tyle że dla elementu
+   position: fixed z podanym `left` i `right`.
+
+   Dlaczego wycinek, a nie samo liczenie środka mapy: pasek bywa szeroki na
+   pół ekranu i przy węższym oknie nie zmieściłby się wyśrodkowany, tylko
+   wystawałby lewą połową pod przyciski. Tak zamiast tego przesuwa się w
+   prawo, a gdy i to nie starcza - zawija się na dwie linijki (flex-wrap),
+   zamiast wylewać tekst poza własne tło. */
 .time-headline {
     position: fixed;
     top: 16px;
-    left: 50%;
-    transform: translateX(-50%);
+    /* Za pływającymi przyciskami: ich prawa krawędź + odstęp. Zależy od
+       szerokości podpisu na #mode-toggle - zmiana napisu to zmiana tej
+       liczby. */
+    left: calc(var(--sidebar-w) + 190px);
+    right: 16px;
+    width: fit-content;
+    margin-inline: auto;
+    transition: left 0.25s ease;
     z-index: 900;
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     align-items: center;
     gap: 7px;
-    max-width: calc(100vw - 32px);
     padding: 6px 12px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.94);
@@ -947,7 +996,6 @@ body.panel-hidden #sidebar {
     box-shadow: var(--shadow);
     font-size: 12.5px;
     color: var(--ink-soft);
-    white-space: nowrap;
 }
 
 .time-headline b {
@@ -978,17 +1026,25 @@ body.panel-hidden #sidebar {
 
 .headline-sep { color: var(--ink-faint); }
 
+/* Schowany panel = przyciski przy lewej krawędzi okna, więc wycinek zaczyna
+   się odpowiednio bliżej. */
+body.panel-hidden .time-headline { left: 180px; }
+
 @media (max-width: 760px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
        pod niego i zwęża się do samych liczb. Odsunięty o tyle co zakładki
        Mapa/Trasy (patrz #view-tabs/.toast) plus wcięcie ekranu na dole -
        bez tego pasek chował się pod zakładkami na telefonach z home
-       indicatorem (np. w zainstalowanej aplikacji). */
+       indicatorem (np. w zainstalowanej aplikacji). Nie ma już nad sobą
+       przycisków, więc wycinek nie musi ich omijać - liczy się tylko to,
+       żeby pasek nie leżał na panelu. */
     .time-headline {
         top: auto;
         bottom: calc(64px + env(safe-area-inset-bottom, 0px));
         font-size: 12px;
+        left: var(--sidebar-w);
     }
+    body.panel-hidden .time-headline { left: 16px; }
 }
 
 /* ------------------------------------ tablica odjazdów przesiadki --- */
@@ -1492,10 +1548,526 @@ body.dev-open #flow-panel { right: 322px; }
     .toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
 
+/* ------------------------------------------------------- rozkłady jazdy --- */
+
+/* Dwa tryby panelu wykluczają się nawzajem: karta wyszukiwania i karta
+   rozkładów zajmują to samo miejsce, a przełącznik ◷ podmienia jedno na
+   drugie. Wynikom robimy to samo - jedne i drugie są listą pod kartą. */
+#timetable-card,
+#tt-results { display: none; }
+
+body.mode-timetable .search-card,
+body.mode-timetable #results { display: none; }
+
+body.mode-timetable #timetable-card { display: block; }
+body.mode-timetable #tt-results { display: block; }
+
+/* Pasek "ile trwa podróż" opisuje wynik wyszukiwania - w rozkładach nie ma
+   czego opisywać. */
+body.mode-timetable .time-headline { display: none; }
+
+/* --- pole szukania ------------------------------------------------------- */
+
+/* Te same style, co pola "skąd/dokąd" - jedno pole tekstowe w tej aplikacji
+   ma wyglądać jak każde inne, niezależnie od tego, w której karcie stoi. */
+.tt-field input {
+    width: 100%;
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    font: inherit;
+    font-size: 15px;
+    color: var(--ink);
+}
+
+.tt-field input.with-action { padding-right: 42px; }
+
+.tt-field input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.tt-field .icon-button.in-field { top: 6px; }
+
+/* Wiersz podpowiedzi ma od razu mówić, co to jest: plakietka w kolorze
+   pojazdu = linia, znaczek słupka = przystanek. Bez tego jedno pole na dwie
+   rzeczy byłoby zgadywanką. */
+.ac-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ac-item .badge { flex: 0 0 auto; }
+
+.ac-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ac-kind {
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+}
+
+/* Znaczek przystanku - ten sam okrąg, co słupek na mapie. */
+.ac-pin {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 auto;
+    margin: 0 9px;
+    border: 2px solid var(--bus);
+    border-radius: 50%;
+    background: var(--surface);
+}
+
+.ac-pin.big {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    border-width: 3px;
+    background: #ffd54f;
+    border-color: #263238;
+}
+
+/* Dzień i godzina - ta sama ramka, co pole czasu wyszukiwarki (.time-field):
+   surowy <input type="date"> na tle karty wyglądał jak nie z tej aplikacji.
+   Zawija się na wąskim ekranie, bo dwie pary etykieta-pole nie mieszczą się
+   w jednym wierszu telefonu. */
+.tt-when {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-size: 12.5px;
+}
+
+.tt-when-part {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tt-when input {
+    flex: 0 0 auto;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 14px;
+    color: var(--ink);
+}
+
+.tt-when input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Kółko ładowania siedzi w wierszu daty - przycisku "Pokaż" nie ma, więc nie
+   ma go gdzie postawić, a szukanie musi być widoczne. */
+.tt-spinner { display: none; margin-left: auto; color: var(--ink-faint); }
+body.tt-searching .tt-spinner { display: inline-block; }
+
+/* --- wyniki -------------------------------------------------------------- */
+
+/* Nagłówek wyniku zastępuje .results-head z wyszukiwarki: tam wystarczał
+   napis "propozycje tras", tu trzeba powiedzieć CZYJ to rozkład i NA KIEDY. */
+.tt-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 8px 2px;
+    /* Prawy margines na pasek przewijania listy - bez niego dzień wyjeżdża
+       poza kadr i urywa się w połowie słowa. */
+    padding-right: 8px;
+    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+}
+
+.tt-title-main {
+    font-size: 15px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-title-sub {
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.tt-card { margin-bottom: 10px; }
+
+.tt-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.tt-h3 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.tt-count {
+    padding: 0 7px;
+    border-radius: 999px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+}
+
+.tt-switch {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.tt-card-head .tt-mini:not(.tt-switch .tt-mini) { margin-left: auto; }
+
+/* Kierunek linii: dwa duże przyciski obok siebie - to jest wybór "w którą
+   stronę", a nie pozycja z listy. Powyżej dwóch (linia bywa ma trzy warianty
+   dość częste, żeby wszystkie były "główne") zawijają się do drugiego rzędu:
+   trzy w szerokości panelu zostawiają na podpis tyle miejsca, że z nazwy
+   kierunku widać pierwsze słowo. */
+.tt-dirs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.tt-dir {
+    flex: 1 1 45%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.tt-dir:hover { background: var(--surface-alt); }
+
+.tt-dir.active {
+    border-color: var(--accent);
+    background: #eef3ff;
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tt-dir-to {
+    font-weight: 600;
+    font-size: 13.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-dir-to::before { content: "→ "; color: var(--ink-faint); }
+
+.tt-dir-sub {
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Słupki jednego przystanku - ten sam wybór, co kierunek linii, więc i ten
+   sam przycisk, tylko w kolumnie: etykietą jest tu ciąg kierunków, a nie
+   jedno słowo, i obok siebie nie miałby jak się zmieścić. */
+.tt-points {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tt-point { flex: 0 0 auto; }
+
+/* "Wszystkie" nie jest kierunkiem - bez strzałki, którą tt-dir-to dokleja. */
+.tt-point-all {
+    font-weight: 600;
+    font-size: 13.5px;
+}
+
+/* Kursy skrócone schowane pod rozwijaniem - są, ale nie zabierają miejsca
+   kierunkom, którymi linia jeździ cały dzień. */
+.tt-side { margin-top: 8px; }
+
+.tt-side > summary {
+    color: var(--ink-soft);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tt-side .tt-dirs,
+.tt-side .tt-points { margin-top: 6px; }
+
+/* Numery linii dużego węzła - gęsta siatka małych przycisków, więc pojemnik
+   z własnym przewijaniem: samych plakietek bywa ze trzydzieści. */
+.tt-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    max-height: 168px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* Plakietka linii jako przełącznik: odhaczona traci kolor, ale zostaje na
+   swoim miejscu - to wciąż lista linii tego przystanku, tylko wypisana. */
+.tt-line {
+    border: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.tt-line.off {
+    background: var(--surface-alt);
+    color: var(--ink-faint);
+    box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.tt-mini {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 10px;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.tt-mini:hover { background: var(--surface-alt); }
+
+.tt-mini.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+}
+
+/* Pełny rozkład - ten sam zapis, co na słupku: wiersz na godzinę, w wierszu
+   minuty kolejnych kursów. Naprzemienne tło zamiast linii siatki, bo wiersze
+   są niskie i krecha między nimi robi z tego kratkę zamiast rozkładu. */
+.tt-grid {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.tt-grid tr:nth-child(even) { background: var(--surface-alt); }
+
+.tt-grid th {
+    width: 30px;
+    padding: 5px 6px;
+    color: var(--ink-soft);
+    font-weight: 400;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: left;
+    vertical-align: top;
+}
+
+.tt-grid td { padding: 3px 4px; }
+
+/* Minuta jest klikalna (rozwija kurs), więc wygląda jak odnośnik - podkreślenie
+   na wewnętrznym <span>, żeby nie łapał go odnośnik kierunku. */
+.tt-min {
+    padding: 2px 3px;
+    border: none;
+    background: none;
+    color: var(--ink);
+    font: inherit;
+    font-size: 13.5px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+
+.tt-min > span { text-decoration: underline; text-underline-offset: 3px; }
+
+.tt-min > sup {
+    font-size: 9px;
+    color: var(--ink-faint);
+}
+
+.tt-min:hover { color: var(--accent); }
+
+.tt-min.open {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.tt-grid + .tt-trip { padding-top: 6px; }
+
+ul.tt-legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+}
+
+.tt-legend-mark {
+    display: inline-block;
+    min-width: 16px;
+    color: var(--ink-soft);
+}
+
+/* Tablica odjazdów i oś przystanków dzielą siatkę: godzina - kropka - treść,
+   tak samo jak oś wybranej trasy w wyszukiwarce. */
+.tt-board,
+.tt-stops {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.tt-dep {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.tt-dep:hover,
+.tt-dep.open { background: var(--surface-alt); }
+
+.tt-dep .tt-t {
+    width: 44px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.tt-head {
+    overflow: hidden;
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-head::before { content: "→ "; color: var(--ink-faint); }
+
+.tt-platform {
+    margin-left: auto;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+}
+
+.tt-trip { padding: 4px 0 8px 8px; }
+
+.tt-stop {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.tt-stop:hover { background: var(--surface-alt); }
+
+.tt-stop .tt-t {
+    width: 44px;
+    color: var(--ink-soft);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Kropka na osi - kolor bierze się z rodzaju pojazdu, tak jak linia na mapie. */
+.tt-dot {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 auto;
+    border: 2px solid var(--other);
+    border-radius: 50%;
+    background: var(--surface);
+}
+
+.tt-stops.tram .tt-dot { border-color: var(--tram); }
+.tt-stops.bus .tt-dot { border-color: var(--bus); }
+
+/* Krańce osi na pełno - widać, gdzie ten kurs się zaczyna i kończy. */
+.tt-stops.tram .tt-stop:first-child .tt-dot,
+.tt-stops.tram .tt-stop:last-child .tt-dot { background: var(--tram); }
+.tt-stops.bus .tt-stop:first-child .tt-dot,
+.tt-stops.bus .tt-stop:last-child .tt-dot { background: var(--bus); }
+
+.tt-name { font-size: 13.5px; }
+
+/* Skok z rozkładu linii na tablicę tego słupka. Cichy, bo stoi przy KAŻDYM
+   przystanku trasy - trzydzieści kolorowych przycisków w kolumnie zasłoniłoby
+   to, po co się tu przyszło, czyli samą listę przystanków. */
+.tt-stop-board {
+    margin-left: auto;
+    padding: 1px 7px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
+    color: var(--ink-faint);
+    font: inherit;
+    font-size: 11.5px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.tt-stop:hover .tt-stop-board,
+.tt-stop-board:focus-visible {
+    border-color: var(--line);
+    background: var(--surface);
+    color: var(--accent);
+}
+
+.tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
+.tt-more:hover { background: #e8edf3; }
+
+/* Przełącznik trybu w zakładkach - tylko telefon (pływające ◷ jest tam
+   schowane razem z ☰). */
+.tab-icon { display: none; }
+
 /* --------------------------------------------------------------- RWD --- */
 
 @media (max-width: 760px) {
     #view-tabs { display: flex; }
+
+    /* Panel jest tu nakładką na całą szerokość, a nie kolumną obok mapy -
+       nie ma czego omijać, pasek bierze całą szerokość okna. */
+    .time-headline,
+    body.panel-hidden .time-headline { left: 16px; }
 
     #sidebar {
         /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu
@@ -1535,6 +2107,26 @@ body.dev-open #flow-panel { right: 322px; }
     /* Zakładki zastępują ☰ - dwa mechanizmy chowania panelu naraz tylko by
        myliły, a przy schowanym ☰ nie byłoby czym go odsłonić. */
     .icon-button.floating { display: none; }
+
+    /* ...a razem z ☰ znika też pływający przełącznik trybu, więc rozkłady
+       dostają swoje miejsce w pasku zakładek. */
+    .tab-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        border: none;
+        background: transparent;
+        color: var(--ink-soft);
+        font-size: 18px;
+        cursor: pointer;
+    }
+
+    .tab-icon.active { color: var(--accent); }
+
+    /* W trybie rozkładów widok mapy pokazuje samą kartę rozkładu - tak jak
+       w wyszukiwarce pokazuje samą kartę wyszukiwania. */
+    body.mode-timetable.view-map #tt-results { display: none; }
 
     body.panel-hidden #sidebar {
         transform: none;

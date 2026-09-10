@@ -31,6 +31,65 @@ około 10 sekund. `app.py` wystawia serwer na http://localhost:5001; port to
 domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
 `PORT`.
 
+## Rozkłady jazdy — linie i przystanki
+
+Obok wyszukiwarki połączeń panel ma drugi tryb, przełączany przyciskiem
+**◷ Rozkłady** tuż obok ← (chowania panelu); na telefonie ten sam przycisk
+jest w pasku zakładek na dole. Oba tryby zajmują to samo miejsce — wejście w rozkłady
+chowa okienko wyszukiwania, wyjście przywraca je razem z tym, co było
+narysowane na mapie, bez ponownego szukania.
+
+Jest **jedno pole** na jedno i drugie: „17" to linia, „Katedra" to
+przystanek. Rodzaj widać na liście podpowiedzi — linie mają plakietkę
+w kolorze pojazdu, przystanki znaczek słupka — czyli tam, gdzie faktycznie
+jest potrzebny, a nie w przełączniku ustawianym przed wpisaniem czegokolwiek.
+
+Pod polem stoi **dzień i godzina**. Godzina jest jedna na oba rozkłady
+i nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko
+przesuwa to, od czego zaczyna się tablica, i to, który kurs linii jest
+„ten najbliższy".
+
+**Linia** odpowiada na „którędy jedzie": wybór wariantu i lista jego
+przystanków, z przebiegiem na mapie. Kierunki podstawowe stoją obok siebie,
+a kursy skrócone (do zajezdni, z pętli w połowie trasy) chowają się pod
+rozwijaniem — jest ich zwykle więcej niż samych kierunków i równorzędnie
+pokazane zamieniają wybór kierunku w szukanie w liście. Przy każdym
+kierunku widać, ile kursów nim jedzie — to po tym poznaje się ten, którym
+linia jeździ cały dzień.
+
+Godzin tu nie ma i to jest wybór, nie brak: rozkład wisi na słupku, a nie
+na trasie, więc „o której to jedzie" ma sens dopiero razem z „skąd" — i tam
+się o nie pyta, przyciskiem opisanym niżej.
+
+Kursy są grupowane po ciągu przystanków, nie po samym napisie na czole:
+zlanie ich w jedną listę dałoby trasę, przez połowę której połowa tych
+kursów nie przejeżdża.
+
+Kliknięcie przystanku na liście przybliża go na mapie, a przycisk
+**„odjazdy"** z prawej strony wiersza przeskakuje na tablicę tego
+przystanku — od razu z właściwym słupkiem i samą tą linią, bez odhaczania
+reszty ręcznie. Krawędź bierze się z rozkładu, więc trafia w tę stronę,
+którą linia faktycznie jedzie.
+
+**Przystanek** — po nazwie albo kliknięciem słupka na mapie. Tablica
+odjazdów wszystkich linii, z plakietkami do odhaczania: zostaje rozkład
+złożony dokładnie z tych linii, które zaznaczysz — od jednej do wszystkich
+naraz. Trasy zaznaczonych linii, **od tego przystanku dalej**, rysują się
+na mapie (do ośmiu linii, wyżej z węzła robi się kłębek); kliknięcie
+konkretnego odjazdu pokazuje ten jeden kurs z godzinami na każdym
+przystanku.
+
+Jedna nazwa to zwykle kilka **słupków**, a z każdego jedzie się w inną
+stronę — karta „Słupki" wypisuje je kierunkami (nazywają się przecież tak
+samo) i zawęża do jednego tablicę, listę linii i trasy na mapie. Słupki są
+też punktami na mapie: klik w przygaszony przełącza tablicę na niego.
+
+Tablicę czyta się na dwa sposoby: **„podana godzina"** to lista najbliższych
+odjazdów, a **„pełny rozkład"** to zapis ze słupka — wiersz na godzinę,
+w wierszu minuty kursów, cała doba na jednym ekranie. Ten drugi dotyczy
+jednej linii naraz (pod zlanym ciągiem minut nie wiadomo, co podjedzie),
+a kierunek odróżniają odnośniki, tak jak na papierze.
+
 ## Instalacja jako aplikacja (PWA)
 
 Metal Planner instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
