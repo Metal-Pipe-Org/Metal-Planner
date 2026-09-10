@@ -552,6 +552,27 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-10** — **pieszo wychodzi się też ze STARTU relacji**, nie tylko
+  przy przesiadce. Do tej pory przejście relaksowało się wyłącznie po
+  wysiadaniu z pojazdu, więc z przystanku startowego nie dawało się nigdzie
+  odejść: relacja „Wojszyce → Dworzec Główny" pokazywała sam autobus, choć
+  cztery minuty marszu dalej stoi przystanek, z którego jedzie się szybciej.
+  Teraz otwiera ją etap „Przejście pieszo do: Parafialna", a karta podaje
+  godzinę WYJŚCIA (10:10), nie odjazdu pojazdu (10:14) — inaczej obiecywałaby
+  moment, w którym pasażer stoi jeszcze kilkaset metrów od słupka. Jeden krok,
+  tak samo jak przy przesiadce. Samo dojście pieszo NIE jest propozycją trasy
+  (`_scan` celowo nie ogłasza wtedy celu). Kotwiczenie mapy dostało osobny
+  zbiór `anchor_stops`, bo `origin_latest` MUSI zostać policzone z prawdziwego
+  startu — wpuszczenie tam słupka leżącego bliżej celu podniosłoby próg
+  cofnięcia dla całej mapy. Przy okazji `MAX_JOURNEY_VISITS` z 500 na 4000:
+  stara wartość była kalibrowana na graf sprzed kolei i sprzed chodzenia,
+  a przy gęstszym grafie budżet wyczerpywał się, ZANIM przeszukiwanie zeszło
+  do segmentów dojeżdżających do celu — „Wrocław Główny → Warszawa Centralna"
+  dawało PUSTĄ listę mimo mapy z 1300 segmentów. Podniesienie jest darmowe
+  (2,30 s → 2,38 s na pięciu relacjach); koszt zapytania siedzi gdzie indziej.
+  Promienia NIE ruszono: pomiar pokazał, że 400 m nie zmienia relacji, od
+  której się zaczęło (pociąg z Wojszyc przegrywa z autobusem 113 o każdej
+  porze), a kosztuje propozycje na trasach miejskich.
 - **2026-09-10** — **pieszo przechodzi się teraz między RÓŻNYMI przystankami**,
   a nie tylko między słupkami o identycznej nazwie. Krawędź piesza bierze się
   z odległości (`gtfs._nearby_bridges`, 300 m), więc dwa przystanki po dwóch
@@ -1226,11 +1247,17 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   oknie bywa tego sporo.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
-- Chodzenie jest PRZESIADKĄ, nie dojściem. Pieszo przechodzi się wyłącznie
-  po wysiadaniu z pojazdu, o jeden krok, w promieniu 300 m. Nie ma więc:
-  wyjścia pieszo z samego startu relacji (żeby wsiąść przystanek dalej),
-  łańcucha dwóch przejść pod rząd, ani prawdziwego routingu po chodnikach —
-  odległość liczy się w linii prostej ze współczynnikiem nadłożenia drogi.
+- Chodzenie ma zasięg JEDNEGO kroku w promieniu 300 m — z przystanku
+  startowego (`_origin_walk`) albo po wysiadaniu z pojazdu. Nie ma więc
+  łańcucha dwóch przejść pod rząd (nie dojdziesz „przez" przystanek pośredni
+  do trzeciego), ani prawdziwego routingu po chodnikach — odległość liczy się
+  w linii prostej ze współczynnikiem nadłożenia drogi. Skutek uboczny widać
+  np. z „Wojszyc": stacja Wrocław Wojszyce leży 359 m od słupka, czyli poza
+  promieniem, choć od sąsiedniej „Przystankowej" dzieli ją 106 m — dwoma
+  krokami byłaby osiągalna, jednym nie jest.
+- Samo dojście pieszo NIGDY nie jest propozycją trasy: wyszukiwarka planuje
+  przejazdy, a trasa bez ani jednego przejazdu nie ma godziny wyjazdu, na
+  której opiera się okno mapy (`_journey_start`).
 - Start/cel wskazany KLIKNIĘCIEM W MAPĘ wciąż nie ma czasu dojścia: każdy
   słupek w promieniu suwaka (domyślnie 1000 m) liczy się jako dostępny
   natychmiast (`gtfs.nearby_stops`). Od kiedy przesiadka piesza czas ma,
@@ -1240,9 +1267,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   początku (`_extract_transfer_graph`), a kotwica to najwcześniejsze
   zdążalne dołączenie. Gęstsza siatka przejść pieszych przesuwa te kotwice
   wstecz i zabiera ze sobą punkty przesiadki, więc na części relacji lista
-  propozycji jest krótsza, niż mogłaby być (zmierzone 2026-09-10 na
-  KOZANÓW → BARTOSZOWICE: 6 propozycji przed zmianą, 2 po). Sama mapa i
-  `plan_route` tego nie mają — to ograniczenie wyłącznie listy propozycji.
+  propozycji bywa krótsza, niż mogłaby być. Próba dopuszczenia wsiadania
+  w KAŻDYM narysowanym punkcie segmentu (2026-09-10) skończyła się
+  wycofaniem: graf puchnie do zera propozycji, a wsiadanie w środku segmentu
+  wywraca `arr_times` — jeden punkt wsiadania jest nośny dla kilku struktur
+  naraz. Sama mapa i `plan_route` tego nie mają — to ograniczenie wyłącznie
+  listy propozycji.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
 - Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
   bo CSA widzi jedną tablicę połączeń (patrz wpis w changelogu) - ale bez

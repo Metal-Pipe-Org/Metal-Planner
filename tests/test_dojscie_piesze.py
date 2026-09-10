@@ -166,3 +166,71 @@ def test_having_been_somewhere_is_measured_by_place_not_by_walking_range():
 
     assert "OBOK" in planner._sibling_places(day, "PERON_A")
     assert "OBOK" not in planner._same_place_stops(day, "PERON_A")
+
+
+# ---- wyjście pieszo ze STARTU -------------------------------------------
+
+def _day_z_dojsciem_ze_startu(odjazd=600):
+    """Ze START-u nie odjeżdża NIC. Jedyny kurs rusza z OBOK, oddalonego
+    o cztery minuty marszu - trzeba tam najpierw dojść."""
+    day = make_day([
+        {"trip_id": "T1", "label": "Pociąg KD 1",
+         "stops": [("OBOK", odjazd, odjazd), ("CEL", odjazd + 600, odjazd + 600)]},
+    ], names={"OBOK": "Wrocław Wojszyce"})
+    day.stop_names["START"] = "Wojszyce"
+    day.stop_coords["START"] = (51.1, 17.03)
+    day.place_of["START"] = "wojszyce"
+    day.stops_by_place["wojszyce"] = ["START"]
+    day.siblings = {"START": {"OBOK": 240}, "OBOK": {"START": 240}}
+    return day
+
+
+def test_a_ride_reachable_only_by_walking_from_the_origin_is_found():
+    """Sedno drugiej połowy zmiany. Chodzenie było wyłącznie przesiadką -
+    relaksowało się tylko po WYSIADANIU - więc z przystanku startowego nie
+    dawało się nigdzie wyjść i taki kurs był niewidoczny."""
+    day = _day_z_dojsciem_ze_startu()
+    stop, arr, journey = planner._scan(day, ["START"], ["CEL"], 0)
+    assert stop == "CEL"
+    assert arr == 1200
+    legs = planner._reconstruct(day, journey, stop)
+    assert [leg["kind"] for leg in legs] == ["walk", "ride"]
+
+
+def test_the_opening_walk_reports_when_to_leave_not_when_the_train_goes():
+    """Karta ma podać godzinę WYJŚCIA. Odjazd pierwszego pojazdu zostawiłby
+    pasażera kilkaset metrów od peronu dokładnie wtedy, gdy pociąg rusza."""
+    day = _day_z_dojsciem_ze_startu(odjazd=600)
+    stop, _, journey = planner._scan(day, ["START"], ["CEL"], 0)
+    legs = planner._reconstruct(day, journey, stop)
+    assert legs[0]["dep_sec"] == 600 - 240
+
+
+def test_walking_out_of_the_origin_takes_only_one_step():
+    """Jeden krok, tak samo jak przy przesiadce - inaczej zasięg startu
+    rósłby wielokrotnością promienia."""
+    day = _day_z_dojsciem_ze_startu()
+    day.stop_names["DALEJ"] = "Dalej"
+    day.stop_coords["DALEJ"] = (51.102, 17.03)
+    day.siblings["OBOK"]["DALEJ"] = 240
+    day.siblings["DALEJ"] = {"OBOK": 240}
+    assert set(planner._origin_walk(day, ["START"])) == {"OBOK"}
+
+
+def test_just_walking_there_is_never_a_proposed_journey():
+    """Ta wyszukiwarka planuje PRZEJAZDY. Poza tym trasa bez ani jednego
+    przejazdu nie ma godziny wyjazdu, na której opiera się okno mapy."""
+    day = _day_z_dojsciem_ze_startu()
+    stop, _arr, _journey = planner._scan(day, ["START"], ["OBOK"], 0)
+    assert stop is None, "samo dojście pieszo ogłoszone jako trasa"
+
+
+def test_the_origin_itself_is_never_delayed_by_a_walk():
+    """Na słupkach startowych stoi się od razu - całe miejsce jest startem
+    naraz, więc dokładanie im czasu przejścia mogłoby tylko opóźnić wyjazd."""
+    day = _day_z_dojsciem_ze_startu()
+    day.stop_names["PERON2"] = "Wojszyce"
+    day.stop_coords["PERON2"] = (51.1001, 17.03)
+    day.siblings["START"]["PERON2"] = 180
+    day.siblings["PERON2"] = {"START": 180}
+    assert "PERON2" not in planner._origin_walk(day, ["START", "PERON2"])

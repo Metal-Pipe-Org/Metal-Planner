@@ -165,6 +165,37 @@ def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs):
     return reached + buffer <= dep_t
 
 
+def _origin_walk(day, source_stops):
+    """Słupki osiągalne pieszo WPROST ze startu relacji: {słupek: (skąd, sek)}.
+
+    Bez tego chodzenie było wyłącznie przesiadką: przejście relaksowało się
+    tylko po WYSIADANIU z pojazdu, więc z przystanku startowego nie dawało
+    się nigdzie wyjść na piechotę. Relacja "Wojszyce -> Dworzec Główny"
+    pokazywała przez to sam autobus, choć stacja kolejowa stoi kilka minut
+    marszu od startu i pociąg bywa szybszy - żeby z niego skorzystać, trzeba
+    najpierw ODEJŚĆ ze startowego słupka, a tego skan nie umiał.
+
+    JEDEN krok, tak samo jak przy przesiadce: wychodzimy ze startu na sąsiada
+    i tam wsiadamy. Nie ma łańcucha "przejdź, przejdź, wsiądź" - inaczej
+    zasięg startu rósłby wielokrotnością promienia i "dojście" zaczęłoby
+    znaczyć spacer przez pół dzielnicy.
+
+    Słupki, które SĄ startem, pomijamy: stoi się na nich od razu, o dep_sec,
+    i dokładanie im czasu przejścia mogłoby tylko opóźnić prawdziwy start
+    (całe miejsce jest startem naraz - patrz gtfs.match_stop).
+    """
+    origin = set(source_stops)
+    reach = {}
+    for stop in origin:
+        for other, sec in day.siblings.get(stop, {}).items():
+            if other in origin:
+                continue
+            known = reach.get(other)
+            if known is None or sec < known[1]:
+                reach[other] = (stop, sec)
+    return reach
+
+
 def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline=None):
     """Connection Scan: najwcześniejszy przyjazd do celu, ze śladem do rekonstrukcji.
 
@@ -184,6 +215,16 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
     for stop in source_stops:
         earliest[stop] = dep_sec
         journey[stop] = ("origin",)
+        legs[stop] = 0
+
+    # Wyjście pieszo ze startu (patrz _origin_walk). CELOWO bez note_target:
+    # "po prostu dojdź tam pieszo" nie ma być propozycją trasy. Ta wyszukiwarka
+    # planuje przejazdy - a poza tym trasa bez ani jednego przejazdu nie ma
+    # godziny wyjazdu, na której opiera się okno mapy (_journey_start), więc
+    # ogłoszenie jej celem zostawiłoby to okno bez punktu odniesienia.
+    for stop, (skad, sec) in _origin_walk(day, source_stops).items():
+        earliest[stop] = dep_sec + sec
+        journey[stop] = ("walk", skad)
         legs[stop] = 0
 
     targets = set(target_stops)
@@ -300,10 +341,17 @@ def _reconstruct(day, journey, last_stop, geo_db=None):
                                   day.conns[exit_i][1], geo_db))
             stop = board[2]
     legs.reverse()
+    # Trasa otwarta przejściem: wychodzi się tak późno, jak się da, czyli
+    # dokładnie na odjazd pierwszego pojazdu. Bez tego etap zostawał
+    # z zerowym `dep_sec` (dla przejść W ŚRODKU trasy jest on nieużywany,
+    # bo godzinę widać po sąsiednich przejazdach) i cała trasa raportowała
+    # wyjazd o 00:00 - patrz plan_route, które czyta legs[0]["dep_sec"].
+    if len(legs) > 1 and legs[0]["kind"] == "walk":
+        legs[0]["dep_sec"] = legs[1]["dep_sec"] - legs[0]["_sec"]
     return legs
 
 
-_PRIVATE_LEG_KEYS = ("_trip", "_from_id", "_to_id", "_arr_sec", "_stops_t")
+_PRIVATE_LEG_KEYS = ("_trip", "_from_id", "_to_id", "_arr_sec", "_stops_t", "_sec")
 
 
 def _next_ride(legs, i):
@@ -473,7 +521,8 @@ def _walk_leg(day, from_stop, to_stop):
     """
     same_place = (day.place_of.get(from_stop, from_stop)
                   == day.place_of.get(to_stop, to_stop))
-    minutes = round(gtfs.walk_seconds(day, from_stop, to_stop) / 60)
+    walk_sec = gtfs.walk_seconds(day, from_stop, to_stop)
+    minutes = round(walk_sec / 60)
     to_name = day.stop_names[to_stop]
     return {
         "kind": "walk",
@@ -481,6 +530,11 @@ def _walk_leg(day, from_stop, to_stop):
                  if same_place else
                  f"Przejście pieszo do: {to_name} (ok. {minutes} min)"),
         "minutes": minutes,
+        # Sekundy obok zaokrąglonych minut: gdy przejście OTWIERA trasę
+        # (wyjście pieszo ze startu - patrz _origin_walk), godzina wyjścia
+        # liczy się jako odjazd pierwszego pojazdu minus TO, a różnica
+        # między 372 s a "6 min" potrafi być tą, która decyduje o zdążeniu.
+        "_sec": walk_sec,
         "same_place": same_place,
         "from": day.stop_names[from_stop],
         "to": to_name,
@@ -543,10 +597,19 @@ MAX_JOURNEY_LIMIT = 20        # (suwak w UI go nadpisuje) - "na siłę" więcej 
 MAX_JOURNEY_CHAIN_LEGS = 4    # maks. liczba etapów przejazdu w jednej propozycji
 MAX_JOURNEY_CANDIDATES = 18   # tyle łańcuchów zbieramy przed sortowaniem/ucięciem PRZY
                               # DOMYŚLNYM limicie (patrz CANDIDATES_PER_JOURNEY niżej)
-MAX_JOURNEY_VISITS = 500      # sufit kosztu (węzły przeszukiwania) PRZY DOMYŚLNYM limicie
+# Sufit kosztu (węzły przeszukiwania) PRZY DOMYŚLNYM limicie. Podniesiony
+# z 500 (2026-09-10): tamta wartość była kalibrowana na graf sprzed kolei
+# i sprzed przejść pieszych między różnymi przystankami, a każde z tych
+# rozszerzeń zagęszcza graf przesiadek. Przy 500 relacja "Wrocław Główny ->
+# Warszawa Centralna" wyczerpywała budżet, ZANIM BFS zszedł do segmentów
+# dojeżdżających do celu, i lista propozycji wychodziła PUSTA, mimo mapy
+# z 1300 segmentów. Podniesienie jest praktycznie darmowe - zmierzone na
+# pięciu relacjach: 500 -> 4000 to 2,30 s -> 2,38 s łącznie, czyli szum.
+# Koszt zapytania siedzi w _select_and_anchor, nie tutaj.
+MAX_JOURNEY_VISITS = 4000
 CANDIDATES_PER_JOURNEY = 3    # gdy suwak żąda więcej niż domyślne 6 - MAX_JOURNEY_CANDIDATES/
                               # DEFAULT_JOURNEY_LIMIT, żeby żądanie większej liczby
-VISITS_PER_JOURNEY = 84       # propozycji faktycznie szukało głębiej, a nie tylko ucinało
+VISITS_PER_JOURNEY = 667      # propozycji faktycznie szukało głębiej, a nie tylko ucinało
                               # krócej listę tych samych paru znalezionych łańcuchów
 
 
@@ -639,9 +702,14 @@ def _no_connection(start_name, end_name, dep_sec):
     }
 
 
-def _summarize_journey(legs, rides, arrival, dep_sec):
-    """Nagłówek karty: odjazd, przyjazd, czas w drodze, czekanie, przesiadki."""
-    first_dep = rides[0]["dep_sec"]
+def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
+    """Nagłówek karty: odjazd, przyjazd, czas w drodze, czekanie, przesiadki.
+
+    `start_sec` podaje się, gdy trasa zaczyna się DOJŚCIEM: wtedy jej odjazd
+    to moment wyjścia, a nie odjazd pierwszego pojazdu - inaczej karta obiecuje
+    godzinę, o której pasażer stoi jeszcze kilkaset metrów dalej.
+    """
+    first_dep = rides[0]["dep_sec"] if start_sec is None else start_sec
     return {
         "departure": _fmt_time(first_dep),
         "arrival": _fmt_time(arrival),
@@ -796,6 +864,17 @@ def plan_flow(start_query, end_query, when=None,
     )
     target_set = target_stops
 
+    # Słupki, w których trasa może się ZACZĄĆ: sam start plus to, dokąd stąd
+    # dojdzie się pieszo (patrz _origin_walk). Osobny zbiór, a nie poszerzone
+    # `source_stops`, i to jest tu najważniejsze: `origin_latest` wyżej MUSI
+    # zostać policzone z prawdziwego startu. Gdyby wpuścić do niego słupek
+    # oddalony o kilkaset metrów, ale leżący bliżej celu, próg cofnięcia
+    # podniósłby się dla CAŁEJ mapy i wyciąłby kandydatów na zupełnie
+    # niepowiązanych korytarzach - dokładnie ta niestabilność, przed którą
+    # ostrzega komentarz nad `origin_latest`.
+    start_reach = _origin_walk(day, source_stops)
+    anchor_stops = set(source_stops) | set(start_reach)
+
     segs = _discover_segments(
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
         latest, origin_latest, target_set,
@@ -805,7 +884,7 @@ def plan_flow(start_query, end_query, when=None,
     # się jasność; bez niego była szacowana (patrz _target_profile).
     profile = _target_profile(day, target_set, dep_sec, deadline)
     _refine_brightness(day, segs, target_set, deadline, best_arr, profile)
-    kept, ranges = _select_and_anchor(day, segs, source_stops, target_set)
+    kept, ranges = _select_and_anchor(day, segs, anchor_stops, target_set)
 
     gtfs.geo_generation()      # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()    # jedno połączenie na WSZYSTKIE wycinki geometrii zapytania
@@ -821,7 +900,8 @@ def plan_flow(start_query, end_query, when=None,
             seg_list, nodes = _finalize_segments(
                 day, kept, ranges, geo_db, earliest, profile[2], deadline,
                 source_stops)
-            graph = _extract_transfer_graph(day, kept, ranges, source_stops, target_set)
+            graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
+                                            target_set, start_reach)
             journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                            limit=journey_limit, gain_sec=gain_sec)
         else:
@@ -1607,7 +1687,8 @@ def _select_and_anchor(day, segs, source_stops, target_set):
     return kept, ranges
 
 
-def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
+def _extract_transfer_graph(day, kept, ranges, source_stops, target_set,
+                            start_reach=None):
     """Krok 5 (propozycje tras): zamienia narysowane, przycięte segmenty
     w mały graf przesiadkowy - węzły to segmenty, krawędzie to miejsca,
     gdzie da się realnie wskoczyć/wysiąść między nimi. To ten sam graf,
@@ -1630,7 +1711,12 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
       warunek porównywalnej jasności co _select_and_anchor przy kotwicy
       końca, żeby żadna podana przesiadka nie była jaśniejsza niż to, co
       widać na mapie),
-    - seg_by_id: id() -> sam segment (wygodny odczyt).
+    - seg_by_id: id() -> sam segment (wygodny odczyt),
+    - origin_walk: {słupek: (skąd, sek)} - te ze startowych słupków, do
+      których trzeba najpierw DOJŚĆ (patrz _origin_walk). Propozycja
+      zaczynająca się w takim słupku musi otworzyć się etapem pieszym,
+      inaczej karta każe wsiąść w pociąg na stacji, o której nie powiedziała,
+      że trzeba do niej podejść.
 
     Przeszukiwanie idzie tylko w przód, wyłącznie po exit_edges: to jedyna
     z dwóch reguł kotwiczenia _select_and_anchor (początek/koniec), która
@@ -1696,6 +1782,7 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set):
         "origin_ids": origin_ids,
         "exit_edges": exit_edges,
         "seg_by_id": {id(seg): seg for seg in kept},
+        "origin_walk": start_reach or {},
     }
 
 
@@ -2321,6 +2408,7 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
     origin_ids = graph["origin_ids"]
     exit_edges = graph["exit_edges"]
     seg_by_id = graph["seg_by_id"]
+    origin_walk = graph.get("origin_walk", {})
 
     candidate_cap = max(MAX_JOURNEY_CANDIDATES, limit * CANDIDATES_PER_JOURNEY)
     visit_cap = max(MAX_JOURNEY_VISITS, limit * VISITS_PER_JOURNEY)
@@ -2385,9 +2473,23 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
                 this_board_stop = seg["stops"][board_pos]
                 if prev_stop != this_board_stop:
                     legs.append(_walk_leg(day, prev_stop, this_board_stop))
+            elif seg["stops"][board_pos] in origin_walk:
+                # Trasa zaczyna się nie na starcie, tylko tam, dokąd stąd
+                # trzeba dojść (patrz _origin_walk) - to musi być widoczne
+                # jako etap, bo inaczej karta milczy o jedynej rzeczy, od
+                # której cała reszta zależy.
+                legs.append(_walk_leg(
+                    day, origin_walk[seg["stops"][board_pos]][0],
+                    seg["stops"][board_pos]))
             legs.append(_segment_ride_leg(day, seg, board_pos, alight_pos, geo_db))
         rides = [leg for leg in legs if leg["kind"] == "ride"]
-        journeys.append(_summarize_journey(legs, rides, arrival, dep_sec))
+        # Odjazd trasy otwartej dojściem to moment WYJŚCIA, nie odjazd
+        # pojazdu: pasażer, który wyjdzie o godzinie z karty, ma zdążyć.
+        start_sec = None
+        if legs[0]["kind"] == "walk":
+            legs[0]["dep_sec"] = start_sec = rides[0]["dep_sec"] - legs[0]["_sec"]
+        journeys.append(_summarize_journey(legs, rides, arrival, dep_sec,
+                                           start_sec))
 
     return journeys
 
@@ -2407,6 +2509,11 @@ def _forward(day, source_stops, dep_sec, deadline):
     for stop in source_stops:
         earliest[stop] = dep_sec
         arrived_by[stop] = "origin"
+    # To samo wyjście pieszo ze startu, co w _scan - inaczej mapa przepływów
+    # nie widziałaby kursów, do których wsiada się dopiero po dojściu.
+    for stop, (_skad, sec) in _origin_walk(day, source_stops).items():
+        earliest[stop] = dep_sec + sec
+        arrived_by[stop] = "walk"
 
     for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
         dep_t, arr_t, dep_s, arr_s, trip = conns[i]

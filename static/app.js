@@ -2039,6 +2039,11 @@ function detailHtml(journey) {
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
+            // Trasa OTWARTA dojsciem (patrz planner._origin_walk): os musi
+            // zaczac sie od tego, SKAD sie wychodzi i o ktorej - inaczej
+            // pierwszy wiersz mowi "przejdz do X", nie mowiac skad ani kiedy,
+            // a godzina z naglowka karty nie ma w osi odpowiednika.
+            if (i === 0) rows.push(stopRow(journey.departure, leg.from, 'first'));
             // Zmiana stanowiska w obrebie jednego przystanku vs marsz na
             // przystanek o innej nazwie (albo pod dworzec) - w drugim
             // przypadku trzeba powiedziec DOKAD, bo bez nazwy taki etap jest
