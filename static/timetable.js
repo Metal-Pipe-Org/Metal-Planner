@@ -25,7 +25,7 @@
 const B = window.plannerBridge;
 if (!B) return;         // brak bazy rozkładów - panel pokazuje sam komunikat
 
-const {map, esc, fitTo, LINE_COLORS, MODE_LABEL} = B;
+const {map, esc, fitTo, LINE_COLORS, MODE_LABEL, ROUTE_ICON} = B;
 const $ = id => document.getElementById(id);
 
 const queryInput = $('tt-query');
@@ -1087,7 +1087,7 @@ function routeButton(line, label) {
                     data-route-mode="${esc(line.mode)}"
                     data-route-headsign="${esc(line.headsign || '')}"
                     title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'linia')} ${esc(line.num)}"
-                    >${esc(label)}</button>`;
+                    >${ROUTE_ICON}${esc(label)}</button>`;
 }
 
 // --------------------------------------------------------- zdarzenia ----

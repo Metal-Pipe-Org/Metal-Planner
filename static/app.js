@@ -2018,6 +2018,17 @@ function badgeHtml(leg) {
     return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
 }
 
+/** Znak trasy: nitka z krańcami na końcach - to samo, co przycisk rysuje na
+    mapie, tylko w 11 pikselach. Ta sama rodzina co FLOW_ICONS: kreska bierze
+    `currentColor`, więc chodzi za kolorem przycisku (przygaszony w spoczynku,
+    akcentowy pod kursorem), zamiast mieć własny, który trzeba by osobno
+    pamiętać przy każdej zmianie stanu. */
+const ROUTE_ICON =
+    '<svg class="tt-route-icon" viewBox="0 0 15 12" aria-hidden="true">'
+    + '<path d="M2.5 9.5h2.6l4.8-7h2.6"/>'
+    + '<circle cx="2.5" cy="9.5" r="1.5"/>'
+    + '<circle cx="12.5" cy="2.5" r="1.5"/></svg>';
+
 /** "A którędy ta linia jedzie w ogóle" - pytanie, na które wyszukiwarka nie
     odpowiada wcale: propozycja pokazuje kawałek od wsiadania do wysiadania,
     a tablica pod słupkiem sam moment odjazdu. Przycisk przeskakuje w rozkład
@@ -2036,7 +2047,7 @@ function routeButtonHtml(line, label) {
                     data-route-mode="${esc(line.mode)}"
                     data-route-headsign="${esc(line.headsign || '')}"
                     title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
-                    >${esc(label)}</button>`;
+                    >${ROUTE_ICON}${esc(label)}</button>`;
 }
 
 /** Klik w "trasę" nigdy nie ma znaczyć tego, co klik w wiersz pod nią -
@@ -3084,7 +3095,7 @@ function resumePlanner() {
 window.plannerBridge = {
     map, esc, fitTo, setView, setBaseDim,
     attachAutocomplete, suggestionsFor, suggestionHtml,
-    LINE_COLORS, MODE_LABEL, STOP_NAMES,
+    LINE_COLORS, MODE_LABEL, STOP_NAMES, ROUTE_ICON,
     suspendPlanner, resumePlanner,
 };
 

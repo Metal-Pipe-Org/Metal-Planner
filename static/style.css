@@ -2085,6 +2085,9 @@ ul.tt-legend {
    słupkiem na mapie, rozwinięty kurs na tablicy), więc styl jest jeden, a
    ustawienie w wierszu dokłada każde z nich osobno. */
 .tt-route {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 1px 6px;
     border: 1px solid transparent;
     border-radius: 999px;
@@ -2101,6 +2104,24 @@ ul.tt-legend {
     border-color: var(--line);
     background: var(--surface);
     color: var(--accent);
+}
+
+/* Nitka kreską, krańce wypełnione - tak samo, jak trasa wygląda na mapie:
+   przystanki po drodze są obwódkami, a końce kropkami pełnymi. */
+.tt-route-icon {
+    width: 12px;
+    height: 10px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.tt-route-icon circle {
+    fill: currentColor;
+    stroke: none;
 }
 
 /* W tablicy odjazdów przycisk budzi się razem z całym wierszem: sama godzina
