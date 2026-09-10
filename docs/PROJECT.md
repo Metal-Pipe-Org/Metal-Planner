@@ -499,6 +499,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 |---|---|
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
+| `naming.py` | ręczne poprawki nazewnictwa (pary stacja PKP ↔ przystanek MPK) - dane, nie algorytm |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
 | `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
 | `routes.py` | endpointy Flaska |
@@ -520,6 +521,19 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-10** — stacja kolejowa i przystanek MPK przy niej to jedno
+  miejsce, także gdy nazywają się różnie. Sześć wrocławskich par
+  (`naming.PLACE_MERGES`: Wrocław Główny ↔ DWORZEC GŁÓWNY, Nadodrze ↔ DWORZEC
+  NADODRZE, Leśnica ↔ Rubczaka, Zachodni ↔ Awicenny, Stadion ↔ Tarczyński
+  Arena, Kuźniki ↔ KUŹNIKI) scalanych na końcu budowy miejsc, więc
+  przesiadka pociąg ↔ tramwaj bierze się z tego samego mostu pieszego co
+  zmiana peronu — nowego mechanizmu nie ma. Lista jest RĘCZNA, bo automat
+  po promieniu wsysałby do Wrocławia Głównego DWORZEC AUTOBUSOWY (94 m,
+  bliżej niż właściwy DWORZEC GŁÓWNY — 185 m), a słupek należy do dokładnie
+  jednego miejsca; strażnik odległości (`PLACE_MAX_SPAN_M`) obowiązuje ją
+  jednak tak samo jak automat. Nazw nie przemianowujemy: obie dalej wracają
+  ze swoją pisownią. Przy okazji etap pieszy między słupkami o RÓŻNYCH
+  nazwach mówi, dokąd iść, zamiast „na inne stanowisko".
 - **2026-08-31** — kolej przestała być doklejką: stacje dokładane do dnia
   PRZED budowaniem miejsc, więc przechodzą przez to samo sklejanie po nazwie
   co przystanki, a ich własny promień przesiadkowy (500 m) usunięty razem
@@ -1357,8 +1371,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   oknie bywa tego sporo.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
-- Brak tras pieszych po mieście — przesiadka tylko między słupkami
-  o identycznej nazwie przystanku.
+- Brak tras pieszych po mieście — przesiadka tylko między słupkami tego
+  samego miejsca, czyli o identycznej nazwie albo wskazanych ręcznie
+  w `naming.py` (sześć wrocławskich par stacja PKP ↔ przystanek
+  MPK). Pozostałe stacje, przy których MPK ma przystanek pod inną nazwą,
+  wciąż czekają na dopisanie do tabeli.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
 - Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
   bo CSA widzi jedną tablicę połączeń (patrz wpis w changelogu) - ale bez

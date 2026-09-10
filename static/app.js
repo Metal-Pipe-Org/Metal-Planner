@@ -2023,9 +2023,16 @@ function detailHtml(journey) {
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
+            // Miejsce potrafi zbierać słupki o różnych nazwach (stacja PKP
+            // i przystanek MPK przy niej - patrz naming.py), a wtedy
+            // "inne stanowisko" nie mówi wysiadającemu z pociągu, dokąd ma
+            // iść. Ta sama zasada co w planner._walk_leg.
+            const dokad = leg.from === leg.to
+                ? 'Przejście na inne stanowisko'
+                : `Przejście do ${esc(leg.to)}`;
             rows.push(
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
-                `<span class="tl-body">Przejście na inne stanowisko · ok. ${leg.minutes} min</span></li>`,
+                `<span class="tl-body">${dokad} · ok. ${leg.minutes} min</span></li>`,
             );
             return;
         }

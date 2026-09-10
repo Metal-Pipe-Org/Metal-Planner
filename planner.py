@@ -453,11 +453,23 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
 def _walk_leg(day, from_stop, to_stop):
     """Etap pieszy między słupkami tego samego miejsca (patrz gtfs.siblings) -
     współdzielony przez _reconstruct (rekonstrukcja CSA) i _enumerate_journeys
-    (przesiadka między segmentami mapy przepływów)."""
+    (przesiadka między segmentami mapy przepływów).
+
+    Miejsce potrafi dziś zbierać słupki o RÓŻNYCH nazwach (stacja kolejowa
+    i przystanek MPK przy niej - patrz naming.PLACE_MERGES), a wysiadającemu
+    z pociągu na "Wrocław Nadodrze" zdanie o zmianie stanowiska nic nie mówi:
+    on ma dojść do "DWORZEC NADODRZE". Gdy nazwy się różnią, mówimy więc
+    dokąd, a nie że "gdzieś tu obok"."""
+    from_name = day.stop_names[from_stop]
+    to_name = day.stop_names[to_stop]
+    text = (
+        f"Zmiana stanowiska na przystanku {to_name}"
+        if from_name == to_name
+        else f"Przejście z {from_name} do {to_name}"
+    )
     return {
         "kind": "walk",
-        "text": f"Zmiana stanowiska na przystanku "
-                f"{day.stop_names[to_stop]} (ok. {WALK_SEC // 60} min)",
+        "text": f"{text} (ok. {WALK_SEC // 60} min)",
         "minutes": WALK_SEC // 60,
         "from": day.stop_names[from_stop],
         "to": day.stop_names[to_stop],

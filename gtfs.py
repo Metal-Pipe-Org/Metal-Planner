@@ -13,6 +13,8 @@ from bisect import bisect_left
 from datetime import timedelta
 from pathlib import Path
 
+import naming
+
 DB_PATH = Path(__file__).resolve().parent / "data" / "gtfs.sqlite"
 
 WEEKDAY_COLUMNS = [
@@ -40,6 +42,7 @@ PREV_DAY_PREFIX = "~"
 # peron do miejsca o nazwie bazowej (patrz _build_places).
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
+
 
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
 # polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
@@ -106,6 +109,42 @@ def _one_spot(stop_ids, stop_coords):
     return kept
 
 
+def _merge_named_places(places, stop_coords):
+    """Skleja w jedno miejsce pary nazw wskazane ręcznie (patrz naming.py).
+
+    To ostatni krok budowy miejsc, po dolepieniu peronów kierunkowych -
+    scalona stacja ma dostać całe miejsce razem z nimi, a nie sam rdzeń.
+
+    Strażnik odległości jest ten sam, co przy peronie (PLACE_MAX_SPAN_M),
+    tylko sprawdzany na WSZYSTKICH parach słupków obu grup: literówka
+    w tabeli albo dopisanie do rozkładu innego miasta kończy się wtedy
+    BRAKIEM scalenia, a nie trzyminutowym przejściem przez pół Polski.
+    Ręczna lista nie jest tu powodem, żeby ufać bardziej niż automatowi -
+    jest powodem, żeby sprawdzać tak samo.
+
+    Zwycięski klucz to nazwa MPK; klucz stacji ZNIKA z `places`, żeby nie
+    został osierocony obok scalonej grupy (ten sam powód co przy peronie
+    w _build_places). Wyszukiwarki to nie dotyczy: `stops_by_key` zostaje
+    nietknięte, więc "Wrocław Główny" dalej jest znaną nazwą, tylko rozwija
+    się teraz (przez _expand_to_places) na całe miejsce razem z tramwajami.
+    """
+    for canon, other in naming.PLACE_MERGES.items():
+        canon_key, other_key = canon.casefold(), other.casefold()
+        target = places.get(canon_key)
+        group = places.get(other_key)
+        if not target or not group or canon_key == other_key:
+            continue
+        if not all(
+            _haversine_m(*stop_coords[a], *stop_coords[b])
+            <= PLACE_MAX_SPAN_M
+            for a in group for b in target
+        ):
+            continue
+        places[canon_key] = target + [s for s in group if s not in target]
+        del places[other_key]
+    return places
+
+
 def _build_places(stop_names, stop_coords, stops_by_key):
     """Grupuje słupki w kanoniczne 'miejsca' - jednostkę, o którą pyta reszta
     systemu (dojechaliśmy? można się tu przesiąść?), zamiast surowej nazwy
@@ -114,6 +153,8 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     dolepiamy perony kierunkowe o nazwie bazowej pasującej do istniejącego
     miejsca, o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
     zabezpieczenie przed przypadkową kolizją nazw gdzie indziej w mieście.
+    Na koniec scalamy pary nazw z ręcznej tabeli (patrz _merge_named_places)
+    - tam, gdzie to samo miejsce nosi w obu sieciach inną nazwę.
     """
     places = {}
     for key, ids in stops_by_key.items():
@@ -143,7 +184,7 @@ def _build_places(stop_names, stop_coords, stops_by_key):
                 del places[own_key]
             elif own_group and stop_id in own_group:
                 places[own_key] = [s for s in own_group if s != stop_id]
-    return places
+    return _merge_named_places(places, stop_coords)
 
 
 def _walking_bridges(place_groups):

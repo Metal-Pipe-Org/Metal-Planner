@@ -34,10 +34,13 @@ miejsc (gtfs.load_day), więc przechodzi przez to samo grupowanie co każdy
 słupek miejski: ta sama nazwa = to samo miejsce = przejście pieszo między
 nimi. Wcześniej było inaczej - stacja dostawała sąsiadów z własnego promienia
 500 m, obok mechanizmu miejsca - i to był drugi mechanizm odpowiadający na to
-samo pytanie. Skutek uboczny usunięcia jest znany i zamierzony: nazwy stacji
-i przystanków prawie nigdy się nie pokrywają ("Wrocław Główny" vs "DWORZEC
-GŁÓWNY"), więc dziś obie sieci stykają się w pojedynczych punktach. Porządne
-łączenie stacji z przystankami to osobne zadanie, nie ten plik.
+samo pytanie. Nazwy stacji i przystanków prawie nigdy się nie pokrywają
+("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc sama reguła "ta sama nazwa"
+zostawiała obie sieci stykające się w pojedynczych punktach; największe
+wrocławskie węzły są dziś sklejone ręczną tabelą naming.PLACE_MERGES
+(2026-09-10). Tabela i tak żyje TAM, nie tutaj: to część budowania miejsc,
+a nie czytania rozkładu kolejowego - ten plik dalej nie wie o przesiadkach
+nic poza tym, że dokłada stacje PRZED budowaniem miejsc.
 
 CZAS jest ucinany do pełnych minut (patrz _sec_of): API kolei podaje sekundy,
 rozkład miejski nie, a jedna oś czasu nie może mieć dwóch dokładności - inaczej
