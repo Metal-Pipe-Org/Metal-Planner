@@ -1060,7 +1060,16 @@ def _fastest_summary(legs, arrival, dep_sec):
 
     To NIE jest pozycja listy propozycji tras - nie ma tu przystanków,
     godzin ani opisów etapów, tylko tyle, ile trzeba, żeby napisać "najszybciej
-    X min" i po najechaniu na tę liczbę pokazać na mapie, która to trasa."""
+    X min" i po najechaniu na tę liczbę pokazać na mapie, która to trasa.
+
+    Etapy PIESZE też, choć nie mają numeru linii. Do 2026-09-10 lecialy tu
+    przez filtr "tylko ride" i pasek nad mapą pokazywał sam pojazd - a odkąd
+    trasa potrafi zacząć się DOJŚCIEM (patrz _origin_walk), znaczyło to, że
+    pasek obiecywał wsiadanie na przystanku, którego użytkownik nie wskazał
+    i o którym nic nie mówił. Podświetlenie trasy na mapie miało z tego samego
+    powodu dziurę: rysowały się same przejazdy, więc trasa zaczynała się
+    "w powietrzu", kawałek od zaznaczonego startu.
+    """
     return {
         "sec": arrival - dep_sec,
         "arrival": _fmt_time(arrival),
@@ -1071,7 +1080,16 @@ def _fastest_summary(legs, arrival, dep_sec):
                 "sec": leg["minutes"] * 60,
                 "path": leg["path"],
             }
-            for leg in legs if leg["kind"] == "ride"
+            if leg["kind"] == "ride" else
+            {
+                "kind": "walk",
+                "minutes": leg["minutes"],
+                "sec": leg["minutes"] * 60,
+                "same_place": leg["same_place"],
+                "to": leg["to"],
+                "path": leg["path"],
+            }
+            for leg in legs
         ],
     }
 

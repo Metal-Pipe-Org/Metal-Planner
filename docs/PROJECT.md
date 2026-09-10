@@ -552,6 +552,14 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-10** — dojście widać też **poza kartą propozycji**: pasek
+  „Najszybciej o …" nad mapą pokazuje je jako plakietkę, a podświetlenie
+  najszybszej trasy rysuje je kreskowaną linią. `_fastest_summary` filtrował
+  etapy przez `kind == "ride"`, więc odkąd trasa potrafi zacząć się dojściem,
+  pasek obiecywał wsiadanie na przystanku, którego użytkownik nie wskazywał,
+  a podświetlona trasa zaczynała się „w powietrzu", kawałek od zaznaczonego
+  startu — i nic nie tłumaczyło tej dziury. `fastest.legs` niesie teraz także
+  etapy `kind: "walk"` (z `minutes`, `same_place`, `to` i geometrią).
 - **2026-09-10** — **przejście otwierające albo zamykające trasę ma na karcie
   własną plakietkę** (ikona idącego + minuty, kreskowany obrys w kolorze
   dojścia z mapy). Rząd plakietek pod godzinami niósł dotąd przejście jako

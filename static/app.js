@@ -163,6 +163,7 @@ function esc(text) {
 }
 
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32', other: '#6a1b9a'};
+const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg', other: 'Linia'};
 
 // ------------------------------------------------------- markery na mapie ----
@@ -847,7 +848,19 @@ function showFastest() {
     if (!fastest || !fastest.legs || !fastest.legs.length) return;
     const halos = [], cores = [];
     for (const leg of fastest.legs) {
+        if (!leg.path || leg.path.length < 2) continue;
         const latlngs = leg.path.map(p => L.latLng(p));
+        if (leg.kind === 'walk') {
+            // Dojscie rysujemy tak, jak wszedzie indziej na tej mapie:
+            // kreskowana linia w kolorze marszu, bez czarnej otoczki. Bez
+            // tego podswietlona trasa zaczynala sie "w powietrzu", kawalek
+            // od zaznaczonego startu - i nic nie tlumaczylo tej dziury.
+            cores.push(L.polyline(latlngs, {
+                color: WALK_COLOR, weight: 4, opacity: 1,
+                dashArray: '1,7', lineCap: 'round', interactive: false,
+            }));
+            continue;
+        }
         halos.push(L.polyline(latlngs, {
             color: '#111', opacity: 0.85, weight: 9,
             lineCap: 'round', lineJoin: 'round', interactive: false,
@@ -864,6 +877,30 @@ function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
 }
 
+/** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
+    (patrz summaryHtml): dojscie OTWIERAJACE albo ZAMYKAJACE trase dostaje
+    wlasny znak, bo inaczej pasek obiecuje wsiadanie na przystanku, ktorego
+    nikt nie wskazywal; przejscie miedzy pojazdami zostaje kreska. */
+function headlineChips(legs) {
+    const parts = [];
+    let pendingWalk = false;
+    legs.forEach((leg, i) => {
+        if (leg.kind === 'walk') {
+            if (i === 0 || i === legs.length - 1) {
+                parts.push(`<span class="headline-walk" title="Przejście pieszo` +
+                           ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`);
+            } else {
+                pendingWalk = true;
+            }
+            return;
+        }
+        if (pendingWalk) parts.push('<span class="headline-hop"></span>');
+        pendingWalk = false;
+        parts.push(`<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`);
+    });
+    return parts.join('');
+}
+
 function renderTimeHeadline() {
     const el = $('time-headline');
     if (!el) return;
@@ -874,8 +911,7 @@ function renderTimeHeadline() {
         hideFastest();
         return;
     }
-    const chips = ((flow.fastest && flow.fastest.legs) || []).map(leg =>
-        `<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`).join('');
+    const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
     el.innerHTML =
         `<span class="headline-best" tabindex="0">Najszybciej o `
         + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
@@ -1894,7 +1930,7 @@ function legLayers(legs, {preview}) {
         if (!leg.path || leg.path.length < 2) continue;
         if (leg.kind === 'walk') {
             lines.push(L.polyline(leg.path, {
-                color: '#455a64', weight: 3, opacity: preview ? 0.7 : 1,
+                color: WALK_COLOR, weight: 3, opacity: preview ? 0.7 : 1,
                 dashArray: '1,6', lineCap: 'round', interactive: false,
             }));
             continue;

@@ -849,6 +849,40 @@ body.panel-hidden #sidebar {
     white-space: nowrap;
 }
 
+/* Dojście w pasku "Najszybciej o ...": ten sam znak, co na karcie, tylko
+   w skali paska. Bez niego pasek pokazywał sam pojazd, więc obiecywał
+   wsiadanie na przystanku, którego użytkownik nie wskazywał. */
+.headline-walk {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 4px;
+    padding: 0 calc(3px * var(--chip-scale, 1));
+    border: 1px dashed var(--walk);
+    border-radius: 5px;
+    color: var(--walk);
+    font-size: calc(11px * var(--chip-scale, 1));
+    font-weight: bold;
+    line-height: calc(15px * var(--chip-scale, 1));
+    white-space: nowrap;
+}
+
+.headline-walk .walk-icon {
+    width: calc(10px * var(--chip-scale, 1));
+    height: calc(10px * var(--chip-scale, 1));
+}
+
+/* Przejście MIĘDZY pojazdami - kreska między plakietkami, jak na karcie. */
+.headline-hop {
+    display: inline-block;
+    width: 10px;
+    height: 2px;
+    margin: 0 3px;
+    vertical-align: middle;
+    background: repeating-linear-gradient(
+        to right, #c5cfda 0 3px, transparent 3px 6px);
+}
+
 .line-chip.tram { color: var(--tram); }
 .line-chip.bus { color: var(--bus); }
 .line-chip.train { color: var(--train); }
