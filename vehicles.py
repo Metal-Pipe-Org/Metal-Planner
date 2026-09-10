@@ -24,7 +24,7 @@ import time
 import urllib.parse
 import urllib.request
 
-import gtfs
+from getdata import gtfs
 
 VEHICLES_URL = "https://mpk.wroc.pl/bus_position"
 

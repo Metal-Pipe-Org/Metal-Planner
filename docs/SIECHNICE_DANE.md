@@ -1,7 +1,7 @@
 # Skąd wziąć rozkład Siechnickiej Komunikacji Publicznej
 
 Notatka z rozpoznania do [issue #11](https://github.com/Metal-Pipe-Org/Metal-Planner/issues/11).
-Stan: sierpień 2026. Kod, który z tego wynikł, jest w [`siechnice.py`](../siechnice.py).
+Stan: sierpień 2026. Kod, który z tego wynikł, jest w [`../getdata`](../getdata/siechnice.py).
 
 ## Czego szukamy
 
@@ -59,7 +59,7 @@ razem z pozycjami pojazdów w czasie rzeczywistym.
 
 To jedyne istniejące strukturalne źródło tych rozkładów. Jego API jest
 niedokumentowane, ale kompletne - kontrakt odtworzony z bundla aplikacji
-opisuje nagłówek [`siechnice.py`](../siechnice.py):
+opisuje nagłówek [`../getdata`](../getdata/siechnice.py):
 
 - `GET /stops` — 237 słupków z nazwami i współrzędnymi,
 - `GET /api/directions/<słupek>` — linie i kierunki na słupku,
@@ -80,7 +80,7 @@ ma, deklaracji o ponownym wykorzystaniu danych nie ma. To najgorszy możliwy
 zestaw: zgody nikt nie udzielił i nie ma nawet warunków, których dałoby się
 dotrzymać.
 
-Dlatego `siechnice.py` pobiera cokolwiek tylko po jawnym `SIECHNICE_ENABLED=on`,
+Dlatego `../getdata` pobiera cokolwiek tylko po jawnym `SIECHNICE_ENABLED=on`,
 z wymuszoną przerwą między zapytaniami i własnym `User-Agent`.
 
 ## Co zrobić, żeby było legalnie i trwale
@@ -128,7 +128,7 @@ wierszu.
 
 ## Co dalej, gdy feed się pojawi
 
-Warstwa przekształceń w `siechnice.py` przestaje być potrzebna - zostaje
+Warstwa przekształceń w `../getdata` przestaje być potrzebna - zostaje
 `merge_into()`, a wejściem staje się zwykły zip GTFS, czytany tak samo jak
 wrocławski. Sklejanie słupków ze wspólnymi (`match_existing_stops`) zostaje
 niezależnie od źródła: linie 800/810 dojeżdżają na wrocławskie Bardzką i Suchą

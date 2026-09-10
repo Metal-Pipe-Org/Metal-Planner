@@ -26,7 +26,7 @@ python3.11 -m venv .venv
 .venv/bin/python app.py
 ```
 
-`update_gtfs.py` pobiera rozkład (~12 MB) i buduje z niego bazę — zajmuje to
+`getdata` pobiera rozkład (~12 MB) i buduje z niego bazę — zajmuje to
 około 10 sekund. `app.py` wystawia serwer na http://localhost:5001; port to
 domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
 `PORT`.
@@ -152,7 +152,7 @@ aktualizuje zawsze.
 Linii 800, 810, 83–89, 860, 870, 890 **nie ma w żadnych otwartych danych** —
 ani we wrocławskim GTFS, ani na dane.gov.pl, ani w Krajowym Punkcie
 Dostępowym. Jedyne strukturalne źródło to niedokumentowane API systemu
-kiedyPrzyjedzie, którym gmina obsługuje informację pasażerską; `siechnice.py`
+kiedyPrzyjedzie, którym gmina obsługuje informację pasażerską; `getdata`
 umie z niego złożyć kompletne kursy i dokleić je do bazy.
 
 Jest to **domyślnie wyłączone**, bo `robots.txt` tego serwisu to `Disallow: /`

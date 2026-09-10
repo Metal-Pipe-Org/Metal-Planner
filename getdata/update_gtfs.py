@@ -33,14 +33,14 @@ from pathlib import Path
 # Ten plik bywa uruchamiany sam (docker/entrypoint.sh, cron), poza
 # procesem serwera - musi wczytać data/.env na własną rękę.
 import config  # noqa: F401
-import siechnice
+from getdata import siechnice
 
 # Portal Otwarte Dane Wrocław publikuje kolejne paczki GTFS nazwane datą
 # początku obowiązywania (GTFS_DDMMRRRR). Ta strona listuje je wszystkie:
 GTFS_LIST_URL = "https://open-data.cui.wroclaw.pl/hdb/ft/6/"
 BASE_URL = "https://open-data.cui.wroclaw.pl"
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+DATA_DIR = Path(config.get_data_location()) / "data"
 DB_PATH = DATA_DIR / "gtfs.sqlite"
 NEW_DB_PATH = DATA_DIR / "gtfs_new.sqlite"
 ZIP_PATH = DATA_DIR / "gtfs_download.zip"

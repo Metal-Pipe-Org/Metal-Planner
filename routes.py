@@ -4,9 +4,9 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request
 
-import gtfs
+from getdata import gtfs
 import naming
-import pkp
+from getdata import pkp
 import timetables
 import vehicles
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,

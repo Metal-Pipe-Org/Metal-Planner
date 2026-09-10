@@ -74,9 +74,9 @@ from pyproj import Transformer
 # Ten plik bywa uruchamiany sam (docker/entrypoint.sh, cron), poza procesem
 # serwera - musi wczytać data/.env na własną rękę.
 import config  # noqa: F401
-import pkp
+from getdata import pkp
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+DATA_DIR = Path(config.get_data_location()) / "data"
 DB_PATH = DATA_DIR / "pkp.sqlite"
 NEW_DB_PATH = DATA_DIR / "pkp_new.sqlite"
 
