@@ -5,7 +5,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
-
+import naming
 import pkp
 import vehicles
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
@@ -120,6 +120,7 @@ def init_routes(app):
         return render_template(
             "index.html",
             stops=stops,
+            abbreviations=naming.ABBREVIATIONS,
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),
             form_date=datetime.now().strftime("%d.%m.%y"),

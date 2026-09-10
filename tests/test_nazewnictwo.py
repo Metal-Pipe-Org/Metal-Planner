@@ -1,13 +1,19 @@
-"""To samo miejsce pod dwiema nazwami.
+"""To samo miejsce pod dwiema nazwami (issue #65).
 
-Stacja kolejowa i przystanek MPK stojący przy niej to dla pasażera jedno
-miejsce, ale nazywają się różnie ("Wrocław Główny" vs "DWORZEC GŁÓWNY"),
-więc grupowanie po nazwie ich nie sklejało i obie sieci stykały się dotąd
-w pojedynczych punktach. Ręczna tabela naming.PLACE_MERGES to naprawia - tu
-pilnujemy, żeby naprawiała dokładnie to i nic więcej.
+Dwie strony tej samej sprawy, obie w naming.py:
 
-Dane są syntetyczne (bez SQLite, bez PKP_API_KEY) - poza jednym testem
-kształtu samej tabeli, który patrzy na prawdziwe wpisy.
+1. Stacja kolejowa i przystanek MPK stojący przy niej to dla pasażera jedno
+   miejsce, ale nazywają się różnie ("Wrocław Główny" vs "DWORZEC GŁÓWNY") -
+   scala je ręczna tabela PLACE_MERGES.
+2. Ten sam przystanek bywa zapisany i wpisywany na kilka sposobów
+   ("PL. GRUNWALDZKI" vs "Plac Grunwaldzki") - godzi je REGUŁA rozwijania
+   skrótów (ABBREVIATIONS + gtfs._alias_key), nie lista wyjątków.
+
+W obu wypadkach pilnujemy, żeby robiły dokładnie to i nic więcej - a przede
+wszystkim, żeby nie odbierały trafienia dokładniejszemu dopasowaniu.
+
+Dane są syntetyczne (bez SQLite, bez PKP_API_KEY) - poza testami kształtu
+samych tabel, które patrzą na prawdziwe wpisy.
 """
 
 import pytest
@@ -54,11 +60,7 @@ def _dzien(coords_stacji=_STACJA):
     day.stop_names = dict(stop_names)
     day.stop_coords = dict(stop_coords)
     for stop_id, name in stop_names.items():
-        key = name.casefold()
-        day.stops_by_key.setdefault(key, []).append(stop_id)
-        day.display_name.setdefault(key, name)
-        day.stops_by_norm_key.setdefault(key, []).append(stop_id)
-        day.norm_display_name.setdefault(key, name)
+        gtfs._register_stop_name(day, stop_id, name)
     day.stops_by_place = gtfs._build_places(stop_names, stop_coords, stops_by_key)
     day.place_of = {
         sid: key for key, ids in day.stops_by_place.items() for sid in ids
@@ -133,10 +135,10 @@ def test_neither_name_is_swallowed_by_the_other(scalenie):
 
 
 def test_the_table_pairs_two_different_names():
-    """Kształt PRAWDZIWEJ tabeli - bez fixture'a `scalenie`, który ją podmienia. para z nazwą po obu stronach nic by nie
-    scaliła, a dwa przystanki wskazujące tę samą stację to pomyłka przy
-    kopiowaniu - nie da się jej wykryć na danych, bo drugie scalenie po
-    prostu po cichu nie zajdzie."""
+    """Kształt PRAWDZIWEJ tabeli - dlatego bez fixture'a `scalenie`, który ją
+    podmienia. Para z tą samą nazwą po obu stronach nic by nie scaliła, a dwa
+    przystanki wskazujące tę samą stację to pomyłka przy kopiowaniu - żadnej
+    z nich nie widać po danych, bo scalenie po prostu po cichu nie zachodzi."""
     keys = [k.casefold() for k in naming.PLACE_MERGES]
     values = [v.casefold() for v in naming.PLACE_MERGES.values()]
     assert len(set(keys)) == len(keys)
@@ -164,3 +166,89 @@ def test_a_walk_between_two_names_says_where_to_go():
     text = _przejscie(_KOLEJ, _MPK)
     assert _KOLEJ in text and _MPK in text
     assert "stanowisk" not in text
+
+
+# ---- ta sama nazwa, inna pisownia ----------------------------------------
+
+def _dzien_z_nazwami(*nazwy):
+    """DayData ze słupkami o podanych nazwach, po pełnej rejestracji kluczy."""
+    day = gtfs.DayData()
+    for i, nazwa in enumerate(nazwy):
+        stop_id = f"S{i}"
+        day.stop_names[stop_id] = nazwa
+        day.stop_coords[stop_id] = (51.11 + i * 0.001, 17.03)
+        gtfs._register_stop_name(day, stop_id, nazwa)
+    day.stops_by_place = gtfs._build_places(
+        day.stop_names, day.stop_coords, day.stops_by_key)
+    day.place_of = {
+        sid: key for key, ids in day.stops_by_place.items() for sid in ids
+    }
+    return day
+
+
+@pytest.mark.parametrize("query", [
+    "PL. GRUNWALDZKI",     # dokładnie jak w danych
+    "pl. grunwaldzki",     # inna wielkość liter
+    "Plac Grunwaldzki",    # skrót rozwinięty - o to prosi issue #65
+    "plac grunwaldzki",
+    "pl grunwaldzki",      # bez kropki
+    "Pl Grunwaldzki",
+])
+def test_every_spelling_of_the_abbreviation_finds_the_stop(query):
+    day = _dzien_z_nazwami("PL. GRUNWALDZKI")
+    name, stops, suggestions = gtfs.match_stop(query, day)
+    assert suggestions is None, f"{query!r} nie trafiło w przystanek"
+    assert name == "PL. GRUNWALDZKI", "wróciła inna pisownia niż z rozkładu"
+    assert stops == ["S0"]
+
+
+def test_the_expansion_works_the_other_way_round_too():
+    """Dane bywają zapisane pełnym słowem, a użytkownik pisze skrótem -
+    reguła składa OBIE strony, więc działa w obie strony."""
+    day = _dzien_z_nazwami("Osiedle Przyjaźni")
+    assert gtfs.match_stop("os. przyjazni", day)[0] == "Osiedle Przyjaźni"
+
+
+def test_the_exact_spelling_still_wins():
+    """Nowy poziom wchodzi na DOLE kaskady. Gdyby pytać o niego wcześniej,
+    odbierałby trafienie nazwie pasującej dokładniej."""
+    day = _dzien_z_nazwami("Plac Zabaw", "PL. ZABAW")
+    name, stops, _ = gtfs.match_stop("Plac Zabaw", day)
+    assert (name, stops) == ("Plac Zabaw", ["S0"]), "alias przebił dokładną pisownię"
+
+
+def test_an_abbreviation_only_expands_as_a_whole_word():
+    """Rozwijamy SŁOWA, nie fragmenty - inaczej "Plateau" zrobiłoby się
+    "placateau", a "Oleśnica" zaczęłaby pasować do czegokolwiek z "os"."""
+    assert gtfs._alias_key("Plateau") == "plateau"
+    assert gtfs._alias_key("Oleśnica") == "olesnica"
+    assert gtfs._alias_key("Pl. Nowy Targ") == "plac nowy targ"
+
+
+def test_a_dot_without_a_space_still_splits_words():
+    """"C.H.Korona" i "C. H. Korona" mają dać ten sam klucz - kropka leci
+    przez spację, nie przez pustkę."""
+    assert gtfs._alias_key("C.H.Korona") == gtfs._alias_key("C. H. Korona")
+
+
+def test_a_half_typed_query_suggests_through_the_expansion():
+    """"plac grun" nie występuje w żadnej surowej nazwie, więc bez poziomu
+    aliasowego nie podpowiadałoby NICZEGO."""
+    day = _dzien_z_nazwami("PL. GRUNWALDZKI")
+    name, stops, _ = gtfs.match_stop("plac grun", day)
+    assert (name, stops) == ("PL. GRUNWALDZKI", ["S0"])
+
+
+def test_saint_stays_untouched():
+    """"św." to rzeczownik odmienny (świętego/świętej), więc jedno rozwinięcie
+    rozjechałoby przypadki zamiast je scalić - w tabeli go celowo nie ma."""
+    assert "sw" not in naming.ABBREVIATIONS
+    assert gtfs._alias_key("Rondo Św. Ojca Pio") == "rondo sw ojca pio"
+
+
+def test_rail_stations_go_through_the_same_indexes():
+    """Nazwy PKP rejestruje dziś ta sama funkcja co nazwy MPK (pkp.augment_day
+    nie ma już własnej kopii) - inaczej stacje wypadłyby z nowego poziomu."""
+    day = _dzien_z_nazwami("Wrocław Główny")
+    assert gtfs.match_stop("wroclaw glowny", day)[0] == "Wrocław Główny"
+    assert day.stops_by_alias_key["wroclaw glowny"] == ["S0"]

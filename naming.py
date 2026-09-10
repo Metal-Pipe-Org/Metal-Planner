@@ -7,10 +7,10 @@ gtfs.py - tutaj leży to, czego wyprowadzić się NIE da i co ktoś musiał
 sprawdzić na mapie.
 
 Dlatego osobny plik: gtfs.py opisuje, JAK powstaje miejsce i jak działa
-wyszukiwanie, a to jest słownik jednego miasta. Zmiana nazwy przystanku
+wyszukiwanie, a to są słowniki jednego miasta. Zmiana nazwy przystanku
 przez MPK ma być poprawką w tabeli poniżej, a nie wejściem w moduł
-z Connection Scanem. Sam plik nic nie robi i nic nie importuje - reguły
-(z ich zabezpieczeniami) zostają po stronie gtfs.py.
+z Connection Scanem. Sam plik nic nie robi i nic nie importuje - reguły,
+które te tabele czytają (i ich zabezpieczenia), zostają po stronie gtfs.py.
 """
 
 # Stacja kolejowa i stojący przy niej przystanek MPK to dla pasażera JEDNO
@@ -46,4 +46,31 @@ PLACE_MERGES = {
     "Awicenny (Stacja kolejowa)": "Wrocław Zachodni",
     "Tarczyński Arena (Lotnicza)": "Wrocław Stadion",
     "KUŹNIKI (Stacja kolejowa)": "Wrocław Kuźniki",
+}
+
+# Skróty rozwijane przy składaniu klucza wyszukiwania (patrz gtfs._alias_key):
+# nazwa i zapytanie przechodzą przez tę samą tabelę, więc "PL. GRUNWALDZKI",
+# "Plac Grunwaldzki" i "pl grunwaldzki" składają się do jednego klucza. To
+# REGUŁA, nie lista wyjątków - kosztuje jeden wpis na skrót i obsługuje
+# wszystkie przystanki tej klasy naraz (dziś 17 nazw), także te, które MPK
+# dopiero doda.
+#
+# Klucze piszemy PO zdjęciu ogonków i kropek (tak, jak widzi je _alias_key):
+# "św." trafiłoby tu jako "sw". Kropka nie musi więc być w kluczu - i nie ma
+# jej celowo, żeby "pl Grunwaldzki" bez kropki działało tak samo.
+#
+# Czego tu NIE MA i dlaczego:
+# - "sw" ("św.") - to rzeczownik ODMIENNY: przystanki nazywają się "Św. Ojca
+#   Pio", "kościół Św. Trójcy", "Wzgórze Św.Maksymiliana", czyli świętego,
+#   świętej, świętego. Jedno rozwinięcie trafiłoby w jeden przypadek i ROZJECHAŁO
+#   pozostałe (zapytanie "Świętej Trójcy" przestałoby pasować do klucza
+#   "swiety trojcy"), więc gorzej niż nic. Samo zdjęcie kropki zostaje.
+# - "ul" ("ul.") - w danych nie ma ANI JEDNEGO przystanku pisanego "ulica",
+#   więc rozwinięcie nie miałoby w co trafić. Pominięcie "ul." w zapytaniu
+#   ("ul. Kwiska" -> "Kwiska") to inna reguła (słowo do POMINIĘCIA, nie do
+#   rozwinięcia) - jak będzie potrzebna, to osobno.
+ABBREVIATIONS = {
+    "pl": "plac",       # 15 przystanków "Pl. ..." vs "Łosice - plac zabaw"
+    "al": "aleja",      # "Rzeplin - Al. Lipowa" vs 5 nazw z "Aleja ..."
+    "os": "osiedle",    # "Os. Przyjaźni" vs 16 nazw z "Osiedle"
 }

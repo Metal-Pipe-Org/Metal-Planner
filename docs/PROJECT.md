@@ -147,6 +147,14 @@ już wypełniona. Lista nazw jedzie w stronie jako JSON (`#stop-names`) —
 to ta sama lista, którą wcześniej dostawał `<datalist>`, bez dodatkowego
 zapytania.
 
+Na końcu dochodzi **drugie złożenie**: bez kropek i z rozwiniętymi skrótami
+(`pl.` → `plac`), żeby „Plac Grunwaldzki" podpowiadało `PL. GRUNWALDZKI`.
+Osobny przebieg, nie zamiennik pierwszego — rozwinięcie zmienia długość
+napisu, więc trafienie nie ma jak wskazać fragmentu do podświetlenia. Tabelę
+skrótów front dostaje z serwera (`#stop-abbrev`, `naming.ABBREVIATIONS`),
+żeby ta sama reguła nie istniała w dwóch kopiach: tej samej używa
+wyszukiwarka po stronie serwera (`gtfs._alias_key`).
+
 **Telefon (≤ 760 px) dostaje zakładki** zamiast panelu nachodzącego na mapę:
 dolny pasek „Mapa / Trasy (n)" przełącza to, co pod kartą wyszukiwania —
 albo lista propozycji na cały ekran, albo sama mapa (wtedy z panelu zostaje
@@ -499,7 +507,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 |---|---|
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
-| `naming.py` | ręczne poprawki nazewnictwa (pary stacja PKP ↔ przystanek MPK) - dane, nie algorytm |
+| `naming.py` | tabele nazewnicze: pary stacja PKP ↔ przystanek MPK, rozwijane skróty - dane, nie algorytm |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
 | `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
 | `routes.py` | endpointy Flaska |
@@ -521,6 +529,19 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-10** — „Plac Grunwaldzki" i „PL. GRUNWALDZKI" to jedno zapytanie.
+  Do kaskady dopasowań (`gtfs.match_stop`) doszedł trzeci, najsłabszy poziom
+  kluczy: bez ogonków, bez kropek i z rozwiniętymi skrótami
+  (`naming.ABBREVIATIONS`, `gtfs._alias_key`). Nazwa przystanku i zapytanie
+  przechodzą przez to samo złożenie, więc to REGUŁA na całą klasę nazw,
+  a nie lista wyjątków — jeden wpis na skrót obsługuje dziś 17 nazw i te,
+  które MPK dopiero doda. `św.` celowo poza tabelą: to rzeczownik odmienny
+  (świętego/świętej), więc jedno rozwinięcie rozjechałoby przypadki zamiast
+  je scalić. Poziom wchodzi na DÓŁ kaskady — dokładna pisownia i ogonki
+  zachowują pierwszeństwo. Podpowiedzi we froncie składają nazwy tak samo,
+  z tabelą wziętą z serwera zamiast przepisanej do `app.js`. Przy okazji
+  indeksy nazw powstają raz, w `gtfs._register_stop_name`, zamiast
+  w dwóch kopiach (`load_day` i `pkp.augment_day`).
 - **2026-09-10** — stacja kolejowa i przystanek MPK przy niej to jedno
   miejsce, także gdy nazywają się różnie. Sześć wrocławskich par
   (`naming.PLACE_MERGES`: Wrocław Główny ↔ DWORZEC GŁÓWNY, Nadodrze ↔ DWORZEC

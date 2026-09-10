@@ -89,6 +89,11 @@
         <p class="locate-msg" id="locate-msg" role="status" hidden></p>
 
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
+        {# Tabela skrótów jedzie z serwera, a nie jest przepisana w app.js:
+           podpowiedzi mają składać nazwę dokładnie tak samo jak wyszukiwarka
+           (patrz naming.ABBREVIATIONS, gtfs._alias_key), a dwie kopie tej
+           samej reguły rozjechałyby się przy pierwszym dopisanym skrócie. #}
+        <script id="stop-abbrev" type="application/json">{{ abbreviations|tojson }}</script>
 
         <div class="search-row">
             <div class="time-field">

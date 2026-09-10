@@ -2455,18 +2455,37 @@ const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                          .toLowerCase().replace(/ł/g, 'l');
 const FOLDED_NAMES = STOP_NAMES.map(fold);
 
+// Drugie złożenie: bez kropek i z rozwiniętymi skrótami, żeby "Plac
+// Grunwaldzki" podpowiadało "PL. GRUNWALDZKI". Tabela przychodzi z serwera
+// (patrz naming.ABBREVIATIONS, templates/index.html) - przepisana tutaj
+// rozjechałaby się z wyszukiwarką przy pierwszym dopisanym skrócie.
+//
+// To OSOBNY, ostatni przebieg, a nie zamiennik fold(): rozwinięcie zmienia
+// długość ("pl" -> "plac"), więc pozycja trafienia nie wskazuje już tego
+// samego fragmentu oryginalnej nazwy i nie ma czego podświetlić.
+const ABBREV = new Map(Object.entries(JSON.parse($('stop-abbrev').textContent)));
+const expand = folded => folded.replace(/\./g, ' ').split(/\s+/)
+                               .filter(Boolean)
+                               .map(word => ABBREV.get(word) || word).join(' ');
+const ALIAS_NAMES = STOP_NAMES.map(name => expand(fold(name)));
+
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
-    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
+    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie.
+    Trafienia po rozwinięciu skrótu idą na koniec: są najluźniejsze, tak samo
+    jak po stronie serwera (patrz gtfs.match_stop). */
 function suggestionsFor(query) {
     const needle = fold(query.trim());
     if (!needle) return [];
-    const prefix = [], inside = [];
+    const alias = expand(needle);
+    const prefix = [], inside = [], aliased = [];
     STOP_NAMES.forEach((name, i) => {
         const at = FOLDED_NAMES[i].indexOf(needle);
         if (at === 0) prefix.push({name, at, len: needle.length});
         else if (at > 0) inside.push({name, at, len: needle.length});
+        // at/len na zero = nic nie podświetlamy (patrz wyżej, dlaczego).
+        else if (alias && ALIAS_NAMES[i].includes(alias)) aliased.push({name, at: 0, len: 0});
     });
-    return [...prefix, ...inside].slice(0, MAX_SUGGESTIONS);
+    return [...prefix, ...inside, ...aliased].slice(0, MAX_SUGGESTIONS);
 }
 
 function attachAutocomplete(input, onPick) {
