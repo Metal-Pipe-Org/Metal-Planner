@@ -71,6 +71,15 @@ przystanku — od razu z właściwym słupkiem i samą tą linią, bez odhaczani
 reszty ręcznie. Krawędź bierze się z rozkładu, więc trafia w tę stronę,
 którą linia faktycznie jedzie.
 
+W drugą stronę wiedzie przycisk **„trasa"**, stojący tam, gdzie widać sam
+numer linii: przy przejeździe w rozwiniętej propozycji, w tablicy odjazdów
+pod kropką przystanku na mapie i pod rozwiniętym kursem tablicy. Otwiera
+rozkład tej linii — i od razu na kierunku, którym jedzie ten konkretny kurs,
+a nie na tym, który ma więcej kursów w ciągu dnia. Powrót przyciskiem ←
+przywraca wachlarz połączeń i wybraną propozycję bez ponownego szukania,
+więc zajrzenie w trasę nic nie kosztuje. Linie, których nie ma w rozkładzie
+(pociągi PKP), przycisku nie dostają.
+
 **Przystanek** — po nazwie albo kliknięciem słupka na mapie. Tablica
 odjazdów wszystkich linii, z plakietkami do odhaczania: zostaje rozkład
 złożony dokładnie z tych linii, które zaznaczysz — od jednej do wszystkich

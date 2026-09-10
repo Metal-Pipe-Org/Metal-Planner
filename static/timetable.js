@@ -41,6 +41,12 @@ if (!queryInput || !resultsBox) return;
 const LINES = JSON.parse($('line-names').textContent);
 const LINE_NUMS = LINES.map(line => line.num);
 const MODE_OF_NUM = new Map(LINES.map(line => [line.num, line.mode]));
+// Po numerze I rodzaju, a nie po samym numerze: to jest odpowiedź na "czy
+// rozkład w ogóle zna tę linię" dla przycisku "trasa" w wyszukiwarce, a ta
+// sama trójka bywa autobusem i tramwajem naraz. Pociągi PKP nie są w tej
+// bazie wcale (patrz timetables.all_lines), więc ich wiersze przycisku nie
+// dostają - zamiast prowadzić w komunikat o nieznanej linii.
+const LINE_KEYS = new Set(LINES.map(line => `${line.mode}|${line.num}`));
 
 // Ile linii naraz ma sens na mapie. Powyżej tego progu z węzła przesiadkowego
 // robi się kłębek, w którym nie widać już żadnej pojedynczej trasy - wtedy
@@ -81,6 +87,7 @@ let boardLimit = BOARD_PAGE;
 let openDep = null;       // rozwinięty odjazd (indeks) - jego kurs jest na mapie
 let tripCache = new Map();
 let pendingBoard = null;  // wybór przyniesiony z rozkładu linii: {point, num, mode}
+let pendingLine = null;   // to samo w drugą stronę: {mode, headsign} spoza rozkładów
 
 // ------------------------------------------------------ warstwy mapy ----
 
@@ -206,6 +213,34 @@ window.timetableMode = {
         load('stop');
         return true;
     },
+
+    /** Czy tę linię da się w ogóle otworzyć. Wyszukiwarka pyta PRZED
+        narysowaniem przycisku "trasa": przycisk, który prowadzi do "nie znam
+        takiej linii", jest gorszy niż brak przycisku. */
+    hasLine(num, mode) {
+        return LINE_KEYS.has(`${mode}|${num}`);
+    },
+
+    /** "Cała trasa tej linii" - wejście z zewnątrz rozkładów: z propozycji,
+        z tablicy pod słupkiem na mapie, z rozwiniętego kursu. Lustro
+        boardFor(), które prowadzi w drugą stronę - z rozkładu linii do
+        tablicy przystanku.
+
+        Powrót jest darmowy: setMode woła suspendPlanner/resumePlanner, więc
+        wyjście z rozkładów przywraca wachlarz i wybraną propozycję bez
+        ponownego szukania. */
+    openLine(line) {
+        if (!line || !this.hasLine(line.num, line.mode)) return false;
+        pendingLine = {mode: line.mode, headsign: line.headsign};
+        setMode(true);
+        queryInput.value = line.num;
+        load('line');
+        // setMode ustawia kursor w polu, bo tak wchodzi się w rozkłady RĘCZNIE.
+        // Tu nikt nic nie wpisuje - a na telefonie klawiatura zasłoniłaby
+        // dokładnie tę listę przystanków, po którą się przyszło.
+        queryInput.blur();
+        return true;
+    },
 };
 
 // ------------------------------------------- jedno pole, dwa rodzaje ----
@@ -275,6 +310,7 @@ function reset() {
     openDep = null;
     tripCache = new Map();
     pendingBoard = null;
+    pendingLine = null;
     resultsBox.innerHTML = '';
     clearMap();
     dimBase(false);
@@ -304,7 +340,9 @@ function load(forced) {
     // Oczekujący wybór zużywa PIERWSZE zapytanie i tylko ono - inaczej
     // przeżyłby porzucone szukanie i wskoczył do zupełnie innej tablicy.
     const pending = pendingBoard;
+    const pendingDir = pendingLine;
     pendingBoard = null;
+    pendingLine = null;
     const mine = ++token;
     clearMap();
     setBusy(true);
@@ -316,7 +354,11 @@ function load(forced) {
     let url;
     if (wanted === 'line') {
         params.set('num', query);
-        const mode = MODE_OF_NUM.get(query);
+        // Rodzaj przyniesiony przez przycisk jest ważniejszy od zgadniętego
+        // z numeru: MODE_OF_NUM zna jedną odpowiedź na numer, a "3" bywa i
+        // tramwajem, i autobusem - wtedy klik w plakietkę autobusu otwierałby
+        // tramwaj o tym samym numerze.
+        const mode = (pendingDir && pendingDir.mode) || MODE_OF_NUM.get(query);
         if (mode) params.set('mode', mode);
         url = '/api/line?' + params;
     } else {
@@ -342,9 +384,13 @@ function load(forced) {
         boardLimit = BOARD_PAGE;
         if (kind === 'line') {
             // Otwieramy na wariancie, którym linia jeździ cały dzień - a nie
-            // na pierwszym z brzegu zjeździe do zajezdni.
-            variantIndex = payload.variants.indexOf(
-                mainVariants()[0] || payload.variants[0]);
+            // na pierwszym z brzegu zjeździe do zajezdni. Wyjątek: wejście
+            // przyciskiem "trasa" zna kierunek konkretnego kursu i ma prawo
+            // wskazać wariant dokładniej (patrz variantForHeadsign).
+            const wanted = pendingDir ? variantForHeadsign(pendingDir.headsign) : -1;
+            variantIndex = wanted >= 0 ? wanted
+                : payload.variants.indexOf(mainVariants()[0] || payload.variants[0]);
+            sideOpen = wanted >= 0 && !mainVariants().includes(payload.variants[wanted]);
         } else {
             picked = new Set(payload.lines.map(lineKey));
             pickedPoint = null;
@@ -465,6 +511,22 @@ function mainVariants() {
 }
 
 const sideVariants = () => data.variants.filter(v => !mainVariants().includes(v));
+
+/** Wariant jadący w TĘ stronę, o którą pytał przycisk "trasa".
+
+    Kierunek jest znany po drodze - propozycja i tablica odjazdów niosą
+    headsign kursu - więc rozkład nie ma prawa otwierać się na wariancie
+    przeciwnym tylko dlatego, że tamten ma więcej kursów. Kierunki podstawowe
+    mają pierwszeństwo przed skróconymi: ten sam napis na czole nosi też
+    kurs do zajezdni, a pytanie brzmiało "którędy jedzie linia", nie "którędy
+    jedzie ten jeden zjazd". -1 = nie ma czym trafić, wybiera load(). */
+function variantForHeadsign(headsign) {
+    const want = (headsign || '').trim().toLowerCase();
+    if (!want) return -1;
+    const match = v => v.headsign.trim().toLowerCase() === want;
+    return data.variants.indexOf(mainVariants().find(match)
+        || data.variants.find(match) || null);
+}
 
 function drawLine(refit) {
     const variant = variantOf();
@@ -1005,9 +1067,27 @@ function tripStopsHtml(dep) {
             <span class="tt-dot"></span>
             <span class="tt-name">${esc(stop.name)}</span>
         </li>`).join('');
+    // Kurs pokazuje drogę OD TEGO SŁUPKA dalej - a "którędy ta linia jedzie
+    // w ogóle" to pytanie, które pada właśnie tutaj, bo widać połowę odpowiedzi.
     return `
         <ol class="tt-stops ${esc(trip.mode)}">${stops}</ol>
-        <p class="field-hint">Kliknij godzinę ponownie, żeby zwinąć ten kurs.</p>`;
+        <p class="field-hint tt-trip-foot">
+            <span>Kliknij godzinę ponownie, żeby zwinąć ten kurs.</span>
+            ${routeButton(data.lines[dep.line], 'cała trasa')}
+        </p>`;
+}
+
+/** Przycisk "trasa" - ten sam, co "odjazdy" w rozkładzie linii, tylko wiedzie
+    w drugą stronę. Pusty napis tam, gdzie rozkład tej linii nie zna (pociągi
+    PKP), bo przycisk prowadzący donikąd jest gorszy niż jego brak. */
+function routeButton(line, label) {
+    if (!line || !LINE_KEYS.has(`${line.mode}|${line.num}`)) return '';
+    return `<button type="button" class="tt-route"
+                    data-route-num="${esc(line.num)}"
+                    data-route-mode="${esc(line.mode)}"
+                    data-route-headsign="${esc(line.headsign || '')}"
+                    title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'linia')} ${esc(line.num)}"
+                    >${esc(label)}</button>`;
 }
 
 // --------------------------------------------------------- zdarzenia ----
@@ -1028,6 +1108,17 @@ resultsBox.addEventListener('click', event => {
         variantIndex = index;
         render();
         draw(true);
+        return;
+    }
+
+    const route = event.target.closest('[data-route-num]');
+    if (route) {
+        event.stopPropagation();
+        window.timetableMode.openLine({
+            num: route.dataset.routeNum,
+            mode: route.dataset.routeMode,
+            headsign: route.dataset.routeHeadsign,
+        });
         return;
     }
 
