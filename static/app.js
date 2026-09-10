@@ -337,7 +337,12 @@ const stopsReady = fetch('/api/stops')
             m.bindTooltip(s.kind === 'train' ? `${s.name} PKP` : s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
-            m.on('click', e => { L.DomEvent.stop(e); pickEndpoint(s.name); });
+            m.on('click', e => {
+                L.DomEvent.stop(e);
+                // W trybie rozkładów klik w słupek nie wybiera końca relacji,
+                // tylko pokazuje jego tablicę odjazdów (static/timetable.js).
+                if (!timetableTook(s.name)) pickEndpoint(s.name);
+            });
             m.addTo(stopsLayer);
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
@@ -368,7 +373,18 @@ function pickEndpoint(value) {
     if (sel.start && sel.end) search();
 }
 
-map.on('click', e => pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng}));
+/** Czy tryb rozkładów przejął ten klik. Pusty punkt mapy nie znaczy tam nic -
+    rozkład ma przystanek albo linię, nie współrzędne - więc klik poza słupkiem
+    jest po prostu ignorowany. */
+function timetableTook(stopName) {
+    return document.body.classList.contains('mode-timetable')
+        && !!(window.timetableMode && window.timetableMode.pickStop(stopName));
+}
+
+map.on('click', e => {
+    if (document.body.classList.contains('mode-timetable')) return;
+    pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
+});
 
 // ------------------------------------------- moja lokalizacja jako start ----
 
@@ -2473,22 +2489,49 @@ const ALIAS_NAMES = STOP_NAMES.map(name => expand(fold(name)));
     chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie.
     Trafienia po rozwinięciu skrótu idą na koniec: są najluźniejsze, tak samo
     jak po stronie serwera (patrz gtfs.match_stop). */
-function suggestionsFor(query) {
+function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIONS) {
     const needle = fold(query.trim());
     if (!needle) return [];
+    const own = names === STOP_NAMES;
+    folded = folded || (own ? FOLDED_NAMES : names.map(fold));
+    // Złożenia aliasowe idą tą samą drogą co `folded`: gotowe dla domyślnej
+    // listy przystanków, liczone w locie dla każdej innej (tryb rozkładów
+    // podaje własną listę numerów linii - patrz timetable.js).
+    const aliases = own ? ALIAS_NAMES : folded.map(expand);
     const alias = expand(needle);
     const prefix = [], inside = [], aliased = [];
-    STOP_NAMES.forEach((name, i) => {
-        const at = FOLDED_NAMES[i].indexOf(needle);
+    names.forEach((name, i) => {
+        const at = folded[i].indexOf(needle);
         if (at === 0) prefix.push({name, at, len: needle.length});
         else if (at > 0) inside.push({name, at, len: needle.length});
         // at/len na zero = nic nie podświetlamy (patrz wyżej, dlaczego).
-        else if (alias && ALIAS_NAMES[i].includes(alias)) aliased.push({name, at: 0, len: 0});
+        else if (alias && aliases[i].includes(alias)) aliased.push({name, at: 0, len: 0});
     });
-    return [...prefix, ...inside, ...aliased].slice(0, MAX_SUGGESTIONS);
+    return [...prefix, ...inside, ...aliased].slice(0, limit);
 }
 
-function attachAutocomplete(input, onPick) {
+/** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów
+    podstawia własny (plakietka linii albo znaczek przystanku). */
+function suggestionHtml(item) {
+    // "PKP" tylko jako etykieta wiersza - do pola wpisuje się sama nazwa.
+    const tag = STOP_KIND.get(item.name) === 'train'
+        ? ' <span class="ac-tag">PKP</span>' : '';
+    return esc(item.name.slice(0, item.at))
+         + `<mark>${esc(item.name.slice(item.at, item.at + item.len))}</mark>`
+         + esc(item.name.slice(item.at + item.len)) + tag;
+}
+
+/** Klawiatura, ARIA i zamykanie listy są tu raz; co dokładnie się podpowiada
+    i jak wygląda wiersz, wołający może podmienić:
+    - `options.suggest(query)` - własne szukanie (rozkłady mieszają w jednej
+      liście linie i przystanki, więc nie da się tego opisać jedną tablicą nazw);
+    - `options.render(item)`   - własny wiersz;
+    - `options.onEnter()`      - co robi Enter poza listą.
+    `onPick` dostaje wybraną pozycję, nie sam napis. */
+function attachAutocomplete(input, onPick, options = {}) {
+    const suggest = options.suggest || (query => suggestionsFor(query));
+    const render = options.render || suggestionHtml;
+    const onEnter = options.onEnter || search;
     const list = $(input.id + '-list');
     let items = [];
     let active = -1;          // -1 = nic nie wybrane klawiaturą
@@ -2504,18 +2547,13 @@ function attachAutocomplete(input, onPick) {
     }
 
     function open() {
-        items = suggestionsFor(input.value);
+        items = suggest(input.value);
         active = -1;
         if (!items.length) { close(); return; }
-        list.innerHTML = items.map((item, i) => {
-            const hit = esc(item.name.slice(item.at, item.at + item.len));
-            const tag = STOP_KIND.get(item.name) === 'train'
-                ? ' <span class="ac-tag">PKP</span>' : '';
-            return `<li class="ac-item" role="option" aria-selected="false"
-                        id="${list.id}-${i}" data-index="${i}">` +
-                   `${esc(item.name.slice(0, item.at))}<mark>${hit}</mark>` +
-                   `${esc(item.name.slice(item.at + item.len))}${tag}</li>`;
-        }).join('');
+        list.innerHTML = items.map((item, i) =>
+            `<li class="ac-item" role="option" aria-selected="false"
+                 id="${list.id}-${i}" data-index="${i}">${render(item)}</li>`
+        ).join('');
         list.hidden = false;
         list.classList.remove('kb');
         input.setAttribute('aria-expanded', 'true');
@@ -2551,7 +2589,7 @@ function attachAutocomplete(input, onPick) {
         if (!item) return;
         input.value = item.name;
         close();
-        onPick();
+        onPick(item);
     }
 
     input.addEventListener('input', open);
@@ -2569,7 +2607,7 @@ function attachAutocomplete(input, onPick) {
         case 'Enter':
             event.preventDefault();
             if (active >= 0) choose(active);
-            else { close(); search(); }
+            else { close(); onEnter(); }
             break;
         }
     });
@@ -2990,5 +3028,42 @@ function bindDevFolds() {
     }
 }
 bindDevFolds();
+
+// ------------------------------------------------- most do trybu rozkładów ----
+//
+// Rozkłady (static/timetable.js) to drugi widok TEJ SAMEJ mapy: własny plik,
+// żeby ten nie puchł, ale rysuje po tym samym Leaflecie i musi umieć schować
+// wachlarz wyszukiwarki na czas swojego panowania. Stąd wąski, jawny most
+// zamiast globalnych zmiennych - poza tym, co niżej, nic z app.js nie wycieka.
+//
+// Schowanie wachlarza NIE kasuje ostatniej odpowiedzi (lastFlow): powrót do
+// wyszukiwania odtwarza dokładnie to, co było widać, bez ponownego zapytania.
+
+function suspendPlanner() {
+    if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
+    if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
+    flowParts = [];
+    flowHits = [];
+    clearFlowHover();
+    clearJourney();
+    clearPreview();
+    hideFastest();
+    setBaseDim(false);          // przystanki wracają do pełnej widoczności - w
+    const headline = $('time-headline');   // rozkładach to one są treścią mapy
+    if (headline) headline.hidden = true;
+}
+
+function resumePlanner() {
+    if (lastFlow) drawFlow(lastFlow, false);
+    else renderTimeHeadline();
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+}
+
+window.plannerBridge = {
+    map, esc, fitTo, setView, setBaseDim,
+    attachAutocomplete, suggestionsFor, suggestionHtml,
+    LINE_COLORS, MODE_LABEL, STOP_NAMES,
+    suspendPlanner, resumePlanner,
+};
 
 }
