@@ -185,10 +185,9 @@ def _target_reach(day, target_set):
     pętli - część z nich chodzi po wszystkich połączeniach doby.
     """
     reach = {stop: (0, stop) for stop in target_set}
-    for stop in target_set:
-        for other, sec in day.siblings.get(stop, {}).items():
-            if sec < reach.get(other, (INF, None))[0]:
-                reach[other] = (sec, stop)
+    for other, (sec, cel) in gtfs.walk_reach(day, target_set).items():
+        if sec < reach.get(other, (INF, None))[0]:
+            reach[other] = (sec, cel)
     return reach
 
 
@@ -211,16 +210,10 @@ def _origin_walk(day, source_stops):
     i dokładanie im czasu przejścia mogłoby tylko opóźnić prawdziwy start
     (całe miejsce jest startem naraz - patrz gtfs.match_stop).
     """
-    origin = set(source_stops)
-    reach = {}
-    for stop in origin:
-        for other, sec in day.siblings.get(stop, {}).items():
-            if other in origin:
-                continue
-            known = reach.get(other)
-            if known is None or sec < known[1]:
-                reach[other] = (stop, sec)
-    return reach
+    return {
+        other: (skad, sec)
+        for other, (sec, skad) in gtfs.walk_reach(day, source_stops).items()
+    }
 
 
 def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline=None):
@@ -249,12 +242,23 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
     # planuje przejazdy - a poza tym trasa bez ani jednego przejazdu nie ma
     # godziny wyjazdu, na której opiera się okno mapy (_journey_start), więc
     # ogłoszenie jej celem zostawiłoby to okno bez punktu odniesienia.
+    targets = set(target_stops)
+    near_target = _target_reach(day, targets)
     for stop, (skad, sec) in _origin_walk(day, source_stops).items():
+        if stop in targets:
+            # Cel w zasięgu marszu ze startu. Dojścia tu NIE zapisujemy, i to
+            # nie z ostrożności, tylko dlatego, że zapis byłby TRUJĄCY: skoro
+            # samo dojście nie ogłasza celu (patrz niżej), to wpisana tu
+            # wczesna godzina nie zostałaby nigdy ogłoszona, a jednocześnie
+            # zasłoniłaby każdy późniejszy DOJAZD - żaden nie poprawiłby już
+            # `earliest`, więc note_target nigdy by się nie odpalił i relacja
+            # z działającym połączeniem wychodziła jako "nie znaleziono".
+            # Ten sam kształt błędu, co naprawiony kiedyś przy note_target.
+            continue
         earliest[stop] = dep_sec + sec
         journey[stop] = ("walk", skad)
         legs[stop] = 0
 
-    targets = set(target_stops)
     best_arr = INF
     best_stop = None
     best_legs = INF
@@ -339,6 +343,23 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
                     journey[sibling] = ("walk", arr_s)
                     legs[sibling] = ride_legs
                     note_target(sibling, walk_arr, ride_legs)
+            # Dojście spod celu. Osobno od pętli wyżej, bo egress ma własny,
+            # większy promień niż przesiadka (patrz gtfs.walk_reach) i takiej
+            # pary w day.siblings po prostu nie ma. Bez tego skan - a więc
+            # i najszybszy przyjazd, i sama trasa - nie widziałby dojazdu pod
+            # przystanek obok celu, choć mapa przepływów przez _target_reach
+            # już go widzi.
+            blisko = near_target.get(arr_s)
+            if blisko is not None and blisko[0]:
+                sec, cel_stop = blisko
+                walk_arr = arr_t + sec
+                known_cel = earliest.get(cel_stop, INF)
+                if walk_arr < known_cel or (walk_arr == known_cel
+                                            and ride_legs < legs[cel_stop]):
+                    earliest[cel_stop] = walk_arr
+                    journey[cel_stop] = ("walk", arr_s)
+                    legs[cel_stop] = ride_legs
+                    note_target(cel_stop, walk_arr, ride_legs)
 
     return best_stop, best_arr, journey
 
@@ -2520,6 +2541,30 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
         ranked.append((arrival + przesiadki * gain_sec, przesiadki, -first_dep,
                        chain, arrival, dojscie_sec, cel_stop))
     ranked.sort(key=lambda item: item[:3])
+
+    # Odsiew propozycji ZDOMINOWANYCH: taka, która dowozi DOKŁADNIE O TEJ
+    # SAMEJ godzinie, każe wyjść nie później, a wymaga większej liczby
+    # przesiadek, nie jest alternatywą - jest tą samą trasą z doklejoną
+    # robotą. Zgłoszone na żywo ("jaki to ma sens? lepiej od razu tam
+    # pójść"): obok trasy "dojdź na stację i wsiądź w pociąg" stała druga,
+    # z tym samym przyjazdem, w której trzeba było najpierw przejechać JEDEN
+    # przystanek autobusem, żeby dojść na tę samą stację od innej strony.
+    #
+    # Równość przyjazdu, nie "nie później" - i to jest tu istotne. Trasa
+    # dojeżdżająca PÓŹNIEJ, choćby i z przesiadką więcej, zostaje: ta lista
+    # ma pokazywać także opcje niszowe (inny korytarz, inna częstotliwość),
+    # a nie tylko czoło rankingu. Odsiewamy wyłącznie pracę wykonaną za
+    # darmo, nie gorszy wybór.
+    niezdominowane = []
+    for wpis in ranked:
+        _koszt, przes, neg_dep, _chain, arr = wpis[:5]
+        if any(lepszy_arr == arr and lepszy_przes < przes
+               and lepszy_neg <= neg_dep
+               for _lk, lepszy_przes, lepszy_neg, _lc, lepszy_arr in
+               (w[:5] for w in niezdominowane)):
+            continue
+        niezdominowane.append(wpis)
+    ranked = niezdominowane
 
     journeys = []
     for (_cost, _przesiadki, neg_dep, chain, arrival,

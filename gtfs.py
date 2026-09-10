@@ -74,7 +74,35 @@ WALK_DETOUR = 1.35
 # niego większa, więc bufor jest w niej zawarty. Zejście poniżej trzech minut
 # rozstroiłoby oba te założenia naraz.
 WALK_MIN_SEC = 180
+# DOJŚCIE NA KRAŃCACH relacji ma własny, WIĘKSZY promień niż przejście
+# w środku podróży - to są dwie różne gotowości do marszu, nie jedna.
+# Do pociągu wychodzi się z domu i idzie się tyle, ile trzeba; przesiadka
+# w połowie trasy konkuruje z siedzeniem w pojeździe, który już jedzie,
+# więc tolerancja jest tam mniejsza.
+#
+# Zlanie obu w jeden próg dawało wynik wprost absurdalny, zgłoszony na żywo:
+# ze słupka "Wojszyce" na stację Wrocław Wojszyce jest 359 m, czyli poza
+# WALK_MAX_M - więc zamiast po prostu tam pójść, planer proponował przejazd
+# JEDEN przystanek autobusem na "Przystankową" i dopiero stamtąd pięć minut
+# marszu na tę samą stację. Podniesienie WALK_MAX_M naprawiłoby ten jeden
+# przypadek, ale zagęszcza CAŁY graf przesiadek: zmierzone dwukrotne
+# wydłużenie najcięższych zapytań i utrata propozycji na relacjach miejskich.
+# Promień dojścia takich kosztów nie ma - dotyczy garstki słupków krańcowych,
+# nie każdej pary w mieście.
+#
+# 600 m to około dziewięciu minut marszu. Ostrożniej, niż system i tak już
+# zakłada gdzie indziej: klik w mapę bierze przystanki w promieniu 1000 m
+# (patrz nearby_stops) i traktuje je jako dostępne NATYCHMIAST, bez żadnego
+# czasu dojścia.
+WALK_ACCESS_M = 400
 _LAT_DEG_M = 111_320   # metrów na stopień szerokości (siatka w _nearby_bridges)
+
+# Pamięć podręczna walk_reach: klucz zawiera id(day), a dni trzyma _day_cache,
+# więc wpis nie przeżyje swojego rozkładu na długo. Kilkanaście miejsc starcza
+# na jedno zapytanie (start, cel, warianty), a limit chroni przed rośnięciem
+# w nieskończoność przy długo żyjącym procesie.
+_reach_cache = {}
+_REACH_CACHE_MAX = 16
 
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
 # polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
@@ -194,11 +222,64 @@ def walk_seconds(day, from_stop, to_stop):
     nie zna już żadnej stałej czasu przejścia, bo od kiedy krawędzie biorą
     się z odległości (patrz _nearby_bridges), stałej po prostu nie ma.
 
-    WALK_MIN_SEC dla pary bez zapisanej krawędzi: syntetyczny dzień z testów
-    podaje same sąsiedztwa, bez kosztów, i ma dostawać dokładnie to samo
-    trzyminutowe przejście, co przed wprowadzeniem odległości.
+    Bez zapisanej krawędzi liczymy z ODLEGŁOŚCI. Nie jest to wyjątek na
+    wszelki wypadek: dojście z krańca relacji ma własny, większy promień
+    (patrz walk_reach) i nie przechodzi przez most, więc dla takiej pary
+    krawędzi po prostu nie ma - a etap pieszy MUSI podać ten sam czas, który
+    policzył sobie skan. Rozjazd między nimi znaczyłby, że karta obiecuje
+    trzy minuty tam, gdzie wyszukiwarka założyła pięć.
+
+    WALK_MIN_SEC dopiero, gdy nie ma nawet współrzędnych: syntetyczny dzień
+    z testów podaje same sąsiedztwa, bez kosztów, i ma dostawać dokładnie to
+    samo trzyminutowe przejście, co przed wprowadzeniem odległości.
     """
-    return day.siblings.get(from_stop, {}).get(to_stop, WALK_MIN_SEC)
+    edge = day.siblings.get(from_stop, {}).get(to_stop)
+    if edge is not None:
+        return edge
+    skad, dokad = day.stop_coords.get(from_stop), day.stop_coords.get(to_stop)
+    if skad is None or dokad is None:
+        return WALK_MIN_SEC
+    return walk_time_sec(_haversine_m(skad[0], skad[1], dokad[0], dokad[1]))
+
+
+def walk_reach(day, stops, max_m=WALK_ACCESS_M):
+    """{słupek: (sekundy dojścia, z którego ze `stops` się tam dochodzi)} -
+    dokąd da się dojść pieszo z KRAŃCA relacji (patrz WALK_ACCESS_M).
+
+    Osobno od day.siblings, bo to inne pytanie i inny promień: siblings są
+    relacją PRZESIADKI, policzoną raz dla całego miasta, a to jest dojście
+    z konkretnego startu (albo do konkretnego celu) - dotyczy kilku słupków,
+    więc wolno mu sięgać dalej, nie płacąc za to gęstością grafu.
+
+    Same `stops` w wyniku nie są: na nich się już stoi.
+    """
+    stops = frozenset(stops)
+    key = (id(day), stops, max_m)
+    cached = _reach_cache.get(key)
+    if cached is not None:
+        return cached
+
+    coords = day.stop_coords
+    reach = {}
+    for src in stops:
+        origin = coords.get(src)
+        if origin is None:
+            continue
+        for other, (lat, lon) in coords.items():
+            if other in stops:
+                continue
+            dist = _haversine_m(origin[0], origin[1], lat, lon)
+            if dist > max_m:
+                continue
+            sec = walk_time_sec(dist)
+            known = reach.get(other)
+            if known is None or sec < known[0]:
+                reach[other] = (sec, src)
+
+    if len(_reach_cache) >= _REACH_CACHE_MAX:
+        _reach_cache.clear()
+    _reach_cache[key] = reach
+    return reach
 
 
 def _walking_bridges(place_groups, stop_coords):

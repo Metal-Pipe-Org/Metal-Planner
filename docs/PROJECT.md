@@ -552,6 +552,33 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-10** — **dojście na KRAŃCACH relacji dostało własny promień**
+  (`gtfs.WALK_ACCESS_M` = 400 m, obok `WALK_MAX_M` = 300 m dla przesiadek).
+  To są dwie różne gotowości do marszu: do pociągu wychodzi się z domu i idzie
+  tyle, ile trzeba, a przesiadka w połowie trasy konkuruje z siedzeniem
+  w pojeździe, który już jedzie. Zlanie ich w jeden próg dawało wynik wprost
+  absurdalny, zgłoszony na żywo: ze słupka „Wojszyce" na stację Wrocław
+  Wojszyce jest 359 m, czyli poza promieniem — więc zamiast tam pójść, planer
+  proponował przejazd JEDEN przystanek autobusem na „Przystankową" i dopiero
+  stamtąd pięć minut marszu na tę samą stację. Podniesienie `WALK_MAX_M`
+  naprawiłoby ten przypadek, ale zagęszcza CAŁY graf przesiadek (zmierzone:
+  2,33 s → 4,90 s na pięciu relacjach, utrata dwóch propozycji na Leśnicy);
+  promień dojścia takich kosztów nie ma, bo dotyczy garstki słupków
+  krańcowych — benchmark po zmianie jest co do sekundy ten sam.
+  Skan honoruje go po obu stronach: `_origin_walk` przy wyjściu, a przy
+  dojeżdżaniu pod cel osobna relaksacja obok `day.siblings` (egress nie
+  przechodzi przez most, więc takiej pary tam po prostu nie ma).
+  `gtfs.walk_seconds` liczy teraz czas z odległości, gdy krawędzi mostu nie
+  ma — inaczej etap pieszy obiecywałby trzy minuty tam, gdzie skan założył
+  sześć. Dojścia ze startu NIE zapisujemy na słupku celu: byłoby trujące,
+  bo samo dojście celu nie ogłasza, a zasłoniłoby każdy późniejszy dojazd
+  (ten sam kształt błędu, co naprawiony kiedyś przy `note_target`).
+  Przy okazji **lista odsiewa propozycje zdominowane** — dowożące o DOKŁADNIE
+  tej samej godzinie, każące wyjść nie później, a wymagające przesiadki
+  więcej. Trasa dojeżdżająca później zostaje (niszowe opcje mają być
+  widoczne); odsiewamy wyłącznie pracę wykonaną za darmo. Na „Dworzec Główny
+  → Oleśnica" zwija to sześć wariantów „przejedź autobusem pod dworzec,
+  do którego masz pięć minut pieszo" w dwa realne pociągi.
 - **2026-09-10** — **„jestem u celu" przestało znaczyć „stoję na słupku
   celu"**. Pięć miejsc pytało o to przynależnością do `target_set`, i przez
   długi czas było to poprawne: most pieszy łączył wyłącznie słupki tej samej
@@ -1274,13 +1301,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   w linii prostej ze współczynnikiem nadłożenia drogi. Skutek uboczny widać
   np. z „Wojszyc": stacja Wrocław Wojszyce leży 359 m od słupka, czyli poza
   promieniem, choć od sąsiedniej „Przystankowej" dzieli ją 106 m — dwoma
-  krokami byłaby osiągalna, jednym nie jest. Trasa przez ten pociąg i tak
-  jest na liście, ale musi zacząć się jednym przystankiem autobusu pod
-  stację; wariantu „wyjdź z domu prosto na peron" nie ma. Podniesienie
-  `WALK_MAX_M` do 400 m by go dołożyło (i podpięło 3 peryferyjne stacje
-  więcej — 44 z 61 zamiast 41), ale zmierzony koszt to dwukrotnie dłuższe
-  najcięższe zapytania (2,33 s → 4,90 s na pięciu relacjach) i utrata dwóch
-  propozycji na „Dworzec Główny → Leśnica".
+  krokami byłaby osiągalna, jednym nie jest — ale START i CEL relacji mają
+  własny, większy promień (`WALK_ACCESS_M`), więc z „Wojszyc" na tę stację
+  po prostu się dochodzi. Ograniczenie zostaje tam, gdzie dwoma krokami
+  trzeba by iść W ŚRODKU trasy.
 - Samo dojście pieszo NIGDY nie jest propozycją trasy: wyszukiwarka planuje
   przejazdy, a trasa bez ani jednego przejazdu nie ma godziny wyjazdu, na
   której opiera się okno mapy (`_journey_start`).

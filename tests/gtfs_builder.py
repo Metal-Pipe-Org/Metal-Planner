@@ -4,7 +4,17 @@ odtworzyć konkretne scenariusze (patrz tests/test_flow_map_contract.py)."""
 
 import gtfs
 
-BASE_LAT, BASE_LON = 51.11, 17.03   # okolice Wrocławia - współrzędne tu nieistotne
+BASE_LAT, BASE_LON = 51.11, 17.03   # okolice Wrocławia - sam punkt bez znaczenia
+
+# Odstęp między kolejnymi słupkami syntetycznego dnia: ~1,5 km, czyli DALEKO
+# poza każdy promień marszu (gtfs.WALK_MAX_M, gtfs.WALK_ACCESS_M). Kiedyś było
+# tu 0.001 (~157 m) i współrzędne faktycznie nie miały znaczenia, bo o tym,
+# co jest pieszo obok czego, decydowała wyłącznie ręcznie podana relacja
+# `siblings`. Od kiedy dojście z krańca relacji liczy się z ODLEGŁOŚCI
+# (gtfs.walk_reach), ciasny odstęp sam z siebie robił z każdego scenariusza
+# miasto, po którym da się wszędzie dojść pieszo. Test, który chce przejścia,
+# ma je podać jawnie - tak jak dotąd.
+STOP_SPACING_DEG = 0.015
 
 
 def make_day(trips, names=None, siblings=None):
@@ -29,7 +39,8 @@ def make_day(trips, names=None, siblings=None):
     for i, stop_id in enumerate(stop_ids):
         name = names.get(stop_id, stop_id)
         day.stop_names[stop_id] = name
-        day.stop_coords[stop_id] = (BASE_LAT + i * 0.001, BASE_LON + i * 0.001)
+        day.stop_coords[stop_id] = (BASE_LAT + i * STOP_SPACING_DEG,
+                                    BASE_LON + i * STOP_SPACING_DEG)
         key = name.casefold()
         day.stops_by_key.setdefault(key, []).append(stop_id)
         day.display_name.setdefault(key, name)

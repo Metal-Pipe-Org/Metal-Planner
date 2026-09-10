@@ -19,6 +19,13 @@ B = (51.1010, 17.0300)
 C = (51.1050, 17.0300)
 
 
+def _o_metrow(od, metrow):
+    """Punkt oddalony o `metrow` na północ od `od` - dojście z krańca relacji
+    liczy się z ODLEGŁOŚCI (gtfs.walk_reach), więc scenariusz musi ustawić
+    słupki naprawdę tam, gdzie mają być, a nie tylko zadeklarować sąsiedztwo."""
+    return (od[0] + metrow / 111_320, od[1])
+
+
 # ---- skąd biorą się krawędzie --------------------------------------------
 
 def test_nearby_stops_are_bridged_regardless_of_name():
@@ -178,11 +185,18 @@ def _day_z_dojsciem_ze_startu(odjazd=600):
          "stops": [("OBOK", odjazd, odjazd), ("CEL", odjazd + 600, odjazd + 600)]},
     ], names={"OBOK": "Wrocław Wojszyce"})
     day.stop_names["START"] = "Wojszyce"
-    day.stop_coords["START"] = (51.1, 17.03)
+    day.stop_coords["START"] = _o_metrow(day.stop_coords["OBOK"], 250)
     day.place_of["START"] = "wojszyce"
     day.stops_by_place["wojszyce"] = ["START"]
-    day.siblings = {"START": {"OBOK": 240}, "OBOK": {"START": 240}}
     return day
+
+
+def _dojscie(day):
+    """Ile naprawdę trwa dojście START -> OBOK w tym dniu. Liczone z dnia,
+    a nie z nominalnych 250 m: _o_metrow przesuwa po samej szerokości, więc
+    haversine i tak wyjdzie o kilka metrów inny - a etap ma podać dokładnie
+    tę sekundę, którą policzył skan."""
+    return gtfs.walk_seconds(day, "START", "OBOK")
 
 
 def test_a_ride_reachable_only_by_walking_from_the_origin_is_found():
@@ -195,6 +209,7 @@ def test_a_ride_reachable_only_by_walking_from_the_origin_is_found():
     assert arr == 1200
     legs = planner._reconstruct(day, journey, stop)
     assert [leg["kind"] for leg in legs] == ["walk", "ride"]
+    assert legs[0]["to"] == "Wrocław Wojszyce"
 
 
 def test_the_opening_walk_reports_when_to_leave_not_when_the_train_goes():
@@ -203,17 +218,18 @@ def test_the_opening_walk_reports_when_to_leave_not_when_the_train_goes():
     day = _day_z_dojsciem_ze_startu(odjazd=600)
     stop, _, journey = planner._scan(day, ["START"], ["CEL"], 0)
     legs = planner._reconstruct(day, journey, stop)
-    assert legs[0]["dep_sec"] == 600 - 240
+    assert legs[0]["dep_sec"] == 600 - _dojscie(day)
 
 
 def test_walking_out_of_the_origin_takes_only_one_step():
     """Jeden krok, tak samo jak przy przesiadce - inaczej zasięg startu
     rósłby wielokrotnością promienia."""
     day = _day_z_dojsciem_ze_startu()
+    # DALEJ stoi tuż za OBOK, ale ze STARTU jest już poza promieniem dojścia:
+    # łańcuchem "przejdź, przejdź" byłby osiągalny, jednym krokiem nie jest.
     day.stop_names["DALEJ"] = "Dalej"
-    day.stop_coords["DALEJ"] = (51.102, 17.03)
-    day.siblings["OBOK"]["DALEJ"] = 240
-    day.siblings["DALEJ"] = {"OBOK": 240}
+    day.stop_coords["DALEJ"] = _o_metrow(day.stop_coords["OBOK"],
+                                         -gtfs.WALK_ACCESS_M)
     assert set(planner._origin_walk(day, ["START"])) == {"OBOK"}
 
 
@@ -230,9 +246,7 @@ def test_the_origin_itself_is_never_delayed_by_a_walk():
     naraz, więc dokładanie im czasu przejścia mogłoby tylko opóźnić wyjazd."""
     day = _day_z_dojsciem_ze_startu()
     day.stop_names["PERON2"] = "Wojszyce"
-    day.stop_coords["PERON2"] = (51.1001, 17.03)
-    day.siblings["START"]["PERON2"] = 180
-    day.siblings["PERON2"] = {"START": 180}
+    day.stop_coords["PERON2"] = _o_metrow(day.stop_coords["START"], 120)
     assert "PERON2" not in planner._origin_walk(day, ["START", "PERON2"])
 
 
@@ -246,10 +260,9 @@ def _day_z_celem_za_dojsciem():
          "stops": [("START", 0, 0), ("STACJA", 600, 600)]},
     ], names={"STACJA": "Wrocław Główny"})
     day.stop_names["CEL"] = "DWORZEC GŁÓWNY"
-    day.stop_coords["CEL"] = (51.1, 17.03)
+    day.stop_coords["CEL"] = _o_metrow(day.stop_coords["STACJA"], 150)
     day.place_of["CEL"] = "dworzec główny"
     day.stops_by_place["dworzec główny"] = ["CEL"]
-    day.siblings = {"STACJA": {"CEL": 180}, "CEL": {"STACJA": 180}}
     return day
 
 
@@ -259,7 +272,7 @@ def test_the_target_is_reachable_on_foot_from_a_nearby_stop():
     day = _day_z_celem_za_dojsciem()
     reach = planner._target_reach(day, {"CEL"})
     assert reach["CEL"] == (0, "CEL")
-    assert reach["STACJA"] == (180, "CEL")
+    assert reach["STACJA"] == (gtfs.WALK_MIN_SEC, "CEL")
 
 
 def test_the_backward_scan_seeds_the_walk_to_the_target():
@@ -271,7 +284,8 @@ def test_the_backward_scan_seeds_the_walk_to_the_target():
     deadline = 3600
     latest = planner._backward(day, {"CEL"}, 0, deadline)
     assert latest["CEL"] == deadline
-    assert latest["STACJA"] == deadline - 180, "dojście do celu nie zasiane"
+    assert latest["STACJA"] == deadline - gtfs.WALK_MIN_SEC, \
+        "dojście do celu nie zasiane"
 
 
 def test_a_journey_may_END_with_a_walk_to_the_target():
@@ -281,7 +295,8 @@ def test_a_journey_may_END_with_a_walk_to_the_target():
     day = _day_z_celem_za_dojsciem()
     stop, arr, journey = planner._scan(day, ["START"], ["CEL"], 0)
     assert stop == "CEL"
-    assert arr == 600 + 180, "przyjazd liczy się DO CELU, razem z dojściem"
+    assert arr == 600 + gtfs.WALK_MIN_SEC, \
+        "przyjazd liczy się DO CELU, razem z dojściem"
     legs = planner._reconstruct(day, journey, stop)
     assert [leg["kind"] for leg in legs] == ["ride", "walk"]
     assert legs[-1]["to"] == "DWORZEC GŁÓWNY"
