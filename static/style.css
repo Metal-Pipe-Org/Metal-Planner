@@ -9,6 +9,8 @@
     --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
     --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
+    --walk: #455a64;   /* przejście pieszo - ten sam kolor, co kreskowana
+                          linia dojścia na mapie (patrz legLayers) */
     --accent: #2563eb;
     --ink: #16202b;
     --ink-soft: #5b6b7c;
@@ -641,8 +643,27 @@ body.panel-hidden #sidebar {
 
 .notice.bike-note p { margin: 0; }
 
+/* Przejście pieszo NIE jest pojazdem, więc nie dostaje wypełnionej pigułki:
+   kreskowany obrys w kolorze dojścia z mapy odróżnia je od linii na pierwszy
+   rzut oka, bez czytania. Liczba obok ikony to minuty marszu. */
+.badge.walk {
+    gap: 3px;
+    padding: 0 6px;
+    background: none;
+    border: 1px dashed var(--walk);
+    color: var(--walk);
+    font-weight: 600;
+}
+
+.walk-icon {
+    width: 13px;
+    height: 13px;
+    flex: none;
+}
+
 /* Łącznik między plakietkami: ciągły = przesiadka na miejscu,
-   kropkowany = trzeba przejść na inne stanowisko. */
+   kreskowany = trzeba przejść pieszo. Przejście OTWIERAJĄCE albo ZAMYKAJĄCE
+   trasę łącznika nie ma - dostaje własną plakietkę (patrz summaryHtml). */
 .hop {
     width: 14px;
     height: 2px;
@@ -892,6 +913,40 @@ body.panel-hidden #sidebar {
     padding: 0 calc(3px * var(--chip-scale, 1));
     border-radius: 5px;
     white-space: nowrap;
+}
+
+/* Dojście w pasku "Najszybciej o ...": ten sam znak, co na karcie, tylko
+   w skali paska. Bez niego pasek pokazywał sam pojazd, więc obiecywał
+   wsiadanie na przystanku, którego użytkownik nie wskazywał. */
+.headline-walk {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 4px;
+    padding: 0 calc(3px * var(--chip-scale, 1));
+    border: 1px dashed var(--walk);
+    border-radius: 5px;
+    color: var(--walk);
+    font-size: calc(11px * var(--chip-scale, 1));
+    font-weight: bold;
+    line-height: calc(15px * var(--chip-scale, 1));
+    white-space: nowrap;
+}
+
+.headline-walk .walk-icon {
+    width: calc(10px * var(--chip-scale, 1));
+    height: calc(10px * var(--chip-scale, 1));
+}
+
+/* Przejście MIĘDZY pojazdami - kreska między plakietkami, jak na karcie. */
+.headline-hop {
+    display: inline-block;
+    width: 10px;
+    height: 2px;
+    margin: 0 3px;
+    vertical-align: middle;
+    background: repeating-linear-gradient(
+        to right, #c5cfda 0 3px, transparent 3px 6px);
 }
 
 .line-chip.tram { color: var(--tram); }

@@ -4,15 +4,28 @@ odtworzyć konkretne scenariusze (patrz tests/test_flow_map_contract.py)."""
 
 import gtfs
 
-BASE_LAT, BASE_LON = 51.11, 17.03   # okolice Wrocławia - współrzędne tu nieistotne
+BASE_LAT, BASE_LON = 51.11, 17.03   # okolice Wrocławia - sam punkt bez znaczenia
+
+# Odstęp między kolejnymi słupkami syntetycznego dnia: ~1,5 km, czyli DALEKO
+# poza każdy promień marszu (gtfs.WALK_MAX_M, gtfs.WALK_ACCESS_M). Kiedyś było
+# tu 0.001 (~157 m) i współrzędne faktycznie nie miały znaczenia, bo o tym,
+# co jest pieszo obok czego, decydowała wyłącznie ręcznie podana relacja
+# `siblings`. Od kiedy dojście z krańca relacji liczy się z ODLEGŁOŚCI
+# (gtfs.walk_reach), ciasny odstęp sam z siebie robił z każdego scenariusza
+# miasto, po którym da się wszędzie dojść pieszo. Test, który chce przejścia,
+# ma je podać jawnie - tak jak dotąd.
+STOP_SPACING_DEG = 0.015
 
 
 def make_day(trips, names=None, siblings=None):
     """trips: [{"trip_id", "label", "headsign"?, "shape_id"?,
                 "stops": [(stop_id, arrival_sec, departure_sec), ...]}, ...]
     names: {stop_id: nazwa wyświetlana} (domyślnie = stop_id)
-    siblings: {stop_id: (inny_stop_id, ...)} - most pieszy między słupkami
-    tego samego miejsca (patrz gtfs.DayData.siblings / _walking_bridges).
+    siblings: most pieszy (patrz gtfs.DayData.siblings). Wolno podać sam
+    kształt sąsiedztwa - {stop_id: (inny_stop_id, ...)} - i wtedy każda
+    krawędź kosztuje gtfs.WALK_MIN_SEC, bo syntetyczne współrzędne z tego
+    pliku i tak nie odwzorowują żadnej prawdziwej odległości. Test, któremu
+    zależy na konkretnym czasie przejścia, podaje pełne {stop_id: {inny: sek}}.
     """
     day = gtfs.DayData()
 
@@ -26,7 +39,8 @@ def make_day(trips, names=None, siblings=None):
     for i, stop_id in enumerate(stop_ids):
         name = names.get(stop_id, stop_id)
         day.stop_names[stop_id] = name
-        day.stop_coords[stop_id] = (BASE_LAT + i * 0.001, BASE_LON + i * 0.001)
+        day.stop_coords[stop_id] = (BASE_LAT + i * STOP_SPACING_DEG,
+                                    BASE_LON + i * STOP_SPACING_DEG)
         key = name.casefold()
         day.stops_by_key.setdefault(key, []).append(stop_id)
         day.display_name.setdefault(key, name)
@@ -35,7 +49,11 @@ def make_day(trips, names=None, siblings=None):
         day.stops_by_place.setdefault(key, []).append(stop_id)
         day.place_of[stop_id] = key
 
-    day.siblings = dict(siblings or {})
+    day.siblings = {
+        stop_id: (dict(neighbors) if isinstance(neighbors, dict)
+                  else {n: gtfs.WALK_MIN_SEC for n in neighbors})
+        for stop_id, neighbors in (siblings or {}).items()
+    }
 
     conns = []
     for trip in trips:

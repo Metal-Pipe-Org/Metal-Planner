@@ -80,8 +80,9 @@ def test_a_station_and_the_stop_beside_it_become_one_place(scalenie):
 def test_the_merged_place_is_what_gives_the_transfer(scalenie):
     """Scalenie nie jest kosmetyką nazw - ma dać most pieszy pociąg <-> tramwaj.
     Innego mechanizmu przesiadki między sieciami nie ma (patrz pkp.py)."""
+    _names, coords, _keys = _miejsca()
     places = gtfs._build_places(*_miejsca())
-    bridges = gtfs._walking_bridges(places.values())
+    bridges = gtfs._walking_bridges(places.values(), coords)
     assert sorted(bridges["PKP:1"]) == ["MPK1", "MPK2"]
 
 

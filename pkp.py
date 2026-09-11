@@ -30,17 +30,23 @@ się nie zmienia, zmienia się tylko to, co potrafimy pokazać.
 
 PRZESIADKA stacja PKP <-> przystanek MPK nie ma tu ŻADNEGO własnego
 mechanizmu (2026-08-31). Stacja jest dokładana do dnia PRZED budowaniem
-miejsc (gtfs.load_day), więc przechodzi przez to samo grupowanie co każdy
-słupek miejski: ta sama nazwa = to samo miejsce = przejście pieszo między
-nimi. Wcześniej było inaczej - stacja dostawała sąsiadów z własnego promienia
-500 m, obok mechanizmu miejsca - i to był drugi mechanizm odpowiadający na to
-samo pytanie. Nazwy stacji i przystanków prawie nigdy się nie pokrywają
-("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc sama reguła "ta sama nazwa"
-zostawiała obie sieci stykające się w pojedynczych punktach; największe
-wrocławskie węzły są dziś sklejone ręczną tabelą naming.PLACE_MERGES
-(2026-09-10). Tabela i tak żyje TAM, nie tutaj: to część budowania miejsc,
-a nie czytania rozkładu kolejowego - ten plik dalej nie wie o przesiadkach
-nic poza tym, że dokłada stacje PRZED budowaniem miejsc.
+miejsc i mostów pieszych (gtfs.load_day), więc przechodzi przez dokładnie to
+samo, co każdy słupek miejski - i stamtąd, nie stąd, bierze się jej
+przesiadka. Wcześniej było inaczej: stacja dostawała sąsiadów z własnego
+promienia 500 m, obok mechanizmu miejsca, czyli drugim mechanizmem na to samo
+pytanie.
+
+Przez pewien czas kosztowało to naprawdę dużo. Wspólnym mechanizmem było
+wtedy WYŁĄCZNIE sklejanie po nazwie, a nazwy stacji i przystanków prawie
+nigdy się nie pokrywają ("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc obie
+sieci stykały się tylko w przypadkowych pojedynczych punktach. Od 2026-09-10
+wspólny mechanizm jest szerszy z dwóch stron naraz: największe wrocławskie
+węzły skleja w jedno miejsce ręczna tabela naming.PLACE_MERGES, a poza nimi
+most pieszy powstaje z ODLEGŁOŚCI, bez oglądania się na nazwę (patrz
+gtfs._nearby_bridges) - i to on łączy dworzec z przystankami pod nim. Kolej
+nadal nie ma tu nic własnego, tabela też żyje TAM, nie tutaj: to część
+budowania miejsc, a nie czytania rozkładu kolejowego. Ten plik dalej nie wie
+o przesiadkach nic poza tym, że dokłada stacje PRZED budowaniem miejsc.
 
 CZAS jest ucinany do pełnych minut (patrz _sec_of): API kolei podaje sekundy,
 rozkład miejski nie, a jedna oś czasu nie może mieć dwóch dokładności - inaczej

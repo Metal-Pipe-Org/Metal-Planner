@@ -166,6 +166,7 @@ function esc(text) {
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
+const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
                     bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
 
@@ -859,7 +860,19 @@ function showFastest() {
     if (!fastest || !fastest.legs || !fastest.legs.length) return;
     const halos = [], cores = [];
     for (const leg of fastest.legs) {
+        if (!leg.path || leg.path.length < 2) continue;
         const latlngs = leg.path.map(p => L.latLng(p));
+        if (leg.kind === 'walk') {
+            // Dojscie rysujemy tak, jak wszedzie indziej na tej mapie:
+            // kreskowana linia w kolorze marszu, bez czarnej otoczki. Bez
+            // tego podswietlona trasa zaczynala sie "w powietrzu", kawalek
+            // od zaznaczonego startu - i nic nie tlumaczylo tej dziury.
+            cores.push(L.polyline(latlngs, {
+                color: WALK_COLOR, weight: 4, opacity: 1,
+                dashArray: '1,7', lineCap: 'round', interactive: false,
+            }));
+            continue;
+        }
         halos.push(L.polyline(latlngs, {
             color: '#111', opacity: 0.85, weight: 9,
             lineCap: 'round', lineJoin: 'round', interactive: false,
@@ -876,6 +889,30 @@ function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
 }
 
+/** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
+    (patrz summaryHtml): dojscie OTWIERAJACE albo ZAMYKAJACE trase dostaje
+    wlasny znak, bo inaczej pasek obiecuje wsiadanie na przystanku, ktorego
+    nikt nie wskazywal; przejscie miedzy pojazdami zostaje kreska. */
+function headlineChips(legs) {
+    const parts = [];
+    let pendingWalk = false;
+    legs.forEach((leg, i) => {
+        if (leg.kind === 'walk') {
+            if (i === 0 || i === legs.length - 1) {
+                parts.push(`<span class="headline-walk" title="Przejście pieszo` +
+                           ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`);
+            } else {
+                pendingWalk = true;
+            }
+            return;
+        }
+        if (pendingWalk) parts.push('<span class="headline-hop"></span>');
+        pendingWalk = false;
+        parts.push(`<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`);
+    });
+    return parts.join('');
+}
+
 function renderTimeHeadline() {
     const el = $('time-headline');
     if (!el) return;
@@ -886,8 +923,7 @@ function renderTimeHeadline() {
         hideFastest();
         return;
     }
-    const chips = ((flow.fastest && flow.fastest.legs) || []).map(leg =>
-        `<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`).join('');
+    const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
     el.innerHTML =
         `<span class="headline-best" tabindex="0">Najszybciej o `
         + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
@@ -1911,7 +1947,7 @@ function legLayers(legs, {preview}) {
         if (!leg.path || leg.path.length < 2) continue;
         if (leg.kind === 'walk') {
             lines.push(L.polyline(leg.path, {
-                color: '#455a64', weight: 3, opacity: preview ? 0.7 : 1,
+                color: WALK_COLOR, weight: 3, opacity: preview ? 0.7 : 1,
                 dashArray: '1,6', lineCap: 'round', interactive: false,
             }));
             continue;
@@ -2122,15 +2158,60 @@ function routeClick(event) {
     return true;
 }
 
+/** Ludzik idacy - monochromatyczny SVG, nie emoji: reszta ikon w interfejsie
+    (◉ ⚙ ⇅ ✕ ◷) tez jest jednobarwna, a kolorowe 🚶 wygladaloby jak wklejka
+    z innego programu i renderowaloby sie inaczej na kazdym systemie. */
+const WALK_ICON =
+    '<svg class="walk-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+    '<circle cx="9" cy="2.5" r="1.9" fill="currentColor"/>' +
+    '<path d="M9.2 5.4 6.4 7.2 5.1 10.4M9.2 5.4 11.2 7.6 11.6 10.8 12.9 13.6' +
+    'M9.2 5.4 7.1 9.8 4.4 13.4" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+
+function walkBadgeHtml(leg) {
+    const dokad = leg.from === leg.to ? ' na inne stanowisko' : ` do: ${leg.to}`;
+    return `<span class="badge walk" title="Przejście pieszo${esc(dokad)}` +
+           ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`;
+}
+
+function hopHtml(walk) {
+    if (!walk) return '<span class="hop"></span>';
+    return `<span class="hop walk" title="Przesiadka z przejściem pieszo` +
+           ` · ok. ${walk.minutes} min"></span>`;
+}
+
+/** Rzad plakietek pod godzinami karty: obraz trasy, etap po etapie.
+
+    Przejscie MIEDZY pojazdami zostaje kreska lacznika - jest wlasnoscia
+    przesiadki ("tu trzeba przejsc"), a nie osobnym przystankiem podrozy.
+    Wersja, w ktorej kazde przejscie dostawalo wlasna plakietke, byla wierna,
+    ale nieczytelna: odkad przesiadka miedzy roznymi slupkami niemal zawsze
+    kosztuje minimalne trzy minuty, trasa z trzema przesiadkami rozrastala sie
+    do "3 - 18 - 3 - 14 - 3 - 4 - 3 - 146" i zawijala do dwoch linii.
+
+    Plakietke dostaje przejscie OTWIERAJACE albo ZAMYKAJACE trase - i to jest
+    ta luka, ktora tu naprawiamy. Takie przejscie nie jest przesiadka, tylko
+    wlasnym etapem do/od sieci, i nie ma sasiedniego lacznika, ktory moglby je
+    ponies: karta "dojdz na stacje i wsiadz w pociag" wygladala przez to jak
+    sam pociag. Zglaszone na zywo. */
 function summaryHtml(legs) {
     const parts = [];
-    let pendingWalk = false;
-    for (const leg of legs) {
-        if (leg.kind === 'walk') { pendingWalk = true; continue; }
-        if (parts.length) parts.push(`<span class="hop${pendingWalk ? ' walk' : ''}"></span>`);
-        pendingWalk = false;
+    let pendingWalk = null;
+    legs.forEach((leg, i) => {
+        if (leg.kind === 'walk') {
+            if (i === 0 || i === legs.length - 1) {
+                if (parts.length) parts.push(hopHtml(null));
+                parts.push(walkBadgeHtml(leg));
+            } else {
+                pendingWalk = leg;
+            }
+            return;
+        }
+        if (parts.length) parts.push(hopHtml(pendingWalk));
+        pendingWalk = null;
         parts.push(badgeHtml(leg));
-    }
+    });
     return parts.join('');
 }
 
@@ -2148,6 +2229,11 @@ function detailHtml(journey) {
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
+            // Trasa OTWARTA dojsciem (patrz planner._origin_walk): os musi
+            // zaczac sie od tego, SKAD sie wychodzi i o ktorej - inaczej
+            // pierwszy wiersz mowi "przejdz do X", nie mowiac skad ani kiedy,
+            // a godzina z naglowka karty nie ma w osi odpowiednika.
+            if (i === 0) rows.push(stopRow(journey.departure, leg.from, 'first'));
             // `note` to gotowy opis z backendu - przychodzi tylko z etapów
             // dostawionych przez warstwę rowerową (planner._foot_leg), bo
             // „Dojście do stacji WRM ..." nie da się złożyć z from/to: stacja
@@ -2159,10 +2245,12 @@ function detailHtml(journey) {
             // Bez adresu z feedu (`to` puste) zostaje samo "dojście do auta" -
             // KTÓRE to auto mówi i tak następny wiersz.
             //
-            // Bez obu: miejsce potrafi zbierać słupki o różnych nazwach
-            // (stacja PKP i przystanek MPK przy niej - patrz naming.py),
-            // a wtedy "inne stanowisko" nie mówi wysiadającemu z pociągu,
-            // dokąd ma iść. Ta sama zasada co w planner._walk_leg.
+            // Bez obu rozstrzygają NAZWY, nie miejsce: miejsce potrafi zbierać
+            // słupki nazwane różnie (stacja PKP i przystanek MPK przy niej -
+            // patrz naming.py), a wtedy "inne stanowisko" nie mówi
+            // wysiadającemu z pociągu, dokąd ma iść. Ta sama zasada co
+            // w planner._walk_leg - zdanie w osi i zdanie z serwera nie mogą
+            // rozstrzygać tego inaczej.
             const dokad = leg.note
                 ? esc(leg.note)
                 : leg.to_car
@@ -2175,6 +2263,14 @@ function detailHtml(journey) {
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
                 `<span class="tl-body">${dokad}${ile} · ok. ${leg.minutes} min</span></li>`,
             );
+            // Trasa ZAMKNIETA dojsciem (patrz planner._target_reach): wiersz
+            // z przyjazdem do celu nie ma juz skad wyjsc, bo emituje go
+            // przejazd, a po tym dojsciu zadnego przejazdu nie ma. Bez tego
+            // os konczy sie na "przejdz do X", nie mowiac o ktorej sie tam
+            // jest - a to jest godzina z naglowka karty.
+            if (i === journey.legs.length - 1) {
+                rows.push(stopRow(journey.arrival, leg.to, 'last'));
+            }
             return;
         }
         if (leg.kind === 'bike') {
@@ -2302,9 +2398,14 @@ function renderJourneys() {
         // i czym się płaci za przejazd. To ma być widać na karcie, zanim się
         // ją rozwinie, a nie dopiero na osi trasy.
         if (j.traficar) meta.push('ostatni odcinek autem');
+        // Etykieta dla czytnika ekranu opowiada te sama trase, co plakietki -
+        // razem z przejsciami, bo to one decyduja, czy trasa jest wykonalna.
         const lines = j.legs.filter(
-            leg => leg.kind === 'ride' || leg.kind === 'bike' || leg.kind === 'drive')
-                            .map(leg => leg.line).join(', ');
+            leg => leg.kind === 'walk' || leg.kind === 'ride'
+                || leg.kind === 'bike' || leg.kind === 'drive')
+            .map(leg => leg.kind === 'walk'
+                ? `pieszo ${leg.minutes} min`
+                : leg.line).join(', ');
         // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
         // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
         // czyta się pierwszą, a nie dopiero w rozwinięciu karty.

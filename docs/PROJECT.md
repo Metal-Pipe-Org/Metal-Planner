@@ -286,9 +286,17 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
 
 - do połączenia można „wsiąść", jeśli już siedzimy w tym kursie, albo jesteśmy
   na jego przystanku odpowiednio wcześnie (bufor przesiadki 2 min; start
-  i dojście piesze bez bufora);
-- słupki o tej samej nazwie przystanku traktujemy jak jeden węzeł połączony
-  przejściem 3 min;
+  i dojście piesze bez bufora — trzyminutowa podłoga przejścia jest od bufora
+  większa, więc go w sobie mieści);
+- między słupkami leżącymi blisko siebie przechodzi się PIESZO, bez względu na
+  nazwę i na to, czyja to sieć (`gtfs._nearby_bridges`, promień
+  `WALK_MAX_M` = 300 m). Czas przejścia liczy się z odległości (spokojny krok
+  ze współczynnikiem nadłożenia drogi, nie mniej niż 3 min) i krawędź niesie
+  go ze sobą — stałej czasu przejścia nie ma. Tą samą drogą łączą się kolej
+  i MPK: dworzec i stojące pod nim przystanki nazywają się inaczej, a i tak
+  są o cztery minuty marszu od siebie. Przejście relaksuje się TYLKO po
+  wysiadaniu z pojazdu i tylko o jeden krok — nie da się iść pieszo dwa razy
+  pod rząd ani wyjść pieszo z samego startu relacji;
 - kursy po północy mają w GTFS godziny 24:xx+ i liczą się do doby, w której
   wyruszyły, więc rozkład dnia D obejmuje też ogon dnia D-1 przesunięty
   o -24 h — to on obsługuje godziny 00:00-06:00 (patrz `gtfs.PREV_DAY_SEC`);
@@ -610,7 +618,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
   to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, path}`; etap
-  pieszy: `{kind: "walk", text, minutes, from, to, path}`. Nagłówek propozycji
+  pieszy: `{kind: "walk", text, minutes, same_place, from, to, path}` —
+  `minutes` liczone z odległości (patrz wyżej), a `same_place` odróżnia zmianę
+  stanowiska w obrębie jednego przystanku od marszu na przystanek o innej
+  nazwie; przy `false` front musi powiedzieć DOKĄD iść, bo bez nazwy taki etap
+  jest niewykonalny. Nagłówek propozycji
   niesie też `departure_sec`/`arrival_sec` — te same dwie godziny w sekundach,
   żeby dało się ustawić propozycje w jednej kolejności niezależnie od tego,
   który algorytm je złożył. `dep_sec`/`arr_sec`
@@ -655,9 +667,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   (`gtfs.load_day` → `pkp.augment_day`, patrz `pkp.py`) — dla wyszukiwarki
   stacja PKP to zwykły przystanek, a przesiadka pociąg↔MPK to zwykła
   przesiadka — przez to samo `siblings`, co przejście między słupkami jednego
-  miejsca, bo stacja przechodzi przez to samo sklejanie w miejsce
-  (`gtfs._build_places`) co każdy słupek: TA SAMA NAZWA = to samo miejsce.
-  Własnego promienia przesiadkowego kolej nie ma (usunięty 2026-08-31).
+  miejsca, bo stacja przechodzi przez to samo budowanie mostów pieszych co
+  każdy słupek. Od 2026-09-10 most bierze się z ODLEGŁOŚCI, nie z nazwy
+  (`gtfs._nearby_bridges`), więc dworzec łączy się z przystankami pod nim
+  także wtedy, gdy nazywają się zupełnie inaczej. Własnego promienia
+  przesiadkowego kolej nie ma (usunięty 2026-08-31) i nadal nie potrzebuje.
   Efekt: relacja „Warszawa Centralna → Rynek” po prostu działa — jedna trasa,
   etapy kolejowe i miejskie razem, bez żadnego specjalnego pola w odpowiedzi.
   Stacja PKP bez ustalonych współrzędnych (geokodowanie w toku - patrz
@@ -780,6 +794,117 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   zepsuta funkcja. Na samej mapie przepływów roweru nie ma i to jest wybór —
   jasność liczy się tam z rozkładu, a rower rozkładu nie ma.
 
+- **2026-09-10** — dojście widać też **poza kartą propozycji**: pasek
+  „Najszybciej o …" nad mapą pokazuje je jako plakietkę, a podświetlenie
+  najszybszej trasy rysuje je kreskowaną linią. `_fastest_summary` filtrował
+  etapy przez `kind == "ride"`, więc odkąd trasa potrafi zacząć się dojściem,
+  pasek obiecywał wsiadanie na przystanku, którego użytkownik nie wskazywał,
+  a podświetlona trasa zaczynała się „w powietrzu", kawałek od zaznaczonego
+  startu — i nic nie tłumaczyło tej dziury. `fastest.legs` niesie teraz także
+  etapy `kind: "walk"` (z `minutes`, `same_place`, `to` i geometrią).
+- **2026-09-10** — **przejście otwierające albo zamykające trasę ma na karcie
+  własną plakietkę** (ikona idącego + minuty, kreskowany obrys w kolorze
+  dojścia z mapy). Rząd plakietek pod godzinami niósł dotąd przejście jako
+  KRESKOWANY ŁĄCZNIK między liniami — dobre dla przesiadki („tu trzeba
+  przejść"), ale bezużyteczne, gdy przejścia nie ma między czym postawić:
+  trasa „dojdź na stację i wsiądź w pociąg" wyglądała na karcie jak sam
+  pociąg. Zgłoszone na żywo. Przejścia MIĘDZY pojazdami zostają łącznikiem —
+  wersja, w której plakietkę dostawało każde przejście, była wierna, ale
+  nieczytelna: odkąd przesiadka między różnymi słupkami niemal zawsze kosztuje
+  minimalne trzy minuty, trasa z trzema przesiadkami rozrastała się do
+  „3 – 18 – 3 – 14 – 3 – 4 – 3 – 146" i zawijała do dwóch linii. Etykieta dla
+  czytnika ekranu wymienia teraz przejścia razem z liniami.
+- **2026-09-10** — **dojście na KRAŃCACH relacji dostało własny promień**
+  (`gtfs.WALK_ACCESS_M` = 400 m, obok `WALK_MAX_M` = 300 m dla przesiadek).
+  To są dwie różne gotowości do marszu: do pociągu wychodzi się z domu i idzie
+  tyle, ile trzeba, a przesiadka w połowie trasy konkuruje z siedzeniem
+  w pojeździe, który już jedzie. Zlanie ich w jeden próg dawało wynik wprost
+  absurdalny, zgłoszony na żywo: ze słupka „Wojszyce" na stację Wrocław
+  Wojszyce jest 359 m, czyli poza promieniem — więc zamiast tam pójść, planer
+  proponował przejazd JEDEN przystanek autobusem na „Przystankową" i dopiero
+  stamtąd pięć minut marszu na tę samą stację. Podniesienie `WALK_MAX_M`
+  naprawiłoby ten przypadek, ale zagęszcza CAŁY graf przesiadek (zmierzone:
+  2,33 s → 4,90 s na pięciu relacjach, utrata dwóch propozycji na Leśnicy);
+  promień dojścia takich kosztów nie ma, bo dotyczy garstki słupków
+  krańcowych — benchmark po zmianie jest co do sekundy ten sam.
+  Skan honoruje go po obu stronach: `_origin_walk` przy wyjściu, a przy
+  dojeżdżaniu pod cel osobna relaksacja obok `day.siblings` (egress nie
+  przechodzi przez most, więc takiej pary tam po prostu nie ma).
+  `gtfs.walk_seconds` liczy teraz czas z odległości, gdy krawędzi mostu nie
+  ma — inaczej etap pieszy obiecywałby trzy minuty tam, gdzie skan założył
+  sześć. Dojścia ze startu NIE zapisujemy na słupku celu: byłoby trujące,
+  bo samo dojście celu nie ogłasza, a zasłoniłoby każdy późniejszy dojazd
+  (ten sam kształt błędu, co naprawiony kiedyś przy `note_target`).
+  Przy okazji **lista odsiewa propozycje zdominowane** — dowożące o DOKŁADNIE
+  tej samej godzinie, każące wyjść nie później, a wymagające przesiadki
+  więcej. Trasa dojeżdżająca później zostaje (niszowe opcje mają być
+  widoczne); odsiewamy wyłącznie pracę wykonaną za darmo. Na „Dworzec Główny
+  → Oleśnica" zwija to sześć wariantów „przejedź autobusem pod dworzec,
+  do którego masz pięć minut pieszo" w dwa realne pociągi.
+- **2026-09-10** — **„jestem u celu" przestało znaczyć „stoję na słupku
+  celu"**. Pięć miejsc pytało o to przynależnością do `target_set`, i przez
+  długi czas było to poprawne: most pieszy łączył wyłącznie słupki tej samej
+  nazwy, a cel to całe MIEJSCE, więc sąsiedzi celu sami byli celem. Po
+  rozszerzeniu mostu na różne przystanki przestało się zgadzać — i sypało
+  się cicho, każde miejsce inaczej. Skan wstecz nie zasiewał dojścia do celu,
+  więc stacja Wrocław Wojszyce dostawała `latest` z przypadkowego objazdu
+  (09:28 zamiast 09:39); reguła cofnięcia uznawała przez to wsiadanie tam za
+  oddalanie się od celu i kasowała cały dowożący kurs, ZANIM cokolwiek zdążyło
+  go zobaczyć. Lista propozycji nie umiała ZAKOŃCZYĆ trasy dojściem, więc
+  doklejała jeszcze jeden autobus, byle skończyć na słupku celu. Wspólny
+  `_target_reach` odpowiada teraz „ile stąd pieszo do celu i do którego jego
+  słupka", a propozycja może zamknąć się etapem pieszym — z przyjazdem
+  liczonym DO CELU. Wyjścia „do celu" sortują się po faktycznym przyjeździe
+  (razem z dojściem), bo deduplikacja łańcuchów patrzy na linię i miejsce
+  wsiadania: bez tego wariant „wysiądź wcześniej i idź" wypierał szybszy
+  „dojedź pod sam cel" jako rzekomy duplikat. Efekt na zgłoszonej relacji
+  „Wojszyce → Dworzec Główny": pociąg KD 60252 wreszcie jest na liście,
+  remisując z autobusem 113 na 09:49.
+- **2026-09-10** — **pieszo wychodzi się też ze STARTU relacji**, nie tylko
+  przy przesiadce. Do tej pory przejście relaksowało się wyłącznie po
+  wysiadaniu z pojazdu, więc z przystanku startowego nie dawało się nigdzie
+  odejść: relacja „Wojszyce → Dworzec Główny" pokazywała sam autobus, choć
+  cztery minuty marszu dalej stoi przystanek, z którego jedzie się szybciej.
+  Teraz otwiera ją etap „Przejście pieszo do: Parafialna", a karta podaje
+  godzinę WYJŚCIA (10:10), nie odjazdu pojazdu (10:14) — inaczej obiecywałaby
+  moment, w którym pasażer stoi jeszcze kilkaset metrów od słupka. Jeden krok,
+  tak samo jak przy przesiadce. Samo dojście pieszo NIE jest propozycją trasy
+  (`_scan` celowo nie ogłasza wtedy celu). Kotwiczenie mapy dostało osobny
+  zbiór `anchor_stops`, bo `origin_latest` MUSI zostać policzone z prawdziwego
+  startu — wpuszczenie tam słupka leżącego bliżej celu podniosłoby próg
+  cofnięcia dla całej mapy. Przy okazji `MAX_JOURNEY_VISITS` z 500 na 4000:
+  stara wartość była kalibrowana na graf sprzed kolei i sprzed chodzenia,
+  a przy gęstszym grafie budżet wyczerpywał się, ZANIM przeszukiwanie zeszło
+  do segmentów dojeżdżających do celu — „Wrocław Główny → Warszawa Centralna"
+  dawało PUSTĄ listę mimo mapy z 1300 segmentów. Podniesienie jest darmowe
+  (2,30 s → 2,38 s na pięciu relacjach); koszt zapytania siedzi gdzie indziej.
+  Promienia NIE ruszono — patrz wpis wyżej i znane ograniczenia: przy 300 m
+  pociąg z Wojszyc jest na liście (po jednym przystanku autobusem pod stację),
+  a 400 m dokłada tylko wariant „wyjdź z domu prosto na stację", za to
+  dwukrotnie wydłuża najcięższe zapytania i zabiera propozycje na LEŚNICY.
+- **2026-09-10** — **pieszo przechodzi się teraz między RÓŻNYMI przystankami**,
+  a nie tylko między słupkami o identycznej nazwie. Krawędź piesza bierze się
+  z odległości (`gtfs._nearby_bridges`, 300 m), więc dwa przystanki po dwóch
+  stronach skrzyżowania przestały być dla wyszukiwarki punktami
+  niepołączonymi. Najwięcej zmienia to na styku sieci: dworzec kolejowy prawie
+  nigdy nie nazywa się tak, jak przystanki pod nim („Wrocław Główny" vs
+  „DWORZEC GŁÓWNY"), więc kolej i MPK stykały się dotąd tylko tam, gdzie nazwy
+  przypadkiem się pokryły — dziś jest 414 takich przejść zamiast garstki, a
+  relacja „Dworzec Główny → Oleśnica" po raz pierwszy układa się jako
+  autobus + 5 min pieszo + pociąg. Czas przejścia przestał być stałą 3 min:
+  liczy się z odległości i krawędź niesie go ze sobą (podłoga 3 min została,
+  bo to w niej siedzi bufor przesiadki, którego przejście jako jedyne nie
+  dostaje). Przy okazji rozdzielone zostały dwa pytania, które przy dawnej,
+  wąskiej relacji miały zawsze tę samą odpowiedź: „czy da się tam dojść"
+  (`_sibling_places`) i „czy już tam byłem" (`_same_place_stops`) — reguła
+  zawracania pyta o to drugie i rozwijana zasięgiem marszu uznawałaby za
+  minięte wszystko w promieniu od trasy. Promień 300 m jest dobrany pomiarem,
+  nie z sufitu: 400 m dokłada głównie pary przystanków wzdłuż tej samej ulicy,
+  dwukrotnie wydłuża najcięższe zapytania i rozpycha kotwice mapy tak, że z
+  listy propozycji znikają dobre trasy; 250 m gubi już realne dojścia.
+  Znane ograniczenia (patrz niżej): dojścia pieszo z samego startu relacji
+  nadal nie ma, a lista propozycji bywa krótsza przez sposób kotwiczenia
+  punktów wsiadania.
 - **2026-09-10** — „Plac Grunwaldzki" i „PL. GRUNWALDZKI" to jedno zapytanie.
   Do kaskady dopasowań (`gtfs.match_stop`) doszedł trzeci, najsłabszy poziom
   kluczy: bez ogonków, bez kropek i z rozwiniętymi skrótami
@@ -1457,11 +1582,40 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   oknie bywa tego sporo.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
-- Brak tras pieszych po mieście — przesiadka tylko między słupkami tego
-  samego miejsca, czyli o identycznej nazwie albo wskazanych ręcznie
-  w `naming.py` (sześć wrocławskich par stacja PKP ↔ przystanek
-  MPK). Pozostałe stacje, przy których MPK ma przystanek pod inną nazwą,
-  wciąż czekają na dopisanie do tabeli.
+- Chodzenie ma zasięg JEDNEGO kroku w promieniu 300 m — z przystanku
+  startowego (`_origin_walk`) albo po wysiadaniu z pojazdu. Nie ma więc
+  łańcucha dwóch przejść pod rząd (nie dojdziesz „przez" przystanek pośredni
+  do trzeciego), ani prawdziwego routingu po chodnikach — odległość liczy się
+  w linii prostej ze współczynnikiem nadłożenia drogi. Skutek uboczny widać
+  np. z „Wojszyc": stacja Wrocław Wojszyce leży 359 m od słupka, czyli poza
+  promieniem, choć od sąsiedniej „Przystankowej" dzieli ją 106 m — dwoma
+  krokami byłaby osiągalna, jednym nie jest — ale START i CEL relacji mają
+  własny, większy promień (`WALK_ACCESS_M`), więc z „Wojszyc" na tę stację
+  po prostu się dochodzi. Ograniczenie zostaje tam, gdzie dwoma krokami
+  trzeba by iść W ŚRODKU trasy.
+- Samo dojście pieszo NIGDY nie jest propozycją trasy: wyszukiwarka planuje
+  przejazdy, a trasa bez ani jednego przejazdu nie ma godziny wyjazdu, na
+  której opiera się okno mapy (`_journey_start`).
+- Start/cel wskazany KLIKNIĘCIEM W MAPĘ wciąż nie ma czasu dojścia: każdy
+  słupek w promieniu suwaka (domyślnie 1000 m) liczy się jako dostępny
+  natychmiast (`gtfs.nearby_stops`). Od kiedy przesiadka piesza czas ma,
+  jest to niespójność widoczna w obie strony — 900 m na starcie za darmo,
+  350 m w środku trasy za 5 minut.
+- Mapa przepływów pozwala wsiąść w segment WYŁĄCZNIE w jego zakotwiczonym
+  początku (`_extract_transfer_graph`), a kotwica to najwcześniejsze
+  zdążalne dołączenie. Gęstsza siatka przejść pieszych przesuwa te kotwice
+  wstecz i zabiera ze sobą punkty przesiadki, więc na części relacji lista
+  propozycji bywa krótsza, niż mogłaby być. Próba dopuszczenia wsiadania
+  w KAŻDYM narysowanym punkcie segmentu (2026-09-10) skończyła się
+  wycofaniem: graf puchnie do zera propozycji, a wsiadanie w środku segmentu
+  wywraca `arr_times` — jeden punkt wsiadania jest nośny dla kilku struktur
+  naraz. Sama mapa i `plan_route` tego nie mają — to ograniczenie wyłącznie
+  listy propozycji.
+- Scalanie stacji PKP z przystankiem MPK o INNEJ nazwie w jedno miejsce
+  (`naming.PLACE_MERGES`) to ręczna tabela sześciu wrocławskich par —
+  pozostałe takie pary czekają na dopisanie. Przesiadki to nie blokuje
+  (most pieszy bierze się z odległości, nie z nazwy), dotyczy wyłącznie
+  tego, co wyszukiwarka rozwija jako jedno miejsce.
 - Rower miejski (`bikes.py`) ma **asymetrię wobec reszty wyszukiwarki**:
   dojście do stacji roweru kosztuje czas liczony z odległości, a słupek
   w promieniu `range_m` (domyślnie 1 km) od klikniętego punktu liczy się
