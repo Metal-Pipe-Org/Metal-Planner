@@ -1,0 +1,237 @@
+name: Claude - oceń PR
+
+# Każdy nowo otwarty pull request dostaje jeden komentarz z oceną: werdykt,
+# podsumowanie zmian, analiza kodu i rzeczy do przemyślenia. Komentarz pojawia
+# się od razu po otwarciu PR-a z informacją, że Claude właśnie go czyta, a po
+# skończonej analizie workflow podmienia go na gotową ocenę — zamiast dwóch
+# wpisów pod PR-em jest jeden, który dojrzewa w miejscu.
+#
+# Ocena jest do przeczytania przez człowieka. Claude nie wystawia recenzji
+# GitHuba, nie zatwierdza, nie blokuje i nie merguje — i nie dostaje tu narzędzi
+# do pisania po plikach, więc nie zmieni kodu ocenianego PR-a.
+#
+# Czego Claude ma szukać i jak ma wyglądać sam komentarz — sekcje, skala
+# emotikonów werdyktu, długość — siedzi w `.claude/commands/review-pr.md`
+# (sekcja „4. Wstaw ocenę" to gotowy szablon treści). Ten plik odpowiada tylko
+# za to, KIEDY ocena leci i gdzie ląduje; żeby zmienić JEJ KSZTAŁT, nie ruszaj
+# workflow, tylko tamten plik.
+#
+# Wyzwalacze celowo nie obejmują `synchronize`: ocena leci raz, przy otwarciu
+# (albo przy wyjściu z wersji roboczej), żeby dosyłanie commitów nie sypało
+# kolejnymi ocenami pod ten sam PR. Po większych poprawkach ocenę można
+# powtórzyć ręcznie: Actions -> „Claude - oceń PR" -> Run workflow -> numer PR-a.
+#
+# Ten plik — jako jedyny z naszych workflow — musi żyć na `testing`, a nie na
+# `main`. Pozostałe chodzą na zdarzeniach (`issues`, `issue_comment`,
+# `pull_request_target`), które GitHub bierze zawsze z gałęzi domyślnej.
+# `pull_request` jest inny: bierze workflow z commitu scalenia PR-a z gałęzią
+# bazową, a bazą PR-ów w tym repo jest `testing` (na `main` wchodzi dopiero
+# wydanie). Gdyby plik siedział tylko na `main`, PR-y do `testing` nie
+# uruchamiałyby niczego.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    # Bazy, których ocena dotyczy: zwykłe PR-y do `testing` i PR-y wydaniowe
+    # `testing` -> `main`. PR-y o innej bazie zostawiamy bez komentarza.
+    branches: [testing, main]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Numer PR-a do ponownej oceny"
+        required: true
+
+# Jedna ocena na PR. Nowsze wołanie ubija starsze, żeby dwa biegi nie
+# podmieniały sobie nawzajem komentarza.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Wersje robocze pomijamy — do oceny zgłasza je dopiero „Ready for review",
+    # które przychodzi tu osobnym zdarzeniem.
+    #
+    # PR-y z forków odsiewamy, bo przy `pull_request` z obcego repozytorium
+    # GitHub nie daje sekretów (nie byłoby czym uwierzytelnić Claude'a), a sam
+    # wyzwalacz `pull_request_target` odpada: pobieramy tu kod z PR-a.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.pull_request.draft == false
+          && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Ustal PR do oceny
+        id: pr
+        env:
+          N: ${{ github.event.pull_request.number || github.event.inputs.pr }}
+        run: |
+          set -euo pipefail
+
+          # Ręczny bieg dostaje sam numer, więc czubek i gałąź bazową
+          # dociągamy z API — dla obu ścieżek dalej wygląda to tak samo.
+          json=$(gh api "repos/$REPO/pulls/$N")
+          head_sha=$(printf '%s' "$json" | jq -r .head.sha)
+          base_ref=$(printf '%s' "$json" | jq -r .base.ref)
+          state=$(printf '%s' "$json" | jq -r .state)
+
+          if [ "$state" != open ]; then
+            echo "PR #$N nie jest otwarty (stan: $state) — nie oceniam." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "go=true"
+            echo "number=$N"
+            echo "head_sha=$head_sha"
+            echo "base_ref=$base_ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout czubka PR-a
+        if: steps.pr.outputs.go == 'true'
+        uses: actions/checkout@v6
+        with:
+          # Konkretny commit, a nie `refs/pull/N/merge`: ocena ma dotyczyć tego,
+          # co autor faktycznie wypchnął. Pełna historia, żeby dało się porównać
+          # z gałęzią bazową.
+          ref: ${{ steps.pr.outputs.head_sha }}
+          fetch-depth: 0
+
+      - name: Weź instrukcję oceny z gałęzi bazowej
+        if: steps.pr.outputs.go == 'true'
+        env:
+          BASE: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+
+          # W drzewie mamy czubek PR-a, a więc razem z ocenianym kodem także
+          # jego wersję `.claude/` — z instrukcją, która mówi Claude'owi, jak
+          # ma oceniać, i z ustawieniami, które Claude Code wykonuje. To zły
+          # plik do słuchania: PR odgałęziony przed wprowadzeniem oceny w ogóle
+          # go nie ma, a PR, który go zmienia, przepisywałby sobie własną
+          # recenzję. Instrukcja ma pochodzić z gałęzi bazowej, nie z PR-a —
+          # oceniany jest kod, nie to, co PR mówi o sobie samym.
+          CMD=.claude/commands/review-pr.md
+          cp "$CMD" "$RUNNER_TEMP/review-pr.md" 2>/dev/null || true
+
+          rm -rf .claude CLAUDE.md
+          for path in .claude CLAUDE.md; do
+            if git cat-file -e "origin/$BASE:$path" 2>/dev/null; then
+              git checkout "origin/$BASE" -- "$path"
+              echo "Wzięte z origin/$BASE: $path"
+            fi
+          done
+
+          if [ -f "$CMD" ]; then
+            exit 0
+          fi
+
+          # Pierwszy taki PR: instrukcja dopiero nim wchodzi, na bazie jej
+          # jeszcze nie ma. Później ta gałąź już nie jest używana.
+          if [ -f "$RUNNER_TEMP/review-pr.md" ]; then
+            mkdir -p "$(dirname "$CMD")"
+            cp "$RUNNER_TEMP/review-pr.md" "$CMD"
+            echo "Na origin/$BASE nie ma jeszcze $CMD — biorę wersję z tego PR-a."
+          else
+            echo "Nie ma $CMD ani na origin/$BASE, ani w tym PR-rze." >&2
+            exit 1
+          fi
+
+      - name: Zapowiedz ocenę w komentarzu
+        id: hello
+        if: steps.pr.outputs.go == 'true'
+        env:
+          N: ${{ steps.pr.outputs.number }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Znacznik w komentarzu HTML jest niewidoczny w treści i służy za ślad,
+          # że ocena jeszcze nie doszła: Claude podmienia całą treść razem z nim,
+          # więc jego obecność po biegu znaczy „nie udało się".
+          cat > "$RUNNER_TEMP/hello.md" <<MD
+          <!-- claude-review:pending -->
+
+          🤔 **Claude czyta ten PR…**
+
+          Za chwilę podmienię ten komentarz na ocenę: werdykt, podsumowanie zmian, analizę kodu i rzeczy do przemyślenia. Zwykle zajmuje to kilka minut — [podgląd biegu](${RUN}).
+          MD
+
+          # `gh pr comment` wypisuje URL komentarza z kotwicą #issuecomment-<id>.
+          url=$(gh pr comment "$N" --repo "$REPO" --body-file "$RUNNER_TEMP/hello.md")
+          id=${url##*issuecomment-}
+          echo "Komentarz-zaczepka: $url"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Python
+        if: steps.pr.outputs.go == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Zależności (żeby Claude mógł odpalić pytest)
+        if: steps.pr.outputs.go == 'true'
+        run: pip install -r requirements-dev.txt
+
+      - name: Claude
+        id: claude
+        if: steps.pr.outputs.go == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} COMMENT_ID: ${{ steps.hello.outputs.id }}
+
+            PR celuje w gałąź `${{ steps.pr.outputs.base_ref }}`; w drzewie masz
+            jego czubek (${{ steps.pr.outputs.head_sha }}), więc zmianę zobaczysz
+            przez `git diff origin/${{ steps.pr.outputs.base_ref }}...HEAD`.
+
+            Twoje jedyne wyjście to podmiana treści komentarza
+            ${{ steps.hello.outputs.id }} na gotową ocenę. Nie zakładaj nowych
+            komentarzy, nie wystawiaj recenzji GitHuba i nie ruszaj kodu.
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 30
+            --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(pytest:*),Bash(python:*),Bash(python3:*),Bash(cat:*),Bash(ls:*)'
+
+      - name: Domknij komentarz, gdy ocena nie doszła
+        # Bieg mógł paść, wyczerpać limit tur albo zostać ubity przez nowszy.
+        # Zostawianie pod PR-em wiecznego „Claude czyta ten PR…" byłoby mylące,
+        # więc zamieniamy zaczepkę na uczciwą informację z linkiem do logu.
+        if: always() && steps.hello.outputs.id != ''
+        continue-on-error: true
+        env:
+          ID: ${{ steps.hello.outputs.id }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          body=$(gh api "repos/$REPO/issues/comments/$ID" --jq .body)
+          case "$body" in
+            *"claude-review:pending"*) ;;
+            *) echo "Ocena doszła — nie ruszam komentarza."; exit 0 ;;
+          esac
+
+          cat > "$RUNNER_TEMP/failed.md" <<MD
+          ⚪ **Ocena się nie udała**
+
+          Claude nie dokończył analizy tego PR-a — [log biegu](${RUN}). Ocenę można powtórzyć ręcznie: Actions → „Claude - oceń PR" → Run workflow → numer tego PR-a.
+          MD
+          gh api --method PATCH "repos/$REPO/issues/comments/$ID" \
+            -F body=@"$RUNNER_TEMP/failed.md"
+
+          echo "Komentarz $ID zamieniony na informację o nieudanym biegu." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
