@@ -56,6 +56,10 @@ on:
       pr:
         description: "Numer PR-a do ponownej oceny"
         required: true
+      debug:
+        description: "Wypisz pełną rozmowę Claude'a w logu (log jest publiczny!)"
+        type: boolean
+        default: false
 
 # Jedna ocena na PR. Nowsze wołanie ubija starsze, żeby dwa biegi nie
 # podmieniały sobie nawzajem komentarza.
@@ -197,6 +201,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Normalnie action pokazuje w logu tylko wynik, bez rozmowy i bez
+          # tego, co Claude wyczytał z repo — i tak ma zostać, bo log biegu
+          # w publicznym repozytorium czyta każdy. Przełącznik jest po to,
+          # żeby przy ręcznym powtórzeniu dało się zobaczyć, na co poszły tury
+          # i które wywołania odbiła lista `--allowedTools`.
+          show_full_output: ${{ github.event.inputs.debug == 'true' }}
           prompt: |
             /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} COMMENT_ID: ${{ steps.hello.outputs.id }}
 
@@ -207,9 +217,17 @@ jobs:
             Twoje jedyne wyjście to podmiana treści komentarza
             ${{ steps.hello.outputs.id }} na gotową ocenę. Nie zakładaj nowych
             komentarzy, nie wystawiaj recenzji GitHuba i nie ruszaj kodu.
+          # Limit tur musi mieć zapas na to, czego instrukcja wymaga: opis PR-a,
+          # diff, komentarze, `README.md`, `docs/` i CAŁE pliki wokół zmienionych
+          # linii — a `planner.py` czy `static/app.js` mają po kilka tysięcy
+          # linii, więc każdy z nich to kilka odczytów. Przy trzydziestu turach
+          # ocena PR-a na dwanaście plików padła na `error_max_turns`, zanim
+          # zdążyła cokolwiek napisać. Prawdziwym bezpiecznikiem jest
+          # `timeout-minutes` powyżej; tura trwa tu kilka sekund, więc sto tur
+          # spokojnie się w nim mieści.
           claude_args: |
             --model claude-sonnet-5
-            --max-turns 30
+            --max-turns 100
             --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(cat:*),Bash(ls:*)'
 
       - name: Domknij komentarz, gdy ocena nie doszła
