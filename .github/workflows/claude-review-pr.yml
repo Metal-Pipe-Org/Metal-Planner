@@ -10,6 +10,13 @@ name: Claude - oceń PR
 # GitHuba, nie zatwierdza, nie blokuje i nie merguje — i nie dostaje tu narzędzi
 # do pisania po plikach, więc nie zmieni kodu ocenianego PR-a.
 #
+# Testów nie uruchamiamy: zestaw nie jest jeszcze właściwie skonfigurowany
+# (stąd `tests.yml` odpalany wyłącznie ręcznie), więc jego wynik niczego by nie
+# rozstrzygnął, a łatwo byłoby na jego podstawie postawić PR-owi fałszywy
+# zarzut. Dlatego nie ma tu ani Pythona, ani zależności, a Claude nie dostaje
+# `Bash(pytest:*)`. Gdy testy będą gotowe, wraca setup-python, `pip install
+# -r requirements-dev.txt`, pytest w allowedTools i sekcja 2 instrukcji.
+#
 # Czego Claude ma szukać i jak ma wyglądać sam komentarz — sekcje, skala
 # emotikonów werdyktu, długość — siedzi w `.claude/commands/review-pr.md`
 # (sekcja „4. Wstaw ocenę" to gotowy szablon treści). Ten plik odpowiada tylko
@@ -174,18 +181,6 @@ jobs:
           echo "Komentarz-zaczepka: $url"
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
-      - name: Python
-        if: steps.pr.outputs.go == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-
-      - name: Zależności (żeby Claude mógł odpalić pytest)
-        if: steps.pr.outputs.go == 'true'
-        run: pip install -r requirements-dev.txt
-
       - name: Claude
         id: claude
         if: steps.pr.outputs.go == 'true'
@@ -205,7 +200,7 @@ jobs:
           claude_args: |
             --model claude-sonnet-5
             --max-turns 30
-            --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(pytest:*),Bash(python:*),Bash(python3:*),Bash(cat:*),Bash(ls:*)'
+            --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(cat:*),Bash(ls:*)'
 
       - name: Domknij komentarz, gdy ocena nie doszła
         # Bieg mógł paść, wyczerpać limit tur albo zostać ubity przez nowszy.
