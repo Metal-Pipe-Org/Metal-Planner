@@ -27,7 +27,9 @@ name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 #
 # PR zamknięty bez merge'a i PR cofnięty do wersji roboczej tylko zdejmują
 # etykiety oczekiwania: zgłoszenie zostaje otwarte i znów czeka na kogoś.
-# Etykiety są czystymi znacznikami stanu — żadna niczego nie uruchamia.
+# Etykiety są czystymi znacznikami stanu — żadna niczego nie uruchamia — i
+# wykluczają się wzajemnie: zgłoszenie nosi najwyżej jedną, więc nadanie nowej
+# zdejmuje te, które już na nim były (także nadane przez wcześniejsze PR-y).
 #
 # Plik żyje na `main`: przy `pull_request_target` GitHub bierze workflow
 # z gałęzi domyślnej repozytorium (GITHUB_REF wskazuje default branch),
@@ -157,16 +159,41 @@ jobs:
           gh label create "$LABEL_MENTION" --repo "$REPO" --color C5DEF5 \
             --description "Jakiś PR o tym wspomina, bez deklaracji zamknięcia" || true
 
+          # Etykiety stanu wykluczają się wzajemnie — zgłoszenie ma najwyżej
+          # jedną naraz. Nadając nową, zdejmujemy w tym samym wywołaniu te,
+          # które już na zgłoszeniu leżą: inaczej po kolejnym PR-ze zostałaby
+          # obok siebie i „PR created", i „waiting for PR review".
+          STATE_LABELS=$(jq -nc \
+            --arg a "$LABEL_WAITING" --arg b "$LABEL_MENTION" --arg c "$LABEL_MERGED" \
+            '[$a, $b, $c]')
+
           oznacz() {
             local label="$1"; shift
-            local n state
+            local n json state other
+            local -a args
             for n in "$@"; do
-              state=$(gh api "repos/$REPO/issues/$n" --jq .state)
+              json=$(gh api "repos/$REPO/issues/$n")
+              state=$(printf '%s' "$json" | jq -r .state)
               if [ "$state" != open ]; then
                 echo "#$n nie jest otwarte (stan: $state) — nie etykietuję."
                 continue
               fi
-              gh issue edit "$n" --repo "$REPO" --add-label "$label"
+
+              # Zdejmujemy tylko etykiety stanu, które zgłoszenie naprawdę ma —
+              # `--remove-label` na nieistniejącej etykiecie wywraca całe
+              # wywołanie, a razem z nim nadanie nowej.
+              args=(--add-label "$label")
+              while IFS= read -r other; do
+                [ -n "$other" ] || continue
+                args+=(--remove-label "$other")
+                echo "#$n: zdejmuję nieaktualne \"$other\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              done < <(printf '%s' "$json" | jq -r \
+                --arg keep "$label" --argjson stany "$STATE_LABELS" \
+                '[.labels[].name]
+                 | map(select(. as $x | $x != $keep and ($stany | index($x)) != null))
+                 | .[]')
+
+              gh issue edit "$n" --repo "$REPO" "${args[@]}"
               echo "#$n: etykieta \"$label\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
             done
           }
@@ -207,8 +234,8 @@ jobs:
 
       - name: Oznacz wspomniane zgłoszenia jako zmergowane
         # Ścieżka B kończy się pytaniem do człowieka, nie zamknięciem: etykieta
-        # mówi „PR wszedł, sprawdź, czy to załatwia sprawę". Biegnie po kroku
-        # zdejmującym, więc "PR created" zdążyło już zniknąć.
+        # mówi „PR wszedł, sprawdź, czy to załatwia sprawę". Poprzednie etykiety
+        # stanu — także te nadane przez inne PR-y — schodzą razem z nadaniem tej.
         if: >-
           steps.refs.outputs.mention != ''
           && github.event.action == 'closed'
@@ -221,13 +248,30 @@ jobs:
           gh label create "$LABEL_MERGED" --repo "$REPO" --color D4C5F9 \
             --description "Wspominający PR jest zmergowany — do sprawdzenia" || true
 
+          STATE_LABELS=$(jq -nc \
+            --arg a "$LABEL_WAITING" --arg b "$LABEL_MENTION" --arg c "$LABEL_MERGED" \
+            '[$a, $b, $c]')
+
           for n in $MENTION; do
-            state=$(gh api "repos/$REPO/issues/$n" --jq .state)
+            json=$(gh api "repos/$REPO/issues/$n")
+            state=$(printf '%s' "$json" | jq -r .state)
             if [ "$state" != open ]; then
               echo "#$n nie jest otwarte (stan: $state) — nie etykietuję."
               continue
             fi
-            gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_MERGED"
+
+            args=(--add-label "$LABEL_MERGED")
+            while IFS= read -r other; do
+              [ -n "$other" ] || continue
+              args+=(--remove-label "$other")
+              echo "#$n: zdejmuję nieaktualne \"$other\"" | tee -a "$GITHUB_STEP_SUMMARY"
+            done < <(printf '%s' "$json" | jq -r \
+              --arg keep "$LABEL_MERGED" --argjson stany "$STATE_LABELS" \
+              '[.labels[].name]
+               | map(select(. as $x | $x != $keep and ($stany | index($x)) != null))
+               | .[]')
+
+            gh issue edit "$n" --repo "$REPO" "${args[@]}"
             echo "#$n: etykieta \"$LABEL_MERGED\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
           done
 
