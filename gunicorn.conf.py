@@ -20,11 +20,11 @@ import os
 # Alias jest konieczny: gunicorn po wykonaniu tego pliku przechodzi po jego
 # nazwach modułowych i każdą pokrywającą się z nazwą swojego ustawienia
 # próbuje ustawić. "config" to jego własna opcja -c/--config (typu string),
-# więc goły `import config` podstawiłby jej obiekt modułu i master padłby na
+# więc goły `getdata config` podstawiłby jej obiekt modułu i master padłby na
 # "Not a string" - w kółko, bo compose restartuje kontener.
 import config as _config  # noqa: F401
-import update_gtfs
-import update_pkp
+from getdata import update_gtfs
+from getdata import update_pkp
 
 bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 workers = int(os.environ.get("WEB_CONCURRENCY", "1"))

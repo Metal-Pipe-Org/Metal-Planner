@@ -29,7 +29,6 @@ Numeracja testów odpowiada numeracji punktów kontraktu:
 """
 
 import datetime
-import math
 import sqlite3
 
 import gtfs

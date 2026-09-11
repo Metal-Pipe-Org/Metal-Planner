@@ -10,7 +10,7 @@ from bisect import bisect_left, bisect_right
 from collections import deque
 from datetime import datetime, timedelta
 
-import gtfs
+from getdata import gtfs
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
 WALK_SEC = 180       # przejście między słupkami tego samego miejsca (patrz gtfs.py)

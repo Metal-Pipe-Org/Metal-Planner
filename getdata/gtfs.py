@@ -355,7 +355,7 @@ def load_day(day):
 
     Import pkp lokalny (nie na górze pliku): pkp.py sam importuje gtfs (żeby
     dociągnąć gtfs._merge_bridges/_haversine_m przy doklejaniu połączeń
-    kolejowych - patrz pkp.augment_day) - import na górze obu plików
+    kolejowych - patrz pkp.augment_day) - getdata na górze obu plików
     zapętliłby się przy starcie procesu. W środku funkcji cyklu nie ma: oba
     moduły są już w pełni załadowane, zanim load_day() zostanie wywołane.
     """

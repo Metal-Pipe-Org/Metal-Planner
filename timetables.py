@@ -19,7 +19,7 @@ interesują nas wszystkie kursy doby rozkładowej, także te wyjeżdżające po
 północy (25:10 to kurs "dzisiejszy", tak samo jak w rozkładzie na słupku).
 """
 
-import gtfs
+from getdata import gtfs
 
 # route_type z GTFS -> rodzaj używany przez front (kolor linii, etykieta).
 # Ten sam podział, co planner._line_parts, tylko liczony z typu trasy, a nie

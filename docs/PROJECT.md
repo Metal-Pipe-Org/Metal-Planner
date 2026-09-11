@@ -18,7 +18,7 @@ możliwości i sam wybiera.
 
 Trzy warstwy:
 
-### 1. Pipeline danych — `update_gtfs.py`
+### 1. Pipeline danych — `../getdata`
 
 Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 
@@ -28,18 +28,18 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 2. Pobiera zip (~12 MB), parsuje pliki CSV (`stops`, `routes`, `trips`,
    `stop_times`, `calendar`, `shapes` — geometria tras po ulicach/torach…)
    i buduje `data/gtfs_new.sqlite`.
-3. Dokleja do niej rozkład gminy Siechnice (`siechnice.py`), jeśli jest
+3. Dokleja do niej rozkład gminy Siechnice (`../getdata`), jeśli jest
    włączony — patrz niżej.
 4. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
    aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
    wczorajsza baza zostaje nietknięta.
 
-#### Drugie źródło — `siechnice.py`
+#### Drugie źródło — `../getdata`
 
 Autobusów gminy Siechnice nie ma w żadnym otwartym zbiorze: ani we
 wrocławskim GTFS, ani na dane.gov.pl, ani w Krajowym Punkcie Dostępowym.
 Jedyne strukturalne źródło to niedokumentowane API systemu kiedyPrzyjedzie,
-z którego `siechnice.py` składa kompletne kursy: odjazdy o tym samym
+z którego `../getdata` składa kompletne kursy: odjazdy o tym samym
 `trip_id`, ułożone po `index`, to jeden przejazd — czyli dokładnie `trip`
 + `stop_times`. Numer linii wychodzi z przecięcia zbiorów linii obsługujących
 kolejne słupki kursu.
@@ -63,7 +63,7 @@ Ma trzy punkty wejścia: wywołanie ręczne (albo z crona), start serwera
 i codzienny harmonogram. Ten ostatni to `start_daily_scheduler()` — wątek
 uruchamiany z hooka `on_starting` w `gunicorn.conf.py` (proces master, przed
 forkiem workerów, więc jeden na kontener) i z `app.py` przy starcie lokalnym.
-O godzinie z `GTFS_AUTO_UPDATE_HOUR` odpala `update_gtfs.py` jako podproces —
+O godzinie z `GTFS_AUTO_UPDATE_HOUR` odpala `../getdata` jako podproces —
 `fork+exec` zamiast wątku, bo budowa SQLite w wątku procesu, który forkuje
 workery, to prosta droga do zakleszczenia świeżo zforkowanego dziecka.
 Bez harmonogramu kontener stojący dłużej niż okno ważności paczki (~3 tygodnie)
@@ -71,7 +71,7 @@ przestałby znajdować jakiekolwiek kursy.
 
 Odpala się też sam przy starcie serwera — bez bazy blokująco (nie ma czego
 serwować), z bazą w tle, więc serwer wstaje od razu na starych danych,
-a atomowa podmiana + mtime w kluczu cache'a w `gtfs.py` sprawiają, że świeży
+a atomowa podmiana + mtime w kluczu cache'a w `../getdata` sprawiają, że świeży
 rozkład wchodzi bez restartu. Dwie ścieżki, bo dwa punkty wejścia:
 `docker/entrypoint.sh` (kontener, przed gunicornem) i `refresh_on_start()`
 wywołane z `app.py` (uruchomienie lokalne). Lokalna dodatkowo pomija bazę
@@ -80,7 +80,7 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
 
 ### 2. Backend — Flask
 
-- **`gtfs.py`** — dostęp do SQLite. Przy pierwszym zapytaniu danego dnia
+- **`../getdata`** — dostęp do SQLite. Przy pierwszym zapytaniu danego dnia
   wyznacza kursujące tego dnia kursy (logika `calendar.txt`), buduje w RAM
   tablicę ~1 mln „połączeń" (pojedynczych przejazdów między sąsiednimi
   przystankami, posortowanych po odjeździe) i cache'uje ją. Klucz cache
@@ -425,7 +425,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 - `GET /api/stops` — wszystkie słupki MPK i (o ile skonfigurowano
   `PKP_API_KEY` i geokodowanie zdążyło już znaleźć współrzędne - patrz
-  `pkp.py`/`update_pkp.py`) stacje PKP: `[{name, lat, lon, kind: "stop"|
+  `../getdata`/`../getdata`) stacje PKP: `[{name, lat, lon, kind: "stop"|
   "train"}, …]`. `kind` mówi frontowi, jakim stylem narysować marker
   (`static/app.js`) - reszta pól jest taka sama dla obu rodzajów.
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
@@ -459,7 +459,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
   `plan_flow` dokładnie tak samo, jak gdyby PKP nie istniało. Połączenia
   kolejowe są doklejone WPROST do tablicy połączeń, którą skanuje CSA
-  (`gtfs.load_day` → `pkp.augment_day`, patrz `pkp.py`) — dla wyszukiwarki
+  (`gtfs.load_day` → `pkp.augment_day`, patrz `../getdata`) — dla wyszukiwarki
   stacja PKP to zwykły przystanek, a przesiadka pociąg↔MPK to zwykła
   przesiadka — przez to samo `siblings`, co przejście między słupkami jednego
   miejsca, bo stacja przechodzi przez to samo sklejanie w miejsce
@@ -468,7 +468,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   Efekt: relacja „Warszawa Centralna → Rynek” po prostu działa — jedna trasa,
   etapy kolejowe i miejskie razem, bez żadnego specjalnego pola w odpowiedzi.
   Stacja PKP bez ustalonych współrzędnych (geokodowanie w toku - patrz
-  `update_pkp.py`) jest dla wyszukiwarki niewidoczna, a etap kolejowy nie ma
+  `../getdata`) jest dla wyszukiwarki niewidoczna, a etap kolejowy nie ma
   geometrii trasy (`path: []` na etapie — sama stacja, jeśli ma współrzędne,
   i tak ma marker na mapie, patrz `/api/stops`).
 - `GET /api/line?num=17&mode=tram&date=YYYY-MM-DD` — rozkład jednej linii:
@@ -521,11 +521,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 | Plik | Rola |
 |---|---|
-| `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
-| `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
+| `../getdata` | pobranie GTFS + budowa SQLite + atomowa podmiana |
+| `../getdata` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
 | `naming.py` | tabele nazewnicze: pary stacja PKP ↔ przystanek MPK, rozwijane skróty - dane, nie algorytm |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
-| `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
+| `../getdata` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
@@ -539,7 +539,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
 | `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
 | `data/gtfs.sqlite` | baza rozkładu MPK (poza gitem) |
-| `update_pkp.py` | pobranie rozkładu PKP + budowa SQLite + atomowa podmiana + geokodowanie stacji |
+| `../getdata` | pobranie rozkładu PKP + budowa SQLite + atomowa podmiana + geokodowanie stacji |
 | `data/pkp.sqlite` | baza rozkładu PKP, tylko z `PKP_API_KEY` (poza gitem) |
 | `data/pkp_station_coords.json` | współrzędne stacji PKP z geokodowania (poza gitem) |
 | `docs/` | dokumentacja: ten plik, `ROUTING_ALGORITHM.md`, `FLOW_MAP_CONTRACT.md` |
@@ -662,7 +662,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - **2026-08-30** — geokodowanie stacji PKP uproszczone na wyraźną prośbę
   użytkownika do DWÓCH źródeł: WYŁĄCZNIE mapa PLK i portal pasażera -
   OpenStreetMap/Overpass i Nominatim (razem z całym mechanizmem "stacje za
-  granicą", który na nich polegał) usunięte z `update_pkp.py` całkowicie,
+  granicą", który na nich polegał) usunięte z `../getdata` całkowicie,
   nie tylko zdegradowane do zapasowych. Powód: oba to zewnętrzne geokodery
   dopasowujące po samej nazwie miejscowości, bez wiedzy o tym, że Polska ma
   wiele miejsc o tej samej nazwie w różnych regionach - historia tego
@@ -805,7 +805,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `.ac-tag`) - nazwa w bazie (`stations.name`) zostaje czysta, żeby nie
   zepsuć dopasowywania w wyszukiwarce.
 
-- **2026-08-29** — wyszukiwarka kolejowa (`pkp.py`) przebudowana z osobnego
+- **2026-08-29** — wyszukiwarka kolejowa (`../getdata`) przebudowana z osobnego
   silnika (własne zapytania SQL o połączenia bezpośrednie, sklejane
   z wynikiem MPK w `routes.py` specjalnymi gałęziami — `rail_only`,
   „stacja-brama") na PRAWDZIWE połączenie z Connection Scanem w
@@ -847,7 +847,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   Naprawka: `tests/conftest.py` dostał autouse fixture wyłączający PKP
   domyślnie dla wszystkich testów; testy, którym PKP jest faktycznie
   potrzebne (`tests/test_pkp.py`), same je z powrotem włączają.
-- **2026-08-29** — dokładność geokodowania stacji PKP (`update_pkp.py`,
+- **2026-08-29** — dokładność geokodowania stacji PKP (`../getdata`,
   patrz `_geocode_one`) - dwa niezależne błędy znalezione na żywo, oba
   naprawione zmianą samej strategii zapytań do Nominatim, bez nowej
   zależności:
@@ -912,10 +912,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
      przejrzeć ich sporo, zanim w ogóle trafi na prawdziwą bramę.
 - **2026-08-29** — wyszukiwarka kolejowa (patrz wpis niżej) przepięta
   z odpytywania API PKP przy KAŻDYM wyszukiwaniu na lokalny pipeline
-  (`update_pkp.py`), tym samym schematem co GTFS dla MPK: jedno zapytanie
+  (`../getdata`), tym samym schematem co GTFS dla MPK: jedno zapytanie
   o rozkład całego kraju na okno `SCHEDULE_WINDOW_DAYS` dni (dziś, sprawdzone
   na żywo: ~26 MB, 18,6 tys. tras, 8 s budowy lokalnej bazy `data/pkp.sqlite`)
-  zamiast osobnego zapytania na każdą wpisaną parę stacji — `pkp.py` czyta
+  zamiast osobnego zapytania na każdą wpisaną parę stacji — `../getdata` czyta
   już tylko SQL do pliku na dysku, bez sieci. Powód: przy limicie 100
   zapytań/h w planie Basic i suwakach panelu deweloperskiego (każdy ruch
   suwaka odpala `/api/flow` od nowa) osobne zapytanie na wyszukiwanie
@@ -924,7 +924,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   wszystkie daty w oknie, więc szersze okno nie mnoży liczby tras) —
   harmonogram odświeżania (`PKP_AUTO_UPDATE_HOUR`/`PKP_UPDATE_ON_START`,
   domyślnie jak GTFS) i atomowa podmiana (`os.replace`) są więc dosłownie
-  tym samym mechanizmem co `update_gtfs.py`, tylko osobnym plikiem — bo to
+  tym samym mechanizmem co `../getdata`, tylko osobnym plikiem — bo to
   niezależny pipeline nad niezależnym źródłem.
 
   Przy okazji: nazwy stacji PKP trafiły do TEJ SAMEJ listy podpowiedzi
@@ -935,7 +935,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `static/app.js`) — czego wcześniej nie było wcale, bo słownik stacji PKP
   (jak cała reszta tego API — sprawdzone pole po polu w
   `/api/v1/fields/schedules`) nie ma NIGDZIE współrzędnych. Jedyny sposób,
-  żeby jednak je zdobyć, to DRUGIE, niezależne źródło: `update_pkp.py`
+  żeby jednak je zdobyć, to DRUGIE, niezależne źródło: `../getdata`
   geokoduje nazwy stacji przez publiczne, darmowe Nominatim (OpenStreetMap),
   z limitem uprzejmościowym 1 zapytanie/s i trwałym cache'em na dysku
   (`data/pkp_station_coords.json`) — raz znaleziona stacja nigdy nie jest
@@ -945,7 +945,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   przybliżeniem (czasem trafiają w środek miasta zamiast w sam dworzec) -
   stacja bez trafienia po prostu nie ma markera, reszta (wyszukiwanie,
   podpowiedzi) działa dla niej mimo to.
-- **2026-08-29** — bezpośrednie połączenia kolejowe (`pkp.py`, PKP PLK
+- **2026-08-29** — bezpośrednie połączenia kolejowe (`../getdata`, PKP PLK
   OpenData API, `pdp-api.plk-sa.pl`) dokładane do tej samej listy propozycji
   co tramwaje i autobusy, bez osobnego formularza — działa na tych samych
   polach „skąd"/„dokąd". Zakres świadomie ograniczony do połączeń BEZ
@@ -1230,14 +1230,14 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   MPK). Pozostałe stacje, przy których MPK ma przystanek pod inną nazwą,
   wciąż czekają na dopisanie do tabeli.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
-- Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
+- Połączenia kolejowe (`../getdata`) obejmują przesiadki - między pociągami też,
   bo CSA widzi jedną tablicę połączeń (patrz wpis w changelogu) - ale bez
   opóźnień na żywo (API ma je w `/operations`, ale wyszukiwarka czyta tylko
   rozkład planowy z `/schedules`). Wymaga skonfigurowanego `PKP_API_KEY` —
   bez klucza ta część wyników po prostu nie dochodzi. Stacje mają markery na
   mapie (geokodowanie DWOMA źródłami - wyłącznie mapa PLK i portal
   pasażera, oba oficjalne/PKP-owe, na wyraźną prośbę użytkownika - patrz
-  wpis w changelogu i nagłówek `update_pkp.py`), ale sama trasa przejazdu
+  wpis w changelogu i nagłówek `../getdata`), ale sama trasa przejazdu
   (`legs[].path`) nie ma geometrii — słownik stacji PKP nie ma współrzędnych
   torów, tylko nazwy, więc geokodowanie daje punkt stacji, nie kształt
   trasy. Pokrycie ok. 98% (3202/3266 na 2026-08-30); stacja ZA GRANICĄ
@@ -1251,5 +1251,5 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 - Więcej odjazdów tej samej trasy na liście („następny kurs o…").
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
-- Opóźnienia pociągów na żywo z `/api/v1/operations` (patrz `pkp.py`) -
+- Opóźnienia pociągów na żywo z `/api/v1/operations` (patrz `../getdata`) -
   dziś wyszukiwarka kolejowa czyta tylko rozkład planowy.

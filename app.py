@@ -6,8 +6,8 @@ from flask import Flask
 # Przed resztą importów aplikacji: data/.env ma być wczytany, zanim
 # którykolwiek moduł sięgnie po os.environ.
 import config  # noqa: F401
-import update_gtfs
-import update_pkp
+from getdata import update_gtfs
+from getdata import update_pkp
 from routes import init_routes
 
 # Python nie zna tego rozszerzenia, a manifest podany jako octet-stream bywa

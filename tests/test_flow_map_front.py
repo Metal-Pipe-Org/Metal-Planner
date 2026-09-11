@@ -27,7 +27,7 @@ kiedyś doszło CI na Linuksie, trzeba będzie tu dołożyć drugi silnik.
 Odświeżenie fixture'a po zmianie w plannerze:
 
     .venv/bin/python -c "
-    from datetime import datetime; import planner, json
+    from datetime getdata datetime; getdata planner, json
     r = planner.plan_flow('Sosnowiecka','Wojszyce', datetime(2026,8,27,15,37),
                           extra_pct=125, extra_floor_sec=300, extra_cap_sec=900)
     json.dump(r, open('tests/js/flow_fixture.json','w'),
