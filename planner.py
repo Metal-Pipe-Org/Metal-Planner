@@ -8,8 +8,9 @@ na jego odjazd na przystanku startowym.
 
 from bisect import bisect_left, bisect_right
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
+import bikes
 import gtfs
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
@@ -628,12 +629,25 @@ def _no_connection(start_name, end_name, dep_sec):
     }
 
 
-def _summarize_journey(legs, rides, arrival, dep_sec):
-    """Nagłówek karty: odjazd, przyjazd, czas w drodze, czekanie, przesiadki."""
-    first_dep = rides[0]["dep_sec"]
+def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
+    """Nagłówek karty: odjazd, przyjazd, czas w drodze, czekanie, przesiadki.
+
+    `start_sec` nadpisuje moment wyruszenia. Domyślnie jest nim odjazd
+    pierwszego pojazdu, bo dopóki trasa zaczyna się od wsiadania, wcześniej
+    po prostu się czeka. Trasa z rowerem zaczyna się jednak dojściem do
+    stacji - wtedy wyrusza się wcześniej niż „odjeżdża" (patrz
+    _bike_journeys).
+
+    `arrival_sec`/`departure_sec` to te same dwie godziny w sekundach doby
+    rozkładowej - potrzebne do ustawienia propozycji w jednej kolejności
+    niezależnie od tego, który algorytm je złożył (patrz _merge_journeys).
+    """
+    first_dep = rides[0]["dep_sec"] if start_sec is None else start_sec
     return {
         "departure": _fmt_time(first_dep),
         "arrival": _fmt_time(arrival),
+        "departure_sec": first_dep,
+        "arrival_sec": arrival,
         "duration_min": round((arrival - first_dep) / 60),
         "wait_min": round((first_dep - dep_sec) / 60),
         "transfers": len(rides) - 1,
@@ -644,7 +658,7 @@ def _summarize_journey(legs, rides, arrival, dep_sec):
 def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, range_m=None, extra_pct=None,
               extra_floor_sec=None, extra_cap_sec=None, journey_limit=None,
-              transfer_gain_sec=None):
+              transfer_gain_sec=None, use_bikes=False):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -698,6 +712,12 @@ def plan_flow(start_query, end_query, when=None,
     _enumerate_journeys przeszukać graf głębiej (patrz CANDIDATES_PER_JOURNEY/
     VISITS_PER_JOURNEY); gdy w grafie jest ich mniej, dostaje się tyle, ile
     faktycznie da się złożyć.
+
+    use_bikes dokłada do listy propozycje z rowerem miejskim (patrz sekcja
+    ROWER MIEJSKI niżej i bikes.py) - ale tylko przy pytaniu o DZIŚ, bo stan
+    stojaków jest żywy, a nie rozkładowy. Wyłączone zmienia dokładnie zero
+    rzeczy w reszcie odpowiedzi - rower niczego tu nie przestawia, tylko
+    dopisuje.
     """
     when = when or datetime.now()
     range_m = (
@@ -875,6 +895,27 @@ def plan_flow(start_query, end_query, when=None,
             seg_list.sort(key=lambda seg: seg["w"])   # blade pierwsze, jaskrawe na wierzchu
             for wariant in warianty:
                 _drop_private(wariant)
+
+        # Rower dokładamy PO obu gałęziach, bo obie zostawiają tę samą rzecz:
+        # listę propozycji. Także po trybie awaryjnym - to właśnie tam, gdzie
+        # z rozkładu nie składa się prawie nic, skrót rowerem bywa jedyną
+        # sensowną odpowiedzią.
+        #
+        # Warunek na dobę: stan stojaków jest sprzed minuty i tyle jest wart -
+        # mówi, ile rowerów stoi TERAZ, a nie ile będzie stało we wtorek. Na
+        # pytanie o inny dzień (także ten, na który wyszukiwarka sama zeszła,
+        # nie znalazłszy nic dzisiaj - patrz day_offset wyżej) roweru więc nie
+        # proponujemy: propozycja oparta na dzisiejszych stojakach byłaby
+        # zgadywaniem podanym jako fakt. `live` w odpowiedzi mówi to wprost,
+        # żeby zero propozycji z tego powodu nie wyglądało jak zero z powodu
+        # milczącego kanału operatora.
+        bike_shown, bike_stations = 0, 0
+        bikes_live = use_bikes and day_offset == 0 and when.date() == date.today()
+        if bikes_live:
+            found, bike_stations = _bike_journeys(
+                day, source_stops, target_stops, dep_sec, deadline, earliest,
+                profile, geo_db, start_point, end_point, start_name, end_name)
+            journeys, bike_shown = _merge_journeys(journeys, found, gain_sec)
     finally:
         geo_db.close()
 
@@ -908,6 +949,13 @@ def plan_flow(start_query, end_query, when=None,
         # pozwala tu wsiąść (patrz _transfer_nodes).
         "nodes": nodes,
         "journeys": journeys,
+        # Stan warstwy rowerowej - tylko gdy o nią pytano. Front ma po czym
+        # odróżnić "policzone, rower nic tu nie daje" od "kanał operatora nie
+        # odpowiedział" (patrz bikes.stations_quiet): w obu przypadkach lista
+        # wygląda tak samo, a to zupełnie różne odpowiedzi.
+        **({"bikes": {"journeys": bike_shown, "stations": bike_stations,
+                      "live": bikes_live}}
+           if use_bikes else {}),
         # True tylko w trybie awaryjnym (patrz gałąź else wyżej): mapa jest
         # wtedy jedną trasą z jasnościami wpisanymi na sztywno, a nie
         # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
@@ -2336,6 +2384,509 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
         journeys.append(_summarize_journey(legs, rides, arrival, dep_sec))
 
     return journeys
+
+
+# ============================================================================
+#                            ROWER MIEJSKI (WRM)
+# ============================================================================
+# Rower wchodzi do trasy jako JEDEN przejazd między dwiema stacjami - bo tak
+# działa WRM: wypożyczenie zaczyna się i kończy w stojaku (patrz bikes.py).
+# Wolno mu stać w DOWOLNYM miejscu trasy, i to bez czterech osobnych
+# algorytmów, bo plan_flow ma już policzone obie połówki odpowiedzi:
+#
+#   earliest[słupek]  - o której najwcześniej da się tu być, startując
+#                       z relacji o dep_sec (skan w przód, _forward);
+#   profile(słupek, t) - stojąc tu o godzinie t, o której jest się w celu
+#                       (profilowy skan wstecz, _target_profile).
+#
+# Wstawienie roweru to więc jedno złożenie tych dwóch funkcji przez parę
+# stacji (A, B):
+#
+#   earliest[X] -> dojście X→A -> ODBLOKOWANIE -> przejazd A→B -> zwrot
+#               -> dojście B→Y -> profile(Y, ...)
+#
+# Skrajne przypadki wychodzą z tego samego wzoru, nie z osobnego kodu:
+# X bywa samym punktem startu (rower NA POCZĄTKU trasy), Y samym celem
+# (rower NA KOŃCU), obie naraz (sam rower), obie w środku sieci (rower
+# W ŚRODKU, jako skrót między dwiema liniami).
+#
+# Czego tu świadomie NIE ma: roweru na mapie przepływów. Jasność segmentu
+# znaczy tam „jak dobrym wyborem jest siedzieć TERAZ w TYM kursie" i liczy
+# się z rozkładu (patrz docs/FLOW_MAP_CONTRACT.md) - rower rozkładu nie ma,
+# więc nie ma też czego porównywać. Trasa z rowerem rysuje się natomiast
+# w całości po wybraniu jej z listy propozycji, tak samo jak każda inna.
+
+# Ile propozycji z rowerem wolno dołożyć do listy. Dwie, bo rower ma tu być
+# alternatywą, a nie zalewem: przy ciasnym oknie czasowym wszystkie warianty
+# z rowerem są do siebie podobne (ta sama okolica, sąsiednie stacje).
+BIKE_JOURNEY_LIMIT = 2
+# Ile najbliższych słupków bierzemy pod uwagę przy jednej stacji. Dalsze i tak
+# przegrywają czasem dojścia, a każdy kosztuje odczyt profilu w pętli po parach.
+BIKE_NEAR_STOPS = 6
+# Bok komórki siatki przystanków, w stopniach. Musi być na tyle duży, żeby
+# kwadrat 3x3 wokół stacji na pewno objął cały promień dojścia: 0,01° to
+# ~1110 m wzdłuż południka i ~700 m wzdłuż równoleżnika na szerokości
+# Wrocławia, więc gwarantowany zasięg to 700 m > bikes.WALK_MAX_M.
+BIKE_GRID_DEG = 0.01
+# Górna granica prędkości czegokolwiek w tej sieci (pociąg podmiejski) -
+# służy WYŁĄCZNIE jako dolne ograniczenie czasu dojazdu w linii prostej,
+# czyli do odsiewania par stacji, które i tak nie mieszczą się w oknie.
+# Zawyżona celowo: ograniczenie ma nie odrzucić niczego, co jest osiągalne.
+BIKE_MAX_SPEED_MPS = 30.0
+
+
+def _endpoint_point(day, stops, point):
+    """Współrzędne końca relacji: kliknięty punkt albo środek jego słupków.
+
+    Rower wymaga tego, czego reszta wyszukiwarki nie potrzebuje - dojście
+    liczone w metrach. Przy relacji podanej z nazwy „gdzie stoi pasażer"
+    nie jest znane w ogóle, więc bierzemy środek miejsca; przy kliknięciu
+    w mapę znamy to dokładnie.
+    """
+    if point is not None:
+        return point
+    coords = [day.stop_coords[s] for s in stops if s in day.stop_coords]
+    if not coords:
+        return None
+    return (sum(c[0] for c in coords) / len(coords),
+            sum(c[1] for c in coords) / len(coords))
+
+
+def _stop_grid(day):
+    """Słupki w siatce kwadratów - żeby „co jest w zasięgu dojścia od tej
+    stacji" nie było przemiataniem wszystkich czterech tysięcy słupków
+    dla każdej z 273 stacji."""
+    grid = {}
+    for stop, (lat, lon) in day.stop_coords.items():
+        cell = (int(lat // BIKE_GRID_DEG), int(lon // BIKE_GRID_DEG))
+        grid.setdefault(cell, []).append(stop)
+    return grid
+
+
+def _near_stops(day, grid, lat, lon, max_m=None, limit=BIKE_NEAR_STOPS):
+    """Najbliższe słupki w promieniu dojścia, od najbliższego: [(metry, słupek)]."""
+    max_m = bikes.WALK_MAX_M if max_m is None else max_m
+    cx, cy = int(lat // BIKE_GRID_DEG), int(lon // BIKE_GRID_DEG)
+    found = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for stop in grid.get((cx + dx, cy + dy), ()):
+                slat, slon = day.stop_coords[stop]
+                dist = bikes.haversine_m(lat, lon, slat, slon)
+                if dist <= max_m:
+                    found.append((dist, stop))
+    found.sort()
+    return found[:limit]
+
+
+def _profile_best(day, profile, stop, arr_t):
+    """Jak _profile_value, ale mówi też, KTÓRYM słupkiem jedzie się dalej
+    i o której się na nim staje.
+
+    Sama wartość nie wystarczy, bo trasę trzeba potem odtworzyć etap po
+    etapie - a odtworzenie musi wyjść z dokładnie tego słupka i tej godziny,
+    z których policzono wartość, inaczej godziny na karcie nie zgadzałyby
+    się z tym, po co ta karta w ogóle jest na liście.
+    """
+    neg_deps, arrs, _board = profile
+    best, best_stop, best_t = INF, None, None
+    for stop2 in _sibling_places(day, stop):
+        # Ten sam bufor co w _profile_value: przyjście na słupek nie jest
+        # jeszcze staniem przy właściwej krawędzi.
+        buffer = TRANSFER_SEC if stop2 == stop else WALK_SEC
+        times = neg_deps.get(stop2)
+        if times is None:
+            continue
+        i = bisect_right(times, -(arr_t + buffer)) - 1
+        if i >= 0 and arrs[stop2][i] < best:
+            best, best_stop, best_t = arrs[stop2][i], stop2, arr_t + buffer
+    return best, best_stop, best_t
+
+
+def _bike_boardings(day, grid, stations, earliest, dep_sec, deadline, origin):
+    """Dla każdej stacji: najwcześniejszy moment, w którym można przy niej
+    stanąć - i skąd się tam przyszło.
+
+    Dwie drogi, obie przez DOJŚCIE (bo stacja stoi obok przystanku, nie na
+    nim): wprost z punktu startu albo z dowolnego słupka, do którego dowozi
+    komunikacja. Ta druga jest całym sekretem „roweru w środku trasy".
+    """
+    boardings = []
+    floor_sec = bikes.UNLOCK_SEC + bikes.ride_sec(bikes.MIN_RIDE_M) + bikes.DOCK_SEC
+    for station in stations:
+        if not station["renting"] or station["bikes"] <= 0:
+            continue
+        best_t, source = INF, None
+        if origin is not None:
+            dist = bikes.haversine_m(origin[0], origin[1],
+                                     station["lat"], station["lon"])
+            if dist <= bikes.WALK_MAX_M:
+                best_t, source = dep_sec + bikes.walk_sec(dist), ("origin", None)
+        for dist, stop in _near_stops(day, grid, station["lat"], station["lon"]):
+            reached = earliest.get(stop)
+            if reached is None or reached > deadline:
+                continue
+            when = reached + bikes.walk_sec(dist)
+            if when < best_t:
+                best_t, source = when, ("stop", stop)
+        if source is None:
+            continue
+        # Nawet najkrótszy dopuszczalny przejazd musi się zmieścić w oknie -
+        # inaczej ta stacja nie ma po co wchodzić do pętli po parach.
+        if best_t + floor_sec > deadline:
+            continue
+        boardings.append((best_t, station, source))
+    boardings.sort(key=lambda item: item[0])
+    return boardings
+
+
+def _bike_alightings(day, grid, stations, profile, target_set, dest):
+    """Dla każdej stacji: czym można stąd jechać dalej i ile to NAJMNIEJ
+    może potrwać.
+
+    `tail_lb` jest dolnym ograniczeniem czasu od zwrotu roweru do celu -
+    prawdziwa wartość zależy od godziny, ale ograniczenie nie, więc da się
+    nim odsiewać pary stacji, zanim policzy się cokolwiek z rozkładu.
+    """
+    neg_deps = profile[0]
+    alightings = []
+    for station in stations:
+        if not station["returning"] or station["docks"] <= 0:
+            continue
+        to_dest = None
+        dist_dest = INF
+        if dest is not None:
+            dist_dest = bikes.haversine_m(dest[0], dest[1],
+                                          station["lat"], station["lon"])
+            if dist_dest <= bikes.WALK_MAX_M:
+                to_dest = bikes.walk_sec(dist_dest)
+        onward = []
+        for dist, stop in _near_stops(day, grid, station["lat"], station["lon"]):
+            if stop in target_set or any(s in neg_deps
+                                         for s in _sibling_places(day, stop)):
+                onward.append((bikes.walk_sec(dist), stop))
+        if to_dest is None and not onward:
+            continue
+        tail_lb = INF if to_dest is None else to_dest
+        if onward:
+            # Dalej jedzie się komunikacją, więc nie szybciej niż w linii
+            # prostej najszybszym pojazdem w sieci - i nie szybciej, niż
+            # trwa samo dojście na przystanek.
+            by_transit = max(min(walk for walk, _ in onward),
+                             dist_dest / BIKE_MAX_SPEED_MPS)
+            tail_lb = min(tail_lb, by_transit)
+        alightings.append({
+            "station": station,
+            "to_dest": to_dest,
+            "onward": onward,
+            "tail_lb": tail_lb,
+        })
+    return alightings
+
+
+def _bike_candidates(day, boardings, alightings, profile, target_set, deadline, dest):
+    """Pętla po parach stacji - najlepszy przyjazd do celu dla każdego
+    KSZTAŁTU trasy z rowerem.
+
+    Kształt to para „skąd się wsiadło na rower, dokąd się nim dojechało"
+    w sensie rodzaju, nie konkretnej stacji: (start albo przystanek) x (cel
+    albo przystanek). Wychodzą z tego cztery warianty - sam rower, rower na
+    początku, rower na końcu, rower w środku - i po jednym, najlepszym
+    przedstawicielu każdego z nich. Bez tego lista dostałaby kilka niemal
+    identycznych propozycji z sąsiednich stacji tej samej okolicy.
+    """
+    best_by_shape = {}
+    for board_t, station_a, source in boardings:
+        # Dolne ograniczenie dla CAŁEJ stacji A: cokolwiek się stąd zrobi,
+        # do celu jest tyle a tyle metrów w linii prostej.
+        if dest is not None:
+            floor = bikes.haversine_m(station_a["lat"], station_a["lon"],
+                                      dest[0], dest[1]) / BIKE_MAX_SPEED_MPS
+            if board_t + bikes.UNLOCK_SEC + floor > deadline:
+                continue
+        for slot in alightings:
+            station_b = slot["station"]
+            if station_b["id"] == station_a["id"]:
+                continue
+            straight = bikes.haversine_m(station_a["lat"], station_a["lon"],
+                                         station_b["lat"], station_b["lon"])
+            if not bikes.MIN_RIDE_M <= straight <= bikes.MAX_RIDE_M:
+                continue
+            dock_t = (board_t + bikes.UNLOCK_SEC + bikes.ride_sec(straight)
+                      + bikes.DOCK_SEC)
+            if dock_t + slot["tail_lb"] > deadline:
+                continue
+
+            arrival, tail = INF, None
+            if slot["to_dest"] is not None:
+                arrival, tail = dock_t + slot["to_dest"], ("dest", None, None)
+            for walk, stop in slot["onward"]:
+                at_stop = dock_t + walk
+                if stop in target_set:
+                    if at_stop < arrival:
+                        arrival, tail = at_stop, ("dest", stop, None)
+                    continue
+                value, board_stop, board_at = _profile_best(
+                    day, profile, stop, at_stop)
+                if value < arrival:
+                    arrival, tail = value, ("transit", stop, (board_stop, board_at))
+            if arrival > deadline:
+                continue
+
+            shape = (source[0], tail[0])
+            known = best_by_shape.get(shape)
+            if known is None or arrival < known[0]:
+                best_by_shape[shape] = (arrival, station_a, station_b, board_t,
+                                        source, dock_t, tail)
+    return sorted(best_by_shape.values(), key=lambda item: item[0])
+
+
+def _foot_leg(from_name, to_name, from_point, to_point, seconds, note, dep_sec):
+    """Etap pieszy podany wprost w metrach i sekundach - inaczej niż
+    _walk_leg, który opisuje przejście między słupkami TEGO SAMEGO miejsca
+    i ma przez to jeden, stały czas. Dojście do stacji roweru trwa tyle, ile
+    wynika z odległości, i nie ma powodu tego uśredniać."""
+    return {
+        "kind": "walk",
+        "text": f"{note} (ok. {seconds // 60} min)",
+        # Front woli `note` od własnego opisu, gdy jest - „Przejście do
+        # Stacja WRM ..." brzmiałoby jak nazwa przystanku (patrz app.js).
+        "note": note,
+        "minutes": seconds // 60,
+        "from": from_name,
+        "to": to_name,
+        "dep_sec": dep_sec,
+        "path": _round_path([from_point, to_point]),
+    }
+
+
+def _bike_ride_leg(station_a, station_b, start_sec):
+    """Etap „jedź rowerem miejskim ze stacji A do stacji B".
+
+    Czas etapu to trzy różne rzeczy naraz i wszystkie trzy są tu widoczne
+    osobno: odblokowanie (stoisz przy stojaku), przejazd i zwrot. Pasażer
+    ma prawo wiedzieć, że z 14 minut cztery to nie jazda - inaczej pierwszy
+    przegapiony autobus po drugiej stronie zrobi z tej propozycji kłamstwo.
+    """
+    straight = bikes.haversine_m(station_a["lat"], station_a["lon"],
+                                 station_b["lat"], station_b["lon"])
+    ride = bikes.ride_sec(straight)
+    total = bikes.UNLOCK_SEC + ride + bikes.DOCK_SEC
+    return {
+        "kind": "bike",
+        "line": "Rower miejski",
+        "num": "WRM",
+        "mode": "bike",
+        "headsign": station_b["name"],
+        "from": station_a["name"],
+        "to": station_b["name"],
+        "from_time": _fmt_time(start_sec),
+        "to_time": _fmt_time(start_sec + total),
+        "dep_sec": start_sec,
+        "arr_sec": start_sec + total,
+        # Wszystkie cztery liczby są w pełnych minutach i sumują się dokładnie
+        # (patrz bikes._whole_minutes) - karta pokazuje je obok siebie.
+        "minutes": total // 60,
+        "ride_minutes": ride // 60,
+        "unlock_minutes": bikes.UNLOCK_SEC // 60,
+        "dock_minutes": bikes.DOCK_SEC // 60,
+        "distance_m": int(round(bikes.ride_distance_m(straight))),
+        # Stan stacji w chwili wyszukiwania - z tego samego kanału, z którego
+        # wzięła się cała ta propozycja (patrz bikes.py). Stąd „6 rowerów"
+        # na karcie: propozycja bez tej liczby każe iść pod stojak w ciemno.
+        "bikes_available": station_a["bikes"],
+        "docks_available": station_b["docks"],
+        "station_from_id": station_a["id"],
+        "station_to_id": station_b["id"],
+        # Linia prosta, nie przebieg ulicami: nie mamy routera rowerowego,
+        # a udawanie geometrii, której nie znamy, byłoby gorsze niż jej brak.
+        # Front rysuje ten etap kreską przerywaną właśnie dlatego.
+        "path": _round_path([(station_a["lat"], station_a["lon"]),
+                             (station_b["lat"], station_b["lon"])]),
+    }
+
+
+def _bike_journey(day, candidate, source_stops, target_stops, dep_sec, deadline,
+                  geo_db, origin, dest, start_name, end_name):
+    """Kandydat (para stacji + czasy) -> gotowa propozycja z etapami.
+
+    Czasy liczymy TU jeszcze raz, do przodu, z faktycznie odtworzonych
+    etapów - a nie przepisujemy tych z pętli po parach. Tamte pochodzą
+    z dwóch skanów po całej sieci i są dobre do WYBORU pary; kartę ogląda
+    się jednak minuta po minucie, więc musi się zgadzać sama ze sobą.
+    """
+    _arrival, station_a, station_b, _board_t, source, _dock_t, tail = candidate
+    legs = []
+
+    # 1. Dojazd do stacji A. Słupek, który sam jest startem relacji, nie
+    # wymaga dojazdu - ale kotwicą dojścia zostaje ON, nie środek miejsca:
+    # to z jego współrzędnych policzono, że stacja jest w zasięgu.
+    if source[0] == "stop":
+        stop = source[1]
+        if stop in source_stops:
+            from_point = day.stop_coords[stop]
+            from_name, now = day.stop_names[stop], dep_sec
+        else:
+            reached, arr, journey = _scan(day, source_stops, {stop}, dep_sec,
+                                          deadline=deadline)
+            if reached is None:
+                return None
+            legs.extend(_reconstruct(day, journey, reached, geo_db))
+            from_point = day.stop_coords[reached]
+            from_name, now = day.stop_names[reached], arr
+    else:
+        if origin is None:
+            return None
+        from_point, from_name, now = origin, start_name, dep_sec
+
+    to_station = bikes.haversine_m(from_point[0], from_point[1],
+                                   station_a["lat"], station_a["lon"])
+    if to_station > bikes.WALK_MAX_M:
+        return None
+    legs.append(_foot_leg(
+        from_name, station_a["name"], from_point,
+        (station_a["lat"], station_a["lon"]), bikes.walk_sec(to_station),
+        f"Dojście do stacji WRM {station_a['name']}", now))
+    now += bikes.walk_sec(to_station)
+    # Trasa, która zaczyna się dojściem do stacji, WYRUSZA wtedy, a nie
+    # dopiero gdy coś odjeżdża (patrz _summarize_journey).
+    start_sec = legs[0]["dep_sec"] if legs[0]["kind"] == "walk" else None
+
+    # 2. Sam przejazd.
+    ride = _bike_ride_leg(station_a, station_b, now)
+    legs.append(ride)
+    now = ride["arr_sec"]
+
+    # 3. Dalsza droga: pieszo do celu albo przesiadka na komunikację.
+    if tail[0] == "dest":
+        end_point = (day.stop_coords[tail[1]] if tail[1] is not None else dest)
+        if end_point is None:
+            return None
+        walk_m = bikes.haversine_m(station_b["lat"], station_b["lon"],
+                                   end_point[0], end_point[1])
+        if walk_m > bikes.WALK_MAX_M:
+            return None
+        seconds = bikes.walk_sec(walk_m)
+        legs.append(_foot_leg(
+            station_b["name"], end_name, (station_b["lat"], station_b["lon"]),
+            end_point, seconds, f"Dojście do celu: {end_name}", now))
+        arrival = now + seconds
+    else:
+        drop_stop, (board_stop, _board_at) = tail[1], tail[2]
+        if board_stop is None:
+            return None
+        walk_m = bikes.haversine_m(station_b["lat"], station_b["lon"],
+                                   *day.stop_coords[drop_stop])
+        seconds = bikes.walk_sec(walk_m)
+        legs.append(_foot_leg(
+            station_b["name"], day.stop_names[drop_stop],
+            (station_b["lat"], station_b["lon"]), day.stop_coords[drop_stop],
+            seconds, f"Dojście na przystanek {day.stop_names[drop_stop]}", now))
+        now += seconds
+        # Ten sam bufor, którym liczył profil - patrz _profile_best.
+        now += TRANSFER_SEC if board_stop == drop_stop else WALK_SEC
+        if board_stop != drop_stop:
+            legs.append(_walk_leg(day, drop_stop, board_stop))
+        reached, arrival, journey = _scan(day, {board_stop}, target_stops, now,
+                                          deadline=deadline)
+        if reached is None:
+            return None
+        legs.extend(_reconstruct(day, journey, reached, geo_db))
+
+    if arrival > deadline:
+        return None
+    rides = [leg for leg in legs if leg["kind"] in ("ride", "bike")]
+    journey = _summarize_journey(legs, rides, arrival, dep_sec,
+                                 start_sec=start_sec)
+    _drop_private(legs)
+    return journey
+
+
+def _bike_journeys(day, source_stops, target_stops, dep_sec, deadline, earliest,
+                   profile, geo_db, start_point, end_point, start_name, end_name,
+                   limit=BIKE_JOURNEY_LIMIT):
+    """Propozycje tras z rowerem miejskim - albo pusta lista.
+
+    Zwraca (propozycje, liczba_stacji). Pusta lista jest odpowiedzią
+    normalną, nie awarią: kanał operatora może nie odpowiadać (patrz
+    bikes.stations_quiet), w okolicy może nie być stacji, a najczęściej po
+    prostu żadne wstawienie roweru nie mieści się w oknie czasowym mapy -
+    czyli rower nic tu nie daje. W każdym z tych przypadków reszta
+    wyszukiwarki działa bez najmniejszej zmiany, a liczba stacji pozwala
+    odróżnić "policzone i nic z tego" od "nie było czego liczyć".
+    """
+    stations = bikes.stations_quiet()
+    if not stations:
+        return [], 0
+
+    origin = _endpoint_point(day, source_stops, start_point)
+    dest = _endpoint_point(day, target_stops, end_point)
+    grid = _stop_grid(day)
+
+    boardings = _bike_boardings(day, grid, stations, earliest, dep_sec,
+                                deadline, origin)
+    if not boardings:
+        return [], len(stations)
+    alightings = _bike_alightings(day, grid, stations, profile, target_stops, dest)
+    if not alightings:
+        return [], len(stations)
+
+    journeys, seen = [], set()
+    for candidate in _bike_candidates(day, boardings, alightings, profile,
+                                      target_stops, deadline, dest):
+        journey = _bike_journey(day, candidate, source_stops, target_stops,
+                                dep_sec, deadline, geo_db, origin, dest,
+                                start_name, end_name)
+        if journey is None:
+            continue
+        # Dwa różne KSZTAŁTY potrafią się zejść w tę samą trasę (np. stacja
+        # tuż przy przystanku startowym - „rower od startu" i „rower po
+        # jednym przystanku" wychodzą wtedy identycznie).
+        signature = (journey["departure_sec"], journey["arrival_sec"],
+                     tuple(leg.get("line", leg["kind"]) for leg in journey["legs"]))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        journeys.append(journey)
+        if len(journeys) >= limit:
+            break
+    return journeys, len(stations)
+
+
+def _journey_key(journey, gain_sec):
+    """Ten sam klucz, którym sortuje _enumerate_journeys: przyjazd z karą za
+    każdą przesiadkę, remis po liczbie przesiadek, a potem po PÓŹNIEJSZYM
+    wyjeździe (mniej czekania)."""
+    return (journey["arrival_sec"] + journey["transfers"] * gain_sec,
+            journey["transfers"], -journey["departure_sec"])
+
+
+def _merge_journeys(journeys, extra, gain_sec):
+    """Dokłada propozycje z rowerem do listy z mapy przepływów i układa
+    wszystko w JEDNĄ kolejność. Zwraca (lista, ile roweru weszło).
+
+    Rower podlega tu dokładnie tej samej regule co wszystko inne na liście:
+    mieści się w oknie czasowym mapy (patrz _deadline) - wchodzi, i staje tam,
+    gdzie mu wypada wg tego samego klucza (_journey_key). Gorsza opcja ląduje
+    na dole listy, a nie znika - dokładnie tak, jak mapa od zawsze pokazuje
+    też niszowe objazdy.
+
+    Kuszące jest dołożyć tu drugi próg („rower wchodzi tylko wtedy, gdy
+    WYGRYWA z najlepszym dojazdem bez niego"), bo rower kosztuje osobno:
+    konto, dojście do stojaka, wypożyczenie, pedałowanie. Nie robimy tego
+    z dwóch powodów. Po pierwsze, zgoda na ten koszt już padła - odhaczenie
+    🚲 jest właśnie nią, więc drugi raz pytać o to nie ma po co. Po drugie
+    i ważniejsze: taki próg sprawdzano by na danych, które zmieniają się co
+    minutę (stan stojaków), a kandydaci potrafią stać dokładnie na jego
+    styku - dwa wyszukania TEJ SAMEJ relacji w odstępie minuty dawałyby więc
+    raz propozycję z rowerem, raz żadną. Z zewnątrz jest to nieodróżnialne od
+    zepsutej funkcji. Sprawdzone na relacji Wojszyce -> pl. Grunwaldzki.
+    """
+    if not extra:
+        return journeys, 0
+    merged = journeys + extra
+    merged.sort(key=lambda j: _journey_key(j, gain_sec))
+    return merged, len(extra)
 
 
 def _forward(day, source_stops, dep_sec, deadline):
