@@ -71,6 +71,15 @@ services:
       # Patrz docs/SIECHNICE_DANE.md.
       SIECHNICE_ENABLED: "off"
 
+      # Stacje Wroclawskiego Roweru Miejskiego (kanal GBFS operatora,
+      # system_id nextbike_pl, licencja CC0-1.0 - patrz bikes.py). Inaczej
+      # niz Siechnice sa domyslnie WLACZONE: zrodlo jest otwarte, oficjalnie
+      # zarejestrowane i nic z niego nie trafia do bazy. "off" gdy kontener
+      # nie ma wyjscia na zewnatrz albo gdy rower ma byc niedostepny -
+      # awaria samego kanalu i tak nie psuje wyszukiwarki, wiec ta zmienna
+      # nie jest do tego potrzebna.
+      WRM_ENABLED: "on"
+
       # Rozklad jest liczony wg zegara kontenera.
       TZ: "Europe/Warsaw"
 

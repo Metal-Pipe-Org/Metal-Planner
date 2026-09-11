@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Planer podróży — Wrocław</title>
+    <title>Metal Planner — Wrocław</title>
     <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu — tramwaje i autobusy.">
 
     <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Planer">
+    <meta name="apple-mobile-web-app-title" content="Metal Planner">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -32,11 +32,23 @@
 <button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
         aria-label="Pokaż/ukryj panel">&larr;</button>
 
+{% if not data_error %}
+{#
+  Przełącznik dwóch trybów panelu: wyszukiwanie trasy albo rozkłady jazdy
+  (patrz static/timetable.js). Stoi obok przycisku chowania panelu, bo oba
+  odpowiadają na to samo pytanie - "co ma być teraz po lewej stronie".
+#}
+<button id="mode-toggle" class="icon-button floating second"
+        title="Rozkłady jazdy — linie i przystanki"
+        aria-label="Przełącz: wyszukiwanie trasy albo rozkłady jazdy"
+        aria-pressed="false">&#9719;<span>Rozkłady</span></button>
+{% endif %}
+
 <aside id="sidebar">
 
     <header class="app-bar">
         <div class="brand">
-            <h1>Planer podróży</h1>
+            <h1>Metal Planner</h1>
             <p>Wrocław · tramwaje i autobusy</p>
         </div>
         <button id="install" class="icon-button" title="Zainstaluj aplikację"
@@ -89,6 +101,11 @@
         <p class="locate-msg" id="locate-msg" role="status" hidden></p>
 
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
+        {# Tabela skrótów jedzie z serwera, a nie jest przepisana w app.js:
+           podpowiedzi mają składać nazwę dokładnie tak samo jak wyszukiwarka
+           (patrz naming.ABBREVIATIONS, gtfs._alias_key), a dwie kopie tej
+           samej reguły rozjechałyby się przy pierwszym dopisanym skrócie. #}
+        <script id="stop-abbrev" type="application/json">{{ abbreviations|tojson }}</script>
 
         <div class="search-row">
             <div class="time-field">
@@ -112,6 +129,16 @@
                     aria-label="Wyczyść wybór">✕</button>
         </div>
 
+        {# Rower miejski jest wyborem pasażera („mam konto w WRM"), nie
+           strojeniem algorytmu, więc stoi tutaj, a nie w panelu ⚙ - i zostaje
+           widoczny także w widoku mapy na telefonie, w odróżnieniu od .hint
+           poniżej: to opcja wyszukiwania, którą odhacza się PRZED szukaniem,
+           a szukanie odpala się samo po drugim kliknięciu w mapę. #}
+        <label class="bike-toggle" id="bike-toggle" for="bikes">
+            <input type="checkbox" id="bikes">
+            <span>🚲 Dojazd rowerem miejskim (WRM)</span>
+        </label>
+
         <p class="hint">
             Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
             potem cel. Inną relację zacznij od ✕.
@@ -121,6 +148,65 @@
 
     <div id="results" class="results" aria-live="polite"></div>
 
+    {#
+      Drugi tryb panelu - rozkłady. Leży w tym samym miejscu co karta
+      wyszukiwania i karta z nią nigdy nie stoją naraz: przełącznik ◷ podmienia
+      jedno na drugie (klasa `mode-timetable` na <body>).
+    #}
+    <div class="card timetable-card" id="timetable-card">
+
+        {#
+          JEDNO pole na linię i na przystanek. Rozdzielenie ich zakładkami
+          kazało wybrać rodzaj rozkładu, zanim w ogóle było wiadomo, czego się
+          szuka - a "17" i "Katedra" i tak nie da się ze sobą pomylić. Rodzaj
+          widać na liście podpowiedzi (plakietka linii / znaczek przystanku),
+          czyli tam, gdzie faktycznie potrzebny.
+        #}
+        <div class="ac-field tt-field">
+            <input type="text" id="tt-query" class="with-action" autocomplete="off"
+                   role="combobox" aria-label="Numer linii albo nazwa przystanku"
+                   aria-autocomplete="list" aria-expanded="false"
+                   aria-controls="tt-query-list"
+                   placeholder="Linia albo przystanek — np. 17, Katedra">
+            <button id="tt-clear" class="icon-button in-field" title="Wyczyść"
+                    aria-label="Wyczyść rozkład" hidden>&#10005;</button>
+            <ul class="ac-list" id="tt-query-list" role="listbox" hidden
+                aria-label="Podpowiedzi linii i przystanków"></ul>
+        </div>
+
+        <script id="line-names" type="application/json">{{ lines|tojson }}</script>
+
+        {#
+          Dzień i godzina w jednym polu, w takiej samej ramce, co czas
+          wyszukiwarki. Godzina nie odpytuje serwera - odpowiedź niesie całą
+          dobę, więc jest punktem odniesienia dla obu rozkładów naraz: od niej
+          lecą odjazdy tablicy i na niej otwiera się rozkład linii.
+        #}
+        <div class="tt-when">
+            <span class="tt-when-part">
+                <label for="tt-date">Dzień</label>
+                <input type="date" id="tt-date" value="{{ form_date }}">
+                <button type="button" id="tt-today" class="time-now-button">dziś</button>
+            </span>
+            <span class="tt-when-part">
+                <label for="tt-time">Godzina</label>
+                <input type="text" id="tt-time" inputmode="numeric"
+                       pattern="[0-9]{2}:[0-9]{2}" maxlength="5" size="5"
+                       placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
+                <button type="button" id="tt-now" class="time-now-button">teraz</button>
+            </span>
+            <span class="spinner tt-spinner" aria-hidden="true"></span>
+        </div>
+
+        <p class="hint" id="tt-hint">
+            Wpisz numer linii albo nazwę przystanku — możesz też kliknąć
+            słupek na mapie.
+        </p>
+
+    </div>
+
+    <div id="tt-results" class="results" aria-live="polite"></div>
+
     {% endif %}
 
 </aside>
@@ -129,8 +215,18 @@
 <nav id="view-tabs" aria-label="Widok">
     <button class="tab active" data-view="map" aria-pressed="true">Mapa</button>
     <button class="tab" data-view="list" aria-pressed="false">
-        Trasy <span id="tab-count" class="tab-count" hidden>0</span>
+        <span id="tab-list-label">Trasy</span>
+        <span id="tab-count" class="tab-count" hidden>0</span>
     </button>
+    {#
+      Ten sam przełącznik trybów, co pływające ◷ - na telefonie pływające
+      przyciski są schowane (zastępują je te zakładki), a tryb rozkładów
+      musi być czymś osiągalny.
+    #}
+    <button id="mode-toggle-m" class="tab-icon"
+            title="Rozkłady jazdy — linie i przystanki"
+            aria-label="Przełącz: wyszukiwanie trasy albo rozkłady jazdy"
+            aria-pressed="false">&#9719;</button>
 </nav>
 
 <div id="dev-panel" class="card hidden">
@@ -476,6 +572,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='timetable.js') }}"></script>
 <script src="{{ url_for('static', filename='pwa.js') }}"></script>
 
 </body>

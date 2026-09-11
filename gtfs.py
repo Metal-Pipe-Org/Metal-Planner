@@ -13,6 +13,8 @@ from bisect import bisect_left
 from datetime import timedelta
 from pathlib import Path
 
+import naming
+
 DB_PATH = Path(__file__).resolve().parent / "data" / "gtfs.sqlite"
 
 WEEKDAY_COLUMNS = [
@@ -41,6 +43,71 @@ PREV_DAY_PREFIX = "~"
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
 
+# CHODZENIE. Zasięg przejścia pieszo między słupkami - NIE mylić
+# z PLACE_MAX_SPAN_M, który mówi tylko, jak szeroki może być jeden przystanek
+# o wspólnej nazwie. Ten promień odpowiada na inne pytanie: dokąd stąd da się
+# dojść, niezależnie od tego, jak to się nazywa i czyja to sieć (patrz
+# _nearby_bridges). 300 m to około cztery minuty marszu - tyle, ile pasażer
+# realnie przejdzie dla przesiadki, i tyle, ile dzieli dworzec kolejowy od
+# stojących przy nim przystanków MPK.
+#
+# Wartość jest DOBRANA POMIAREM, nie z sufitu. 400 m dokłada głównie pary
+# przystanków wzdłuż tej samej ulicy (mało komu potrzebne), za to dwukrotnie
+# wydłuża najcięższe zapytania i - co gorsza - rozpycha kotwice mapy
+# przepływów tak, że z listy propozycji znikają dobre trasy (patrz
+# _extract_transfer_graph: w segment wsiada się wyłącznie w jego
+# zakotwiczonym początku, więc przesuwanie kotwic zabiera punkty przesiadki).
+# 250 m z kolei gubi już realne dojścia. Stycznych z koleją, które są tu
+# celem, 300 m nie traci: Wrocław Główny nadal ma pieszo DWORZEC GŁÓWNY,
+# DWORZEC AUTOBUSOWY i SUCHĄ.
+WALK_MAX_M = 300
+# Prędkość marszu w linii prostej liczymy z zapasem: haversine mierzy przez
+# budynki, a chodnik obchodzi kwartał, więc 1,3 m/s (spokojny krok) dzielimy
+# przez współczynnik nadłożenia drogi. Efektywnie ~0,96 m/s - plan ma być
+# pesymistyczny co do czasu przejścia, nigdy optymistyczny (ta sama zasada,
+# co przy zaokrąglaniu godzin kolejowych - patrz pkp.py).
+WALK_SPEED_MPS = 1.3
+WALK_DETOUR = 1.35
+# Podłoga: żadne przejście nie kosztuje mniej niż trzy minuty. Dwa powody,
+# oba istotne. Po pierwsze, sam dystans nie jest całym kosztem - trzeba
+# jeszcze ZNALEŹĆ właściwe stanowisko, co przy zmianie peronu potrafi być
+# droższe niż te trzydzieści metrów. Po drugie, krawędź piesza jako jedyna
+# NIE dostaje bufora przesiadki (planner.TRANSFER_SEC): ta podłoga jest od
+# niego większa, więc bufor jest w niej zawarty. Zejście poniżej trzech minut
+# rozstroiłoby oba te założenia naraz.
+WALK_MIN_SEC = 180
+# DOJŚCIE NA KRAŃCACH relacji ma własny, WIĘKSZY promień niż przejście
+# w środku podróży - to są dwie różne gotowości do marszu, nie jedna.
+# Do pociągu wychodzi się z domu i idzie się tyle, ile trzeba; przesiadka
+# w połowie trasy konkuruje z siedzeniem w pojeździe, który już jedzie,
+# więc tolerancja jest tam mniejsza.
+#
+# Zlanie obu w jeden próg dawało wynik wprost absurdalny, zgłoszony na żywo:
+# ze słupka "Wojszyce" na stację Wrocław Wojszyce jest 359 m, czyli poza
+# WALK_MAX_M - więc zamiast po prostu tam pójść, planer proponował przejazd
+# JEDEN przystanek autobusem na "Przystankową" i dopiero stamtąd pięć minut
+# marszu na tę samą stację. Podniesienie WALK_MAX_M naprawiłoby ten jeden
+# przypadek, ale zagęszcza CAŁY graf przesiadek: zmierzone dwukrotne
+# wydłużenie najcięższych zapytań i utrata propozycji na relacjach miejskich.
+# Promień dojścia takich kosztów nie ma - dotyczy garstki słupków krańcowych,
+# nie każdej pary w mieście.
+#
+# 600 m to około dziewięciu minut marszu. Ostrożniej, niż system i tak już
+# zakłada gdzie indziej: klik w mapę bierze przystanki w promieniu 1000 m
+# (patrz nearby_stops) i traktuje je jako dostępne NATYCHMIAST, bez żadnego
+# czasu dojścia.
+WALK_ACCESS_M = 400
+_LAT_DEG_M = 111_320   # metrów na stopień szerokości (siatka w _nearby_bridges)
+
+# Pamięć podręczna walk_reach: kilkanaście miejsc starcza na jedno zapytanie
+# (start, cel, warianty), a limit chroni przed rośnięciem w nieskończoność.
+# Siedzi NA DNIU (DayData._reach), nie w słowniku modułu pod kluczem z
+# id(day): identyfikator zwolnionego obiektu CPython nadaje następnemu, więc
+# świeży rozkład potrafił dostać cudzy, nieswój wynik - cicho i tylko czasem,
+# bo zależało to od tego, co akurat przedtem zostało zwolnione. Cache na dniu
+# nie ma tego pytania w ogóle: żyje i umiera razem ze swoim rozkładem.
+_REACH_CACHE_MAX = 16
+
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
 # polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
 # unicodedata.normalize, więc jawna tabela zamiast NFKD.
@@ -52,6 +119,51 @@ _DIACRITIC_MAP = str.maketrans({
 
 def _strip_diacritics(casefolded):
     return casefolded.translate(_DIACRITIC_MAP)
+
+
+def _alias_key(name):
+    """Klucz "ta sama nazwa, inna pisownia": bez ogonków, bez kropek,
+    z rozwiniętymi skrótami (patrz naming.ABBREVIATIONS).
+
+    Składany TAK SAMO z nazwy przystanku i z zapytania, więc "PL. GRUNWALDZKI",
+    "Plac Grunwaldzki" i "pl grunwaldzki" dają jeden klucz - bez wpisywania
+    czegokolwiek do tabeli wyjątków. Kropka leci przez SPACJĘ, nie przez pustkę
+    ("C.H.Korona" -> "c h korona"), żeby skrót bez odstępu rozpadł się na te
+    same słowa co ze spacją.
+
+    To NAJSŁABSZY z kluczy dokładnych (patrz match_stop): różne nazwy schodzą
+    się tu częściej niż przy samym zdjęciu ogonków, więc pyta się o niego
+    dopiero, gdy dokładna pisownia i ogonki zawiodły."""
+    key = _strip_diacritics(name.casefold()).replace(".", " ")
+    return " ".join(naming.ABBREVIATIONS.get(word, word) for word in key.split())
+
+
+def _register_stop_name(data, stop_id, name):
+    """Wpisuje słupek do wszystkich indeksów nazw naraz (patrz match_stop).
+
+    Jedno miejsce dla obu sieci: MPK i PKP jadą tędy tak samo, więc dołożenie
+    poziomu kluczy jest zmianą w JEDNEJ funkcji, a nie w dwóch trzymanych
+    ręcznie w zgodzie (do 2026-09-10 pkp.augment_day powtarzało ten kod razem
+    z własną kopią _strip_diacritics).
+
+    `setdefault` przy pisowni wyświetlanej znaczy "pierwszy wygrywa", a dzień
+    budujemy od słupków MPK - nazwa z rozkładu miejskiego ma więc
+    pierwszeństwo przed kolejową, gdy obie schodzą się do jednego klucza.
+
+    Samego `stop_names` NIE dotyka - to indeksy nazw, nie zapis słupka; dzięki
+    temu wolno tym przejechać po `stop_names` bez modyfikowania go w trakcie."""
+    name_key = name.casefold()
+    data.stops_by_key.setdefault(name_key, []).append(stop_id)
+    data.display_name.setdefault(name_key, name)
+
+    norm_key = _strip_diacritics(name_key)
+    data.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
+    data.norm_display_name.setdefault(norm_key, name)
+
+    alias_key = _alias_key(name)
+    data.stops_by_alias_key.setdefault(alias_key, []).append(stop_id)
+    data.alias_display_name.setdefault(alias_key, name)
+
 
 _day_cache = {}
 
@@ -106,6 +218,42 @@ def _one_spot(stop_ids, stop_coords):
     return kept
 
 
+def _merge_named_places(places, stop_coords):
+    """Skleja w jedno miejsce pary nazw wskazane ręcznie (patrz naming.py).
+
+    To ostatni krok budowy miejsc, po dolepieniu peronów kierunkowych -
+    scalona stacja ma dostać całe miejsce razem z nimi, a nie sam rdzeń.
+
+    Strażnik odległości jest ten sam, co przy peronie (PLACE_MAX_SPAN_M),
+    tylko sprawdzany na WSZYSTKICH parach słupków obu grup: literówka
+    w tabeli albo dopisanie do rozkładu innego miasta kończy się wtedy
+    BRAKIEM scalenia, a nie trzyminutowym przejściem przez pół Polski.
+    Ręczna lista nie jest tu powodem, żeby ufać bardziej niż automatowi -
+    jest powodem, żeby sprawdzać tak samo.
+
+    Zwycięski klucz to nazwa MPK; klucz stacji ZNIKA z `places`, żeby nie
+    został osierocony obok scalonej grupy (ten sam powód co przy peronie
+    w _build_places). Wyszukiwarki to nie dotyczy: `stops_by_key` zostaje
+    nietknięte, więc "Wrocław Główny" dalej jest znaną nazwą, tylko rozwija
+    się teraz (przez _expand_to_places) na całe miejsce razem z tramwajami.
+    """
+    for canon, other in naming.PLACE_MERGES.items():
+        canon_key, other_key = canon.casefold(), other.casefold()
+        target = places.get(canon_key)
+        group = places.get(other_key)
+        if not target or not group or canon_key == other_key:
+            continue
+        if not all(
+            _haversine_m(*stop_coords[a], *stop_coords[b])
+            <= PLACE_MAX_SPAN_M
+            for a in group for b in target
+        ):
+            continue
+        places[canon_key] = target + [s for s in group if s not in target]
+        del places[other_key]
+    return places
+
+
 def _build_places(stop_names, stop_coords, stops_by_key):
     """Grupuje słupki w kanoniczne 'miejsca' - jednostkę, o którą pyta reszta
     systemu (dojechaliśmy? można się tu przesiąść?), zamiast surowej nazwy
@@ -114,6 +262,8 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     dolepiamy perony kierunkowe o nazwie bazowej pasującej do istniejącego
     miejsca, o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
     zabezpieczenie przed przypadkową kolizją nazw gdzie indziej w mieście.
+    Na koniec scalamy pary nazw z ręcznej tabeli (patrz _merge_named_places)
+    - tam, gdzie to samo miejsce nosi w obu sieciach inną nazwę.
     """
     places = {}
     for key, ids in stops_by_key.items():
@@ -143,34 +293,186 @@ def _build_places(stop_names, stop_coords, stops_by_key):
                 del places[own_key]
             elif own_group and stop_id in own_group:
                 places[own_key] = [s for s in own_group if s != stop_id]
-    return places
+    return _merge_named_places(places, stop_coords)
 
 
-def _walking_bridges(place_groups):
-    """Krawędzie 'przejście pieszym' między słupkami tego samego miejsca.
+def walk_time_sec(meters):
+    """Ile trwa przejście pieszo na dystansie `meters` w linii prostej
+    (patrz WALK_SPEED_MPS/WALK_DETOUR/WALK_MIN_SEC - tam całe uzasadnienie)."""
+    return max(WALK_MIN_SEC, round(meters * WALK_DETOUR / WALK_SPEED_MPS))
 
-    To jest most (bridge): kształt stop_id -> (sąsiad, ...) jest ogólnym
+
+def walk_seconds(day, from_stop, to_stop):
+    """Koszt krawędzi pieszej między dwoma słupkami połączonymi mostem.
+
+    JEDNO miejsce, w którym cała reszta systemu pyta "ile to trwa" - planner
+    nie zna już żadnej stałej czasu przejścia, bo od kiedy krawędzie biorą
+    się z odległości (patrz _nearby_bridges), stałej po prostu nie ma.
+
+    Bez zapisanej krawędzi liczymy z ODLEGŁOŚCI. Nie jest to wyjątek na
+    wszelki wypadek: dojście z krańca relacji ma własny, większy promień
+    (patrz walk_reach) i nie przechodzi przez most, więc dla takiej pary
+    krawędzi po prostu nie ma - a etap pieszy MUSI podać ten sam czas, który
+    policzył sobie skan. Rozjazd między nimi znaczyłby, że karta obiecuje
+    trzy minuty tam, gdzie wyszukiwarka założyła pięć.
+
+    WALK_MIN_SEC dopiero, gdy nie ma nawet współrzędnych: syntetyczny dzień
+    z testów podaje same sąsiedztwa, bez kosztów, i ma dostawać dokładnie to
+    samo trzyminutowe przejście, co przed wprowadzeniem odległości.
+    """
+    edge = day.siblings.get(from_stop, {}).get(to_stop)
+    if edge is not None:
+        return edge
+    skad, dokad = day.stop_coords.get(from_stop), day.stop_coords.get(to_stop)
+    if skad is None or dokad is None:
+        return WALK_MIN_SEC
+    return walk_time_sec(_haversine_m(skad[0], skad[1], dokad[0], dokad[1]))
+
+
+def walk_reach(day, stops, max_m=WALK_ACCESS_M):
+    """{słupek: (sekundy dojścia, z którego ze `stops` się tam dochodzi)} -
+    dokąd da się dojść pieszo z KRAŃCA relacji (patrz WALK_ACCESS_M).
+
+    Osobno od day.siblings, bo to inne pytanie i inny promień: siblings są
+    relacją PRZESIADKI, policzoną raz dla całego miasta, a to jest dojście
+    z konkretnego startu (albo do konkretnego celu) - dotyczy kilku słupków,
+    więc wolno mu sięgać dalej, nie płacąc za to gęstością grafu.
+
+    Same `stops` w wyniku nie są: na nich się już stoi.
+    """
+    key = (frozenset(stops), max_m)
+    cached = day._reach.get(key)
+    if cached is not None:
+        return cached
+    stops = key[0]
+
+    coords = day.stop_coords
+    reach = {}
+    for src in stops:
+        origin = coords.get(src)
+        if origin is None:
+            continue
+        for other, (lat, lon) in coords.items():
+            if other in stops:
+                continue
+            dist = _haversine_m(origin[0], origin[1], lat, lon)
+            if dist > max_m:
+                continue
+            sec = walk_time_sec(dist)
+            known = reach.get(other)
+            if known is None or sec < known[0]:
+                reach[other] = (sec, src)
+
+    if len(day._reach) >= _REACH_CACHE_MAX:
+        day._reach.clear()
+    day._reach[key] = reach
+    return reach
+
+
+def _walking_bridges(place_groups, stop_coords):
+    """Krawędzie 'przejście pieszo' między słupkami tego samego MIEJSCA.
+
+    To jest most (bridge): kształt stop_id -> {sąsiad: sekundy} jest ogólnym
     kontraktem transferu w tym systemie, nie czymś specyficznym dla chodzenia
     - każdy przyszły typ transferu (rower, hulajnoga, ...) dostarcza własne
     krawędzie w tym samym kształcie i scala się z resztą przez _merge_bridges,
     bez zmiany logiki skanowania w planner.py.
+
+    Dostawca "to samo miejsce" jest tu dalej, obok _nearby_bridges, i nie jest
+    jego duplikatem - miejsce wolno rozciągnąć na PLACE_MAX_SPAN_M (400 m),
+    czyli DALEJ, niż sięga promień marszu (WALK_MAX_M, 300 m). Rozległy plac
+    z peronami na obu krańcach trzymają więc razem te krawędzie, a nie tamte.
+    Tak ma być: peron jest dostępny z peronu dlatego, że to jeden przystanek,
+    a nie dlatego, że akurat mieści się w promieniu.
     """
     bridges = {}
     for group in place_groups:
-        if len(group) > 1:
-            for stop_id in group:
-                bridges[stop_id] = tuple(s for s in group if s != stop_id)
+        if len(group) <= 1:
+            continue
+        for stop_id in group:
+            if stop_id not in stop_coords:
+                continue
+            edges = {
+                other: walk_time_sec(
+                    _haversine_m(*stop_coords[stop_id], *stop_coords[other]))
+                for other in group
+                if other != stop_id and other in stop_coords
+            }
+            if edges:
+                bridges[stop_id] = edges
+    return bridges
+
+
+def _nearby_bridges(stop_coords, max_m=WALK_MAX_M):
+    """Krawędzie 'przejście pieszo' między słupkami po prostu BLISKIMI siebie,
+    bez oglądania się na nazwę - drugi dostawca mostów obok _walking_bridges.
+
+    To jest ta krawędź, której do 2026-09-10 nie było w ogóle. Wcześniej
+    pieszo dawało się przejść WYŁĄCZNIE między słupkami o tej samej nazwie,
+    więc dwa przystanki po dwóch stronach skrzyżowania - osiemdziesiąt metrów
+    i różne nazwy - były dla wyszukiwarki punktami niepołączonymi. Najdotkliwiej
+    widać to było na styku sieci: stacja kolejowa prawie nigdy nie nazywa się
+    tak, jak przystanki pod nią ("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc
+    kolej i MPK stykały się tylko tam, gdzie nazwy przypadkiem się pokryły.
+
+    Siatka zamiast porównywania każdego z każdym: słupków jest kilka tysięcy
+    (miasto plus wszystkie stacje kolejowe w kraju), więc pełne O(n^2) to
+    dziesiątki milionów haversine'ów przy każdym przeładowaniu dnia. Komórka
+    ma bok NIE MNIEJSZY niż max_m, więc wszystko w zasięgu leży w niej samej
+    albo w ośmiu przyległych i wystarczy sprawdzić sąsiedztwo 3x3.
+    """
+    if not stop_coords:
+        return {}
+
+    lat_step = max_m / _LAT_DEG_M
+    # Krok w stopniach długości liczymy dla NAJDALEJ NA PÓŁNOC położonego
+    # słupka - tam południki są najbliżej siebie, więc komórka wychodzi
+    # najwęższa w metrach. Ten sam krok użyty niżej na południu daje komórkę
+    # szerszą, czyli po bezpiecznej stronie; odwrotnie (krok liczony na
+    # południu) komórki na północy zrobiłyby się CIAŚNIEJSZE niż max_m
+    # i sąsiedztwo 3x3 przestałoby obejmować cały promień.
+    najdalej = max(abs(lat) for lat, _ in stop_coords.values())
+    lon_step = max_m / (_LAT_DEG_M * max(math.cos(math.radians(najdalej)), 0.01))
+
+    def cell(lat, lon):
+        return int(lat / lat_step), int(lon / lon_step)
+
+    cells = {}
+    for stop_id, (lat, lon) in stop_coords.items():
+        cells.setdefault(cell(lat, lon), []).append(stop_id)
+
+    bridges = {}
+    for stop_id, (lat, lon) in stop_coords.items():
+        cx, cy = cell(lat, lon)
+        edges = {}
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for other in cells.get((cx + dx, cy + dy), ()):
+                    if other == stop_id:
+                        continue
+                    dist = _haversine_m(lat, lon, *stop_coords[other])
+                    if dist <= max_m:
+                        edges[other] = walk_time_sec(dist)
+        if edges:
+            bridges[stop_id] = edges
     return bridges
 
 
 def _merge_bridges(*bridge_maps):
-    """Scala mosty z kilku dostawców (na razie tylko chodzenie) w jedną
-    relację. Kolejny typ transferu dokłada się tu, a nie osobną ścieżką."""
+    """Scala mosty z kilku dostawców (na razie same rodzaje chodzenia) w jedną
+    relację. Kolejny typ transferu dokłada się tu, a nie osobną ścieżką.
+
+    Ta sama krawędź od dwóch dostawców zostaje z TAŃSZYM czasem: dostawcy
+    odpowiadają na to samo pytanie ("da się tędy przejść i ile to trwa"),
+    więc gdy się nie zgadzają, wierzymy temu, który zna krótszą drogę.
+    """
     merged = {}
     for bridges in bridge_maps:
         for stop_id, neighbors in bridges.items():
-            existing = merged.get(stop_id, ())
-            merged[stop_id] = existing + tuple(n for n in neighbors if n not in existing)
+            into = merged.setdefault(stop_id, {})
+            for neighbor, sec in neighbors.items():
+                if sec < into.get(neighbor, math.inf):
+                    into[neighbor] = sec
     return merged
 
 
@@ -180,9 +482,10 @@ class DayData:
     __slots__ = (
         "conns", "dep_times", "stop_names", "stop_coords", "stops_by_key",
         "display_name", "stops_by_norm_key", "norm_display_name",
+        "stops_by_alias_key", "alias_display_name",
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
-        "pkp_stations", "deps_by_stop",
+        "pkp_stations", "deps_by_stop", "_reach",
     )
 
     def __init__(self):
@@ -197,13 +500,22 @@ class DayData:
         self.display_name = {}       # nazwa.casefold() -> oryginalna pisownia
         self.stops_by_norm_key = {}  # jw. bez polskich znaków diakrytycznych
         self.norm_display_name = {}  # jw. bez polskich znaków diakrytycznych
-        self.siblings = {}           # stop_id -> inne słupki tego samego miejsca
+        self.stops_by_alias_key = {}   # jw. + bez kropek, skróty rozwinięte
+        self.alias_display_name = {}   # jw. (patrz _alias_key)
+        # stop_id -> {sąsiad: sekundy} - słupki, do których stąd DA SIĘ DOJŚĆ
+        # pieszo, z czasem przejścia (patrz _merge_bridges i jego dostawcy).
+        # Nazwa jest starsza niż relacja: kiedyś byli to wyłącznie "bracia",
+        # czyli słupki tego samego miejsca. Dziś sąsiadem jest też przystanek
+        # o zupełnie innej nazwie po drugiej stronie skrzyżowania i stacja
+        # kolejowa obok - patrz _nearby_bridges.
+        self.siblings = {}
         self.trip_info = {}          # trip_id -> (etykieta linii, kierunek)
         self.trip_shape = {}         # trip_id -> shape_id (geometria z shapes.txt)
         self.stops_by_place = {}     # klucz miejsca -> [stop_id, ...] (patrz _build_places)
         self.place_of = {}           # stop_id -> klucz miejsca
         self.conns_by_trip = None    # kurs -> indeksy w conns (leniwie, patrz trip_conns)
         self.deps_by_stop = None     # słupek -> odjazdy (leniwie, patrz stop_departures)
+        self._reach = {}             # pamięć podręczna walk_reach (patrz wyżej)
         # trip_id "PKP:..." -> [(stop_id, przyjazd, odjazd), ...] po kolei -
         # odpowiednik stop_times.txt dla kursów kolejowych (patrz pkp.py:
         # augment_day/trip_path). GTFS-owe kursy tego nie używają - mają
@@ -325,12 +637,6 @@ def load_day(day):
         stop_id = sys.intern(stop_id)
         data.stop_names[stop_id] = stop_name
         data.stop_coords[stop_id] = (lat, lon)
-        name_key = stop_name.casefold()
-        data.stops_by_key.setdefault(name_key, []).append(stop_id)
-        data.display_name.setdefault(name_key, stop_name)
-        norm_key = _strip_diacritics(name_key)
-        data.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
-        data.norm_display_name.setdefault(norm_key, stop_name)
 
     # Kolej PRZED budowaniem miejsc: stacja ma przejść przez dokładnie ten
     # sam młynek co przystanek miejski (ta sama nazwa -> to samo miejsce ->
@@ -339,14 +645,28 @@ def load_day(day):
     # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
     pkp.augment_day(data, day)
 
-    # Kanoniczne miejsce (patrz _build_places) i most pieszy między jego
-    # słupkami (patrz _walking_bridges) - _merge_bridges scala go tu z
-    # dowolnymi innymi dostawcami transferu, gdyby doszły.
+    # Indeksy nazw dopiero TERAZ, gdy w dniu są już obie sieci - jednym
+    # przebiegiem po wszystkich słupkach, zamiast raz tutaj i drugi raz
+    # w pkp.augment_day (tak było do 2026-09-10, z osobną kopią składania
+    # klucza po każdej stronie). Kolejność jest ta sama co wtedy: MPK
+    # wchodzi do stop_names pierwsze, więc przy wspólnym kluczu to jego
+    # pisownia zostaje wyświetlana (patrz _register_stop_name).
+    for stop_id, stop_name in data.stop_names.items():
+        _register_stop_name(data, stop_id, stop_name)
+
+    # Kanoniczne miejsce (patrz _build_places) i mosty piesze: między słupkami
+    # jednego miejsca (_walking_bridges) oraz między słupkami po prostu
+    # bliskimi siebie, bez względu na nazwę i sieć (_nearby_bridges).
+    # _merge_bridges scala obu dostawców w jedną relację - i przyjmie tu
+    # każdego następnego, gdyby doszedł.
     data.stops_by_place = _build_places(data.stop_names, data.stop_coords, data.stops_by_key)
     data.place_of = {
         sid: key for key, ids in data.stops_by_place.items() for sid in ids
     }
-    data.siblings = _merge_bridges(_walking_bridges(data.stops_by_place.values()))
+    data.siblings = _merge_bridges(
+        _walking_bridges(data.stops_by_place.values(), data.stop_coords),
+        _nearby_bridges(data.stop_coords),
+    )
 
     # stop_times czytamy w kolejności (trip_id, stop_sequence) - to indeks,
     # więc bez sortowania - i sklejamy sąsiednie przystanki kursu w połączenia.
@@ -475,7 +795,20 @@ def _match_city_group(key, norm_key, data):
     pkp.augment_day, used_ids) - dokładnie to, co "przystanek" ma znaczyć.
 
     Zwraca (nazwa_do_wyświetlenia, [stop_id, ...]) albo (None, None), gdy
-    nic nie pasuje - wołane jako OSTATNI fallback w match_stop."""
+    nic nie pasuje - wołane jako OSTATNI fallback w match_stop.
+
+    Nazwa do wyświetlenia to "MIASTO -" (WIELKIMI LITERAMI + myślnik) - TA
+    SAMA postać, którą trzeba wpisać, żeby w ogóle trafić w tę gałąź (patrz
+    wyżej) i identyczna z etykietami podpowiedzi (pkp._city_group_labels).
+    To celowe, nie kosmetyka: zgłoszony przez użytkownika na żywo błąd -
+    front pokazuje/odsyła z powrotem nazwę zwróconą stąd (np. przy
+    ponownym wyszukaniu tej samej trasy), więc jeśli ta nazwa NIE pasuje
+    z powrotem do tego samego dopasowania (np. dawne "Wrocław (dowolna
+    stacja)" - bez myślnika na końcu, więc `key.endswith("-")` wyżej od
+    razu odrzuca), drugie wyszukanie kończy się fałszywym "nie znaleziono
+    przystanku", mimo że dane się nie zmieniły. Zwracana nazwa musi więc
+    być NIEZMIENNIKIEM tej funkcji (round-trip: wynik podany z powrotem na
+    wejściu daje ten sam wynik), nie tylko czytelną etykietą."""
     if not key.endswith("-"):
         return None, None
     city = key[:-1].strip()
@@ -494,55 +827,7 @@ def _match_city_group(key, norm_key, data):
             group.add(stop_id)
     if not group:
         return None, None
-    return f"{city.title()} (dowolna stacja)", _expand_to_places(data, list(group))
-
-
-def _match_city_group(key, norm_key, data):
-    """Dopasowuje "zbiorczą" stację PKP typu "Warszawa -" (patrz
-    update_pkp._is_city_wildcard) - PKP oznacza tak w słowniku stacji
-    "dowolną stację w tym mieście", zawsze bez żadnego WŁASNEGO kursu
-    (sprawdzone na żywo: 0 wpisów w stops dla każdej z nich) - żadne
-    z wcześniejszych dopasowań w match_stop nigdy jej więc nie złapie,
-    rozkład po prostu nie ma czego z nią połączyć.
-
-    Rozpoznanie PO WZORCU zapytania (kończy się myślnikiem), nie po
-    sztywnej liście nazw miast - i szukamy WSZYSTKICH prawdziwych, znanych
-    stacji zaczynających się od tej nazwy jako CAŁE SŁOWO (nie podciąg -
-    "Warszawa" nie ma złapać hipotetycznej "Warszawskiej"), łącząc ich
-    słupki w JEDNO zapytanie do CSA zamiast zwracać błąd "nie znaleziono" -
-    skan i tak sam wybierze najlepszą z nich (patrz _scan/plan_route:
-    przyjmuje ZBIÓR stacji startowych/końcowych z definicji, to nie nowy
-    mechanizm, tylko ten sam co przy zwykłym "miejscu" z wielu słupków).
-
-    PRZESZUKUJE WYŁĄCZNIE data.pkp_stations (patrz jej nagłówek w
-    DayData.__init__), NIE ogólne stops_by_key/stops_by_norm_key (tam MPK
-    i PKP są zmieszane) - "Wrocław -" ma trafić w prawdziwe stacje PKP
-    zaczynające się na "Wrocław", nie przypadkiem też w jakiś przystanek
-    MPK o zbieżnym przedrostku nazwy. data.pkp_stations to z definicji
-    tylko stacje z co najmniej jednym kursem TEGO dnia (patrz
-    pkp.augment_day, used_ids) - dokładnie to, co "przystanek" ma znaczyć.
-
-    Zwraca (nazwa_do_wyświetlenia, [stop_id, ...]) albo (None, None), gdy
-    nic nie pasuje - wołane jako OSTATNI fallback w match_stop."""
-    if not key.endswith("-"):
-        return None, None
-    city = key[:-1].strip()
-    if not city:
-        return None, None
-    norm_city = norm_key[:-1].strip() if norm_key.endswith("-") else _strip_diacritics(city)
-
-    group = set()
-    for name, stop_id in data.pkp_stations:
-        name_cf = name.casefold()
-        if name_cf == city or name_cf.startswith(city + " "):
-            group.add(stop_id)
-            continue
-        norm_name = _strip_diacritics(name_cf)
-        if norm_name == norm_city or norm_name.startswith(norm_city + " "):
-            group.add(stop_id)
-    if not group:
-        return None, None
-    return f"{city.title()} (dowolna stacja)", _expand_to_places(data, list(group))
+    return f"{city.upper()} -", _expand_to_places(data, list(group))
 
 
 def match_stop(query, data):
@@ -556,6 +841,13 @@ def match_stop(query, data):
     Dopasowanie ignoruje wielkość liter i - dopiero gdy dokładna pisownia
     zawiedzie - polskie znaki diakrytyczne (patrz _strip_diacritics), więc
     "Zabia" trafia w "Żabia", a "Dworzec Glowny" w "Dworzec Główny".
+    Krok niżej odpuszcza jeszcze kropki i skróty (patrz _alias_key), więc
+    "Plac Grunwaldzki" i "pl grunwaldzki" trafiają w "PL. GRUNWALDZKI".
+
+    Kolejność poziomów NIE jest przypadkowa i nowy poziom dokłada się na
+    DOLE, nigdy w środku: każdy następny skleja ze sobą więcej różnych
+    napisów, więc pytany wcześniej odbierałby trafienie czemuś, co pasuje
+    dokładniej.
 
     "Zbiorcza" stacja typu "Warszawa -" (patrz _match_city_group) trafia
     we WSZYSTKIE prawdziwe stacje danego miasta na raz - dopiero gdy nic
@@ -573,6 +865,14 @@ def match_stop(query, data):
         return (
             data.norm_display_name[norm_key],
             _expand_to_places(data, data.stops_by_norm_key[norm_key]),
+            None,
+        )
+
+    alias_key = _alias_key(key)
+    if alias_key in data.stops_by_alias_key:
+        return (
+            data.alias_display_name[alias_key],
+            _expand_to_places(data, data.stops_by_alias_key[alias_key]),
             None,
         )
 
@@ -595,7 +895,22 @@ def match_stop(query, data):
             _expand_to_places(data, data.stops_by_norm_key[k]),
             None,
         )
-    return None, None, sorted({data.norm_display_name[k] for k in norm_candidates})[:8]
+    if norm_candidates:
+        return None, None, sorted({data.norm_display_name[k] for k in norm_candidates})[:8]
+
+    # Ten sam kaskadowy układ co wyżej, tylko na kluczach aliasowych: bez
+    # tego "plac grun" nie podpowiedziałby NICZEGO, bo "plac" nie występuje
+    # w żadnej surowej nazwie przystanku - a to dokładnie ta połowa
+    # zapytania, którą użytkownik zdążył wpisać.
+    alias_candidates = [k for k in data.stops_by_alias_key if alias_key in k]
+    if len(alias_candidates) == 1:
+        k = alias_candidates[0]
+        return (
+            data.alias_display_name[k],
+            _expand_to_places(data, data.stops_by_alias_key[k]),
+            None,
+        )
+    return None, None, sorted({data.alias_display_name[k] for k in alias_candidates})[:8]
 
 
 def all_stop_names():

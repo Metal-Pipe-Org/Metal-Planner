@@ -982,4 +982,84 @@ checks.pojazdy_zawezone_do_linii_z_mapy = (function () {
     };
 })();
 
+/* Ostatni etap Traficarem (patrz planner._car_drive_leg). Front ma go
+   narysować INACZEJ niż kurs: odcinek auto -> cel jest prostą, nie przebiegiem
+   ulicami, więc kreskowana linia zamiast ciągłej i żadnej białej otoczki,
+   którą dostają prawdziwe kursy. */
+
+const DRIVE_LEGS = [
+    {kind: 'ride', mode: 'tram', num: '5', from: 'Katedra', to: 'Krakowska',
+     dep_sec: 50520, arr_sec: 51240, path: [[51.11, 17.04], [51.09, 17.05]]},
+    {kind: 'walk', to_car: true, minutes: 2, metres: 145, from: 'Krakowska',
+     to: 'ul. Testowa', path: [[51.09, 17.05], [51.089, 17.051]]},
+    {kind: 'drive', mode: 'car', num: 'Traficar', line: 'Traficar KK08703',
+     from: 'ul. Testowa', to: 'Iwiny', from_time: '14:21', to_time: '14:33',
+     dep_sec: 51660, arr_sec: 52380, minutes: 12, km: 5, start_min: 5,
+     plate: 'KK08703', model: 'Dacia Sandero', fuel: 26, range: 104,
+     estimated: true, path: [[51.089, 17.051], [51.03, 17.07]]},
+];
+
+checks.traficar_jedzie_kreskowana_a_nie_jak_kurs = (() => {
+    const layers = app.legLayers(DRIVE_LEGS, {preview: false});
+    const linie = layers.filter(l => l.kind === 'polyline');
+    const auto = linie.filter(l => l.options.dashArray === '10,8');
+    const otoczki = linie.filter(l => l.options.color === '#fff');
+    const plakietki = layers.filter(
+        l => l.kind === 'marker' && (l.options.icon.className || '').includes('car'));
+    return {
+        // Jedna kreskowana linia auta, jedna plakietka przy niej - i tylko
+        // JEDNA biała otoczka, ta od prawdziwego przejazdu tramwajem.
+        ok: auto.length === 1 && otoczki.length === 1 && plakietki.length === 1
+            && auto[0].options.color !== '#fff'
+            && auto[0].options.dashArray !== undefined,
+        kreskowanych: auto.length, otoczek: otoczki.length,
+        plakietek: plakietki.length,
+    };
+})();
+
+checks.traficar_widac_na_karcie_przed_rozwinieciem = (() => {
+    const zAutem = {
+        departure: '14:02', arrival: '14:33', duration_min: 31, wait_min: 2,
+        transfers: 1, traficar: true, legs: DRIVE_LEGS,
+    };
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zAutem]}, false);
+    const html = app.resultsBox.innerHTML;
+    return {
+        ok: html.includes('badge car') && html.includes('Traficar')
+            && html.includes('ostatni odcinek autem')
+            // Łącznik kropkowany: między tramwajem a autem trzeba dojść.
+            && html.includes('hop walk'),
+        html: html.slice(html.indexOf('j-lines'), html.indexOf('j-lines') + 260),
+    };
+})();
+
+/* Czas podróży kończącej się autem jest SZACUNKIEM i ma to być widać na
+   pierwszej liczbie, którą się czyta - nie dopiero w rozwiniętej karcie. */
+checks.traficar_czas_oznaczony_jako_szacunek = (() => {
+    const zAutem = {
+        departure: '14:02', arrival: '14:33', duration_min: 31, wait_min: 2,
+        transfers: 1, traficar: true, legs: DRIVE_LEGS,
+    };
+    const zwykla = {...zAutem, traficar: false, legs: DRIVE_LEGS.slice(0, 1)};
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zAutem]}, false);
+    const auto = app.resultsBox.innerHTML;
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zwykla]}, false);
+    const bezAuta = app.resultsBox.innerHTML;
+
+    // Rozwinięta karta mówi wprost, skąd te liczby - i podaje dystans też
+    // z "ok.", bo jest obarczony tym samym szacunkiem co czas.
+    const szczegoly = app.detailHtml(zAutem);
+    return {
+        ok: auto.includes('j-duration est') && auto.includes('ok. 31 min')
+            // Zwykła trasa ma godziny z rozkładu i żadnego "ok." przy czasie.
+            && !bezAuta.includes('j-duration est') && bezAuta.includes('>31 min<')
+            && szczegoly.includes('auto nie ma rozkładu')
+            && szczegoly.includes('ok. 12 min') && szczegoly.includes('ok. 5 km')
+            && szczegoly.includes('ok. 5 min'),      // odbiór i start auta
+        auto: auto.slice(auto.indexOf('j-duration'), auto.indexOf('j-duration') + 90),
+        szczegoly: szczegoly.slice(szczegoly.indexOf('tl-info'),
+                                   szczegoly.indexOf('tl-info') + 220),
+    };
+})();
+
 JSON.stringify(checks);

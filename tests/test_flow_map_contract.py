@@ -1232,7 +1232,10 @@ def test_a_journey_that_starts_with_a_walk_still_reports_its_departure():
     day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
     day.stop_names["OBOK"] = "OBOK"
     day.stop_coords["OBOK"] = (51.11, 17.03)
-    day.siblings = {"OBOK": ("START",), "START": ("OBOK",)}
+    day.siblings = {
+        "OBOK": {"START": gtfs.WALK_MIN_SEC},
+        "START": {"OBOK": gtfs.WALK_MIN_SEC},
+    }
     stop, _, journey = planner._scan(day, ["START"], ["CEL"], 10 * 3600)
     assert planner._journey_start(day, journey, stop) == 12 * 3600
 
