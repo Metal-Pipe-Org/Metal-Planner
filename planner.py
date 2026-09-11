@@ -562,21 +562,34 @@ def _walk_leg(day, from_stop, to_stop):
     Dwa różne przejścia, jeden etap. Zmiana stanowiska w obrębie jednego
     przystanku to dla pasażera co innego niż marsz na przystanek o innej
     nazwie albo pod dworzec - pierwsze się "robi po drodze", drugie trzeba
-    ŚWIADOMIE przejść i trzeba wiedzieć DOKĄD. Rozstrzyga o tym miejsce
-    (gtfs._build_places), nie sama nazwa: perony jednego placu bywają nazwane
-    różnie, a i tak są tym samym przystankiem. Front dostaje `same_place`
-    gotowe, żeby nie odtwarzać tego z porównania nazw (patrz static/app.js).
+    ŚWIADOMIE przejść i trzeba wiedzieć DOKĄD.
+
+    Rozstrzygają o tym NAZWY, nie miejsce. Miejsce (gtfs._build_places) bywa
+    szersze niż jedna nazwa: zbiera dziś stację kolejową razem z przystankiem
+    MPK przy niej (patrz naming.PLACE_MERGES), a wysiadającemu z pociągu na
+    "Wrocław Nadodrze" zdanie o zmianie stanowiska nic nie mówi - on ma dojść
+    do "DWORZEC NADODRZE". Gdy nazwy się różnią, mówimy więc dokąd, a nie że
+    "gdzieś tu obok". Front rozstrzyga tak samo (patrz static/app.js): jedno
+    przejście nie może mieć dwóch różnych opisów.
+
+    `same_place` jedzie obok jako fakt o MIEJSCU - to inne pytanie niż
+    o nazwę i tylko stąd da się na nie odpowiedzieć, więc etap niesie je
+    gotowe dla każdego, kto go potrzebuje.
     """
     same_place = (day.place_of.get(from_stop, from_stop)
                   == day.place_of.get(to_stop, to_stop))
     walk_sec = gtfs.walk_seconds(day, from_stop, to_stop)
     minutes = round(walk_sec / 60)
+    from_name = day.stop_names[from_stop]
     to_name = day.stop_names[to_stop]
+    text = (
+        f"Zmiana stanowiska na przystanku {to_name}"
+        if from_name == to_name
+        else f"Przejście z {from_name} do {to_name}"
+    )
     return {
         "kind": "walk",
-        "text": (f"Zmiana stanowiska na przystanku {to_name} (ok. {minutes} min)"
-                 if same_place else
-                 f"Przejście pieszo do: {to_name} (ok. {minutes} min)"),
+        "text": f"{text} (ok. {minutes} min)",
         "minutes": minutes,
         # Sekundy obok zaokrąglonych minut: gdy przejście OTWIERA trasę
         # (wyjście pieszo ze startu - patrz _origin_walk), godzina wyjścia

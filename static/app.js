@@ -1532,6 +1532,11 @@ function startDotIn(layer) {
 
 if (flowPanel) $('flow-panel-close').addEventListener('click', hideSidePanel);
 
+// Okienko w rogu jest jedynym miejscem, w którym tę tablicę da się KLIKNĄĆ:
+// dymek przy kursorze Leaflet trzyma poza zdarzeniami myszy (pointer-events),
+// więc przycisk "trasa" jest tam schowany stylem (patrz style.css).
+if (flowPanelBody) flowPanelBody.addEventListener('click', routeClick);
+
 // Odpowiedzi /api/timetable trzymamy pod (przystanek, doba, godzina) - ta
 // sama kropka pytana drugi raz (powrót kursorem, przerysowanie trasy po
 // suwaku) pokazuje dymek od razu, bez mrugnięcia "Ładowanie...".
@@ -1592,7 +1597,7 @@ function flowIcon(flow) {
 
 function timetableHtml(data) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
-    const head = `<div class="tt-head"><span class="tt-stop">${esc(data.stop)}</span>` +
+    const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
                  `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
     if (!data.departures.length) {
         return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
@@ -1607,7 +1612,7 @@ function timetableHtml(data) {
         `<li>` + (flows ? flowIcon(d.flow) : '') +
         `<span class="tt-time">${esc(d.time)}</span>` +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
-        `<span class="tt-dir">${esc(d.headsign)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}</span>` +
         // "0 min", nie "teraz": nagłówek mówi "od 16:57", a to nie jest
         // godzina zegarowa, tylko najwcześniejsza, o której da się tu być -
         // "teraz" obok niej znaczyłoby coś innego niż znaczy. Rytm dopisany
@@ -1615,7 +1620,7 @@ function timetableHtml(data) {
         // wyższego od pozostałych.
         `<span class="tt-in">${esc(d.in_min < 1 ? 0 : d.in_min)} min` +
         (d.every_min ? `<small> · co ${esc(d.every_min)} min</small>` : '') +
-        `</span></li>`
+        `</span>` + routeButtonHtml(d, 'trasa') + `</li>`
     ).join('');
     return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
 }
@@ -2049,6 +2054,53 @@ function badgeHtml(leg) {
     return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
 }
 
+/** Znak trasy: nitka z krańcami na końcach - to samo, co przycisk rysuje na
+    mapie, tylko w 11 pikselach. Ta sama rodzina co FLOW_ICONS: kreska bierze
+    `currentColor`, więc chodzi za kolorem przycisku (przygaszony w spoczynku,
+    akcentowy pod kursorem), zamiast mieć własny, który trzeba by osobno
+    pamiętać przy każdej zmianie stanu. */
+const ROUTE_ICON =
+    '<svg class="tt-route-icon" viewBox="0 0 15 12" aria-hidden="true">'
+    + '<path d="M2.5 9.5h2.6l4.8-7h2.6"/>'
+    + '<circle cx="2.5" cy="9.5" r="1.5"/>'
+    + '<circle cx="12.5" cy="2.5" r="1.5"/></svg>';
+
+/** "A którędy ta linia jedzie w ogóle" - pytanie, na które wyszukiwarka nie
+    odpowiada wcale: propozycja pokazuje kawałek od wsiadania do wysiadania,
+    a tablica pod słupkiem sam moment odjazdu. Przycisk przeskakuje w rozkład
+    linii, tak jak "odjazdy" w rozkładzie linii przeskakuje w tablicę słupka.
+
+    Rysowany TYLKO dla linii, które rozkład zna (patrz timetableMode.hasLine):
+    pociągi PKP nie są w bazie rozkładów, więc ich wiersze zostają bez
+    przycisku zamiast prowadzić w komunikat o nieznanej linii. Kierunek jedzie
+    razem z numerem - rozkład ma się otworzyć na tym wariancie, którym jedzie
+    ten kurs, a nie na przeciwnym. */
+function routeButtonHtml(line, label) {
+    const tt = window.timetableMode;
+    if (!tt || !tt.hasLine || !tt.hasLine(line.num, line.mode)) return '';
+    return `<button type="button" class="tt-route"
+                    data-route-num="${esc(line.num)}"
+                    data-route-mode="${esc(line.mode)}"
+                    data-route-headsign="${esc(line.headsign || '')}"
+                    title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
+                    >${ROUTE_ICON}${esc(label)}</button>`;
+}
+
+/** Klik w "trasę" nigdy nie ma znaczyć tego, co klik w wiersz pod nią -
+    ani rozwinięcia propozycji, ani zamknięcia okienka. */
+function routeClick(event) {
+    const button = event.target.closest('[data-route-num]');
+    if (!button) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    window.timetableMode.openLine({
+        num: button.dataset.routeNum,
+        mode: button.dataset.routeMode,
+        headsign: button.dataset.routeHeadsign,
+    });
+    return true;
+}
+
 /** Ludzik idacy - monochromatyczny SVG, nie emoji: reszta ikon w interfejsie
     (◉ ⚙ ⇅ ✕ ◷) tez jest jednobarwna, a kolorowe 🚶 wygladaloby jak wklejka
     z innego programu i renderowaloby sie inaczej na kazdym systemie. */
@@ -2061,7 +2113,7 @@ const WALK_ICON =
 
 
 function walkBadgeHtml(leg) {
-    const dokad = leg.same_place === false ? ` do: ${leg.to}` : ' na inne stanowisko';
+    const dokad = leg.from === leg.to ? ' na inne stanowisko' : ` do: ${leg.to}`;
     return `<span class="badge walk" title="Przejście pieszo${esc(dokad)}` +
            ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`;
 }
@@ -2128,12 +2180,15 @@ function detailHtml(journey) {
             // Zmiana stanowiska w obrebie jednego przystanku vs marsz na
             // przystanek o innej nazwie (albo pod dworzec) - w drugim
             // przypadku trzeba powiedziec DOKAD, bo bez nazwy taki etap jest
-            // nie do wykonania. `same_place` liczy serwer (patrz
-            // planner._walk_leg); z samych nazw nie da sie tego odtworzyc,
-            // bo perony jednego placu bywaja nazwane roznie.
-            const body = leg.same_place === false
-                ? `Przejście pieszo do: ${esc(leg.to)} · ok. ${leg.minutes} min`
-                : `Przejście na inne stanowisko · ok. ${leg.minutes} min`;
+            // nie do wykonania. Rozstrzygaja NAZWY, nie miejsce: miejsce
+            // potrafi zbierac slupki nazwane roznie (stacja PKP i przystanek
+            // MPK przy niej - patrz naming.py), a wtedy "inne stanowisko" nie
+            // mowi wysiadajacemu z pociagu, dokad ma isc. Ta sama zasada, co
+            // w planner._walk_leg - zdanie w osi i zdanie z serwera nie moga
+            // rozstrzygac tego inaczej.
+            const body = leg.from === leg.to
+                ? `Przejście na inne stanowisko · ok. ${leg.minutes} min`
+                : `Przejście do ${esc(leg.to)} · ok. ${leg.minutes} min`;
             rows.push(
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
                 `<span class="tl-body">${body}</span></li>`,
@@ -2155,7 +2210,12 @@ function detailHtml(journey) {
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
+            // Przycisk PRZED liczbą przystanków, choć czyta się go po niej:
+            // .tl-info zajmuje całą szerokość (flex-basis: 100%), więc wszystko
+            // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
+            // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
+            routeButtonHtml(leg, 'trasa') +
             `<span class="tl-info">${leg.stops_count} ${stopWord} · ` +
             `${leg.minutes} min</span></span></li>`,
         );
@@ -2240,6 +2300,8 @@ function scrollToSelected() {
 }
 
 resultsBox.addEventListener('click', event => {
+    if (routeClick(event)) return;
+
     if (event.target.closest('#results-toggle')) {
         resultsCollapsed = !resultsCollapsed;
         saveUiState({resultsCollapsed});
@@ -2269,6 +2331,7 @@ resultsBox.addEventListener('click', event => {
 });
 
 resultsBox.addEventListener('keydown', event => {
+    if (event.target.closest('[data-route-num]')) return;
     const card = event.target.closest('.journey');
     if (card && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault();
@@ -2570,19 +2633,43 @@ const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                          .toLowerCase().replace(/ł/g, 'l');
 const FOLDED_NAMES = STOP_NAMES.map(fold);
 
+// Drugie złożenie: bez kropek i z rozwiniętymi skrótami, żeby "Plac
+// Grunwaldzki" podpowiadało "PL. GRUNWALDZKI". Tabela przychodzi z serwera
+// (patrz naming.ABBREVIATIONS, templates/index.html) - przepisana tutaj
+// rozjechałaby się z wyszukiwarką przy pierwszym dopisanym skrócie.
+//
+// To OSOBNY, ostatni przebieg, a nie zamiennik fold(): rozwinięcie zmienia
+// długość ("pl" -> "plac"), więc pozycja trafienia nie wskazuje już tego
+// samego fragmentu oryginalnej nazwy i nie ma czego podświetlić.
+const ABBREV = new Map(Object.entries(JSON.parse($('stop-abbrev').textContent)));
+const expand = folded => folded.replace(/\./g, ' ').split(/\s+/)
+                               .filter(Boolean)
+                               .map(word => ABBREV.get(word) || word).join(' ');
+const ALIAS_NAMES = STOP_NAMES.map(name => expand(fold(name)));
+
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
-    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
+    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie.
+    Trafienia po rozwinięciu skrótu idą na koniec: są najluźniejsze, tak samo
+    jak po stronie serwera (patrz gtfs.match_stop). */
 function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIONS) {
-    folded = folded || (names === STOP_NAMES ? FOLDED_NAMES : names.map(fold));
     const needle = fold(query.trim());
     if (!needle) return [];
-    const prefix = [], inside = [];
+    const own = names === STOP_NAMES;
+    folded = folded || (own ? FOLDED_NAMES : names.map(fold));
+    // Złożenia aliasowe idą tą samą drogą co `folded`: gotowe dla domyślnej
+    // listy przystanków, liczone w locie dla każdej innej (tryb rozkładów
+    // podaje własną listę numerów linii - patrz timetable.js).
+    const aliases = own ? ALIAS_NAMES : folded.map(expand);
+    const alias = expand(needle);
+    const prefix = [], inside = [], aliased = [];
     names.forEach((name, i) => {
         const at = folded[i].indexOf(needle);
         if (at === 0) prefix.push({name, at, len: needle.length});
         else if (at > 0) inside.push({name, at, len: needle.length});
+        // at/len na zero = nic nie podświetlamy (patrz wyżej, dlaczego).
+        else if (alias && aliases[i].includes(alias)) aliased.push({name, at: 0, len: 0});
     });
-    return [...prefix, ...inside].slice(0, limit);
+    return [...prefix, ...inside, ...aliased].slice(0, limit);
 }
 
 /** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów
@@ -3126,6 +3213,10 @@ function suspendPlanner() {
     setBaseDim(false);          // przystanki wracają do pełnej widoczności - w
     const headline = $('time-headline');   // rozkładach to one są treścią mapy
     if (headline) headline.hidden = true;
+    // Okienko w rogu opisuje przystanek na mapie, którą właśnie zdejmujemy -
+    // zostawione, wisiałoby nad rozkładami z tablicą sprzed przejścia (a od
+    // niedawna również z przyciskiem „trasa", którym się tu weszło).
+    hideSidePanel();
 }
 
 function resumePlanner() {
@@ -3137,7 +3228,7 @@ function resumePlanner() {
 window.plannerBridge = {
     map, esc, fitTo, setView, setBaseDim,
     attachAutocomplete, suggestionsFor, suggestionHtml,
-    LINE_COLORS, MODE_LABEL, STOP_NAMES,
+    LINE_COLORS, MODE_LABEL, STOP_NAMES, ROUTE_ICON,
     suspendPlanner, resumePlanner,
 };
 

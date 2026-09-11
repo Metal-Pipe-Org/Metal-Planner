@@ -40,10 +40,13 @@ Przez pewien czas kosztowało to naprawdę dużo. Wspólnym mechanizmem było
 wtedy WYŁĄCZNIE sklejanie po nazwie, a nazwy stacji i przystanków prawie
 nigdy się nie pokrywają ("Wrocław Główny" vs "DWORZEC GŁÓWNY"), więc obie
 sieci stykały się tylko w przypadkowych pojedynczych punktach. Od 2026-09-10
-wspólny mechanizm jest szerszy: most pieszy powstaje z ODLEGŁOŚCI, bez
-oglądania się na nazwę (patrz gtfs._nearby_bridges), i to on łączy dworzec
-z przystankami pod nim. Kolej nadal nie ma tu nic własnego - po prostu to,
-co jest wspólne, wreszcie na to wystarcza.
+wspólny mechanizm jest szerszy z dwóch stron naraz: największe wrocławskie
+węzły skleja w jedno miejsce ręczna tabela naming.PLACE_MERGES, a poza nimi
+most pieszy powstaje z ODLEGŁOŚCI, bez oglądania się na nazwę (patrz
+gtfs._nearby_bridges) - i to on łączy dworzec z przystankami pod nim. Kolej
+nadal nie ma tu nic własnego, tabela też żyje TAM, nie tutaj: to część
+budowania miejsc, a nie czytania rozkładu kolejowego. Ten plik dalej nie wie
+o przesiadkach nic poza tym, że dokłada stacje PRZED budowaniem miejsc.
 
 CZAS jest ucinany do pełnych minut (patrz _sec_of): API kolei podaje sekundy,
 rozkład miejski nie, a jedna oś czasu nie może mieć dwóch dokładności - inaczej
@@ -68,11 +71,6 @@ import config
 DB_PATH = Path(__file__).resolve().parent / "data" / "pkp.sqlite"
 COORDS_PATH = Path(__file__).resolve().parent / "data" / "pkp_station_coords.json"
 
-_DIACRITIC_MAP = str.maketrans({
-    "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
-    "ó": "o", "ś": "s", "ź": "z", "ż": "z",
-})
-
 # Klucz cache'a to mtime pliku bazy - ten sam trik co gtfs._day_cache: po
 # nocnej podmianie (update_pkp.py) dane przeładują się same, bez restartu
 # procesu, i trzymamy naraz tylko jedną (aktualną) wersję.
@@ -82,10 +80,6 @@ _stations_cache = {}
 def enabled():
     """Czy skonfigurowano klucz PKP - brak klucza wyłącza funkcję po cichu."""
     return config.pkp_api_key() is not None
-
-
-def _strip_diacritics(casefolded):
-    return casefolded.translate(_DIACRITIC_MAP)
 
 
 def _connect():
@@ -312,7 +306,7 @@ def augment_day(day, date):
     try:
         rows = db.execute(
             """
-            SELECT r.name, r.carrier_code, r.national_number, r.category,
+            SELECT r.carrier_code, r.national_number, r.category,
                    s.schedule_id, s.order_id, s.station_id, s.order_number,
                    s.arrival_time, s.departure_time
             FROM stops s
@@ -329,7 +323,7 @@ def augment_day(day, date):
     if not rows:
         return
 
-    used_ids = {row[6] for row in rows if row[6] in coords}
+    used_ids = {row[5] for row in rows if row[5] in coords}
     if not used_ids:
         return
 
@@ -339,15 +333,31 @@ def augment_day(day, date):
         stop_of[station_id] = stop_id
         name = stations.get(station_id, f"Stacja {station_id}")
         lat, lon = coords[station_id]
+        # Sama nazwa i współrzędne - indeksy wyszukiwania buduje gtfs.load_day
+        # jednym przebiegiem po WSZYSTKICH słupkach, już po tym doklejeniu
+        # (patrz gtfs._register_stop_name). Do 2026-09-10 stało tu drugie,
+        # ręcznie utrzymywane w zgodzie kopiuj-wklej tamtego kodu.
         day.stop_names[stop_id] = name
         day.stop_coords[stop_id] = (lat, lon)
         day.pkp_stations.append((name, stop_id))
-        name_key = name.casefold()
-        day.stops_by_key.setdefault(name_key, []).append(stop_id)
-        day.display_name.setdefault(name_key, name)
-        norm_key = _strip_diacritics(name_key)
-        day.stops_by_norm_key.setdefault(norm_key, []).append(stop_id)
-        day.norm_display_name.setdefault(norm_key, name)
+
+    # Kierunek kursu to jego OSTATNIA stacja - to samo, co headsign
+    # autobusu i to samo, co stoi na tablicy dworcowej. Liczony osobnym
+    # przejściem, bo wiersze idą od początku trasy, a nazwa kierunku jest
+    # potrzebna już przy pierwszej z nich (niżej, na granicy kursu); wiersze
+    # są posortowane po order_number, więc wygrywa ostatni wpis kursu.
+    #
+    # NIE `routes.name`: to nazwa WŁASNA pociągu ("GALICJA", "ORZESZKOWA"),
+    # u większości kursów pusta - w polu kierunku dawała albo nic, albo
+    # słowo, które nie mówi, dokąd ten pociąg jedzie.
+    #
+    # Bez oglądania się na współrzędne: pociąg dojeżdża do swojej ostatniej
+    # stacji niezależnie od tego, czy umiemy ją postawić na mapie. Kierunek
+    # ucięty do ostatniej stacji, którą akurat znamy, kłamałby.
+    destination = {}
+    for row in rows:
+        _, _, _, schedule_id, order_id, station_id = row[:6]
+        destination[(schedule_id, order_id)] = stations.get(station_id, "")
 
     # Jedno przejście po wierszach (posortowanych SQL-em wg schedule_id,
     # order_id, order_number) buduje i połączenia (day.conns), i sekwencję
@@ -361,7 +371,7 @@ def augment_day(day, date):
     prev_stop = None
     prev_dep_c = None
     for row in rows:
-        (name, carrier_code, national_number, category, schedule_id, order_id,
+        (carrier_code, national_number, category, schedule_id, order_id,
          station_id, order_number, arrival_time, departure_time) = row
         key = (schedule_id, order_id)
         if key != prev_key:
@@ -374,7 +384,8 @@ def augment_day(day, date):
             number_digits = "".join(c for c in national_number or "" if c.isdigit())
             label = f"{carrier_code or ''} {number_digits}".strip()
             day.trip_info[trip_id] = (
-                f"Pociąg {label}" if label else "Pociąg", name or "",
+                f"Pociąg {label}" if label else "Pociąg",
+                destination.get(key, ""),
             )
 
         raw_arr = _sec_of(arrival_time, round_up=True) if arrival_time else None
