@@ -392,3 +392,28 @@ def test_a_station_group_travels_to_the_server_under_its_canonical_name(front):
     przystanku" (błąd zgłoszony na żywo, przez który etykieta wróciła kiedyś
     do myślnika - patrz docstring gtfs._match_city_group)."""
     _check(front, "grupa_stacji_wraca_kanoniczna")
+
+
+# ------------------------------------------------------------- Traficar ----
+
+def test_the_car_leg_is_drawn_as_an_estimate_not_as_a_ride(front):
+    """Ostatni etap Traficarem (patrz planner._car_drive_leg) biegnie prostą
+    od auta do celu - prawdziwego przebiegu jazdy nikt tu nie liczy. Linia
+    ciągła w otoczce, czyli tak jak rysuje się kursy z rozkładu, obiecywałaby
+    trasę, której nie ma; stąd kreska i żadnej otoczki."""
+    _check(front, "traficar_jedzie_kreskowana_a_nie_jak_kurs")
+
+
+def test_the_car_is_visible_on_the_card_before_expanding(front):
+    """Propozycja z autem kończy się czymś, czego nie ma w rozkładzie i czym
+    się płaci za przejazd - to ma być widać na zwiniętej karcie, a nie dopiero
+    po jej rozwinięciu."""
+    _check(front, "traficar_widac_na_karcie_przed_rozwinieciem")
+
+
+def test_the_estimated_time_says_so_on_the_card(front):
+    """Każda inna godzina w tej aplikacji jest odczytana z rozkładu - ta
+    jedna nie ma skąd. Karta mówi to „ok." przy czasie podróży (pierwszej
+    liczbie, którą się czyta), a rozwinięcie dopowiada wprost, skąd te liczby
+    się biorą. Zwykła trasa nie dostaje ani jednego, ani drugiego."""
+    _check(front, "traficar_czas_oznaczony_jako_szacunek")

@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
+import naming
 import pkp
 import timetables
 import vehicles
@@ -138,6 +139,7 @@ def init_routes(app):
         return render_template(
             "index.html",
             stops=stops,
+            abbreviations=naming.ABBREVIATIONS,
             lines=lines,
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),
@@ -265,4 +267,9 @@ def init_routes(app):
             extra_floor_sec=_float_arg("extra_floor_sec"),
             extra_cap_sec=_float_arg("extra_cap_sec"),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
+            # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
+            # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc
+            # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi
+            # (przełącznik 🚲 w karcie wyszukiwania).
+            use_bikes=request.args.get("bikes") == "1",
         ))

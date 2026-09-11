@@ -39,7 +39,10 @@ def _day_z_celem_za_przejsciem(przyjazd_pojazdem=None):
     if "CEL" not in day.stop_names:
         day.stop_names["CEL"] = "CEL"
         day.stop_coords["CEL"] = (51.111, 17.031)
-    day.siblings = {"SASIAD": ("CEL",), "CEL": ("SASIAD",)}
+    day.siblings = {
+        "SASIAD": {"CEL": gtfs.WALK_MIN_SEC},
+        "CEL": {"SASIAD": gtfs.WALK_MIN_SEC},
+    }
     return day
 
 
@@ -51,7 +54,7 @@ def test_a_target_reached_only_on_foot_is_still_a_connection():
     day = _day_z_celem_za_przejsciem()
     stop, arr, _ = planner._scan(day, ["START"], ["CEL"], 0)
     assert stop == "CEL", "cel za przejściem pieszo ogłoszony jako nieosiągalny"
-    assert arr == 600 + planner.WALK_SEC
+    assert arr == 600 + gtfs.WALK_MIN_SEC
 
 
 def test_the_walk_does_not_hide_a_later_ride_to_the_target():
@@ -60,11 +63,11 @@ def test_the_walk_does_not_hide_a_later_ride_to_the_target():
     liczyć, jego godzina i tak lądowała w tabeli najwcześniejszych dojazdów
     i blokowała późniejszy kurs, który BYŁBY zauważony: wychodziło z tego
     "nie znaleziono połączenia" mimo dwóch dobrych dróg."""
-    pozniej = 600 + planner.WALK_SEC + 60
+    pozniej = 600 + gtfs.WALK_MIN_SEC + 60
     day = _day_z_celem_za_przejsciem(przyjazd_pojazdem=pozniej)
     stop, arr, _ = planner._scan(day, ["START"], ["CEL"], 0)
     assert stop == "CEL"
-    assert arr == 600 + planner.WALK_SEC, "wygrać ma szybsze dotarcie, nie to pojazdem"
+    assert arr == 600 + gtfs.WALK_MIN_SEC, "wygrać ma szybsze dotarcie, nie to pojazdem"
 
 
 def test_a_walk_arrival_can_be_reconstructed_into_legs():
