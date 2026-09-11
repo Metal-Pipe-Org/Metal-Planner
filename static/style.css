@@ -6,6 +6,7 @@
     --tram: #c62828;
     --bus: #1565c0;
     --train: #2e7d33;
+    --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
     --accent: #2563eb;
     --ink: #16202b;
@@ -598,6 +599,7 @@ body.panel-hidden #sidebar {
 .badge.tram { background: var(--tram); }
 .badge.bus { background: var(--bus); }
 .badge.train { background: var(--train); }
+.badge.car { background: var(--car); }
 
 /* Łącznik między plakietkami: ciągły = przesiadka na miejscu,
    kropkowany = trzeba przejść na inne stanowisko. */
@@ -674,6 +676,16 @@ body.panel-hidden #sidebar {
 .tl-ride.tram .tl-dot { background: var(--tram); }
 .tl-ride.bus .tl-dot { background: var(--bus); }
 .tl-ride.train .tl-dot { background: var(--train); }
+.tl-ride.car .tl-dot { background: var(--car); }
+
+/* Autko przy modelu auta na osi trasy - w linii z tekstem, nie nad nim. */
+.tl-car-icon {
+    width: 17px;
+    height: 10px;
+    margin-right: 4px;
+    vertical-align: -1px;
+    fill: var(--car);
+}
 
 .tl-ride .tl-body {
     display: flex;
@@ -739,6 +751,7 @@ body.panel-hidden #sidebar {
     box-shadow: 0 0 3px rgba(0, 0, 0, 0.35);
 }
 
+.line-badge.car { color: var(--car); border-color: var(--car); }
 .line-badge.tram { color: var(--tram); border-color: var(--tram); }
 .line-badge.bus { color: var(--bus); border-color: var(--bus); }
 .line-badge.train { color: var(--train); border-color: var(--train); }
@@ -756,6 +769,7 @@ body.panel-hidden #sidebar {
 .line-badge.solid.tram { background: var(--tram); }
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.train { background: var(--train); }
+.line-badge.solid.car { background: var(--car); }
 .line-badge.solid.other { background: var(--other); }
 
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,

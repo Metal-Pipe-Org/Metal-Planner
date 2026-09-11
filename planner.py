@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta
 
 import gtfs
+import traficar
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
 WALK_SEC = 180       # przejście między słupkami tego samego miejsca (patrz gtfs.py)
@@ -478,6 +479,185 @@ def _walk_leg(day, from_stop, to_stop):
     }
 
 
+# ----------------------------------------------------------------- Traficar --
+# Ostatni kawałek podróży wynajętym autem (patrz traficar.py): komunikacja
+# dowozi w okolicę celu, a tam, gdzie nie ma już sensownej linii - albo gdzie
+# byłaby to trzecia przesiadka na piętnaście minut - wsiada się do auta.
+#
+# To DODATKOWA pozycja na liście propozycji, nie zmiana wyszukiwania. Mapa
+# przepływów nic o aucie nie wie i wiedzieć nie ma: rysuje kursy z rozkładu,
+# z godzinami odczytanymi z tego rozkładu (punkty 10 i 12 kontraktu), a auto
+# nie ma ani kursu, ani rozkładu - jego czas jest szacunkiem. Propozycja
+# z autem rysuje się więc dopiero wtedy, gdy się ją wybierze, tak jak każda
+# inna trasa z listy, i znika razem z nią.
+#
+# Gdy feed nie działa, propozycji po prostu nie ma - żaden błąd Traficara nie
+# ma prawa zabrać odpowiedzi na pytanie "jak tam dojadę".
+TRAFICAR_LIMIT = 2   # ile propozycji z autem najwyżej dokładamy do listy
+
+
+def _reached_times(day, journey):
+    """stop_id -> godzina, o której trasa ze skanu DOWOZI na ten słupek.
+
+    Czytane wprost ze śladu `journey` (ten sam, z którego korzysta
+    _reconstruct), więc nie trzeba drugiego skanu tylko po godziny.
+
+    Bez słupków startowych: na nich się stoi od początku, a "dojdź do auta
+    i jedź" nie jest propozycją dojazdu komunikacją miejską.
+    """
+    times = {}
+    for stop, entry in journey.items():
+        if entry[0] == "ride":
+            times[stop] = day.conns[entry[2]][1]
+        elif entry[0] == "walk":
+            parent = journey[entry[1]]
+            # Przejście z przejścia nie występuje (patrz _scan: piesze
+            # relaksacje wychodzą wyłącznie z przyjazdu pojazdem), ale gdyby
+            # kiedyś wystąpiło, brak wpisu jest bezpieczniejszy niż zła godzina.
+            if parent[0] == "ride":
+                times[stop] = day.conns[parent[2]][1] + WALK_SEC
+    return times
+
+
+def _endpoint_point(day, stops, point):
+    """(lat, lon) końca trasy: kliknięty punkt albo środek słupków miejsca.
+
+    Auto jedzie do CELU, a nie na słupek - ale gdy cel podano nazwą,
+    współrzędne tego miejsca są jedynym, co o nim wiadomo.
+    """
+    if point is not None:
+        return point
+    coords = [day.stop_coords[s] for s in stops if s in day.stop_coords]
+    if not coords:
+        return None
+    return (sum(lat for lat, _ in coords) / len(coords),
+            sum(lon for _, lon in coords) / len(coords))
+
+
+def _car_walk_leg(day, from_stop, option):
+    """Dojście z przystanku wysiadania do auta.
+
+    Osobny etap od _walk_leg, choć tego samego rodzaju ("walk"): tamten
+    prowadzi na słupek i nazywa go nazwą z rozkładu, a ten do pojazdu
+    stojącego przy ulicy - nazwą miejsca postoju z feedu.
+    """
+    car = option["car"]
+    minutes = round(option["walk_sec"] / 60)
+    # Bez adresu z feedu nie ma dokąd iść z nazwy - zostaje sama odległość
+    # i czas, a KTÓRE to auto powie już następny wiersz (patrz _car_drive_leg).
+    where = car["where"]
+    dokad = f" ({where})" if where else ""
+    return {
+        "kind": "walk",
+        # Front rysuje ten etap tak samo jak każde inne przejście, ale opisuje
+        # inaczej - "przejście na inne stanowisko" nie mówi nic komuś, kto ma
+        # dojść do konkretnego auta (patrz static/app.js, detailHtml).
+        "to_car": True,
+        "text": f"Dojście do auta Traficar{dokad} - ok. {minutes} min",
+        "minutes": minutes,
+        "metres": option["walk_m"],
+        "from": day.stop_names[from_stop],
+        "to": where,
+        "dep_sec": 0,
+        "path": _round_path([day.stop_coords[from_stop], (car["lat"], car["lon"])]),
+    }
+
+
+def _car_drive_leg(option, dep_sec, end_name, dest):
+    """Jazda autem do celu - ostatni etap propozycji z Traficarem.
+
+    `estimated` jest w odpowiedzi po to, żeby front nie musiał wiedzieć, które
+    rodzaje etapów mają rozkład, a które nie: godziny tego jednego są
+    policzone z prędkości (patrz traficar.drive_time), więc wszędzie idą
+    z "ok." i z kreskowaną, a nie ciągłą linią na mapie.
+
+    `path` to odcinek prosty od auta do celu - i tak ma być: prawdziwego
+    przebiegu jazdy nikt tu nie liczy, a udawanie go ulicami byłoby
+    obietnicą, której ta liczba nie pokrywa.
+    """
+    car = option["car"]
+    arr_sec = dep_sec + option["drive_sec"]
+    return {
+        "kind": "drive",
+        "line": f"Traficar {car['plate']}",
+        "num": "Traficar",
+        "mode": "car",
+        "headsign": end_name,
+        "from": car["where"] or "Postój Traficara",
+        "from_time": _fmt_time(dep_sec),
+        "to": end_name,
+        "to_time": _fmt_time(arr_sec),
+        "dep_sec": dep_sec,
+        "arr_sec": arr_sec,
+        "minutes": round(option["drive_sec"] / 60),
+        "km": round(option["drive_m"] / 1000, 1),
+        "start_min": round(option["start_sec"] / 60),
+        "plate": car["plate"],
+        "model": car["model"],
+        "fuel": car["fuel"],
+        "range": car["range"],
+        "estimated": True,
+        "path": _round_path([(car["lat"], car["lon"]), dest]),
+    }
+
+
+def _traficar_journeys(day, journey, dep_sec, deadline, dest, end_name, geo_db):
+    """Propozycje kończące się jazdą Traficarem - lista w kształcie takim
+    samym jak z _enumerate_journeys, więc front nie musi ich rozpoznawać,
+    żeby narysować.
+
+    Dojazd do auta bierzemy ze śladu skanu CSA (`journey`), a nie z grafu
+    segmentów mapy: mapa rysuje to, czym da się dojechać DO CELU, a tu trzeba
+    czegoś innego - czym da się dojechać W OKOLICĘ auta, które do celu dowiezie
+    już samo. Dlatego ta lista może zaproponować wysiadanie tam, gdzie mapa
+    przepływów nic nie rysuje, i nie jest to sprzeczność: mapa odpowiada na
+    pytanie o komunikację miejską, a to jest propozycja obok niej.
+
+    `deadline` to to samo okno, którym mierzy się sensowność wszystkiego
+    innego (patrz _deadline): auto, które dowozi później niż najwolniejszy
+    pokazywany dojazd komunikacją, nie jest opcją, tylko szumem.
+    """
+    if dest is None:
+        return []
+    options = traficar.car_options(day, _reached_times(day, journey), dest,
+                                   limit=TRAFICAR_LIMIT)
+    journeys = []
+    for option in options:
+        if option["arrival"] > deadline:
+            continue
+        legs = _reconstruct(day, journey, option["stop"], geo_db)
+        rides = [leg for leg in legs if leg["kind"] == "ride"]
+        if not rides:
+            continue
+        legs.append(_car_walk_leg(day, option["stop"], option))
+        legs.append(_car_drive_leg(
+            option, option["arrival"] - option["drive_sec"], end_name, dest))
+        summary = _summarize_journey(legs, rides, option["arrival"], dep_sec)
+        # Wsiadanie do auta to zmiana pojazdu jak każda inna - karta ma mówić
+        # "dwie przesiadki", gdy tyle razy trzeba z czegoś wysiąść i wsiąść
+        # w coś innego, niezależnie od tego, czy to coś ma rozkład.
+        summary["transfers"] = len(rides)
+        summary["traficar"] = True
+        _drop_private(legs)
+        journeys.append(summary)
+    return journeys
+
+
+def _journey_cost_key(journey, gain_sec):
+    """Klucz porządkowania gotowych propozycji - ten sam, którym sortuje
+    _enumerate_journeys (przyjazd + kara za każdą przesiadkę), tylko liczony
+    z gotowej karty, a nie z łańcucha segmentów.
+
+    Potrzebny wyłącznie po to, żeby wpleść propozycje z Traficarem między
+    pozostałe zamiast doklejać je na koniec listy. Lista bez nich jest już
+    posortowana tym samym kluczem, więc sortowanie stabilne niczego w niej
+    nie przestawia.
+    """
+    arrival = max((leg["arr_sec"] for leg in journey["legs"]
+                   if "arr_sec" in leg), default=0)
+    return (arrival + journey["transfers"] * gain_sec, journey["transfers"])
+
+
 MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
 
 
@@ -761,6 +941,10 @@ def plan_flow(start_query, end_query, when=None,
     deadline = _deadline(best_arr, best_dep, extra_pct, extra_floor_sec,
                          extra_cap_sec)
 
+    # Współrzędne celu - potrzebne wyłącznie propozycjom z Traficarem (dokąd
+    # ma dojechać auto); liczone raz, bo `target_stops` bywa całym placem.
+    end_point_ll = _endpoint_point(day, target_stops, end_point)
+
     earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
     latest = _backward(day, target_stops, dep_sec, deadline)
 
@@ -875,6 +1059,17 @@ def plan_flow(start_query, end_query, when=None,
             seg_list.sort(key=lambda seg: seg["w"])   # blade pierwsze, jaskrawe na wierzchu
             for wariant in warianty:
                 _drop_private(wariant)
+
+        # Dodatkowe propozycje kończące się Traficarem (patrz
+        # _traficar_journeys). Dokładane po wszystkim i osobno, bo powstają
+        # poza mapą przepływów - w trybie awaryjnym po prostu na końcu listy,
+        # żeby nie przestawić dwóch wariantów, których kolejność jest tam
+        # świadoma (pierwszy = proponowany).
+        with_car = _traficar_journeys(day, best_journey, dep_sec, deadline,
+                                      end_point_ll, end_name, geo_db)
+        if with_car:
+            journeys = (journeys + with_car) if degraded else sorted(
+                journeys + with_car, key=lambda j: _journey_cost_key(j, gain_sec))
     finally:
         geo_db.close()
 

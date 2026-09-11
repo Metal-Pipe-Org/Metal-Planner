@@ -99,6 +99,28 @@ w wierszu minuty kursów, cała doba na jednym ekranie. Ten drugi dotyczy
 jednej linii naraz (pod zlanym ciągiem minut nie wiadomo, co podjedzie),
 a kierunek odróżniają odnośniki, tak jak na papierze.
 
+## Ostatni kawałek Traficarem
+
+Na liście propozycji, obok zwykłych wariantów dojazdu, potrafi stanąć trasa
+**kończąca się wynajętym autem**: komunikacja dowozi w okolicę celu, a ten
+ostatni kawałek — ten, na który nie ma już dobrej linii — jedzie się
+Traficarem. Karta rozpisuje to na cztery części: przejazd, dojście
+z przystanku do auta, pięć minut na odbiór i start, jazda do celu. Widać
+też, które to auto (model, numery, paliwo i zasięg), bo pod adresem stoi
+jedno konkretne, a nie „jakiś samochód".
+
+To **dodatkowa opcja, nie osobny tryb** — wchodzi na listę tym samym kluczem,
+którym sortują się pozostałe propozycje, więc auto staje wyżej tylko wtedy,
+gdy naprawdę jest szybsze. Na mapie rysuje się dopiero po wybraniu
+propozycji, i celowo **kreskowaną** linią: czasu jazdy nie ma skąd odczytać
+(auto nie ma rozkładu), więc jest szacowany, a odcinek auto → cel to prosta,
+nie przebieg ulicami.
+
+Auta biorą się z [fioletowe.live](https://fioletowe.live/) — otwartego
+serwisu, który republikuje wewnętrzne API Traficara. To strona trzecia, nie
+sam operator, więc może zniknąć bez ostrzeżenia; gdy nie odpowiada, po prostu
+nie ma propozycji z autem. Wyłącza się to zmienną `TRAFICAR=0`.
+
 ## Instalacja jako aplikacja (PWA)
 
 Metal Planner instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu
