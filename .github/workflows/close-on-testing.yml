@@ -1,30 +1,38 @@
-name: "Zgłoszenia: etykieta oczekiwania i zamykanie po merge"
+name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 
-# Zgłoszenie wskazane przez PR słowem kluczowym (`Fixes #78` w tytule albo
-# w opisie) przechodzi przez dwa stany i oba widać na liście zgłoszeń:
+# PR może wskazać zgłoszenie na dwa sposoby i workflow traktuje je inaczej,
+# bo znaczą co innego:
 #
-#  1. Jest PR, nie ma jeszcze merge'a → zgłoszenie dostaje etykietę
-#     "waiting for PR review". Znaczy: ktoś to już napisał, rzecz czeka
-#     na czyjąś recenzję, nie ma po co brać jej drugi raz.
+#  A. Słowem kluczowym — `Fixes #78`, `Closes #64`, `Resolves #9` w tytule
+#     albo opisie PR-a; tak samo liczy się nazwa gałęzi solvera
+#     (`claude/issue-78-20260903-2030`). Autor deklaruje: ten PR to załatwia.
+#       • PR otwarty  → zgłoszenie dostaje "waiting for PR review"
+#       • merge do `testing` → etykieta znika, zgłoszenie zamykamy z notką,
+#         że na `main` zmiana trafi przy wydaniu
 #
-#  2. PR zmergowany do `testing` → etykieta znika, a zgłoszenie zamyka się
-#     z notką, że na `main` zmiana trafi przy wydaniu. Słowa kluczowe
-#     GitHuba same zamykają zgłoszenie dopiero przy merge do gałęzi
-#     domyślnej, czyli `main`; PR-y solvera idą do `testing`, więc bez tego
-#     zgłoszenia wisiałyby otwarte aż do wydania.
+#     Słowa kluczowe GitHuba same zamykają zgłoszenie dopiero przy merge do
+#     gałęzi domyślnej, czyli `main`; PR-y solvera idą do `testing`, więc bez
+#     tego zgłoszenia wisiałyby otwarte aż do wydania.
 #
-#     PR zamknięty bez merge'a i PR cofnięty do wersji roboczej tylko
-#     zdejmują etykietę — zgłoszenie zostaje otwarte i znów czeka na kogoś.
+#  B. Samym numerem — `#78` gdzieś w tytule albo opisie, bez słowa
+#     kluczowego. To luźniejszy związek: PR dotyka tematu, ale nikt nie
+#     obiecuje, że go zamyka.
+#       • PR otwarty → zgłoszenie dostaje "PR created"
+#       • merge      → "PR created" znika, wchodzi "merged - is it ok?"
+#     Zgłoszenia NIE zamykamy — ostatnie słowo ma człowiek, a etykieta jest
+#     właśnie prośbą o sprawdzenie. Zdejmuje ją ten, kto zgłoszenie zamknie.
 #
-# Numery zgłoszeń zbieramy z tych samych dwóch źródeł co zawsze: słów
-# kluczowych w tytule i opisie PR-a oraz z nazwy gałęzi solvera
-# (`claude/issue-78-20260903-2030`). Etykieta jest czystym znacznikiem
-# stanu — niczego nie uruchamia.
+# Numer, który padł ze słowem kluczowym, nie liczy się drugi raz jako samo
+# wspomnienie — ścieżka A wygrywa.
+#
+# PR zamknięty bez merge'a i PR cofnięty do wersji roboczej tylko zdejmują
+# etykiety oczekiwania: zgłoszenie zostaje otwarte i znów czeka na kogoś.
+# Etykiety są czystymi znacznikami stanu — żadna niczego nie uruchamia.
 #
 # Plik żyje na `main`: przy `pull_request_target` GitHub bierze workflow
 # z gałęzi domyślnej repozytorium (GITHUB_REF wskazuje default branch),
 # niezależnie od tego, do której gałęzi celuje PR. Za odsianie PR-ów
-# odpowiada filtr `branches`, działający na gałęzi bazowej: etykietę
+# odpowiada filtr `branches`, działający na gałęzi bazowej: etykiety
 # obsługujemy dla PR-ów do `testing` i do `main`, a zgłoszenia zamykamy
 # tylko przy `testing` — po merge do `main` robi to już sam GitHub.
 on:
@@ -39,7 +47,9 @@ permissions:
   issues: write
 
 env:
-  LABEL: "waiting for PR review"
+  LABEL_WAITING: "waiting for PR review"
+  LABEL_MENTION: "PR created"
+  LABEL_MERGED: "merged - is it ok?"
 
 jobs:
   track-issues:
@@ -61,7 +71,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          raw=$(
+          # Ścieżka A: słowa kluczowe w tytule i opisie plus nazwa gałęzi solvera.
+          keyword_raw=$(
             {
               printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
                 | grep -oiE '(^|[^[:alnum:]])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]:]*#[0-9]+' \
@@ -72,96 +83,166 @@ jobs:
             } | sort -u
           )
 
-          # Odsiewamy tu raz numery, które nie są zgłoszeniem — dalsze kroki
-          # dostają już samą listę istniejących zgłoszeń. Stanu (otwarte /
-          # zamknięte) celowo nie sprawdzamy: etykietę nadajemy tylko otwartym,
-          # ale zdejmować ją trzeba także z zamkniętych.
-          numbers=""
-          for n in $raw; do
-            if ! json=$(gh api "repos/$REPO/issues/$n" 2>/dev/null); then
-              echo "#$n nie istnieje — pomijam."
+          # Ścieżka B: każde `#123`, z którego odejmujemy potem numery ze
+          # ścieżki A i numer samego PR-a. `[^[:alnum:]/]` przed hashem odsiewa
+          # odwołania do obcych repozytoriów (`org/repo#12`) i ogony URL-i.
+          mention_all=$(
+            printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
+              | grep -oE '(^|[^[:alnum:]/])#[0-9]+' \
+              | grep -oE '[0-9]+' | sort -u || true
+          )
+          mention_raw=""
+          for n in $mention_all; do
+            if [ "$n" = "$PR" ]; then
               continue
             fi
-            if [ -n "$(printf '%s' "$json" | jq -r '.pull_request.url // empty')" ]; then
-              echo "#$n to PR, nie zgłoszenie — pomijam."
+            if printf '%s\n' $keyword_raw | grep -qxF "$n"; then
               continue
             fi
-            numbers="${numbers:+$numbers }$n"
+            mention_raw="${mention_raw:+$mention_raw }$n"
           done
 
-          if [ -z "$numbers" ]; then
-            echo "PR #$PR nie wskazuje żadnego zgłoszenia." | tee -a "$GITHUB_STEP_SUMMARY"
-          else
-            echo "PR #$PR wskazuje zgłoszenia: $numbers"
-          fi
-          echo "numbers=$numbers" >> "$GITHUB_OUTPUT"
+          # Numery, które nie są istniejącym zgłoszeniem, odsiewamy raz tutaj —
+          # dalsze kroki dostają już gotowe listy. Stanu (otwarte / zamknięte)
+          # celowo nie sprawdzamy: etykietę nadajemy tylko otwartym, ale
+          # zdejmować ją trzeba także z zamkniętych.
+          filter() {
+            local out="" n json
+            for n in "$@"; do
+              if ! json=$(gh api "repos/$REPO/issues/$n" 2>/dev/null); then
+                echo "#$n nie istnieje — pomijam." >&2
+                continue
+              fi
+              if [ -n "$(printf '%s' "$json" | jq -r '.pull_request.url // empty')" ]; then
+                echo "#$n to PR, nie zgłoszenie — pomijam." >&2
+                continue
+              fi
+              out="${out:+$out }$n"
+            done
+            printf '%s' "$out"
+          }
 
-      - name: Oznacz zgłoszenia jako czekające na recenzję
+          keyword=$(filter $keyword_raw)
+          mention=$(filter $mention_raw)
+
+          echo "PR #$PR — ze słowem kluczowym: [${keyword:-brak}], samo wspomnienie: [${mention:-brak}]"
+          {
+            echo "keyword=$keyword"
+            echo "mention=$mention"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Nadaj etykiety otwartym zgłoszeniom
         # Wersje robocze pomijamy — do recenzji zgłasza je dopiero
         # „Ready for review", które przychodzi tu osobnym zdarzeniem.
         #
-        # `edited` jest w wyzwalaczach, bo słowo kluczowe często dopisuje się
-        # do opisu już po otwarciu PR-a. Odwrotny przypadek — ktoś usuwa
-        # `Fixes #78` z opisu — zostawia na zgłoszeniu nieaktualną etykietę
-        # do ręcznego zdjęcia; nie zgadujemy z historii edycji, co zniknęło.
+        # `edited` jest w wyzwalaczach, bo numer zgłoszenia często dopisuje się
+        # do opisu już po otwarciu PR-a. Odwrotny przypadek — ktoś usuwa `#78`
+        # z opisu — zostawia na zgłoszeniu nieaktualną etykietę do ręcznego
+        # zdjęcia; nie zgadujemy z historii edycji, co zniknęło.
         if: >-
-          steps.refs.outputs.numbers != ''
+          (steps.refs.outputs.keyword != '' || steps.refs.outputs.mention != '')
           && github.event.action != 'closed'
           && github.event.action != 'converted_to_draft'
           && github.event.pull_request.draft == false
         env:
-          NUMBERS: ${{ steps.refs.outputs.numbers }}
+          KEYWORD: ${{ steps.refs.outputs.keyword }}
+          MENTION: ${{ steps.refs.outputs.mention }}
         run: |
           set -euo pipefail
 
-          # Pierwszy bieg w repo zakłada etykietę; przy kolejnych `gh` zgłasza
+          # Pierwszy bieg w repo zakłada etykiety; przy kolejnych `gh` zgłasza
           # „already exists" i to jest w porządku.
-          gh label create "$LABEL" --repo "$REPO" --color FBCA04 \
-            --description "Jest PR do tego zgłoszenia, czeka na recenzję" || true
+          gh label create "$LABEL_WAITING" --repo "$REPO" --color FBCA04 \
+            --description "Jest PR, który to zamyka — czeka na recenzję" || true
+          gh label create "$LABEL_MENTION" --repo "$REPO" --color C5DEF5 \
+            --description "Jakiś PR o tym wspomina, bez deklaracji zamknięcia" || true
 
-          for n in $NUMBERS; do
+          oznacz() {
+            local label="$1"; shift
+            local n state
+            for n in "$@"; do
+              state=$(gh api "repos/$REPO/issues/$n" --jq .state)
+              if [ "$state" != open ]; then
+                echo "#$n nie jest otwarte (stan: $state) — nie etykietuję."
+                continue
+              fi
+              gh issue edit "$n" --repo "$REPO" --add-label "$label"
+              echo "#$n: etykieta \"$label\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
+            done
+          }
+
+          [ -n "$KEYWORD" ] && oznacz "$LABEL_WAITING" $KEYWORD
+          [ -n "$MENTION" ] && oznacz "$LABEL_MENTION" $MENTION
+          exit 0
+
+      - name: Zdejmij etykiety oczekiwania
+        if: >-
+          (steps.refs.outputs.keyword != '' || steps.refs.outputs.mention != '')
+          && (github.event.action == 'closed'
+              || github.event.action == 'converted_to_draft')
+        env:
+          KEYWORD: ${{ steps.refs.outputs.keyword }}
+          MENTION: ${{ steps.refs.outputs.mention }}
+        run: |
+          set -euo pipefail
+
+          odznacz() {
+            local label="$1"; shift
+            local n
+            for n in "$@"; do
+              # Etykiety mogło nigdy nie być: zgłoszenie sprzed tego workflow,
+              # PR otwarty od razu jako wersja robocza, etykieta zdjęta ręcznie.
+              # Brak etykiety to nie awaria, więc nie wywracamy na tym biegu.
+              if gh issue edit "$n" --repo "$REPO" --remove-label "$label"; then
+                echo "#$n: zdjęto etykietę \"$label\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
+              else
+                echo "#$n: nie udało się zdjąć etykiety \"$label\" — najpewniej jej nie miało."
+              fi
+            done
+          }
+
+          [ -n "$KEYWORD" ] && odznacz "$LABEL_WAITING" $KEYWORD
+          [ -n "$MENTION" ] && odznacz "$LABEL_MENTION" $MENTION
+          exit 0
+
+      - name: Oznacz wspomniane zgłoszenia jako zmergowane
+        # Ścieżka B kończy się pytaniem do człowieka, nie zamknięciem: etykieta
+        # mówi „PR wszedł, sprawdź, czy to załatwia sprawę". Biegnie po kroku
+        # zdejmującym, więc "PR created" zdążyło już zniknąć.
+        if: >-
+          steps.refs.outputs.mention != ''
+          && github.event.action == 'closed'
+          && github.event.pull_request.merged == true
+        env:
+          MENTION: ${{ steps.refs.outputs.mention }}
+        run: |
+          set -euo pipefail
+
+          gh label create "$LABEL_MERGED" --repo "$REPO" --color D4C5F9 \
+            --description "Wspominający PR jest zmergowany — do sprawdzenia" || true
+
+          for n in $MENTION; do
             state=$(gh api "repos/$REPO/issues/$n" --jq .state)
             if [ "$state" != open ]; then
               echo "#$n nie jest otwarte (stan: $state) — nie etykietuję."
               continue
             fi
-            gh issue edit "$n" --repo "$REPO" --add-label "$LABEL"
-            echo "#$n: etykieta \"$LABEL\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
-          done
-
-      - name: Zdejmij etykietę oczekiwania
-        if: >-
-          steps.refs.outputs.numbers != ''
-          && (github.event.action == 'closed'
-              || github.event.action == 'converted_to_draft')
-        env:
-          NUMBERS: ${{ steps.refs.outputs.numbers }}
-        run: |
-          set -euo pipefail
-
-          for n in $NUMBERS; do
-            # Etykiety mogło nigdy nie być: zgłoszenie sprzed tego workflow,
-            # PR otwarty od razu jako wersja robocza, etykieta zdjęta ręcznie.
-            # Brak etykiety to nie awaria, więc nie wywracamy na tym biegu.
-            if gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL"; then
-              echo "#$n: zdjęto etykietę \"$LABEL\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
-            else
-              echo "#$n: nie udało się zdjąć etykiety \"$LABEL\" — najpewniej jej nie miało."
-            fi
+            gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_MERGED"
+            echo "#$n: etykieta \"$LABEL_MERGED\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
           done
 
       - name: Zamknij zgłoszenia zmergowane do testing
         if: >-
-          steps.refs.outputs.numbers != ''
+          steps.refs.outputs.keyword != ''
           && github.event.action == 'closed'
           && github.event.pull_request.merged == true
           && github.event.pull_request.base.ref == 'testing'
         env:
-          NUMBERS: ${{ steps.refs.outputs.numbers }}
+          KEYWORD: ${{ steps.refs.outputs.keyword }}
         run: |
           set -euo pipefail
 
-          for n in $NUMBERS; do
+          for n in $KEYWORD; do
             state=$(gh api "repos/$REPO/issues/$n" --jq .state)
             if [ "$state" != open ]; then
               echo "#$n nie jest otwarte (stan: $state) — pomijam."
