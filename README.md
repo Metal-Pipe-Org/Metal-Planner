@@ -169,6 +169,34 @@ WRM_ENABLED=off
 
 (`WRM_GBFS_URL` podmienia sam adres kanału — np. na inne miasto nextbike.)
 
+## Ostatni kawałek Traficarem
+
+Na liście propozycji, obok zwykłych wariantów dojazdu, potrafi stanąć trasa
+**kończąca się wynajętym autem**: komunikacja dowozi w okolicę celu, a ten
+ostatni kawałek — ten, na który nie ma już dobrej linii — jedzie się
+Traficarem. Karta rozpisuje to na cztery części: przejazd, dojście
+z przystanku do auta, pięć minut na odbiór i start, jazda do celu. Widać
+też, które to auto (model, numery, paliwo i zasięg), bo pod adresem stoi
+jedno konkretne, a nie „jakiś samochód".
+
+To **dodatkowa opcja, nie osobny tryb** — wchodzi na listę tym samym kluczem,
+którym sortują się pozostałe propozycje, więc auto staje wyżej tylko wtedy,
+gdy naprawdę jest szybsze. Na mapie rysuje się dopiero po wybraniu
+propozycji, i celowo **kreskowaną** linią.
+
+**Czas jazdy jest szacunkiem i aplikacja tego nie ukrywa.** Auto nie ma
+rozkładu, więc czas i dystans wychodzą z odległości w linii prostej —
+wszystkie takie liczby stoją z „ok.", czas podróży na karcie jest przygaszony,
+a rozwinięta karta mówi wprost, skąd się biorą. Stałe modelu są zmierzone na
+30 losowych trasach przez prawdziwy routing samochodowy: czas myli się
+o ~19% (mediana), dystans o ~10%, najczęściej **zawyżając** — dlatego dystans
+podajemy w pełnych kilometrach, a nie z miejscem po przecinku.
+
+Auta biorą się z [fioletowe.live](https://fioletowe.live/) — otwartego
+serwisu, który republikuje wewnętrzne API Traficara. To strona trzecia, nie
+sam operator, więc może zniknąć bez ostrzeżenia; gdy nie odpowiada, po prostu
+nie ma propozycji z autem. Wyłącza się to zmienną `TRAFICAR=0`.
+
 ## Instalacja jako aplikacja (PWA)
 
 Metal Planner instaluje się jak zwykła aplikacja — na telefonie „Dodaj do ekranu

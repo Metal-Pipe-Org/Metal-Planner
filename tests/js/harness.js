@@ -430,7 +430,7 @@ const INJECTION = `
     get resultsBox() { return resultsBox; },
     flowHitsAt, corridorOptions, pickFromCluster, handleFlowHover, clearFlowHover,
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
-    legLayers, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
+    legLayers, detailHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
     waitNoticeHtml,
     summariseRepeats, timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
     keepWithinHorizon,

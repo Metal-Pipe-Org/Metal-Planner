@@ -162,10 +162,20 @@ function esc(text) {
     return div.innerHTML;
 }
 
+// `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
+// fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
-                     bike: '#ef6c00', other: '#6a1b9a'};
+                     bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
-                    bike: 'Rower miejski', other: 'Linia'};
+                    bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
+
+/** Autko do wiersza "jedziesz autem" na osi trasy. Bierze `currentColor`, tak
+    jak ROUTE_ICON, więc nie ma własnego koloru do pamiętania. */
+const CAR_ICON =
+    '<svg class="tl-car-icon" viewBox="0 0 24 14" aria-hidden="true">'
+    + '<path d="M3 9.5 4.3 5.2A2.2 2.2 0 0 1 6.4 3.6h11.2a2.2 2.2 0 0 1 2.1 1.6'
+    + 'L21 9.5v2.6h-2.6v-1.4H5.6v1.4H3z"/>'
+    + '<circle cx="7.4" cy="9.4" r="1.5"/><circle cx="16.6" cy="9.4" r="1.5"/></svg>';
 
 // ------------------------------------------------------- markery na mapie ----
 
@@ -1926,6 +1936,27 @@ function legLayers(legs, {preview}) {
             }
             continue;
         }
+        // Jazda Traficarem (patrz planner._car_drive_leg). Kreskowana i bez
+        // białej otoczki, czyli NIE tak, jak rysuje się kursy: to odcinek
+        // prosty od auta do celu, nie przebieg ulicami, bo przebiegu nikt tu
+        // nie liczy. Linia ciągła obiecywałaby trasę, której nie ma.
+        if (leg.kind === 'drive') {
+            lines.push(L.polyline(leg.path, {
+                color: LINE_COLORS.car, weight: preview ? 4 : 5,
+                opacity: preview ? 0.7 : 0.95, dashArray: '10,8',
+                lineCap: 'round', interactive: false,
+            }));
+            if (!preview) {
+                marks.push(L.marker(leg.path[Math.floor(leg.path.length / 2)], {
+                    icon: L.divIcon({
+                        className: 'line-badge solid car',
+                        html: esc(leg.num), iconSize: null,
+                    }),
+                    interactive: false,
+                }));
+            }
+            continue;
+        }
         const color = LINE_COLORS[leg.mode] || LINE_COLORS.other;
         casings.push(L.polyline(leg.path, {
             color: '#fff', weight: rideWeight + 5, opacity: preview ? 0.7 : 0.95,
@@ -2122,18 +2153,27 @@ function detailHtml(journey) {
             // „Dojście do stacji WRM ..." nie da się złożyć z from/to: stacja
             // roweru to nie przystanek.
             //
-            // Bez niego: miejsce potrafi zbierać słupki o różnych nazwach
+            // `to_car` to dojście do auta Traficar, nie na inny słupek
+            // (patrz planner._car_walk_leg): tam nie ma przystanku, tylko
+            // ulica, przy której stoi konkretne auto - i to trzeba napisać.
+            // Bez adresu z feedu (`to` puste) zostaje samo "dojście do auta" -
+            // KTÓRE to auto mówi i tak następny wiersz.
+            //
+            // Bez obu: miejsce potrafi zbierać słupki o różnych nazwach
             // (stacja PKP i przystanek MPK przy niej - patrz naming.py),
             // a wtedy "inne stanowisko" nie mówi wysiadającemu z pociągu,
             // dokąd ma iść. Ta sama zasada co w planner._walk_leg.
             const dokad = leg.note
                 ? esc(leg.note)
-                : leg.from === leg.to
-                    ? 'Przejście na inne stanowisko'
-                    : `Przejście do ${esc(leg.to)}`;
+                : leg.to_car
+                    ? (leg.to ? `Dojście do auta · ${esc(leg.to)}` : 'Dojście do auta')
+                    : leg.from === leg.to
+                        ? 'Przejście na inne stanowisko'
+                        : `Przejście do ${esc(leg.to)}`;
+            const ile = leg.to_car && leg.metres ? ` (${leg.metres} m)` : '';
             rows.push(
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
-                `<span class="tl-body">${dokad} · ok. ${leg.minutes} min</span></li>`,
+                `<span class="tl-body">${dokad}${ile} · ok. ${leg.minutes} min</span></li>`,
             );
             return;
         }
@@ -2162,6 +2202,33 @@ function detailHtml(journey) {
             if (!after || after.kind === 'walk') {
                 rows.push(stopRow(leg.to_time, leg.to, after ? '' : 'last'));
             }
+            return;
+        }
+        // Ostatni etap propozycji z Traficarem. Wszystkie liczby idą z "ok.":
+        // auto nie ma rozkładu, więc czas jazdy jest policzony z odległości,
+        // a nie odczytany (patrz traficar.drive_time). Osobny wiersz na sam
+        // odbiór auta, bo te pięć minut to nie jazda i nie dojście - a mija.
+        if (leg.kind === 'drive') {
+            rows.push(
+                `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
+                `<span class="tl-body">Odbiór auta: rezerwacja i start · ` +
+                `ok. ${leg.start_min} min</span></li>`,
+            );
+            rows.push(stopRow(leg.from_time, leg.from, ''));
+            rows.push(
+                `<li class="tl-ride car"><span class="tl-time"></span>` +
+                `<span class="tl-dot"></span><span class="tl-body">` +
+                `${badgeHtml(leg)} <span class="tl-headsign">${CAR_ICON}` +
+                `${esc(leg.model)} · ${esc(leg.plate)}</span>` +
+                `<span class="tl-info">ok. ${leg.minutes} min · ok. ${leg.km} km · ` +
+                `paliwo ${leg.fuel}%, zasięg ${leg.range} km</span>` +
+                // Skąd te liczby - powiedziane wprost, a nie zostawione do
+                // domyślenia się z samego "ok.". Każda inna godzina w tej
+                // aplikacji jest odczytana z rozkładu; ta jedna nie ma skąd.
+                `<span class="tl-info est">Czas i dystans szacowane z odległości` +
+                ` — auto nie ma rozkładu</span></span></li>`,
+            );
+            rows.push(stopRow(leg.to_time, leg.to, 'last'));
             return;
         }
         const stopWord = leg.mode === 'train'
@@ -2231,9 +2298,18 @@ function renderJourneys() {
             transfers,
             j.wait_min > 0 ? `odjazd za ${j.wait_min} min` : 'odjazd teraz',
         ];
-        const lines = j.legs.filter(leg => leg.kind === 'ride' || leg.kind === 'bike')
+        // Propozycja z autem kończy się czymś, czego nie ma w rozkładzie -
+        // i czym się płaci za przejazd. To ma być widać na karcie, zanim się
+        // ją rozwinie, a nie dopiero na osi trasy.
+        if (j.traficar) meta.push('ostatni odcinek autem');
+        const lines = j.legs.filter(
+            leg => leg.kind === 'ride' || leg.kind === 'bike' || leg.kind === 'drive')
                             .map(leg => leg.line).join(', ');
-        const label = `${j.departure} – ${j.arrival}, ${j.duration_min} min, ` +
+        // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
+        // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
+        // czyta się pierwszą, a nie dopiero w rozwinięciu karty.
+        const czas = j.traficar ? `ok. ${j.duration_min} min` : `${j.duration_min} min`;
+        const label = `${j.departure} – ${j.arrival}, ${czas}, ` +
                       `${transfers}, ${lines}`;
         return `
             <li class="journey${selected ? ' selected' : ''}" data-index="${i}"
@@ -2241,7 +2317,10 @@ function renderJourneys() {
                 aria-label="${esc(label)}">
                 <div class="j-head">
                     <span class="j-clock">${esc(j.departure)} – ${esc(j.arrival)}</span>
-                    <span class="j-duration">${j.duration_min} min</span>
+                    <span class="j-duration${j.traficar ? ' est' : ''}"${
+                        j.traficar ? ' title="Ostatni odcinek autem - czas jazdy'
+                                   + ' szacowany, auto nie ma rozkładu"' : ''
+                    }>${esc(czas)}</span>
                 </div>
                 <div class="j-lines">${summaryHtml(j.legs)}</div>
                 <div class="j-meta">${meta.join(' · ')}</div>

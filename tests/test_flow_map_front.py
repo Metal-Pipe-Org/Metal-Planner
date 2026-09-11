@@ -381,3 +381,28 @@ def test_the_corner_window_opens_on_the_start_stop(front):
     wyrusza - bez najeżdżania na cokolwiek. Przy wyłączonym okienku i bez
     wybranego startu nie otwiera się wcale."""
     _check(front, "okienko_startuje_od_przystanku_startowego")
+
+
+# ------------------------------------------------------------- Traficar ----
+
+def test_the_car_leg_is_drawn_as_an_estimate_not_as_a_ride(front):
+    """Ostatni etap Traficarem (patrz planner._car_drive_leg) biegnie prostą
+    od auta do celu - prawdziwego przebiegu jazdy nikt tu nie liczy. Linia
+    ciągła w otoczce, czyli tak jak rysuje się kursy z rozkładu, obiecywałaby
+    trasę, której nie ma; stąd kreska i żadnej otoczki."""
+    _check(front, "traficar_jedzie_kreskowana_a_nie_jak_kurs")
+
+
+def test_the_car_is_visible_on_the_card_before_expanding(front):
+    """Propozycja z autem kończy się czymś, czego nie ma w rozkładzie i czym
+    się płaci za przejazd - to ma być widać na zwiniętej karcie, a nie dopiero
+    po jej rozwinięciu."""
+    _check(front, "traficar_widac_na_karcie_przed_rozwinieciem")
+
+
+def test_the_estimated_time_says_so_on_the_card(front):
+    """Każda inna godzina w tej aplikacji jest odczytana z rozkładu - ta
+    jedna nie ma skąd. Karta mówi to „ok." przy czasie podróży (pierwszej
+    liczbie, którą się czyta), a rozwinięcie dopowiada wprost, skąd te liczby
+    się biorą. Zwykła trasa nie dostaje ani jednego, ani drugiego."""
+    _check(front, "traficar_czas_oznaczony_jako_szacunek")

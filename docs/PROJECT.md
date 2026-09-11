@@ -354,6 +354,57 @@ Etapy dostają geometrię wprost z segmentu (ten sam `gtfs.shape_slice`, jedno
 połączenie do bazy na całe zapytanie - i mapę, i listę), więc wybrana
 propozycja rysuje się po realnych ulicach i torach.
 
+#### Ostatni etap Traficarem (`traficar.py`)
+
+Do tej samej listy dokładają się **propozycje kończące się wynajętym autem**:
+komunikacja dowozi w okolicę celu, a ostatni kawałek — ten, na który nie ma
+już sensownej linii — jedzie się Traficarem. Propozycja ma cztery części po
+kolei: przejazd(y) komunikacją → dojście z przystanku do auta → pięć minut na
+odbiór i start → jazda do celu.
+
+Skąd auta: `fioletowe.live` (open source, GPLv3, `divadsn/traficar-map`)
+republikuje wewnętrzne API Traficara jako REST/JSON bez klucza; Wrocław to
+`zoneId=3`. To **strona trzecia**, nie sam operator, więc feed może zniknąć
+bez ostrzeżenia — stąd wyłącznik `TRAFICAR=0` i zasada, że każdy błąd tego
+źródła jest brakiem propozycji z autem, nigdy błędem wyszukiwania.
+
+Skąd kandydaci: NIE z grafu segmentów mapy (ten prowadzi do celu, a tu trzeba
+czegoś innego — dojazdu w okolicę auta), tylko wprost ze śladu skanu CSA,
+który `plan_flow` i tak już ma policzony na potrzeby deadline'u
+(`_reached_times` czyta z niego godziny bez drugiego skanu). Dla każdej pary
+„przystanek wysiadania + auto" liczy się godzina dotarcia do celu; zostają
+najwyżej dwie, po jednej na miejsce i na auto, i tylko te mieszczące się
+w tym samym oknie czasowym co reszta listy. Odpada auto dalej niż 600 m od
+przystanku, bliżej niż 1,5 km od celu (odpalenie trwa dłużej niż ten
+kawałek), dalej niż 25 km oraz takie, którego zasięg nie pokrywa przejazdu
+z zapasem.
+
+**Czas jazdy jest szacowany i jest to powiedziane wprost.** Auto nie ma
+rozkładu, a routingu samochodowego w projekcie nie ma — czas i dystans
+wychodzą z odległości w linii prostej: krętość ×1,30, 34 km/h. Obie stałe są
+**zmierzone**, nie wzięte z głowy: 30 losowych par przystanków przepuszczonych
+jednorazowo (poza aplikacją, w runtime nic takiego nie jest wołane) przez
+prawdziwy routing samochodowy OSRM. Mediana krętości wyszła 1,30, mediana
+prędkości 36 km/h; bierzemy 34, bo profil OSRM liczy jazdę swobodną, bez
+korków, a plan ma bywać pesymistyczny (punkt 12 kontraktu).
+
+Ile to warte: błąd czasu 19% (mediana), 34% (90. centyl), zakres −23%…+54%,
+zawyżenie w 21 z 30 przypadków — czyli najczęściej w bezpieczną stronę. Błąd
+dystansu 10% / 22%. Stałe sprzed pomiaru (1,35 i 27 km/h) myliły się co do
+czasu o 47% mediany i zawyżały w 30 z 30 przypadków, w skrajnym dwukrotnie.
+
+Ten rozrzut dyktuje sposób pokazywania: dystans w **pełnych kilometrach**
+(przy 22% rozrzutu „7,7 km" udawałoby odczyt z licznika), wszystko z „ok.",
+czas podróży na karcie też z „ok." i przygaszony, a rozwinięta karta mówi
+wprost „czas i dystans szacowane z odległości — auto nie ma rozkładu".
+Szacunki idą w górę do pełnej minuty.
+
+**Czego to nie dotyka: mapy przepływów.** Mapa rysuje wyłącznie godziny
+odczytane z rozkładu (punkt 10 kontraktu), a ta jedna odczytana nie jest.
+Propozycja z autem rysuje się więc dopiero po jej wybraniu, tak jak każda
+inna trasa z listy: kreskowaną linią bez otoczki, bo odcinek auto → cel jest
+prostą, a nie przebiegiem ulicami.
+
 ### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
 
 Włączany przełącznikiem 🚲 w karcie wyszukiwania (`bikes=1` w `/api/flow`);
@@ -566,6 +617,20 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   to sekundy na osi doby rozkładowej (mogą przekroczyć 24 h) — `from_time`
   i `to_time` po północy zawijają się do `00:xx` i nie da się z nich odtworzyć
   doby (patrz `/api/timetable`).
+  Propozycja kończąca się autem (patrz `traficar.py`) jest oznaczona
+  `traficar: true` i ma dwa dodatkowe kształty etapów: dojście do auta to
+  zwykły `kind: "walk"` z `to_car: true` i `metres` (`to` jest wtedy miejscem
+  postoju, nie nazwą przystanku), a sama jazda to `{kind: "drive", mode:
+  "car", num: "Traficar", line, from, from_time, to, to_time, dep_sec,
+  arr_sec, minutes, km, start_min, plate, model, fuel, range, estimated:
+  true, path}`. `estimated` mówi wprost, że godziny są policzone z prędkości,
+  a nie odczytane z rozkładu — `path` to odcinek prosty auto → cel, nie
+  przebieg ulicami. `transfers` liczy wsiadanie do auta jak każdą inną zmianę
+  pojazdu. Gdy feed Traficara nie odpowiada albo `TRAFICAR=0`, takich pozycji
+  po prostu nie ma — reszta odpowiedzi jest bez zmian. `km` jest w PEŁNYCH
+  kilometrach, a `minutes` w pełnych minutach (w górę): przy zmierzonym
+  rozrzucie tego szacunku drobniejsza podziałka udawałaby dokładność.
+
   `bikes=1` dokłada do `journeys` propozycje z rowerem miejskim (patrz sekcja
   wyżej) i wstawia do odpowiedzi `bikes: {journeys, stations, live}` — ile ich
   weszło, ile stacji w ogóle odpowiedziało (zero = kanał operatora milczy,
@@ -654,6 +719,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `naming.py` | tabele nazewnicze: pary stacja PKP ↔ przystanek MPK, rozwijane skróty - dane, nie algorytm |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
 | `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
+| `traficar.py` | auta Traficar z fioletowe.live + szukanie pary "przystanek + auto" na ostatni etap trasy |
 | `bikes.py` | stacje Wrocławskiego Roweru Miejskiego (GBFS) + model czasu roweru |
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
@@ -675,6 +741,21 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-11** — lista propozycji umie skończyć podróż **Traficarem**
+  (`traficar.py`): komunikacja dowozi w okolicę celu, dalej dojście do auta,
+  pięć minut na odbiór i start, i jazda do celu. Dodatkowa pozycja obok
+  zwykłych wariantów, nie osobny tryb — i wpleciona w listę tym samym
+  kluczem, którym sortuje się reszta, więc auto musi być realnie szybsze,
+  żeby stanąć wyżej. Auta z `fioletowe.live` (strona trzecia, wyłącznik
+  `TRAFICAR=0`), kandydaci ze śladu skanu CSA, który `plan_flow` już ma —
+  bez drugiego przeszukiwania. Mapy przepływów to nie dotyka: czas jazdy
+  jest szacowany, a nie odczytany z rozkładu, więc auto rysuje się dopiero
+  po wybraniu propozycji, kreskowaną linią. Stałe szacunku (krętość 1,30,
+  34 km/h) zmierzone na 30 losowych trasach prawdziwym routingiem
+  samochodowym: błąd czasu 19% mediany, najczęściej w górę. Że to szacunek,
+  widać na karcie („ok." przy czasie podróży) i w jej rozwinięciu (osobna
+  nota pod etapem).
 
 - **2026-09-11** — **rower miejski (WRM) w trasie**. Przełącznik 🚲 w karcie
   wyszukiwania dokłada do listy propozycji takie, w których część drogi

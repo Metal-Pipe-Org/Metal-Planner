@@ -6,6 +6,7 @@
     --tram: #c62828;
     --bus: #1565c0;
     --train: #2e7d33;
+    --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
     --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
     --accent: #2563eb;
@@ -566,6 +567,14 @@ body.panel-hidden #sidebar {
     color: var(--ink-soft);
 }
 
+/* Czas podróży kończącej się autem jest szacunkiem (patrz traficar.py) -
+   "ok." przy liczbie plus przygaszenie, żeby nie czytało się jak godzina
+   z rozkładu, którą każda inna liczba w tym miejscu jest. */
+.j-duration.est {
+    font-weight: 500;
+    color: var(--ink-faint);
+}
+
 .j-lines {
     display: flex;
     align-items: center;
@@ -600,6 +609,7 @@ body.panel-hidden #sidebar {
 .badge.bus { background: var(--bus); }
 .badge.train { background: var(--train); }
 .badge.bike { background: var(--bike); }
+.badge.car { background: var(--car); }
 
 /* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
    a nie w panelu deweloperskim ⚙, bo to wybór PASAŻERA (mam konto w WRM
@@ -707,6 +717,16 @@ body.panel-hidden #sidebar {
 .tl-ride.bus .tl-dot { background: var(--bus); }
 .tl-ride.train .tl-dot { background: var(--train); }
 .tl-ride.bike .tl-dot { background: var(--bike); }
+.tl-ride.car .tl-dot { background: var(--car); }
+
+/* Autko przy modelu auta na osi trasy - w linii z tekstem, nie nad nim. */
+.tl-car-icon {
+    width: 17px;
+    height: 10px;
+    margin-right: 4px;
+    vertical-align: -1px;
+    fill: var(--car);
+}
 
 .tl-ride .tl-body {
     display: flex;
@@ -725,6 +745,15 @@ body.panel-hidden #sidebar {
     flex-basis: 100%;
     font-size: 12px;
     color: var(--ink-faint);
+}
+
+/* Nota "skąd te liczby" pod etapem jazdy autem - cichsza od samych liczb,
+   bo jest o nich, a nie obok nich. */
+.tl-info.est {
+    margin-top: 1px;
+    font-size: 11px;
+    font-style: italic;
+    opacity: 0.85;
 }
 
 .tl-walk .tl-dot {
@@ -772,6 +801,7 @@ body.panel-hidden #sidebar {
     box-shadow: 0 0 3px rgba(0, 0, 0, 0.35);
 }
 
+.line-badge.car { color: var(--car); border-color: var(--car); }
 .line-badge.tram { color: var(--tram); border-color: var(--tram); }
 .line-badge.bus { color: var(--bus); border-color: var(--bus); }
 .line-badge.train { color: var(--train); border-color: var(--train); }
@@ -790,6 +820,7 @@ body.panel-hidden #sidebar {
 .line-badge.solid.tram { background: var(--tram); }
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.train { background: var(--train); }
+.line-badge.solid.car { background: var(--car); }
 .line-badge.solid.other { background: var(--other); }
 .line-badge.solid.bike { background: var(--bike); }
 
