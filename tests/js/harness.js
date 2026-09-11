@@ -441,6 +441,9 @@ const INJECTION = `
     get flowPick() { return flowPick; },
     get flowParts() { return flowParts; },
     nodePoint, dotOpts, seedStartPanel,
+    prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
+    get startInput() { return startInput; },
+    get endInput() { return endInput; },
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },
 };
