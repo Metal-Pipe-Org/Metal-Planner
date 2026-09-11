@@ -8,6 +8,7 @@
     --train: #2e7d33;
     --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
+    --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
     --accent: #2563eb;
     --ink: #16202b;
     --ink-soft: #5b6b7c;
@@ -607,7 +608,38 @@ body.panel-hidden #sidebar {
 .badge.tram { background: var(--tram); }
 .badge.bus { background: var(--bus); }
 .badge.train { background: var(--train); }
+.badge.bike { background: var(--bike); }
 .badge.car { background: var(--car); }
+
+/* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
+   a nie w panelu deweloperskim ⚙, bo to wybór PASAŻERA (mam konto w WRM
+   albo nie), a nie strojenie algorytmu. */
+.bike-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    user-select: none;
+}
+
+.bike-toggle input { accent-color: var(--bike); margin: 0; }
+
+.bike-toggle.on { color: var(--bike); font-weight: 600; }
+
+/* Wyjaśnienie „dlaczego nie ma tu roweru" pod listą propozycji. Kartka jak
+   pozostałe komunikaty, z paskiem w kolorze warstwy - żeby od razu było
+   widać, czego dotyczy (patrz bikeNoteHtml w app.js). */
+.notice.bike-note {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-left: 3px solid var(--bike);
+    font-size: 12.5px;
+}
+
+.notice.bike-note p { margin: 0; }
 
 /* Łącznik między plakietkami: ciągły = przesiadka na miejscu,
    kropkowany = trzeba przejść na inne stanowisko. */
@@ -684,6 +716,7 @@ body.panel-hidden #sidebar {
 .tl-ride.tram .tl-dot { background: var(--tram); }
 .tl-ride.bus .tl-dot { background: var(--bus); }
 .tl-ride.train .tl-dot { background: var(--train); }
+.tl-ride.bike .tl-dot { background: var(--bike); }
 .tl-ride.car .tl-dot { background: var(--car); }
 
 /* Autko przy modelu auta na osi trasy - w linii z tekstem, nie nad nim. */
@@ -773,6 +806,7 @@ body.panel-hidden #sidebar {
 .line-badge.bus { color: var(--bus); border-color: var(--bus); }
 .line-badge.train { color: var(--train); border-color: var(--train); }
 .line-badge.other { color: var(--other); border-color: var(--other); }
+.line-badge.bike { color: var(--bike); border-color: var(--bike); }
 
 .line-badge.solid {
     color: #fff;
@@ -788,6 +822,7 @@ body.panel-hidden #sidebar {
 .line-badge.solid.train { background: var(--train); }
 .line-badge.solid.car { background: var(--car); }
 .line-badge.solid.other { background: var(--other); }
+.line-badge.solid.bike { background: var(--bike); }
 
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
@@ -863,6 +898,7 @@ body.panel-hidden #sidebar {
 .line-chip.bus { color: var(--bus); }
 .line-chip.train { color: var(--train); }
 .line-chip.other { color: var(--other); }
+.line-chip.bike { color: var(--bike); }
 
 .line-chip.picked,
 .line-cluster .line-chip:hover { color: #fff; }

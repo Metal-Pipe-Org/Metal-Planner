@@ -165,9 +165,9 @@ function esc(text) {
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
-                     car: '#7b2ff2', other: '#6a1b9a'};
+                     bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
-                    car: 'Traficar', other: 'Linia'};
+                    bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
 
 /** Autko do wiersza "jedziesz autem" na osi trasy. Bierze `currentColor`, tak
     jak ROUTE_ICON, więc nie ma własnego koloru do pamiętania. */
@@ -1916,6 +1916,26 @@ function legLayers(legs, {preview}) {
             }));
             continue;
         }
+        if (leg.kind === 'bike') {
+            // Przerywana, bo to NIE jest przebieg ulicami: backend zna tylko
+            // dwie stacje i odcinek między nimi (patrz planner._bike_ride_leg).
+            // Ciągła kreska obiecywałaby trasę, której nikt tu nie policzył.
+            lines.push(L.polyline(leg.path, {
+                color: LINE_COLORS.bike, weight: preview ? 4 : 5,
+                opacity: preview ? 0.75 : 1, dashArray: '9,7',
+                lineCap: 'round', interactive: false,
+            }));
+            if (!preview) {
+                marks.push(L.marker(leg.path[Math.floor(leg.path.length / 2)], {
+                    icon: L.divIcon({
+                        className: 'line-badge solid bike',
+                        html: BIKE_ICON, iconSize: null,
+                    }),
+                    interactive: false,
+                }));
+            }
+            continue;
+        }
         // Jazda Traficarem (patrz planner._car_drive_leg). Kreskowana i bez
         // białej otoczki, czyli NIE tak, jak rysuje się kursy: to odcinek
         // prosty od auta do celu, nie przebieg ulicami, bo przebiegu nikt tu
@@ -2051,6 +2071,10 @@ function badgeHtml(leg) {
     return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
 }
 
+// Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
+// bo rower numeru nie ma - a plakietka ma mówić „czym", nie „którym".
+const BIKE_ICON = '🚲';
+
 /** Znak trasy: nitka z krańcami na końcach - to samo, co przycisk rysuje na
     mapie, tylko w 11 pikselach. Ta sama rodzina co FLOW_ICONS: kreska bierze
     `currentColor`, więc chodzi za kolorem przycisku (przygaszony w spoczynku,
@@ -2124,26 +2148,60 @@ function detailHtml(journey) {
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
-            // Miejsce potrafi zbierać słupki o różnych nazwach (stacja PKP
-            // i przystanek MPK przy niej - patrz naming.py), a wtedy
-            // "inne stanowisko" nie mówi wysiadającemu z pociągu, dokąd ma
-            // iść. Ta sama zasada co w planner._walk_leg.
+            // `note` to gotowy opis z backendu - przychodzi tylko z etapów
+            // dostawionych przez warstwę rowerową (planner._foot_leg), bo
+            // „Dojście do stacji WRM ..." nie da się złożyć z from/to: stacja
+            // roweru to nie przystanek.
             //
             // `to_car` to dojście do auta Traficar, nie na inny słupek
             // (patrz planner._car_walk_leg): tam nie ma przystanku, tylko
             // ulica, przy której stoi konkretne auto - i to trzeba napisać.
             // Bez adresu z feedu (`to` puste) zostaje samo "dojście do auta" -
             // KTÓRE to auto mówi i tak następny wiersz.
-            const dokad = leg.to_car
-                ? (leg.to ? `Dojście do auta · ${esc(leg.to)}` : 'Dojście do auta')
-                : leg.from === leg.to
-                    ? 'Przejście na inne stanowisko'
-                    : `Przejście do ${esc(leg.to)}`;
+            //
+            // Bez obu: miejsce potrafi zbierać słupki o różnych nazwach
+            // (stacja PKP i przystanek MPK przy niej - patrz naming.py),
+            // a wtedy "inne stanowisko" nie mówi wysiadającemu z pociągu,
+            // dokąd ma iść. Ta sama zasada co w planner._walk_leg.
+            const dokad = leg.note
+                ? esc(leg.note)
+                : leg.to_car
+                    ? (leg.to ? `Dojście do auta · ${esc(leg.to)}` : 'Dojście do auta')
+                    : leg.from === leg.to
+                        ? 'Przejście na inne stanowisko'
+                        : `Przejście do ${esc(leg.to)}`;
             const ile = leg.to_car && leg.metres ? ` (${leg.metres} m)` : '';
             rows.push(
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
                 `<span class="tl-body">${dokad}${ile} · ok. ${leg.minutes} min</span></li>`,
             );
+            return;
+        }
+        if (leg.kind === 'bike') {
+            rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
+            rows.push(
+                `<li class="tl-ride bike"><span class="tl-time"></span>` +
+                `<span class="tl-dot"></span><span class="tl-body">` +
+                `${badgeHtml(leg)} <span class="tl-headsign">do stacji ` +
+                `${esc(leg.to)}</span>` +
+                // Rozbicie czasu na trzy części jest tu sednem, nie ozdobą:
+                // z 14 minut cztery to stanie przy stojaku (patrz
+                // planner._bike_ride_leg), a kto tego nie wie, ten planuje
+                // przesiadkę, której nie zdąży.
+                // Przecinek, nie kropka - reszta interfejsu jest po polsku.
+                `<span class="tl-info">${(leg.distance_m / 1000).toFixed(1).replace('.', ',')} km · ` +
+                `${leg.minutes} min (odblokowanie ${leg.unlock_minutes} min, ` +
+                `jazda ${leg.ride_minutes} min, zwrot ${leg.dock_minutes} min)<br>` +
+                `${esc(leg.from)}: ${leg.bikes_available} ` +
+                `${plural(leg.bikes_available, 'rower', 'rowery', 'rowerów')} · ` +
+                `${esc(leg.to)}: ${leg.docks_available} ` +
+                `${plural(leg.docks_available, 'wolne miejsce', 'wolne miejsca', 'wolnych miejsc')}` +
+                `</span></span></li>`,
+            );
+            const after = journey.legs[i + 1];
+            if (!after || after.kind === 'walk') {
+                rows.push(stopRow(leg.to_time, leg.to, after ? '' : 'last'));
+            }
             return;
         }
         // Ostatni etap propozycji z Traficarem. Wszystkie liczby idą z "ok.":
@@ -2205,6 +2263,30 @@ function detailHtml(journey) {
         </p>`;
 }
 
+/** Dlaczego na liście nie ma roweru, choć 🚲 jest odhaczone.
+
+    Bez tego zera nie da się od siebie odróżnić: „policzone, rowerem nie
+    dojedziesz tu w oknie mapy", „kanał operatora milczy" i „pytasz o inny
+    dzień, a stan stojaków jest żywy" wyglądają identycznie - czyli jak
+    zepsuta funkcja. Backend rozróżnia te trzy przypadki (patrz pole `bikes`
+    w odpowiedzi /api/flow), więc wystarczy je wypisać. */
+function bikeNoteHtml() {
+    const info = lastFlow && lastFlow.bikes;
+    if (!info || info.journeys > 0) return '';
+    const text = !info.live
+        ? 'Rower liczymy tylko dla dzisiejszych wyjazdów — stan stacji jest '
+          + 'z tej chwili, nie z rozkładu.'
+        : info.stations === 0
+            ? 'Nie udało się pobrać stanu stacji WRM. Reszta wyników jest '
+              + 'kompletna.'
+            : 'Żadna trasa ze stacją WRM nie mieści się w oknie czasowym '
+              + 'mapy — tutaj rower nic nie daje.';
+    // Kartka (.notice), a nie szara linijka jak .results-foot: ten tekst leży
+    // nad mapą, gdzie sam cień pod literami czyta się ledwo - a to jedyne
+    // miejsce, w którym pada odpowiedź na „czemu nic nie widzę".
+    return `<div class="notice bike-note"><p>🚲 ${esc(text)}</p></div>`;
+}
+
 function renderJourneys() {
     if (!journeys.length) return;
     const cards = journeys.map((j, i) => {
@@ -2220,7 +2302,8 @@ function renderJourneys() {
         // i czym się płaci za przejazd. To ma być widać na karcie, zanim się
         // ją rozwinie, a nie dopiero na osi trasy.
         if (j.traficar) meta.push('ostatni odcinek autem');
-        const lines = j.legs.filter(leg => leg.kind === 'ride' || leg.kind === 'drive')
+        const lines = j.legs.filter(
+            leg => leg.kind === 'ride' || leg.kind === 'bike' || leg.kind === 'drive')
                             .map(leg => leg.line).join(', ');
         // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
         // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
@@ -2255,6 +2338,7 @@ function renderJourneys() {
                     aria-expanded="${String(!resultsCollapsed)}">${resultsCollapsed ? '▸' : '▾'}</button>
         </div>
         <ol class="journeys">${cards}</ol>
+        ${bikeNoteHtml()}
         <p class="results-foot">
             Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
             tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
@@ -2361,6 +2445,10 @@ function queryParams() {
         extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
+    // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
+    // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
+    // jak przed dodaniem warstwy rowerowej.
+    if (bikeToggle.checked) params.set('bikes', '1');
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
@@ -2495,6 +2583,25 @@ function loadPlan(token, refit) {
             return true;      // znaleziono - patrz search() i playPipeDrop
         });
 }
+
+// Przełącznik roweru miejskiego. Stan przeżywa odświeżenie strony razem
+// z resztą ustawień panelu (patrz saveUiState): kto jeździ WRM-em, ten jeździ
+// nim stale, a kto nie ma konta, ten nie chce tego odhaczać przy każdej wizycie.
+const bikeToggle = $('bikes');
+bikeToggle.checked = !!uiState.bikes;
+$('bike-toggle').classList.toggle('on', bikeToggle.checked);
+bikeToggle.addEventListener('change', () => {
+    $('bike-toggle').classList.toggle('on', bikeToggle.checked);
+    saveUiState({bikes: bikeToggle.checked});
+    // Zmiana odpowiedzi, nie wyglądu: gotowy wynik trzeba przeliczyć od nowa,
+    // bo rowerowych propozycji nie ma w ostatniej odpowiedzi. Tą samą drogą
+    // co suwaki w ⚙ (loadPlan bez kadrowania), a nie przez search() - relacja
+    // się nie zmieniła, więc kadr ma zostać na miejscu i nie ma po co znowu
+    // odgrywać dźwięku znalezienia trasy.
+    if (!lastFlow || !startInput.value || !endInput.value) return;
+    loadPlan(requestToken, false)
+        .catch(() => showError('Nie udało się połączyć z serwerem.'));
+});
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
