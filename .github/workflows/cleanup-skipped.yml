@@ -2,8 +2,14 @@ name: Sprzątanie pominiętych run'ów
 
 # Wyzwalacz `issue_comment` w claude-issue.yml tworzy bieg przy KAŻDYM komentarzu
 # w repo — GitHub nie umie filtrować po treści, więc te bez @claude odbija dopiero
-# warunek `if` w jobie. Pominięcia nie kosztują minut (job nie dostaje runnera),
+# warunek `if` w jobie. Tak samo claude-review-pr.yml pomija PR-y robocze
+# i te z forków. Pominięcia nie kosztują minut (job nie dostaje runnera),
 # ale zapychają listę w zakładce Actions. Ten workflow je stamtąd usuwa.
+#
+# claude-review-pr.yml stoi okrakiem na `testing` i na `main` — wymuszają to
+# jego dwa wyzwalacze (szczegóły w nagłówku tamtego pliku). Sprzątania to nie
+# dotyczy: biegi widnieją w Actions całego repozytorium, niezależnie od tego,
+# na której gałęzi leży plik, który je zrodził.
 #
 # Cron chodzi w UTC i nie przesuwa się z czasem letnim: 03:17 UTC to 05:17
 # w Polsce latem i 04:17 zimą. Nierówna minuta z rozmysłem — biegi planowane
@@ -23,28 +29,35 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Skasuj pominięte biegi solvera
+      - name: Skasuj pominięte biegi Claude'a
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          # Tylko nasze workflow — cudzych biegów nie ruszamy.
+          WORKFLOWS: "claude-issue.yml claude-review-pr.yml"
         run: |
           set -euo pipefail
 
-          # Tylko biegi claude-issue.yml — cudzych workflow nie ruszamy.
-          ids=$(gh api \
-            "repos/$REPO/actions/workflows/claude-issue.yml/runs?status=skipped&per_page=100" \
-            --jq '.workflow_runs[].id')
-
-          if [ -z "$ids" ]; then
-            echo "Nic do sprzątania." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
           count=0
-          for id in $ids; do
-            echo "Kasuję bieg $id"
-            gh api -X DELETE "repos/$REPO/actions/runs/$id"
-            count=$((count + 1))
+          for wf in $WORKFLOWS; do
+            # Workflow, który nie zdążył jeszcze ani razu wystartować, nie jest
+            # GitHubowi znany i API oddaje 404 — to nie powód do wywracania biegu.
+            if ! ids=$(gh api \
+              "repos/$REPO/actions/workflows/$wf/runs?status=skipped&per_page=100" \
+              --jq '.workflow_runs[].id' 2>/dev/null); then
+              echo "$wf: brak biegów w tym repo — pomijam."
+              continue
+            fi
+
+            for id in $ids; do
+              echo "Kasuję bieg $id ($wf)"
+              gh api -X DELETE "repos/$REPO/actions/runs/$id"
+              count=$((count + 1))
+            done
           done
 
-          echo "Usunięto pominiętych biegów: $count" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$count" -eq 0 ]; then
+            echo "Nic do sprzątania." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Usunięto pominiętych biegów: $count" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
