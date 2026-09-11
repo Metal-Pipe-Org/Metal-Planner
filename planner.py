@@ -571,6 +571,11 @@ def _car_drive_leg(option, dep_sec, end_name, dest):
     policzone z prędkości (patrz traficar.drive_time), więc wszędzie idą
     z "ok." i z kreskowaną, a nie ciągłą linią na mapie.
 
+    `km` w PEŁNYCH kilometrach, choć `drive_m` zna metry: przy zmierzonym
+    rozrzucie tego szacunku (22% na 90. centylu - patrz traficar.py) miejsce
+    po przecinku byłoby udawaną dokładnością. Lepiej "ok. 8 km", które jest
+    prawdziwe, niż "7,7 km", które brzmi jak odczyt z licznika.
+
     `path` to odcinek prosty od auta do celu - i tak ma być: prawdziwego
     przebiegu jazdy nikt tu nie liczy, a udawanie go ulicami byłoby
     obietnicą, której ta liczba nie pokrywa.
@@ -590,7 +595,7 @@ def _car_drive_leg(option, dep_sec, end_name, dest):
         "dep_sec": dep_sec,
         "arr_sec": arr_sec,
         "minutes": round(option["drive_sec"] / 60),
-        "km": round(option["drive_m"] / 1000, 1),
+        "km": round(option["drive_m"] / 1000),
         "start_min": round(option["start_sec"] / 60),
         "plate": car["plate"],
         "model": car["model"],

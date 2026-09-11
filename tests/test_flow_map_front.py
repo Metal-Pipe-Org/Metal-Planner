@@ -398,3 +398,11 @@ def test_the_car_is_visible_on_the_card_before_expanding(front):
     się płaci za przejazd - to ma być widać na zwiniętej karcie, a nie dopiero
     po jej rozwinięciu."""
     _check(front, "traficar_widac_na_karcie_przed_rozwinieciem")
+
+
+def test_the_estimated_time_says_so_on_the_card(front):
+    """Każda inna godzina w tej aplikacji jest odczytana z rozkładu - ta
+    jedna nie ma skąd. Karta mówi to „ok." przy czasie podróży (pierwszej
+    liczbie, którą się czyta), a rozwinięcie dopowiada wprost, skąd te liczby
+    się biorą. Zwykła trasa nie dostaje ani jednego, ani drugiego."""
+    _check(front, "traficar_czas_oznaczony_jako_szacunek")

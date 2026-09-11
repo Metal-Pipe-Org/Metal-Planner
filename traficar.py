@@ -59,12 +59,28 @@ WALK_MIN_SEC = 60
 # odjazd z miejsca postojowego. Pięć minut, w których nie jedzie się nigdzie.
 START_SEC = 300
 
-# Jazda autem - szacunek, patrz nagłówek modułu.
-# Prędkość to średnia MIEJSKA ze światłami i skrzyżowaniami (27 km/h), a nie
-# prędkość na liczniku; mnożnik nadrabia to, że ulice nie biegną po linii
-# prostej (typowy współczynnik krętości siatki miejskiej).
-DRIVE_SPEED_MPS = 7.5
-DRIVE_DETOUR = 1.35
+# Jazda autem - szacunek, patrz nagłówek modułu. Obie stałe są ZMIERZONE, nie
+# wzięte z głowy: 30 losowych par przystanków w oknie [MIN_DRIVE_M,
+# MAX_DRIVE_M] przepuszczonych przez prawdziwy routing samochodowy (OSRM na
+# danych OSM, jednorazowo, poza aplikacją - w runtime niczego takiego nie
+# wołamy). Z tej próbki mediana krętości (droga / linia prosta) to 1,30,
+# a mediana prędkości po drodze 36 km/h.
+#
+# Bierzemy 34 km/h, nie zmierzone 36: profil samochodowy OSRM liczy jazdę
+# swobodną, bez korków, a plan ma bywać pesymistyczny, nigdy optymistyczny
+# (punkt 12 kontraktu). Przy tych stałych model myli się co do czasu o 19%
+# (mediana), 34% (90. centyl), w zakresie -23%..+54%, i zawyża w 21 z 30
+# przypadków - czyli najczęściej w bezpieczną stronę. Co do dystansu: 10%
+# (mediana), 22% (90. centyl).
+#
+# Dla porównania stałe sprzed pomiaru (1,35 i 27 km/h) myliły się co do czasu
+# o 47% (mediana) i zawyżały w 30 z 30 przypadków, dwukrotnie w skrajnym.
+#
+# Ten rząd wielkości błędu jest powodem, dla którego dystans podajemy
+# w pełnych kilometrach i z "ok." (patrz planner._car_drive_leg): przy 22%
+# rozrzutu "7,7 km" udawałoby dokładność, której tu nie ma.
+DRIVE_SPEED_MPS = 9.4
+DRIVE_DETOUR = 1.30
 DRIVE_MIN_SEC = 120
 # Poniżej tego auto nie ma czego załatwić: samo odpalenie (START_SEC) trwa
 # dłużej niż przejście tego kawałka, a opłata za przejazd zostaje.

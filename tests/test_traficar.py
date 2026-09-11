@@ -67,8 +67,8 @@ def test_auto_przy_przystanku_jest_propozycja(monkeypatch):
     # Dojście krótsze niż minuta liczymy jako minutę (WALK_MIN_SEC).
     assert option["walk_sec"] == traficar.WALK_MIN_SEC
     assert option["start_sec"] == traficar.START_SEC
-    # ~4,45 km w linii prostej razy krętość - i tyle, ile z tego wychodzi czasu.
-    assert 5800 < option["drive_m"] < 6200
+    # ~4,42 km w linii prostej razy zmierzona krętość (patrz DRIVE_DETOUR).
+    assert 5600 < option["drive_m"] < 5900
     assert option["arrival"] == (
         600 + option["walk_sec"] + traficar.START_SEC + option["drive_sec"])
 

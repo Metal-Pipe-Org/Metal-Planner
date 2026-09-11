@@ -895,4 +895,33 @@ checks.traficar_widac_na_karcie_przed_rozwinieciem = (() => {
     };
 })();
 
+/* Czas podróży kończącej się autem jest SZACUNKIEM i ma to być widać na
+   pierwszej liczbie, którą się czyta - nie dopiero w rozwiniętej karcie. */
+checks.traficar_czas_oznaczony_jako_szacunek = (() => {
+    const zAutem = {
+        departure: '14:02', arrival: '14:33', duration_min: 31, wait_min: 2,
+        transfers: 1, traficar: true, legs: DRIVE_LEGS,
+    };
+    const zwykla = {...zAutem, traficar: false, legs: DRIVE_LEGS.slice(0, 1)};
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zAutem]}, false);
+    const auto = app.resultsBox.innerHTML;
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zwykla]}, false);
+    const bezAuta = app.resultsBox.innerHTML;
+
+    // Rozwinięta karta mówi wprost, skąd te liczby - i podaje dystans też
+    // z "ok.", bo jest obarczony tym samym szacunkiem co czas.
+    const szczegoly = app.detailHtml(zAutem);
+    return {
+        ok: auto.includes('j-duration est') && auto.includes('ok. 31 min')
+            // Zwykła trasa ma godziny z rozkładu i żadnego "ok." przy czasie.
+            && !bezAuta.includes('j-duration est') && bezAuta.includes('>31 min<')
+            && szczegoly.includes('auto nie ma rozkładu')
+            && szczegoly.includes('ok. 12 min') && szczegoly.includes('ok. 5 km')
+            && szczegoly.includes('ok. 5 min'),      // odbiór i start auta
+        auto: auto.slice(auto.indexOf('j-duration'), auto.indexOf('j-duration') + 90),
+        szczegoly: szczegoly.slice(szczegoly.indexOf('tl-info'),
+                                   szczegoly.indexOf('tl-info') + 220),
+    };
+})();
+
 JSON.stringify(checks);

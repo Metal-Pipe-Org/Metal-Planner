@@ -566,6 +566,14 @@ body.panel-hidden #sidebar {
     color: var(--ink-soft);
 }
 
+/* Czas podróży kończącej się autem jest szacunkiem (patrz traficar.py) -
+   "ok." przy liczbie plus przygaszenie, żeby nie czytało się jak godzina
+   z rozkładu, którą każda inna liczba w tym miejscu jest. */
+.j-duration.est {
+    font-weight: 500;
+    color: var(--ink-faint);
+}
+
 .j-lines {
     display: flex;
     align-items: center;
@@ -704,6 +712,15 @@ body.panel-hidden #sidebar {
     flex-basis: 100%;
     font-size: 12px;
     color: var(--ink-faint);
+}
+
+/* Nota "skąd te liczby" pod etapem jazdy autem - cichsza od samych liczb,
+   bo jest o nich, a nie obok nich. */
+.tl-info.est {
+    margin-top: 1px;
+    font-size: 11px;
+    font-style: italic;
+    opacity: 0.85;
 }
 
 .tl-walk .tl-dot {

@@ -360,13 +360,31 @@ przystanku, bliżej niż 1,5 km od celu (odpalenie trwa dłużej niż ten
 kawałek), dalej niż 25 km oraz takie, którego zasięg nie pokrywa przejazdu
 z zapasem.
 
-**Czego to nie dotyka: mapy przepływów.** Auto nie ma ani kursu, ani rozkładu
-— jego czas jest szacowany z odległości w linii prostej (krętość ×1,35,
-27 km/h), a mapa rysuje wyłącznie godziny odczytane z rozkładu (punkt 10
-kontraktu). Propozycja z autem rysuje się więc dopiero po jej wybraniu, tak
-jak każda inna trasa z listy: kreskowaną linią bez otoczki, bo odcinek auto →
-cel jest prostą, a nie przebiegiem ulicami. Wszystkie szacunki idą w górę do
-pełnej minuty i są podpisane „ok.".
+**Czas jazdy jest szacowany i jest to powiedziane wprost.** Auto nie ma
+rozkładu, a routingu samochodowego w projekcie nie ma — czas i dystans
+wychodzą z odległości w linii prostej: krętość ×1,30, 34 km/h. Obie stałe są
+**zmierzone**, nie wzięte z głowy: 30 losowych par przystanków przepuszczonych
+jednorazowo (poza aplikacją, w runtime nic takiego nie jest wołane) przez
+prawdziwy routing samochodowy OSRM. Mediana krętości wyszła 1,30, mediana
+prędkości 36 km/h; bierzemy 34, bo profil OSRM liczy jazdę swobodną, bez
+korków, a plan ma bywać pesymistyczny (punkt 12 kontraktu).
+
+Ile to warte: błąd czasu 19% (mediana), 34% (90. centyl), zakres −23%…+54%,
+zawyżenie w 21 z 30 przypadków — czyli najczęściej w bezpieczną stronę. Błąd
+dystansu 10% / 22%. Stałe sprzed pomiaru (1,35 i 27 km/h) myliły się co do
+czasu o 47% mediany i zawyżały w 30 z 30 przypadków, w skrajnym dwukrotnie.
+
+Ten rozrzut dyktuje sposób pokazywania: dystans w **pełnych kilometrach**
+(przy 22% rozrzutu „7,7 km" udawałoby odczyt z licznika), wszystko z „ok.",
+czas podróży na karcie też z „ok." i przygaszony, a rozwinięta karta mówi
+wprost „czas i dystans szacowane z odległości — auto nie ma rozkładu".
+Szacunki idą w górę do pełnej minuty.
+
+**Czego to nie dotyka: mapy przepływów.** Mapa rysuje wyłącznie godziny
+odczytane z rozkładu (punkt 10 kontraktu), a ta jedna odczytana nie jest.
+Propozycja z autem rysuje się więc dopiero po jej wybraniu, tak jak każda
+inna trasa z listy: kreskowaną linią bez otoczki, bo odcinek auto → cel jest
+prostą, a nie przebiegiem ulicami.
 
 ### Mapa przepływów / „symulacja mrówek" (`plan_flow`)
 
@@ -497,7 +515,9 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   a nie odczytane z rozkładu — `path` to odcinek prosty auto → cel, nie
   przebieg ulicami. `transfers` liczy wsiadanie do auta jak każdą inną zmianę
   pojazdu. Gdy feed Traficara nie odpowiada albo `TRAFICAR=0`, takich pozycji
-  po prostu nie ma — reszta odpowiedzi jest bez zmian.
+  po prostu nie ma — reszta odpowiedzi jest bez zmian. `km` jest w PEŁNYCH
+  kilometrach, a `minutes` w pełnych minutach (w górę): przy zmierzonym
+  rozrzucie tego szacunku drobniejsza podziałka udawałaby dokładność.
   Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
   akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
   (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
@@ -601,7 +621,11 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `TRAFICAR=0`), kandydaci ze śladu skanu CSA, który `plan_flow` już ma —
   bez drugiego przeszukiwania. Mapy przepływów to nie dotyka: czas jazdy
   jest szacowany, a nie odczytany z rozkładu, więc auto rysuje się dopiero
-  po wybraniu propozycji, kreskowaną linią.
+  po wybraniu propozycji, kreskowaną linią. Stałe szacunku (krętość 1,30,
+  34 km/h) zmierzone na 30 losowych trasach prawdziwym routingiem
+  samochodowym: błąd czasu 19% mediany, najczęściej w górę. Że to szacunek,
+  widać na karcie („ok." przy czasie podróży) i w jej rozwinięciu (osobna
+  nota pod etapem).
 - **2026-09-10** — „Plac Grunwaldzki" i „PL. GRUNWALDZKI" to jedno zapytanie.
   Do kaskady dopasowań (`gtfs.match_stop`) doszedł trzeci, najsłabszy poziom
   kluczy: bez ogonków, bez kropek i z rozwiniętymi skrótami

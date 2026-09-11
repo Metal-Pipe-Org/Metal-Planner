@@ -112,9 +112,15 @@ jedno konkretne, a nie „jakiś samochód".
 To **dodatkowa opcja, nie osobny tryb** — wchodzi na listę tym samym kluczem,
 którym sortują się pozostałe propozycje, więc auto staje wyżej tylko wtedy,
 gdy naprawdę jest szybsze. Na mapie rysuje się dopiero po wybraniu
-propozycji, i celowo **kreskowaną** linią: czasu jazdy nie ma skąd odczytać
-(auto nie ma rozkładu), więc jest szacowany, a odcinek auto → cel to prosta,
-nie przebieg ulicami.
+propozycji, i celowo **kreskowaną** linią.
+
+**Czas jazdy jest szacunkiem i aplikacja tego nie ukrywa.** Auto nie ma
+rozkładu, więc czas i dystans wychodzą z odległości w linii prostej —
+wszystkie takie liczby stoją z „ok.", czas podróży na karcie jest przygaszony,
+a rozwinięta karta mówi wprost, skąd się biorą. Stałe modelu są zmierzone na
+30 losowych trasach przez prawdziwy routing samochodowy: czas myli się
+o ~19% (mediana), dystans o ~10%, najczęściej **zawyżając** — dlatego dystans
+podajemy w pełnych kilometrach, a nie z miejscem po przecinku.
 
 Auta biorą się z [fioletowe.live](https://fioletowe.live/) — otwartego
 serwisu, który republikuje wewnętrzne API Traficara. To strona trzecia, nie

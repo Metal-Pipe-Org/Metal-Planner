@@ -2162,9 +2162,13 @@ function detailHtml(journey) {
                 `<span class="tl-dot"></span><span class="tl-body">` +
                 `${badgeHtml(leg)} <span class="tl-headsign">${CAR_ICON}` +
                 `${esc(leg.model)} · ${esc(leg.plate)}</span>` +
-                `<span class="tl-info">ok. ${leg.minutes} min · ` +
-                `${esc(String(leg.km).replace('.', ','))} km · ` +
-                `paliwo ${leg.fuel}%, zasięg ${leg.range} km</span></span></li>`,
+                `<span class="tl-info">ok. ${leg.minutes} min · ok. ${leg.km} km · ` +
+                `paliwo ${leg.fuel}%, zasięg ${leg.range} km</span>` +
+                // Skąd te liczby - powiedziane wprost, a nie zostawione do
+                // domyślenia się z samego "ok.". Każda inna godzina w tej
+                // aplikacji jest odczytana z rozkładu; ta jedna nie ma skąd.
+                `<span class="tl-info est">Czas i dystans szacowane z odległości` +
+                ` — auto nie ma rozkładu</span></span></li>`,
             );
             rows.push(stopRow(leg.to_time, leg.to, 'last'));
             return;
@@ -2218,7 +2222,11 @@ function renderJourneys() {
         if (j.traficar) meta.push('ostatni odcinek autem');
         const lines = j.legs.filter(leg => leg.kind === 'ride' || leg.kind === 'drive')
                             .map(leg => leg.line).join(', ');
-        const label = `${j.departure} – ${j.arrival}, ${j.duration_min} min, ` +
+        // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
+        // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
+        // czyta się pierwszą, a nie dopiero w rozwinięciu karty.
+        const czas = j.traficar ? `ok. ${j.duration_min} min` : `${j.duration_min} min`;
+        const label = `${j.departure} – ${j.arrival}, ${czas}, ` +
                       `${transfers}, ${lines}`;
         return `
             <li class="journey${selected ? ' selected' : ''}" data-index="${i}"
@@ -2226,7 +2234,10 @@ function renderJourneys() {
                 aria-label="${esc(label)}">
                 <div class="j-head">
                     <span class="j-clock">${esc(j.departure)} – ${esc(j.arrival)}</span>
-                    <span class="j-duration">${j.duration_min} min</span>
+                    <span class="j-duration${j.traficar ? ' est' : ''}"${
+                        j.traficar ? ' title="Ostatni odcinek autem - czas jazdy'
+                                   + ' szacowany, auto nie ma rozkładu"' : ''
+                    }>${esc(czas)}</span>
                 </div>
                 <div class="j-lines">${summaryHtml(j.legs)}</div>
                 <div class="j-meta">${meta.join(' · ')}</div>
