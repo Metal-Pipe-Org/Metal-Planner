@@ -6,9 +6,10 @@ name: Sprzątanie pominiętych run'ów
 # i te z forków. Pominięcia nie kosztują minut (job nie dostaje runnera),
 # ale zapychają listę w zakładce Actions. Ten workflow je stamtąd usuwa.
 #
-# claude-review-pr.yml żyje na `testing` (tak każe wyzwalacz `pull_request` —
-# szczegóły w nagłówku tamtego pliku), ale sprzątanie i tak działa: biegi
-# widnieją w Actions całego repozytorium, niezależnie od gałęzi z plikiem.
+# claude-review-pr.yml stoi okrakiem na `testing` i na `main` — wymuszają to
+# jego dwa wyzwalacze (szczegóły w nagłówku tamtego pliku). Sprzątania to nie
+# dotyczy: biegi widnieją w Actions całego repozytorium, niezależnie od tego,
+# na której gałęzi leży plik, który je zrodził.
 #
 # Cron chodzi w UTC i nie przesuwa się z czasem letnim: 03:17 UTC to 05:17
 # w Polsce latem i 04:17 zimą. Nierówna minuta z rozmysłem — biegi planowane
