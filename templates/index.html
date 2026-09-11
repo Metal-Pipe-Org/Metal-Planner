@@ -129,6 +129,16 @@
                     aria-label="Wyczyść wybór">✕</button>
         </div>
 
+        {# Rower miejski jest wyborem pasażera („mam konto w WRM"), nie
+           strojeniem algorytmu, więc stoi tutaj, a nie w panelu ⚙ - i zostaje
+           widoczny także w widoku mapy na telefonie, w odróżnieniu od .hint
+           poniżej: to opcja wyszukiwania, którą odhacza się PRZED szukaniem,
+           a szukanie odpala się samo po drugim kliknięciu w mapę. #}
+        <label class="bike-toggle" id="bike-toggle" for="bikes">
+            <input type="checkbox" id="bikes">
+            <span>🚲 Dojazd rowerem miejskim (WRM)</span>
+        </label>
+
         <p class="hint">
             Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
             potem cel. Inną relację zacznij od ✕.

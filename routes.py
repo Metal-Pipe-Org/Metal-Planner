@@ -267,4 +267,9 @@ def init_routes(app):
             extra_floor_sec=_float_arg("extra_floor_sec"),
             extra_cap_sec=_float_arg("extra_cap_sec"),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
+            # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
+            # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc
+            # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi
+            # (przełącznik 🚲 w karcie wyszukiwania).
+            use_bikes=request.args.get("bikes") == "1",
         ))

@@ -7,6 +7,7 @@ import pytest
 
 import gtfs
 import pkp
+import traficar
 
 
 @pytest.fixture
@@ -32,3 +33,18 @@ def _pkp_disabled_by_default(monkeypatch):
     same nadpisują `pkp.enabled` w swoim fixturze - ten sam `monkeypatch`
     ma zasięg całego testu, więc kolejne setattr po prostu wygrywa."""
     monkeypatch.setattr(pkp, "enabled", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def _traficar_disabled_by_default(monkeypatch):
+    """plan_flow dokłada do listy propozycje kończące się Traficarem (patrz
+    traficar.py) - a te biorą się z ŻYWEGO feedu fioletowe.live. Bez tej
+    blokady każdy test wołający plan_flow strzelałby w internet: wynik
+    zależałby od tego, ile aut akurat stoi we Wrocławiu i czy serwis żyje,
+    a testy chodziłyby tyle, ile trwa timeout HTTP.
+
+    Test, który Traficara faktycznie dotyczy, sam podstawia dane (ten sam
+    `monkeypatch` ma zasięg całego testu, więc kolejne setattr wygrywa) -
+    patrz tests/test_traficar.py.
+    """
+    monkeypatch.setattr(traficar, "enabled", lambda: False)

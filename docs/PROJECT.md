@@ -95,6 +95,12 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
   rozkładowej, grupowane po ciągu przystanków), tablica przystanku — z tej
   samej tablicy połączeń dnia co planer, bo odjazd z przystanku to po
   prostu połączenie, które się w nim zaczyna.
+- **`bikes.py`** — trzecie źródło danych: stacje Wrocławskiego Roweru
+  Miejskiego z kanału GBFS operatora (`nextbike_pl`, licencja CC0-1.0),
+  razem z modelem czasu tego środka transportu (dojście, odblokowanie,
+  przejazd, zwrot). W przeciwieństwie do GTFS i PKP nie trafia do żadnej
+  bazy — to stan sprzed minuty, nie rozkład — więc żyje wyłącznie w pamięci
+  procesu, z krótkim cache, tak jak `vehicles.py`. Opis niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
   `/api/flow`, `/api/timetable`, `/api/line`, `/api/stop_board`,
   `/api/trip` (szczegóły w sekcji API).
@@ -183,6 +189,19 @@ akurat tam, gdzie wyszukiwanie odpala się samo po drugim kliknięciu w mapę.
 Gasi je tylko odpowiedź na aktualne zapytanie (`requestToken`), a ✕ w trakcie
 szukania podbija token — porzucone zapytanie nie dorysuje już wyników relacji,
 której nie ma na ekranie.
+
+Pod polami relacji stoi przełącznik **🚲 Dojazd rowerem miejskim (WRM)** —
+w karcie wyszukiwania, a nie w panelu ⚙, bo to wybór PASAŻERA („mam konto
+w WRM" albo nie), a nie strojenie algorytmu. Zostaje widoczny także w widoku
+mapy na telefonie, w odróżnieniu od `.hint`: odhacza się go PRZED szukaniem,
+a szukanie odpala się samo po drugim kliknięciu w mapę. Stan przeżywa
+odświeżenie strony (`localStorage`, razem z resztą ustawień panelu), a jego
+zmiana przelicza gotowy wynik tą samą drogą co suwaki ⚙ (`loadPlan` bez
+kadrowania) — relacja się nie zmieniła, więc kadr ma zostać na miejscu.
+
+Gdy przełącznik jest włączony, a propozycji z rowerem nie ma, pod listą
+staje kartka mówiąca dlaczego (`bikeNoteHtml`) — brak wyniku i zepsuta
+funkcja wyglądają inaczej tylko wtedy, gdy ktoś to powie.
 
 Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
 ⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
@@ -343,6 +362,147 @@ Etapy dostają geometrię wprost z segmentu (ten sam `gtfs.shape_slice`, jedno
 połączenie do bazy na całe zapytanie - i mapę, i listę), więc wybrana
 propozycja rysuje się po realnych ulicach i torach.
 
+#### Ostatni etap Traficarem (`traficar.py`)
+
+Do tej samej listy dokładają się **propozycje kończące się wynajętym autem**:
+komunikacja dowozi w okolicę celu, a ostatni kawałek — ten, na który nie ma
+już sensownej linii — jedzie się Traficarem. Propozycja ma cztery części po
+kolei: przejazd(y) komunikacją → dojście z przystanku do auta → pięć minut na
+odbiór i start → jazda do celu.
+
+Skąd auta: `fioletowe.live` (open source, GPLv3, `divadsn/traficar-map`)
+republikuje wewnętrzne API Traficara jako REST/JSON bez klucza; Wrocław to
+`zoneId=3`. To **strona trzecia**, nie sam operator, więc feed może zniknąć
+bez ostrzeżenia — stąd wyłącznik `TRAFICAR=0` i zasada, że każdy błąd tego
+źródła jest brakiem propozycji z autem, nigdy błędem wyszukiwania.
+
+Skąd kandydaci: NIE z grafu segmentów mapy (ten prowadzi do celu, a tu trzeba
+czegoś innego — dojazdu w okolicę auta), tylko wprost ze śladu skanu CSA,
+który `plan_flow` i tak już ma policzony na potrzeby deadline'u
+(`_reached_times` czyta z niego godziny bez drugiego skanu). Dla każdej pary
+„przystanek wysiadania + auto" liczy się godzina dotarcia do celu; zostają
+najwyżej dwie, po jednej na miejsce i na auto, i tylko te mieszczące się
+w tym samym oknie czasowym co reszta listy. Odpada auto dalej niż 600 m od
+przystanku, bliżej niż 1,5 km od celu (odpalenie trwa dłużej niż ten
+kawałek), dalej niż 25 km oraz takie, którego zasięg nie pokrywa przejazdu
+z zapasem.
+
+**Czas jazdy jest szacowany i jest to powiedziane wprost.** Auto nie ma
+rozkładu, a routingu samochodowego w projekcie nie ma — czas i dystans
+wychodzą z odległości w linii prostej: krętość ×1,30, 34 km/h. Obie stałe są
+**zmierzone**, nie wzięte z głowy: 30 losowych par przystanków przepuszczonych
+jednorazowo (poza aplikacją, w runtime nic takiego nie jest wołane) przez
+prawdziwy routing samochodowy OSRM. Mediana krętości wyszła 1,30, mediana
+prędkości 36 km/h; bierzemy 34, bo profil OSRM liczy jazdę swobodną, bez
+korków, a plan ma bywać pesymistyczny (punkt 12 kontraktu).
+
+Ile to warte: błąd czasu 19% (mediana), 34% (90. centyl), zakres −23%…+54%,
+zawyżenie w 21 z 30 przypadków — czyli najczęściej w bezpieczną stronę. Błąd
+dystansu 10% / 22%. Stałe sprzed pomiaru (1,35 i 27 km/h) myliły się co do
+czasu o 47% mediany i zawyżały w 30 z 30 przypadków, w skrajnym dwukrotnie.
+
+Ten rozrzut dyktuje sposób pokazywania: dystans w **pełnych kilometrach**
+(przy 22% rozrzutu „7,7 km" udawałoby odczyt z licznika), wszystko z „ok.",
+czas podróży na karcie też z „ok." i przygaszony, a rozwinięta karta mówi
+wprost „czas i dystans szacowane z odległości — auto nie ma rozkładu".
+Szacunki idą w górę do pełnej minuty.
+
+**Czego to nie dotyka: mapy przepływów.** Mapa rysuje wyłącznie godziny
+odczytane z rozkładu (punkt 10 kontraktu), a ta jedna odczytana nie jest.
+Propozycja z autem rysuje się więc dopiero po jej wybraniu, tak jak każda
+inna trasa z listy: kreskowaną linią bez otoczki, bo odcinek auto → cel jest
+prostą, a nie przebiegiem ulicami.
+
+### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
+
+Włączany przełącznikiem 🚲 w karcie wyszukiwania (`bikes=1` w `/api/flow`);
+bez niego odpowiedź jest co do pola taka sama jak przed dodaniem tej
+warstwy. Rower jest wyborem pasażera, nie ustawieniem serwera — bez konta
+w WRM propozycja z rowerem jest bezużyteczna.
+
+Rower jeździ **między stacjami**, bo tak działa ten system: wypożyczenie
+zaczyna się i kończy w stojaku. Wolno mu przy tym stać w **dowolnym miejscu
+trasy** — i to bez czterech osobnych algorytmów, bo `plan_flow` ma już
+policzone obie połówki odpowiedzi:
+
+- `earliest[słupek]` — o której najwcześniej da się tu być, startując
+  z relacji (skan w przód, `_forward`);
+- `profile(słupek, t)` — stojąc tu o godzinie `t`, o której jest się w celu
+  (profilowy skan wstecz, `_target_profile`).
+
+Wstawienie roweru to złożenie tych dwóch funkcji przez parę stacji (A, B):
+
+```
+earliest[X] → dojście X→A → ODBLOKOWANIE → przejazd A→B → zwrot
+            → dojście B→Y → profile(Y, …)
+```
+
+Skrajne przypadki wychodzą z tego samego wzoru, nie z osobnego kodu: X bywa
+samym punktem startu (rower na POCZĄTKU), Y samym celem (na KOŃCU), obie
+naraz (sam rower), obie w środku sieci (rower w ŚRODKU — skrót między dwiema
+liniami). Pętla po parach stacji (`_bike_candidates`) zostawia po jednym,
+najlepszym przedstawicielu każdego z tych czterech **kształtów** — bez tego
+lista dostałaby kilka niemal identycznych propozycji z sąsiednich stacji tej
+samej okolicy. Odsiewanie par jest geometryczne i robi się przed dotknięciem
+rozkładu (dolne ograniczenia: minimalny sensowny przejazd, dojście od stacji
+B, odległość B od celu w linii prostej ÷ prędkość najszybszego pojazdu
+w sieci), więc 273 × 273 pary kosztują kilka milisekund.
+
+Wybrane pary są dopiero **odtwarzane** etap po etapie dwoma zwykłymi skanami
+CSA (`_scan` + `_reconstruct`) — po jednym na każdą połowę trasy. Godziny na
+karcie liczone są przy tym od nowa, do przodu, z faktycznie odtworzonych
+etapów, a nie przepisane z pętli po parach: tamte są dobre do WYBORU pary,
+ale kartę ogląda się minuta po minucie, więc musi się zgadzać sama ze sobą.
+
+Czas etapu rowerowego to trzy różne rzeczy i wszystkie trzy są widoczne
+osobno na karcie: **odblokowanie** (3 min — podejście do stojaka,
+wypożyczenie, wyjęcie roweru; jedyny moment podróży, w którym stoi się przed
+maszyną, a nie czeka na rozkład), **jazda** (14 km/h, odległość w linii
+prostej razy 1,35 na krętość) i **zwrot** (1 min). Dojście do stacji i od
+stacji to osobne etapy pieszne z własnym czasem (4,5 km/h, mnożnik 1,3),
+w promieniu do 500 m. Wszystkie te czasy zaokrągla się **w górę do pełnych
+minut** (`bikes._whole_minutes`): karta pokazuje godziny z dokładnością do
+minuty, więc przy sekundach „13:03 przyjazd, 1 min dojścia, 13:03 odjazd",
+a suma trzech części przejazdu nie równa się jego długości. W górę, bo każde
+z tych zaokrągleń jest marginesem.
+
+**Żadnego osobnego progu.** Rower podlega dokładnie tej samej regule co
+wszystko inne na liście: mieści się w oknie czasowym mapy (`_deadline`) —
+wchodzi, i staje tam, gdzie mu wypada wg wspólnego klucza (`_journey_key`).
+Gorsza opcja ląduje na dole, a nie znika.
+
+Kuszące jest dołożyć drugi próg („rower wchodzi tylko wtedy, gdy **wygrywa**
+z najlepszym dojazdem bez niego"), bo rower kosztuje osobno: konto, dojście
+do stojaka, wypożyczenie, pedałowanie. Odpada z dwóch powodów. Zgoda na ten
+koszt **już padła** — odhaczenie 🚲 jest właśnie nią. A przede wszystkim taki
+próg sprawdzano by na danych zmieniających się **co minutę** (stan stojaków),
+podczas gdy kandydaci potrafią stać dokładnie na jego styku: dwa wyszukania
+tej samej relacji w odstępie minuty dawałyby raz propozycję z rowerem, raz
+żadną. Z zewnątrz jest to nieodróżnialne od zepsutej funkcji (zmierzone na
+relacji Wojszyce → pl. Grunwaldzki: `bikes = 0` i `bikes = 1` w odstępie
+dwóch sekund).
+
+**Gdy roweru nie ma, front mówi dlaczego** (`bikeNoteHtml` w `app.js`).
+Trzy zera wyglądają identycznie, a znaczą co innego: „policzone, nic się nie
+mieści w oknie", „kanał operatora milczy" i „pytasz o inny dzień". Pole
+`bikes` w odpowiedzi rozróżnia je (`journeys`/`stations`/`live`), więc
+wystarczy je wypisać — bez tego brak propozycji jest nieodróżnialny od
+zepsutej funkcji.
+
+**Czego tu świadomie NIE ma: roweru na mapie przepływów.** Jasność segmentu
+znaczy tam „jak dobrym wyborem jest siedzieć teraz w tym kursie" i liczy się
+z rozkładu (patrz `FLOW_MAP_CONTRACT.md`) — rower rozkładu nie ma, więc nie
+ma też czego porównywać. Wybrana trasa z rowerem rysuje się natomiast
+w całości, tak jak każda inna; sam przejazd kreską **przerywaną**, bo znamy
+obie stacje, ale nie przebieg ulicami, a ciągła linia obiecywałaby
+geometrię, której nikt nie policzył.
+
+Awaria kanału operatora ma jeden skutek: propozycji z rowerem po prostu nie
+ma (`bikes.stations_quiet` oddaje pustą listę zamiast rzucać), a reszta
+wyszukiwarki działa bez zmian. Odpowiedź niesie wtedy `bikes.stations == 0`,
+żeby front miał po czym odróżnić „policzone, rower nic tu nie daje" od „nie
+było czego liczyć".
+
 ### Mapa przepływów / „symulacja mrówek" (`plan_flow`)
 
 Cel: pokazać **wszystkie** użyteczne opcje naraz, z intensywnością malejącą
@@ -462,10 +622,43 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `minutes` liczone z odległości (patrz wyżej), a `same_place` odróżnia zmianę
   stanowiska w obrębie jednego przystanku od marszu na przystanek o innej
   nazwie; przy `false` front musi powiedzieć DOKĄD iść, bo bez nazwy taki etap
-  jest niewykonalny. `dep_sec`/`arr_sec`
+  jest niewykonalny. Nagłówek propozycji
+  niesie też `departure_sec`/`arrival_sec` — te same dwie godziny w sekundach,
+  żeby dało się ustawić propozycje w jednej kolejności niezależnie od tego,
+  który algorytm je złożył. `dep_sec`/`arr_sec`
   to sekundy na osi doby rozkładowej (mogą przekroczyć 24 h) — `from_time`
   i `to_time` po północy zawijają się do `00:xx` i nie da się z nich odtworzyć
   doby (patrz `/api/timetable`).
+  Propozycja kończąca się autem (patrz `traficar.py`) jest oznaczona
+  `traficar: true` i ma dwa dodatkowe kształty etapów: dojście do auta to
+  zwykły `kind: "walk"` z `to_car: true` i `metres` (`to` jest wtedy miejscem
+  postoju, nie nazwą przystanku), a sama jazda to `{kind: "drive", mode:
+  "car", num: "Traficar", line, from, from_time, to, to_time, dep_sec,
+  arr_sec, minutes, km, start_min, plate, model, fuel, range, estimated:
+  true, path}`. `estimated` mówi wprost, że godziny są policzone z prędkości,
+  a nie odczytane z rozkładu — `path` to odcinek prosty auto → cel, nie
+  przebieg ulicami. `transfers` liczy wsiadanie do auta jak każdą inną zmianę
+  pojazdu. Gdy feed Traficara nie odpowiada albo `TRAFICAR=0`, takich pozycji
+  po prostu nie ma — reszta odpowiedzi jest bez zmian. `km` jest w PEŁNYCH
+  kilometrach, a `minutes` w pełnych minutach (w górę): przy zmierzonym
+  rozrzucie tego szacunku drobniejsza podziałka udawałaby dokładność.
+
+  `bikes=1` dokłada do `journeys` propozycje z rowerem miejskim (patrz sekcja
+  wyżej) i wstawia do odpowiedzi `bikes: {journeys, stations, live}` — ile ich
+  weszło, ile stacji w ogóle odpowiedziało (zero = kanał operatora milczy,
+  a nie „rower tu nic nie daje") i czy warstwa w ogóle się liczyła:
+  `live: false` znaczy „pytanie dotyczy innej doby niż dziś", a stan stojaków
+  jest żywy, nie rozkładowy, więc propozycja na jutro byłaby zgadywaniem
+  podanym jako fakt. Etap rowerowy:
+  `{kind: "bike", line: "Rower miejski", num: "WRM", mode: "bike", headsign,
+  from, from_time, to, to_time, dep_sec, arr_sec, minutes, ride_minutes,
+  unlock_minutes, dock_minutes, distance_m, bikes_available, docks_available,
+  station_from_id, station_to_id, path}` — `from`/`to` to nazwy STACJI WRM,
+  nie przystanków, `path` to odcinek między nimi (dwa punkty, nie przebieg
+  ulicami), a cztery pola minutowe sumują się dokładnie. Dojście do stacji
+  i od stacji jedzie jako zwykły etap `walk` z dodatkowym polem `note`
+  (gotowy opis — „Dojście do stacji WRM …" nie da się złożyć z `from`/`to`,
+  bo stacja roweru to nie przystanek).
   Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
   akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
   (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
@@ -540,6 +733,8 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `naming.py` | tabele nazewnicze: pary stacja PKP ↔ przystanek MPK, rozwijane skróty - dane, nie algorytm |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
 | `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
+| `traficar.py` | auta Traficar z fioletowe.live + szukanie pary "przystanek + auto" na ostatni etap trasy |
+| `bikes.py` | stacje Wrocławskiego Roweru Miejskiego (GBFS) + model czasu roweru |
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
@@ -560,6 +755,44 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-11** — lista propozycji umie skończyć podróż **Traficarem**
+  (`traficar.py`): komunikacja dowozi w okolicę celu, dalej dojście do auta,
+  pięć minut na odbiór i start, i jazda do celu. Dodatkowa pozycja obok
+  zwykłych wariantów, nie osobny tryb — i wpleciona w listę tym samym
+  kluczem, którym sortuje się reszta, więc auto musi być realnie szybsze,
+  żeby stanąć wyżej. Auta z `fioletowe.live` (strona trzecia, wyłącznik
+  `TRAFICAR=0`), kandydaci ze śladu skanu CSA, który `plan_flow` już ma —
+  bez drugiego przeszukiwania. Mapy przepływów to nie dotyka: czas jazdy
+  jest szacowany, a nie odczytany z rozkładu, więc auto rysuje się dopiero
+  po wybraniu propozycji, kreskowaną linią. Stałe szacunku (krętość 1,30,
+  34 km/h) zmierzone na 30 losowych trasach prawdziwym routingiem
+  samochodowym: błąd czasu 19% mediany, najczęściej w górę. Że to szacunek,
+  widać na karcie („ok." przy czasie podróży) i w jej rozwinięciu (osobna
+  nota pod etapem).
+
+- **2026-09-11** — **rower miejski (WRM) w trasie**. Przełącznik 🚲 w karcie
+  wyszukiwania dokłada do listy propozycji takie, w których część drogi
+  pokonuje się rowerem — między stacjami, bo tak działa ten system, i w
+  DOWOLNYM miejscu trasy: na początku, na końcu, w środku (jako skrót
+  między dwiema liniami) albo zamiast całej trasy. Nie ma na to osobnego
+  algorytmu: cztery kształty wychodzą z jednego złożenia dwóch rzeczy, które
+  `plan_flow` i tak już liczy — skanu w przód (`earliest`) i profilu dojazdu
+  do celu (`_target_profile`) — przez parę stacji (patrz sekcja „Rower
+  miejski w trasie"). Źródło to kanał GBFS operatora (`nextbike_pl`, CC0-1.0,
+  rejestr MobilityData), czytany wyłącznie do pamięci, z cache 60 s na stan
+  stojaków; awaria cudzego serwera odbiera tylko propozycje z rowerem, nic
+  więcej. Etap rowerowy pokazuje osobno odblokowanie (3 min), jazdę i zwrot,
+  bo z tych trzech tylko jedna część to jazda — a kto tego nie wie, planuje
+  przesiadkę, której nie zdąży; wszystkie czasy tej warstwy zaokrąglają się
+  w górę do pełnych minut, żeby godziny na karcie zgadzały się z podanymi
+  długościami etapów. Rower podlega tej samej regule co reszta listy —
+  mieści się w oknie czasowym mapy, więc wchodzi i staje tam, gdzie mu
+  wypada; osobnego progu nie ma, bo odhaczenie 🚲 jest właśnie zgodą na koszt
+  roweru. Gdy propozycji nie ma, front mówi dlaczego (okno, milczący kanał
+  albo pytanie o inny dzień) — inaczej trzy różne zera wyglądają jak jedna
+  zepsuta funkcja. Na samej mapie przepływów roweru nie ma i to jest wybór —
+  jasność liczy się tam z rozkładu, a rower rozkładu nie ma.
 
 - **2026-09-10** — dojście widać też **poza kartą propozycji**: pasek
   „Najszybciej o …" nad mapą pokazuje je jako plakietkę, a podświetlenie
@@ -1383,6 +1616,22 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   pozostałe takie pary czekają na dopisanie. Przesiadki to nie blokuje
   (most pieszy bierze się z odległości, nie z nazwy), dotyczy wyłącznie
   tego, co wyszukiwarka rozwija jako jedno miejsce.
+- Rower miejski (`bikes.py`) ma **asymetrię wobec reszty wyszukiwarki**:
+  dojście do stacji roweru kosztuje czas liczony z odległości, a słupek
+  w promieniu `range_m` (domyślnie 1 km) od klikniętego punktu liczy się
+  jako dostępny od razu, bez czasu dojścia (patrz `gtfs.nearby_stops`). Na
+  relacjach wskazanych punktem na mapie systematycznie zaniża to szanse
+  „roweru na początku" wobec zwykłego dojazdu. Uczciwe wyrównanie to
+  doliczenie czasu dojścia do PRZYSTANKU, czyli zmiana w rdzeniu, nie
+  w warstwie rowerowej.
+- Przejazd rowerem nie ma geometrii: znamy obie stacje, długość trasy jest
+  szacowana (odległość w linii prostej × 1,35), a na mapie rysuje się
+  odcinek między stacjami, kreską przerywaną. Prawdziwy przebieg wymagałby
+  routera rowerowego, którego projekt nie ma.
+- Stan stojaków jest sprzed najwyżej minuty, ale nie jest przewidywaniem:
+  stacja z jednym rowerem może być pusta, zanim się do niej dojdzie. Karta
+  pokazuje więc liczbę rowerów i wolnych miejsc wprost, zamiast udawać, że
+  to gwarancja.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
 - Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
   bo CSA widzi jedną tablicę połączeń (patrz wpis w changelogu) - ale bez

@@ -6,7 +6,9 @@
     --tram: #c62828;
     --bus: #1565c0;
     --train: #2e7d33;
+    --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
+    --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
     --walk: #455a64;   /* przejście pieszo - ten sam kolor, co kreskowana
                           linia dojścia na mapie (patrz legLayers) */
     --accent: #2563eb;
@@ -567,6 +569,14 @@ body.panel-hidden #sidebar {
     color: var(--ink-soft);
 }
 
+/* Czas podróży kończącej się autem jest szacunkiem (patrz traficar.py) -
+   "ok." przy liczbie plus przygaszenie, żeby nie czytało się jak godzina
+   z rozkładu, którą każda inna liczba w tym miejscu jest. */
+.j-duration.est {
+    font-weight: 500;
+    color: var(--ink-faint);
+}
+
 .j-lines {
     display: flex;
     align-items: center;
@@ -600,6 +610,38 @@ body.panel-hidden #sidebar {
 .badge.tram { background: var(--tram); }
 .badge.bus { background: var(--bus); }
 .badge.train { background: var(--train); }
+.badge.bike { background: var(--bike); }
+.badge.car { background: var(--car); }
+
+/* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
+   a nie w panelu deweloperskim ⚙, bo to wybór PASAŻERA (mam konto w WRM
+   albo nie), a nie strojenie algorytmu. */
+.bike-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    user-select: none;
+}
+
+.bike-toggle input { accent-color: var(--bike); margin: 0; }
+
+.bike-toggle.on { color: var(--bike); font-weight: 600; }
+
+/* Wyjaśnienie „dlaczego nie ma tu roweru" pod listą propozycji. Kartka jak
+   pozostałe komunikaty, z paskiem w kolorze warstwy - żeby od razu było
+   widać, czego dotyczy (patrz bikeNoteHtml w app.js). */
+.notice.bike-note {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-left: 3px solid var(--bike);
+    font-size: 12.5px;
+}
+
+.notice.bike-note p { margin: 0; }
 
 /* Przejście pieszo NIE jest pojazdem, więc nie dostaje wypełnionej pigułki:
    kreskowany obrys w kolorze dojścia z mapy odróżnia je od linii na pierwszy
@@ -695,6 +737,17 @@ body.panel-hidden #sidebar {
 .tl-ride.tram .tl-dot { background: var(--tram); }
 .tl-ride.bus .tl-dot { background: var(--bus); }
 .tl-ride.train .tl-dot { background: var(--train); }
+.tl-ride.bike .tl-dot { background: var(--bike); }
+.tl-ride.car .tl-dot { background: var(--car); }
+
+/* Autko przy modelu auta na osi trasy - w linii z tekstem, nie nad nim. */
+.tl-car-icon {
+    width: 17px;
+    height: 10px;
+    margin-right: 4px;
+    vertical-align: -1px;
+    fill: var(--car);
+}
 
 .tl-ride .tl-body {
     display: flex;
@@ -713,6 +766,15 @@ body.panel-hidden #sidebar {
     flex-basis: 100%;
     font-size: 12px;
     color: var(--ink-faint);
+}
+
+/* Nota "skąd te liczby" pod etapem jazdy autem - cichsza od samych liczb,
+   bo jest o nich, a nie obok nich. */
+.tl-info.est {
+    margin-top: 1px;
+    font-size: 11px;
+    font-style: italic;
+    opacity: 0.85;
 }
 
 .tl-walk .tl-dot {
@@ -760,10 +822,12 @@ body.panel-hidden #sidebar {
     box-shadow: 0 0 3px rgba(0, 0, 0, 0.35);
 }
 
+.line-badge.car { color: var(--car); border-color: var(--car); }
 .line-badge.tram { color: var(--tram); border-color: var(--tram); }
 .line-badge.bus { color: var(--bus); border-color: var(--bus); }
 .line-badge.train { color: var(--train); border-color: var(--train); }
 .line-badge.other { color: var(--other); border-color: var(--other); }
+.line-badge.bike { color: var(--bike); border-color: var(--bike); }
 
 .line-badge.solid {
     color: #fff;
@@ -777,7 +841,9 @@ body.panel-hidden #sidebar {
 .line-badge.solid.tram { background: var(--tram); }
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.train { background: var(--train); }
+.line-badge.solid.car { background: var(--car); }
 .line-badge.solid.other { background: var(--other); }
+.line-badge.solid.bike { background: var(--bike); }
 
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
@@ -887,6 +953,7 @@ body.panel-hidden #sidebar {
 .line-chip.bus { color: var(--bus); }
 .line-chip.train { color: var(--train); }
 .line-chip.other { color: var(--other); }
+.line-chip.bike { color: var(--bike); }
 
 .line-chip.picked,
 .line-cluster .line-chip:hover { color: #fff; }
