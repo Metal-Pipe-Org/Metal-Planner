@@ -28,13 +28,23 @@ name: Claude - oceń PR
 # kolejnymi ocenami pod ten sam PR. Po większych poprawkach ocenę można
 # powtórzyć ręcznie: Actions -> „Claude - oceń PR" -> Run workflow -> numer PR-a.
 #
-# Ten plik — jako jedyny z naszych workflow — musi żyć na `testing`, a nie na
-# `main`. Pozostałe chodzą na zdarzeniach (`issues`, `issue_comment`,
-# `pull_request_target`), które GitHub bierze zawsze z gałęzi domyślnej.
-# `pull_request` jest inny: bierze workflow z commitu scalenia PR-a z gałęzią
-# bazową, a bazą PR-ów w tym repo jest `testing` (na `main` wchodzi dopiero
-# wydanie). Gdyby plik siedział tylko na `main`, PR-y do `testing` nie
-# uruchamiałyby niczego.
+# Ten plik musi żyć na DWÓCH gałęziach naraz i nie jest to niechlujstwo —
+# każdy z dwóch wyzwalaczy czyta go skądinąd:
+#
+#  * na `testing`, bo `pull_request` bierze workflow z commitu scalenia PR-a
+#    z gałęzią bazową, a bazą PR-ów w tym repo jest `testing` (na `main`
+#    wchodzi dopiero wydanie). Gdyby pliku tam nie było, PR-y do `testing` nie
+#    uruchamiałyby niczego. Działa to również dla gałęzi odbitych, zanim ocena
+#    powstała: commit scalenia dokłada plik z bazy, choć sama gałąź go nie ma.
+#
+#  * na `main`, bo `workflow_dispatch` uruchamia workflow tylko wtedy, gdy plik
+#    jest na gałęzi domyślnej. Bez kopii na `main` nie ma przycisku „Run
+#    workflow", czyli nie ma jak powtórzyć oceny ręcznie.
+#
+# Pozostałe nasze workflow chodzą na zdarzeniach (`issues`, `issue_comment`,
+# `pull_request_target`), które GitHub czyta zawsze z gałęzi domyślnej — im
+# wystarcza `main`. Obie kopie tego pliku trzymaj identyczne: wtedy wydanie
+# `testing` -> `main` scala je bez konfliktu.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
