@@ -441,6 +441,7 @@ const INJECTION = `
     get flowPick() { return flowPick; },
     get flowParts() { return flowParts; },
     nodePoint, dotOpts, seedStartPanel,
+    get flowCarLayer() { return flowCarLayer; }, CAR_STYLE,
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },
 };

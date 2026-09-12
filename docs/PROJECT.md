@@ -410,11 +410,31 @@ czas podróży na karcie też z „ok." i przygaszony, a rozwinięta karta mówi
 wprost „czas i dystans szacowane z odległości — auto nie ma rozkładu".
 Szacunki idą w górę do pełnej minuty.
 
-**Czego to nie dotyka: mapy przepływów.** Mapa rysuje wyłącznie godziny
-odczytane z rozkładu (punkt 10 kontraktu), a ta jedna odczytana nie jest.
-Propozycja z autem rysuje się więc dopiero po jej wybraniu, tak jak każda
-inna trasa z listy: kreskowaną linią bez otoczki, bo odcinek auto → cel jest
-prostą, a nie przebiegiem ulicami.
+**Czego ten szacunek nie dotyka: mapy przepływów.** Mapa rysuje wyłącznie
+godziny odczytane z rozkładu (punkt 10 kontraktu), a ta jedna odczytana nie
+jest. Propozycja z autem rysuje się więc dopiero po jej wybraniu, tak jak
+każda inna trasa z listy: kreskowaną linią bez otoczki, bo odcinek auto → cel
+jest prostą, a nie przebiegiem ulicami.
+
+#### Auto jako miejsce na mapie (`traficar.map_cars`)
+
+Samo auto na mapie już jest — od 2026-09-12, ale bez ani jednej liczby
+z tego szacunku (punkt 15 kontraktu). Mapa traktuje je tak, jak traktuje
+przystanek: to **miejsce, do którego da się dojść**. Wolne auto oddalone
+o jedno dojście (`gtfs.WALK_M`, czas z `gtfs.walk_time_sec` — ta sama reguła
+co wszędzie, punkt 14) od czegoś, co mapa NARYSOWAŁA (`planner._drawn_reach`)
+albo od samego startu, dostaje znacznik i mówi, o której da się przy nim być.
+
+Dalej mapa milczy: żadnego czasu jazdy, żadnego przebiegu, żadnej godziny
+w celu — tylko odległość auta od celu w linii prostej. To nie jest to samo
+pytanie co przy propozycjach: tam trzeba było ułożyć CAŁĄ trasę i podać
+godzinę przyjazdu, więc bez szacunku nie dało się jej w ogóle pokazać; tutaj
+odpowiedź brzmi „o 15:12 możesz stać przy tym aucie", a co dalej — wie
+pasażer, nie my.
+
+Znaczniki pojawiają się wyłącznie przy pytaniu o dziś (auta stoją tam, gdzie
+stoją teraz — ta sama zasada, co przy stojakach rowerowych), a milczący feed
+albo `TRAFICAR=0` po prostu je zabiera.
 
 ### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
 
@@ -619,6 +639,21 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   MAPA pozwala tam wsiąść, z kierunkiem (ta sama linia mija węzeł w obie
   strony, a mapa proponuje jedną). Węzeł, z którego nie da się w nic wsiąść,
   nie trafia na listę — nie ma tam przesiadki.
+  `cars` to wolne auta car-sharingu w zasięgu TEJ mapy (patrz
+  `traficar.map_cars`, punkt 15 kontraktu): `[{lat, lon, plate, model, where,
+  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m}, …]` — `at` to godzina,
+  o której da się być przy aucie (dojazd z narysowanej mapy plus dojście
+  liczone tak samo jak każde inne), `from`/`walk_*` mówią skąd i jak daleko
+  się idzie, a `to_dest_m` to odległość auta od celu W LINII PROSTEJ. Czasu
+  jazdy autem tu nie ma i nie będzie — mapa go nie zgaduje (to różnica wobec
+  propozycji z autem niżej, które szacują go z prędkości).
+  `ogarniam` to program Traficara, w którym za zajęcie się autem należy się
+  zniżka: `[{co: "Sprzątanie", ile: 30}, …]`, pusta lista = przy tym aucie nie
+  ma nic do wzięcia (w feedzie to `discounts`, nazwy z zamkniętej listy:
+  Tankowanie, Sprzątanie, Relokacja; kwota jest liczbą bez waluty — złotówki,
+  ale samo źródło tego nie mówi). Lista jest pusta
+  przy pytaniu o inną dobę niż dziś, przy `TRAFICAR=0` i przy milczącym
+  feedzie — brak aut nigdy nie jest błędem wyszukiwania.
   `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
   to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, path}`; etap
@@ -737,7 +772,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `naming.py` | tabele nazewnicze: pary stacja PKP ↔ przystanek MPK, rozwijane skróty - dane, nie algorytm |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
 | `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
-| `traficar.py` | auta Traficar z fioletowe.live + szukanie pary "przystanek + auto" na ostatni etap trasy |
+| `traficar.py` | auta Traficar z fioletowe.live: znaczniki w zasięgu mapy (`map_cars`) + para "przystanek + auto" na ostatni etap trasy |
 | `bikes.py` | stacje Wrocławskiego Roweru Miejskiego (GBFS) + model czasu roweru |
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
@@ -760,6 +795,36 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-12** — **auta car-sharingu na mapie przepływów** (punkt 15
+  kontraktu). Dotąd Traficar dotykał wyłącznie listy propozycji — mapa nie
+  wiedziała o nim nic. Teraz wolne auto, do którego da się dojść JEDNYM
+  dojściem od czegoś, co mapa rysuje (albo od samego startu), dostaje
+  fioletowy znacznik i po najechaniu mówi: o której się przy nim jest, skąd
+  i ile minut się idzie, ile stąd do celu w linii prostej oraz ile ma paliwa
+  i zasięgu. Marsz liczy ta sama funkcja, co każdy inny (`gtfs.walk_time_sec`,
+  punkt 14) — auto nie ma własnej, hojniejszej miary. Ulicy postoju w dymku
+  nie ma: znacznik i tak stoi dokładnie tam, gdzie auto.
+  **Program „Ogarniam"** (w feedzie `discounts`, udokumentowany jako
+  `CarDiscountV1`): przy części aut Traficar płaci zniżką za tankowanie,
+  sprzątanie albo relokację. Dymek mówi, ZA CO i ZA ILE — a gdy nie ma nic,
+  mówi i to, bo milczenie znaczyłoby naraz „nic tu nie ma" i „nie wiadomo".
+  Auto z nagrodą nosi dodatkowo złotą obwódkę, żeby dało się je znaleźć bez
+  najeżdżania po kolei na wszystkie. Pomiar 2026-09-12: 11 z 44 aut w mieście
+  ma coś do wzięcia, 15–30 zł za zadanie.
+  **Czasu jazdy autem mapa nie podaje w ogóle.** Propozycje szacują go
+  z prędkości (`traficar.DRIVE_*`), ale mapa ma nie zgadywać: bez rozkładu
+  i bez routingu samochodowego zostaje odległość w linii prostej i decyzja
+  pasażera.
+  Zasięg bierze się z NARYSOWANYCH kawałków (`planner._drawn_reach`), nie
+  z całego skanu — auto stoi przy tym, co widać, albo nie ma go wcale. Na
+  przemiarze relacji na żywo wychodzi 1–9 aut (wolnych jest we Wrocławiu
+  ok. 40 naraz), więc mapa nie tonie w fiolecie. Znaczniki tylko przy pytaniu
+  o dziś, dokładnie z tego powodu co stojaki rowerowe: auto stoi tam, gdzie
+  stoi TERAZ.
+  Wygląd (fiolet marki, dymek z rejestracją i zasięgiem) podebrany
+  z odrzuconej warstwy `archive/traficar-layer` (7fd7b66, 2026-07-22) — tamta
+  pokazywała wszystkie auta w mieście i nie wiedziała nic o wyszukiwanej
+  relacji, ta pokazuje tylko te, do których mapa dowozi.
 - **2026-09-12** — **jedna zasada chodzenia zamiast trzech**. Było: 300 m
   w przesiadce z czasem marszu, 400 m na krańcach relacji z czasem marszu
   i 1000 m wokół punktu klikniętego na mapie ZA DARMO — czyli 900 m na
@@ -1707,6 +1772,14 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   przeniesienie CAŁEGO backendu na OpenTripPlanner odrzucone — on zwraca
   listę tras, a mapa przepływów (wachlarz, jasność, kotwice, kropki) i tak
   zostałaby po naszej stronie.
+- **Odnośnik „prowadź" przy aucie car-sharingu.** Mapa mówi, gdzie stoi auto
+  i ile stąd do celu w linii prostej, ale trasy jazdy nie pokaże nigdy —
+  routingu samochodowego tu nie ma i nie ma go po co dorabiać. Zamiast tego
+  wystarczy w dymku auta gotowy odnośnik otwierający tę jazdę w Google Maps
+  (`https://www.google.com/maps/dir/?api=1&origin=…&destination=…&travelmode=
+  driving`): wszystko, czego potrzebuje, już jest w odpowiedzi — współrzędne
+  auta i celu. Wtedy „ile to potrwa" odpowiada ten, kto naprawdę wie, a my
+  dalej nie zgadujemy ani minuty.
 - Więcej odjazdów tej samej trasy na liście („następny kurs o…").
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
 - Opóźnienia pociągów na żywo z `/api/v1/operations` (patrz `pkp.py`) -

@@ -751,11 +751,13 @@ let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania be
 let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
 let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
 let flowDotLayer = null;    // węzły przesiadkowe wachlarza (patrz flowStopDots)
+let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
+    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     hoveredStopDot = null;
     flowParts = [];
     flowHits = [];
@@ -822,6 +824,10 @@ function drawFlow(flow, refit) {
     flowLayer = L.layerGroup([...faint, ...casings, ...bright]).addTo(map);
     // Osobna warstwa, dodana PO korytarzach: kropka ma łapać kursor przed
     // linią, na której leży.
+    // Auta pod kropkami przesiadek: gdy jedno stoi dokładnie na węźle, kursor
+    // ma trafić najpierw w kropkę - ona opisuje całe to miejsce.
+    if (flowCarLayer) map.removeLayer(flowCarLayer);
+    flowCarLayer = L.layerGroup(flowCarMarkers(flow.cars)).addTo(map);
     if (flowDotLayer) map.removeLayer(flowDotLayer);
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
@@ -1934,6 +1940,60 @@ function nodePoint(node) {
     return dotOpts.center && node.clat !== undefined
         ? [node.clat, node.clon]
         : [node.lat, node.lon];
+}
+
+
+// Auto car-sharingu w zasięgu mapy. Fiolet, bo tym kolorem te auta jeżdżą
+// i po nim się je poznaje na ulicy (ten sam powód, co --car w style.css).
+const CAR_STYLE = {radius: 5, weight: 1, color: '#6a1b9a',
+                   fillColor: '#ab47bc', fillOpacity: 0.9};
+
+// Auto, przy którym jest coś do wzięcia w programie „Ogarniam", nosi złotą
+// obwódkę - inaczej trzeba by najeżdżać po kolei na wszystkie, żeby znaleźć
+// to jedno, za które Traficar płaci.
+const CAR_OGARNIAM_STYLE = {radius: 6, weight: 2.5, color: '#f9a825'};
+
+/** Znaczniki wolnych aut (patrz traficar.map_cars).
+
+    Auto jest MIEJSCEM, do którego mapa dowozi, a nie kursem: nie ma linii,
+    nie ma jasności, nie należy do wachlarza (kontrakt p.15). Cała treść
+    siedzi w dymku, bo o aucie mówi się to samo, co o przystanku - o której
+    się przy nim jest - plus to, czego o nim nie wiemy: ile stąd do celu
+    w linii prostej i ani słowa o czasie jazdy. */
+function flowCarMarkers(cars) {
+    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], {
+        ...CAR_STYLE,
+        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
+    }).bindTooltip(carTooltipHtml(car), {
+        direction: 'top', offset: [0, -4], opacity: 1,
+    }));
+}
+
+function carTooltipHtml(car) {
+    return [
+        `<b>${esc(car.model)} · ${esc(car.plate)}</b>`,
+        `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
+        `pieszo z „${esc(car.from)}”`,
+        `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
+        `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
+        ogarniamText(car.ogarniam),
+    ].join('<br>');
+}
+
+/** Program „Ogarniam" (w feedzie: `discounts`) - co przy tym aucie jest do
+    wzięcia i za ile. Zdanie pada ZAWSZE, także gdy nie ma nic: brak wiersza
+    znaczyłby naraz „nic tu nie ma" i „nie wiadomo", a to dwie różne rzeczy. */
+function ogarniamText(tasks) {
+    if (!tasks || !tasks.length) return 'Ogarniam: nic do wzięcia';
+    return 'Ogarniam: ' + tasks
+        .map(task => `${esc(task.co.toLowerCase())} ${task.ile} zł`)
+        .join(' · ');
+}
+
+function fmtDist(metres) {
+    return metres < 1000
+        ? `${metres} m`
+        : `${(metres / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
 function legLayers(legs, {preview}) {
@@ -3388,6 +3448,7 @@ bindDevFolds();
 function suspendPlanner() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
+    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     flowParts = [];
     flowHits = [];
     clearFlowHover();

@@ -406,3 +406,22 @@ def test_the_estimated_time_says_so_on_the_card(front):
     liczbie, którą się czyta), a rozwinięcie dopowiada wprost, skąd te liczby
     się biorą. Zwykła trasa nie dostaje ani jednego, ani drugiego."""
     _check(front, "traficar_czas_oznaczony_jako_szacunek")
+
+
+# ---------------------------------------------------------------------- 15 -
+
+def test_a_car_is_a_place_on_the_map_not_a_ride(front):
+    """Punkt 15: wolne auto w zasięgu mapy dostaje własny znacznik i mówi to
+    samo, co przystanek - o której się przy nim jest - plus to, czego o nim
+    nie wiadomo: ile stąd do celu w linii prostej. Ani jednej linii na mapie
+    i ani słowa o czasie jazdy; wachlarz wygląda dokładnie tak samo jak bez
+    aut."""
+    _check(front, "auto_to_miejsce_a_nie_kurs")
+
+
+def test_the_car_says_what_is_there_to_earn(front):
+    """Program „Ogarniam": przy aucie, za które Traficar płaci, dymek mówi ZA
+    CO i ZA ILE, a sam znacznik nosi złotą obwódkę — inaczej trzeba by
+    najeżdżać po kolei na wszystkie. Auto bez nagrody mówi to wprost, bo
+    milczenie znaczyłoby naraz „nic tu nie ma" i „nie wiadomo"."""
+    _check(front, "ogarniam_widac_na_aucie")

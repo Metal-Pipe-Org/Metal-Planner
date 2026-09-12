@@ -924,4 +924,67 @@ checks.traficar_czas_oznaczony_jako_szacunek = (() => {
     };
 })();
 
+/* Auto car-sharingu jest MIEJSCEM na mapie, nie kursem (kontrakt p.15):
+   dostaje własny znacznik z godziną, o której się przy nim jest, i z samą
+   odległością celu w linii prostej - a wachlarz wygląda dokładnie tak samo,
+   jak bez aut. */
+checks.auto_to_miejsce_a_nie_kurs = (() => {
+    const auto = {
+        lat: 51.09, lon: 17.02, plate: 'WE1AA11', model: 'Renault Clio',
+        where: 'ul. Testowa', fuel: 80, range: 300, ogarniam: [],
+        at: 56100, walk_sec: 420, walk_m: 300, from: 'Kamienna', to_dest_m: 2744,
+    };
+    app.drawFlow({...FLOW_FIXTURE, cars: [auto]}, false);
+    const znaczniki = app.flowCarLayer.getLayers();
+    const kawalkow_z_autem = app.flowParts.length;
+    const tip = znaczniki.length ? znaczniki[0]._tooltip.content : '';
+
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: znaczniki.length === 1
+            && kawalkow_z_autem === app.flowParts.length
+            && tip.includes('15:35')            // o której jest się przy aucie
+            && tip.includes('7 min')            // dojście - ta sama reguła, co każde
+            && tip.includes('Kamienna')
+            && tip.includes('2,7 km')           // do celu, w linii prostej
+            && !/jazd|ok\./.test(tip)           // o samej jeździe mapa milczy
+            && !tip.includes('Testowa')         // ulicy postoju nie pokazujemy
+            // Odpowiedź bez aut nie zostawia po nich znacznika.
+            && app.flowCarLayer.getLayers().length === 0,
+        znacznikow: znaczniki.length,
+        kawalkow_z_autem,
+        kawalkow_bez_auta: app.flowParts.length,
+        tip,
+    };
+})();
+
+/* Program „Ogarniam": przy aucie, za które Traficar płaci, ma być widać ZA CO
+   i ZA ILE - bez najeżdżania po kolei na wszystkie, stąd złota obwódka. Auto
+   bez nagrody mówi to wprost, zamiast milczeć. */
+checks.ogarniam_widac_na_aucie = (() => {
+    const wspolne = {
+        model: 'Renault Clio', fuel: 80, range: 300,
+        at: 56100, walk_sec: 420, walk_m: 300, from: 'Kamienna', to_dest_m: 2744,
+    };
+    const zNagroda = {...wspolne, lat: 51.09, lon: 17.02, plate: 'WE1AA11',
+                      ogarniam: [{co: 'Sprzątanie', ile: 30},
+                                 {co: 'Tankowanie', ile: 15}]};
+    const bezNagrody = {...wspolne, lat: 51.10, lon: 17.03, plate: 'WE2BB22',
+                        ogarniam: []};
+    app.drawFlow({...FLOW_FIXTURE, cars: [zNagroda, bezNagrody]}, false);
+    const [zlote, zwykle] = app.flowCarLayer.getLayers();
+    const tipZ = zlote._tooltip.content, tipBez = zwykle._tooltip.content;
+
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: tipZ.includes('Ogarniam: sprzątanie 30 zł · tankowanie 15 zł')
+            && tipBez.includes('Ogarniam: nic do wzięcia')
+            // Obwódka niesie tę samą wiadomość, co pierwszy wiersz dymka.
+            && zlote.options.color === '#f9a825'
+            && zwykle.options.color === app.CAR_STYLE.color,
+        tipZ, tipBez,
+        obwodki: [zlote.options.color, zwykle.options.color],
+    };
+})();
+
 JSON.stringify(checks);

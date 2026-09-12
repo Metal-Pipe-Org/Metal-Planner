@@ -1284,6 +1284,34 @@ def plan_flow(start_query, end_query, when=None,
         if with_car:
             journeys = (journeys + with_car) if degraded else sorted(
                 journeys + with_car, key=lambda j: _journey_key(j, gain_sec))
+
+        # Auta car-sharingu stojące przy narysowanej mapie (patrz
+        # traficar.map_cars). Nie są kursem i nie mają na mapie linii - są
+        # miejscem, do którego mapa dowozi, z godziną dotarcia i odległością
+        # celu w linii prostej (punkt 15 kontraktu).
+        #
+        # Zasięg to to, co mapa RYSUJE, plus sam start: do auta stojącego pod
+        # nosem idzie się od razu, bez wsiadania w cokolwiek. Marsz liczy się
+        # od miejsca, w którym się JEST, więc dalej jest to jedno przejście
+        # (punkt 14), a nie łańcuch "dojdź na przystanek, potem do auta".
+        #
+        # Warunek na dobę ten sam, co przy rowerze: auta stoją tam, gdzie
+        # stoją TERAZ. Przy pytaniu o inny dzień (także ten, na który
+        # wyszukiwarka sama zeszła) nie pokazujemy ich wcale - pokazanie
+        # byłoby zgadywaniem podanym jako fakt.
+        #
+        # W trybie awaryjnym (kept puste) aut nie ma wcale: godziny ze skanu
+        # znają pół miasta, a tu ma być to, co widać na ekranie - i akurat
+        # tam mapa nie jest wachlarzem, tylko jedną trasą (patrz gałąź else
+        # wyżej). Auto przy przystanku, którego nikt nie narysował, mówiłoby
+        # o mapie coś, czego na niej nie ma.
+        cars = []
+        if kept and day_offset == 0 and when.date() == date.today():
+            reach = dict.fromkeys(source_stops, dep_sec)
+            for stop, at in _drawn_reach(kept, ranges).items():
+                if at < reach.get(stop, INF):
+                    reach[stop] = at
+            cars = traficar.map_cars(day, reach, end_point_ll)
     finally:
         geo_db.close()
 
@@ -1316,6 +1344,8 @@ def plan_flow(start_query, end_query, when=None,
         # Węzły przesiadkowe: po jednym na miejsce, z liniami, w które MAPA
         # pozwala tu wsiąść (patrz _transfer_nodes).
         "nodes": nodes,
+        # Wolne auta car-sharingu w zasięgu tej mapy (patrz traficar.map_cars).
+        "cars": cars,
         "journeys": journeys,
         # Stan warstwy rowerowej - tylko gdy o nią pytano. Front ma po czym
         # odróżnić "policzone, rower nic tu nie daje" od "kanał operatora nie
@@ -2271,6 +2301,28 @@ def _corridor_lines(pieces, hop_members):
         ]
     return result
 
+
+
+def _drawn_reach(kept, ranges):
+    """{słupek: najwcześniejsza godzina, o której MAPA tu dowozi}.
+
+    Czytane z narysowanej części kawałków, nie z całego skanu: skan zna
+    godziny dla pół miasta, a tu chodzi o miejsca, które mapa naprawdę
+    pokazuje. Stąd biorą się auta car-sharingu na mapie (patrz
+    traficar.map_cars) - stoją przy tym, co narysowane, albo nie ma ich wcale.
+
+    Godziny czytamy tak samo jak _piece_times: pierwszy przystanek narysowanej
+    części opisuje ODJAZD, każdy następny PRZYJAZD.
+    """
+    reach = {}
+    for seg in kept:
+        start_pos, cut = ranges[id(seg)]
+        for pos in range(start_pos, cut):
+            stop = seg["stops"][pos]
+            when = (seg["best_deps"] if pos == start_pos else seg["arr_times"]).get(stop)
+            if when is not None and when < reach.get(stop, INF):
+                reach[stop] = when
+    return reach
 
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,

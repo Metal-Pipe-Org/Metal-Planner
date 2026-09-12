@@ -1087,3 +1087,94 @@ pokazane jako dwie opcje — patrz znane ograniczenie o kotwiczeniu segmentów.
 **Testy:** 270 (było 268). Dwa nowe: wybór bliższego z dwóch przystanków tego
 samego kursu (zweryfikowany jako czerwony na poprzedniej wersji reguły —
 wskazywał dalszy) i kotwica mapy dla tego samego układu.
+
+## Auto na wynajem wchodzi na mapę — punkt 15 (2026-09-12)
+
+Do tej pory Traficar żył wyłącznie w liście propozycji: mapa nie wiedziała
+o żadnym aucie, a auto nie wiedziało o żadnej mapie. Warstwa z odrzuconego
+branchu `archive/traficar-layer` (7fd7b66, 2026-07-22) pokazywała z kolei
+wszystkie auta w mieście naraz i nie wiedziała nic o wyszukiwanej relacji —
+ładny fiolet, zero odpowiedzi na pytanie „i co mi z tego". Stąd wygląd
+został wzięty stamtąd, a reguła powstała od zera.
+
+**Reguła jest jednym zdaniem:** auto jest miejscem, do którego da się dojść.
+Nie kursem, nie etapem, nie propozycją. Wszystko inne wynika z tego zdania:
+
+- czym się do niego dochodzi — tym samym dojściem, co wszędzie indziej
+  (`gtfs.WALK_M`, `gtfs.walk_time_sec`, punkt 14). Auto nie dostało własnego
+  promienia ani własnej prędkości, choć `traficar.py` jeden taki ma —
+  `WALK_TO_CAR_M`/`WALK_SPEED_MPS` zostały tam, gdzie były, bo obsługują
+  propozycje, a te są osobnym procesem i nie zmieniały się tu ani o minutę;
+- skąd się dochodzi — z tego, co mapa NARYSOWAŁA (`planner._drawn_reach`
+  czyta godziny z narysowanych kawałków), plus z samego startu. Kuszące było
+  wziąć `earliest` ze skanu w przód: jest pod ręką i zna pół miasta. Właśnie
+  dlatego nie — „mapa dowozi" ma znaczyć to, co widać na ekranie, inaczej
+  auto stałoby przy trasie, której nikt nie narysował. Z tego samego powodu
+  w trybie awaryjnym (mapa jest wtedy jedną trasą, nie wachlarzem) aut nie ma
+  wcale;
+- co auto o sobie mówi — godzinę, o której się przy nim jest, i odległość
+  celu w linii prostej. Ani minuty jazdy.
+
+**Dlaczego mapa nie podaje czasu jazdy, skoro propozycje podają.** To nie jest
+niekonsekwencja, tylko dwa różne pytania. Propozycja musi ułożyć CAŁĄ trasę
+i skończyć się godziną w celu — bez szacunku nie dałoby się jej pokazać
+w ogóle, więc szacunek jest, zmierzony i podpisany „ok." wszędzie, gdzie się
+pojawia. Mapa odpowiada krócej: „o 15:12 możesz stać przy tym aucie, do celu
+stąd 2,7 km w linii prostej". Reszta należy do pasażera — i do przyszłego
+odnośnika „prowadź", który to pytanie odda temu, kto naprawdę zna drogę
+(patrz „Pomysły na dalej" w PROJECT.md).
+
+**Ile tego jest.** Wolnych aut we Wrocławiu jest ok. 40 naraz (feed, pomiar
+2026-09-12), a w zasięgu jednej mapy wychodzi 1–9: `Wojszyce → Dworzec
+Główny` 1, `Kozanów → pl. Grunwaldzki` 1, `Katedra → Leśnica` 3, punkt
+w Radwanicach → `pl. Grunwaldzki` 4, `Osobowice → Biskupin` 9. Żadnego
+odsiewu „czy to auto ma sens" nie ma i celowo: mapa nie zakłada jazdy, więc
+nie ma czym mierzyć sensu — a przy takich liczbach nie ma też czego ratować.
+
+**Testy:** 282 (było 270). Jedenaście nowych w
+`tests/test_trafikary_na_mapie.py` (osobny plik od `test_traficar.py` —
+tamten jest o propozycjach): co w ogóle trafia na mapę, godzina przy aucie
+jako dojazd plus marsz tą samą regułą, wybór najwcześniejszego dojścia,
+sama odległość w linii prostej bez pól jazdy, brak wpływu na wachlarz
+(`segments`/`nodes` identyczne jak bez aut), cisza przy pytaniu o inny dzień,
+przy wyłączniku i przy padniętym feedzie. Jeden we froncie, przez emulator:
+`test_a_car_is_a_place_on_the_map_not_a_ride` — znacznik powstaje, dymek
+mówi godzinę, dojście, skąd i ile do celu, nie mówi nic o jeździe, a liczba
+narysowanych kawałków nie drgnęła.
+
+### Dopisek tego samego dnia: „Ogarniam" i ulica, której nikt nie potrzebuje
+
+Dwie poprawki po obejrzeniu warstwy na żywo.
+
+**Ulica postoju wypadła z dymka.** Feed podaje adres („Wrocław, ul.
+Łagiewnicka"), ale znacznik i tak stoi dokładnie tam, gdzie auto — nazwa
+ulicy nie dodaje do tego nic, czego nie widać. Pole zostaje w odpowiedzi
+(propozycje z autem nadal je wypisują), zniknął tylko wiersz na mapie.
+
+**Doszło to, po co naprawdę się na te auta patrzy: program „Ogarniam".**
+Traficar płaci zniżką za zatankowanie, posprzątanie albo przestawienie auta,
+a `fioletowe.live` to publikuje — pole `discounts`, udokumentowane jako
+`CarDiscountV1`, z zamkniętą listą nazw (Tankowanie, Sprzątanie, Relokacja)
+i kwotą. Sprawdzone przed napisaniem czegokolwiek: 11 z 44 wolnych aut we
+Wrocławiu miało coś do wzięcia (15–30 zł za zadanie), a auto bez nagrody ma
+tam `null`, nie pustą listę.
+
+Na mapie: dymek mówi ZA CO i ZA ILE, a gdy nie ma nic — mówi i to. Milczenie
+w tym miejscu znaczyłoby naraz „nic tu nie ma" i „nie wiadomo", a to dwie
+różne odpowiedzi (ta sama zasada, co przy notce o rowerze). Znacznik auta
+z nagrodą dostał złotą obwódkę: przy dziewięciu autach na mapie szukanie tego
+jednego płatnego przez najeżdżanie po kolei byłoby pracą, nie informacją.
+
+Kwota idzie z feedu bez przeliczania i bez waluty w źródle — „zł" dokłada
+front, bo Traficar jeździ po Polsce. Gdyby feed kiedyś zaczął podawać coś
+innego niż złotówki, to jest jedyne miejsce do poprawienia.
+
+Kontrakt (punkt 15) nie był ruszany — mówi o godzinie i odległości, a nie
+o tym, co jeszcze auto ma na sobie napisane. Do rozważenia przy najbliższym
+przeglądzie punktu, czy nagroda zasługuje na własne zdanie.
+
+**Testy:** 286 (było 282). Trzy nowe w `tests/test_trafikary_na_mapie.py`
+(nagroda dociera do mapy, brak nagrody to pusta lista, `null` z feedu zamienia
+się w pustą listę) i jeden we froncie: `test_the_car_says_what_is_there_to_earn`
+— dymek z kwotami, dymek „nic do wzięcia", złota obwódka tylko przy nagrodzie
+i brak ulicy w obu.

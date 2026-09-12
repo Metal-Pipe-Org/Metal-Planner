@@ -26,12 +26,13 @@ jest wiedzą plannera i tam zostaje (patrz planner._traficar_journeys).
 
 Czasu jazdy autem NIE MA SKĄD odczytać: auto nie ma rozkładu, a routingu
 samochodowego w projekcie nie ma. Jest więc szacowany z odległości w linii
-prostej (patrz DRIVE_*) i wszędzie podpisany jako "ok." - tak samo jak czas
-dojścia pieszego, który od zawsze jest szacunkiem. To jedyne miejsce
-w projekcie, gdzie czas bierze się z prędkości, a nie z rozkładu, i dlatego
-nie dotyka mapy przepływów: mapa dalej rysuje wyłącznie kursy z rozkładu
-(punkt 10 kontraktu), a auto pojawia się tylko jako dodatkowa pozycja na
-liście propozycji.
+prostej (patrz DRIVE_*) i wszędzie podpisany jako "ok.".
+
+Mapa przepływów tego szacunku NIE UŻYWA WCALE (patrz map_cars): pokazuje
+auto jako miejsce, do którego da się dojść, z godziną dotarcia z rozkładu
+i z samą odległością celu w linii prostej - a ile trwa jazda, zostawia
+pasażerowi. Rysowane kursy dalej pochodzą wyłącznie z rozkładu (punkt 10
+kontraktu); auto nie jest kursem i nie ma na mapie linii.
 """
 
 import json
@@ -162,6 +163,13 @@ def car_list():
     `available` i tak sprawdzamy - pole jest w odpowiedzi, więc poleganie na
     tym, że zawsze jest prawdziwe, byłoby zakładem o cudzy serwis.
 
+    `ogarniam` to program Traficara, w którym za zajęcie się autem należy się
+    zniżka: [{"co": "Tankowanie", "ile": 15}, ...], puste, gdy przy tym aucie
+    nie ma nic do wzięcia. W feedzie nazywa się to `discounts` i jest
+    udokumentowane (`CarDiscountV1`, nazwy z zamkniętej listy: Tankowanie,
+    Sprzątanie, Relokacja); kwota jest liczbą bez waluty - to złotówki, bo
+    Traficar jeździ po Polsce, ale samo źródło tego nie mówi.
+
     Błąd sieci przy pustym cache'u -> TraficarDataError; przy niepustym -
     stare dane zamiast wyjątku (auto "zestarzeje się" zamiast zniknąć).
     """
@@ -178,6 +186,10 @@ def car_list():
                     "where": _spot_label(c.get("location")),
                     "fuel": round(float(c["fuel"])),
                     "range": c["range"],
+                    "ogarniam": [
+                        {"co": d["name"], "ile": d["amount"]}
+                        for d in (c.get("discounts") or [])
+                    ],
                 }
                 for c in data["cars"] if c.get("available")
             ]
@@ -221,6 +233,63 @@ def _in_box(lat, lon, clat, clon, metres):
     dlat = metres / 111_320
     dlon = metres / 71_000     # 111 320 * cos(51,1°) - szerokość Wrocławia
     return abs(lat - clat) <= dlat and abs(lon - clon) <= dlon
+
+
+def map_cars(day, reach, dest):
+    """Auta w zasięgu narysowanej mapy: [{lat, lon, plate, ..., at, from}, ...].
+
+    `reach` to {słupek: sekunda, o której mapa tu dowozi} - dokładnie to, co
+    mapa RYSUJE (patrz planner._drawn_reach), plus sam start. Auto trafia na
+    mapę wtedy, gdy od któregoś z tych miejsc da się do niego dojść JEDNYM
+    dojściem - tą samą regułą, co między przystankami (gtfs.WALK_M
+    i gtfs.walk_time_sec, punkt 14 kontraktu), nie osobną miarą dla aut.
+
+    Stąd `at`: najwcześniejsza godzina, o której da się być PRZY AUCIE
+    (dojazd + marsz), razem z tym, skąd i jak długo się idzie. To wszystko,
+    co o aucie wiadomo z rozkładu.
+
+    Dalej nie obiecujemy nic: `to_dest_m` to odległość auta od celu W LINII
+    PROSTEJ i nic więcej - czasu jazdy autem nie ma skąd wziąć (auto nie ma
+    rozkładu, routingu samochodowego w projekcie nie ma), więc mapa go nie
+    zgaduje.
+    """
+    if not enabled() or not reach:
+        return []
+    try:
+        cars = car_list()
+    except TraficarDataError:
+        return []
+
+    dest_lat, dest_lon = dest
+    out = []
+    for car in cars:
+        best = None
+        for stop, arrival in reach.items():
+            coords = day.stop_coords.get(stop)
+            if coords is None or not _in_box(*coords, car["lat"], car["lon"],
+                                             gtfs.WALK_M):
+                continue
+            metres = gtfs._haversine_m(*coords, car["lat"], car["lon"])
+            if metres > gtfs.WALK_M:
+                continue
+            walk_sec = gtfs.walk_time_sec(metres)
+            option = (arrival + walk_sec, walk_sec, round(metres), stop)
+            if best is None or option < best:
+                best = option
+        if best is None:
+            continue
+        at, walk_sec, walk_m, stop = best
+        out.append({
+            **car,
+            "at": at,
+            "from": day.stop_names.get(stop, stop),
+            "walk_sec": walk_sec,
+            "walk_m": walk_m,
+            "to_dest_m": round(gtfs._haversine_m(car["lat"], car["lon"],
+                                                 dest_lat, dest_lon)),
+        })
+    out.sort(key=lambda car: (car["at"], car["to_dest_m"]))
+    return out
 
 
 def car_options(day, reachable, dest, limit=2):

@@ -305,6 +305,28 @@ idź".
 
 **Przejść na mapie nie widać** — patrz punkt 4.
 
+## 15. Auto na wynajem to miejsce, nie kurs
+
+**Widać tylko te auta, do których mapa dowozi.** Wolne auto car-sharingu staje
+na mapie wtedy, gdy da się do niego dojść jednym dojściem — tą samą regułą co
+każde inne (punkt 14) — od czegoś, co mapa rysuje: od przystanku, na który
+dowozi, albo od samego startu. Auto stojące gdzieś w mieście, bez związku z tą
+relacją, nie jest częścią odpowiedzi.
+
+**Auto mówi to samo, co przystanek: o której się przy nim jest.** Godzina
+z rozkładu plus marsz, razem z tym, skąd ten marsz prowadzi.
+
+**O jeździe autem mapa nie mówi NIC.** Auto nie ma rozkładu, a routingu
+samochodowego tu nie ma — więc nie ma czasu jazdy, przebiegu ani godziny
+dotarcia do celu. Zostaje odległość celu w linii prostej i decyzja pasażera.
+Auto nie jest kursem: nie ma linii, nie ma jasności, nie wchodzi do wachlarza
+i niczego w nim nie przestawia.
+
+**Tylko dzisiaj.** Auta stoją tam, gdzie stoją w tej chwili. Przy pytaniu
+o inny dzień nie pokazujemy ich wcale — godzina „będziesz przy nim” byłaby
+wtedy zgadywaniem podanym jako fakt. Brak aut nigdy nie jest błędem
+wyszukiwania: milczące źródło zabiera znaczniki, nie odpowiedź.
+
 ## Priorytet: poprawność przed szybkością
 
 Rozsądna szybkość działania jest pożądana, ale nigdy kosztem poprawności.
