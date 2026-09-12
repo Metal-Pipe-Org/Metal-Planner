@@ -59,6 +59,14 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
   `test_the_board_mixes_arrivals_into_the_departures_by_time`.
   Wcześniej (od 2026-08-29) tylko odsiew oferty: `..._only_what_the_map_offers_here`,
   `..._departures_that_cannot_make_it_are_dropped`, `..._past_the_map_horizon_are_dropped`
+- **15** — `tests/test_trafikary_na_mapie.py` w całości. Front, przez emulator:
+  `test_a_car_is_a_place_on_the_map_not_a_ride`,
+  `test_the_car_says_what_is_there_to_earn`
+- **16** — `tests/test_rowery_na_mapie.py` w całości; sedno punktu to
+  `test_przystanek_bez_narysowanego_odjazdu_niczego_nie_otwiera`
+  i `test_przejazd_nie_musi_byc_szybszy_niz_tramwaj`. Front, przez emulator:
+  `test_a_bike_shows_its_rides_only_under_the_cursor`,
+  `test_a_bike_on_another_day_does_not_pretend_to_know`
 
 ## Otwarte pytania
 
@@ -1178,3 +1186,142 @@ przeglądzie punktu, czy nagroda zasługuje na własne zdanie.
 się w pustą listę) i jeden we froncie: `test_the_car_says_what_is_there_to_earn`
 — dymek z kwotami, dymek „nic do wzięcia", złota obwódka tylko przy nagrodzie
 i brak ulicy w obu.
+
+## Rower miejski wchodzi na mapę — punkt 16 (2026-09-12)
+
+Punkt 16 kontraktu powstał na końcu, po trzech rundach uwag i dwóch cofniętych
+pomysłach — użytkownik wprost poprosił, żeby napisać go dopiero wtedy, gdy
+kształt warstwy będzie uzgodniony. Ta sekcja jest zapisem drogi do niego oraz
+tego, co w warstwie jest zgadywane.
+
+**Reguła sensu, w jednym zdaniu:** przejazd rowerem zostaje na mapie, jeżeli
+po zsiadaniu zdąży się jeszcze WSIĄŚĆ w coś, co mapa RYSUJE — albo dojechać
+pod sam cel.
+
+To jest świadome odwrócenie mojej pierwszej propozycji, którą użytkownik
+odrzucił. Proponowałem „przejazd ma sens, gdy stawia Cię gdzieś WCZEŚNIEJ, niż
+mapa sama Cię tam dowozi" — czyli mierzenie zysku w minutach. Odpowiedź: *„Nic
+innego nie musi być szybsze, żeby było uwzględnione. To musi być opcją, która
+Ciebie realnie dowiezie w zakres mapy. Może ktoś mieć ochotę na rower zamiast
+tramwaju."* I ma rację również formalnie: cała reszta mapy jest odsiewana
+oknem (punkt 2), a nie porównaniem z alternatywą. Wyjątek dla roweru byłby
+drugą miarą sensowności w jednym rysunku.
+
+Technicznie: `planner.plan_flow` podaje `bikes.map_places` dwie rzeczy i obie
+pochodzą z tego, co mapa RYSUJE — `reach` (dokąd dowozi, to samo wejście, co
+przy autach) oraz `_drawn_boardings` (najpóźniejsza godzina, o której mapa
+pozwala na danym słupku wsiąść w kawałek jadący DALEJ), plus krańce relacji
+liczone do deadline'u. Przejazd przeżywa, gdy dla najbliższego słupka przy
+stacji docelowej `przyjazd + dojście ≤ board[słupek]`.
+
+**Poprawka, która to naprawiła (ten sam dzień).** Pierwsza wersja brała tu
+`latest` ze skanu wstecz i to był błąd dokładnie tej samej klasy, co kiedyś
+przy autach: skan zna pół miasta. Użytkownik złapał to na zrzucie — stacja
+Piaskowa / św. Ducha, przejazd „otwiera Halę Targową", a z Hali Targowej mapa
+nie rysuje ani jednego odjazdu. *„Ale czemu mogę do niej dojechać? I z niej
+co?"* Zdążyć na przystanek to nie to samo, co móc z niego pojechać. Skutek
+poprawki jest drastyczny: Kozanów → pl. Grunwaldzki o 21:07 miał kilkadziesiąt
+kropek, po poprawce ma dwanaście, a wśród otwieranych słupków zostały same
+narysowane (PL. GRUNWALDZKI, Katedra, Ogród Botaniczny, Pl. Bema, Reja).
+
+**Dlaczego najbliższy słupek, a nie najlepszy.** Po zsiadaniu idzie się do
+najbliższego; dalszy, na który też by się zdążyło, nie jest przez ten przejazd
+otwarty *bardziej*. Gdy na najbliższy już się nie zdąży, bierzemy kolejny —
+stąd dwa testy obok siebie (`test_otwiera_najblizszy_slupek_na_ktory_sie_zdazy`
+i `test_pomija_slupek_na_ktory_sie_nie_zdazy`).
+
+**Tempo — jedna liczba zamiast dwóch.** Warstwa propozycji liczy przejazd jako
+14 km/h razy 1,35 krętości miasta. Na mapie to zostało przeliczone na jedną
+prędkość po linii prostej: 10 km/h (10,37 zaokrąglone w dół — w tę stronę
+zaokrągla się w tym projekcie cały czas nierozkładowy). Powód jest ten sam, co
+przy „nie zgadujemy jazdy autem": rozbicie na prędkość × krętość ma sens tylko
+tam, gdzie zna się przebieg trasy, a mapa zna wyłącznie odległość w linii
+prostej — dwie liczby udawałyby wiedzę, której nie ma. Narzut stały to 2 min
+(wypożyczenie w aplikacji, wyjęcie roweru z blokady, a na drugim końcu wpięcie
+i potwierdzenie). Pierwotnie wpisałem 5 min, źle odczytawszy wypowiedź
+użytkownika; poprawione na jego wskazanie. Skutek był duży — na Kozanowie
+liczba kropek wzrosła z 44 do 95, bo w oknie mieści się teraz znacznie więcej
+przejazdów. **Obie liczby są od użytkownika i obie są łatwe do zmiany**
+(`bikes.MAP_RIDE_MPS`, `bikes.MAP_OVERHEAD_SEC`); model propozycji został
+nietknięty, bo to osobna warstwa i osobny priorytet.
+
+Wolno je w ogóle zgadywać z tego samego powodu, z którego wolno zgadywać marsz
+(punkt 10): zakaz szacowania dotyczy POJAZDÓW, które mają rozkład. Rower
+rozkładu nie ma, więc nie ma czego odczytać.
+
+**Rowery luzem.** Kanał `free_bike_status` istnieje dla `nextbike_pl`
+i w chwili pomiaru stało we Wrocławiu 131 rowerów poza stojakami (plus 2629
+w stojakach — te trzeba odsiewać po `station_id`, inaczej byłyby policzone
+dwa razy). Wchodzą jako POCZĄTEK przejazdu, nigdy jako koniec: za zostawienie
+roweru poza stacją operator liczy osobno i dużo. Elektryki rozpoznajemy po
+`propulsion_type`, nie po nazwie modelu — nazwy („E-Bike", „e-SMARTbike 2.0
+RFID") to marketing operatora, a lista modeli rośnie z każdą dostawą.
+
+**Czego NIE ma, choć wydawało się naturalne.** Nie ma wymogu wolnego stojaka
+na stacji docelowej: użytkownik wprost powiedział, że u WRM-u taka sytuacja
+po prostu nie występuje. Nie ma progu „przejazd musi coś przyspieszyć" (patrz
+wyżej). Zostały dwa progi z warstwy propozycji, bo dotyczą tego, czy to
+w ogóle jest przejazd, a nie czy jest opłacalny: dół 500 m (poniżej samo
+wypożyczenie trwa dłużej niż marsz) i góra pół godziny pedałowania, czyli
+~5 km w linii prostej.
+
+**Ile tego jest (2026-09-12, 17:30).** Kozanów → pl. Grunwaldzki: 95 kropek,
+807 przejazdów. Osobowice → Biskupin: 68 i 567. Katedra → Leśnica: 53 i 198.
+Wojszyce → Dworzec Główny: zero.
+
+**Sprostowanie do tego zera.** Napisałem najpierw, że „na południu nie ma
+stacji WRM". To nieprawda i użytkownik słusznie o to dopytał: poniżej Wojszyc
+jest 31 stacji, najdalsza w Siechnicach. Prawdziwy powód jest inny i ciekawszy.
+Ta relacja rysuje się jako JEDEN kawałek (autobus 113) o dziesięciu słupkach,
+a stacji w promieniu dojścia od nich jest szesnaście — wszystkie dopiero
+w centrum, przy samym celu. Do pierwszej z nich dochodzi się o 17:51, a okno
+mapy kończy się chwilę później: każdy przejazd wypada za deadline. Zero nie
+jest więc faktem o rozmieszczeniu stacji, tylko o tym, że przy celu okno jest
+już wyczerpane - i to jest zachowanie poprawne.
+
+Te liczby rozstrzygnęły wygląd: kropki stoją zawsze, kreski przejazdów
+pojawiają się **pod kursorem**. Kilkaset kresek naraz zasłania mapę, a dwie
+kropki i tak mówią to samo, co kreska między nimi — użytkownik ujął to tak, że
+*„jak widzisz kropkę tu i kropkę tam, to nie trzeba rysować kreski, żeby się
+domyślić"*. Pod zębatką są dwa przełączniki: „przejazdy widoczne bez
+najeżdżania" (do obejrzenia całości) oraz „godziny przejazdu rowerem", która
+chowa JEDYNĄ zgadywaną liczbę — godzina „jesteś przy rowerze" pochodzi
+z rozkładu i zostaje zawsze.
+
+**Pytanie o inny dzień.** Inaczej niż przy autach: kropki ZOSTAJĄ. Stacja stoi
+w tym samym miejscu jutro, więc jej zniknięcie mówiłoby nieprawdę; nieznany
+jest sam stan stojaka i dymek pisze to wprost, zamiast podać dzisiejszą liczbę
+jako jutrzejszą. Rowery luzem przy takim pytaniu znikają — rower leżący dziś
+na chodniku jutro tam nie leży.
+
+**Ślepa uliczka: kropki jako „jeden rodzaj rzeczy".** Po pierwszej rundzie
+uwag zrobiłem z każdej stacji równorzędną kropkę, łącznie z tymi, do których
+dowozi wyłącznie rower. To było nadinterpretowanie zastrzeżenia użytkownika
+i zostało cofnięte: *„Co to w ogóle za stacja, do których żadna komunikacja
+nie dowozi i dojeżdżasz do nich rowerem? Nie prosiłem w ogóle o to."* Kropkę
+dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ na rower. Prawdziwe
+zastrzeżenie („najeżdżam na drugi koniec i chcę rozpatrzyć, że przyjadę tu
+komunikacją i stąd pojadę dalej") jest spełnione bez tego: taka stacja i tak
+jest na mapie z własnego tytułu, z własnymi przejazdami.
+
+**Bez przełączników.** Trzy pokrętła pod zębatką zostały usunięte i zastąpione
+stałymi w `static/app.js`: `BIKE_RIDES_ALWAYS` (kreski tylko pod kursorem)
+i `BIKE_RIDE_TIMES` (godzin samego przejazdu nie pokazujemy). Przy drugim
+końcu widać SAMĄ odległość — godzina jest policzona, nie odczytana, a
+odległość mówi to samo, nie udając rozkładu.
+
+**Do przemyślenia (użytkownik sam to oznaczył).** Co przejazd „otwiera", jest
+dziś jednym wierszem: nazwa słupka i godzina. Docelowo ma to wyglądać jak
+zawartość kropki przesiadkowej (punkt 11) — z liniami, które stamtąd
+odjeżdżają. Osobno: gdy kreski są włączone na stałe, mogłaby być widoczna
+tylko najlepsza z każdej stacji, a wszystkie dopiero pod kursorem.
+
+**Testy** (23 nowe w `tests/test_rowery_na_mapie.py`, 2 w
+`tests/js/checks.js`): co trafia na mapę i czym jest odsiewane, że przejazd nie
+musi być szybszy niż tramwaj, skąd bierze się każda godzina, oba progi
+długości przejazdu, rowery luzem jako początek i nie-koniec, pytanie o inny
+dzień, nietykalność wachlarza, milczący kanał i wyłącznik, oraz czytanie
+kanału (elektryki po rodzaju napędu, rower w stojaku nie jest „luzem").
+Doszedł też fixture wyciszający kanał WRM w całym zestawie — warstwa mapy
+sięga po niego przy KAŻDYM wyszukaniu, nie tylko przy odhaczonym rowerze.
+Razem 311, było 286.

@@ -327,6 +327,55 @@ o inny dzień nie pokazujemy ich wcale — godzina „będziesz przy nim” był
 wtedy zgadywaniem podanym jako fakt. Brak aut nigdy nie jest błędem
 wyszukiwania: milczące źródło zabiera znaczniki, nie odpowiedź.
 
+## 16. Rower miejski to przejście o innym tempie
+
+**Rower nie jest kursem.** Nie ma rozkładu, nie ma numeru, nie ma jasności
+i nie wchodzi do wachlarza. Jest tym, czym pieszo (punkt 14), tylko szybszym:
+sposobem przemieszczenia się między dwoma miejscami, którego rozkład nie zna.
+Zdjęcie roweru zostawia mapę dokładnie taką, jaka była.
+
+**Widać tylko to, na czym da się WSIĄŚĆ.** Kropkę dostaje rower, do którego
+mapa dowozi jednym dojściem — tą samą regułą co każde inne (punkt 14) — od
+czegoś, co mapa rysuje, albo od samego startu. Stacja bez rowerów nie jest
+miejscem, z którego da się wyjechać. Drugi koniec przejazdu własnej kropki nie
+dostaje: pokazuje się razem z nim, bo opisuje ten przejazd, a nie siebie. Jeśli
+sam jest miejscem do wsiadania, stoi na mapie z własnego tytułu.
+
+**Przejazd musi prowadzić do celu — przez to, co mapa RYSUJE.** Zostaje wtedy,
+gdy po zsiadaniu zdąży się jeszcze wsiąść w kawałek, który mapa pokazuje i
+który wiezie dalej, albo dojechać pod sam cel. Nie musi być szybszy niż
+tramwaj: ktoś może chcieć jechać rowerem dlatego, że woli rower. Musi natomiast
+dowozić naprawdę. Przystanek, na który da się zdążyć, ale z którego mapa nie
+rysuje ani jednego odjazdu, niczego nie otwiera — „zdążę tam" to nie to samo,
+co „stamtąd dojadę". Tak samo nie liczy się przystanek, na którym narysowany
+kawałek się kończy: tam się wysiada.
+
+**Skąd rower się bierze i gdzie wraca.** Wypożyczyć da się ze stojaka albo
+wprost z ulicy, bo rower stojący luzem wypożycza się tak samo jak ten ze
+stacji — więc jako początek przejazdu liczy się na równi z nią. Oddać już nie:
+przejazd kończy się zawsze na stacji, bo zostawienie roweru poza nią jest u
+operatora osobną, wysoką opłatą, a mapa nie ma prawa proponować czegoś, za co
+pasażer zapłaci, nie wiedząc o tym.
+
+**Czas przejazdu wolno policzyć, bo nie ma go skąd odczytać.** To ten sam
+wyjątek, co przy marszu (punkt 10): zakaz szacowania dotyczy pojazdów, które
+mają rozkład. Jedna prędkość, mierzona w linii prostej, zaokrąglana w górę,
+z osobnym narzutem na wypożyczenie i oddanie. Rozbicia na prędkość i krętość
+nie ma, bo mapa nie zna przebiegu trasy — dwie liczby udawałyby wiedzę, której
+nie ma.
+
+**Przejazdu mapa nie rysuje.** Dwie kropki mówią to samo, co kreska między
+nimi, a kresek byłyby setki. Kreski pojawiają się pod kursorem, przy kropce,
+o którą się pyta. Obok drugiego końca stoi odległość w linii prostej — nie
+godzina: godzina byłaby jedyną liczbą na tej mapie policzoną, a wyglądającą
+na odczytaną.
+
+**Tylko dzisiejszy stan.** Ile rowerów stoi w stojaku, wiadomo z tej chwili
+i tylko z tej chwili. Przy pytaniu o inny dzień kropki zostają — stacja stoi
+tam zawsze — ale mapa mówi wprost, że stanu nie zna, zamiast podać dzisiejszą
+liczbę jako jutrzejszą. Milczące źródło zabiera kropki, nigdy odpowiedź na
+pytanie „jak tam dojadę".
+
 ## Priorytet: poprawność przed szybkością
 
 Rozsądna szybkość działania jest pożądana, ale nigdy kosztem poprawności.

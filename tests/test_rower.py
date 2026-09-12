@@ -376,7 +376,8 @@ def test_stacje_bez_pary_w_drugim_kanale_wypadaja():
 
     assert [s["id"] for s in stacje] == ["1"]
     assert stacje[0] == {"id": "1", "name": "Z pełną parą", "lat": 51.1, "lon": 17.0,
-                         "bikes": 4, "docks": 7, "renting": True, "returning": True}
+                         "bikes": 4, "electric": 0, "docks": 7,
+                         "renting": True, "returning": True}
 
 
 def test_stations_quiet_nie_rzuca_przy_awarii_sieci(monkeypatch):

@@ -425,3 +425,23 @@ def test_the_car_says_what_is_there_to_earn(front):
     najeżdżać po kolei na wszystkie. Auto bez nagrody mówi to wprost, bo
     milczenie znaczyłoby naraz „nic tu nie ma" i „nie wiadomo"."""
     _check(front, "ogarniam_widac_na_aucie")
+
+
+# ------------------------------------------------------ rower na mapie -
+
+def test_a_bike_shows_its_rides_only_under_the_cursor(front):
+    """Rower miejski jest miejscem, do którego mapa dowozi, i z którego da się
+    jeszcze dojechać gdzieś, gdzie zdąży się w oknie mapy. Kropka stoi sama;
+    przejazdy - kilkaset naraz na całej mapie - pojawiają się dopiero pod
+    kursorem i znikają razem z nim. Wachlarz wygląda tak samo jak bez
+    rowerów."""
+    _check(front, "rower_pokazuje_przejazdy_dopiero_pod_kursorem")
+
+
+def test_a_bike_on_another_day_does_not_pretend_to_know(front):
+    """Stacja stoi w tym samym miejscu co jutro, więc kropka zostaje. Ile
+    w niej będzie rowerów - nie wiadomo, bo liczba jest z tej chwili; mapa
+    pisze to wprost i szarzeje, zamiast podać dzisiejszą liczbę jako
+    jutrzejszą. Godzina „jesteś przy nim" pochodzi z rozkładu tamtego dnia,
+    więc zostaje."""
+    _check(front, "rower_na_inny_dzien_nie_udaje_ze_wie")

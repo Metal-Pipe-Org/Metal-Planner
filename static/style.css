@@ -1193,6 +1193,24 @@ body.panel-hidden .time-headline { left: 180px; }
 
 .timetable-tip.leaflet-tooltip-top::before { border-top-color: var(--surface); }
 
+/* Etykietka przy drugim końcu przejazdu rowerem: godzina i odległość, nic
+   więcej. Wisi na stałe tak długo, jak kursor stoi na kropce, z której ten
+   przejazd wychodzi - i jest ich wtedy kilkanaście naraz, więc ma być mała,
+   bez tła i bez dzióbka. Reszta treści siedzi w zwykłym dymku tej kropki. */
+.bike-ride-label {
+    padding: 0 3px;
+    border: 0;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: none;
+    color: var(--bike);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.bike-ride-label::before { display: none; }
+
 /* Dymek Leafleta jest poza zdarzeniami myszy - przycisku "trasa" nie dałoby
    się w nim kliknąć, więc go tam nie ma (tablica jest jedna, ten sam HTML
    idzie do dymka i do okienka w rogu - patrz emitTimetable w app.js).

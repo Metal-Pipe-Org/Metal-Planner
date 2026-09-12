@@ -96,9 +96,10 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
   samej tablicy połączeń dnia co planer, bo odjazd z przystanku to po
   prostu połączenie, które się w nim zaczyna.
 - **`bikes.py`** — trzecie źródło danych: stacje Wrocławskiego Roweru
-  Miejskiego z kanału GBFS operatora (`nextbike_pl`, licencja CC0-1.0),
-  razem z modelem czasu tego środka transportu (dojście, odblokowanie,
-  przejazd, zwrot). W przeciwieństwie do GTFS i PKP nie trafia do żadnej
+  Miejskiego oraz rowery stojące poza stojakami, z kanału GBFS operatora
+  (`nextbike_pl`, licencja CC0-1.0), razem z modelem czasu tego środka
+  transportu (dojście, odblokowanie, przejazd, zwrot) — osobnym dla
+  propozycji i dla mapy, patrz `map_places`. W przeciwieństwie do GTFS i PKP nie trafia do żadnej
   bazy — to stan sprzed minuty, nie rozkład — więc żyje wyłącznie w pamięci
   procesu, z krótkim cache, tak jak `vehicles.py`. Opis niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
@@ -436,6 +437,63 @@ Znaczniki pojawiają się wyłącznie przy pytaniu o dziś (auta stoją tam, gdz
 stoją teraz — ta sama zasada, co przy stojakach rowerowych), a milczący feed
 albo `TRAFICAR=0` po prostu je zabiera.
 
+#### Rower jako miejsce na mapie (`bikes.map_places`, punkt 16 kontraktu)
+
+Od 2026-09-12. Wzorzec ten sam, co przy aucie — kropka, do której mapa
+dowozi jednym dojściem — z jedną różnicą: **z roweru się JEDZIE**, więc mapa
+mówi też, dokąd. Auto zostaje bez ani jednej liczby o jeździe, bo routingu
+samochodowego nie ma; rower jest przejściem o innym tempie i wolno go liczyć
+z tego samego powodu, z którego wolno liczyć marsz (punkt 10: zakaz
+szacowania dotyczy pojazdów, które mają rozkład).
+
+**Reguła sensu: przejazd zostaje, jeżeli po zsiadaniu zdąży się jeszcze
+wsiąść w coś, co mapa RYSUJE** (albo dojechać pod sam cel). Nie musi być
+szybszy niż tramwaj — ktoś może chcieć jechać rowerem właśnie dlatego, że woli
+rower — ale musi prowadzić do czegoś widocznego. Technicznie: `planner` podaje
+`_drawn_boardings` (najpóźniejsza godzina, o której mapa pozwala na danym
+słupku wsiąść w kawałek jadący DALEJ) plus krańce relacji liczone do
+deadline'u, a przejazd przeżywa, gdy dla najbliższego słupka przy stacji
+docelowej `przyjazd + dojście ≤ board[słupek]`.
+
+Pierwsza wersja brała tu `latest` ze skanu wstecz i to był błąd tej samej
+klasy, co kiedyś przy autach: skan zna pół miasta, więc rower proponował
+przejazd „pod przystanek, z którego mapa nie rysuje ani jednego odjazdu".
+Efekt był drastyczny — na Kozanowie o 21:07 kropek było kilkadziesiąt, po
+poprawce jest dwanaście.
+
+Model czasu jest tu JEDNĄ prędkością liczoną po linii prostej
+(`MAP_RIDE_MPS`, 10 km/h — to 14 km/h realnej jazdy podzielone przez 1,35
+krętości miasta, zaokrąglone w dół) plus stały narzut na wypożyczenie
+i oddanie (`MAP_OVERHEAD_SEC`, 2 min). Rozbicie na prędkość × krętość ma sens
+tylko tam, gdzie zna się przebieg trasy — mapa zna wyłącznie odległość
+w linii prostej, więc dwie liczby udawałyby wiedzę, której nie ma. Propozycje
+mają własny model (`BIKE_SPEED_KMH`/`BIKE_DETOUR`/`UNLOCK_SEC`/`DOCK_SEC`)
+i ten nie został ruszony.
+
+Przejazd zaczyna się na stacji **albo przy rowerze stojącym luzem**
+(`free_bike_status` — we Wrocławiu jest ich ponad sto naraz), a kończy zawsze
+na stacji: za zostawienie roweru poza stojakiem operator liczy osobno i dużo.
+Przy pytaniu o inną dobę kropki zostają, znika tylko stan stojaka i rowery
+luzem.
+
+Wielkości z pomiaru (2026-09-12, 17:30): Kozanów → pl. Grunwaldzki 95 kropek
+i 807 przejazdów, Osobowice → Biskupin 68 i 567, Katedra → Leśnica 53 i 198,
+Wojszyce → Dworzec Główny zero. To ostatnie **nie** dlatego, że na południu nie
+ma stacji WRM — są, 31 poniżej Wojszyc, aż po Siechnice i Bielany. Powód jest
+inny: przy samych Wojszycach żadna stacja nie leży w promieniu dojścia od
+narysowanych przystanków, a te 16 stacji, do których ta mapa dociera, stoi
+dopiero przy samym celu — tam okno jest już wyczerpane i żaden przejazd się
+w nim nie mieści.
+
+Stąd decyzja, że mapa rysuje same kropki, a kreski przejazdów pokazuje pod
+kursorem — kilkaset kresek naraz zasłania mapę, a dwie kropki i tak mówią to
+samo, co kreska między nimi. Nie ma tu żadnego przełącznika dla pasażera: oba
+zachowania (kreski tylko pod kursorem, godziny samego przejazdu ukryte) są
+stałymi w `static/app.js` — `BIKE_RIDES_ALWAYS` i `BIKE_RIDE_TIMES` — bo to
+nie są decyzje, które ma podejmować użytkownik. Przy drugim końcu przejazdu
+widać SAMĄ odległość: godzina jest policzona, nie odczytana, a odległość mówi
+to samo, nie udając rozkładu.
+
 ### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
 
 Włączany przełącznikiem 🚲 w karcie wyszukiwania (`bikes=1` w `/api/flow`);
@@ -654,6 +712,27 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   ale samo źródło tego nie mówi). Lista jest pusta
   przy pytaniu o inną dobę niż dziś, przy `TRAFICAR=0` i przy milczącym
   feedzie — brak aut nigdy nie jest błędem wyszukiwania.
+  `bike_places` to rowery miejskie w zasięgu TEJ mapy (patrz `bikes.map_places`):
+  `[{id, name, lat, lon, bikes, electric, docks, loose, at, from, walk_sec,
+  walk_m, rides: [...]}, …]` — WYŁĄCZNIE miejsca, w których da się wsiąść na
+  rower: mapa do nich dowozi i prowadzi z nich choć jeden sensowny przejazd.
+  Drugi koniec przejazdu osobnym wpisem nie jest (front rysuje go razem ze
+  strzałką, pod kursorem) — chyba że sam jest takim miejscem.
+  `at`/`from`/`walk_*` znaczą to samo, co przy autach — o której i skąd się
+  tu dochodzi. `loose` to rower stojący POZA stojakiem
+  (wtedy `name` jest `null` i `bikes` = 1); takim rowerem da się wyjechać, ale
+  nie da się go oddać, więc jako cel przejazdu nie występuje. `rides` to
+  WSZYSTKIE sensowne przejazdy stąd: `[{id, name, lat, lon, bikes, docks, m,
+  sec, at, opens, opens_at, opens_last, opens_walk_sec, opens_m}, …]` — `m` to
+  odległość w linii prostej, `sec` czas przejazdu (jedyna zgadywana liczba:
+  `bikes.MAP_RIDE_MPS` plus `bikes.MAP_OVERHEAD_SEC`), a `opens*` mówi, PO CO
+  ten przejazd: najbliższy słupek, na którym po zsiadaniu jeszcze się zdąży
+  WSIĄŚĆ w coś, co mapa rysuje, z godziną dotarcia i ostatnim momentem. To
+  jest cała reguła sensu — przejazd NIE musi być szybszy niż tramwaj, ale musi
+  prowadzić do czegoś WIDOCZNEGO. `bike_places_live` mówi, czy
+  liczby rowerów są z tej chwili: przy pytaniu o inną dobę kropki stacji
+  zostają (stacja stoi tam zawsze), ale stan stojaka jest nieznany i front ma
+  to napisać zamiast podać dzisiejszą liczbę jako jutrzejszą.
   `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
   to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, path}`; etap
@@ -773,7 +852,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
 | `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
 | `traficar.py` | auta Traficar z fioletowe.live: znaczniki w zasięgu mapy (`map_cars`) + para "przystanek + auto" na ostatni etap trasy |
-| `bikes.py` | stacje Wrocławskiego Roweru Miejskiego (GBFS) + model czasu roweru |
+| `bikes.py` | stacje i wolne rowery WRM (GBFS) + model czasu roweru + rower jako miejsce na mapie |
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
@@ -782,7 +861,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `static/timetable.js` | frontend rozkładów (drugi tryb panelu, po moście z `app.js`) |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
 | `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
-| `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`) |
+| `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`); na localhoście wszystko nasze idzie tylko z sieci |
 | `static/pwa.js` | rejestracja workera, przycisk instalacji, ciche przejście na nową wersję |
 | `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
 | `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
@@ -795,6 +874,23 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-12** — **rower miejski na mapie przepływów** (punkt 16
+  kontraktu). Wzorzec ten sam, co
+  przy autach: kropka, do której mapa dowozi jednym dojściem. Różnica: z roweru
+  się jedzie, więc mapa mówi też dokąd — ale wyłącznie tam, gdzie po zsiadaniu
+  wciąż mieści się w oknie, które i tak rysuje. Ta sama miara sensowności, co
+  dla każdego kursu (punkt 2), a nie osobna: przejazd nie musi być SZYBSZY niż
+  tramwaj, ma realnie dowozić. Doszły wolne rowery spoza stojaków (ponad sto
+  naraz we Wrocławiu) jako początek przejazdu — końcem nie, bo operator liczy
+  za to osobno. Kropkę dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ na
+  rower; drugi koniec przejazdu pojawia się razem ze strzałką, pod kursorem,
+  z samą odległością obok. Kreski przejazdów pokazują się tylko pod kursorem
+  (jest ich kilkaset), a godzin samego przejazdu nie pokazujemy wcale —
+  jedno i drugie to stałe w kodzie, nie opcje dla pasażera. Przy pytaniu
+  o inną dobę kropki zostają, ale mówią wprost, że stanu stojaka nie znają.
+  Model czasu przeliczony na jedną prędkość po linii prostej (10 km/h) plus
+  2 min stałego narzutu; model propozycji nietknięty. Pomiar: 12 kropek na
+  Kozanów → pl. Grunwaldzki o 21:07. Testy: 311, było 286.
 - **2026-09-12** — **auta car-sharingu na mapie przepływów** (punkt 15
   kontraktu). Dotąd Traficar dotykał wyłącznie listy propozycji — mapa nie
   wiedziała o nim nic. Teraz wolne auto, do którego da się dojść JEDNYM
@@ -1727,10 +1823,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   pozostałe takie pary czekają na dopisanie. Przesiadki to nie blokuje
   (most pieszy bierze się z odległości, nie z nazwy), dotyczy wyłącznie
   tego, co wyszukiwarka rozwija jako jedno miejsce.
-- Rower miejski (`bikes.py`) liczy dojście własną miarą (`bikes.WALK_MAX_M`
-  i własna prędkość), a nie tą jedną zasadą chodzenia, co reszta
-  wyszukiwarki — więc dojście do stojaka i dojście na przystanek są wyceniane
-  różnie. Wyrównanie to podmiana miary w warstwie rowerowej.
+- Rower miejski liczy dojście własną miarą (`bikes.WALK_MAX_M` i własna
+  prędkość) **w propozycjach tras**, a nie tą jedną zasadą chodzenia, co
+  reszta wyszukiwarki — więc dojście do stojaka i dojście na przystanek są tam
+  wyceniane różnie. Wyrównanie to podmiana miary w warstwie rowerowej. Na
+  mapie przepływów problemu nie ma: `bikes.map_places` chodzi wyłącznie
+  `gtfs.WALK_M`/`gtfs.walk_time_sec`, tak jak wszystko inne (punkt 14).
 - Przejazd rowerem nie ma geometrii: znamy obie stacje, długość trasy jest
   szacowana (odległość w linii prostej × 1,35), a na mapie rysuje się
   odcinek między stacjami, kreską przerywaną. Prawdziwy przebieg wymagałby

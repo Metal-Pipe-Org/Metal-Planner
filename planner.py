@@ -1305,13 +1305,37 @@ def plan_flow(start_query, end_query, when=None,
         # tam mapa nie jest wachlarzem, tylko jedną trasą (patrz gałąź else
         # wyżej). Auto przy przystanku, którego nikt nie narysował, mówiłoby
         # o mapie coś, czego na niej nie ma.
-        cars = []
-        if kept and day_offset == 0 and when.date() == date.today():
+        cars, bike_places = [], []
+        if kept:
             reach = dict.fromkeys(source_stops, dep_sec)
             for stop, at in _drawn_reach(kept, ranges).items():
                 if at < reach.get(stop, INF):
                     reach[stop] = at
-            cars = traficar.map_cars(day, reach, end_point_ll)
+            if day_offset == 0 and when.date() == date.today():
+                cars = traficar.map_cars(day, reach, end_point_ll)
+
+            # Rower miejski jako miejsce na mapie (patrz bikes.map_places).
+            # Inaczej niż auto: z roweru się JEDZIE, więc mapa mówi też,
+            # dokąd - ale wyłącznie tam, skąd da się jeszcze wsiąść w coś,
+            # co mapa RYSUJE. Stąd `_drawn_boardings`, a nie skan wstecz:
+            # `latest` zna pół miasta i uznałby za sensowny przejazd na
+            # przystanek, z którego mapa nie rysuje ani jednego odjazdu.
+            #
+            # Do tego same krańce relacji: dojechać rowerem pod sam cel to
+            # zakończenie podróży, a nie przesiadka, więc nie ma tam czego
+            # łapać - liczy się sam deadline.
+            #
+            # Kropki zostają także przy pytaniu o inny dzień - stacje stoją
+            # tam zawsze, a zniknięcie ich z mapy mówiłoby nieprawdę. Nieznany
+            # jest wtedy sam STAN stojaka i `bikes_live` mówi to wprost, żeby
+            # front nie podał zgadywania jako liczby rowerów.
+            board = _drawn_boardings(kept, ranges)
+            for stop in target_stops:
+                if deadline > board.get(stop, -INF):
+                    board[stop] = deadline
+            bike_places = bikes.map_places(
+                day, reach, board,
+                live=day_offset == 0 and when.date() == date.today())
     finally:
         geo_db.close()
 
@@ -1346,6 +1370,14 @@ def plan_flow(start_query, end_query, when=None,
         "nodes": nodes,
         # Wolne auta car-sharingu w zasięgu tej mapy (patrz traficar.map_cars).
         "cars": cars,
+        # Rowery miejskie w zasięgu tej mapy, każdy z listą przejazdów, które
+        # jeszcze mieszczą się w oknie (patrz bikes.map_places). Przejazdów
+        # mapa NIE rysuje - front pokazuje je po najechaniu.
+        "bike_places": bike_places,
+        # Czy liczby rowerów pochodzą z tej chwili. Przy pytaniu o inny dzień
+        # kropki stacji zostają, ale stan stojaka jest nieznany - front ma to
+        # napisać, a nie pokazać wczorajszą liczbę jako dzisiejszą.
+        "bike_places_live": day_offset == 0 and when.date() == date.today(),
         "journeys": journeys,
         # Stan warstwy rowerowej - tylko gdy o nią pytano. Front ma po czym
         # odróżnić "policzone, rower nic tu nie daje" od "kanał operatora nie
@@ -2323,6 +2355,29 @@ def _drawn_reach(kept, ranges):
             if when is not None and when < reach.get(stop, INF):
                 reach[stop] = when
     return reach
+
+
+def _drawn_boardings(kept, ranges):
+    """{słupek: najpóźniejsza godzina, o której MAPA pozwala tu wsiąść}.
+
+    "Wsiąść" znaczy: stoi tu narysowany kawałek, który jedzie DALEJ - stąd
+    `cut - 1`, bo na ostatnim narysowanym słupku kawałka już się wysiada.
+
+    To jest ta sama zasada, co przy `_drawn_reach`, tylko w drugą stronę
+    i z tego samego powodu: liczy się to, co widać na ekranie. Skan wstecz
+    (`latest`) zna pół miasta i powiedziałby "zdążysz" o przystanku, na
+    którym mapa nie rysuje ani jednego odjazdu - a taki przystanek niczego
+    nie otwiera, choćby dało się do niego dojść.
+    """
+    board = {}
+    for seg in kept:
+        start_pos, cut = ranges[id(seg)]
+        for pos in range(start_pos, cut - 1):
+            stop = seg["stops"][pos]
+            when = (seg["best_deps"] if pos == start_pos else seg["arr_times"]).get(stop)
+            if when is not None and when > board.get(stop, -INF):
+                board[stop] = when
+    return board
 
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
