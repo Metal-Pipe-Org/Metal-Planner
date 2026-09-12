@@ -1,10 +1,60 @@
 <!-- Źródło ikony aplikacji: ta sama geometria co pliki PNG obok.
-     Motyw jak szyna w panelu wyszukiwania - start, trasa, cel. -->
+     Motyw: trasa poprowadzona metalową rurą - start, kolano, cel. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+    <defs>
+        <mask id="rura" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+            <rect width="1024" height="1024" fill="#000"/>
+            <path d="M 322 300 L 322 606 Q 322 702 418 702 L 716 702" stroke="#fff" stroke-width="146"
+                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </mask>
+        <mask id="kolnierz-pion" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+            <rect width="1024" height="1024" fill="#000"/>
+            <path d="M 322 424 L 322 462" stroke="#fff" stroke-width="176" fill="none" stroke-linecap="butt"/>
+        </mask>
+        <mask id="kolnierz-poziom" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+            <rect width="1024" height="1024" fill="#000"/>
+            <path d="M 556 702 L 594 702" stroke="#fff" stroke-width="176" fill="none" stroke-linecap="butt"/>
+        </mask>
+    </defs>
+
     <rect width="1024" height="1024" rx="224" ry="224" fill="#2563eb"/>
-    <g stroke="#fff" fill="none" stroke-linecap="round">
-        <path d="M368 368 L656 656" stroke-width="52"/>
-        <circle cx="368" cy="368" r="79" stroke-width="26" fill="#43a047"/>
-        <circle cx="656" cy="656" r="79" stroke-width="26" fill="#e53935"/>
+
+    <g transform="translate(512 512) scale(1.06) translate(-512 -512)">
+        <path d="M 322 300 L 322 606 Q 322 702 418 702 L 716 702" stroke="#2c343c" stroke-width="162"
+              fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <g mask="url(#rura)">
+            <rect width="1024" height="1024" fill="#98a3ae"/>
+            <path d="M 322 300 L 322 606 Q 322 702 418 702 L 716 702" stroke="#5b656f" stroke-width="58"
+                  fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(-41 41)"/>
+            <path d="M 322 300 L 322 606 Q 322 702 418 702 L 716 702" stroke="#e3e9ef" stroke-width="44"
+                  fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(25 -25)"/>
+            <path d="M 322 300 L 322 606 Q 322 702 418 702 L 716 702" stroke="#fff" stroke-width="13" opacity="0.95"
+                  fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(36 -36)"/>
+        </g>
+
+        <path d="M 322 424 L 322 462" stroke="#2c343c" stroke-width="190" fill="none" stroke-linecap="butt"/>
+        <g mask="url(#kolnierz-pion)">
+            <rect width="1024" height="1024" fill="#98a3ae"/>
+            <path d="M 322 424 L 322 462" stroke="#5b656f" stroke-width="73" fill="none" stroke-linecap="butt"
+                  transform="translate(-72 0)"/>
+            <path d="M 322 424 L 322 462" stroke="#e3e9ef" stroke-width="55" fill="none" stroke-linecap="butt"
+                  transform="translate(44 0)"/>
+            <path d="M 322 424 L 322 462" stroke="#fff" stroke-width="18" opacity="0.95" fill="none"
+                  stroke-linecap="butt" transform="translate(64 0)"/>
+        </g>
+
+        <path d="M 556 702 L 594 702" stroke="#2c343c" stroke-width="190" fill="none" stroke-linecap="butt"/>
+        <g mask="url(#kolnierz-poziom)">
+            <rect width="1024" height="1024" fill="#98a3ae"/>
+            <path d="M 556 702 L 594 702" stroke="#5b656f" stroke-width="73" fill="none" stroke-linecap="butt"
+                  transform="translate(0 72)"/>
+            <path d="M 556 702 L 594 702" stroke="#e3e9ef" stroke-width="55" fill="none" stroke-linecap="butt"
+                  transform="translate(0 -44)"/>
+            <path d="M 556 702 L 594 702" stroke="#fff" stroke-width="18" opacity="0.95" fill="none"
+                  stroke-linecap="butt" transform="translate(0 -64)"/>
+        </g>
+
+        <circle cx="322" cy="300" r="78" fill="#43a047" stroke="#fff" stroke-width="26"/>
+        <circle cx="716" cy="702" r="78" fill="#e53935" stroke="#fff" stroke-width="26"/>
     </g>
 </svg>
