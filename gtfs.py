@@ -5,6 +5,7 @@ Rozkład dla danego dnia jest wczytywany z SQLite raz i trzymany w pamięci
 przez update_gtfs.py dane przeładują się same przy pierwszym zapytaniu.
 """
 
+import copy
 import math
 import re
 import sqlite3
@@ -43,31 +44,37 @@ PREV_DAY_PREFIX = "~"
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
 
-# CHODZENIE. Zasięg przejścia pieszo między słupkami - NIE mylić
-# z PLACE_MAX_SPAN_M, który mówi tylko, jak szeroki może być jeden przystanek
-# o wspólnej nazwie. Ten promień odpowiada na inne pytanie: dokąd stąd da się
-# dojść, niezależnie od tego, jak to się nazywa i czyja to sieć (patrz
-# _nearby_bridges). 300 m to około cztery minuty marszu - tyle, ile pasażer
-# realnie przejdzie dla przesiadki, i tyle, ile dzieli dworzec kolejowy od
-# stojących przy nim przystanków MPK.
+# CHODZENIE. JEDNA zasada na cały system: pieszo przechodzi się między
+# dowolnymi słupkami bliższymi niż WALK_M, kosztuje to tyle, ile mówi
+# walk_time_sec, i obowiązuje tak samo na starcie relacji, w przesiadce,
+# u celu oraz przy punkcie klikniętym na mapie (patrz with_point).
 #
-# Wartość jest DOBRANA POMIAREM, nie z sufitu. 400 m dokłada głównie pary
-# przystanków wzdłuż tej samej ulicy (mało komu potrzebne), za to dwukrotnie
-# wydłuża najcięższe zapytania i - co gorsza - rozpycha kotwice mapy
-# przepływów tak, że z listy propozycji znikają dobre trasy (patrz
-# _extract_transfer_graph: w segment wsiada się wyłącznie w jego
-# zakotwiczonym początku, więc przesuwanie kotwic zabiera punkty przesiadki).
-# 250 m z kolei gubi już realne dojścia. Stycznych z koleją, które są tu
-# celem, 300 m nie traci: Wrocław Główny nadal ma pieszo DWORZEC GŁÓWNY,
-# DWORZEC AUTOBUSOWY i SUCHĄ.
-WALK_MAX_M = 300
-# Prędkość marszu w linii prostej liczymy z zapasem: haversine mierzy przez
-# budynki, a chodnik obchodzi kwartał, więc 1,3 m/s (spokojny krok) dzielimy
-# przez współczynnik nadłożenia drogi. Efektywnie ~0,96 m/s - plan ma być
-# pesymistyczny co do czasu przejścia, nigdy optymistyczny (ta sama zasada,
-# co przy zaokrąglaniu godzin kolejowych - patrz pkp.py).
-WALK_SPEED_MPS = 1.3
-WALK_DETOUR = 1.35
+# Do 2026-09-12 były tu trzy różne zasady naraz: 300 m w przesiadce z czasem
+# marszu, 400 m na krańcach relacji z czasem marszu i 1000 m wokół
+# klikniętego punktu ZA DARMO. Wychodziło z tego, że 900 m na starcie nie
+# kosztowało ani minuty, a 350 m w środku trasy pięć minut - ta sama
+# czynność wyceniana trzy razy inaczej, zależnie od tego, gdzie w podróży
+# wypadła. Promień jest teraz jeden, bo to jedno pytanie: czy da się tam
+# dojść. NIE mylić z PLACE_MAX_SPAN_M, który mówi tylko, jak szeroki może
+# być jeden przystanek o wspólnej nazwie.
+WALK_M = 600
+# Prędkość liczona PO LINII PROSTEJ, bo tylko taką odległość znamy: mamy
+# współrzędne słupków, nie chodniki. Cały zapas siedzi więc w tej jednej
+# liczbie i ma być hojny, bo musi w sobie zmieścić wszystko, czego nie
+# widzimy: obejście kwartału, przejście dla pieszych, czekanie na światłach,
+# schody w przejściu podziemnym.
+#
+# Skąd 0,7: ostrożny pieszy idzie około 1,07 m/s (tyle przekracza 85% ludzi -
+# wartość z inżynierii ruchu, od liczenia długości zielonego światła), a
+# realna droga bywa około półtora raza dłuższa niż linia prosta (pomiary
+# "detour factor": 1,4-1,5 w siatce ulic, więcej na osiedlach z zaułkami).
+# Efektywnie jakieś 42 metry na minutę.
+#
+# Zasada nadrzędna: lepiej NIE pokazać przesiadki, niż pokazać taką, na którą
+# pasażer nie zdąży, bo zaniżyliśmy marsz. Plan ma być co do chodzenia
+# pesymistyczny, nigdy optymistyczny (ta sama zasada, co przy zaokrąglaniu
+# godzin kolejowych - patrz pkp.py).
+WALK_SPEED_MPS = 0.7
 # Podłoga: żadne przejście nie kosztuje mniej niż trzy minuty. Dwa powody,
 # oba istotne. Po pierwsze, sam dystans nie jest całym kosztem - trzeba
 # jeszcze ZNALEŹĆ właściwe stanowisko, co przy zmianie peronu potrafi być
@@ -76,27 +83,6 @@ WALK_DETOUR = 1.35
 # niego większa, więc bufor jest w niej zawarty. Zejście poniżej trzech minut
 # rozstroiłoby oba te założenia naraz.
 WALK_MIN_SEC = 180
-# DOJŚCIE NA KRAŃCACH relacji ma własny, WIĘKSZY promień niż przejście
-# w środku podróży - to są dwie różne gotowości do marszu, nie jedna.
-# Do pociągu wychodzi się z domu i idzie się tyle, ile trzeba; przesiadka
-# w połowie trasy konkuruje z siedzeniem w pojeździe, który już jedzie,
-# więc tolerancja jest tam mniejsza.
-#
-# Zlanie obu w jeden próg dawało wynik wprost absurdalny, zgłoszony na żywo:
-# ze słupka "Wojszyce" na stację Wrocław Wojszyce jest 359 m, czyli poza
-# WALK_MAX_M - więc zamiast po prostu tam pójść, planer proponował przejazd
-# JEDEN przystanek autobusem na "Przystankową" i dopiero stamtąd pięć minut
-# marszu na tę samą stację. Podniesienie WALK_MAX_M naprawiłoby ten jeden
-# przypadek, ale zagęszcza CAŁY graf przesiadek: zmierzone dwukrotne
-# wydłużenie najcięższych zapytań i utrata propozycji na relacjach miejskich.
-# Promień dojścia takich kosztów nie ma - dotyczy garstki słupków krańcowych,
-# nie każdej pary w mieście.
-#
-# 600 m to około dziewięciu minut marszu. Ostrożniej, niż system i tak już
-# zakłada gdzie indziej: klik w mapę bierze przystanki w promieniu 1000 m
-# (patrz nearby_stops) i traktuje je jako dostępne NATYCHMIAST, bez żadnego
-# czasu dojścia.
-WALK_ACCESS_M = 400
 _LAT_DEG_M = 111_320   # metrów na stopień szerokości (siatka w _nearby_bridges)
 
 # Pamięć podręczna walk_reach: kilkanaście miejsc starcza na jedno zapytanie
@@ -298,8 +284,12 @@ def _build_places(stop_names, stop_coords, stops_by_key):
 
 def walk_time_sec(meters):
     """Ile trwa przejście pieszo na dystansie `meters` w linii prostej
-    (patrz WALK_SPEED_MPS/WALK_DETOUR/WALK_MIN_SEC - tam całe uzasadnienie)."""
-    return max(WALK_MIN_SEC, round(meters * WALK_DETOUR / WALK_SPEED_MPS))
+    Zaokrąglamy W GÓRĘ do pełnej minuty - tak samo, jak cała reszta godzin
+    w tej aplikacji jest w pełnych minutach (patrz punkt 12 kontraktu), i tak
+    samo po bezpiecznej stronie: pasażer ma mieć na przejście całą minutę,
+    a nie jej kawałek (patrz WALK_SPEED_MPS/WALK_MIN_SEC - tam uzasadnienie
+    samej prędkości)."""
+    return max(WALK_MIN_SEC, 60 * math.ceil(meters / WALK_SPEED_MPS / 60))
 
 
 def walk_seconds(day, from_stop, to_stop):
@@ -329,14 +319,16 @@ def walk_seconds(day, from_stop, to_stop):
     return walk_time_sec(_haversine_m(skad[0], skad[1], dokad[0], dokad[1]))
 
 
-def walk_reach(day, stops, max_m=WALK_ACCESS_M):
+def walk_reach(day, stops, max_m=WALK_M):
     """{słupek: (sekundy dojścia, z którego ze `stops` się tam dochodzi)} -
-    dokąd da się dojść pieszo z KRAŃCA relacji (patrz WALK_ACCESS_M).
+    dokąd da się dojść pieszo z KRAŃCA relacji.
 
-    Osobno od day.siblings, bo to inne pytanie i inny promień: siblings są
-    relacją PRZESIADKI, policzoną raz dla całego miasta, a to jest dojście
-    z konkretnego startu (albo do konkretnego celu) - dotyczy kilku słupków,
-    więc wolno mu sięgać dalej, nie płacąc za to gęstością grafu.
+    Promień i czas są te same, co przy przesiadce (patrz WALK_M) - to jedna
+    zasada chodzenia. Osobno od day.siblings tylko dlatego, że to inne
+    pytanie: siblings są policzone raz dla całego miasta, a tu chodzi
+    o dojście z konkretnego startu albo do konkretnego celu, czyli o kilka
+    słupków. Krańcem relacji bywa też punkt kliknięty na mapie - wchodzi tu
+    jako zwykły słupek (patrz with_point).
 
     Same `stops` w wyniku nie są: na nich się już stoi.
     """
@@ -379,11 +371,10 @@ def _walking_bridges(place_groups, stop_coords):
     bez zmiany logiki skanowania w planner.py.
 
     Dostawca "to samo miejsce" jest tu dalej, obok _nearby_bridges, i nie jest
-    jego duplikatem - miejsce wolno rozciągnąć na PLACE_MAX_SPAN_M (400 m),
-    czyli DALEJ, niż sięga promień marszu (WALK_MAX_M, 300 m). Rozległy plac
-    z peronami na obu krańcach trzymają więc razem te krawędzie, a nie tamte.
-    Tak ma być: peron jest dostępny z peronu dlatego, że to jeden przystanek,
-    a nie dlatego, że akurat mieści się w promieniu.
+    jego duplikatem: peron jest dostępny z peronu dlatego, że to jeden
+    przystanek, a nie dlatego, że akurat mieści się w promieniu marszu.
+    Dopóki WALK_M jest większe niż PLACE_MAX_SPAN_M, te krawędzie i tak
+    powstałyby obok - ale powód ich istnienia jest inny i to on tu decyduje.
     """
     bridges = {}
     for group in place_groups:
@@ -403,7 +394,7 @@ def _walking_bridges(place_groups, stop_coords):
     return bridges
 
 
-def _nearby_bridges(stop_coords, max_m=WALK_MAX_M):
+def _nearby_bridges(stop_coords, max_m=WALK_M):
     """Krawędzie 'przejście pieszo' między słupkami po prostu BLISKIMI siebie,
     bez oglądania się na nazwę - drugi dostawca mostów obok _walking_bridges.
 
@@ -721,25 +712,51 @@ def _expand_to_places(data, stop_ids):
     return list(expanded)
 
 
-LAST_MILE_MAX_STOPS = 5  # ile najbliższych słupków bierzemy pod uwagę jako "wyzwalacze" miejsca
+def with_point(day, lat, lon, side):
+    """Dzień z punktem klikniętym na mapie dołożonym jako ZWYKŁY słupek -
+    zwraca (dzień, stop_id punktu).
 
+    Punkt nie jest przystankiem, ale dla wyszukiwarki ma być krańcem relacji
+    dokładnie takim samym jak każdy inny: stoi się na nim i idzie pieszo do
+    słupków w zasięgu, płacąc za to czasem (patrz WALK_M, walk_time_sec).
+    Do 2026-09-12 klik brał wszystkie słupki w promieniu kilometra i uznawał
+    je za dostępne NATYCHMIAST, więc 900 m na starcie nie kosztowało ani
+    minuty, choć 350 m w środku trasy kosztowało pięć.
 
-def nearby_stops(lat, lon, day, radius_m, max_n=LAST_MILE_MAX_STOPS):
-    """Słupki w promieniu `radius_m` od dowolnego punktu (klik na mapie) -
-    dla wybranych `max_n` najbliższych dociąga też resztę ich miejsca
-    (patrz _expand_to_places), tak samo jak przy wyszukiwaniu po nazwie.
+    Dołożenie słupka zamiast osobnej gałęzi w skanie znaczy, że o dojściu
+    z punktu nie musi wiedzieć nic poza tym jednym miejscem: most pieszy,
+    skan w przód, skan wstecz, profil celu i mapa dostają zwykły słupek,
+    tyle że bez własnych połączeń. Nie ma go w żadnym MIEJSCU (place) -
+    kliknięcie obok jednego peronu nie zgarnia całego placu za darmo, każdy
+    peron ma po prostu swoje dojście.
 
-    Brak modelowania czasu dojścia - słupek w zasięgu liczy się jako
-    od razu dostępny, tak jak przy starcie/celu z nazwy.
+    Dzień jest współdzielony między zapytaniami i cache'owany, więc kopiujemy
+    go płytko i wymieniamy tylko te słowniki, które dotykamy. Tablica
+    połączeń - jedyna duża rzecz - zostaje wspólna.
     """
-    in_range = []
-    for stop_id, (slat, slon) in day.stop_coords.items():
+    data = copy.copy(day)
+    data.stop_coords = dict(day.stop_coords)
+    data.stop_names = dict(day.stop_names)
+    data.siblings = dict(day.siblings)
+    data._reach = {}          # inny zestaw słupków, więc cache dojść nie pasuje
+
+    stop_id = f"__punkt__{side}"
+    data.stop_coords[stop_id] = (lat, lon)
+    data.stop_names[stop_id] = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
+
+    edges = {}
+    for other, (slat, slon) in day.stop_coords.items():
         dist = _haversine_m(lat, lon, slat, slon)
-        if dist <= radius_m:
-            in_range.append((dist, stop_id))
-    in_range.sort()
-    triggers = [stop_id for _, stop_id in in_range[:max_n]]
-    return set(_expand_to_places(day, triggers))
+        if dist > WALK_M:
+            continue
+        sec = walk_time_sec(dist)
+        edges[other] = sec
+        # Most jest dwukierunkowy: z punktu się wychodzi (start relacji), ale
+        # też do niego dochodzi (cel relacji), a skan wstecz i profil celu
+        # pytają właśnie o tę drugą stronę.
+        data.siblings[other] = {**day.siblings.get(other, {}), stop_id: sec}
+    data.siblings[stop_id] = edges
+    return data, stop_id
 
 
 STOP_SNAP_M = 60   # kropka na mapie stoi NA słupku, nie "gdzieś w okolicy"
@@ -749,8 +766,8 @@ def stop_at(lat, lon, data, max_m=STOP_SNAP_M):
     """Przystanek pod wskazanym punktem: (nazwa, [stop_id, ...] całego miejsca).
 
     Do pytania o kropkę narysowaną na słupku - front zna jej współrzędne, ale
-    nie nazwę. Inaczej niż nearby_stops, które zbiera wszystko w promieniu
-    dojścia i odpowiada na zupełnie inne pytanie ("skąd mogę tu zacząć"): tu
+    nie nazwę. Inaczej niż with_point, które dokłada sam punkt i odpowiada na
+    zupełnie inne pytanie ("dokąd stąd dojdę pieszo"): tu
     punkt ma trafić w JEDEN konkretny słupek, więc promień jest mały, a wynik
     to ten najbliższy, dociągnięty do reszty swojego miejsca
     (patrz _expand_to_places).

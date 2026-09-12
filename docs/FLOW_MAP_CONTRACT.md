@@ -54,8 +54,13 @@ narysowanym**, albo kończąca się w miejscu **niezwiązanym z dotarciem do
 celu**, nie ma prawa się pojawić na mapie.
 
 Kryterium jest czysto **fizyczna osiągalność** — czy da się tam realnie,
-w czasie, dotrzeć czymś, co mapa już rysuje — nie to, jak jasna jest ta
-rzecz, przez którą się dociera. Gałąź kotwiczy więc DOWOLNA zdążalna
+w czasie, dotrzeć: czymś, co mapa już rysuje, albo **pieszo** (punkt 14) —
+nie to, jak jasna jest ta rzecz, przez którą się dociera. Gałąź, do której
+się dochodzi, wygląda więc na mapie jak zaczynająca się obok reszty rysunku,
+bo przejść pieszo nie rysujemy. To jest świadomy wybór: kreska przy każdym
+przejściu zaśmiecałaby mapę bardziej, niż tłumaczy, a że z jednego
+przystanku da się dojść do drugiego o dwieście metrów dalej, widać na mapie
+samemu. Gałąź kotwiczy więc DOWOLNA zdążalna
 przesiadka z narysowanego segmentu, choćby bardzo blada: bladość dojazdu
 nie znaczy, że dalsza, jasna część jest nieosiągalna. Tak samo jest na
 końcu — jasność kontynuacji nie ma tu nic do rzeczy.
@@ -148,7 +153,10 @@ dokładnie tutaj, i o której jest się w celu, jadąc dalej najszybszą możliw
 kontynuacją. Do tego ile to jeszcze zajmie.
 
 **Skąd te godziny.** Z rozkładu tego samego kursu, z którego narysowano ten
-odcinek. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
+odcinek. Zakaz szacowania dotyczy POJAZDÓW: godziny kursu nie wolno wyliczać
+z prędkości ani z odległości, bo rozkład je zna. Jedyny czas na mapie, który
+nie jest odczytany, to czas przejścia PIESZO (punkt 14) — rozkładu marszu nie
+ma, więc liczy się go z odległości, hojnie i zawsze w tę samą stronę. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
 proporcjonalnie do przebytej drogi, nie średnią: bliżej następnego
 przystanku znaczy bliżej jego godziny. Wolno wyłącznie to: interpolacja
 **między dwiema godzinami odczytanymi z rozkładu tego samego kursu**. Nie
@@ -240,9 +248,11 @@ wszystkich źródeł: nazwa mówi, że to może być to samo, odległość rozst
 czy jest. Nazwa bez odległości robi z „Mokrej" trzyminutowy spacer przez pół
 Polski.
 
-**Czego to nie obiecuje.** Że każda stacja ma przesiadkę do miasta. Dopóki
-łączy je wyłącznie nazwa, stykają się rzadko — i to jest znany brak, nie
-usterka.
+**Po co jeszcze jest wspólne miejsce.** Nie po to, żeby kolej stykała się
+z miastem — to robi dziś przejście pieszo, liczone z odległości, bez oglądania
+się na nazwę (punkt 14). Wspólne miejsce rozstrzyga o czym innym: co znaczy
+wskazany start i cel. Pytając o „Dworzec Główny", pyta się o wszystkie jego
+perony naraz, a nie o jeden słupek.
 
 ## 13. Zawsze jakaś trasa, choćby za godzinę
 
@@ -258,6 +268,113 @@ pytanie ma to napisane przy sobie. Mapa nigdy nie udaje, że coś jedzie teraz.
 **Okno czasowe liczy się od wyjazdu, nie od pytania.** Wachlarz wariantów
 wokół takiej trasy jest tak samo szeroki jak wokół każdej innej — godzina
 czekania nie zawęża wyboru, bo nie jest częścią podróży.
+
+## 14. Pieszo to też droga
+
+**Jedna zasada na cały system.** Pieszo przechodzi się między dowolnymi
+przystankami leżącymi blisko siebie — bez względu na nazwę i na to, czyja to
+sieć — i kosztuje to tyle samo na starcie relacji, w przesiadce, u celu oraz
+przy punkcie wskazanym kliknięciem w mapę. Jeden promień, jedna cena. Punkt
+z mapy jest krańcem relacji jak każdy inny: przystanki wokół niego nie są
+„dostępne od razu", tylko oddalone o tyle a tyle minut marszu.
+
+**Czas przejścia liczy się z odległości i jest zawyżony.** Rozkład czasu
+marszu nie zna, a my znamy tylko odległość w linii prostej — nie chodniki,
+nie światła, nie przejścia podziemne. Cały ten brak wiedzy siedzi w jednej,
+hojnej prędkości, zaokrąglonej w górę do pełnych minut i nigdy krótszej niż
+trzy. Zasada nadrzędna: **lepiej nie pokazać przesiadki, niż pokazać taką, na
+którą pasażer nie zdąży**, bo zaniżyliśmy marsz.
+
+**Przejście musi coś OTWIERAĆ.** Marsz ma sens tylko wtedy, gdy daje dostęp do
+kursu, którego inaczej nie da się złapać — choćby dojazd nie był przez to
+szybszy, byle mieścił się w oknie (punkt 2). Kurs, który zatrzymuje się BLIŻEJ
+nas, takim kursem nie jest: po ten sam pojazd nie chodzi się dalej, niż
+trzeba. Ani ze wskazanego przystanku — skoro autobus i tak po nas przyjedzie —
+ani z punktu na mapie: z dwóch jego przystanków wybiera się ten z krótszym
+dojściem, nawet jeśli kurs mija ten dalszy wcześniej. Mapa rysuje taki kurs od
+przystanku, do którego jest bliżej.
+
+**Jeden krok.** Pieszo idzie się raz: ze startu albo po wysiadaniu z pojazdu.
+Nie ma łańcucha dwóch przejść pod rząd — inaczej „dojście" zaczęłoby znaczyć
+spacer przez pół dzielnicy.
+
+**Samo przejście nie jest trasą.** Ta wyszukiwarka planuje przejazdy, a trasa
+bez ani jednego przejazdu nie ma godziny wyjazdu, na której opiera się okno
+mapy. Relacja, którą da się przejść pieszo, nie dostaje propozycji „po prostu
+idź".
+
+**Przejść na mapie nie widać** — patrz punkt 4.
+
+## 15. Auto na wynajem to miejsce, nie kurs
+
+**Widać tylko te auta, do których mapa dowozi.** Wolne auto car-sharingu staje
+na mapie wtedy, gdy da się do niego dojść jednym dojściem — tą samą regułą co
+każde inne (punkt 14) — od czegoś, co mapa rysuje: od przystanku, na który
+dowozi, albo od samego startu. Auto stojące gdzieś w mieście, bez związku z tą
+relacją, nie jest częścią odpowiedzi.
+
+**Auto mówi to samo, co przystanek: o której się przy nim jest.** Godzina
+z rozkładu plus marsz, razem z tym, skąd ten marsz prowadzi.
+
+**O jeździe autem mapa nie mówi NIC.** Auto nie ma rozkładu, a routingu
+samochodowego tu nie ma — więc nie ma czasu jazdy, przebiegu ani godziny
+dotarcia do celu. Zostaje odległość celu w linii prostej i decyzja pasażera.
+Auto nie jest kursem: nie ma linii, nie ma jasności, nie wchodzi do wachlarza
+i niczego w nim nie przestawia.
+
+**Tylko dzisiaj.** Auta stoją tam, gdzie stoją w tej chwili. Przy pytaniu
+o inny dzień nie pokazujemy ich wcale — godzina „będziesz przy nim” byłaby
+wtedy zgadywaniem podanym jako fakt. Brak aut nigdy nie jest błędem
+wyszukiwania: milczące źródło zabiera znaczniki, nie odpowiedź.
+
+## 16. Rower miejski to przejście o innym tempie
+
+**Rower nie jest kursem.** Nie ma rozkładu, nie ma numeru, nie ma jasności
+i nie wchodzi do wachlarza. Jest tym, czym pieszo (punkt 14), tylko szybszym:
+sposobem przemieszczenia się między dwoma miejscami, którego rozkład nie zna.
+Zdjęcie roweru zostawia mapę dokładnie taką, jaka była.
+
+**Widać tylko to, na czym da się WSIĄŚĆ.** Kropkę dostaje rower, do którego
+mapa dowozi jednym dojściem — tą samą regułą co każde inne (punkt 14) — od
+czegoś, co mapa rysuje, albo od samego startu. Stacja bez rowerów nie jest
+miejscem, z którego da się wyjechać. Drugi koniec przejazdu własnej kropki nie
+dostaje: pokazuje się razem z nim, bo opisuje ten przejazd, a nie siebie. Jeśli
+sam jest miejscem do wsiadania, stoi na mapie z własnego tytułu.
+
+**Przejazd musi prowadzić do celu — przez to, co mapa RYSUJE.** Zostaje wtedy,
+gdy po zsiadaniu zdąży się jeszcze wsiąść w kawałek, który mapa pokazuje i
+który wiezie dalej, albo dojechać pod sam cel. Nie musi być szybszy niż
+tramwaj: ktoś może chcieć jechać rowerem dlatego, że woli rower. Musi natomiast
+dowozić naprawdę. Przystanek, na który da się zdążyć, ale z którego mapa nie
+rysuje ani jednego odjazdu, niczego nie otwiera — „zdążę tam" to nie to samo,
+co „stamtąd dojadę". Tak samo nie liczy się przystanek, na którym narysowany
+kawałek się kończy: tam się wysiada.
+
+**Skąd rower się bierze i gdzie wraca.** Wypożyczyć da się ze stojaka albo
+wprost z ulicy, bo rower stojący luzem wypożycza się tak samo jak ten ze
+stacji — więc jako początek przejazdu liczy się na równi z nią. Oddać już nie:
+przejazd kończy się zawsze na stacji, bo zostawienie roweru poza nią jest u
+operatora osobną, wysoką opłatą, a mapa nie ma prawa proponować czegoś, za co
+pasażer zapłaci, nie wiedząc o tym.
+
+**Czas przejazdu wolno policzyć, bo nie ma go skąd odczytać.** To ten sam
+wyjątek, co przy marszu (punkt 10): zakaz szacowania dotyczy pojazdów, które
+mają rozkład. Jedna prędkość, mierzona w linii prostej, zaokrąglana w górę,
+z osobnym narzutem na wypożyczenie i oddanie. Rozbicia na prędkość i krętość
+nie ma, bo mapa nie zna przebiegu trasy — dwie liczby udawałyby wiedzę, której
+nie ma.
+
+**Przejazdu mapa nie rysuje.** Dwie kropki mówią to samo, co kreska między
+nimi, a kresek byłyby setki. Kreski pojawiają się pod kursorem, przy kropce,
+o którą się pyta. Obok drugiego końca stoi odległość w linii prostej — nie
+godzina: godzina byłaby jedyną liczbą na tej mapie policzoną, a wyglądającą
+na odczytaną.
+
+**Tylko dzisiejszy stan.** Ile rowerów stoi w stojaku, wiadomo z tej chwili
+i tylko z tej chwili. Przy pytaniu o inny dzień kropki zostają — stacja stoi
+tam zawsze — ale mapa mówi wprost, że stanu nie zna, zamiast podać dzisiejszą
+liczbę jako jutrzejszą. Milczące źródło zabiera kropki, nigdy odpowiedź na
+pytanie „jak tam dojadę".
 
 ## Priorytet: poprawność przed szybkością
 

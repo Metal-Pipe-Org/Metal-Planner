@@ -346,22 +346,6 @@
 
     </details>
 
-    <details class="dev-fold" id="fold-range">
-    <summary>Szukanie punktu</summary>
-
-    <div class="field">
-        <label for="range">
-            Zasięg szukania punktu <output id="range-value">1000</output> m
-        </label>
-        <input type="range" id="range" min="200" max="1500" step="100" value="1000">
-        <p class="field-hint">
-            Przy kliknięciu w dowolny punkt mapy — jak daleko szukać słupków,
-            z których można wsiąść lub wysiąść.
-        </p>
-    </div>
-
-    </details>
-
     {#
       SEKCJA SCHOWANA (SOUND_TUNING = false w app.js) — na razie dźwięk po
       prostu jest, bez ustawienia. Atrybut `hidden` niżej to tylko stan
@@ -449,6 +433,30 @@
                 poza horyzontem decyzji „czym stąd pojechać”.
             </p>
         </div>
+
+        <div class="dev-section-head">Rower miejski</div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
+        </label>
+        <p class="field-hint">
+            Godzina, o której jest się PRZY rowerze, pochodzi z rozkładu i jest
+            pokazywana zawsze. To ustawienie dotyczy tego, co jest za nią:
+            samego przejazdu, którego rozkładu nie ma i który jest policzony
+            z odległości. Domyślnie zgaszone — obok drugiego końca widać samą
+            odległość, która mówi to samo, nie udając odczytanej.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-opens"> Co przejazd otwiera
+        </label>
+        <p class="field-hint">
+            Przy odległości dopisuje nazwę przystanku, z którego po zsiadaniu
+            zdąży się jeszcze pojechać dalej — czyli powód, dla którego ten
+            przejazd w ogóle jest na mapie. Domyślnie zgaszone: przy kilkunastu
+            etykietkach naraz to głównie tekst, a odległość wystarczy, żeby
+            wybrać.
+        </p>
 
         <div class="dev-section-head">Gdzie pokazać rozkład</div>
 

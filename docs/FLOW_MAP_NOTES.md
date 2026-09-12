@@ -59,6 +59,14 @@ Plik: [`tests/test_flow_map_contract.py`](../tests/test_flow_map_contract.py)
   `test_the_board_mixes_arrivals_into_the_departures_by_time`.
   Wcześniej (od 2026-08-29) tylko odsiew oferty: `..._only_what_the_map_offers_here`,
   `..._departures_that_cannot_make_it_are_dropped`, `..._past_the_map_horizon_are_dropped`
+- **15** — `tests/test_trafikary_na_mapie.py` w całości. Front, przez emulator:
+  `test_a_car_is_a_place_on_the_map_not_a_ride`,
+  `test_the_car_says_what_is_there_to_earn`
+- **16** — `tests/test_rowery_na_mapie.py` w całości; sedno punktu to
+  `test_przystanek_bez_narysowanego_odjazdu_niczego_nie_otwiera`
+  i `test_przejazd_nie_musi_byc_szybszy_niz_tramwaj`. Front, przez emulator:
+  `test_a_bike_shows_its_rides_only_under_the_cursor`,
+  `test_a_bike_on_another_day_does_not_pretend_to_know`
 
 ## Otwarte pytania
 
@@ -1233,3 +1241,321 @@ Same suwaki wyglądu nie zmieniają tego, CO jest rysowane, a pytanie
   mówią o jasności pojedynczej linii i nic o tym, że setka bladych kresek
   przebija trójkę jasnych. Przed projektowaniem: sprawdzić, jak z tym radzą
   sobie prawdziwe mapy przepływów, nie zgadywać.
+
+## Jedna zasada chodzenia — punkt 14 (2026-09-12)
+
+Kontrakt dostał punkt 14, a punkty 4, 10 i 12 zostały pod niego dociągnięte.
+Powód był prosty: chodzenie miało trzy różne zasady naraz — 300 m
+w przesiadce z czasem marszu, 400 m na krańcach relacji z czasem marszu
+i 1000 m wokół punktu klikniętego na mapie **za darmo**. Ta sama czynność
+była wyceniana trzy razy inaczej, zależnie od tego, gdzie w podróży wypadła:
+900 m na starcie nie kosztowało ani minuty, 350 m w środku trasy pięć.
+
+**Promień jest jeden** (`gtfs.WALK_M`, 600 m). Punkt z mapy wchodzi do dnia
+jako zwykły słupek bez połączeń (`gtfs.with_point`) — dzięki temu most
+pieszy, skan w przód, skan wstecz, profil celu i całe kotwiczenie nie musiały
+się o nim niczego dowiedzieć. Suwak „Zasięg szukania punktu" zniknął razem
+z parametrem `range_m`: nie ma już czego regulować.
+
+**Czas marszu liczy się z samej odległości w linii prostej**, 0,7 m/s, w górę
+do pełnych minut, nie mniej niż trzy. Wcześniej: 1,3 m/s dzielone przez
+współczynnik nadłożenia drogi (efektywnie 0,96 m/s). Skoro i tak znamy tylko
+prostą, cały brak wiedzy ma siedzieć w jednej liczbie — za nią stoi ostrożny
+pieszy (1,07 m/s, wartość z inżynierii ruchu; przekracza ją 85% ludzi) na
+drodze półtora raza dłuższej niż prosta (pomiary „detour factor": 1,4–1,5
+w siatce ulic, więcej na osiedlach z zaułkami).
+
+**Przejście musi coś otwierać.** Zgłoszone na żywo ze zrzutem ekranu:
+`Wojszyce → DWORZEC GŁÓWNY`, 11.09, 18:08. Autobus 112 staje na Parafialnej
+o 18:13 i na Wojszycach o 18:14 — ten sam kurs. Wyszukiwarka kazała iść
+cztery minuty WSTECZ, żeby wsiąść przystanek wcześniej, z identyczną godziną
+w celu (18:32); mapa rysowała 112 i 113 od Parafialnej, a na Wojszycach nie
+było nawet kropki, bo obie linie tylko tamtędy „przejeżdżały". Dwie poprawki,
+obie tej samej myśli — po pojazd, który i tak po nas przyjedzie, się nie
+chodzi:
+
+1. `_cheaper_boarding` przesuwa wsiadanie na przystanek, na którym już stoimy,
+   gdy zapisany punkt wsiadania wymagał marszu (przy tej samej liczbie
+   przejazdów). Wcześniej warunek był ostry (`legs[stop] >= board_legs`), więc
+   remis rozstrzygała kolejność skanowania.
+2. `_select_and_anchor` dostaje `source_stops` i `walk_stops` OSOBNO. Kurs,
+   który zatrzymuje się na przystanku startowym, kotwiczy się tam, choćby
+   wcześniej mijał słupek osiągalny pieszo.
+
+Po zmianie ta sama relacja: 112 od Wojszyc, kropka na Wojszycach (z flagą
+startu), ta sama godzina w celu.
+
+**Pomiar rozdzielający przyczyny** (6 relacji, 12.09): sama reguła wsiadania
+nie zmienia map — kawałki, linie, kropki i propozycje wychodzą co do sztuki
+tak samo jak przed zmianą. Wszystkie różnice biorą się z wolniejszego marszu
+i o to chodziło: przejście z peronu Wrocław Główny na przystanek „DWORZEC
+GŁÓWNY" kosztowało 3 minuty, teraz 7, więc autobus, którego się nie łapało,
+przestał być proponowany.
+
+**Czego tu NIE ma.** Przejść pieszo mapa nadal nie rysuje — to wybór
+(punkt 4), nie brak: kreska przy każdym przejściu zaśmieciłaby rysunek
+bardziej, niż tłumaczy. Kropka przesiadkowa nadal nie wie o chodzeniu:
+miejsce, z którego wychodzi się PIESZO na inny przystanek, wygląda dla niej
+jak „tu się tylko wysiada". To jest otwarta część punktu 11, świadomie
+zostawiona do przemyślenia.
+
+**Testy:** 268 (było 264). Cztery nowe w `tests/test_dojscie_piesze.py`:
+marsz po własny kurs (zweryfikowany jako czerwony na starej regule), mapa
+rysowana od przystanku startowego, czas dojścia z klikniętego punktu i punkt
+bez przystanków w zasięgu. Cztery istniejące przestały zakładać starą
+prędkość i drugi promień — liczą teraz czas przejścia z `gtfs.walk_seconds`,
+więc nie zamrażają żadnej stałej.
+
+### Dopisek tego samego dnia: „mniej marszu", nie tylko „bez marszu"
+
+Pierwsza wersja reguły z punktu 14 porównywała wsiadanie „bez chodzenia"
+z wsiadaniem „za marszem" — i przez to nie łapała przypadku, w którym OBA
+przystanki są za marszem. Zgłoszone z punktu klikniętego w Radwanicach:
+APK1 staje na Mickiewicza o 15:00 i na Skrajnej o 15:01 (ten sam kurs), a ze
+wskazanego punktu idzie się odpowiednio 14 i 7 minut. Mapa proponowała dalszy
+przystanek, bo kurs mija go wcześniej i to tam zapisywało się wsiadanie.
+
+Miarą jest teraz ILOŚĆ MARSZU, nie jego obecność. Skan niesie `walked`
+(sekundy chodzenia w najlepszej drodze do przystanku; jazda nóg nie kosztuje),
+`_cheaper_boarding` przy remisie wybiera mniejszy marsz, a `_select_and_anchor`
+kotwiczy kurs na tym ze słupków osiągalnych pieszo, do którego jest najbliżej —
+nie na tym mijanym najwcześniej. Po zmianie: wsiadanie na Skrajnej, kropka na
+Skrajnej, przyjazd 15:21 taki sam jak przedtem.
+
+Otwarte i świadomie nietknięte: mapa pokazuje JEDNO miejsce wsiadania w kurs
+(kotwica), więc „wsiądź na Skrajnej ALBO na Mickiewicza" nie ma dziś jak być
+pokazane jako dwie opcje — patrz znane ograniczenie o kotwiczeniu segmentów.
+
+**Testy:** 270 (było 268). Dwa nowe: wybór bliższego z dwóch przystanków tego
+samego kursu (zweryfikowany jako czerwony na poprzedniej wersji reguły —
+wskazywał dalszy) i kotwica mapy dla tego samego układu.
+
+## Auto na wynajem wchodzi na mapę — punkt 15 (2026-09-12)
+
+Do tej pory Traficar żył wyłącznie w liście propozycji: mapa nie wiedziała
+o żadnym aucie, a auto nie wiedziało o żadnej mapie. Warstwa z odrzuconego
+branchu `archive/traficar-layer` (7fd7b66, 2026-07-22) pokazywała z kolei
+wszystkie auta w mieście naraz i nie wiedziała nic o wyszukiwanej relacji —
+ładny fiolet, zero odpowiedzi na pytanie „i co mi z tego". Stąd wygląd
+został wzięty stamtąd, a reguła powstała od zera.
+
+**Reguła jest jednym zdaniem:** auto jest miejscem, do którego da się dojść.
+Nie kursem, nie etapem, nie propozycją. Wszystko inne wynika z tego zdania:
+
+- czym się do niego dochodzi — tym samym dojściem, co wszędzie indziej
+  (`gtfs.WALK_M`, `gtfs.walk_time_sec`, punkt 14). Auto nie dostało własnego
+  promienia ani własnej prędkości, choć `traficar.py` jeden taki ma —
+  `WALK_TO_CAR_M`/`WALK_SPEED_MPS` zostały tam, gdzie były, bo obsługują
+  propozycje, a te są osobnym procesem i nie zmieniały się tu ani o minutę;
+- skąd się dochodzi — z tego, co mapa NARYSOWAŁA (`planner._drawn_reach`
+  czyta godziny z narysowanych kawałków), plus z samego startu. Kuszące było
+  wziąć `earliest` ze skanu w przód: jest pod ręką i zna pół miasta. Właśnie
+  dlatego nie — „mapa dowozi" ma znaczyć to, co widać na ekranie, inaczej
+  auto stałoby przy trasie, której nikt nie narysował. Z tego samego powodu
+  w trybie awaryjnym (mapa jest wtedy jedną trasą, nie wachlarzem) aut nie ma
+  wcale;
+- co auto o sobie mówi — godzinę, o której się przy nim jest, i odległość
+  celu w linii prostej. Ani minuty jazdy.
+
+**Dlaczego mapa nie podaje czasu jazdy, skoro propozycje podają.** To nie jest
+niekonsekwencja, tylko dwa różne pytania. Propozycja musi ułożyć CAŁĄ trasę
+i skończyć się godziną w celu — bez szacunku nie dałoby się jej pokazać
+w ogóle, więc szacunek jest, zmierzony i podpisany „ok." wszędzie, gdzie się
+pojawia. Mapa odpowiada krócej: „o 15:12 możesz stać przy tym aucie, do celu
+stąd 2,7 km w linii prostej". Reszta należy do pasażera — i do przyszłego
+odnośnika „prowadź", który to pytanie odda temu, kto naprawdę zna drogę
+(patrz „Pomysły na dalej" w PROJECT.md).
+
+**Ile tego jest.** Wolnych aut we Wrocławiu jest ok. 40 naraz (feed, pomiar
+2026-09-12), a w zasięgu jednej mapy wychodzi 1–9: `Wojszyce → Dworzec
+Główny` 1, `Kozanów → pl. Grunwaldzki` 1, `Katedra → Leśnica` 3, punkt
+w Radwanicach → `pl. Grunwaldzki` 4, `Osobowice → Biskupin` 9. Żadnego
+odsiewu „czy to auto ma sens" nie ma i celowo: mapa nie zakłada jazdy, więc
+nie ma czym mierzyć sensu — a przy takich liczbach nie ma też czego ratować.
+
+**Testy:** 282 (było 270). Jedenaście nowych w
+`tests/test_trafikary_na_mapie.py` (osobny plik od `test_traficar.py` —
+tamten jest o propozycjach): co w ogóle trafia na mapę, godzina przy aucie
+jako dojazd plus marsz tą samą regułą, wybór najwcześniejszego dojścia,
+sama odległość w linii prostej bez pól jazdy, brak wpływu na wachlarz
+(`segments`/`nodes` identyczne jak bez aut), cisza przy pytaniu o inny dzień,
+przy wyłączniku i przy padniętym feedzie. Jeden we froncie, przez emulator:
+`test_a_car_is_a_place_on_the_map_not_a_ride` — znacznik powstaje, dymek
+mówi godzinę, dojście, skąd i ile do celu, nie mówi nic o jeździe, a liczba
+narysowanych kawałków nie drgnęła.
+
+### Dopisek tego samego dnia: „Ogarniam" i ulica, której nikt nie potrzebuje
+
+Dwie poprawki po obejrzeniu warstwy na żywo.
+
+**Ulica postoju wypadła z dymka.** Feed podaje adres („Wrocław, ul.
+Łagiewnicka"), ale znacznik i tak stoi dokładnie tam, gdzie auto — nazwa
+ulicy nie dodaje do tego nic, czego nie widać. Pole zostaje w odpowiedzi
+(propozycje z autem nadal je wypisują), zniknął tylko wiersz na mapie.
+
+**Doszło to, po co naprawdę się na te auta patrzy: program „Ogarniam".**
+Traficar płaci zniżką za zatankowanie, posprzątanie albo przestawienie auta,
+a `fioletowe.live` to publikuje — pole `discounts`, udokumentowane jako
+`CarDiscountV1`, z zamkniętą listą nazw (Tankowanie, Sprzątanie, Relokacja)
+i kwotą. Sprawdzone przed napisaniem czegokolwiek: 11 z 44 wolnych aut we
+Wrocławiu miało coś do wzięcia (15–30 zł za zadanie), a auto bez nagrody ma
+tam `null`, nie pustą listę.
+
+Na mapie: dymek mówi ZA CO i ZA ILE, a gdy nie ma nic — mówi i to. Milczenie
+w tym miejscu znaczyłoby naraz „nic tu nie ma" i „nie wiadomo", a to dwie
+różne odpowiedzi (ta sama zasada, co przy notce o rowerze). Znacznik auta
+z nagrodą dostał złotą obwódkę: przy dziewięciu autach na mapie szukanie tego
+jednego płatnego przez najeżdżanie po kolei byłoby pracą, nie informacją.
+
+Kwota idzie z feedu bez przeliczania i bez waluty w źródle — „zł" dokłada
+front, bo Traficar jeździ po Polsce. Gdyby feed kiedyś zaczął podawać coś
+innego niż złotówki, to jest jedyne miejsce do poprawienia.
+
+Kontrakt (punkt 15) nie był ruszany — mówi o godzinie i odległości, a nie
+o tym, co jeszcze auto ma na sobie napisane. Do rozważenia przy najbliższym
+przeglądzie punktu, czy nagroda zasługuje na własne zdanie.
+
+**Testy:** 286 (było 282). Trzy nowe w `tests/test_trafikary_na_mapie.py`
+(nagroda dociera do mapy, brak nagrody to pusta lista, `null` z feedu zamienia
+się w pustą listę) i jeden we froncie: `test_the_car_says_what_is_there_to_earn`
+— dymek z kwotami, dymek „nic do wzięcia", złota obwódka tylko przy nagrodzie
+i brak ulicy w obu.
+
+## Rower miejski wchodzi na mapę — punkt 16 (2026-09-12)
+
+Punkt 16 kontraktu powstał na końcu, po trzech rundach uwag i dwóch cofniętych
+pomysłach — użytkownik wprost poprosił, żeby napisać go dopiero wtedy, gdy
+kształt warstwy będzie uzgodniony. Ta sekcja jest zapisem drogi do niego oraz
+tego, co w warstwie jest zgadywane.
+
+**Reguła sensu, w jednym zdaniu:** przejazd rowerem zostaje na mapie, jeżeli
+po zsiadaniu zdąży się jeszcze WSIĄŚĆ w coś, co mapa RYSUJE — albo dojechać
+pod sam cel.
+
+To jest świadome odwrócenie mojej pierwszej propozycji, którą użytkownik
+odrzucił. Proponowałem „przejazd ma sens, gdy stawia Cię gdzieś WCZEŚNIEJ, niż
+mapa sama Cię tam dowozi" — czyli mierzenie zysku w minutach. Odpowiedź: *„Nic
+innego nie musi być szybsze, żeby było uwzględnione. To musi być opcją, która
+Ciebie realnie dowiezie w zakres mapy. Może ktoś mieć ochotę na rower zamiast
+tramwaju."* I ma rację również formalnie: cała reszta mapy jest odsiewana
+oknem (punkt 2), a nie porównaniem z alternatywą. Wyjątek dla roweru byłby
+drugą miarą sensowności w jednym rysunku.
+
+Technicznie: `planner.plan_flow` podaje `bikes.map_places` dwie rzeczy i obie
+pochodzą z tego, co mapa RYSUJE — `reach` (dokąd dowozi, to samo wejście, co
+przy autach) oraz `_drawn_boardings` (najpóźniejsza godzina, o której mapa
+pozwala na danym słupku wsiąść w kawałek jadący DALEJ), plus krańce relacji
+liczone do deadline'u. Przejazd przeżywa, gdy dla najbliższego słupka przy
+stacji docelowej `przyjazd + dojście ≤ board[słupek]`.
+
+**Poprawka, która to naprawiła (ten sam dzień).** Pierwsza wersja brała tu
+`latest` ze skanu wstecz i to był błąd dokładnie tej samej klasy, co kiedyś
+przy autach: skan zna pół miasta. Użytkownik złapał to na zrzucie — stacja
+Piaskowa / św. Ducha, przejazd „otwiera Halę Targową", a z Hali Targowej mapa
+nie rysuje ani jednego odjazdu. *„Ale czemu mogę do niej dojechać? I z niej
+co?"* Zdążyć na przystanek to nie to samo, co móc z niego pojechać. Skutek
+poprawki jest drastyczny: Kozanów → pl. Grunwaldzki o 21:07 miał kilkadziesiąt
+kropek, po poprawce ma dwanaście, a wśród otwieranych słupków zostały same
+narysowane (PL. GRUNWALDZKI, Katedra, Ogród Botaniczny, Pl. Bema, Reja).
+
+**Dlaczego najbliższy słupek, a nie najlepszy.** Po zsiadaniu idzie się do
+najbliższego; dalszy, na który też by się zdążyło, nie jest przez ten przejazd
+otwarty *bardziej*. Gdy na najbliższy już się nie zdąży, bierzemy kolejny —
+stąd dwa testy obok siebie (`test_otwiera_najblizszy_slupek_na_ktory_sie_zdazy`
+i `test_pomija_slupek_na_ktory_sie_nie_zdazy`).
+
+**Tempo — jedna liczba zamiast dwóch.** Warstwa propozycji liczy przejazd jako
+14 km/h razy 1,35 krętości miasta. Na mapie to zostało przeliczone na jedną
+prędkość po linii prostej: 10 km/h (10,37 zaokrąglone w dół — w tę stronę
+zaokrągla się w tym projekcie cały czas nierozkładowy). Powód jest ten sam, co
+przy „nie zgadujemy jazdy autem": rozbicie na prędkość × krętość ma sens tylko
+tam, gdzie zna się przebieg trasy, a mapa zna wyłącznie odległość w linii
+prostej — dwie liczby udawałyby wiedzę, której nie ma. Narzut stały to 2 min
+(wypożyczenie w aplikacji, wyjęcie roweru z blokady, a na drugim końcu wpięcie
+i potwierdzenie). Pierwotnie wpisałem 5 min, źle odczytawszy wypowiedź
+użytkownika; poprawione na jego wskazanie. Skutek był duży — na Kozanowie
+liczba kropek wzrosła z 44 do 95, bo w oknie mieści się teraz znacznie więcej
+przejazdów. **Obie liczby są od użytkownika i obie są łatwe do zmiany**
+(`bikes.MAP_RIDE_MPS`, `bikes.MAP_OVERHEAD_SEC`); model propozycji został
+nietknięty, bo to osobna warstwa i osobny priorytet.
+
+Wolno je w ogóle zgadywać z tego samego powodu, z którego wolno zgadywać marsz
+(punkt 10): zakaz szacowania dotyczy POJAZDÓW, które mają rozkład. Rower
+rozkładu nie ma, więc nie ma czego odczytać.
+
+**Rowery luzem.** Kanał `free_bike_status` istnieje dla `nextbike_pl`
+i w chwili pomiaru stało we Wrocławiu 131 rowerów poza stojakami (plus 2629
+w stojakach — te trzeba odsiewać po `station_id`, inaczej byłyby policzone
+dwa razy). Wchodzą jako POCZĄTEK przejazdu, nigdy jako koniec: za zostawienie
+roweru poza stacją operator liczy osobno i dużo. Elektryki rozpoznajemy po
+`propulsion_type`, nie po nazwie modelu — nazwy („E-Bike", „e-SMARTbike 2.0
+RFID") to marketing operatora, a lista modeli rośnie z każdą dostawą.
+
+**Czego NIE ma, choć wydawało się naturalne.** Nie ma wymogu wolnego stojaka
+na stacji docelowej: użytkownik wprost powiedział, że u WRM-u taka sytuacja
+po prostu nie występuje. Nie ma progu „przejazd musi coś przyspieszyć" (patrz
+wyżej). Zostały dwa progi z warstwy propozycji, bo dotyczą tego, czy to
+w ogóle jest przejazd, a nie czy jest opłacalny: dół 500 m (poniżej samo
+wypożyczenie trwa dłużej niż marsz) i góra pół godziny pedałowania, czyli
+~5 km w linii prostej.
+
+**Ile tego jest (2026-09-12, 17:30).** Kozanów → pl. Grunwaldzki: 95 kropek,
+807 przejazdów. Osobowice → Biskupin: 68 i 567. Katedra → Leśnica: 53 i 198.
+Wojszyce → Dworzec Główny: zero.
+
+**Sprostowanie do tego zera.** Napisałem najpierw, że „na południu nie ma
+stacji WRM". To nieprawda i użytkownik słusznie o to dopytał: poniżej Wojszyc
+jest 31 stacji, najdalsza w Siechnicach. Prawdziwy powód jest inny i ciekawszy.
+Ta relacja rysuje się jako JEDEN kawałek (autobus 113) o dziesięciu słupkach,
+a stacji w promieniu dojścia od nich jest szesnaście — wszystkie dopiero
+w centrum, przy samym celu. Do pierwszej z nich dochodzi się o 17:51, a okno
+mapy kończy się chwilę później: każdy przejazd wypada za deadline. Zero nie
+jest więc faktem o rozmieszczeniu stacji, tylko o tym, że przy celu okno jest
+już wyczerpane - i to jest zachowanie poprawne.
+
+Te liczby rozstrzygnęły wygląd: kropki stoją zawsze, kreski przejazdów
+pojawiają się **pod kursorem**. Kilkaset kresek naraz zasłania mapę, a dwie
+kropki i tak mówią to samo, co kreska między nimi — użytkownik ujął to tak, że
+*„jak widzisz kropkę tu i kropkę tam, to nie trzeba rysować kreski, żeby się
+domyślić"*. Pod zębatką są dwa przełączniki: „przejazdy widoczne bez
+najeżdżania" (do obejrzenia całości) oraz „godziny przejazdu rowerem", która
+chowa JEDYNĄ zgadywaną liczbę — godzina „jesteś przy rowerze" pochodzi
+z rozkładu i zostaje zawsze.
+
+**Pytanie o inny dzień.** Inaczej niż przy autach: kropki ZOSTAJĄ. Stacja stoi
+w tym samym miejscu jutro, więc jej zniknięcie mówiłoby nieprawdę; nieznany
+jest sam stan stojaka i dymek pisze to wprost, zamiast podać dzisiejszą liczbę
+jako jutrzejszą. Rowery luzem przy takim pytaniu znikają — rower leżący dziś
+na chodniku jutro tam nie leży.
+
+**Ślepa uliczka: kropki jako „jeden rodzaj rzeczy".** Po pierwszej rundzie
+uwag zrobiłem z każdej stacji równorzędną kropkę, łącznie z tymi, do których
+dowozi wyłącznie rower. To było nadinterpretowanie zastrzeżenia użytkownika
+i zostało cofnięte: *„Co to w ogóle za stacja, do których żadna komunikacja
+nie dowozi i dojeżdżasz do nich rowerem? Nie prosiłem w ogóle o to."* Kropkę
+dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ na rower. Prawdziwe
+zastrzeżenie („najeżdżam na drugi koniec i chcę rozpatrzyć, że przyjadę tu
+komunikacją i stąd pojadę dalej") jest spełnione bez tego: taka stacja i tak
+jest na mapie z własnego tytułu, z własnymi przejazdami.
+
+**Bez przełączników.** Trzy pokrętła pod zębatką zostały usunięte i zastąpione
+stałymi w `static/app.js`: `BIKE_RIDES_ALWAYS` (kreski tylko pod kursorem)
+i `BIKE_RIDE_TIMES` (godzin samego przejazdu nie pokazujemy). Przy drugim
+końcu widać SAMĄ odległość — godzina jest policzona, nie odczytana, a
+odległość mówi to samo, nie udając rozkładu.
+
+**Do przemyślenia (użytkownik sam to oznaczył).** Co przejazd „otwiera", jest
+dziś jednym wierszem: nazwa słupka i godzina. Docelowo ma to wyglądać jak
+zawartość kropki przesiadkowej (punkt 11) — z liniami, które stamtąd
+odjeżdżają. Osobno: gdy kreski są włączone na stałe, mogłaby być widoczna
+tylko najlepsza z każdej stacji, a wszystkie dopiero pod kursorem.
+
+**Testy** (23 nowe w `tests/test_rowery_na_mapie.py`, 2 w
+`tests/js/checks.js`): co trafia na mapę i czym jest odsiewane, że przejazd nie
+musi być szybszy niż tramwaj, skąd bierze się każda godzina, oba progi
+długości przejazdu, rowery luzem jako początek i nie-koniec, pytanie o inny
+dzień, nietykalność wachlarza, milczący kanał i wyłącznik, oraz czytanie
+kanału (elektryki po rodzaju napędu, rower w stojaku nie jest „luzem").
+Doszedł też fixture wyciszający kanał WRM w całym zestawie — warstwa mapy
+sięga po niego przy KAŻDYM wyszukaniu, nie tylko przy odhaczonym rowerze.
+Razem 311, było 286.
