@@ -287,10 +287,12 @@ którą pasażer nie zdąży**, bo zaniżyliśmy marsz.
 
 **Przejście musi coś OTWIERAĆ.** Marsz ma sens tylko wtedy, gdy daje dostęp do
 kursu, którego inaczej nie da się złapać — choćby dojazd nie był przez to
-szybszy, byle mieścił się w oknie (punkt 2). Kurs, który i tak zatrzymuje się
-tam, gdzie stoimy, takim kursem nie jest: po własny pojazd się nie chodzi.
-Mapa rysuje go od naszego przystanku, a nie od słupka o jeden przystanek
-wcześniej na tym samym kursie.
+szybszy, byle mieścił się w oknie (punkt 2). Kurs, który zatrzymuje się BLIŻEJ
+nas, takim kursem nie jest: po ten sam pojazd nie chodzi się dalej, niż
+trzeba. Ani ze wskazanego przystanku — skoro autobus i tak po nas przyjedzie —
+ani z punktu na mapie: z dwóch jego przystanków wybiera się ten z krótszym
+dojściem, nawet jeśli kurs mija ten dalszy wcześniej. Mapa rysuje taki kurs od
+przystanku, do którego jest bliżej.
 
 **Jeden krok.** Pieszo idzie się raz: ze startu albo po wysiadaniu z pojazdu.
 Nie ma łańcucha dwóch przejść pod rząd — inaczej „dojście" zaczęłoby znaczyć

@@ -150,11 +150,11 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
 
 
-def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs,
+def _cheaper_boarding(earliest, journey, legs, walked, stop, dep_t, board_legs,
                       board_stop):
     """Czy w kurs, którym już jedziemy, można wsiąść na `stop` TANIEJ niż
-    w zapisanym punkcie wsiadania - mniejszą liczbą przejazdów albo bez
-    chodzenia, którego tamten punkt wymagał.
+    w zapisanym punkcie wsiadania - mniejszą liczbą przejazdów albo mniejszym
+    marszem.
 
     Samo "mniej przejazdów" nie wystarczy - trzeba jeszcze zdążyć na odjazd
     z tego przystanku, tym samym buforem co przy zwykłym wsiadaniu.
@@ -162,20 +162,22 @@ def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs,
     więcej niż punkt wsiadania, więc przesunięcie nie potrafi rozciąć jazdy
     jednym pojazdem na dwa etapy.
 
-    Drugi powód - BEZ CHODZENIA - dokłada się tu, bo przejście pieszo ma
-    sens tylko wtedy, gdy otwiera kurs, którego inaczej nie złapiemy. Kurs,
-    który i tak zatrzyma się tam, gdzie stoimy, nie jest takim kursem.
-    Zgłoszone na żywo (Wojszyce -> DWORZEC GŁÓWNY, 18:08): 112 staje na
-    Parafialnej o 18:13 i na Wojszycach o 18:14, więc skan kazał iść cztery
-    minuty WSTECZ po ten sam autobus, po czym wracać nim obok własnego
-    przystanku - z identyczną godziną w celu. Wsiadanie przesuwa się teraz
-    na przystanek, na którym już stoimy, a marsz z trasy znika.
+    Drugi powód - MNIEJ MARSZU - jest tą samą zasadą, co punkt 14 kontraktu:
+    przejście ma sens tylko wtedy, gdy otwiera kurs, którego inaczej nie
+    złapiemy. Kurs, który i tak zatrzyma się bliżej nas, takim kursem nie
+    jest, więc chodzenie po niego dalej jest chodzeniem donikąd. Dwa
+    zgłoszenia na żywo, ten sam kształt:
+      - Wojszyce -> DWORZEC GŁÓWNY, 18:08: 112 staje na Parafialnej o 18:13
+        i na Wojszycach o 18:14, więc skan kazał iść cztery minuty WSTECZ po
+        autobus, który zaraz podjeżdżał pod sam start;
+      - punkt kliknięty w Radwanicach: APK1 staje na Mickiewicza o 15:00
+        i na Skrajnej o 15:01, więc skan kazał iść 14 minut zamiast 7 -
+        po ten sam kurs, z tą samą godziną w celu.
     """
     reached = earliest.get(stop, INF)
     if reached is INF or legs[stop] > board_legs:
         return False
-    if legs[stop] == board_legs and not (journey[board_stop][0] == "walk"
-                                         and journey[stop][0] != "walk"):
+    if legs[stop] == board_legs and walked[stop] >= walked[board_stop]:
         return False
     buffer = TRANSFER_SEC if journey[stop][0] == "ride" else 0
     return reached + buffer <= dep_t
@@ -245,13 +247,21 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
     journey = {}      # stop_id -> ("origin",) | ("ride", idx_wsiadania, idx_wysiadania) | ("walk", skad)
     trip_board = {}   # trip_id -> indeks połączenia, na którym wsiedliśmy do kursu
     trip_legs = {}    # trip_id -> liczba przejazdów PRZED wsiadaniem do kursu
+    trip_walk = {}    # trip_id -> ile marszu kosztowało dojście do wsiadania
     legs = {}         # stop_id -> liczba przejazdów w najlepszej drodze do niego
+    # Ile sekund marszu kosztuje najlepsza droga do przystanku. Nie po to, żeby
+    # wybierać trasę - o tym decyduje godzina przyjazdu - tylko po to, żeby
+    # przy REMISIE wybrać wsiadanie z mniejszym marszem (patrz
+    # _cheaper_boarding): dwa przystanki tego samego kursu są dla zegara
+    # równoważne, a dla nóg nie.
+    walked = {}
 
     # Użytkownik podaje nazwę przystanku, więc startuje ze wszystkich jego słupków.
     for stop in source_stops:
         earliest[stop] = dep_sec
         journey[stop] = ("origin",)
         legs[stop] = 0
+        walked[stop] = 0
 
     # Wyjście pieszo ze startu (patrz _origin_walk). CELOWO bez note_target:
     # "po prostu dojdź tam pieszo" nie ma być propozycją trasy. Ta wyszukiwarka
@@ -274,6 +284,7 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
         earliest[stop] = dep_sec + sec
         journey[stop] = ("walk", skad)
         legs[stop] = 0
+        walked[stop] = sec
 
     best_arr = INF
     best_stop = None
@@ -314,7 +325,8 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
                 continue
             trip_board[trip] = i
             trip_legs[trip] = legs[dep_s]
-        elif _cheaper_boarding(earliest, journey, legs, dep_s, dep_t,
+            trip_walk[trip] = walked[dep_s]
+        elif _cheaper_boarding(earliest, journey, legs, walked, dep_s, dep_t,
                                trip_legs[trip], conns[trip_board[trip]][2]):
             # Jedziemy już tym kursem, ale właśnie mijamy przystanek, na
             # którym stalibyśmy MNIEJSZĄ liczbą przejazdów niż w zapisanym
@@ -329,6 +341,7 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
             # zdejmuje z trasy etap, który niczego nie dawał.
             trip_board[trip] = i
             trip_legs[trip] = legs[dep_s]
+            trip_walk[trip] = walked[dep_s]
 
         # Przy REMISIE na godzinie przyjazdu wygrywa droga z mniejszą liczbą
         # przejazdów - inaczej decyduje o tym kolejność skanowania i podróżny
@@ -343,6 +356,7 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
             earliest[arr_s] = arr_t
             journey[arr_s] = ("ride", trip_board[trip], i)
             legs[arr_s] = ride_legs
+            walked[arr_s] = trip_walk[trip]     # jazda nóg nie kosztuje
             note_target(arr_s, arr_t, ride_legs)
             # Relaksacja pieszo na wszystko, dokąd stąd się dojdzie
             # (patrz gtfs.DayData.siblings) - sąsiedni peron, przystanek po
@@ -351,13 +365,15 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
             # pieszo dalej nie relaksuje, więc nie da się złożyć trasy
             # z dwóch przejść pod rząd.
             for sibling in day.siblings.get(arr_s, ()):
-                walk_arr = arr_t + gtfs.walk_seconds(day, arr_s, sibling)
+                walk_sec = gtfs.walk_seconds(day, arr_s, sibling)
+                walk_arr = arr_t + walk_sec
                 known_sib = earliest.get(sibling, INF)
                 if walk_arr < known_sib or (walk_arr == known_sib
                                             and ride_legs < legs[sibling]):
                     earliest[sibling] = walk_arr
                     journey[sibling] = ("walk", arr_s)
                     legs[sibling] = ride_legs
+                    walked[sibling] = walked[arr_s] + walk_sec
                     note_target(sibling, walk_arr, ride_legs)
             # Dojście spod celu. Osobno od pętli wyżej, bo egress ma własny,
             # większy promień niż przesiadka (patrz gtfs.walk_reach) i takiej
@@ -375,6 +391,7 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
                     earliest[cel_stop] = walk_arr
                     journey[cel_stop] = ("walk", arr_s)
                     legs[cel_stop] = ride_legs
+                    walked[cel_stop] = walked[arr_s] + sec
                     note_target(cel_stop, walk_arr, ride_legs)
 
     return best_stop, best_arr, journey
@@ -1940,6 +1957,7 @@ def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
             else:
                 start_pos = None
                 own_pos = None     # przystanek startowy - wsiadanie BEZ marszu
+                walk_best = None   # (sekundy marszu, pozycja) najtańszego dojścia
                 for stop2, p in seg["pos_of"].items():
                     if p >= len(seg["stops"]) - 1:
                         continue         # dołączenie na samym końcu - puste
@@ -1968,9 +1986,14 @@ def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
                     if stop2 in walk_stops:
                         # Tu wsiadamy po dojściu pieszo ze startu. Też jest to
                         # kotwica (dało się tu być), ale gorsza od własnego
-                        # przystanku - patrz niżej.
-                        if start_pos is None or p < start_pos:
-                            start_pos = p
+                        # przystanku - patrz niżej. Spośród takich słupków
+                        # liczy się NAJKRÓTSZE dojście, nie najwcześniejsza
+                        # pozycja na trasie kursu: dwa przystanki tego samego
+                        # kursu są dla zegara równoważne, a dla nóg nie
+                        # (ta sama zasada, co w _cheaper_boarding).
+                        krok = (walk_stops[stop2][1], p)
+                        if walk_best is None or krok < walk_best:
+                            walk_best = krok
                         continue
                     for other, _, arr_t, stop in exit_index.get(stop2, ()):
                         if other is seg:
@@ -1980,6 +2003,12 @@ def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
                         if _catchable(arr_t, buffer, times):
                             if start_pos is None or p < start_pos:
                                 start_pos = p
+                # Dojście pieszo wchodzi do gry dopiero teraz, i to tylko
+                # najkrótsze: wcześniejsza pozycja na trasie kursu nie jest
+                # warta ani metra nadłożonej drogi, skoro to ten sam pojazd.
+                if walk_best is not None and (start_pos is None
+                                              or walk_best[1] < start_pos):
+                    start_pos = walk_best[1]
                 # Kurs, który zatrzymuje się na przystanku STARTOWYM, rysujemy
                 # od niego - nawet jeśli wcześniej mija słupek, do którego
                 # dałoby się dojść pieszo. Marsz po pojazd, który i tak po nas

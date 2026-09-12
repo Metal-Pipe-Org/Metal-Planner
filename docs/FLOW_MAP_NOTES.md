@@ -1063,3 +1063,27 @@ rysowana od przystanku startowego, czas dojścia z klikniętego punktu i punkt
 bez przystanków w zasięgu. Cztery istniejące przestały zakładać starą
 prędkość i drugi promień — liczą teraz czas przejścia z `gtfs.walk_seconds`,
 więc nie zamrażają żadnej stałej.
+
+### Dopisek tego samego dnia: „mniej marszu", nie tylko „bez marszu"
+
+Pierwsza wersja reguły z punktu 14 porównywała wsiadanie „bez chodzenia"
+z wsiadaniem „za marszem" — i przez to nie łapała przypadku, w którym OBA
+przystanki są za marszem. Zgłoszone z punktu klikniętego w Radwanicach:
+APK1 staje na Mickiewicza o 15:00 i na Skrajnej o 15:01 (ten sam kurs), a ze
+wskazanego punktu idzie się odpowiednio 14 i 7 minut. Mapa proponowała dalszy
+przystanek, bo kurs mija go wcześniej i to tam zapisywało się wsiadanie.
+
+Miarą jest teraz ILOŚĆ MARSZU, nie jego obecność. Skan niesie `walked`
+(sekundy chodzenia w najlepszej drodze do przystanku; jazda nóg nie kosztuje),
+`_cheaper_boarding` przy remisie wybiera mniejszy marsz, a `_select_and_anchor`
+kotwiczy kurs na tym ze słupków osiągalnych pieszo, do którego jest najbliżej —
+nie na tym mijanym najwcześniej. Po zmianie: wsiadanie na Skrajnej, kropka na
+Skrajnej, przyjazd 15:21 taki sam jak przedtem.
+
+Otwarte i świadomie nietknięte: mapa pokazuje JEDNO miejsce wsiadania w kurs
+(kotwica), więc „wsiądź na Skrajnej ALBO na Mickiewicza" nie ma dziś jak być
+pokazane jako dwie opcje — patrz znane ograniczenie o kotwiczeniu segmentów.
+
+**Testy:** 270 (było 268). Dwa nowe: wybór bliższego z dwóch przystanków tego
+samego kursu (zweryfikowany jako czerwony na poprzedniej wersji reguły —
+wskazywał dalszy) i kotwica mapy dla tego samego układu.

@@ -372,6 +372,47 @@ def test_a_point_on_the_map_pays_for_the_walk_like_everyone_else():
     assert "OBOK" not in day.siblings.get(punkt, {}), "dzień z cache'u zmieniony"
 
 
+def _day_z_dwoma_dojsciami():
+    """Ten sam kurs staje najpierw na DALEKIM, minutę później na BLISKIM.
+    Z klikniętego punktu da się dojść do obu - do BLISKIEGO dwa razy bliżej.
+    Układ z Radwanic: APK1 jest na Mickiewicza o 15:00 i na Skrajnej o 15:01,
+    a ze wskazanego punktu na Mickiewicza idzie się 14 minut, na Skrajną 7."""
+    day = make_day([
+        {"trip_id": "T1", "label": "Autobus APK1",
+         "stops": [("DALEKI", 900, 900), ("BLISKI", 960, 960), ("CEL", 2400, 2400)]},
+    ], names={"DALEKI": "Mickiewicza", "BLISKI": "Skrajna"})
+    day.stop_coords["DALEKI"] = _o_metrow(A, 500)
+    day.stop_coords["BLISKI"] = _o_metrow(A, 200)
+    return day
+
+
+def test_of_two_stops_on_one_course_the_nearer_one_wins():
+    """Wcześniejsza pozycja na trasie kursu nie jest warta ani metra
+    nadłożonej drogi: to ten sam pojazd i ta sama godzina w celu. Skan
+    wybierał dotąd pierwszy przystanek, na który zdążył - czyli ten dalszy,
+    bo kurs mija go wcześniej."""
+    day = _day_z_dwoma_dojsciami()
+    z_punktem, punkt = gtfs.with_point(day, A[0], A[1], "start")
+    stop, arr, journey = planner._scan(z_punktem, [punkt], ["CEL"], 0)
+    assert (stop, arr) == ("CEL", 2400)
+    legs = planner._reconstruct(z_punktem, journey, stop)
+    assert [leg["kind"] for leg in legs] == ["walk", "ride"]
+    assert legs[0]["to"] == "Skrajna", "marsz dalej po ten sam autobus"
+
+
+def test_the_map_anchors_such_a_course_at_the_nearer_stop(install_day):
+    """To samo na mapie: kurs ma być rysowany od przystanku, do którego jest
+    bliżej — inaczej mapa pokazuje wsiadanie tam, dokąd nikt rozsądny nie
+    pójdzie, skoro ten sam autobus zaraz podjeżdża bliżej."""
+    day = _day_z_dwoma_dojsciami()
+    install_day(day)
+    flow = planner.plan_flow("", "CEL", when=WHEN, start_point=A)
+    assert flow["segments"], "mapa pusta"
+    blisko = planner._round_path([day.stop_coords["BLISKI"]])[0]
+    assert all(seg["path"][0] == blisko for seg in flow["segments"])
+    assert [n["name"] for n in flow["nodes"]] == ["Skrajna"]
+
+
 def test_a_point_too_far_from_everything_is_an_honest_error():
     """Punkt bez ani jednego przystanku w promieniu marszu nie jest krańcem
     relacji - lepiej powiedzieć to wprost, niż liczyć trasę znikąd."""

@@ -791,6 +791,16 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   — przystanek startowy bije słupek „o cztery minuty stąd"
   (`_select_and_anchor`). Po zmianie ta sama relacja: 112 od Wojszyc, kropka
   na Wojszycach, ta sama godzina w celu.
+  Tego samego dnia zgłoszony drugi przypadek tego samego kształtu, tym razem
+  z punktu klikniętego w Radwanicach: APK1 staje na Mickiewicza o 15:00 i na
+  Skrajnej o 15:01 — ten sam kurs — a z punktu na Mickiewicza idzie się
+  14 minut, na Skrajną 7. Pierwsza wersja reguły tego nie łapała, bo oba
+  przystanki są „za marszem". Skan liczy więc teraz, ILE marszu kosztuje
+  dojście na każdy przystanek (`walked`), i przy remisie wybiera wsiadanie
+  z mniejszym; kotwica mapy wybiera spośród słupków osiągalnych pieszo ten
+  z najkrótszym dojściem, a nie ten mijany przez kurs najwcześniej. Wcześniejsza
+  pozycja na trasie kursu nie jest warta ani metra nadłożonej drogi — to ten
+  sam pojazd i ta sama godzina w celu (15:21).
   Zmierzone na sześciu relacjach: sama reguła wsiadania nie zmienia map
   (kawałki, linie, kropki co do sztuki takie same) — różnice biorą się
   wyłącznie z wolniejszego marszu, i o to chodziło. Kontrakt mapy dostał
