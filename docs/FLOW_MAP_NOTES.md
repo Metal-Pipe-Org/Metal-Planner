@@ -999,3 +999,237 @@ wyszłaby bzdura. Czekanie liczy się od pytania, przez granicę doby.
 | brak zejścia na kolejną dobę | `test_nothing_today_is_answered_with_tomorrow` |
 | odjazd trasy = godzina pytania | `test_the_window_is_measured_from_the_departure_not_the_question` + 2 |
 | czekanie nigdy nie pokazane | `test_a_route_that_starts_much_later_says_so` |
+
+## „+X min" — ręczne przedłużanie zakresu mapy (2026-09-04)
+
+Zgłoszenie #79. Okno czasowe miało dotąd jedno wejście: trzy suwaki pod
+zębatką (procent + podłoga + sufit). Dla kogoś, kto po prostu chce zobaczyć
+„co jeszcze pojedzie później", to zła warstwa — suwaki opisują okno
+WZGLĘDEM najszybszej trasy, a pytanie brzmi wprost „pokaż dalej w przód".
+
+**Co zostało zrobione.** Pasek nad mapą kończy się przyciskiem `+X min`,
+gdzie X to POŁOWA tego, co mapa pokazuje w tej chwili (prawa liczba paska) —
+klik rozciąga zakres razy 1,5, kolejny znów. Sufit 2 h (obie liczby to
+decyzja użytkownika, poprawione 2026-09-04 z „razy 2, sufit 4 h": mniejszy
+krok daje więcej stopni pośrednich, a niższy sufit trzyma czas liczenia
+w ryzach). Przy suficie przycisk znika, a tuż pod nim obiecuje już tylko
+resztę do sufitu, żeby nie zapowiadał minut, których nie doda. X liczony
+w pełnych minutach — inaczej etykieta obiecywałaby co innego, niż dokłada
+klik.
+
+**Gdzie to siedzi.** Nowy parametr `/api/flow`: `horizon_sec` — żądana
+szerokość CAŁEGO okna liczona od godziny z zapytania. Może okno tylko
+poszerzyć (`deadline = max(okno z suwaków, dep + horizon)`), nigdy przyciąć:
+przycinanie zostaje wyłącznie w gestii suwaków. Sufit (`MAX_HORIZON_SEC`)
+stoi po stronie serwera, nie frontu — szerokość okna to wprost koszt skanu
+i nie może zależeć od tego, co przyśle przeglądarka.
+
+**Co kasuje przedłużenie.** Nowe wyszukiwanie (nowa relacja zaczyna od okna
+z suwaków) i ruszenie którymkolwiek suwakiem okna czasowego — inaczej
+ręczne, szersze okno przykrywałoby suwak i wyglądałby na zepsuty.
+
+**Cena.** Zakres to koszt skanu: Sosnowiecka → Wojszyce o 12:00 daje przy
+oknie z suwaków (51 min) 32 kawałki w 1,2 s, przy suficie 2 h — 1959
+kawałków. (Zmierzone jeszcze przy 4 h: 3829 kawałków w ~3 s — to był
+powód obniżenia sufitu.)
+
+**Testy:** 170 (było 166). Serwer:
+`test_manual_horizon_widens_the_window_but_never_narrows_it`,
+`test_manual_horizon_has_a_hard_ceiling`. Front (emulator):
+`test_the_button_stretches_the_map_range_up_to_the_ceiling`.
+
+**Po drodze: emulator frontu nie wstawał w ogóle.** Wszystkie 43 testy
+frontu były od dłuższego czasu błędem, nie przebiegiem — atrapa grupy
+warstw w `tests/js/harness.js` nie miała `clearLayers`/`addLayer`, a
+warstwa pojazdów czyści się i napełnia przy każdym odświeżeniu. Naprawione
+przy okazji (trzy metody + `addTo` umiejące jako cel grupę, nie tylko mapę).
+
+## „co X min" mówi o linii, nie o oknie (2026-09-04)
+
+Notka o takcie w dymku przystanku (`za 4 min · co 15 min`) liczyła się
+z listy odjazdów PO odsiewie — po wycięciu kursów, którymi do celu już się
+nie zdąży, i po przycięciu do horyzontu mapy. Skutek: znikała dokładnie
+tam, gdzie była najpotrzebniejsza. Na rzadkim węźle blisko granicy okna
+w tablicy zostawał jeden kurs, więc „nie ma czego zwijać" — a człowiek
+patrzący na jeden odjazd nie wie, czy następny jest za 20 minut, czy za
+dwie godziny.
+
+Takt jest cechą LINII, nie okna: teraz liczy się z pełnej tablicy
+przystanku (`all_departures`, doklejane przed sitami i przez nie
+nietykane), a wierszom przypisuje po kluczu linii. Wiersze dalej pokazują
+tylko to, co mapa oferuje — zmienia się wyłącznie to, skąd bierze się
+liczba w notce. Wiersz przyjazdu (`flow: "end"`) taktu nie dostaje i nie
+wchodzi do jego liczenia: przyjazd nie jest odjazdem, a dwa takie
+zdarzenia tej samej linii zrobiłyby „rytm" z jednego kursu.
+
+**Test:** `test_the_cadence_shows_even_past_the_map_range` (front,
+emulator) — sprawdzany przez cały dymek, nie samo zwijanie, bo chodzi też
+o to, czy pełna tablica w ogóle dochodzi tam, gdzie liczy się rytm.
+
+Sprawdzone też A/B w przeglądarce na żywych danych (Sosnowiecka → Wojszyce,
+ta sama minuta): przed zmianą okienko pisało samo „0 min", po zmianie
+„0 min · co 30 min".
+
+## Czerwone ramki nad działającą mapą (2026-09-04)
+
+Zgłoszone dwoma zrzutami: Bielany Wrocławskie - PKP → Wojszyce o 13:29,
+przed kliknięciem „+X min" i po nim. Na obu ekranach czerwony komunikat,
+w drugim nad mapą pełną połączeń.
+
+**Co się naprawdę działo.** Zmierzone na tej relacji: przy oknie z suwaków
+(59 min, czyli ~12 min naddatku ponad 49-minutową najszybszą trasę)
+`_discover_segments` znajduje **2** kandydatów, kotwiczenie zostawia **0** —
+stąd tryb awaryjny. Po poszerzeniu do 1 h 29 min: 123 kandydatów, 13 po
+kotwiczeniu, 24 narysowane kawałki. To nie jest awaria algorytmu, tylko
+prawda o kierunku: 612 i 113 jadą co pół godziny, więc w oknie z naddatkiem
+12 minut mieści się dokładnie jeden kurs i wachlarz nie ma z czego powstać.
+Poszerzenie zakresu jest jedynym wyjściem — a komunikat mówił tylko, że się
+nie udało, i nie wskazywał żadnego.
+
+**Co zostało zmienione (same komunikaty, nie liczenie mapy).**
+
+- Tryb awaryjny mówi teraz, co z tym zrobić: „…mapa pokazuje samą najszybszą
+  trasę. Zakres poszerzysz przyciskiem «+X min» nad mapą."
+- Narysowana mapa z pustą listą obok przestała być błędem: neutralna ramka
+  zamiast czerwonej i BEZ polecenia „Zawęź okno czasowe". To polecenie było
+  dokładnym odwróceniem tego, co użytkownik przed chwilą zrobił przyciskiem —
+  ekran kazał cofnąć własne działanie sprzed sekundy. Pusta mapa zostaje
+  błędem, bo tam naprawdę nie ma czego pokazać.
+
+Wzór jest ten sam, co przy `showRailOnlyNotice`: wyjaśnienie, czemu lista
+obok jest pusta, mimo że mapa jest w porządku — a nie zgłoszenie awarii.
+
+**Test:** `test_a_full_map_without_a_list_is_not_an_error` (front, emulator).
+Sprawdzone też w przeglądarce na tej samej relacji i o tej samej godzinie:
+przed — czerwona ramka z podpowiedzią o przycisku; po kliknięciu — zero
+czerwonych ramek; po drugim kliknięciu przycisk znika przy suficie (1 h 59).
+
+## Pętelka po drodze ucinała jedyne wyjście ze startu (2026-09-04)
+
+Ciąg dalszy poprzedniego zgłoszenia — pytania brzmiały: czemu drugi ekran
+w ogóle ma ostrzeżenie i czemu mapa nigdy nie pokazała trasy OD STARTU,
+tylko jakieś linie obok. Obie odpowiedzi mają jedną przyczynę.
+
+**Pomiar.** Bielany Wrocławskie - PKP → Wojszyce, 13:29, okno poszerzone do
+1 h 29 min: 24 narysowane kawałki i **ani jeden** dotykający przystanku
+startowego. Wśród kandydatów Autobus 612 był (2 kawałki przy starcie), oba
+padały na kotwicy końca. Powód: kurs 612 z 13:37 obsługuje osiedlową pętelkę
+Boczna → Kwiatowa → Boczna, a dopiero potem jedzie na Partynice — i to tam,
+i tylko tam, jest przesiadka na 113 do celu (czekanie 10 min, mieści się
+w limicie). Reguła zawracania z 2026-08-29 przerywała segment na powrocie na
+Boczną, więc Partynice do niego nie wchodziły. Bez nich 612 nie miał
+kontynuacji, ginął — a razem z nim jedyne wyjście ze startu.
+
+To odpowiada na oba pytania naraz: bez kawałka przy starcie nie da się ułożyć
+łańcucha start → cel (stąd ostrzeżenie), a to, co zostało narysowane, to
+kawałki podpierające się nawzajem gdzieś przy celu — dokładnie „gałąź
+zaczynająca się w miejscu nieosiągalnym niczym już narysowanym" z punktu 4.
+
+**Zmiana.** Intencja punktu 4 zostaje (żadnych kikutów na pętli końcowej),
+zmienia się miara: pętla kończy kurs tylko wtedy, gdy po powrocie nie ma już
+ani jednego NOWEGO miejsca. Miara jest czysto topologiczna, więc szersze okno
+może kawałków tylko dołożyć, nigdy zabrać (punkt 9).
+
+**Czego jeszcze ta reguła pilnowała.** Przemiot 24 prawdziwych relacji
+(12 par × 2 godziny, 13:29 i 8:15): 22 bez ŻADNEJ zmiany (identyczne liczby
+kawałków i tras), 2 wychodzą z trybu awaryjnego (obie z Bielan — to ta sama
+osiedlowa pętelka), zero regresji, zero utraconych kawałków. Komentarz przy
+regule twierdził, że na przemiecie 4 relacji ani jedna linia nie obsługiwała
+tego samego miejsca drugi raz w dalszym przebiegu — 612 jest kontrprzykładem.
+
+**Efekt na zgłoszonym ekranie.** Okno z suwaków: było 2 kawałki + tryb
+awaryjny, jest 2 kawałki bez trybu awaryjnego i z prawdziwą trasą (612+113).
+Po kliknięciu „+30 min": było 24 kawałki, 0 tras, ostrzeżenie; jest 271
+kawałków, 6 tras, zero ostrzeżeń, 108 kawałków po kotwiczeniu, w tym 3 przy
+samym przystanku startowym. Czas odpowiedzi 0,14 s.
+
+**Testy:** `test_a_drawn_course_stops_where_the_loop_ends_it` (pętla jako
+koniec kursu — nadal ucinamy) i `test_a_course_that_rides_on_past_a_loop_is_drawn_whole`
+(pętelka po drodze — jedziemy dalej). Fikstura dostała trzeci kurs, żeby oba
+przypadki dały się rozróżnić.
+
+**Zostaje do przemyślenia.** Kotwica startu przyjmuje dojazd „czymkolwiek już
+narysowanym", a zbieżność iteracji nie wymaga, żeby narysowana sieć była
+połączona z PRAWDZIWYM startem — dlatego zestaw kawałków przy celu potrafił
+podeprzeć się nawzajem i przeżyć bez żadnej drogi z Bielan. Tutaj problem
+zniknął razem z przyczyną (612 wrócił), ale dziura konstrukcyjnie jest.
+
+
+
+## 2026-09-04 — ciężar obrazka: kropki biorą jasność, blade linie chudną
+
+**Zgłoszenie.** Bielany Wrocławskie → Wojszyce, 13:29, po kliknięciu „+30 min":
+„pokazuje mi większą ilość tras po Wrocławiu niż pomiędzy Bielanami a
+Wojszycami".
+
+**Czego to NIE było.** Pierwsza hipoteza brzmiała: mapa rysuje kawałki, które
+nie należą do żadnej pełnej trasy. Zmierzone — nieprawda, i pomiar, na którym
+się to oparło, był zły. Test szedł po grafie przesiadek `_can_board`, czyli
+przypinał JEDEN konkretny kurs na wzorzec i wymagał, żeby cały łańcuch zgrał
+się kurs w kurs; wychodziło 24 ze 108. Prawdziwa podróż przez dany kawałek
+może wsiąść w PÓŹNIEJSZY kurs następnej linii, więc ten test zaniża.
+Uczciwa miara (czy da się dojechać na wsiadanie: `earliest` z buforem tej
+samej reguły co `_forward`; czy z wysiadania da się jeszcze zdążyć: `latest`)
+daje **108 ze 108**, zero wyjątków w obie strony. Mapa nie rysuje śmieci —
+każdy kawałek leży na prawdziwej, spójnej w czasie podróży z Bielan do
+Wojszyc, mieszczącej się w oknie.
+
+**Co to naprawdę było.** Rozkład czasów najkrótszej podróży PRZEZ każdy
+kawałek, przy najszybszej trasie 49 min i oknie 89 min:
+
+| czas podróży | kawałków |
+|---|---|
+| < 70 min | 9 |
+| 70–79 min | 23 |
+| 80–89 min | **76** |
+
+Trzy czwarte mapy to warianty 80–89-minutowe przy 49-minutowym optimum —
+realne, tylko o 60–80% gorsze. Korytarz z Bielan jest cienki, bo naprawdę
+jadą stamtąd dwie linie; centrum jest grube, bo takich wariantów są tam setki.
+
+Jasność już to wiedziała: z 271 rysowanych kawałków **240 siedziało przy
+bladym końcu skali, a pełnym blaskiem świeciły 3**. Problem był czysto
+wizualny — oko sumuje POWIERZCHNIĘ, a 240 bladych kresek o tej samej grubości
+co korytarz waży więcej niż 3 jasne. Do tego kropki przesiadkowe miały krycie
+wpisane na sztywno (1.0), więc 66 jednakowo mocnych kółek dokładało ciężar
+dokładnie tam, gdzie było ich najwięcej — w bladej okolicy.
+
+**Zmiana (wygląd, nie wybór — kontrakt nietknięty).**
+
+1. Grubość przestała być stała: najbledszy kawałek ma 2 px, najjaśniejszy 3
+   (było 3/3, całą różnicę niosło samo krycie). Dolny próg krycia 0.4 → 0.3.
+   Punkt 8 dalej trzyma: 0.3 i 2 px to wciąż widoczna kreska bez najeżdżania.
+2. Węzeł przesiadkowy niesie własną jasność (`w` przy węźle) — maksimum z
+   kawałków, które go dotykają, po TYM SAMYM przeskalowaniu co segmenty
+   (punkt 9), a front przelicza ją na krycie tym samym suwakiem co linie.
+   Maksimum, nie minimum: miejsce jest tak dobre, jak najlepsza rzecz, którą
+   się z niego jedzie — minimum gasiłoby węzeł na najszybszej trasie, ilekroć
+   mija go cokolwiek bladego. Kropka startowa zostaje pełna zawsze: to nie
+   jedna z opcji, tylko miejsce, w którym stoisz.
+
+Punkt 11 mówi, że kropka niczego nie rusza — więc jasność BIERZE, a nie
+nadaje: zdjęcie kropek wciąż zostawia mapę dokładnie taką, jaka była.
+
+**Zmierzone po zmianie** na tym samym ekranie: 66 węzłów, z tego 43 na 0.3 i
+niżej, 8 na pełnej jedynce — i te jasne stoją na korytarzu (Bielany,
+Grota-Roweckiego, Kurpiów, Husarska), nie w centrum.
+
+**Testy:** `test_a_node_weighs_as_much_as_what_lies_next_to_it` (każdy węzeł
+równy najjaśniejszemu kawałkowi przy sobie),
+`test_a_node_by_a_detour_is_paler_than_one_on_the_fast_route` (i że to
+naprawdę różnicuje), front: `kropka_bierze_jasnosc_z_otoczenia`.
+
+**Zostaje do decyzji użytkownika (propozycje do kontraktu, NIE wpisane).**
+Same suwaki wyglądu nie zmieniają tego, CO jest rysowane, a pytanie
+„czemu więcej tras po mieście niż na mojej relacji" jest o wyborze:
+
+- *Narysowany przejazd nie może przez dłuższy odcinek wieźć w stronę od celu.*
+  Dziś kontrakt mierzy sensowność wyłącznie godziną przyjazdu (punkt 2), więc
+  wariant „na Dworzec Główny i z powrotem na południe" jest legalny — mieści
+  się w oknie. Ucięłoby to objazdy, zostawiając wolniejsze korytarze
+  równoległe.
+- *Mapa jako całość ma się czytać jako TA podróż* — najlepsze opcje mają
+  dominować obraz, nie tylko być jaśniejsze od sąsiada. Dziś punkty 8 i 9
+  mówią o jasności pojedynczej linii i nic o tym, że setka bladych kresek
+  przebija trójkę jasnych. Przed projektowaniem: sprawdzić, jak z tym radzą
+  sobie prawdziwe mapy przepływów, nie zgadywać.
