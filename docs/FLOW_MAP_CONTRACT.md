@@ -54,8 +54,13 @@ narysowanym**, albo kończąca się w miejscu **niezwiązanym z dotarciem do
 celu**, nie ma prawa się pojawić na mapie.
 
 Kryterium jest czysto **fizyczna osiągalność** — czy da się tam realnie,
-w czasie, dotrzeć czymś, co mapa już rysuje — nie to, jak jasna jest ta
-rzecz, przez którą się dociera. Gałąź kotwiczy więc DOWOLNA zdążalna
+w czasie, dotrzeć: czymś, co mapa już rysuje, albo **pieszo** (punkt 14) —
+nie to, jak jasna jest ta rzecz, przez którą się dociera. Gałąź, do której
+się dochodzi, wygląda więc na mapie jak zaczynająca się obok reszty rysunku,
+bo przejść pieszo nie rysujemy. To jest świadomy wybór: kreska przy każdym
+przejściu zaśmiecałaby mapę bardziej, niż tłumaczy, a że z jednego
+przystanku da się dojść do drugiego o dwieście metrów dalej, widać na mapie
+samemu. Gałąź kotwiczy więc DOWOLNA zdążalna
 przesiadka z narysowanego segmentu, choćby bardzo blada: bladość dojazdu
 nie znaczy, że dalsza, jasna część jest nieosiągalna. Tak samo jest na
 końcu — jasność kontynuacji nie ma tu nic do rzeczy.
@@ -148,7 +153,10 @@ dokładnie tutaj, i o której jest się w celu, jadąc dalej najszybszą możliw
 kontynuacją. Do tego ile to jeszcze zajmie.
 
 **Skąd te godziny.** Z rozkładu tego samego kursu, z którego narysowano ten
-odcinek. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
+odcinek. Zakaz szacowania dotyczy POJAZDÓW: godziny kursu nie wolno wyliczać
+z prędkości ani z odległości, bo rozkład je zna. Jedyny czas na mapie, który
+nie jest odczytany, to czas przejścia PIESZO (punkt 14) — rozkładu marszu nie
+ma, więc liczy się go z odległości, hojnie i zawsze w tę samą stronę. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
 proporcjonalnie do przebytej drogi, nie średnią: bliżej następnego
 przystanku znaczy bliżej jego godziny. Wolno wyłącznie to: interpolacja
 **między dwiema godzinami odczytanymi z rozkładu tego samego kursu**. Nie
@@ -240,9 +248,11 @@ wszystkich źródeł: nazwa mówi, że to może być to samo, odległość rozst
 czy jest. Nazwa bez odległości robi z „Mokrej" trzyminutowy spacer przez pół
 Polski.
 
-**Czego to nie obiecuje.** Że każda stacja ma przesiadkę do miasta. Dopóki
-łączy je wyłącznie nazwa, stykają się rzadko — i to jest znany brak, nie
-usterka.
+**Po co jeszcze jest wspólne miejsce.** Nie po to, żeby kolej stykała się
+z miastem — to robi dziś przejście pieszo, liczone z odległości, bez oglądania
+się na nazwę (punkt 14). Wspólne miejsce rozstrzyga o czym innym: co znaczy
+wskazany start i cel. Pytając o „Dworzec Główny", pyta się o wszystkie jego
+perony naraz, a nie o jeden słupek.
 
 ## 13. Zawsze jakaś trasa, choćby za godzinę
 
@@ -258,6 +268,40 @@ pytanie ma to napisane przy sobie. Mapa nigdy nie udaje, że coś jedzie teraz.
 **Okno czasowe liczy się od wyjazdu, nie od pytania.** Wachlarz wariantów
 wokół takiej trasy jest tak samo szeroki jak wokół każdej innej — godzina
 czekania nie zawęża wyboru, bo nie jest częścią podróży.
+
+## 14. Pieszo to też droga
+
+**Jedna zasada na cały system.** Pieszo przechodzi się między dowolnymi
+przystankami leżącymi blisko siebie — bez względu na nazwę i na to, czyja to
+sieć — i kosztuje to tyle samo na starcie relacji, w przesiadce, u celu oraz
+przy punkcie wskazanym kliknięciem w mapę. Jeden promień, jedna cena. Punkt
+z mapy jest krańcem relacji jak każdy inny: przystanki wokół niego nie są
+„dostępne od razu", tylko oddalone o tyle a tyle minut marszu.
+
+**Czas przejścia liczy się z odległości i jest zawyżony.** Rozkład czasu
+marszu nie zna, a my znamy tylko odległość w linii prostej — nie chodniki,
+nie światła, nie przejścia podziemne. Cały ten brak wiedzy siedzi w jednej,
+hojnej prędkości, zaokrąglonej w górę do pełnych minut i nigdy krótszej niż
+trzy. Zasada nadrzędna: **lepiej nie pokazać przesiadki, niż pokazać taką, na
+którą pasażer nie zdąży**, bo zaniżyliśmy marsz.
+
+**Przejście musi coś OTWIERAĆ.** Marsz ma sens tylko wtedy, gdy daje dostęp do
+kursu, którego inaczej nie da się złapać — choćby dojazd nie był przez to
+szybszy, byle mieścił się w oknie (punkt 2). Kurs, który i tak zatrzymuje się
+tam, gdzie stoimy, takim kursem nie jest: po własny pojazd się nie chodzi.
+Mapa rysuje go od naszego przystanku, a nie od słupka o jeden przystanek
+wcześniej na tym samym kursie.
+
+**Jeden krok.** Pieszo idzie się raz: ze startu albo po wysiadaniu z pojazdu.
+Nie ma łańcucha dwóch przejść pod rząd — inaczej „dojście" zaczęłoby znaczyć
+spacer przez pół dzielnicy.
+
+**Samo przejście nie jest trasą.** Ta wyszukiwarka planuje przejazdy, a trasa
+bez ani jednego przejazdu nie ma godziny wyjazdu, na której opiera się okno
+mapy. Relacja, którą da się przejść pieszo, nie dostaje propozycji „po prostu
+idź".
+
+**Przejść na mapie nie widać** — patrz punkt 4.
 
 ## Priorytet: poprawność przed szybkością
 

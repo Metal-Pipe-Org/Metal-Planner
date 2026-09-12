@@ -150,18 +150,32 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
 
 
-def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs):
-    """Czy w kurs, którym już jedziemy, można wsiąść na `stop` mniejszą
-    liczbą przejazdów niż w zapisanym punkcie wsiadania.
+def _cheaper_boarding(earliest, journey, legs, stop, dep_t, board_legs,
+                      board_stop):
+    """Czy w kurs, którym już jedziemy, można wsiąść na `stop` TANIEJ niż
+    w zapisanym punkcie wsiadania - mniejszą liczbą przejazdów albo bez
+    chodzenia, którego tamten punkt wymagał.
 
-    Sam warunek "mniej przejazdów" nie wystarczy - trzeba jeszcze zdążyć na
-    odjazd z tego przystanku, tym samym buforem co przy zwykłym wsiadaniu.
+    Samo "mniej przejazdów" nie wystarczy - trzeba jeszcze zdążyć na odjazd
+    z tego przystanku, tym samym buforem co przy zwykłym wsiadaniu.
     Przystanek osiągnięty PRZEZ TEN kurs nigdy nie przejdzie: ma o przejazd
     więcej niż punkt wsiadania, więc przesunięcie nie potrafi rozciąć jazdy
     jednym pojazdem na dwa etapy.
+
+    Drugi powód - BEZ CHODZENIA - dokłada się tu, bo przejście pieszo ma
+    sens tylko wtedy, gdy otwiera kurs, którego inaczej nie złapiemy. Kurs,
+    który i tak zatrzyma się tam, gdzie stoimy, nie jest takim kursem.
+    Zgłoszone na żywo (Wojszyce -> DWORZEC GŁÓWNY, 18:08): 112 staje na
+    Parafialnej o 18:13 i na Wojszycach o 18:14, więc skan kazał iść cztery
+    minuty WSTECZ po ten sam autobus, po czym wracać nim obok własnego
+    przystanku - z identyczną godziną w celu. Wsiadanie przesuwa się teraz
+    na przystanek, na którym już stoimy, a marsz z trasy znika.
     """
     reached = earliest.get(stop, INF)
-    if reached is INF or legs[stop] >= board_legs:
+    if reached is INF or legs[stop] > board_legs:
+        return False
+    if legs[stop] == board_legs and not (journey[board_stop][0] == "walk"
+                                         and journey[stop][0] != "walk"):
         return False
     buffer = TRANSFER_SEC if journey[stop][0] == "ride" else 0
     return reached + buffer <= dep_t
@@ -301,7 +315,7 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
             trip_board[trip] = i
             trip_legs[trip] = legs[dep_s]
         elif _cheaper_boarding(earliest, journey, legs, dep_s, dep_t,
-                               trip_legs[trip]):
+                               trip_legs[trip], conns[trip_board[trip]][2]):
             # Jedziemy już tym kursem, ale właśnie mijamy przystanek, na
             # którym stalibyśmy MNIEJSZĄ liczbą przejazdów niż w zapisanym
             # punkcie wsiadania - w skrajnym przypadku sam start relacji.
@@ -819,11 +833,6 @@ BACKTRACK_TOL_SEC = 120 # wsiadanie nie może wymagać oddalenia się od celu
                         # (cofnięcia) o więcej niż 2 min
 WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
 
-MIN_RANGE_M = 200       # zasięg szukania słupków wokół klikniętego punktu
-MAX_RANGE_M = 1500      # (suwak w UI go nadpisuje) - patrz gtfs.nearby_stops
-DEFAULT_RANGE_M = 1000
-
-
 DEFAULT_JOURNEY_LIMIT = 6     # domyślnie tyle propozycji tras szukamy/pokazujemy
 MIN_JOURNEY_LIMIT = 1
 MAX_JOURNEY_LIMIT = 20        # (suwak w UI go nadpisuje) - "na siłę" więcej wariantów
@@ -846,12 +855,18 @@ VISITS_PER_JOURNEY = 667      # propozycji faktycznie szukało głębiej, a nie 
                               # krócej listę tych samych paru znalezionych łańcuchów
 
 
-def _resolve_endpoints(day, start_query, end_query, start_point, end_point, range_m):
-    """Start i cel -> nazwy do pokazania + zbiory słupków do skanowania.
+def _resolve_endpoints(day, start_query, end_query, start_point, end_point):
+    """Start i cel -> dzień, nazwy do pokazania + zbiory słupków do skanowania.
 
     Każda strona niezależnie: nazwa przystanku (match_stop, całe kanoniczne
-    miejsce) albo dowolny punkt z mapy (słupki w zasięgu). Wspólne dla mapy
-    przepływów i listy propozycji - obie muszą rozumieć endpointy tak samo.
+    miejsce) albo dowolny punkt z mapy. Wspólne dla mapy przepływów i listy
+    propozycji - obie muszą rozumieć krańce relacji tak samo.
+
+    Punkt z mapy wchodzi do dnia jako zwykły słupek bez połączeń
+    (gtfs.with_point), więc niżej nikt już nie musi wiedzieć, że relacja
+    zaczyna się poza przystankiem: dojście z punktu na przystanek jest tym
+    samym przejściem pieszo, co każde inne, i tyle samo kosztuje. Dlatego
+    zwracamy też `day` - dołożenie punktu robi kopię dnia.
     """
     resolved = {}
     for side, query, point, missing in (
@@ -860,12 +875,11 @@ def _resolve_endpoints(day, start_query, end_query, start_point, end_point, rang
     ):
         stops_key = "source_stops" if side == "start" else "target_stops"
         if point is not None:
-            lat, lon = point
-            stops = gtfs.nearby_stops(lat, lon, day, range_m)
-            if not stops:
+            day, point_stop = gtfs.with_point(day, point[0], point[1], side)
+            if not day.siblings[point_stop]:
                 return {"error": f"Brak przystanków w zasięgu wybranego punktu {missing}."}
-            resolved[side] = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
-            resolved[stops_key] = stops
+            resolved[side] = day.stop_names[point_stop]
+            resolved[stops_key] = {point_stop}
         else:
             name, stops, hints = gtfs.match_stop(query, day)
             if name is None:
@@ -875,6 +889,7 @@ def _resolve_endpoints(day, start_query, end_query, start_point, end_point, rang
 
     if resolved["start"] == resolved["end"]:
         return {"error": "Przystanek początkowy i końcowy są takie same."}
+    resolved["day"] = day
     return resolved
 
 
@@ -963,7 +978,7 @@ def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
 
 
 def plan_flow(start_query, end_query, when=None,
-              start_point=None, end_point=None, range_m=None, extra_pct=None,
+              start_point=None, end_point=None, extra_pct=None,
               extra_floor_sec=None, extra_cap_sec=None, journey_limit=None,
               transfer_gain_sec=None, use_bikes=False):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
@@ -1027,10 +1042,6 @@ def plan_flow(start_query, end_query, when=None,
     dopisuje.
     """
     when = when or datetime.now()
-    range_m = (
-        DEFAULT_RANGE_M if range_m is None
-        else max(MIN_RANGE_M, min(MAX_RANGE_M, range_m))
-    )
     journey_limit = (
         DEFAULT_JOURNEY_LIMIT if journey_limit is None
         else int(max(MIN_JOURNEY_LIMIT, min(MAX_JOURNEY_LIMIT, journey_limit)))
@@ -1041,9 +1052,10 @@ def plan_flow(start_query, end_query, when=None,
     except FileNotFoundError as e:
         return {"error": str(e)}
 
-    ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point, range_m)
+    ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point)
     if "error" in ends:
         return ends
+    day = ends["day"]          # z punktem z mapy dołożonym jako słupek
     start_name, source_stops = ends["start"], ends["source_stops"]
     end_name, target_stops = ends["end"], ends["target_stops"]
 
@@ -1067,10 +1079,10 @@ def plan_flow(start_query, end_query, when=None,
         except FileNotFoundError:
             break
         ends = _resolve_endpoints(later, start_query, end_query,
-                                  start_point, end_point, range_m)
+                                  start_point, end_point)
         if "error" in ends:
             break
-        day = later
+        day = ends["day"]
         start_name, source_stops = ends["start"], ends["source_stops"]
         end_name, target_stops = ends["end"], ends["target_stops"]
         dep_sec = 0
@@ -1124,6 +1136,10 @@ def plan_flow(start_query, end_query, when=None,
     # podniósłby się dla CAŁEJ mapy i wyciąłby kandydatów na zupełnie
     # niepowiązanych korytarzach - dokładnie ta niestabilność, przed którą
     # ostrzega komentarz nad `origin_latest`.
+    #
+    # Kotwiczenie mapy dostaje oba zbiory OSOBNO (patrz _select_and_anchor),
+    # bo przystanek startowy i słupek "o cztery minuty marszu stąd" nie są
+    # równoważnymi miejscami wsiadania: pierwszy bije drugiego zawsze.
     start_reach = _origin_walk(day, source_stops)
     anchor_stops = set(source_stops) | set(start_reach)
 
@@ -1136,7 +1152,8 @@ def plan_flow(start_query, end_query, when=None,
     # się jasność; bez niego była szacowana (patrz _target_profile).
     profile = _target_profile(day, target_set, dep_sec, deadline)
     _refine_brightness(day, segs, target_set, deadline, best_arr, profile)
-    kept, ranges = _select_and_anchor(day, segs, anchor_stops, target_set)
+    kept, ranges = _select_and_anchor(day, segs, source_stops, target_set,
+                                      start_reach)
 
     gtfs.geo_generation()      # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()    # jedno połączenie na WSZYSTKIE wycinki geometrii zapytania
@@ -1888,13 +1905,14 @@ def _leads_onward(day, other, stop, behind, drawn=None):
     return False
 
 
-def _select_and_anchor(day, segs, source_stops, target_set):
+def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
     """Krok 3: spójność narysowanej sieci (bez progu jasności - to, co jest
     w oknie czasowym, jest już wyznaczone przez deadline; q służy dalej
     tylko do intensywności rysowania). Segment jest przycinany z OBU stron
     do zakotwiczonych punktów:
-    - początek: start relacji albo miejsce, gdzie dołącza (zdążalnie) inny
-      narysowany segment - żaden segment nie zaczyna się "znikąd";
+    - początek: start relacji, słupek osiągalny z niego pieszo (`walk_stops`)
+      albo miejsce, gdzie dołącza (zdążalnie) inny narysowany segment -
+      żaden segment nie zaczyna się "znikąd";
     - koniec: cel albo ostatnia przesiadka w porównywalnie jasny narysowany
       segment, który prowadzi DALEJ, a nie z powrotem tam, skąd właśnie
       przyjechaliśmy (patrz _leads_onward) - żaden ogon nie prowadzi
@@ -1921,6 +1939,7 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                 start_pos = 0
             else:
                 start_pos = None
+                own_pos = None     # przystanek startowy - wsiadanie BEZ marszu
                 for stop2, p in seg["pos_of"].items():
                     if p >= len(seg["stops"]) - 1:
                         continue         # dołączenie na samym końcu - puste
@@ -1943,6 +1962,13 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                         # zera, po czym plan_flow wchodził w tryb awaryjny.
                         # Zmierzone 2026-08-27 na Sosnowiecka -> Wojszyce
                         # 15:37: 31 kandydatów, 0 zatrzymanych.
+                        if own_pos is None or p < own_pos:
+                            own_pos = p
+                        continue
+                    if stop2 in walk_stops:
+                        # Tu wsiadamy po dojściu pieszo ze startu. Też jest to
+                        # kotwica (dało się tu być), ale gorsza od własnego
+                        # przystanku - patrz niżej.
                         if start_pos is None or p < start_pos:
                             start_pos = p
                         continue
@@ -1954,6 +1980,17 @@ def _select_and_anchor(day, segs, source_stops, target_set):
                         if _catchable(arr_t, buffer, times):
                             if start_pos is None or p < start_pos:
                                 start_pos = p
+                # Kurs, który zatrzymuje się na przystanku STARTOWYM, rysujemy
+                # od niego - nawet jeśli wcześniej mija słupek, do którego
+                # dałoby się dojść pieszo. Marsz po pojazd, który i tak po nas
+                # przyjedzie, jest marszem donikąd (ta sama zasada, co
+                # w _cheaper_boarding). Zgłoszone na żywo: relacja z Wojszyc
+                # rysowała 112 od Parafialnej, o przystanek WCZEŚNIEJ na tym
+                # samym kursie, więc mapa zaczynała się obok wskazanego startu,
+                # a na samych Wojszycach nie było nawet kropki - 112 tylko tamtędy
+                # "przejeżdżało" (patrz _transfer_nodes).
+                if own_pos is not None:
+                    start_pos = own_pos
                 if start_pos is None:
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---

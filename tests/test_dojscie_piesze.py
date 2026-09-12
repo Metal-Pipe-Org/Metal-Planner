@@ -8,9 +8,13 @@ tylko tam, gdzie nazwy przypadkiem się pokryły. Tu pilnujemy trzech rzeczy:
 przejścia, i że pasażer dowiaduje się, DOKĄD ma pójść.
 """
 
+from datetime import datetime
+
 import gtfs
 import planner
 from gtfs_builder import make_day
+
+WHEN = datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, dla czytelnych liczb
 
 
 # Trzy punkty na jednej linii południka: A-B ok. 111 m, A-C ok. 555 m.
@@ -229,7 +233,7 @@ def test_walking_out_of_the_origin_takes_only_one_step():
     # łańcuchem "przejdź, przejdź" byłby osiągalny, jednym krokiem nie jest.
     day.stop_names["DALEJ"] = "Dalej"
     day.stop_coords["DALEJ"] = _o_metrow(day.stop_coords["OBOK"],
-                                         -gtfs.WALK_ACCESS_M)
+                                         -(gtfs.WALK_M - 100))
     assert set(planner._origin_walk(day, ["START"])) == {"OBOK"}
 
 
@@ -272,7 +276,7 @@ def test_the_target_is_reachable_on_foot_from_a_nearby_stop():
     day = _day_z_celem_za_dojsciem()
     reach = planner._target_reach(day, {"CEL"})
     assert reach["CEL"] == (0, "CEL")
-    assert reach["STACJA"] == (gtfs.WALK_MIN_SEC, "CEL")
+    assert reach["STACJA"] == (gtfs.walk_seconds(day, "STACJA", "CEL"), "CEL")
 
 
 def test_the_backward_scan_seeds_the_walk_to_the_target():
@@ -284,7 +288,7 @@ def test_the_backward_scan_seeds_the_walk_to_the_target():
     deadline = 3600
     latest = planner._backward(day, {"CEL"}, 0, deadline)
     assert latest["CEL"] == deadline
-    assert latest["STACJA"] == deadline - gtfs.WALK_MIN_SEC, \
+    assert latest["STACJA"] == deadline - gtfs.walk_seconds(day, "STACJA", "CEL"), \
         "dojście do celu nie zasiane"
 
 
@@ -295,8 +299,83 @@ def test_a_journey_may_END_with_a_walk_to_the_target():
     day = _day_z_celem_za_dojsciem()
     stop, arr, journey = planner._scan(day, ["START"], ["CEL"], 0)
     assert stop == "CEL"
-    assert arr == 600 + gtfs.WALK_MIN_SEC, \
+    assert arr == 600 + gtfs.walk_seconds(day, "STACJA", "CEL"), \
         "przyjazd liczy się DO CELU, razem z dojściem"
     legs = planner._reconstruct(day, journey, stop)
     assert [leg["kind"] for leg in legs] == ["ride", "walk"]
     assert legs[-1]["to"] == "DWORZEC GŁÓWNY"
+
+
+# ---- przejście musi coś OTWIERAĆ ----------------------------------------
+
+def _day_z_kursem_przez_start():
+    """Kurs staje najpierw na OBOK (pięć minut marszu od startu), a zaraz
+    potem na samym STARCIE - dokładnie układ z Wojszyc: 112 jest na
+    Parafialnej o 18:13, a na Wojszycach o 18:14."""
+    day = make_day([
+        {"trip_id": "T1", "label": "Autobus 112",
+         "stops": [("OBOK", 780, 780), ("START", 840, 840), ("CEL", 2280, 2280)]},
+    ], names={"OBOK": "Parafialna"})
+    day.stop_names["START"] = "Wojszyce"
+    day.stop_coords["START"] = _o_metrow(day.stop_coords["OBOK"], 250)
+    day.place_of["START"] = "wojszyce"
+    day.stops_by_place["wojszyce"] = ["START"]
+    day.stops_by_key["wojszyce"] = ["START"]       # żeby dało się o nią zapytać z nazwy
+    day.display_name["wojszyce"] = "Wojszyce"
+    return day
+
+
+def test_no_walk_to_catch_a_course_that_stops_at_the_origin_anyway():
+    """Przejście ma sens tylko wtedy, gdy OTWIERA kurs, którego inaczej nie
+    złapiemy. Kurs, który i tak zatrzyma się tam, gdzie stoimy, taki nie jest -
+    a skan kazał iść po niego wstecz, bo wcześniejsze wsiadanie widział
+    pierwsze. Godzina w celu jest w obu wersjach ta sama, więc marsz był
+    czystą stratą (zgłoszone na żywo: Wojszyce -> DWORZEC GŁÓWNY, 18:08)."""
+    day = _day_z_kursem_przez_start()
+    stop, arr, journey = planner._scan(day, ["START"], ["CEL"], 0)
+    assert (stop, arr) == ("CEL", 2280)
+    legs = planner._reconstruct(day, journey, stop)
+    assert [leg["kind"] for leg in legs] == ["ride"], "marsz po własny autobus"
+    assert legs[0]["from"] == "Wojszyce"
+
+
+def test_the_map_draws_such_a_course_from_the_origin_stop(install_day):
+    """To samo na mapie: kurs zatrzymujący się na przystanku startowym ma być
+    rysowany OD NIEGO. Inaczej mapa zaczyna się o przystanek wcześniej, obok
+    wskazanego startu, a na samym starcie nie ma nawet kropki - bo linia tylko
+    tamtędy "przejeżdża" (patrz _transfer_nodes)."""
+    day = _day_z_kursem_przez_start()
+    install_day(day)
+    flow = planner.plan_flow("Wojszyce", "CEL", when=WHEN)
+    assert flow["segments"], "mapa pusta"
+    start_point = planner._round_path([day.stop_coords["START"]])[0]
+    assert all(seg["path"][0] == start_point for seg in flow["segments"]), \
+        "kawałek zaczyna się przed przystankiem startowym"
+    assert any(node["name"] == "Wojszyce" for node in flow["nodes"]), \
+        "brak kropki na przystanku startowym"
+
+
+# ---- punkt kliknięty na mapie -------------------------------------------
+
+def test_a_point_on_the_map_pays_for_the_walk_like_everyone_else():
+    """Kliknięty punkt to kraniec relacji jak każdy inny: słupki w zasięgu są
+    osiągalne PIESZO, z czasem liczonym z odległości - a nie dostępne
+    natychmiast, jak do 2026-09-12 (1000 m za darmo przy 5 minutach za 350 m
+    w środku trasy)."""
+    day = _day_z_dojsciem_ze_startu()
+    lat, lon = _o_metrow(day.stop_coords["OBOK"], 200)
+    z_punktem, punkt = gtfs.with_point(day, lat, lon, "start")
+    assert z_punktem.siblings[punkt]["OBOK"] == gtfs.walk_time_sec(200)
+    # Most jest dwukierunkowy - do punktu trzeba umieć DOJŚĆ, inaczej skan
+    # wstecz i profil celu nie wiedzą, że stojąc obok jest się prawie u celu.
+    assert z_punktem.siblings["OBOK"][punkt] == gtfs.walk_time_sec(200)
+    assert "OBOK" not in day.siblings.get(punkt, {}), "dzień z cache'u zmieniony"
+
+
+def test_a_point_too_far_from_everything_is_an_honest_error():
+    """Punkt bez ani jednego przystanku w promieniu marszu nie jest krańcem
+    relacji - lepiej powiedzieć to wprost, niż liczyć trasę znikąd."""
+    day = _day_z_dojsciem_ze_startu()
+    daleko = _o_metrow(day.stop_coords["OBOK"], 5 * gtfs.WALK_M)
+    z_punktem, punkt = gtfs.with_point(day, daleko[0], daleko[1], "start")
+    assert z_punktem.siblings[punkt] == {}

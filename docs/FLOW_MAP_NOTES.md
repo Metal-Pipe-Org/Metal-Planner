@@ -999,3 +999,67 @@ wyszłaby bzdura. Czekanie liczy się od pytania, przez granicę doby.
 | brak zejścia na kolejną dobę | `test_nothing_today_is_answered_with_tomorrow` |
 | odjazd trasy = godzina pytania | `test_the_window_is_measured_from_the_departure_not_the_question` + 2 |
 | czekanie nigdy nie pokazane | `test_a_route_that_starts_much_later_says_so` |
+
+## Jedna zasada chodzenia — punkt 14 (2026-09-12)
+
+Kontrakt dostał punkt 14, a punkty 4, 10 i 12 zostały pod niego dociągnięte.
+Powód był prosty: chodzenie miało trzy różne zasady naraz — 300 m
+w przesiadce z czasem marszu, 400 m na krańcach relacji z czasem marszu
+i 1000 m wokół punktu klikniętego na mapie **za darmo**. Ta sama czynność
+była wyceniana trzy razy inaczej, zależnie od tego, gdzie w podróży wypadła:
+900 m na starcie nie kosztowało ani minuty, 350 m w środku trasy pięć.
+
+**Promień jest jeden** (`gtfs.WALK_M`, 600 m). Punkt z mapy wchodzi do dnia
+jako zwykły słupek bez połączeń (`gtfs.with_point`) — dzięki temu most
+pieszy, skan w przód, skan wstecz, profil celu i całe kotwiczenie nie musiały
+się o nim niczego dowiedzieć. Suwak „Zasięg szukania punktu" zniknął razem
+z parametrem `range_m`: nie ma już czego regulować.
+
+**Czas marszu liczy się z samej odległości w linii prostej**, 0,7 m/s, w górę
+do pełnych minut, nie mniej niż trzy. Wcześniej: 1,3 m/s dzielone przez
+współczynnik nadłożenia drogi (efektywnie 0,96 m/s). Skoro i tak znamy tylko
+prostą, cały brak wiedzy ma siedzieć w jednej liczbie — za nią stoi ostrożny
+pieszy (1,07 m/s, wartość z inżynierii ruchu; przekracza ją 85% ludzi) na
+drodze półtora raza dłuższej niż prosta (pomiary „detour factor": 1,4–1,5
+w siatce ulic, więcej na osiedlach z zaułkami).
+
+**Przejście musi coś otwierać.** Zgłoszone na żywo ze zrzutem ekranu:
+`Wojszyce → DWORZEC GŁÓWNY`, 11.09, 18:08. Autobus 112 staje na Parafialnej
+o 18:13 i na Wojszycach o 18:14 — ten sam kurs. Wyszukiwarka kazała iść
+cztery minuty WSTECZ, żeby wsiąść przystanek wcześniej, z identyczną godziną
+w celu (18:32); mapa rysowała 112 i 113 od Parafialnej, a na Wojszycach nie
+było nawet kropki, bo obie linie tylko tamtędy „przejeżdżały". Dwie poprawki,
+obie tej samej myśli — po pojazd, który i tak po nas przyjedzie, się nie
+chodzi:
+
+1. `_cheaper_boarding` przesuwa wsiadanie na przystanek, na którym już stoimy,
+   gdy zapisany punkt wsiadania wymagał marszu (przy tej samej liczbie
+   przejazdów). Wcześniej warunek był ostry (`legs[stop] >= board_legs`), więc
+   remis rozstrzygała kolejność skanowania.
+2. `_select_and_anchor` dostaje `source_stops` i `walk_stops` OSOBNO. Kurs,
+   który zatrzymuje się na przystanku startowym, kotwiczy się tam, choćby
+   wcześniej mijał słupek osiągalny pieszo.
+
+Po zmianie ta sama relacja: 112 od Wojszyc, kropka na Wojszycach (z flagą
+startu), ta sama godzina w celu.
+
+**Pomiar rozdzielający przyczyny** (6 relacji, 12.09): sama reguła wsiadania
+nie zmienia map — kawałki, linie, kropki i propozycje wychodzą co do sztuki
+tak samo jak przed zmianą. Wszystkie różnice biorą się z wolniejszego marszu
+i o to chodziło: przejście z peronu Wrocław Główny na przystanek „DWORZEC
+GŁÓWNY" kosztowało 3 minuty, teraz 7, więc autobus, którego się nie łapało,
+przestał być proponowany.
+
+**Czego tu NIE ma.** Przejść pieszo mapa nadal nie rysuje — to wybór
+(punkt 4), nie brak: kreska przy każdym przejściu zaśmieciłaby rysunek
+bardziej, niż tłumaczy. Kropka przesiadkowa nadal nie wie o chodzeniu:
+miejsce, z którego wychodzi się PIESZO na inny przystanek, wygląda dla niej
+jak „tu się tylko wysiada". To jest otwarta część punktu 11, świadomie
+zostawiona do przemyślenia.
+
+**Testy:** 268 (było 264). Cztery nowe w `tests/test_dojscie_piesze.py`:
+marsz po własny kurs (zweryfikowany jako czerwony na starej regule), mapa
+rysowana od przystanku startowego, czas dojścia z klikniętego punktu i punkt
+bez przystanków w zasięgu. Cztery istniejące przestały zakładać starą
+prędkość i drugi promień — liczą teraz czas przejścia z `gtfs.walk_seconds`,
+więc nie zamrażają żadnej stałej.

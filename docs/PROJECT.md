@@ -290,13 +290,16 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
   większa, więc go w sobie mieści);
 - między słupkami leżącymi blisko siebie przechodzi się PIESZO, bez względu na
   nazwę i na to, czyja to sieć (`gtfs._nearby_bridges`, promień
-  `WALK_MAX_M` = 300 m). Czas przejścia liczy się z odległości (spokojny krok
-  ze współczynnikiem nadłożenia drogi, nie mniej niż 3 min) i krawędź niesie
+  `WALK_M` = 600 m — ten sam na starcie, w przesiadce, u celu i przy punkcie
+  klikniętym na mapie). Czas przejścia liczy się z samej odległości w linii
+  prostej (0,7 m/s, w górę do pełnych minut, nie mniej niż 3) i krawędź niesie
   go ze sobą — stałej czasu przejścia nie ma. Tą samą drogą łączą się kolej
   i MPK: dworzec i stojące pod nim przystanki nazywają się inaczej, a i tak
-  są o cztery minuty marszu od siebie. Przejście relaksuje się TYLKO po
-  wysiadaniu z pojazdu i tylko o jeden krok — nie da się iść pieszo dwa razy
-  pod rząd ani wyjść pieszo z samego startu relacji;
+  dzieli je kilka minut marszu. Przejście relaksuje się po wysiadaniu
+  z pojazdu albo z samego startu relacji, zawsze o JEDEN krok — nie da się iść
+  pieszo dwa razy pod rząd. Do kursu, który i tak zatrzymuje się tam, gdzie
+  stoimy, nie wolno dojść pieszo wcześniej (`_cheaper_boarding`): marsz ma
+  otwierać nowy kurs, a nie dosiadać nas do własnego;
 - kursy po północy mają w GTFS godziny 24:xx+ i liczą się do doby, w której
   wyruszyły, więc rozkład dnia D obejmuje też ogon dnia D-1 przesunięty
   o -24 h — to on obsługuje godziny 00:00-06:00 (patrz `gtfs.PREV_DAY_SEC`);
@@ -600,7 +603,8 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
 - `GET /api/flow?start=&end=&time=HH:MM&extra_sec=600` (albo `start_lat`/
-  `start_lon`, `end_lat`/`end_lon` i `range_m` zamiast nazw) — JEDNA
+  `start_lon`, `end_lat`/`end_lon` zamiast nazw — punkt wchodzi jako słupek
+  z dojściem pieszo, patrz `gtfs.with_point`) — JEDNA
   odpowiedź niesie i mapę, i listę propozycji (dawniej dwa osobne
   zapytania/endpointy — `/api/journeys` zniknął, patrz wyżej dlaczego):
   `{start, end, departure, best_arrival, deadline, segments: [{path:
@@ -755,6 +759,42 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-12** — **jedna zasada chodzenia zamiast trzech**. Było: 300 m
+  w przesiadce z czasem marszu, 400 m na krańcach relacji z czasem marszu
+  i 1000 m wokół punktu klikniętego na mapie ZA DARMO — czyli 900 m na
+  starcie nie kosztowało ani minuty, a 350 m w środku trasy pięć. Jest jeden
+  promień (`gtfs.WALK_M`, 600 m) i jeden czas, ten sam wszędzie. Punkt z mapy
+  wchodzi do dnia jako zwykły słupek bez połączeń (`gtfs.with_point`), więc
+  most pieszy, oba skany, profil celu i mapa nie musiały się o nim niczego
+  dowiadywać; suwak „Zasięg szukania punktu" zniknął razem z parametrem
+  `range_m`, bo nie ma już czego regulować.
+  **Czas marszu liczy się z samej odległości w linii prostej** i jest hojny:
+  0,7 m/s (ok. 42 m/min), w górę do pełnych minut, nie mniej niż trzy.
+  Wcześniej było 1,3 m/s podzielone przez współczynnik nadłożenia drogi
+  (efektywnie 0,96 m/s) — ale skoro znamy tylko prostą, to cały brak wiedzy
+  (obejście kwartału, światła, przejście podziemne) ma siedzieć w jednej
+  liczbie. Za nią stoi ostrożny pieszy (1,07 m/s — wartość z inżynierii
+  ruchu, przekracza ją 85% ludzi) na drodze półtora raza dłuższej niż prosta.
+  Zasada: lepiej nie pokazać przesiadki, niż pokazać taką, na którą pasażer
+  nie zdąży. Widać to od razu — przejście z peronu Wrocław Główny na
+  przystanek „DWORZEC GŁÓWNY" kosztowało 3 minuty, teraz 7, i autobus,
+  którego się nie łapało, przestał być proponowany.
+  **Przejście musi coś otwierać.** Zgłoszone na żywo (`Wojszyce → DWORZEC
+  GŁÓWNY`, 11.09 18:08): 112 staje na Parafialnej o 18:13 i na Wojszycach
+  o 18:14, więc wyszukiwarka kazała iść cztery minuty WSTECZ po ten sam
+  autobus — z identyczną godziną w celu (18:32) — a mapa rysowała 112 i 113
+  od Parafialnej i na samych Wojszycach nie stawiała nawet kropki (linia
+  tylko tamtędy „przejeżdżała"). Marsz po pojazd, który i tak po nas
+  przyjedzie, jest marszem donikąd: wsiadanie przesuwa się teraz na własny
+  przystanek (`_cheaper_boarding`), a kotwica mapy dostała oba zbiory osobno
+  — przystanek startowy bije słupek „o cztery minuty stąd"
+  (`_select_and_anchor`). Po zmianie ta sama relacja: 112 od Wojszyc, kropka
+  na Wojszycach, ta sama godzina w celu.
+  Zmierzone na sześciu relacjach: sama reguła wsiadania nie zmienia map
+  (kawałki, linie, kropki co do sztuki takie same) — różnice biorą się
+  wyłącznie z wolniejszego marszu, i o to chodziło. Kontrakt mapy dostał
+  punkt 14, a punkty 4, 10 i 12 zostały pod niego dociągnięte.
 
 - **2026-09-11** — lista propozycji umie skończyć podróż **Traficarem**
   (`traficar.py`): komunikacja dowozi w okolicę celu, dalej dojście do auta,
@@ -1582,25 +1622,21 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   oknie bywa tego sporo.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
-- Chodzenie ma zasięg JEDNEGO kroku w promieniu 300 m — z przystanku
-  startowego (`_origin_walk`) albo po wysiadaniu z pojazdu. Nie ma więc
-  łańcucha dwóch przejść pod rząd (nie dojdziesz „przez" przystanek pośredni
-  do trzeciego), ani prawdziwego routingu po chodnikach — odległość liczy się
-  w linii prostej ze współczynnikiem nadłożenia drogi. Skutek uboczny widać
-  np. z „Wojszyc": stacja Wrocław Wojszyce leży 359 m od słupka, czyli poza
-  promieniem, choć od sąsiedniej „Przystankowej" dzieli ją 106 m — dwoma
-  krokami byłaby osiągalna, jednym nie jest — ale START i CEL relacji mają
-  własny, większy promień (`WALK_ACCESS_M`), więc z „Wojszyc" na tę stację
-  po prostu się dochodzi. Ograniczenie zostaje tam, gdzie dwoma krokami
-  trzeba by iść W ŚRODKU trasy.
+- Chodzenie ma zasięg JEDNEGO kroku w promieniu 600 m — z przystanku
+  startowego (`_origin_walk`), po wysiadaniu z pojazdu albo z punktu
+  klikniętego na mapie. Nie ma więc łańcucha dwóch przejść pod rząd (nie
+  dojdziesz „przez" przystanek pośredni do trzeciego).
+- Nie ma prawdziwego routingu po chodnikach: znamy współrzędne słupków, nie
+  ulice, więc czas marszu bierze się z odległości w LINII PROSTEJ, a cały
+  zapas (obejście kwartału, światła, przejście podziemne) siedzi w jednej,
+  hojnej prędkości 0,7 m/s. Gdzieniegdzie będzie to wyraźnie za dużo (prosty
+  chodnik wzdłuż ulicy), i tak ma być — plan woli nie pokazać przesiadki, niż
+  pokazać taką, na którą się nie zdąży. Uczciwie byłoby policzyć te czasy raz,
+  prawdziwym routerem po OpenStreetMap, i wstawić gotowe (17 tys. par słupków
+  przy 600 m) — patrz „Pomysły na dalej".
 - Samo dojście pieszo NIGDY nie jest propozycją trasy: wyszukiwarka planuje
   przejazdy, a trasa bez ani jednego przejazdu nie ma godziny wyjazdu, na
   której opiera się okno mapy (`_journey_start`).
-- Start/cel wskazany KLIKNIĘCIEM W MAPĘ wciąż nie ma czasu dojścia: każdy
-  słupek w promieniu suwaka (domyślnie 1000 m) liczy się jako dostępny
-  natychmiast (`gtfs.nearby_stops`). Od kiedy przesiadka piesza czas ma,
-  jest to niespójność widoczna w obie strony — 900 m na starcie za darmo,
-  350 m w środku trasy za 5 minut.
 - Mapa przepływów pozwala wsiąść w segment WYŁĄCZNIE w jego zakotwiczonym
   początku (`_extract_transfer_graph`), a kotwica to najwcześniejsze
   zdążalne dołączenie. Gęstsza siatka przejść pieszych przesuwa te kotwice
@@ -1616,14 +1652,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   pozostałe takie pary czekają na dopisanie. Przesiadki to nie blokuje
   (most pieszy bierze się z odległości, nie z nazwy), dotyczy wyłącznie
   tego, co wyszukiwarka rozwija jako jedno miejsce.
-- Rower miejski (`bikes.py`) ma **asymetrię wobec reszty wyszukiwarki**:
-  dojście do stacji roweru kosztuje czas liczony z odległości, a słupek
-  w promieniu `range_m` (domyślnie 1 km) od klikniętego punktu liczy się
-  jako dostępny od razu, bez czasu dojścia (patrz `gtfs.nearby_stops`). Na
-  relacjach wskazanych punktem na mapie systematycznie zaniża to szanse
-  „roweru na początku" wobec zwykłego dojazdu. Uczciwe wyrównanie to
-  doliczenie czasu dojścia do PRZYSTANKU, czyli zmiana w rdzeniu, nie
-  w warstwie rowerowej.
+- Rower miejski (`bikes.py`) liczy dojście własną miarą (`bikes.WALK_MAX_M`
+  i własna prędkość), a nie tą jedną zasadą chodzenia, co reszta
+  wyszukiwarki — więc dojście do stojaka i dojście na przystanek są wyceniane
+  różnie. Wyrównanie to podmiana miary w warstwie rowerowej.
 - Przejazd rowerem nie ma geometrii: znamy obie stacje, długość trasy jest
   szacowana (odległość w linii prostej × 1,35), a na mapie rysuje się
   odcinek między stacjami, kreską przerywaną. Prawdziwy przebieg wymagałby
@@ -1652,6 +1684,19 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Pomysły na dalej
 
+- **Prawdziwe czasy przejść pieszo, policzone raz.** Dziś marsz liczy się
+  z linii prostej i jednej, hojnej prędkości — bo o chodnikach nie wiemy nic.
+  Router pieszy po OpenStreetMap (np. OSRM albo OpenTripPlanner, który i tak
+  to ma) potrafi dać prawdziwą drogę: schody, przejścia, tunel pod dworcem.
+  Nie musi przy tym stać w ścieżce zapytania — par słupków bliższych niż
+  `WALK_M` jest 17 tysięcy (przy 5524 słupkach), więc czasy liczy się RAZ,
+  przy aktualizacji rozkładu, i wstawia gotowe w to samo miejsce, w którym
+  dziś stoi `gtfs.walk_time_sec`. Wtedy zawyżona prędkość przestaje być
+  potrzebna, a przesiadka „z peronu pod wiatę" przestaje kosztować tyle samo
+  co marsz przez park. Rozważane 2026-09-12 przy ujednolicaniu chodzenia;
+  przeniesienie CAŁEGO backendu na OpenTripPlanner odrzucone — on zwraca
+  listę tras, a mapa przepływów (wachlarz, jasność, kotwice, kropki) i tak
+  zostałaby po naszej stronie.
 - Więcej odjazdów tej samej trasy na liście („następny kurs o…").
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
 - Opóźnienia pociągów na żywo z `/api/v1/operations` (patrz `pkp.py`) -

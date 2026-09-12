@@ -402,7 +402,7 @@ map.on('click', e => {
 // ------------------------------------------- moja lokalizacja jako start ----
 
 // Pozycja z przeglądarki to dla nas zwykły punkt mapy, nie przystanek -
-// backend sam znajdzie wokół niego słupki (zasięg z panelu ⚙).
+// backend dokłada go jako słupek i sam liczy dojście na okoliczne przystanki.
 const locateButton = $('locate');
 const locateMsg = $('locate-msg');
 
@@ -2540,7 +2540,6 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
-        range_m: $('range').value,
         extra_pct: $('extra').value,
         extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
         extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
@@ -3018,7 +3017,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['range', 'extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
+const DEV_SLIDER_IDS = ['extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
 
 function loadDevPrefs() {
     try {
@@ -3066,7 +3065,6 @@ function liveSlider(inputId, valueId) {
     });
 }
 applyStoredDevPrefs();
-liveSlider('range', 'range-value');
 liveSlider('extra', 'extra-value');
 liveSlider('extra-floor', 'extra-floor-value');
 liveSlider('extra-cap', 'extra-cap-value');
@@ -3361,7 +3359,7 @@ bindDotOpts();
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
-    'fold-time', 'fold-window', 'fold-transfer', 'fold-range',
+    'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-dots', 'look-section', 'fold-version',
 ];
 
