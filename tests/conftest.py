@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
+import bikes
 import gtfs
 import pkp
 import traficar
@@ -48,3 +49,21 @@ def _traficar_disabled_by_default(monkeypatch):
     patrz tests/test_traficar.py.
     """
     monkeypatch.setattr(traficar, "enabled", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def _bikes_disabled_by_default(monkeypatch):
+    """Ten sam powód, co przy Traficarze, tylko źródłem jest kanał GBFS
+    operatora WRM. Odkąd rowery stoją NA MAPIE (patrz bikes.map_places),
+    sięga po nie każde wyszukanie, nie tylko to z odhaczonym rowerem - więc
+    bez tej blokady w internet strzelałby każdy test wołający plan_flow.
+
+    Zatkana jest sama granica sieci, a nie wyłącznik `bikes.enabled` - inaczej
+    nie dałoby się przetestować tego wyłącznika (patrz tests/test_rower.py).
+    Test o rowerach sam podstawia dane (patrz tests/test_rowery_na_mapie.py).
+    """
+    def _bez_sieci(url):
+        raise OSError(f"test nie wychodzi do sieci: {url}")
+
+    bikes._cache.clear()
+    monkeypatch.setattr(bikes, "_fetch", _bez_sieci)
