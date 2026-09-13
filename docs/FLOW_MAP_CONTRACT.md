@@ -25,7 +25,28 @@ Jasność linii to ciągła miara jakości (0–1), nie binarne pokaż/ukryj.
 
 To, co się liczy jako „sensowne”, jest mierzone tym, jak blisko dana opcja
 dociera do celu w porównaniu z najlepszym możliwym (najszybszą trasą).
-Okno czasowe to arbitralny, regulowalny próg tego porównania.
+To jedyna miara jakości linii — regulować wolno tylko to, gdzie na niej
+stoi próg.
+
+**Próg wynika z czytelności, nie z minut.** Pokazanie za dużo to to samo, co
+nie pokazanie nic. Próg jakości przesuwa się więc tak, żeby narysowana sieć
+miała docelową gęstość: ile RÓŻNYCH korytarzy leży w kadrze, w którym mapa
+pokazuje relację, w stosunku do jego powierzchni. Linie leżące na sobie
+(punkt 7) liczą się raz, bo w oku są jedną kreską — dwadzieścia numerów
+jednym korytarzem nie zajmuje miejsca innego korytarza. Trasa przez całe
+miasto ma większy kadr, więc mieści więcej niż trasa na kilometr. Docelowa
+gęstość to jedyne pokrętło progu i jest suwakiem. Godzina, do której mapa
+rysuje (punkt 10), jest skutkiem progu, a nie jego ustawieniem.
+
+**Jeden próg, bez dziur.** Tnie się wyłącznie tym jednym progiem. Jeśli na
+mapie jest opcja o danej jakości, jest na niej każda lepsza. Nie ma wyjątków
+„pokaż mimo to” ani ukrywania pojedynczych opcji — mapa kończy się w jednym
+miejscu skali, zamiast wybierać za pasażera.
+
+**„Pokaż więcej” dokłada jednostki gęstości.** Każde kliknięcie podnosi cel
+o jedną wyjściową gęstość: pierwsze do dwukrotności, drugie do
+trzykrotności, kolejne do czterokrotności. Tym samym kliknięciem rośnie
+liczba aut na mapie (punkt 15). Przedłużenie żyje do następnego wyszukiwania.
 
 ## 3. Jasność w każdym punkcie kursu, nie jedna na cały kurs
 
@@ -126,16 +147,16 @@ najeżdżania na niego myszką.
 
 ## 9. Pełny zakres jasności zawsze wykorzystany
 
-Suwak okna czasowego reguluje, CO jest w ogóle pokazane (punkt 2), ale
-skala jasności nie jest liczona względem pełnej, teoretycznej szerokości
-okna, tylko względem najgorszej opcji, która FAKTYCZNIE się w nim
-mieści. Najlepsza trasa zawsze świeci pełnym blaskiem (q=1), a najgorsza
-opcja, która akurat się zmieściła, zawsze ląduje na dole skali (patrz
-punkt 8 w sprawie tego, że dół skali nadal jest widoczny na mapie) —
-niezależnie od tego, jak szeroko otwarty jest suwak. Skutek: poszerzenie
-suwaka, które nie wprowadza żadnej nowej, gorszej opcji, nie zmienia
-jasności tego, co już jest na mapie; ale jeśli wprowadza nową, gorszą
-opcję, to poprzednio-najgorsze trasy mogą się realnie rozjaśnić — dół
+Próg z punktu 2 reguluje, CO jest w ogóle pokazane, ale skala jasności
+nie jest liczona względem teoretycznego miejsca progu, tylko względem
+najgorszej opcji, która FAKTYCZNIE jest pokazana. Najlepsza trasa zawsze
+świeci pełnym blaskiem (q=1), a najgorsza opcja, która akurat się
+zmieściła, zawsze ląduje na dole skali (patrz punkt 8 w sprawie tego, że
+dół skali nadal jest widoczny na mapie) — niezależnie od tego, gdzie stoi
+próg. Skutek: przesunięcie progu, które nie wprowadza żadnej nowej,
+gorszej opcji, nie zmienia jasności tego, co już jest na mapie; ale jeśli
+wprowadza nową, gorszą opcję, to poprzednio-najgorsze trasy mogą się
+realnie rozjaśnić — dół
 skali przesunął się niżej. To drugie nie jest błędem, to ta sama zasada
 działająca w drugą stronę.
 
@@ -312,6 +333,28 @@ na mapie wtedy, gdy da się do niego dojść jednym dojściem — tą samą regu
 każde inne (punkt 14) — od czegoś, co mapa rysuje: od przystanku, na który
 dowozi, albo od samego startu. Auto stojące gdzieś w mieście, bez związku z tą
 relacją, nie jest częścią odpowiedzi.
+
+**Z tych aut widać te, których nic nie bije.** Auto porównuje się z innymi
+autami wyłącznie tym, co mapa przy nim pokazuje: o której się przy nim jest,
+jak daleko od niego do celu w linii prostej i ile daje za nie program
+„Ogarniam”. Auto bije inne, jeśli jest co najmniej tak dobre we wszystkich
+trzech naraz i w którymś lepsze. Porównuje się z tą dokładnością, z jaką
+liczby są wypisane — ta sama minuta to remis, a nie wygrana o sekundy.
+
+**Zawsze widać każde auto, którego nie bije żadne inne** (zbiór Pareto).
+Każde z nich jest najlepsze w czymś, a wybór między nimi zostaje przy
+pasażerze — mapa nie waży minut przeciw metrom ani złotówkom. Auto z „Ogarniam” nie ma osobnej
+reguły: widać je dokładnie wtedy, gdy nie ma auta, przy którym jest się nie
+później, które stoi nie dalej od celu i daje co najmniej tyle samo.
+
+**Więcej aut to luźniejsza reguła, nie wybrane auta** (k-skyband, którego
+zbiór Pareto jest pierwszym poziomem). Suwak mówi, ile aut mapa ma
+pokazać. Dokłada się wtedy auta pobite przez najwyżej jedno inne,
+potem przez najwyżej dwa i tak dalej, aż uzbiera się tyle, ile ustawiono.
+Kolejny poziom wchodzi w całości, choćby przekroczył liczbę z suwaka, bo
+ucięcie go w środku wymagałoby zważenia kryteriów. Skutek jest ten sam co
+przy liniach (punkt 2): nigdy nie widać auta, gdy schowane jest inne, które
+je bije. „Pokaż więcej” mnoży liczbę z suwaka tak samo jak gęstość linii.
 
 **Auto mówi to samo, co przystanek: o której się przy nim jest.** Godzina
 z rozkładu plus marsz, razem z tym, skąd ten marsz prowadzi.
