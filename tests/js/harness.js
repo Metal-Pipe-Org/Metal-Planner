@@ -449,6 +449,17 @@ const INJECTION = `
     // móc podstawić pozycje (fetch w emulatorze nie odpowiada) i zgasić mapę.
     vehiclesLayer, stopsLayer, setVehiclesOn, renderVehicles, vehiclesFilter, clearFlow,
     set lastVehicles(v) { lastVehicles = v; },
+    // Wejście w rozkłady zdejmuje z mapy wszystko, co opisuje wyszukiwanie -
+    // do sprawdzenia trzeba widzieć kropki węzłów i markery relacji.
+    suspendPlanner, resumePlanner, styleFor, updatePointMarker,
+    get flowDotLayer() { return flowDotLayer; },
+    get pointMarkers() { return pointMarkers; },
+    get sel() { return sel; },
+    set sel(v) { sel = v; },
+    suggestionHtml, placeTimeHeadline,
+    // Rower jest odtąd wyborem pasażera („mam konto w WRM"), więc na mapie
+    // pojawia się dopiero po zapaleniu warstwy - testy muszą to zrobić same.
+    setBikesOn, setCarsOn,
     nodePoint, dotOpts, seedStartPanel,
     prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
     get startInput() { return startInput; },

@@ -1162,6 +1162,7 @@ checks.ogarniam_widac_na_aucie = (() => {
    samego przejazdu nie pokazujemy: zostaje odległość, która mówi to samo, a
    nie udaje odczytanej z rozkładu. */
 checks.rower_pokazuje_przejazdy_dopiero_pod_kursorem = (() => {
+    app.setBikesOn(true);      // rower jest odtąd wyborem pasażera, nie domyślną warstwą
     const stacja = {
         id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
         electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
@@ -1219,6 +1220,7 @@ checks.rower_pokazuje_przejazdy_dopiero_pod_kursorem = (() => {
    liczba rowerów jest z TEJ chwili, więc mapa mówi wprost, że jej nie zna,
    zamiast podać dzisiejszą jako jutrzejszą. */
 checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
+    app.setBikesOn(true);      // jw. - warstwa musi być zapalona
     const stacja = {
         id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
         electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
@@ -1244,6 +1246,97 @@ checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
             && kropka.options.color === app.BIKE_UNKNOWN_STYLE.color
             && kropka.options.color !== app.BIKE_STYLE.color,
         tip, obwodka: kropka.options.color,
+    };
+})();
+
+
+/* W rozkładach o warstwie pojazdów decyduje to, co stoi na ekranie: otwarty
+   rozkład linii albo zaznaczone linie tablicy przystanku. Mapa przepływów
+   przestaje mieć tu cokolwiek do powiedzenia. */
+checks.pojazdy_w_rozkladach_ida_za_ekranem = (function () {
+    app.drawFlow(FLOW_FIXTURE, false);
+    const seg = app.flowHits[0].seg;
+    app.lastVehicles = [
+        {line: seg.num, kind: seg.kind, lat: 51.10, lon: 17.00},
+        {line: '999', kind: 'bus', lat: 51.11, lon: 17.02},
+    ];
+    app.setVehiclesOn(true);
+
+    window.timetableMode = {vehicleLines: () => new Set(['bus 999'])};
+    app.renderVehicles();
+    const wRozkladach = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+
+    window.timetableMode = {vehicleLines: () => null};
+    app.renderVehicles();
+    const poWyjsciu = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+
+    delete window.timetableMode;
+    app.setVehiclesOn(false);
+    return {
+        ok: wRozkladach.length === 1 && wRozkladach[0] === '999'
+            && poWyjsciu.length === 1 && poWyjsciu[0] === seg.num,
+        wRozkladach, poWyjsciu,
+    };
+})();
+
+/* Wejście w rozkłady zdejmuje z mapy CAŁE wyszukiwanie, nie tylko linie:
+   kropki węzłów przesiadkowych i wyróżnienie startu z celem opisują pytanie,
+   którego na ekranie już nie ma. Wyjście przywraca jedno i drugie. */
+checks.rozklady_sprzataja_slady_wyszukiwania = (function () {
+    app.sel = {start: 'Sosnowiecka', end: 'Wojszyce'};
+    app.updatePointMarker('start', {lat: 51.10, lon: 17.00});
+    // Fixture jest sprzed węzłów przesiadkowych, a to właśnie ich kropki
+    // zostawały na mapie - dokładamy dwa (patrz kropki_wachlarza).
+    app.drawFlow({...FLOW_FIXTURE, nodes: [
+        {name: 'PILCZYCE', lat: 51.13, lon: 16.95, sec: 48720, lines: []},
+        {name: 'Rondo', lat: 51.11, lon: 17.01, sec: 49000, lines: []},
+    ]}, false);
+    const kropkiPrzed = app.flowDotLayer.getLayers().length;
+    const startPrzed = app.styleFor('Sosnowiecka').fillColor;
+
+    app.suspendPlanner();
+    const kropkiPo = app.flowDotLayer;
+    const punktPo = app.pointMarkers.start;
+    const startPo = app.styleFor('Sosnowiecka').fillColor;
+
+    app.resumePlanner();
+    const startZ = app.styleFor('Sosnowiecka').fillColor;
+
+    app.sel = {start: null, end: null};
+    app.updatePointMarker('start', null);
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: kropkiPrzed > 0 && kropkiPo === null && punktPo === null
+            && startPrzed !== startPo && startZ === startPrzed,
+        kropkiPrzed, kropkiPo, punktPo, startPrzed, startPo, startZ,
+    };
+})();
+
+/* Pasek z czasem trasy stoi na środku OKNA, a nie na środku tego, co zostało
+   z mapy obok panelu. Dopiero gdy wyśrodkowany wszedłby na panel albo na
+   przyciski, odsuwa się w prawo - i ani piksela dalej. */
+checks.pasek_czasu_stoi_na_srodku_okna = (function () {
+    app.drawFlow(FLOW_FIXTURE, false);
+    const el = document.getElementById('time-headline');
+    el.hidden = false;
+
+    // Emulator daje każdemu elementowi tę samą ramkę: 320 px szerokości,
+    // prawa krawędź na 320 - czyli przeszkody kończą się na 320, a pasek ma
+    // 320 px szerokości.
+    const przeszkoda = 320 + 16;
+    window.innerWidth = 1200;
+    app.placeTimeHeadline();
+    const szeroko = parseFloat(el.style.left);
+
+    window.innerWidth = 700;
+    app.placeTimeHeadline();
+    const wasko = parseFloat(el.style.left);
+
+    window.innerWidth = 1200;
+    return {
+        ok: szeroko === (1200 - 320) / 2 && szeroko + 320 / 2 === 1200 / 2
+            && wasko === przeszkoda && wasko > (700 - 320) / 2,
+        szeroko, wasko, przeszkoda,
     };
 })();
 

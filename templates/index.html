@@ -47,16 +47,38 @@
 <aside id="sidebar">
 
     <header class="app-bar">
-        <div class="brand">
-            <h1>Metal Planner</h1>
-            <p>Wrocław · tramwaje i autobusy</p>
+        <div class="app-bar-row">
+            <div class="brand">
+                <h1>Metal Planner</h1>
+                <p>Wrocław · tramwaje i autobusy</p>
+            </div>
+            <button id="install" class="icon-button" title="Zainstaluj aplikację"
+                    aria-label="Zainstaluj aplikację" hidden>⤓</button>
+            <button id="dev-toggle" class="icon-button" title="Ustawienia deweloperskie"
+                    aria-label="Ustawienia deweloperskie" aria-expanded="false">⚙</button>
         </div>
-        <button id="install" class="icon-button" title="Zainstaluj aplikację"
-                aria-label="Zainstaluj aplikację" hidden>⤓</button>
-        <button id="vehicles-toggle" class="icon-button" title="Pokaż pojazdy na mapie zamiast przystanków"
-                aria-label="Pokaż pojazdy na mapie zamiast przystanków" aria-pressed="false">◉</button>
-        <button id="dev-toggle" class="icon-button" title="Ustawienia deweloperskie"
-                aria-label="Ustawienia deweloperskie" aria-expanded="false">⚙</button>
+
+        {#
+          Wszystko, co DOKŁADA warstwę na mapę, stoi w jednym rzędzie i wygląda
+          tak samo - przedtem żywe pojazdy siedziały przy ustawieniach, auta
+          i rowery nie miały włącznika wcale, a każda nowa warstwa lądowała
+          tam, gdzie akurat było miejsce. Instalacja i ustawienia zostają
+          wyżej: nie są warstwami, tylko rzeczami o samej aplikacji.
+        #}
+        <div class="layer-bar" role="group" aria-label="Warstwy na mapie">
+            <button id="vehicles-toggle" class="icon-button layer-button"
+                    title="Autobusy i tramwaje na żywo"
+                    aria-label="Pokaż autobusy i tramwaje na żywo"
+                    aria-pressed="false">◉<span>Na żywo</span></button>
+            <button id="cars-toggle" class="icon-button layer-button"
+                    title="Wolne auta Traficara"
+                    aria-label="Pokaż wolne auta Traficara"
+                    aria-pressed="false">🚗<span>Traficar</span></button>
+            <button id="bikes-toggle" class="icon-button layer-button"
+                    title="Rowery miejskie (WRM)"
+                    aria-label="Pokaż rowery miejskie"
+                    aria-pressed="false">🚲<span>Rowery</span></button>
+        </div>
     </header>
 
     {% if data_error %}
@@ -129,16 +151,9 @@
                     aria-label="Wyczyść wybór">✕</button>
         </div>
 
-        {# Rower miejski jest wyborem pasażera („mam konto w WRM"), nie
-           strojeniem algorytmu, więc stoi tutaj, a nie w panelu ⚙ - i zostaje
-           widoczny także w widoku mapy na telefonie, w odróżnieniu od .hint
-           poniżej: to opcja wyszukiwania, którą odhacza się PRZED szukaniem,
-           a szukanie odpala się samo po drugim kliknięciu w mapę. #}
-        <label class="bike-toggle" id="bike-toggle" for="bikes">
-            <input type="checkbox" id="bikes">
-            <span>🚲 Dojazd rowerem miejskim (WRM)</span>
-        </label>
-
+        {# Rower miejski ma JEDEN włącznik - ten w pasku warstw wyżej. Osobny
+           checkbox „dojazd rowerem" znaczył dokładnie to samo co on, tyle że
+           w drugim miejscu i tylko dla wyszukiwania. #}
         <p class="hint">
             Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
             potem cel. Inną relację zacznij od ✕.
@@ -186,7 +201,6 @@
             <span class="tt-when-part">
                 <label for="tt-date">Dzień</label>
                 <input type="date" id="tt-date" value="{{ form_date }}">
-                <button type="button" id="tt-today" class="time-now-button">dziś</button>
             </span>
             <span class="tt-when-part">
                 <label for="tt-time">Godzina</label>

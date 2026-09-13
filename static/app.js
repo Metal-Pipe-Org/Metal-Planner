@@ -216,12 +216,18 @@ const TRAIN_STYLE = {radius: 5, weight: 1, color: '#1b5e20',
 const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
                    fillColor: '#90a4ae', fillOpacity: 0.25};
 let baseDimmed = false;
+// W rozkładach mapa mówi o linii albo o przystanku, a nie o relacji wpisanej
+// w wyszukiwarkę - zieleń startu i czerwień celu opisują wtedy pytanie,
+// którego na ekranie nie ma (patrz suspendPlanner).
+let plannerSuspended = false;
 
 function styleFor(name) {
-    if (name === sel.start) return {radius: 8, weight: 2, color: '#1b5e20',
-                                    fillColor: '#4caf50', fillOpacity: 1};
-    if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
-                                  fillColor: '#ef5350', fillOpacity: 1};
+    if (!plannerSuspended) {
+        if (name === sel.start) return {radius: 8, weight: 2, color: '#1b5e20',
+                                        fillColor: '#4caf50', fillOpacity: 1};
+        if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
+                                      fillColor: '#ef5350', fillOpacity: 1};
+    }
     if (baseDimmed) return DIM_STYLE;
     return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
 }
@@ -274,10 +280,25 @@ function updatePointMarker(slot, value) {
 // można wsiąść, a to inne pytanie niż to, co akurat jedzie.
 //
 // Punktem odniesienia jest MAPA: gdy stoi na niej wachlarz przepływów,
-// warstwa zawęża się do linii, które są na nim narysowane (patrz
+// warstwa zawęża się do LINII, które są na nim narysowane (patrz
 // vehiclesFilter). Reszta miasta odpowiada na inne pytanie niż to, które
-// zadał ktoś, rysując tę mapę - i tylko ją zasłania. Bez mapy (przed
-// wyszukaniem) nie ma czego zawężać i widać wszystko, co jeździ.
+// zadał ktoś, rysując tę mapę - i tylko ją zasłania. W rozkładach zawężeniem
+// rządzi to, co stoi na ekranie: rozkład linii - ta linia, tablica przystanku
+// - zaznaczone linie tablicy. Bez jednego i drugiego nie ma czego zawężać
+// i widać wszystko, co jeździ.
+//
+// ODSTAWIONE (2026-09-13): zawężanie dalej, do pojedynczych POJAZDÓW - tylko
+// tych, których kurs zatrzyma się jeszcze tam, gdzie mapa prowadzi jego linię
+// (zgłoszone: przy relacji Księże Małe - pl. Grunwaldzki warstwa pokazywała
+// 146 stojące na Biskupinie). Działało i było zmierzone (z 49 pojazdów linii
+// z mapy zostawało 12), ale zostało zdjęte na wyraźną prośbę - warstwa ma
+// pokazywać wszystkie pojazdy linii z mapy. Kod serwera czeka zakomentowany
+// w vehicles.py, a filtr wyglądał tak:
+//
+//     const drawn = only.stops && only.stops.get(key);   // przystanki z mapy
+//     if (!drawn || !v.stops) return true;               // kursu nie rozpoznano
+//     return v.stops.some(([lat, lon, sec]) =>
+//         sec <= only.until && drawn.has(lat + ',' + lon));
 
 const vehiclesLayer = L.layerGroup();
 const vehiclesToggle = $('vehicles-toggle');
@@ -302,18 +323,21 @@ function vehicleTooltipHtml(v) {
     return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
 }
 
-/** Linie narysowane na mapie przepływów - do nich zawęża się warstwa
-    pojazdów (patrz komentarz nad sekcją). null = mapa pusta, nie ma czego
+const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();
+
+/** Linie, do których zawęża się warstwa pojazdów - albo null, gdy nie ma czego
     zawężać. Liczone z flowHits, czyli z tego, co NAPRAWDĘ jest na ekranie,
     a nie z odpowiedzi serwera - to ta sama lista, którą kursor rozstrzyga
-    korytarze. */
+    korytarze. W rozkładach pytamy ekran (patrz timetableMode.vehicleLines). */
 function vehiclesFilter() {
+    const fromTimetable = window.timetableMode && window.timetableMode.vehicleLines();
+    if (fromTimetable) return fromTimetable;
     if (!flowHits.length) return null;
-    const keys = new Set();
+    const lines = new Set();
     for (const hit of flowHits) {
-        if (hit.seg.num) keys.add(hit.seg.kind + ' ' + hit.seg.num.trim());
+        if (hit.seg.num) lines.add(vehicleKey(hit.seg.kind, hit.seg.num));
     }
-    return keys;
+    return lines;
 }
 
 function renderVehicles() {
@@ -321,7 +345,7 @@ function renderVehicles() {
     if (!vehiclesOn) return;
     const only = vehiclesFilter();
     for (const v of lastVehicles) {
-        if (only && !only.has(v.kind + ' ' + v.line.trim())) continue;
+        if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
         L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
             .bindTooltip(vehicleTooltipHtml(v))
             .addTo(vehiclesLayer);
@@ -356,6 +380,152 @@ function setVehiclesOn(on) {
 
 if (vehiclesToggle) {
     vehiclesToggle.addEventListener('click', () => setVehiclesOn(!vehiclesOn));
+}
+
+// ------------------------------------------- auta i rowery jako warstwy ----
+//
+// Jeden włącznik na warstwę, dwa źródła danych pod spodem. Przy narysowanej
+// mapie przepływów pokazuje się to, co przyszło razem z nią: tamte auta
+// i rowery wiedzą, o której się przy nich jest i ile stąd do celu - to są
+// odpowiedzi na zadane pytanie. Bez mapy nie ma pytania, więc zostaje samo
+// „co gdzie stoi" i warstwa bierze cały miejski feed (/api/cars, /api/bikes).
+//
+// Włącznik NIGDY nie rusza propozycji tras ani samego wachlarza - dokłada
+// i zdejmuje wyłącznie kropki na mapie.
+
+const CARS_REFRESH_MS = 20000;    // tyle deklaruje feed Traficara (CARS_TTL_SEC)
+const BIKES_REFRESH_MS = 60000;   // tyle deklaruje kanał WRM (`ttl`)
+
+// Auta domyślnie włączone: na narysowanej mapie stały tam od zawsze (kontrakt
+// p. 15), a zgaszenie ich przy okazji dokładania włącznika byłoby zabraniem
+// czegoś, o co nikt nie prosił. Rower odwrotnie - to ten sam wybór, co dawne
+// „mam konto w WRM": domyślnie nie, a kto go odhaczył wcześniej, ten ma go
+// dalej (stara pamięć `bikes`). Pojazdy na żywo zostają zgaszone jak dotąd.
+let carsOn = uiState.carsOn !== false;
+let bikesOn = uiState.bikesOn === undefined
+    ? !!uiState.bikes : !!uiState.bikesOn;
+let cityCarLayer = null;
+let cityBikeLayer = null;
+let carsTimer = null;
+let bikesTimer = null;
+const carsToggle = $('cars-toggle');
+const bikesToggle = $('bikes-toggle');
+
+/** Czy na ekranie stoi wachlarz - to on rozstrzyga, z którego źródła biorą
+    się auta i rowery. W rozkładach i przed wyszukiwaniem go nie ma. */
+const flowOnScreen = () => !!flowLayer;
+
+function cityCarMarkers(cars) {
+    return cars.map(car => L.circleMarker([car.lat, car.lon], {
+        ...CAR_STYLE,
+        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
+    }).bindTooltip(
+        `<b>${esc(car.model)} · ${esc(car.plate)}</b><br>` +
+        // Opis miejsca postoju bywa w feedzie pusty - pusta linijka w dymku
+        // wyglądałaby jak brakująca treść.
+        (car.where ? `${esc(car.where)}<br>` : '') +
+        `Paliwo ${car.fuel}%, zasięg ${car.range} km<br>` +
+        ogarniamText(car.ogarniam),
+        {direction: 'top', offset: [0, -4], opacity: 1},
+    ));
+}
+
+function cityBikeMarkers(stations, free) {
+    const places = stations
+        .filter(s => s.renting)
+        .map(s => ({...s, loose: false}))
+        .concat(free.map(b => ({...b, loose: true, bikes: 1})));
+    return places.map(place => L.circleMarker(
+        [place.lat, place.lon], bikeStyle(place, true),
+    ).bindTooltip(
+        `<b>${esc(place.name || 'Rower luzem')}</b><br>${bikeCountText(place)}`,
+        {direction: 'top', offset: [0, -4], opacity: 1},
+    ));
+}
+
+function loadCityCars() {
+    fetch('/api/cars').then(r => r.json()).then(data => {
+        if (data.error || !carsOn || flowOnScreen()) return;
+        if (cityCarLayer) map.removeLayer(cityCarLayer);
+        cityCarLayer = L.layerGroup(cityCarMarkers(data.cars)).addTo(map);
+    }).catch(() => {});   // sieć/timeout - kolejna próba za CARS_REFRESH_MS
+}
+
+function loadCityBikes() {
+    fetch('/api/bikes').then(r => r.json()).then(data => {
+        if (data.error || !bikesOn || flowOnScreen()) return;
+        if (cityBikeLayer) map.removeLayer(cityBikeLayer);
+        cityBikeLayer = L.layerGroup(
+            cityBikeMarkers(data.stations, data.free)).addTo(map);
+    }).catch(() => {});
+}
+
+/** Postawienie warstwy aut od zera - po przełączniku, po nowej mapie i po jej
+    zdjęciu. Zawsze zdejmuje obie wersje i stawia najwyżej jedną, więc nie da
+    się zostać z autami z wyniku pod autami z całego miasta. */
+function refreshCarLayer() {
+    clearInterval(carsTimer);
+    carsTimer = null;
+    if (cityCarLayer) { map.removeLayer(cityCarLayer); cityCarLayer = null; }
+    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
+    // W rozkładach mapa jest o linii albo o przystanku - auta i rowery nie
+    // mają tam czego dokładać, choćby włącznik został zapalony.
+    if (!carsOn || plannerSuspended) return;
+    if (flowOnScreen()) {
+        flowCarLayer = L.layerGroup(flowCarMarkers(lastFlow.cars)).addTo(map);
+        return;
+    }
+    loadCityCars();
+    carsTimer = setInterval(loadCityCars, CARS_REFRESH_MS);
+}
+
+function refreshBikeLayer() {
+    clearInterval(bikesTimer);
+    bikesTimer = null;
+    clearBikeRides();
+    if (cityBikeLayer) { map.removeLayer(cityBikeLayer); cityBikeLayer = null; }
+    if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
+    if (!bikesOn || plannerSuspended) return;   // patrz refreshCarLayer
+    if (flowOnScreen()) {
+        flowBikeLayer = L.layerGroup(flowBikeMarkers(
+            lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
+        if (BIKE_RIDES_ALWAYS) showAllBikeRides(lastFlow.bike_places);
+        return;
+    }
+    loadCityBikes();
+    bikesTimer = setInterval(loadCityBikes, BIKES_REFRESH_MS);
+}
+
+function paintLayerButton(button, on) {
+    button.classList.toggle('active', on);
+    button.setAttribute('aria-pressed', String(on));
+}
+
+function setCarsOn(on) {
+    carsOn = on;
+    saveUiState({carsOn: on});
+    paintLayerButton(carsToggle, on);
+    refreshCarLayer();
+}
+
+function setBikesOn(on) {
+    bikesOn = on;
+    saveUiState({bikesOn: on});
+    paintLayerButton(bikesToggle, on);
+    refreshBikeLayer();
+    // Ten włącznik mówi też „mam konto w WRM" - zastąpił dawny checkbox pod
+    // wyszukiwarką, więc zmienia nie tylko mapę, ale i sam wynik.
+    replanForBikes();
+}
+
+if (carsToggle) {
+    carsToggle.addEventListener('click', () => setCarsOn(!carsOn));
+    paintLayerButton(carsToggle, carsOn);
+}
+
+if (bikesToggle) {
+    bikesToggle.addEventListener('click', () => setBikesOn(!bikesOn));
+    paintLayerButton(bikesToggle, bikesOn);
 }
 
 // Kadrowanie wyniku potrzebuje współrzędnych startu i celu, a te znamy
@@ -806,6 +976,10 @@ function clearFlow() {
     timetableTarget = null;
     renderTimeHeadline();
     setBaseDim(false);
+    // Zdjęta mapa = nie ma już pytania, na które odpowiadały tamte auta
+    // i rowery. Włączona warstwa wraca wtedy do miejskiego feedu.
+    refreshCarLayer();
+    refreshBikeLayer();
 }
 
 /** Skład korytarza danego kawałka: wszystkie linie jadące tymi samymi,
@@ -865,15 +1039,10 @@ function drawFlow(flow, refit) {
     // linią, na której leży.
     // Rowery pod autami i pod kropkami: stacja bywa dokładnie przy węźle, a
     // najpierw pod kursor ma trafić to, co opisuje całe miejsce.
-    if (flowBikeLayer) map.removeLayer(flowBikeLayer);
-    clearBikeRides();
-    flowBikeLayer = L.layerGroup(
-        flowBikeMarkers(flow.bike_places, flow.bike_places_live)).addTo(map);
-    if (BIKE_RIDES_ALWAYS) showAllBikeRides(flow.bike_places);
+    refreshBikeLayer();
     // Auta pod kropkami przesiadek: gdy jedno stoi dokładnie na węźle, kursor
     // ma trafić najpierw w kropkę - ona opisuje całe to miejsce.
-    if (flowCarLayer) map.removeLayer(flowCarLayer);
-    flowCarLayer = L.layerGroup(flowCarMarkers(flow.cars)).addTo(map);
+    refreshCarLayer();
     if (flowDotLayer) map.removeLayer(flowDotLayer);
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
@@ -1043,7 +1212,60 @@ function renderTimeHeadline() {
         event.stopPropagation();
         if (fastestLayer) hideFastest(); else showFastest();
     });
+    placeTimeHeadline();
 }
+
+// Odstęp paska od krawędzi okna i od tego, co może mu stanąć na drodze.
+const HEADLINE_GAP = 16;
+
+/** Dokąd z lewej sięga to, na czym paskowi stawać nie wolno: panel i pływające
+    przyciski - ale tylko te, które leżą na jego wysokości. Mierzone, a nie
+    wpisane liczbą: szerokość panelu zmienia suwak, a napis na przycisku trybu
+    zmienia jego szerokość; wpisana liczba rozjeżdżała się z każdą taką zmianą.
+    Schowany panel sam wyjeżdża poza ekran, więc przestaje być przeszkodą bez
+    osobnej reguły. */
+function headlineGuard(band) {
+    let guard = HEADLINE_GAP;
+    for (const el of [sidebar, $('sidebar-toggle'), $('mode-toggle')]) {
+        if (!el || el.hidden) continue;
+        const box = el.getBoundingClientRect();
+        if (box.bottom <= band.top || box.top >= band.bottom) continue;
+        guard = Math.max(guard, box.right + HEADLINE_GAP);
+    }
+    return guard;
+}
+
+/** Pasek stoi na środku OKNA - tam patrzy oko, a nie na środek wolnego
+    skrawka mapy. Gdy wyśrodkowany wszedłby na panel albo na przyciski,
+    odsuwa się w prawo dokładnie o tyle, o ile trzeba; gdy i wtedy brakuje mu
+    miejsca, zawija się na kolejne linijki (flex-wrap) zamiast wystawać poza
+    ekran. Idealny środek jest więc regułą, a nie obietnicą: przy wąskim oknie
+    granica wygrywa - ale dopiero wtedy. */
+function placeTimeHeadline() {
+    const el = $('time-headline');
+    if (!el || el.hidden) return;
+    // Na telefonie panel jest nakładką na całą szerokość, a pasek schodzi pod
+    // niego na sam dół - nie ma tam czego omijać i całe ustawianie oddaje się
+    // arkuszowi (patrz RWD w style.css).
+    if (!window.matchMedia('(min-width: 761px)').matches) {
+        el.style.maxWidth = '';
+        el.style.left = '';
+        return;
+    }
+    el.style.maxWidth = '';
+    const band = el.getBoundingClientRect();
+    const guard = headlineGuard(band);
+    const room = window.innerWidth - HEADLINE_GAP - guard;
+    el.style.maxWidth = room + 'px';
+    // Szerokość po przycięciu: zawinięty pasek jest węższy, więc znów może
+    // zmieścić się na środku.
+    const width = el.getBoundingClientRect().width;
+    el.style.left = Math.max(guard, (window.innerWidth - width) / 2) + 'px';
+}
+
+window.addEventListener('resize', placeTimeHeadline);
+// Panel zjeżdża z animacją, więc miejsce na pasek zmienia się dopiero po niej.
+sidebar.addEventListener('transitionend', placeTimeHeadline);
 
 // --- numery linii: jedna grupka na cały wspólny korytarz -------------------
 //
@@ -1518,10 +1740,12 @@ function renderFlowPick() {
         map.removeLayer(flowTooltip);
         flowTooltip = null;
     }
-    // Korytarz przejmuje okienko od kropki - inaczej po zejściu z kropki na
-    // linię w rogu wisiałaby dalej tablica odjazdów sprzed ruchu myszy.
+    // Okienko w rogu należy do TABLICY ODJAZDÓW i tylko do niej: „tu jesteś,
+    // stąd w 14 min u celu" mówi o punkcie pod kursorem, więc czyta się je
+    // tam, gdzie stoi kursor, a nie w drugim końcu ekranu. Kropka traci tu
+    // jednak prawo do okienka - inaczej spóźniona odpowiedź z jej tablicą
+    // wskoczyłaby w róg już po zejściu kursora na linię.
     timetableTarget = null;
-    showSidePanel(html);
 }
 
 function clearFlowHover() {
@@ -2713,7 +2937,7 @@ function detailHtml(journey) {
         </p>`;
 }
 
-/** Dlaczego na liście nie ma roweru, choć 🚲 jest odhaczone.
+/** Dlaczego na liście nie ma roweru, choć warstwa 🚲 jest włączona.
 
     Bez tego zera nie da się od siebie odróżnić: „policzone, rowerem nie
     dojedziesz tu w oknie mapy", „kanał operatora milczy" i „pytasz o inny
@@ -2909,7 +3133,7 @@ function queryParams() {
     // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
-    if (bikeToggle.checked) params.set('bikes', '1');
+    if (bikesOn) params.set('bikes', '1');
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
@@ -3066,24 +3290,16 @@ function loadPlan(token, refit) {
         });
 }
 
-// Przełącznik roweru miejskiego. Stan przeżywa odświeżenie strony razem
-// z resztą ustawień panelu (patrz saveUiState): kto jeździ WRM-em, ten jeździ
-// nim stale, a kto nie ma konta, ten nie chce tego odhaczać przy każdej wizycie.
-const bikeToggle = $('bikes');
-bikeToggle.checked = !!uiState.bikes;
-$('bike-toggle').classList.toggle('on', bikeToggle.checked);
-bikeToggle.addEventListener('change', () => {
-    $('bike-toggle').classList.toggle('on', bikeToggle.checked);
-    saveUiState({bikes: bikeToggle.checked});
-    // Zmiana odpowiedzi, nie wyglądu: gotowy wynik trzeba przeliczyć od nowa,
-    // bo rowerowych propozycji nie ma w ostatniej odpowiedzi. Tą samą drogą
-    // co suwaki w ⚙ (loadPlan bez kadrowania), a nie przez search() - relacja
-    // się nie zmieniła, więc kadr ma zostać na miejscu i nie ma po co znowu
-    // odgrywać dźwięku znalezienia trasy.
+/** Rower zmienia ODPOWIEDŹ, nie tylko wygląd mapy: rowerowych propozycji nie
+    ma w ostatniej odpowiedzi serwera, więc po przełączeniu warstwy trzeba je
+    doliczyć. Tą samą drogą co suwaki w ⚙ (bez kadrowania), a nie przez nowe
+    wyszukiwanie - relacja się nie zmieniła, więc kadr ma zostać na miejscu
+    i nie ma po co znowu odgrywać dźwięku znalezienia trasy. */
+function replanForBikes() {
     if (!lastFlow || !startInput.value || !endInput.value) return;
     loadPlan(requestToken, false)
         .catch(() => showError('Nie udało się połączyć z serwerem.'));
-});
+}
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
@@ -3377,8 +3593,13 @@ $('swap').addEventListener('click', () => {
     search();
 });
 
+// „teraz" to CHWILA, nie sama godzina: przy dacie zostawionej na innym dniu
+// sama godzina opisywałaby 17:40 w przyszły wtorek, a nie ten moment.
 $('time-now').addEventListener('click', () => {
-    $('time').value = new Date().toTimeString().slice(0, 5);
+    const now = new Date();
+    $('time').value = now.toTimeString().slice(0, 5);
+    $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+                    + `-${String(now.getDate()).padStart(2, '0')}`;
     if (startInput.value && endInput.value) search();
 });
 
@@ -3781,10 +4002,19 @@ bindDevFolds();
 // wyszukiwania odtwarza dokładnie to, co było widać, bez ponownego zapytania.
 
 function suspendPlanner() {
+    plannerSuspended = true;
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
-    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
-    if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
+    if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
+    // Punkty i wyróżnione słupki relacji schodzą razem z wachlarzem: same,
+    // bez linii między nimi, mówiłyby o wyszukiwaniu, którego nie widać.
+    updatePointMarker('start', null);
+    updatePointMarker('end', null);
+    restyle(sel.start, sel.end);
+    // Wachlarza nie ma, więc warstwy wracają do miejskiego feedu - włącznik
+    // zostaje tam, gdzie go zostawiono (patrz refreshCarLayer).
+    refreshCarLayer();
+    refreshBikeLayer();
     clearBikeRides();
     flowParts = [];
     flowHits = [];
@@ -3802,13 +4032,28 @@ function suspendPlanner() {
 }
 
 function resumePlanner() {
+    plannerSuspended = false;
+    updatePointMarker('start', sel.start);
+    updatePointMarker('end', sel.end);
+    restyle(sel.start, sel.end);
     if (lastFlow) drawFlow(lastFlow, false);
-    else renderTimeHeadline();
+    // Bez mapy nie ma czego zawężać - a rozkłady właśnie przestały o tym
+    // decydować (patrz vehiclesFilter). Auta i rowery wracają wtedy do
+    // miejskiego feedu, bo ich włącznik znów ma na czym stać.
+    else { renderTimeHeadline(); renderVehicles();
+           refreshCarLayer(); refreshBikeLayer(); }
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
 }
 
+// Pierwsze postawienie warstw aut i rowerów: zanim padnie jakiekolwiek
+// pytanie, pokazują po prostu całe miasto (patrz refreshCarLayer). Tutaj,
+// a nie przy samych przyciskach - stamtąd warstwy wachlarza jeszcze nie
+// istnieją.
+refreshCarLayer();
+refreshBikeLayer();
+
 window.plannerBridge = {
-    map, esc, fitTo, setView, setBaseDim,
+    map, esc, fitTo, setView, setBaseDim, renderVehicles,
     attachAutocomplete, suggestionsFor, suggestionHtml,
     // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
     // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
