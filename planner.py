@@ -9,6 +9,7 @@ na jego odjazd na przystanku startowym.
 from bisect import bisect_left, bisect_right
 from collections import deque
 from datetime import date, datetime, timedelta
+from math import sqrt
 
 import bikes
 import gtfs
@@ -826,9 +827,9 @@ def _round_path(coords):
 # ta sama liczba minut dawała raz pustą mapę, raz nieczytelny gąszcz.
 # Domyślna wartość to mediana gęstości dawnych map (okno 125%, 5-15 min) na
 # dziesięciu prawdziwych relacjach - pomiar w FLOW_MAP_NOTES.md, 2026-09-13.
-DEFAULT_MAP_DENSITY = 0.6    # km różnych korytarzy na km² kadru
-MIN_MAP_DENSITY = 0.1
-MAX_MAP_DENSITY = 3.0        # sufit suwaka pod zębatką - pilnowany tutaj
+DEFAULT_MAP_DENSITY = 3.5    # km różnych korytarzy na km boku kadru (km/√km²)
+MIN_MAP_DENSITY = 0.5
+MAX_MAP_DENSITY = 15.0       # sufit suwaka pod zębatką - pilnowany tutaj
 
 # "Pokaż więcej" dokłada po jednej wyjściowej gęstości: x2, x3, x4.
 MAX_MAP_MORE = 3
@@ -847,7 +848,7 @@ MIN_FRAME_SIDE_KM = 1.0
 # Ile aut car-sharingu mapa pokazuje (punkt 15, patrz traficar.map_skyband).
 # Auta, których nic nie bije, są na mapie i ponad tę liczbę - a bywa ich
 # sporo: na dziesięciu relacjach (2026-09-13, 20:20) od 2 do 13, mediana 6-7.
-DEFAULT_MAP_CARS = 5
+DEFAULT_MAP_CARS = 3
 MIN_MAP_CARS = 1
 MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
@@ -989,8 +990,13 @@ def _corridor_km(day, kept, ranges):
 
 
 def _map_density(corridor_km, frame_km2):
-    """Gęstość z punktu 2: różne korytarze w kadrze na jego powierzchnię."""
-    return corridor_km / frame_km2
+    """Gęstość z punktu 2, taka jak na ekranie: mapa wpasowuje każdy kadr
+    w to samo okno, a kreska ma stałą grubość w pikselach - tłok to więc
+    długość korytarzy przez BOK kadru, nie przez jego powierzchnię. Przez
+    powierzchnię kadr 30 razy większy dostawał 30 razy mniej, choć na
+    ekranie jest ciaśniej tylko √30 ≈ 5,5 raza (FLOW_MAP_NOTES.md,
+    2026-09-13)."""
+    return corridor_km / sqrt(frame_km2)
 
 
 def _drawn_network(day, dep_sec, deadline, best_arr, source_stops, target_stops,

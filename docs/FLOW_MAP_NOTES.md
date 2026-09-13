@@ -1746,11 +1746,17 @@ dnia przesuwała im próg z powodów niezwiązanych z tym, co sprawdzają.
 
 ### Otwarte
 
-1. **Miara**: km/km² (jak w kontrakcie) czy km/√km² (jak widać na ekranie).
-2. **Domyślna gęstość**: 0,6 km/km² albo 3,5 km/√km², czyli mediana dawnych map.
-3. **Domyślna liczba aut**: 5.
-4. **Czy przy suficie skanu przycisk „Pokaż więcej" znika.** Dziś znika, tak jak
-   dawny „+X min".
+1. ~~**Miara**: km/km² (jak w kontrakcie) czy km/√km² (jak widać na ekranie).~~
+   Rozstrzygnięte 2026-09-13: **km/√km²**. Użytkownik wybrał ją po zrzutach;
+   punkt 2 kontraktu przepisany na jego polecenie. Uzasadnienie: mapa wpasowuje
+   każdy kadr w to samo okno, a kreska ma stałą grubość w pikselach, więc tłok
+   na ekranie to długość przez bok kadru. Suwak: 0,5–15 co 0,5 (x4 domyślnej
+   to 14).
+2. ~~**Domyślna gęstość**: 0,6 km/km² albo 3,5 km/√km², czyli mediana dawnych map.~~
+   Rozstrzygnięte 2026-09-13: **3,5**.
+3. ~~**Domyślna liczba aut**: 5.~~ Rozstrzygnięte 2026-09-13: **3**.
+4. ~~**Czy przy suficie skanu przycisk „Pokaż więcej" znika.**~~ Rozstrzygnięte
+   2026-09-13: **tak, znika** (bez zmian).
 5. **Przy długiej trasie panel odjazdów w prawym górnym rogu zasłania koniec
    paska** razem z przyciskiem. Było tak już przy „+X min" (zrzut Kozanowa
    „przed"). Dłuższy napis to pogarsza. Nie ruszane.

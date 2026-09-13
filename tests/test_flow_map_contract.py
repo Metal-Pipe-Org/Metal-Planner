@@ -135,10 +135,17 @@ def test_the_frame_is_never_narrower_than_a_kilometre():
     assert planner._frame_km2(day, [], ["S", "E"]) == planner.MIN_FRAME_SIDE_KM ** 2
 
 
+def test_density_is_measured_per_side_of_the_frame_as_on_screen():
+    """Każdy kadr wpasowany jest w to samo okno, a kreska ma stałą grubość:
+    kadr dwa razy szerszy (cztery razy większy) mieści na ekranie dwa razy
+    więcej korytarza, nie cztery."""
+    assert planner._map_density(2.0, 1.0) == planner._map_density(4.0, 4.0)
+
+
 def _jeden_korytarz_i_objazd_day():
     """Trzy linie jednym korytarzem S -> E (w celu o 600, 900 i 1400) i jedna
-    innym, przez X (w celu o 1000). Sam korytarz S-E ma gęstość ~1,13 km/km²
-    w swoim kadrze, z objazdem ~4,5."""
+    innym, przez X (w celu o 1000). Sam korytarz S-E ma gęstość ~1,5 km/√km²
+    w swoim kadrze, z objazdem ~6,0."""
     return make_day([
         {"trip_id": "fast", "label": "Tramwaj 1",
          "stops": [("S", 0, 0), ("E", 600, 600)]},
@@ -161,7 +168,7 @@ def test_the_threshold_stops_at_a_new_corridor_and_leaves_no_holes(install_day):
     naprawdę inny korytarz. Autobus 4 nic by nie dołożył, a i tak go nie ma:
     jest gorszy od czegoś, co się nie zmieściło, a jeden próg nie ma dziur."""
     install_day(_jeden_korytarz_i_objazd_day())
-    wynik = planner.plan_flow("Start", "Cel", when=WHEN, density=1.2)
+    wynik = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6)
     assert "error" not in wynik
     assert _linie(wynik) == ["1", "2"]
     assert wynik["deadline_sec"] == 960          # ostatnia minuta przed 1000
@@ -174,9 +181,9 @@ def test_show_more_adds_whole_starting_densities(install_day):
     przy x4 mieści się już wszystko do sufitu skanu. Więcej niż trzy
     kliknięcia serwer nie przyjmuje."""
     install_day(_jeden_korytarz_i_objazd_day())
-    x3 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.2, more=2)
-    x4 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.2, more=3)
-    ponad = planner.plan_flow("Start", "Cel", when=WHEN, density=1.2, more=10)
+    x3 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=2)
+    x4 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=3)
+    ponad = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=10)
 
     assert _linie(x3) == ["1", "2"]
     assert _linie(x4) == ["1", "2", "4", "7"]

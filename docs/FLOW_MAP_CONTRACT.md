@@ -31,7 +31,10 @@ stoi próg.
 **Próg wynika z czytelności, nie z minut.** Pokazanie za dużo to to samo, co
 nie pokazanie nic. Próg jakości przesuwa się więc tak, żeby narysowana sieć
 miała docelową gęstość: ile RÓŻNYCH korytarzy leży w kadrze, w którym mapa
-pokazuje relację, w stosunku do jego powierzchni. Linie leżące na sobie
+pokazuje relację, w stosunku do jego boku (pierwiastka z powierzchni). Liczy
+się gęstość na ekranie, a nie w mieście: każdy kadr jest wpasowany w to samo
+okno, a kreska ma zawsze tę samą grubość, więc kadr dziesięć razy szerszy
+jest na ekranie ciaśniejszy dziesięć razy, nie sto. Linie leżące na sobie
 (punkt 7) liczą się raz, bo w oku są jedną kreską — dwadzieścia numerów
 jednym korytarzem nie zajmuje miejsca innego korytarza. Trasa przez całe
 miasto ma większy kadr, więc mieści więcej niż trasa na kilometr. Docelowa
