@@ -403,7 +403,7 @@ map.on('click', e => {
 // ------------------------------------------- moja lokalizacja jako start ----
 
 // Pozycja z przeglądarki to dla nas zwykły punkt mapy, nie przystanek -
-// backend sam znajdzie wokół niego słupki (zasięg z panelu ⚙).
+// backend dokłada go jako słupek i sam liczy dojście na okoliczne przystanki.
 const locateButton = $('locate');
 const locateMsg = $('locate-msg');
 
@@ -602,6 +602,15 @@ const DOT_DEFAULTS = {
     start: false,      // wyróżnienie przystanku startowego
     tipCursor: true,   // dymek przy kursorze
     tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
+    // Godziny SAMEGO przejazdu rowerem - domyślnie zgaszone. Godzina "jesteś
+    // przy rowerze" pochodzi z rozkładu i jest pokazywana zawsze; ta druga
+    // jest jedyną liczbą na tej mapie, której w żadnym rozkładzie nie ma.
+    // Odległość obok mówi to samo, nie udając odczytanej.
+    bikeTimes: false,
+    // Nazwa przystanku, który przejazd otwiera, dopisana przy odległości -
+    // też domyślnie zgaszona. Powód sensowności przejazdu jest ważny dla
+    // ALGORYTMU; przy kilkunastu etykietkach naraz jest głównie tekstem.
+    bikeOpens: false,
 };
 
 const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
@@ -756,11 +765,17 @@ let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania be
 let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
 let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
 let flowDotLayer = null;    // węzły przesiadkowe wachlarza (patrz flowStopDots)
+let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
+let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
+let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
+    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
+    if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
+    clearBikeRides();
     hoveredStopDot = null;
     flowParts = [];
     flowHits = [];
@@ -827,6 +842,17 @@ function drawFlow(flow, refit) {
     flowLayer = L.layerGroup([...faint, ...casings, ...bright]).addTo(map);
     // Osobna warstwa, dodana PO korytarzach: kropka ma łapać kursor przed
     // linią, na której leży.
+    // Rowery pod autami i pod kropkami: stacja bywa dokładnie przy węźle, a
+    // najpierw pod kursor ma trafić to, co opisuje całe miejsce.
+    if (flowBikeLayer) map.removeLayer(flowBikeLayer);
+    clearBikeRides();
+    flowBikeLayer = L.layerGroup(
+        flowBikeMarkers(flow.bike_places, flow.bike_places_live)).addTo(map);
+    if (BIKE_RIDES_ALWAYS) showAllBikeRides(flow.bike_places);
+    // Auta pod kropkami przesiadek: gdy jedno stoi dokładnie na węźle, kursor
+    // ma trafić najpierw w kropkę - ona opisuje całe to miejsce.
+    if (flowCarLayer) map.removeLayer(flowCarLayer);
+    flowCarLayer = L.layerGroup(flowCarMarkers(flow.cars)).addTo(map);
     if (flowDotLayer) map.removeLayer(flowDotLayer);
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
@@ -2038,6 +2064,211 @@ function nodePoint(node) {
         : [node.lat, node.lon];
 }
 
+
+// Auto car-sharingu w zasięgu mapy. Fiolet, bo tym kolorem te auta jeżdżą
+// i po nim się je poznaje na ulicy (ten sam powód, co --car w style.css).
+const CAR_STYLE = {radius: 5, weight: 1, color: '#6a1b9a',
+                   fillColor: '#ab47bc', fillOpacity: 0.9};
+
+// Auto, przy którym jest coś do wzięcia w programie „Ogarniam", nosi złotą
+// obwódkę - inaczej trzeba by najeżdżać po kolei na wszystkie, żeby znaleźć
+// to jedno, za które Traficar płaci.
+const CAR_OGARNIAM_STYLE = {radius: 6, weight: 2.5, color: '#f9a825'};
+
+/** Znaczniki wolnych aut (patrz traficar.map_cars).
+
+    Auto jest MIEJSCEM, do którego mapa dowozi, a nie kursem: nie ma linii,
+    nie ma jasności, nie należy do wachlarza (kontrakt p.15). Cała treść
+    siedzi w dymku, bo o aucie mówi się to samo, co o przystanku - o której
+    się przy nim jest - plus to, czego o nim nie wiemy: ile stąd do celu
+    w linii prostej i ani słowa o czasie jazdy. */
+function flowCarMarkers(cars) {
+    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], {
+        ...CAR_STYLE,
+        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
+    }).bindTooltip(carTooltipHtml(car), {
+        direction: 'top', offset: [0, -4], opacity: 1,
+    }));
+}
+
+function carTooltipHtml(car) {
+    return [
+        `<b>${esc(car.model)} · ${esc(car.plate)}</b>`,
+        `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
+        `pieszo z „${esc(car.from)}”`,
+        `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
+        `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
+        ogarniamText(car.ogarniam),
+    ].join('<br>');
+}
+
+/** Program „Ogarniam" (w feedzie: `discounts`) - co przy tym aucie jest do
+    wzięcia i za ile. Zdanie pada ZAWSZE, także gdy nie ma nic: brak wiersza
+    znaczyłby naraz „nic tu nie ma" i „nie wiadomo", a to dwie różne rzeczy. */
+function ogarniamText(tasks) {
+    if (!tasks || !tasks.length) return 'Ogarniam: nic do wzięcia';
+    return 'Ogarniam: ' + tasks
+        .map(task => `${esc(task.co.toLowerCase())} ${task.ile} zł`)
+        .join(' · ');
+}
+
+function fmtDist(metres) {
+    return metres < 1000
+        ? `${metres} m`
+        : `${(metres / 1000).toFixed(1).replace('.', ',')} km`;
+}
+
+// Rower miejski na mapie. Pomarańcz jest ten sam, co plakietka etapu
+// rowerowego na wybranej trasie - „to jest rower" ma znaczyć jedno, niezależnie
+// czy patrzy się na kropkę stacji, czy na kreskę przejazdu.
+const BIKE_STYLE = {weight: 1, color: '#e65100', fillColor: '#ffb74d',
+                    fillOpacity: 0.9};
+// Rower stojący luzem, poza stojakiem: ta sama rodzina koloru, ale pusty
+// środek - to jeden rower, a nie miejsce, w którym stoi ich kilka.
+const BIKE_LOOSE_STYLE = {radius: 4, weight: 2, color: '#e65100',
+                          fillColor: '#fff', fillOpacity: 1};
+// Pytanie o inny dzień: stacja stoi tam zawsze, ale ile w niej będzie
+// rowerów - nie wiadomo. Szarość mówi to, zanim się przeczyta dymek.
+const BIKE_UNKNOWN_STYLE = {radius: 4, weight: 1.5, color: '#9e9e9e',
+                            fillColor: '#fff', fillOpacity: 0.35};
+// Drugi koniec przejazdu. Blada i bez własnego życia: pojawia się razem ze
+// strzałką, pod kursorem, bo opisuje przejazd, a nie miejsce, z którego coś
+// się bierze. Stacja, na której da się WSIĄŚĆ na rower, ma własną kropkę.
+const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
+                           fillColor: '#ffe0b2', fillOpacity: 0.85};
+// Kreska przejazdu kropkowana tak samo, jak etap rowerowy wybranej trasy.
+const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
+                         dashArray: '1, 6', interactive: false};
+
+// Kreski przejazdów pokazują się WYŁĄCZNIE pod kursorem: jest ich kilkaset
+// i narysowane naraz zasłaniają mapę, o którą się właśnie pyta. Stała, a nie
+// przełącznik - to nie jest decyzja, którą ma podejmować pasażer.
+const BIKE_RIDES_ALWAYS = false;
+
+/** Kropki rowerów w zasięgu mapy (patrz bikes.map_places).
+
+    Kropkę dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ NA ROWER: mapa
+    do niego dowozi i prowadzi z niego choć jeden sensowny przejazd. Drugi
+    koniec przejazdu pokazuje się razem ze strzałką, pod kursorem - a jeśli
+    sam jest miejscem do wsiadania, stoi na mapie z własnego tytułu.
+
+    Sam przejazd nie jest narysowany na stałe: dwie kropki mówią to samo, co
+    kreska między nimi, a kresek jest kilkaset. Pojawiają się pod kursorem. */
+function flowBikeMarkers(places, live) {
+    return (places || []).map(place => {
+        const dot = L.circleMarker([place.lat, place.lon],
+                                   bikeStyle(place, live))
+            .bindTooltip(bikeTooltipHtml(place, live),
+                         {direction: 'top', offset: [0, -4], opacity: 1});
+        dot.on('mouseover', () => showBikeRides(place));
+        dot.on('mouseout', () => {
+            if (!BIKE_RIDES_ALWAYS) clearBikeRides();
+            else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
+        });
+        return dot;
+    });
+}
+
+function bikeStyle(place, live) {
+    if (!live) return BIKE_UNKNOWN_STYLE;
+    if (place.loose) return BIKE_LOOSE_STYLE;
+    // Wielkość niesie liczbę rowerów, więc pełna i pusta stacja różnią się
+    // od siebie bez czytania. Sufit, bo powyżej kilkunastu "więcej" już nic
+    // nie zmienia w decyzji, a kropka zaczyna zasłaniać mapę.
+    return {...BIKE_STYLE, radius: 4 + Math.min(place.bikes, 16) * 0.4};
+}
+
+function bikeTooltipHtml(place, live) {
+    const rows = [`<b>${esc(place.name || 'Rower luzem')}</b>`];
+    rows.push(`Jesteś przy nim ${fmtClock(place.at)} — ` +
+              `${fmtMins(place.walk_sec)} pieszo z „${esc(place.from)}”`);
+    rows.push(live ? bikeCountText(place)
+                   : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
+                     'jest z tej chwili, a pytasz o inny dzień');
+    return rows.join('<br>');
+}
+
+function bikeCountText(place) {
+    if (place.loose) return place.electric ? 'Jeden rower, elektryczny'
+                                           : 'Jeden rower';
+    const bikes = `${place.bikes} ` +
+        plural(place.bikes, 'rower', 'rowery', 'rowerów');
+    return place.electric
+        ? `${bikes} (w tym ${place.electric} ` +
+          plural(place.electric, 'elektryczny', 'elektryczne', 'elektrycznych') + ')'
+        : bikes;
+}
+
+/** Strzałki przejazdów z jednej kropki - wszystkie, jakie z niej mają sens.
+
+    Z etykietką przy każdym drugim końcu, bo to jest cała odpowiedź na „po co
+    tu ten rower": o której się tam jest i jak daleko to stąd. */
+function showBikeRides(place) {
+    clearBikeRides();
+    flowBikeRideLayer = L.layerGroup(bikeRideLayers(place, true)).addTo(map);
+}
+
+/** Wszystkie przejazdy wszystkich kropek naraz (przełącznik pod zębatką).
+
+    Bez etykietek: kilkaset naraz to nie jest mapa, tylko ściana tekstu.
+    Etykietki wracają, gdy kursor wskaże konkretną kropkę. */
+function showAllBikeRides(places) {
+    clearBikeRides();
+    const layers = [];
+    for (const place of places || []) layers.push(...bikeRideLayers(place, false));
+    flowBikeRideLayer = L.layerGroup(layers).addTo(map);
+}
+
+function clearBikeRides() {
+    if (flowBikeRideLayer) map.removeLayer(flowBikeRideLayer);
+    flowBikeRideLayer = null;
+}
+
+function bikeRideLayers(place, labels) {
+    const layers = [];
+    for (const ride of place.rides) {
+        layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
+                               BIKE_RIDE_STYLE));
+        if (!labels) continue;
+        layers.push(L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
+            .bindTooltip(bikeRideTooltipHtml(ride),
+                         {direction: 'top', offset: [0, -4], opacity: 1}));
+        // Etykietka wisi na własnym, niewidzialnym uchwycie przezroczystym
+        // dla kursora: leży dokładnie na kropce wyżej, a to ona ma łapać
+        // najechanie.
+        layers.push(L.circleMarker([ride.lat, ride.lon],
+                                   {...BIKE_TARGET_STYLE, opacity: 0,
+                                    fillOpacity: 0, interactive: false})
+            .bindTooltip(bikeRideLabel(ride),
+                         {permanent: true, direction: 'right', offset: [6, 0],
+                          className: 'bike-ride-label', opacity: 1}));
+    }
+    return layers;
+}
+
+/** Etykietka przy drugim końcu. Domyślnie SAMA odległość: godzina przejazdu
+    jest policzona, nie odczytana, a nazwa otwieranego przystanku to powód,
+    dla którego ten przejazd w ogóle tu jest - ważny dla algorytmu, nie dla
+    patrzącego. Oba dopiski wracają przełącznikami pod zębatką. */
+function bikeRideLabel(ride) {
+    const parts = [];
+    if (dotOpts.bikeTimes) parts.push(fmtClock(ride.at));
+    parts.push(fmtDist(ride.m));
+    if (dotOpts.bikeOpens) parts.push(`→ ${esc(ride.opens)}`);
+    return parts.join(' · ');
+}
+
+function bikeRideTooltipHtml(ride) {
+    const rows = [`<b>${esc(ride.name)}</b>`];
+    rows.push(dotOpts.bikeTimes
+        ? `Stąd ${fmtDist(ride.m)} w linii prostej — ${fmtMins(ride.sec)} ` +
+          `z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
+        : `Stąd ${fmtDist(ride.m)} w linii prostej`);
+    rows.push(`${ride.bikes} ` + plural(ride.bikes, 'rower', 'rowery', 'rowerów') +
+              ` na miejscu, ${ride.docks} wolnych stojaków`);
+    return rows.join('<br>');
+}
+
 function legLayers(legs, {preview}) {
     const casings = [], lines = [], marks = [];
     const rideWeight = preview ? 5 : 7;
@@ -2642,7 +2873,6 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
-        range_m: $('range').value,
         extra_pct: $('extra').value,
         extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
         extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
@@ -3142,7 +3372,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['range', 'extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
+const DEV_SLIDER_IDS = ['extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
 
 function loadDevPrefs() {
     try {
@@ -3194,7 +3424,6 @@ function liveSlider(inputId, valueId, dropsHorizon) {
     });
 }
 applyStoredDevPrefs();
-liveSlider('range', 'range-value');
 liveSlider('extra', 'extra-value', true);
 liveSlider('extra-floor', 'extra-floor-value', true);
 liveSlider('extra-cap', 'extra-cap-value', true);
@@ -3427,6 +3656,8 @@ const DOT_TOGGLES = {
     'dot-start': 'start',
     'tip-cursor': 'tipCursor',
     'tip-panel': 'tipPanel',
+    'bike-times': 'bikeTimes',
+    'bike-opens': 'bikeOpens',
 };
 
 function applyDotOpts() {
@@ -3489,7 +3720,7 @@ bindDotOpts();
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
-    'fold-time', 'fold-window', 'fold-transfer', 'fold-range',
+    'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-dots', 'look-section', 'fold-version',
 ];
 
@@ -3518,6 +3749,9 @@ bindDevFolds();
 function suspendPlanner() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
+    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
+    if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
+    clearBikeRides();
     flowParts = [];
     flowHits = [];
     clearFlowHover();

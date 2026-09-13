@@ -7,7 +7,7 @@ import gtfs
 BASE_LAT, BASE_LON = 51.11, 17.03   # okolice Wrocławia - sam punkt bez znaczenia
 
 # Odstęp między kolejnymi słupkami syntetycznego dnia: ~1,5 km, czyli DALEKO
-# poza każdy promień marszu (gtfs.WALK_MAX_M, gtfs.WALK_ACCESS_M). Kiedyś było
+# poza promień marszu (gtfs.WALK_M). Kiedyś było
 # tu 0.001 (~157 m) i współrzędne faktycznie nie miały znaczenia, bo o tym,
 # co jest pieszo obok czego, decydowała wyłącznie ręcznie podana relacja
 # `siblings`. Od kiedy dojście z krańca relacji liczy się z ODLEGŁOŚCI
