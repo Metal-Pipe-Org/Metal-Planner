@@ -226,14 +226,42 @@ body.panel-hidden #sidebar {
 
 .app-bar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    flex-direction: column;
+    gap: 8px;
     padding: 10px 12px;
     background: var(--surface);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     flex: 0 0 auto;
+}
+
+.app-bar-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+/* Warstwy mapy w jednym rzędzie, pod nazwą aplikacji: to jedyne przyciski,
+   które zmieniają TREŚĆ mapy, więc trzymają się razem i wyglądają tak samo -
+   podpisane, bo sama ikona nie mówi, co się włącza. */
+.layer-bar {
+    display: flex;
+    gap: 6px;
+}
+
+.layer-button {
+    width: auto;
+    flex: 1 1 0;
+    gap: 6px;
+    padding: 0 10px;
+    height: 32px;
+    font-size: 14px;
+}
+
+.layer-button span {
+    font-size: 12.5px;
+    font-weight: 600;
 }
 
 .brand h1 {
@@ -616,21 +644,6 @@ body.panel-hidden #sidebar {
 /* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
    a nie w panelu deweloperskim ⚙, bo to wybór PASAŻERA (mam konto w WRM
    albo nie), a nie strojenie algorytmu. */
-.bike-toggle {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin: 8px 0 0;
-    font-size: 13px;
-    color: var(--ink-soft);
-    cursor: pointer;
-    user-select: none;
-}
-
-.bike-toggle input { accent-color: var(--bike); margin: 0; }
-
-.bike-toggle.on { color: var(--bike); font-weight: 600; }
-
 /* Wyjaśnienie „dlaczego nie ma tu roweru" pod listą propozycji. Kartka jak
    pozostałe komunikaty, z paskiem w kolorze warstwy - żeby od razu było
    widać, czego dotyczy (patrz bikeNoteHtml w app.js). */
@@ -1080,30 +1093,21 @@ body.panel-hidden #sidebar {
    w górnym rzędzie, nad panelem wyszukiwania (z lewej) i pod panelem
    deweloperskim (z prawej), żeby nie wchodzić żadnemu w drogę.
 
-   Wyśrodkowany, ale NIE przez `left: 50%` - środek okna leży o pół panelu za
-   daleko w lewo i pasek wjeżdżał nim na panel, a od kiedy przełącznik trybu
-   jest podpisany („◷ Rozkłady", ~105 px zamiast kwadraciku), także na
-   pływające przyciski. Zamiast tego dostaje wycinek ekranu: od miejsca, w
-   którym kończą się przyciski, do prawej krawędzi - a w nim `width:
-   fit-content` z automatycznymi marginesami stawia go pośrodku. To ta sama
-   sztuczka, co `margin: 0 auto` w zwykłym przepływie, tyle że dla elementu
-   position: fixed z podanym `left` i `right`.
-
-   Dlaczego wycinek, a nie samo liczenie środka mapy: pasek bywa szeroki na
-   pół ekranu i przy węższym oknie nie zmieściłby się wyśrodkowany, tylko
-   wystawałby lewą połową pod przyciski. Tak zamiast tego przesuwa się w
-   prawo, a gdy i to nie starcza - zawija się na dwie linijki (flex-wrap),
-   zamiast wylewać tekst poza własne tło. */
+   Środek jest środkiem OKNA, a nie wolnego skrawka mapy - i dlatego liczy go
+   skrypt (placeTimeHeadline w app.js), a nie arkusz: żeby postawić pasek na
+   środku okna i JEDNOCZEŚNIE nie wpuścić go na panel ani na pływające
+   przyciski, trzeba znać jego szerokość, a tej CSS nie umie użyć w
+   obliczeniach. Arkusz daje więc sam wygląd i zawijanie (flex-wrap), a `left`
+   i `max-width` przychodzą stąd zmierzone. Na telefonie pasek zjeżdża pod
+   panel na sam dół i ustawia się w całości tutaj (patrz RWD). */
 .time-headline {
     position: fixed;
     top: 16px;
-    /* Za pływającymi przyciskami: ich prawa krawędź + odstęp. Zależy od
-       szerokości podpisu na #mode-toggle - zmiana napisu to zmiana tej
-       liczby. */
-    left: calc(var(--sidebar-w) + 190px);
+    left: 16px;
+    /* Nie po to, żeby wyśrodkować (od tego jest `left` ze skryptu), tylko
+       żeby pasek nie wylał się poza prawą krawędź, zanim zdąży się zawinąć. */
     right: 16px;
     width: fit-content;
-    margin-inline: auto;
     transition: left 0.25s ease;
     z-index: 900;
     display: flex;
@@ -1167,10 +1171,6 @@ body.panel-hidden #sidebar {
 .headline-more:hover { background: var(--ink); color: #fff; }
 .headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
-/* Schowany panel = przyciski przy lewej krawędzi okna, więc wycinek zaczyna
-   się odpowiednio bliżej. */
-body.panel-hidden .time-headline { left: 180px; }
-
 @media (max-width: 760px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
        pod niego i zwęża się do samych liczb. Odsunięty o tyle co zakładki
@@ -1178,12 +1178,16 @@ body.panel-hidden .time-headline { left: 180px; }
        bez tego pasek chował się pod zakładkami na telefonach z home
        indicatorem (np. w zainstalowanej aplikacji). Nie ma już nad sobą
        przycisków, więc wycinek nie musi ich omijać - liczy się tylko to,
-       żeby pasek nie leżał na panelu. */
+       żeby pasek nie leżał na panelu. Środek liczy tu arkusz, a nie skrypt
+       (patrz placeTimeHeadline): wycinek idzie od krawędzi do krawędzi, więc
+       jego środek JEST środkiem okna. */
     .time-headline {
         top: auto;
         bottom: calc(64px + env(safe-area-inset-bottom, 0px));
         font-size: 12px;
         left: var(--sidebar-w);
+        right: 16px;
+        margin-inline: auto;
     }
     body.panel-hidden .time-headline { left: 16px; }
 }
@@ -1778,8 +1782,14 @@ body.mode-timetable .time-headline { display: none; }
 
 /* Wiersz podpowiedzi ma od razu mówić, co to jest: plakietka w kolorze
    pojazdu = linia, znaczek słupka = przystanek. Bez tego jedno pole na dwie
-   rzeczy byłoby zgadywanką. */
-.ac-item {
+   rzeczy byłoby zgadywanką.
+
+   TYLKO w rozkładach, stąd zawężenie do ich listy: wiersz wyszukiwarki to nie
+   kafelki obok siebie, tylko jedna nazwa z podświetlonym trafieniem. Reguła
+   bez zawężenia robiła z „DWORZEC AUTOBUSOWY" dwa elementy siatki - osobno
+   pogrubione „DWO" i osobno „RZEC AUTOBUSOWY" - a odstęp między nimi czytało
+   się jako spację w środku nazwy (zgłoszone 2026-09-11). */
+#tt-query-list .ac-item {
     display: flex;
     align-items: center;
     gap: 8px;

@@ -215,6 +215,18 @@ window.timetableMode = {
         return true;
     },
 
+    /** Linie, o których mówi to, co stoi teraz na ekranie - do nich zawęża
+        się warstwa żywych pojazdów (patrz vehiclesFilter w app.js). Rozkład
+        linii to ta jedna linia w OBU kierunkach: pojazd w danych nie mówi,
+        dokąd jedzie, a linia na ekranie jest jedna. Tablica przystanku -
+        zaznaczone linie tablicy, czyli dokładnie to, co widać na liście.
+        null = rozkłady są zamknięte, warstwa rządzi się mapą. */
+    vehicleLines() {
+        if (!active() || !data) return null;
+        if (kind === 'line') return new Set([`${data.mode} ${data.num}`]);
+        return new Set([...picked].map(key => key.replace('|', ' ')));
+    },
+
     /** Czy tę linię da się w ogóle otworzyć. Wyszukiwarka pyta PRZED
         narysowaniem przycisku "trasa": przycisk, który prowadzi do "nie znam
         takiej linii", jest gorszy niż brak przycisku. */
@@ -416,14 +428,16 @@ function load(forced) {
 
 queryInput.addEventListener('input', syncField);
 if (dateInput) dateInput.addEventListener('change', () => { if (data) load(kind); });
-$('tt-today').addEventListener('click', () => {
-    dateInput.value = isoToday();
-    if (data) load(kind);
-});
 if (timeInput) timeInput.addEventListener('input', retime);
+// „teraz" to CHWILA, więc wraca też na dzisiejszy dzień - sama godzina przy
+// dacie zostawionej na innym dniu opisywałaby tamtą dobę. Zmiana dnia to nowy
+// rozkład; sama godzina tylko przesuwa tablicę (patrz retime).
 $('tt-now').addEventListener('click', () => {
+    const otherDay = dateInput.value !== isoToday();
+    dateInput.value = isoToday();
     timeInput.value = isoNow();
-    retime();
+    if (otherDay && data) load(kind);
+    else retime();
 });
 
 /** Zmiana godziny nie odpytuje serwera - dobę mamy w całości, więc tablica
@@ -445,6 +459,10 @@ clearButton.addEventListener('click', () => {
 
 function draw(refit) {
     if (!active()) return;
+    // Zmiana tego, co na mapie, zmienia też to, które żywe pojazdy jej
+    // dotyczą (patrz vehicleLines niżej). Przy zgaszonej warstwie ◉ to nic
+    // nie kosztuje.
+    B.renderVehicles();
     if (!data) { clearMap(); return; }
     if (kind === 'line') drawLine(refit);
     else drawBoard(refit);

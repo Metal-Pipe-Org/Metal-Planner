@@ -418,6 +418,29 @@ def test_the_button_stretches_the_map_range_up_to_the_ceiling(front):
 
 # ------------------------------------------------- pojazdy na żywo -
 
+def test_in_timetable_mode_the_screen_decides_which_vehicles_show(front):
+    """W rozkładach warstwa idzie za tym, co widać: otwarta linia albo
+    zaznaczone linie tablicy przystanku, a nie za mapą przepływów spod
+    spodu. Po wyjściu z rozkładów decyduje znów mapa."""
+    _check(front, "pojazdy_w_rozkladach_ida_za_ekranem")
+
+
+def test_entering_timetables_clears_the_whole_search_from_the_map(front):
+    """Zgłoszone 2026-09-11 (#111): po wejściu w rozkłady znikał wachlarz, ale
+    kropki węzłów przesiadkowych i zieleń/czerwień startu z celem zostawały -
+    mapa mówiła wtedy o wyszukiwaniu, którego na ekranie nie ma. Wyjście
+    przywraca jedno i drugie."""
+    _check(front, "rozklady_sprzataja_slady_wyszukiwania")
+
+
+def test_the_time_bar_is_centred_on_the_window(front):
+    """Zgłoszone 2026-09-11 (#115): pasek był wyśrodkowany w skrawku mapy obok
+    panelu, więc na ekranie stał nie na środku. Teraz środek jest środkiem
+    OKNA, a granica (panel, pływające przyciski) odsuwa go w prawo dopiero
+    wtedy, gdy naprawdę nie ma miejsca."""
+    _check(front, "pasek_czasu_stoi_na_srodku_okna")
+
+
 def test_live_vehicles_are_narrowed_to_the_drawn_lines(front):
     """Warstwa żywych pojazdów (◉) idzie za MAPĄ: przy narysowanym wachlarzu
     pokazuje wyłącznie linie, które na nim są - pojazd linii, której mapa nie

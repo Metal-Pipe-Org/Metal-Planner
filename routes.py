@@ -4,10 +4,12 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request
 
+import bikes
 import gtfs
 import naming
 import pkp
 import timetables
+import traficar
 import vehicles
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
                      stop_timetable)
@@ -186,14 +188,38 @@ def init_routes(app):
     @app.route("/api/vehicles")
     def api_vehicles():
         """Żywe pozycje autobusów/tramwajów (mpk.wroc.pl/bus_position, patrz
-        vehicles.py) - warstwa włączana przyciskiem ◉ w nagłówku, zamiennie
-        ze słupkami."""
+        vehicles.py) - warstwa włączana przyciskiem ◉ w pasku warstw.
+
+        Odpowiedź niesie same pozycje: front zawęża je do linii narysowanych na
+        mapie i na tym koniec. Odstawione dopisywanie rozkładu kursu, którym
+        dany pojazd jedzie, czeka zakomentowane w vehicles.py.
+        """
         try:
             return jsonify({"vehicles": vehicles.get_vehicles()})
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
         except (OSError, ValueError) as e:
             return jsonify({"error": f"Nie udało się pobrać pozycji pojazdów: {e}"}), 503
+
+    @app.route("/api/cars")
+    def api_cars():
+        """Wszystkie wolne auta Traficara we Wrocławiu - warstwa 🚗 włączana
+        w pasku warstw, gdy na mapie nie ma jeszcze wyszukiwania. Z narysowaną
+        mapą auta przychodzą razem z nią (patrz plan_flow), bo tam niosą też
+        godzinę dojścia; tutaj jest tylko to, co feed wie sam z siebie."""
+        try:
+            return jsonify({"cars": traficar.car_list()})
+        except traficar.TraficarDataError as e:
+            return jsonify({"error": f"Nie udało się pobrać aut: {e}"}), 503
+
+    @app.route("/api/bikes")
+    def api_bikes():
+        """Wszystkie stacje WRM i rowery stojące luzem - warstwa 🚲 w pasku
+        warstw, bez związku z wyszukiwaniem (patrz api_cars)."""
+        try:
+            return jsonify({"stations": bikes.stations(), "free": bikes.free_bikes()})
+        except (OSError, ValueError) as e:
+            return jsonify({"error": f"Nie udało się pobrać rowerów: {e}"}), 503
 
     @app.route("/api/plan")
     def api_plan():
