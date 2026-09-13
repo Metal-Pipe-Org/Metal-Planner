@@ -1559,3 +1559,198 @@ kanału (elektryki po rodzaju napędu, rower w stojaku nie jest „luzem").
 Doszedł też fixture wyciszający kanał WRM w całym zestawie — warstwa mapy
 sięga po niego przy KAŻDYM wyszukaniu, nie tylko przy odhaczonym rowerze.
 Razem 311, było 286.
+
+## Próg z gęstości zamiast okna w minutach; auta jako k-skyband — punkty 2 i 15 (2026-09-13)
+
+Kontrakt (punkty 2, 9 i 15) został przepisany w poprzedniej rozmowie, przed tą
+implementacją. Ta sekcja to pomiar, droga i szczegóły wykonania.
+
+**Po co.** Zakres mapy wyznaczało okno czasowe względem najszybszej trasy (125%,
+co najmniej 5, najwyżej 15 min) plus przycisk „+X min". Minuty to arbitralna
+gałka: ta sama liczba minut dawała raz pustą mapę, raz gąszcz. Zrzuty „przed"
+pokazały to wprost: Galeria Dominikańska → pl. Grunwaldzki to jedna linia,
+Kozanów → Księże Małe jedna nitka, Swojczyce → Oporów kłębek 57 linii.
+
+### Pomiar przy dawnym oknie (wtorek 15.09, zanim cokolwiek zmieniono)
+
+Kadr = prostokąt wokół najszybszej trasy i obu krańców, bok nie mniejszy niż
+1 km. Długość = różne odcinki między sąsiednimi MIEJSCAMI (nie liniami), między
+środkami miejsc.
+
+| # | relacja | najszybciej | mapa do | linie | korytarze km | kadr km² | km/km² | km/√km² |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Galeria Dominikańska → pl. Grunwaldzki 8:15 | 10 min | +5 | 5 | 3,9 | 1,9 | 2,03 | 2,82 |
+| 2 | Renoma → Katedra 8:15 | 22 min | +5 | 14 | 11,6 | 1,8 | 6,39 | 8,59 |
+| 3 | Leśnica → Biskupin 8:15 | 60 min | +15 | 25 | 33,2 | 89,4 | 0,37 | 3,51 |
+| 4 | Kozanów → Księże Małe 8:15 | 56 min | +12 | 20 | 35,0 | 55,7 | 0,63 | 4,69 |
+| 5 | Osobowice → Wojszyce 17:00 | 52 min | +13 | 29 | 33,6 | 23,3 | 1,44 | 6,95 |
+| 6 | Pilczyce → Jagodno 17:00 | 49 min | +12 | 7 | 18,2 | 71,5 | 0,25 | 2,15 |
+| 7 | Bielany Wr. PKP → Wojszyce 13:29 | 49 min | +10 | 3 | 9,6 | 16,8 | 0,57 | 2,33 |
+| 8 | Zakrzów → Muchobór Wielki 8:15 | 62 min | +14 | tryb awaryjny | – | 91,3 | – | – |
+| 9 | Swojczyce → Oporów 8:15 | 65 min | +15 | 57 | 103,6 | 46,9 | 2,21 | 15,12 |
+| 10 | Siechnice → Dworzec Główny 8:15 | 17 min | +5 | 1 | 10,1 | 52,7 | 0,19 | 1,39 |
+
+Mediany (bez awaryjnej #8): **0,6 km/km²** i **3,5 km/√km²** — stąd domyślna
+gęstość 0,6.
+
+**Linie leżące na sobie mają znaczenie.** Suma długości wszystkich narysowanych
+kawałków (każda linia osobno) przy tych samych mapach: Swojczyce 250 km zamiast
+104, Leśnica 68 zamiast 33; w centrum przy godzinie zakresu 1067 km zamiast 178.
+
+### Koszt szerokości skanu
+
+Rynek → Dworzec Główny, 8:15, zakres liczony od godziny pytania:
+
+| zakres | kawałki | cała mapa | z tego kotwiczenie |
+|---|---|---|---|
+| 45 min | 517 | 0,52 s | 0,33 s |
+| 60 min | 1180 | 1,40 s | 1,15 s |
+| 90 min | 3149 | 7,94 s | 7,26 s |
+| 120 min | 3837 | 13,05 s | 11,75 s |
+
+Całą cenę płaci kotwiczenie (`_select_and_anchor`) i rośnie ona ponadliniowo.
+Kozanów i Siechnice dają ten sam obraz (8,3 s i 13,3 s przy 120 min). Dawny
+sufit „+X min" (2 h od pytania) kosztowałby więc do kilkunastu sekund.
+
+### Jak to działa teraz
+
+1. **Miara jakości bez zmian**: o której opcja dociera do celu. Próg to
+   najpóźniejszy dopuszczony przyjazd, w pełnych minutach za najszybszym —
+   i jedyne, co się zmieniło, to skąd się go bierze.
+2. **Mapa przy danym progu** liczy się dokładnie tym samym potokiem co dotąd
+   (skan w przód, wstecz, odkrycie kursów, profil, jasność, kotwiczenie —
+   `planner._drawn_network`), tylko bez geometrii. Gęstość to
+   `_corridor_km / _frame_km2` (`_map_density`).
+3. **Dobór progu** (`_choose_deadline`): najpóźniejsza minuta, przy której
+   gęstość nie przekracza celu. Skoki o połowę (1, 2, 3, 4, 6, 9, 13, 19, 28,
+   42, 60 min), potem połowienie. Pierwsza wersja skakała dwukrotnie i przy x4
+   na Pilczycach i Zakrzowie próbowała 60 min, żeby znaleźć 35 — 12–14 s.
+   Z krokiem o połowę ta sama relacja przy x4: 5 s, Swojczyce 2 s, a x1 poniżej
+   sekundy wszędzie.
+4. **Najszybsza trasa zostaje zawsze** — próg nie schodzi poniżej niej, choćby
+   sama była gęstsza niż cel.
+5. **Sufit**: 60 min za najszybszym przyjazdem (`MAX_THRESHOLD_SEC`). Na
+   dziesięciu relacjach nawet x4 nie sięgnęło dalej niż 47 min. Przy suficie
+   odpowiedź ma `at_ceiling`, a przycisk znika.
+6. **„Pokaż więcej"** wysyła `more` (1, 2, 3); cel to gęstość × (1 + more).
+   Serwer przycina `more` do 3, gęstość do [0,1; 3,0]. Nowe wyszukiwanie
+   i ruszenie suwakiem gęstości zerują `more`.
+7. **Punkt 13 nadal trzyma**: próg liczy się od najszybszego PRZYJAZDU, więc
+   czekanie na pierwszy pojazd niczego w nim nie rozdyma.
+8. **Punkt 9 bez zmian w kodzie**: jasność i tak skalowała się do najgorszej
+   pokazanej opcji (`_refine_brightness`, `_finalize_segments`).
+
+**Czy gęstość rośnie z progiem.** Wyszukiwanie połowieniem tego wymaga, więc
+sprawdzone minuta po minucie (Leśnica 0–25, Galeria 0–19, Bielany 0–33 min za
+najszybszym): **ani jeden odcinek nie znika** przy poszerzeniu. Pierwszy pomiar
+pokazał spadki gęstości, ale to był szum mojego pomiaru — długość odcinka
+brana z tej pary peronów, którą akurat narysowano. Stąd w produkcie długość
+między środkami miejsc.
+
+### Wynik na mapie (minuty za najszybszym przyjazdem)
+
+| # | dawne okno | km/km² x1 | x2 | km/√km² x1 | x2 |
+|---|---|---|---|---|---|
+| 1 Galeria → Grunwaldzki | +5 | +0 | +3 | +6 | +14 |
+| 2 Renoma → Katedra | +5 | +0 | +0 | +0 | +0 |
+| 3 Leśnica → Biskupin | +15 | +14 | +17 | +9 | +14 |
+| 4 Kozanów → Księże Małe | +12 | +8 | +8 | +8 | +14 |
+| 5 Osobowice → Wojszyce | +13 | +6 | +8 | +6 | +8 |
+| 6 Pilczyce → Jagodno | +12 | +14 | +20 | +14 | +16 |
+| 7 Bielany → Wojszyce | +10 | +10 | +16 | +10 | +25 |
+| 8 Zakrzów → Muchobór | +14 (awaryjna) | +21 | +21 | +14 | +21 |
+| 9 Swojczyce → Oporów | +15 | +5 | +8 | +4 | +8 |
+| 10 Siechnice → Dworzec | +5 | +29 | +36 | +28 | +33 |
+
+Zakrzów przestał wpadać w tryb awaryjny: próg sam idzie dalej, aż sieć się
+zakotwiczy. Renoma → Katedra zostaje przy samej najszybszej trasie w obu
+miarach — ta trasa (8 i N, wężykiem przez centrum) jest sama gęstsza niż x2.
+
+Zrzuty przed/po: `local/gestosc-mapy/index.html` (poza gitem).
+
+### Rozbieżność z kontraktem — do decyzji użytkownika
+
+Kontrakt i zlecenie mówią „długość podzielona przez powierzchnię". Na ekranie
+kadr ma zawsze tyle samo pikseli, więc kadr o 30 razy większej powierzchni
+jest pokazany w √30 ≈ 5,5 raza mniejszej skali. Ta sama liczba km/km² daje
+wtedy na ekranie 5,5 raza gęstszy rysunek. To widać w pomiarze: wg km/km²
+Galeria (2,03) jest trzy razy „gęstsza" od Kozanowa (0,63), a na zrzucie
+Galeria jest pustsza. Wg km/√km² (2,82 i 4,69) kolejność zgadza się z okiem.
+Skutek w wynikach wyżej: przy km/km² relacje w centrum dostają samą najszybszą
+trasę nawet po kliknięciu, a „pokaż więcej" niewiele w nich zmienia.
+
+W kodzie jest **km/km², zgodnie z kontraktem**. Zamiana to jedna linia
+(`_map_density`) i nowa domyślna wartość (3,5). Kontrakt nie był ruszany. Zdanie
+„w stosunku do jego powierzchni" pasuje do obu miar, a „podzielona przez" ze
+zlecenia — tylko do pierwszej.
+
+### Traficary — k-skyband (punkt 15)
+
+`traficar.map_skyband(cars, limit)`, wołane w `plan_flow` na wyniku
+`map_cars` z `limit = suwak × (1 + more)`.
+
+- **Porównanie w dokładności wyświetlania** (`_shown_as`): godzina zaokrąglona do
+  minuty tak jak `fmtClock`, odległość w metrach poniżej 1 km, a powyżej do
+  100 m tak jak `fmtDist`, a „Ogarniam" jako suma kwot zadań przy aucie.
+- **Poziomy**: dla każdego auta liczba aut, które je biją. Pokazane są auta
+  pobite przez najwyżej t innych, gdzie t to liczba pobić auta stojącego na
+  pozycji `limit` po posortowaniu. Pierwszy poziom zawsze, każdy poziom
+  w całości. Koszt n² przy kilkudziesięciu autach jest pomijalny.
+
+**Pomiar (niedziela 13.09, 20:20, żywy feed).** Aut w zasięgu mapy i ile z nich
+nie jest pobitych przez nic (x1):
+
+| relacja | aut | niepobitych |
+|---|---|---|
+| Galeria → Grunwaldzki | 3 | 3 |
+| Renoma → Katedra | 3 | 2 |
+| Leśnica → Biskupin | 13 | 9 |
+| Kozanów → Księże Małe | 15 | 10 |
+| Osobowice → Wojszyce | 4 | 3 |
+| Pilczyce → Jagodno | 15 | 10 |
+| Bielany → Wojszyce | 5 | 3 |
+| Zakrzów → Muchobór | 24 | 13 |
+| Swojczyce → Oporów | 12 | 8 |
+| Siechnice → Dworzec | 12 | 5 |
+
+Przy x4 niepobitych bywa do 16. **Trzy kryteria z dokładnością do minuty
+i 100 m rzadko się biją nawzajem**, więc zbiór Pareto sam często przekracza
+każdy rozsądny suwak. Domyślne 5 w praktyce znaczy „same niepobite, a przy
+rzadkiej mapie jeszcze poziom". Na zrzutach: Zakrzów 25 → 13 aut, Kozanów
+15 → 10, Leśnica 14 → 9.
+
+### Testy
+
+334 (było 311).
+
+- **Nowe dla punktu 2** (`test_flow_map_contract.py`, sekcja 2): próg to
+  ostatnia minuta w celu, najszybsza trasa zostaje, sufit, szukanie nie
+  przestrzeliwuje daleko, linie na sobie liczą się raz, perony jednego miejsca
+  to jeden korytarz, kadr nie węższy niż 1 km. Do tego na mapie: próg staje
+  przed nowym korytarzem i nie zostawia dziury, „pokaż więcej" dokłada całe
+  gęstości, suwak ma sufit po stronie serwera.
+- **Punkt 13**: sprawdza teraz, że czekanie nie przesuwa progu.
+- **Nowe dla punktu 15** (`test_trafikary_na_mapie.py`): niepobite zawsze, remis
+  w wypisanej minucie i w „3,0 km", poziom w całości, losowe miasto
+  z gwarancją „schowane nie bije pokazanego" dla każdego suwaka, suwak razy
+  „pokaż więcej" na mapie.
+- **Front**: „pokaż więcej" wysyła `more`, gęstość i liczbę aut, a po trzecim
+  kliknięciu i przy suficie przycisku nie ma.
+
+Testy, które sprawdzają co innego niż sam próg (kotwiczenie, jasność, kropki,
+rowery), dostały fixture `pin_deadline`. Wartości NIE są zgadnięte: przed zmianą
+cały zestaw przeszedł z rejestratorem progu każdego wywołania mapy, a każdy
+test dostał dokładnie ten próg, który miał przy dawnym oknie. Dwa testy bez
+parametrów okna też go potrzebowały (progi 4500 i 900 s) — gęstość syntetycznego
+dnia przesuwała im próg z powodów niezwiązanych z tym, co sprawdzają.
+
+### Otwarte
+
+1. **Miara**: km/km² (jak w kontrakcie) czy km/√km² (jak widać na ekranie).
+2. **Domyślna gęstość**: 0,6 km/km² albo 3,5 km/√km², czyli mediana dawnych map.
+3. **Domyślna liczba aut**: 5.
+4. **Czy przy suficie skanu przycisk „Pokaż więcej" znika.** Dziś znika, tak jak
+   dawny „+X min".
+5. **Przy długiej trasie panel odjazdów w prawym górnym rogu zasłania koniec
+   paska** razem z przyciskiem. Było tak już przy „+X min" (zrzut Kozanowa
+   „przed"). Dłuższy napis to pogarsza. Nie ruszane.

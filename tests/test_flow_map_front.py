@@ -408,12 +408,11 @@ def test_a_full_map_without_a_list_is_not_an_error(front):
     _check(front, "pelna_mapa_bez_listy_nie_jest_bledem")
 
 
-def test_the_button_stretches_the_map_range_up_to_the_ceiling(front):
-    """„+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
-    w tej chwili (klik rozciąga zakres razy 1,5 i wysyła go do serwera jako
-    horizon_sec), a przy suficie 2 h przycisku nie ma - nie ma już czego
-    dokładać. Tuż pod sufitem obiecuje tylko resztę do sufitu."""
-    _check(front, "przycisk_przedluza_zakres_mapy")
+def test_show_more_adds_one_starting_density_per_click(front):
+    """„Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie wysyła do
+    serwera `more` razem z gęstością z suwaka, a po trzecim kliknięciu i przy
+    suficie skanu przycisku nie ma - nie ma już czego dokładać."""
+    _check(front, "pokaz_wiecej_doklada_gestosc")
 
 
 # ------------------------------------------------- pojazdy na żywo -

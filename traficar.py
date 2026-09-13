@@ -292,6 +292,45 @@ def map_cars(day, reach, dest):
     return out
 
 
+def _shown_as(car):
+    """Trzy liczby, którymi mapa opisuje auto, z dokładnością, z jaką je
+    wypisuje (app.js: fmtClock, fmtDist, ogarniamText) - zwrócone tak, że
+    mniej znaczy lepiej. Ta sama wypisana minuta to remis, nie wygrana
+    o sekundy: pasażer nie ma jak zobaczyć różnicy, której mapa nie pokazuje."""
+    metres = car["to_dest_m"]
+    return (
+        (car["at"] + 30) // 60,
+        metres if metres < 1000 else (metres + 50) // 100 * 100,
+        -sum(task["ile"] for task in car["ogarniam"]),
+    )
+
+
+def map_skyband(cars, limit):
+    """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband.
+
+    Auto A bije auto B, gdy jest co najmniej tak dobre we wszystkich trzech
+    liczbach naraz (_shown_as) i w którejś lepsze. Poziom k to auta pobite
+    przez najwyżej k-1 innych; pierwszy poziom - te, których nie bije nic -
+    jest zawsze na mapie, choćby było ich więcej niż `limit`. Kolejne
+    poziomy dokłada się, aż uzbiera się `limit`, i każdy wchodzi W CAŁOŚCI:
+    ucięcie poziomu w środku wymagałoby zważenia minut przeciw metrom
+    i złotówkom, a tego mapa nie robi. Stąd gwarancja - nigdy nie widać auta,
+    gdy schowane jest takie, które je bije.
+
+    Auto z „Ogarniam" nie ma tu osobnej reguły: jego kwota jest trzecią
+    z tych liczb i tyle."""
+    shown = [_shown_as(car) for car in cars]
+    beaten_by = [
+        sum(other != mine and all(o <= m for o, m in zip(other, mine))
+            for other in shown)
+        for mine in shown
+    ]
+    if len(cars) <= limit:
+        return cars
+    level = sorted(beaten_by)[limit - 1]
+    return [car for car, beaten in zip(cars, beaten_by) if beaten <= level]
+
+
 def car_options(day, reachable, dest, limit=2):
     """Najlepsze zakończenia podróży autem: [{stop, car, walk_sec, ...}, ...].
 

@@ -820,36 +820,36 @@ def _round_path(coords):
     return [[round(lat, 5), round(lon, 5)] for lat, lon in coords]
 
 
-# Okno czasowe: "pokaż trasy do X% dłuższe niż najszybsza" - procentowo,
-# nie w minutach, żeby okno rosło razem z długością trasy zamiast być
-# stałym naddatkiem (30 min "dodatku" to nic dla trasy godzinnej, ale
-# 250% dla trasy 20-minutowej). Dwa dodatkowe suwaki łatają skrajności
-# samej procentówki:
-#   - floor (minimalne okno w sekundach) - bez niego krótka trasa (np. 3
-#     min) przy 110% dostaje tylko ~18 s naddatku i prawie nic więcej się
-#     nie mieści w oknie, nawet przy 200%;
-#   - cap (maksymalne okno w sekundach) - żeby bardzo długa trasa nie
-#     otwierała absurdalnie szerokiego okna przy wysokim %.
-# Efektywne okno = clamp(czas_trasy × (pct/100 − 1), floor, cap).
-DEFAULT_EXTRA_PCT = 125   # domyślnie: pokaż trasy do 125% czasu najszybszej
-MIN_EXTRA_PCT = 110
-MAX_EXTRA_PCT = 200        # (suwak w UI go nadpisuje)
+# Próg mapy (punkt 2 kontraktu). Miarą jakości zostaje godzina, o której
+# opcja dociera do celu; próg stoi tam, gdzie narysowana sieć osiąga docelową
+# GĘSTOŚĆ (patrz _map_density), a nie tam, gdzie wypada jakaś liczba minut -
+# ta sama liczba minut dawała raz pustą mapę, raz nieczytelny gąszcz.
+# Domyślna wartość to mediana gęstości dawnych map (okno 125%, 5-15 min) na
+# dziesięciu prawdziwych relacjach - pomiar w FLOW_MAP_NOTES.md, 2026-09-13.
+DEFAULT_MAP_DENSITY = 0.6    # km różnych korytarzy na km² kadru
+MIN_MAP_DENSITY = 0.1
+MAX_MAP_DENSITY = 3.0        # sufit suwaka pod zębatką - pilnowany tutaj
 
-DEFAULT_EXTRA_FLOOR_SEC = 300   # domyślnie: co najmniej 5 min naddatku
-MIN_EXTRA_FLOOR_SEC = 0
-MAX_EXTRA_FLOOR_SEC = 1800      # (suwak w UI go nadpisuje) - sufit 30 min
+# "Pokaż więcej" dokłada po jednej wyjściowej gęstości: x2, x3, x4.
+MAX_MAP_MORE = 3
 
-DEFAULT_EXTRA_CAP_SEC = 900     # domyślnie: najwyżej 15 min naddatku
-MIN_EXTRA_CAP_SEC = 600
-MAX_EXTRA_CAP_SEC = 7200        # (suwak w UI go nadpisuje) - sufit 120 min
+# Jak daleko za najszybszym przyjazdem wolno w ogóle szukać progu. Szerokość
+# skanu to wprost koszt, i to ponadliniowy (kotwiczenie: 0,3 s przy 45 min
+# zakresu, 12 s przy 120 min), a na dziesięciu relacjach nawet x4 nie
+# sięgnęło dalej niż 47 min za najszybszym przyjazdem.
+MAX_THRESHOLD_SEC = 3600
 
-# Ręczne przedłużenie zakresu mapy ("+X min" przy pasku nad mapą). Suwaki
-# wyżej opisują okno WZGLĘDEM najszybszej trasy - to jest zamiast tego
-# ŻĄDANIE KONKRETNEJ SZEROKOŚCI: "rysuj wszystko, co startuje w ciągu tylu
-# sekund od godziny z zapytania". Może okno tylko POSZERZYĆ, nigdy przyciąć
-# (przycinanie ma zostać wyłącznie w gestii suwaków), a sufit jest twardy,
-# bo szerokość okna to wprost koszt skanu.
-MAX_HORIZON_SEC = 2 * 3600
+# Kadr relacji nie bywa węższy niż tyle z żadnej strony: kilometrowej trasy
+# mapa i tak nie pokaże ciaśniej (maxZoom w app.js), więc liczenie gęstości
+# na pasku szerokości ulicy dawało jej cel nieosiągalnie mały.
+MIN_FRAME_SIDE_KM = 1.0
+
+# Ile aut car-sharingu mapa pokazuje (punkt 15, patrz traficar.map_skyband).
+# Auta, których nic nie bije, są na mapie i ponad tę liczbę - a bywa ich
+# sporo: na dziesięciu relacjach (2026-09-13, 20:20) od 2 do 13, mediana 6-7.
+DEFAULT_MAP_CARS = 5
+MIN_MAP_CARS = 1
+MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
 Q_ANCHOR_TOL = 0.10     # tolerancja jasności przy porównaniu segmentów
                         # (patrz _extract_transfer_graph; kotwica końca mapy
@@ -946,26 +946,115 @@ def _journey_start(day, journey, last_stop):
     return start
 
 
-def _deadline(best_arr, dep_sec, extra_pct=None, extra_floor_sec=None, extra_cap_sec=None):
-    """Granica sensowności: najlepszy przyjazd + naddatek (trzy suwaki w UI,
-    patrz DEFAULT_EXTRA_PCT/FLOOR/CAP powyżej) - naddatek to procent czasu
-    najszybszej trasy, przycięty do [floor, cap] w sekundach."""
-    extra_pct = (
-        DEFAULT_EXTRA_PCT if extra_pct is None
-        else max(MIN_EXTRA_PCT, min(MAX_EXTRA_PCT, extra_pct))
+def _frame_km2(day, legs, stops):
+    """Powierzchnia kadru, w którym mapa pokazuje relację: prostokąt wokół
+    najszybszej trasy i obu krańców.
+
+    Z najszybszej trasy, a nie z tego, co narysowane: kadr liczony z rysunku
+    rósłby razem z progiem, który sam ma wyznaczać."""
+    points = [p for leg in legs for p in (leg.get("path") or ())]
+    points += [day.stop_coords[s] for s in stops if s in day.stop_coords]
+    lats = [p[0] for p in points]
+    lons = [p[1] for p in points]
+    mid_lat = (min(lats) + max(lats)) / 2
+    height = gtfs._haversine_m(min(lats), lons[0], max(lats), lons[0]) / 1000
+    width = gtfs._haversine_m(mid_lat, min(lons), mid_lat, max(lons)) / 1000
+    return max(height, MIN_FRAME_SIDE_KM) * max(width, MIN_FRAME_SIDE_KM)
+
+
+def _corridor_km(day, kept, ranges):
+    """Łączna długość RÓŻNYCH korytarzy narysowanej sieci, w kilometrach.
+
+    Odcinkiem jest para sąsiednich MIEJSC, nie linia ani słupek: dwadzieścia
+    numerów jednym korytarzem to w oku jedna kreska (punkt 7), a tramwaj
+    i autobus stają na osobnych peronach tego samego placu. Długość idzie
+    między środkami miejsc - liczona między słupkami zależałaby od tego,
+    który peron akurat narysował ten odcinek, i gęstość drgałaby przy progu,
+    który niczego nowego nie dołożył."""
+    hops = {}
+    for seg in kept:
+        start_pos, cut = ranges[id(seg)]
+        stops = seg["stops"]
+        for k in range(start_pos, cut - 1):
+            a, b = stops[k], stops[k + 1]
+            place_a, place_b = day.place_of.get(a, a), day.place_of.get(b, b)
+            key = _hop_key(place_a, place_b)
+            hops.setdefault(key, (a, b) if key[0] == place_a else (b, a))
+    metres = 0.0
+    for (place_a, place_b), (stop_a, stop_b) in hops.items():
+        lat_a, lon_a = _place_center(day, place_a, stop_a)
+        lat_b, lon_b = _place_center(day, place_b, stop_b)
+        metres += gtfs._haversine_m(lat_a, lon_a, lat_b, lon_b)
+    return metres / 1000
+
+
+def _map_density(corridor_km, frame_km2):
+    """Gęstość z punktu 2: różne korytarze w kadrze na jego powierzchnię."""
+    return corridor_km / frame_km2
+
+
+def _drawn_network(day, dep_sec, deadline, best_arr, source_stops, target_stops,
+                   origin_latest, start_reach, frame_km2):
+    """Mapa przy jednym progu, jeszcze bez geometrii: odkrycie kursów,
+    jasność, kotwiczenie (kroki opisane w plan_flow) i gęstość tego, co z
+    tego zostało narysowane. Bez geometrii, bo szukając progu
+    (_choose_deadline) liczy się kilka takich map, a rysuje jedną."""
+    earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
+    latest = _backward(day, target_stops, dep_sec, deadline)
+    segs = _discover_segments(
+        day, dep_sec, deadline, earliest, arrived_by, trip_board,
+        latest, origin_latest, target_stops,
     )
-    extra_floor_sec = (
-        DEFAULT_EXTRA_FLOOR_SEC if extra_floor_sec is None
-        else int(max(MIN_EXTRA_FLOOR_SEC, min(MAX_EXTRA_FLOOR_SEC, extra_floor_sec)))
-    )
-    extra_cap_sec = (
-        DEFAULT_EXTRA_CAP_SEC if extra_cap_sec is None
-        else int(max(MIN_EXTRA_CAP_SEC, min(MAX_EXTRA_CAP_SEC, extra_cap_sec)))
-    )
-    best_duration_sec = best_arr - dep_sec
-    extra_sec = best_duration_sec * (extra_pct / 100 - 1)
-    extra_sec = max(extra_floor_sec, min(extra_cap_sec, extra_sec))
-    return best_arr + int(round(extra_sec))
+    # Jeden skan wstecz daje ODCZYTANĄ odpowiedź "wysiadam tu o tej godzinie -
+    # o której jestem w celu" dla każdego przystanku w oknie. To z niego bierze
+    # się jasność; bez niego była szacowana (patrz _target_profile).
+    profile = _target_profile(day, target_stops, dep_sec, deadline)
+    _refine_brightness(day, segs, target_stops, deadline, best_arr, profile)
+    kept, ranges = _select_and_anchor(day, segs, source_stops, target_stops,
+                                      start_reach)
+    return {
+        "earliest": earliest,
+        "profile": profile,
+        "kept": kept,
+        "ranges": ranges,
+        "density": _map_density(_corridor_km(day, kept, ranges), frame_km2),
+    }
+
+
+def _choose_deadline(network_at, best_arr, target):
+    """Próg z punktu 2: NAJPÓŹNIEJSZY przyjazd, w pełnych minutach za
+    najszybszym, przy którym narysowana sieć nie jest gęstsza niż `target`.
+    Poniżej najszybszej trasy próg nie schodzi - ona jest na mapie zawsze,
+    choćby sama była gęstsza niż cel.
+
+    Szersza mapa dokłada kursy, a nie zabiera (punkt 9; sprawdzone próg po
+    progu na żywych relacjach, FLOW_MAP_NOTES.md 2026-09-13), więc gęstość
+    z progiem nie maleje i wystarczy szukać skokami, a potem połowieniem.
+    Skoki rosną o połowę, nie dwukrotnie: koszt jednej mapy rośnie z progiem
+    ponadliniowo, a skok z 32 na 64 minuty potrafił kosztować 12 s tam, gdzie
+    cel leżał w 35. minucie.
+
+    Zwraca (deadline, sufit) - `sufit` znaczy, że nawet przy
+    MAX_THRESHOLD_SEC sieć nie dobiła do celu, więc szerzej już nic nie ma."""
+    ceiling = MAX_THRESHOLD_SEC // 60
+
+    def too_dense(minutes):
+        return network_at(best_arr + minutes * 60)["density"] > target
+
+    lo, probe = 0, 1
+    while not too_dense(probe):
+        lo = probe
+        if probe == ceiling:
+            return best_arr + ceiling * 60, True
+        probe = min(ceiling, probe + max(1, probe // 2))
+    hi = probe
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if too_dense(mid):
+            hi = mid
+        else:
+            lo = mid
+    return best_arr + lo * 60, False
 
 
 def _no_connection(start_name, end_name, dep_sec):
@@ -1003,9 +1092,9 @@ def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
 
 
 def plan_flow(start_query, end_query, when=None,
-              start_point=None, end_point=None, extra_pct=None,
-              extra_floor_sec=None, extra_cap_sec=None, journey_limit=None,
-              transfer_gain_sec=None, horizon_sec=None, use_bikes=False):
+              start_point=None, end_point=None, density=None, more=None,
+              car_count=None, journey_limit=None, transfer_gain_sec=None,
+              use_bikes=False):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -1043,21 +1132,18 @@ def plan_flow(start_query, end_query, when=None,
     Lista propozycji tras ("journeys") to NIE osobny algorytm - to ścieżki
     przeczytane wprost z tego samego, już narysowanego grafu segmentów
     (_extract_transfer_graph + _enumerate_journeys), więc lista nigdy nie
-    pokaże przesiadki, której nie ma na mapie, i reaguje na te same suwaki
-    (extra_pct/extra_floor_sec/extra_cap_sec) co mapa.
+    pokaże przesiadki, której nie ma na mapie, i przesuwa się razem z progiem
+    mapy.
 
-    extra_pct/extra_floor_sec/extra_cap_sec to suwaki okna czasowego: "pokaż
-    trasy do X% dłuższe niż najszybsza, ale co najmniej floor i najwyżej cap
-    sekund naddatku" (patrz _deadline) - procent zamiast stałej liczby minut,
-    żeby okno skalowało się z długością trasy; floor/cap łatają skrajności
-    (bardzo krótkie albo bardzo długie trasy). Nie ma osobnego progu
-    jasności - wszystko w oknie czasowym jest pokazywane, jasność (q) służy
-    już tylko do intensywności rysowania.
-    horizon_sec to ręczne przedłużenie zakresu ("+X min" przy pasku nad
-    mapą, patrz MAX_HORIZON_SEC): żądana szerokość CAŁEGO okna w sekundach,
-    liczona od godziny z zapytania, przycięta do sufitu i brana tylko wtedy,
-    gdy jest szersza niż okno z suwaków - przycinać okno mogą dalej wyłącznie
-    suwaki.
+    density to docelowa gęstość narysowanej sieci (suwak pod zębatką, patrz
+    DEFAULT_MAP_DENSITY), a more - ile razy kliknięto "pokaż więcej" (0-3).
+    Razem wyznaczają próg mapy: najpóźniejszy przyjazd do celu, przy którym
+    sieć nie jest gęstsza niż density × (1 + more) (patrz _choose_deadline).
+    Nie ma osobnego progu jasności - wszystko przed progiem jest pokazywane,
+    jasność (q) służy już tylko do intensywności rysowania.
+    car_count to ile aut car-sharingu pokazać przy mapie (suwak pod zębatką,
+    patrz DEFAULT_MAP_CARS i traficar.map_skyband); "pokaż więcej" mnoży ją
+    tak samo jak gęstość.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -1122,23 +1208,16 @@ def plan_flow(start_query, end_query, when=None,
     if best_stop is None:
         return _no_connection(start_name, end_name, dep_sec)
 
-    # Okno liczone od WYJAZDU, nie od pytania - czekanie nie jest podróżą
-    # i nie ma rozdymać wachlarza (punkt 13).
+    # Kiedy najszybsza trasa naprawdę RUSZA - czekanie ma być widoczne, nie
+    # schowane (punkt 13). Progu mapy to nie dotyczy: liczy się go od
+    # najszybszego PRZYJAZDU, więc godzina czekania niczego w nim nie rozdyma.
     best_dep = _journey_start(day, best_journey, best_stop)
     if best_dep is None:
         best_dep = dep_sec
-    deadline = _deadline(best_arr, best_dep, extra_pct, extra_floor_sec,
-                         extra_cap_sec)
-    if horizon_sec is not None:
-        wanted = max(0, min(int(horizon_sec), MAX_HORIZON_SEC))
-        deadline = max(deadline, dep_sec + wanted)
 
     # Współrzędne celu - potrzebne wyłącznie propozycjom z Traficarem (dokąd
     # ma dojechać auto); liczone raz, bo `target_stops` bywa całym placem.
     end_point_ll = _endpoint_point(day, target_stops, end_point)
-
-    earliest, arrived_by, trip_board = _forward(day, source_stops, dep_sec, deadline)
-    latest = _backward(day, target_stops, dep_sec, deadline)
 
     # Punkt odniesienia reguły cofnięcia: im później można być na przystanku
     # i wciąż zdążyć (latest), tym bliżej celu się jest. Liczony względem
@@ -1176,27 +1255,41 @@ def plan_flow(start_query, end_query, when=None,
     start_reach = _origin_walk(day, source_stops)
     anchor_stops = set(source_stops) | set(start_reach)
 
-    segs = _discover_segments(
-        day, dep_sec, deadline, earliest, arrived_by, trip_board,
-        latest, origin_latest, target_set,
-    )
-    # Jeden skan wstecz daje ODCZYTANĄ odpowiedź "wysiadam tu o tej godzinie -
-    # o której jestem w celu" dla każdego przystanku w oknie. To z niego bierze
-    # się jasność; bez niego była szacowana (patrz _target_profile).
-    profile = _target_profile(day, target_set, dep_sec, deadline)
-    _refine_brightness(day, segs, target_set, deadline, best_arr, profile)
-    kept, ranges = _select_and_anchor(day, segs, source_stops, target_set,
-                                      start_reach)
-
     gtfs.geo_generation()      # jeden stat na zapytanie; czyści cache po podmianie bazy
     geo_db = gtfs.open_db()    # jedno połączenie na WSZYSTKIE wycinki geometrii zapytania
     try:
         # Najszybsza trasa i tak jest już policzona wyżej (_scan wyznacza nią
         # skalę całej mapy) - odtwarzamy ją raz, tutaj, żeby front mógł podać
         # "najszybciej tyle a tyle" i pokazać, KTÓRĄ trasą to jest, bez
-        # sięgania po listę propozycji (i bez drugiego szukania).
+        # sięgania po listę propozycji (i bez drugiego szukania). Wyznacza też
+        # kadr relacji, a z nim gęstość, do której dobiera się próg.
         best_legs = _reconstruct(day, best_journey, best_stop, geo_db)
         fastest = _fastest_summary(best_legs, best_arr, dep_sec)
+
+        # Próg mapy (punkt 2): tyle, ile mieści docelowa gęstość, a "pokaż
+        # więcej" dokłada jej po jednej wyjściowej porcji. Mapy policzone po
+        # drodze zostają w `networks` - ta przy wybranym progu jest tą
+        # rysowaną, nie liczy się jej drugi raz.
+        frame_km2 = _frame_km2(day, best_legs, [*source_stops, *target_stops])
+        density = (DEFAULT_MAP_DENSITY if density is None
+                   else max(MIN_MAP_DENSITY, min(MAX_MAP_DENSITY, float(density))))
+        more = 0 if more is None else int(max(0, min(MAX_MAP_MORE, more)))
+        car_count = (DEFAULT_MAP_CARS if car_count is None
+                     else int(max(MIN_MAP_CARS, min(MAX_MAP_CARS, car_count))))
+        networks = {}
+
+        def network_at(deadline):
+            if deadline not in networks:
+                networks[deadline] = _drawn_network(
+                    day, dep_sec, deadline, best_arr, source_stops, target_set,
+                    origin_latest, start_reach, frame_km2)
+            return networks[deadline]
+
+        deadline, at_ceiling = _choose_deadline(network_at, best_arr,
+                                                density * (1 + more))
+        network = network_at(deadline)
+        earliest, profile = network["earliest"], network["profile"]
+        kept, ranges = network["kept"], network["ranges"]
         degraded = False
         if kept:
             seg_list, nodes = _finalize_segments(
@@ -1328,7 +1421,11 @@ def plan_flow(start_query, end_query, when=None,
                 if at < reach.get(stop, INF):
                     reach[stop] = at
             if day_offset == 0 and when.date() == date.today():
-                cars = traficar.map_cars(day, reach, end_point_ll)
+                # Ile z nich: suwak razy to samo "pokaż więcej", co przy
+                # liniach - a auta, których nic nie bije, zostają i tak.
+                cars = traficar.map_skyband(
+                    traficar.map_cars(day, reach, end_point_ll),
+                    car_count * (1 + more))
 
             # Rower miejski jako miejsce na mapie (patrz bikes.map_places).
             # Inaczej niż auto: z roweru się JEDZIE, więc mapa mówi też,
@@ -1370,6 +1467,12 @@ def plan_flow(start_query, end_query, when=None,
         # rysowanego wariantu - to warunek konieczny, liczony z best_arr
         # (skan CSA), więc nie zależy od szacowanych przyjazdów kawałków.
         "deadline_sec": deadline,
+        # Z czego ten próg wyszedł (punkt 2): docelowa gęstość z suwaka i ile
+        # razy kliknięto "pokaż więcej". `at_ceiling` - próg doszedł do
+        # MAX_THRESHOLD_SEC, więc kolejne kliknięcie nie miałoby czego dołożyć.
+        "density": density,
+        "more": more,
+        "at_ceiling": at_ceiling,
         "fastest": fastest,
         # Kiedy ta trasa RUSZA i za ile dni - czekanie ma być widoczne, nie
         # schowane (punkt 13). `day_offset` 0 to dzień z pytania.

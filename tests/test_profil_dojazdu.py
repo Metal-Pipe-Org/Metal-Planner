@@ -18,10 +18,6 @@ from tests.gtfs_builder import make_day
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, dla czytelnych liczb
 
-# Okno musi zmieścić wariant gorszy o 20 minut - inaczej nie ma czego badać.
-SZEROKIE_OKNO = dict(extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999)
-
-
 def _zgubiona_przesiadka_day():
     """Dwa dojazdy do węzła M, po których rozkład rozchodzi się drastycznie.
 
@@ -80,12 +76,13 @@ def test_profil_jest_niemalejacy_wzgledem_godziny(install_day):
         poprzedni = wartosc
 
 
-def test_mapa_podaje_odczytana_godzine_gorszego_wariantu(install_day):
+def test_mapa_podaje_odczytana_godzine_gorszego_wariantu(install_day, pin_deadline):
     """Ten sam scenariusz na całej mapie: gorszy dojazd do węzła ma dostać
     swoją PRAWDZIWĄ godzinę przyjazdu (2700), nie tę przesuniętą (1800)."""
+    pin_deadline(3000)   # dawne okno 200%
     day = _zgubiona_przesiadka_day()
     install_day(day)
-    wynik = planner.plan_flow("S", "E", when=WHEN, **SZEROKIE_OKNO)
+    wynik = planner.plan_flow("S", "E", when=WHEN)
 
     assert "error" not in wynik
     gorszy = [s for s in wynik["segments"] if s["num"] == "2"]
@@ -113,7 +110,7 @@ def test_zadna_odczytana_wartosc_nie_pobija_optimum(install_day):
     install_day(day)
     dep_sec = 0
     _, best_arr, _ = planner._scan(day, {"S"}, {"E"}, dep_sec)
-    deadline = planner._deadline(best_arr, dep_sec, **SZEROKIE_OKNO)
+    deadline = 2 * best_arr - dep_sec    # szeroko: drugie tyle, co najszybsza trasa
     earliest, arrived_by, trip_board = planner._forward(day, {"S"}, dep_sec, deadline)
     latest = planner._backward(day, {"E"}, dep_sec, deadline)
     origin_latest = max(latest[s] for s in {"S"} if s in latest)

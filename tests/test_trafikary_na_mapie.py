@@ -9,6 +9,7 @@ punkt 14) i ile stąd do celu w linii prostej.
 Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
+import random
 from datetime import date, datetime, time
 
 import gtfs
@@ -188,6 +189,94 @@ def test_ogarniam_czytamy_z_feedu_takie_jakie_jest(monkeypatch):
 
     assert z_nagroda["ogarniam"] == [{"co": "Relokacja", "ile": 30}]
     assert bez_nagrody["ogarniam"] == []
+
+
+# ------------------------------------------------- które auta pokazać ----
+
+def _auto(tablica, at, do_celu, ogarniam=0):
+    return {**CAR, "plate": tablica, "at": at, "to_dest_m": do_celu,
+            "ogarniam": [{"co": "Tankowanie", "ile": ogarniam}] if ogarniam else []}
+
+
+def _tablice(cars):
+    return sorted(car["plate"] for car in cars)
+
+
+def test_zawsze_widac_auta_ktorych_nic_nie_bije():
+    """Każde auto najlepsze w czymś zostaje, nawet ponad suwak - wybór między
+    minutami, metrami i złotówkami należy do pasażera. Auto z „Ogarniam" nie
+    ma osobnej reguły: wygrywa kwotą i tyle."""
+    wczesne = _auto("A", 600, 5000)
+    blisko = _auto("B", 1200, 500)
+    platne = _auto("C", 1800, 9000, ogarniam=20)
+    pobite = _auto("D", 1800, 6000)          # później i dalej niż A i B
+
+    pokazane = traficar.map_skyband([wczesne, blisko, platne, pobite], 1)
+
+    assert _tablice(pokazane) == ["A", "B", "C"]
+
+
+def test_ta_sama_wypisana_liczba_to_remis():
+    """Porównuje się z dokładnością, z jaką mapa liczby wypisuje: ta sama
+    minuta to remis, nie wygrana o sekundy - i tak samo „3,0 km" przy
+    2950 i 2990 m."""
+    o_sekundy_pozniej = _auto("A", 625, 3000)
+    blizej = _auto("B", 600, 2900)           # ta sama minuta, 2,9 zamiast 3,0 km
+    assert _tablice(traficar.map_skyband([o_sekundy_pozniej, blizej], 1)) == ["B"]
+
+    o_metry_blizej = _auto("C", 900, 2950)
+    wczesniej = _auto("D", 600, 2990)        # to samo „3,0 km", pięć minut wcześniej
+    assert _tablice(traficar.map_skyband([o_metry_blizej, wczesniej], 1)) == ["D"]
+
+
+def test_poziom_wchodzi_w_calosci_choc_przekracza_suwak():
+    """Suwak na 2: jedno auto nie jest pobite przez nic, trzy - przez dokładnie
+    jedno. Wchodzą wszystkie cztery, bo wybranie jednego z trzech wymagałoby
+    zważenia minut przeciw metrom. Auto pobite przez dwa zostaje schowane."""
+    najlepsze = _auto("A", 600, 1000)
+    wczesne = _auto("B", 1200, 5000)
+    srodkowe = _auto("C", 1800, 3000)
+    bliskie = _auto("D", 2400, 2000)
+    slabsze = _auto("E", 1300, 6000)         # bite przez A i przez B
+
+    pokazane = traficar.map_skyband(
+        [najlepsze, wczesne, srodkowe, bliskie, slabsze], 2)
+
+    assert _tablice(pokazane) == ["A", "B", "C", "D"]
+
+
+def test_nigdy_nie_widac_auta_gdy_schowane_jest_lepsze():
+    """Gwarancja z punktu 15, sprawdzona na losowym mieście i każdym
+    położeniu suwaka: żadne schowane auto nie bije żadnego pokazanego."""
+    los = random.Random(15)
+    auta = [_auto(str(i), los.randrange(0, 3600), los.randrange(100, 9000),
+                  los.choice([0, 0, 0, 15, 20, 30]))
+            for i in range(30)]
+
+    def bije(a, b):
+        sa, sb = traficar._shown_as(a), traficar._shown_as(b)
+        return sa != sb and all(x <= y for x, y in zip(sa, sb))
+
+    for suwak in range(1, 31):
+        pokazane = traficar.map_skyband(auta, suwak)
+        schowane = [a for a in auta if a not in pokazane]
+        assert len(pokazane) >= min(suwak, len(auta))
+        assert not any(bije(s, p) for s in schowane for p in pokazane), suwak
+
+
+def test_suwak_i_pokaz_wiecej_mnoza_liczbe_aut(install_day, monkeypatch):
+    """Trzy auta przy M, każde później i dalej od celu niż poprzednie - każde
+    bije następne. Suwak na 1 pokazuje jedno, „pokaż więcej" dwa razy - trzy."""
+    install_day(_day())
+    _cars(monkeypatch, [{**CAR, "plate": "BLISKO"},
+                        {**CAR, "plate": "DALEJ", "lat": 51.1170},
+                        {**CAR, "plate": "NAJDALEJ", "lat": 51.1150}])
+
+    jedno = planner.plan_flow("Start", "Cel", WHEN, car_count=1)
+    trzy = planner.plan_flow("Start", "Cel", WHEN, car_count=1, more=2)
+
+    assert _tablice(jedno["cars"]) == ["BLISKO"]
+    assert _tablice(trzy["cars"]) == ["BLISKO", "DALEJ", "NAJDALEJ"]
 
 
 # ------------------------------------------------ kiedy aut nie ma w ogóle ----

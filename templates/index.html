@@ -287,48 +287,40 @@
         <p class="field-hint">
             Pasek podaje godzinę i czas najszybszego dojazdu oraz granicę,
             do jakiej mapa jeszcze rysuje. Najechanie na pierwszą liczbę
-            pokazuje, którą trasą się ten czas osiąga. Przycisk „+X min” na
-            końcu paska rozciąga ten zakres o połowę (razy 1,5, do 2 h) —
-            kolejne wyszukiwanie wraca do okna z suwaków niżej.
+            pokazuje, którą trasą się ten czas osiąga. Przycisk „Pokaż więcej”
+            na końcu paska zagęszcza mapę: dwa, trzy, cztery razy względem
+            gęstości z suwaka niżej — kolejne wyszukiwanie wraca do wyjściowej.
         </p>
     </details>
 
     <details class="dev-fold" id="fold-window" open>
-    <summary>Okno czasowe</summary>
+    <summary>Zakres mapy</summary>
 
     <div class="field">
-        <label for="extra">
-            Ile dłużej niż najszybsza trasa <output id="extra-value">125</output>%
+        <label for="density">
+            Gęstość mapy <output id="density-value">0.6</output> km/km²
         </label>
-        <input type="range" id="extra" min="110" max="200" step="5" value="125">
+        <input type="range" id="density" min="0.1" max="3" step="0.1" value="0.6">
         <p class="field-hint">
-            Okno czasowe procentowo, nie w minutach — rośnie razem z długością
-            trasy zamiast być stałym naddatkiem. Dwa suwaki niżej łatają
-            skrajności: bardzo krótkie i bardzo długie trasy.
+            Ile różnych korytarzy mapa rysuje na kilometr kwadratowy kadru, w
+            którym pokazuje relację. Linie jadące jedną ulicą liczą się raz.
+            Mapa pokazuje wszystkie opcje lepsze od progu, a próg staje tam,
+            gdzie ta gęstość się kończy — godzina „mapa pokazuje do” na pasku
+            jest skutkiem, nie ustawieniem.
         </p>
     </div>
 
     <div class="field">
-        <label for="extra-floor">
-            Minimalne okno (niezależnie od %) <output id="extra-floor-value">5</output> min
+        <label for="car-count">
+            Ile aut Traficara <output id="car-count-value">5</output>
         </label>
-        <input type="range" id="extra-floor" min="0" max="30" step="1" value="5">
+        <input type="range" id="car-count" min="1" max="30" step="1" value="5">
         <p class="field-hint">
-            Przy krótkich trasach sam procent daje grosze — 3-minutowa trasa
-            przy 110% to ledwie 18 s naddatku. Ten suwak gwarantuje co
-            najmniej tyle minut okna, nawet dla bardzo krótkich tras.
-        </p>
-    </div>
-
-    <div class="field">
-        <label for="extra-cap">
-            Maksymalne okno (sufit dla długich tras) <output id="extra-cap-value">15</output> min
-        </label>
-        <input type="range" id="extra-cap" min="10" max="120" step="5" value="15">
-        <p class="field-hint">
-            Odwrotność powyższego — przy bardzo długiej najszybszej trasie
-            wysoki procent otworzyłby absurdalnie szerokie okno. Ten suwak je
-            ogranicza. Do debugów; jeśli nie przeszkadza, można zostawić.
+            Auta, których nie bije żadne inne — przy którym jest się nie
+            później, które stoi nie dalej od celu i daje z „Ogarniam” co
+            najmniej tyle samo — są na mapie zawsze, nawet ponad tę liczbę.
+            Suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle aut;
+            „Pokaż więcej” mnoży ją tak samo jak gęstość.
         </p>
     </div>
 

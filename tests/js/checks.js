@@ -909,40 +909,38 @@ checks.czekanie_jest_widoczne = (() => {
     };
 })();
 
-/* Przycisk "+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
-   TERAZ (klik rozciąga zakres razy 1,5), klik przekazuje nowy zakres do
-   serwera, a przy suficie 2 h przycisku nie ma wcale - nie ma już czego
-   dokładać. */
-checks.przycisk_przedluza_zakres_mapy = (() => {
+/* Przycisk "Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie dokłada
+   jedną wyjściową gęstość i leci do serwera jako `more` razem z gęstością
+   z suwaka. Po trzecim kliknięciu i przy suficie skanu przycisku nie ma - nie
+   ma już czego dokładać. */
+checks.pokaz_wiecej_doklada_gestosc = (() => {
     const pasek = () => document.getElementById('time-headline').innerHTML;
-    const etykieta = html => (html.match(/headline-more[^>]*>\+([^<]*)</) || [])[1] || '';
 
-    const krok = app.horizonStep(FLOW_FIXTURE.limit_sec);
-    const naStarcie = etykieta(pasek());
+    app.drawFlow({...FLOW_FIXTURE, more: 0, at_ceiling: false}, false);
+    const naStarcie = pasek();
 
-    app.extendHorizon(FLOW_FIXTURE.limit_sec, krok);
+    app.showMore();
     const zapytanie = app.queryParams().toString();
 
-    // Sufit: zakres już na 2 h - nie ma czego dokładać, przycisk znika.
-    app.drawFlow({...FLOW_FIXTURE, limit_sec: app.MAX_HORIZON_SEC}, false);
+    app.drawFlow({...FLOW_FIXTURE, more: app.MAX_MAP_MORE, at_ceiling: false}, false);
+    const poTrzecim = pasek();
+    app.drawFlow({...FLOW_FIXTURE, more: 1, at_ceiling: true}, false);
     const przySuficie = pasek();
-    // ...a tuż pod sufitem przycisk obiecuje tylko to, co zostało do sufitu,
-    // nie pełną połowę okna.
-    const podSufitem = app.horizonStep(app.MAX_HORIZON_SEC - 600);
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
 
     return {
-        ok: krok === FLOW_FIXTURE.limit_sec / 2          // połowa okna
-            && naStarcie === '35 min'                    // połowa z 1 h 10 min
-            && app.mapHorizonSec === 1.5 * FLOW_FIXTURE.limit_sec
-            && zapytanie.includes('horizon_sec=6300')    // i to leci do serwera
-            && !przySuficie.includes('headline-more')    // przy 2 h nie ma przycisku
-            && podSufitem === 600                        // przy 1h50 dokłada 10 min
-            && app.horizonStep(app.MAX_HORIZON_SEC) === 0,
-        krok, naStarcie, podSufitem,
-        horizon: app.mapHorizonSec,
+        ok: naStarcie.includes('headline-more')
+            && app.mapMore === 1
+            && zapytanie.includes('more=1')              // i to leci do serwera
+            && zapytanie.includes('density=')            // razem z gęstością z suwaka
+            && zapytanie.includes('cars=')               // i liczbą aut, którą też mnoży
+            && !zapytanie.includes('horizon_sec')
+            && !poTrzecim.includes('headline-more')      // po trzecim nie ma przycisku
+            && !przySuficie.includes('headline-more'),   // przy suficie też nie
+        more: app.mapMore,
         zapytanie: zapytanie.slice(0, 200),
-        sufit: przySuficie.slice(0, 200),
+        naStarcie: naStarcie.slice(-200),
+        poTrzecim: poTrzecim.slice(-200),
     };
 })();
 

@@ -8,6 +8,7 @@ import pytest
 import bikes
 import gtfs
 import pkp
+import planner
 import traficar
 
 
@@ -18,6 +19,22 @@ def install_day(monkeypatch):
     def _install(day):
         monkeypatch.setattr(gtfs, "load_day", lambda d: day)
     return _install
+
+
+@pytest.fixture
+def pin_deadline(monkeypatch):
+    """pin_deadline(sekunda) ustawia próg mapy na sztywno, z pominięciem
+    doboru po gęstości (planner._choose_deadline).
+
+    Dla testów, które sprawdzają coś INNEGO niż sam próg - kotwiczenie,
+    jasność, kropki - i potrzebują mapy o znanym zakresie. Gęstość liczona na
+    syntetycznym dniu (słupki co półtora kilometra, kadr z kilku punktów)
+    przesuwałaby im próg z powodów, które nie mają nic wspólnego z tym, co
+    sprawdzają. Kolejne wywołanie w tym samym teście przestawia próg na nowo."""
+    def _pin(deadline_sec):
+        monkeypatch.setattr(planner, "_choose_deadline",
+                            lambda network_at, best_arr, target: (deadline_sec, False))
+    return _pin
 
 
 @pytest.fixture(autouse=True)

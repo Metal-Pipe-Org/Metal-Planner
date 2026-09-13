@@ -593,8 +593,12 @@ ten sam efekt daje analiza dwóch skanów:
 1. **Skan w przód** od przystanku startowego: najwcześniejszy możliwy
    przyjazd `earliest[s]` na każdy przystanek + dla każdego kursu miejsce,
    w którym najwcześniej da się do niego wsiąść.
-2. **Deadline**: najlepszy przyjazd + 50% czasu podróży (min. 5, maks.
-   30 minut). Wszystko, co dociera do celu po deadline, jest bezużyteczne.
+2. **Deadline** (próg mapy, od 2026-09-13): najpóźniejsza pełna minuta za
+   najlepszym przyjazdem, przy której narysowana sieć nie przekracza
+   docelowej gęstości — łącznej długości różnych korytarzy na powierzchnię
+   kadru relacji (`_choose_deadline`, `_map_density`); najwyżej 60 min za
+   najlepszym przyjazdem. Wszystko, co dociera do celu po deadline, nie jest
+   rysowane.
 3. **Skan wstecz** od celu: najpóźniejszy moment `latest[s]`, w którym można
    być na przystanku `s` i jeszcze zdążyć do celu przed deadline
    (połączenia przetwarzane malejąco po odjeździe).
@@ -680,7 +684,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
-- `GET /api/flow?start=&end=&time=HH:MM&extra_sec=600` (albo `start_lat`/
+- `GET /api/flow?start=&end=&time=HH:MM&density=0.6&cars=5` (albo `start_lat`/
   `start_lon`, `end_lat`/`end_lon` zamiast nazw — punkt wchodzi jako słupek
   z dojściem pieszo, patrz `gtfs.with_point`) — JEDNA
   odpowiedź niesie i mapę, i listę propozycji (dawniej dwa osobne
@@ -778,12 +782,16 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   (gotowy opis — „Dojście do stacji WRM …" nie da się złożyć z `from`/`to`,
   bo stacja roweru to nie przystanek).
 
-  `horizon_sec` (opcjonalny) to ręczne przedłużenie zakresu mapy — przycisk
-  „+X min" przy pasku nad mapą: żądana szerokość CAŁEGO okna w sekundach,
-  liczona od godziny z zapytania. Może okno tylko poszerzyć (suwaki
-  `extra_*` zostają jedynym sposobem na jego przycięcie) i jest przycinany
-  do `planner.MAX_HORIZON_SEC` (2 h) — szerokość okna to wprost koszt skanu,
-  więc sufit stoi po stronie serwera. Efekt widać w `limit_sec`/`deadline`.
+  `density` to docelowa gęstość mapy w km różnych korytarzy na km² kadru
+  (suwak pod zębatką, przycinana do [0,1; 3,0]), `more` — ile razy kliknięto
+  „Pokaż więcej" (0–3; cel gęstości to `density × (1 + more)`), `cars` — ile
+  aut car-sharingu pokazać (1–30, też razy `1 + more`). Z `density` i `more`
+  serwer dobiera próg mapy; odpowiedź niesie je z powrotem (`density`, `more`)
+  razem z `at_ceiling` — próg doszedł do sufitu skanu (60 min za najszybszym
+  przyjazdem), więc kolejne kliknięcie nie miałoby czego dołożyć. Wynikowy
+  próg widać w `limit_sec`/`deadline`. `cars` w odpowiedzi jest przesiane
+  przez `traficar.map_skyband`: auta, których nie bije żadne inne, zawsze,
+  kolejne poziomy w całości, aż uzbiera się żądana liczba.
   Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
   akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
   (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
@@ -881,6 +889,21 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-13** — **zakres mapy z gęstości, nie z minut** (punkty 2 i 15
+  kontraktu). Trzy suwaki okna czasowego (procent, minimum, maksimum) i przycisk
+  „+X min" zniknęły. Miara jakości została ta sama — o której opcja dociera do
+  celu — a próg staje tam, gdzie narysowana sieć osiąga docelową gęstość:
+  łączną długość RÓŻNYCH korytarzy w kadrze relacji na jego powierzchnię.
+  Linie jadące jednym korytarzem liczą się raz, więc próg idzie za nimi dalej,
+  aż trafi na naprawdę inny korytarz. Jeden suwak gęstości pod zębatką; godzina
+  „mapa pokazuje do" jest skutkiem. „Pokaż więcej" dokłada po jednej wyjściowej
+  gęstości (x2, x3, x4) i znika po trzecim kliknięciu albo przy suficie skanu.
+  Auta Traficara wybiera k-skyband: auta, których nic nie bije (godzina przy
+  aucie, odległość do celu, kwota z „Ogarniam", w dokładności wyświetlania),
+  są zawsze, kolejne poziomy w całości do liczby z nowego suwaka, też razy
+  „Pokaż więcej". Pomiar na dziesięciu relacjach, koszt skanu, zrzuty i otwarte
+  decyzje (w tym rozbieżność km/km² z tym, co widać na ekranie) —
+  FLOW_MAP_NOTES.md. Testy: 334, było 311.
 - **2026-09-12** — **rower miejski na mapie przepływów** (punkt 16
   kontraktu). Wzorzec ten sam, co
   przy autach: kropka, do której mapa dowozi jednym dojściem. Różnica: z roweru

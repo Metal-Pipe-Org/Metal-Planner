@@ -1051,7 +1051,7 @@ function drawFlow(flow, refit) {
 // Jedyna liczba na mapie, której nie trzeba szukać kursorem - i jedyna, która
 // odpowiada na pytanie zadawane najpierw: "ile to w ogóle zajmuje". Podaje
 // dwie granice całego wachlarza: najszybszy dojazd i najpóźniejszy, jaki mapa
-// jeszcze rysuje (czyli dokładnie to, co ustawia suwak okna czasowego).
+// jeszcze rysuje (czyli skutek progu mapy - patrz showMore).
 // Najechanie na najszybszy czas pokazuje, KTÓRĄ trasą się go osiąga - obie
 // liczby przychodzą z serwera (best_sec/limit_sec/fastest), razem z gotową
 // geometrią tej trasy. Obie strony paska podają godzinę i czas jazdy w tej
@@ -1092,38 +1092,25 @@ function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
 }
 
-// Ręczne przedłużanie zakresu: "+X min" tuż za granicą okna. X to POŁOWA
-// tego, co mapa pokazuje w tej chwili, więc klik rozciąga zakres o połowę
-// (razy 1,5), kolejny znów - a przy suficie X jest już tylko tym, co do
-// sufitu zostało, żeby przycisk nie obiecywał minut, których nie doda.
-// Sufit (2 h) stoi po obu stronach: tutaj, żeby przycisk zniknął, i w
-// plannerze (MAX_HORIZON_SEC), bo szerokość okna to wprost koszt skanu i nie
-// może zależeć od frontu. Przedłużenie żyje do NASTĘPNEGO wyszukiwania -
-// nowa relacja zaczyna od okna z suwaków.
-const MAX_HORIZON_SEC = 2 * 3600;
-const HORIZON_GROWTH = 0.5;        // razy 1,5 na klik: dokładamy połowę okna
-const MIN_HORIZON_STEP_SEC = 60;   // mniej niż minuta to przycisk bez treści
-let mapHorizonSec = null;          // null = zakres z suwaków, bez przedłużenia
-let horizonBusy = false;           // klik w locie - drugi klik ma poczekać
+// "Pokaż więcej" tuż za granicą mapy (punkt 2 kontraktu): każde kliknięcie
+// dokłada jedną WYJŚCIOWĄ gęstość - pierwsze do dwukrotności, drugie do
+// trzykrotności, trzecie do czterokrotności. Próg z tego dobiera serwer i to
+// on pilnuje sufitu (MAX_MAP_MORE w plannerze), tutaj liczba służy tylko
+// temu, żeby przycisk zniknął, gdy nie ma już czego dokładać. Dokładka żyje
+// do NASTĘPNEGO wyszukiwania - nowa relacja zaczyna od gęstości z suwaka.
+const MAX_MAP_MORE = 3;
+let mapMore = 0;                   // ile razy kliknięto "pokaż więcej"
+let moreBusy = false;              // klik w locie - drugi klik ma poczekać
 
-/** Ile jeszcze da się dołożyć: połowa tego, co mapa pokazuje teraz, ale nie
-    ponad sufit. W pełnych minutach, bo w minutach jest podpisany przycisk -
-    inaczej etykieta obiecywałaby co innego, niż dokłada klik. */
-function horizonStep(limitSec) {
-    const krok = Math.round(limitSec * HORIZON_GROWTH / 60) * 60;
-    const doSufitu = Math.floor((MAX_HORIZON_SEC - limitSec) / 60) * 60;
-    return Math.min(krok, doSufitu);
-}
-
-function extendHorizon(limitSec, stepSec) {
-    if (horizonBusy) return;
-    horizonBusy = true;
-    mapHorizonSec = limitSec + stepSec;
-    // Kadru NIE przestawiamy - tak samo jak przy suwakach okna czasowego:
-    // szersze okno dokłada linie, nie zmienia tego, na co user patrzy.
+function showMore() {
+    if (moreBusy) return;
+    moreBusy = true;
+    mapMore += 1;
+    // Kadru NIE przestawiamy: gęstsza mapa dokłada linie, nie zmienia tego,
+    // na co user patrzy.
     loadPlan(requestToken, false)
         .catch(() => showError('Nie udało się połączyć z serwerem.'))
-        .finally(() => { horizonBusy = false; });
+        .finally(() => { moreBusy = false; });
 }
 
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
@@ -1161,11 +1148,11 @@ function renderTimeHeadline() {
         return;
     }
     const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
-    const step = horizonStep(flow.limit_sec);
-    const more = step >= MIN_HORIZON_STEP_SEC
-        ? `<button type="button" class="headline-more" title="Rysuj też trasy `
-          + `odjeżdżające później - zakres mapy do ${esc(fmtMins(flow.limit_sec + step))}">`
-          + `+${esc(fmtMins(step))}</button>`
+    // Po trzecim kliknięciu i przy suficie skanu (at_ceiling) nie ma już
+    // czego dokładać - przycisk, który nic nie robi, nie ma prawa stać.
+    const more = flow.more < MAX_MAP_MORE && !flow.at_ceiling
+        ? `<button type="button" class="headline-more" title="Rysuj też gorsze `
+          + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">Pokaż więcej</button>`
         : '';
     el.innerHTML =
         `<span class="headline-best" tabindex="0">Najszybciej o `
@@ -1181,8 +1168,7 @@ function renderTimeHeadline() {
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
     const moreBtn = el.querySelector('.headline-more');
-    if (moreBtn) moreBtn.addEventListener('click',
-        () => extendHorizon(flow.limit_sec, step));
+    if (moreBtn) moreBtn.addEventListener('click', showMore);
     // Na dotyku nie ma "mouseenter" - to jedyny sposób, żeby zobaczyć trasę
     // najszybszego dojazdu na telefonie. Toggle, nie show: drugie stuknięcie
     // (albo stuknięcie gdzie indziej, które i tak odpala renderTimeHeadline
@@ -3097,14 +3083,13 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
-        extra_pct: $('extra').value,
-        extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
-        extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
+        density: $('density').value,
+        cars: $('car-count').value,
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
-    // Ręczne przedłużenie zakresu ("+X min" nad mapą) - tylko gdy user je
-    // kliknął; bez niego o szerokości okna decydują wyłącznie suwaki.
-    if (mapHorizonSec !== null) params.set('horizon_sec', mapHorizonSec.toFixed(0));
+    // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
+    // wynika z samej gęstości z suwaka.
+    if (mapMore) params.set('more', mapMore);
     // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
@@ -3162,7 +3147,7 @@ function showDegradedNotice() {
     resultsBox.insertAdjacentHTML('afterbegin',
         '<div class="notice error degraded"><p>Tryb awaryjny: w tym oknie '
         + 'czasowym nie ułożył się wachlarz połączeń — mapa pokazuje samą '
-        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „+X min” nad mapą.'
+        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „Pokaż więcej” nad mapą.'
         + '</p></div>');
 }
 
@@ -3332,7 +3317,7 @@ function setSearching(on) {
 function search() {
     if (!startInput.value || !endInput.value) return;
     const token = ++requestToken;
-    mapHorizonSec = null;      // nowa relacja zaczyna od okna z suwaków
+    mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     clearJourney();
     clearPreview();
     setSearching(true);
@@ -3593,7 +3578,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
+const DEV_SLIDER_IDS = ['density', 'car-count', 'transfer-gain'];
 
 function loadDevPrefs() {
     try {
@@ -3625,16 +3610,16 @@ function applyStoredDevPrefs() {
     }
 }
 
-function liveSlider(inputId, valueId, dropsHorizon) {
+function liveSlider(inputId, valueId, resetsMore) {
     const input = $(inputId);
     const valueEl = $(valueId);
     let timer = null;
     input.addEventListener('input', () => {
         valueEl.textContent = input.value;
-        // Ruszenie suwakiem okna to powrót do okna liczonego z suwaków -
-        // inaczej ręczne przedłużenie (szersze) i tak by je przykryło, a
-        // suwak wyglądałby na zepsuty.
-        if (dropsHorizon) mapHorizonSec = null;
+        // Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
+        // z "pokaż więcej" liczyłaby się inaczej od starej i suwak
+        // wyglądałby na zepsuty.
+        if (resetsMore) mapMore = 0;
         saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
@@ -3645,9 +3630,8 @@ function liveSlider(inputId, valueId, dropsHorizon) {
     });
 }
 applyStoredDevPrefs();
-liveSlider('extra', 'extra-value', true);
-liveSlider('extra-floor', 'extra-floor-value', true);
-liveSlider('extra-cap', 'extra-cap-value', true);
+liveSlider('density', 'density-value', true);
+liveSlider('car-count', 'car-count-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
 
 // --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
