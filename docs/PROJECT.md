@@ -894,7 +894,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   „+X min" zniknęły. Miara jakości została ta sama — o której opcja dociera do
   celu — a próg staje tam, gdzie narysowana sieć osiąga docelową gęstość:
   łączną długość RÓŻNYCH korytarzy w kadrze relacji na jego bok (pierwiastek
-  z powierzchni — tak gęsto, jak widać na ekranie; domyślnie 3,5).
+  z powierzchni — tak gęsto, jak widać na ekranie; domyślnie 2,5).
   Linie jadące jednym korytarzem liczą się raz, więc próg idzie za nimi dalej,
   aż trafi na naprawdę inny korytarz. Jeden suwak gęstości pod zębatką; godzina
   „mapa pokazuje do" jest skutkiem. „Pokaż więcej" dokłada po jednej wyjściowej

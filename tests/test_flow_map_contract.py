@@ -1272,13 +1272,14 @@ def _drawing_seam_day():
     ])
 
 
-def test_a_seam_between_two_pieces_is_not_a_transfer(install_day):
+def test_a_seam_between_two_pieces_is_not_a_transfer(install_day, pin_deadline):
     """Zgłoszone 2026-08-31: kropka stała na Urzędzie Wojewódzkim (Impart)
     i nie miała nic do powiedzenia - D i 146 tylko tamtędy przejeżdżały.
     Kawałki tnie także zmiana składu korytarza (punkt 7), czyli sprawa czysto
     rysunkowa, a kropka dziedziczyła ten szew. Miejsce, przez które wszystko
     tylko przejeżdża, nie jest przesiadką."""
     install_day(_drawing_seam_day())
+    pin_deadline(4600)   # próg przy dawnej domyślnej gęstości 3,5
     result = planner.plan_flow("S", "T", WHEN)
 
     # Szew NAPRAWDĘ tam jest - inaczej test przechodziłby na pusto.

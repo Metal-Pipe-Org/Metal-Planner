@@ -825,9 +825,9 @@ def _round_path(coords):
 # opcja dociera do celu; próg stoi tam, gdzie narysowana sieć osiąga docelową
 # GĘSTOŚĆ (patrz _map_density), a nie tam, gdzie wypada jakaś liczba minut -
 # ta sama liczba minut dawała raz pustą mapę, raz nieczytelny gąszcz.
-# Domyślna wartość to mediana gęstości dawnych map (okno 125%, 5-15 min) na
-# dziesięciu prawdziwych relacjach - pomiar w FLOW_MAP_NOTES.md, 2026-09-13.
-DEFAULT_MAP_DENSITY = 3.5    # km różnych korytarzy na km boku kadru (km/√km²)
+# Domyślna wartość jest poniżej mediany dawnych map (3,5 przy oknie 125%,
+# 5-15 min) - wybór użytkownika, pomiar w FLOW_MAP_NOTES.md, 2026-09-13.
+DEFAULT_MAP_DENSITY = 2.5    # km różnych korytarzy na km boku kadru (km/√km²)
 MIN_MAP_DENSITY = 0.5
 MAX_MAP_DENSITY = 15.0       # sufit suwaka pod zębatką - pilnowany tutaj
 
