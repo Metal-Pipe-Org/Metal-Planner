@@ -423,3 +423,5 @@ pytanie „jak tam dojadę".
 
 Rozsądna szybkość działania jest pożądana, ale nigdy kosztem poprawności.
 Wolniejszy, ale dokładny wynik jest lepszy niż szybki, ale niedokładny.
+
+edited
