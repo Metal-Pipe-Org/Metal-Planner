@@ -183,13 +183,26 @@ function esc(text) {
     return div.innerHTML;
 }
 
-const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32', other: '#6a1b9a'};
-const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg', other: 'Linia'};
+// `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
+// fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
+const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
+                     bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
+const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
+const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
+                    bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
+
+/** Autko do wiersza "jedziesz autem" na osi trasy. Bierze `currentColor`, tak
+    jak ROUTE_ICON, więc nie ma własnego koloru do pamiętania. */
+const CAR_ICON =
+    '<svg class="tl-car-icon" viewBox="0 0 24 14" aria-hidden="true">'
+    + '<path d="M3 9.5 4.3 5.2A2.2 2.2 0 0 1 6.4 3.6h11.2a2.2 2.2 0 0 1 2.1 1.6'
+    + 'L21 9.5v2.6h-2.6v-1.4H5.6v1.4H3z"/>'
+    + '<circle cx="7.4" cy="9.4" r="1.5"/><circle cx="16.6" cy="9.4" r="1.5"/></svg>';
 
 // ------------------------------------------------------- markery na mapie ----
 
 const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
-const stopsLayer = L.layerGroup();        // wszystkie słupki naraz - włącznik ◉ chowa je razem
+const stopsLayer = L.layerGroup();        // wszystkie słupki naraz
 const stopKind = new Map();               // nazwa -> 'stop' (MPK) | 'train' (PKP)
 
 const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
@@ -254,13 +267,17 @@ function updatePointMarker(slot, value) {
 
 // -------------------------------------------------- pojazdy na mapie ----
 //
-// Druga warstwa markerów, wykluczająca się ze słupkami: przycisk ◉ w
-// nagłówku chowa stopsLayer i pokazuje żywe pozycje autobusów/tramwajów
-// z /api/vehicles (backend odpytuje mpk.wroc.pl/bus_position - CORS nie
-// pozwala zrobić tego wprost z przeglądarki, patrz vehicles.py). Wybór propozycji
-// trasy zawęża warstwę do linii, którymi się jedzie - reszta miasta by ją
-// tylko zasłaniała (patrz vehiclesFilter, wołane z openJourney/
-// deselectJourney/loadPlan/resetResults niżej w pliku).
+// Warstwa markerów dokładana NAD słupkami: przycisk ◉ w nagłówku pokazuje
+// żywe pozycje autobusów/tramwajów z /api/vehicles (backend odpytuje
+// mpk.wroc.pl/bus_position - CORS nie pozwala zrobić tego wprost z
+// przeglądarki, patrz vehicles.py). Słupki zostają na mapie: mówią, gdzie
+// można wsiąść, a to inne pytanie niż to, co akurat jedzie.
+//
+// Punktem odniesienia jest MAPA: gdy stoi na niej wachlarz przepływów,
+// warstwa zawęża się do linii, które są na nim narysowane (patrz
+// vehiclesFilter). Reszta miasta odpowiada na inne pytanie niż to, które
+// zadał ktoś, rysując tę mapę - i tylko ją zasłania. Bez mapy (przed
+// wyszukaniem) nie ma czego zawężać i widać wszystko, co jeździ.
 
 const vehiclesLayer = L.layerGroup();
 const vehiclesToggle = $('vehicles-toggle');
@@ -285,16 +302,16 @@ function vehicleTooltipHtml(v) {
     return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
 }
 
-/** Gdy wybrana jest propozycja trasy, warstwa pojazdów zawęża się do linii,
-    którymi ona jedzie - bez wybranej trasy widać wszystko, co akurat
-    przyjechało z /api/vehicles. */
+/** Linie narysowane na mapie przepływów - do nich zawęża się warstwa
+    pojazdów (patrz komentarz nad sekcją). null = mapa pusta, nie ma czego
+    zawężać. Liczone z flowHits, czyli z tego, co NAPRAWDĘ jest na ekranie,
+    a nie z odpowiedzi serwera - to ta sama lista, którą kursor rozstrzyga
+    korytarze. */
 function vehiclesFilter() {
-    if (selectedJourney === null) return null;
-    const journey = journeys[selectedJourney];
-    if (!journey) return null;
+    if (!flowHits.length) return null;
     const keys = new Set();
-    for (const leg of journey.legs) {
-        if (leg.kind === 'ride') keys.add(leg.mode + ' ' + leg.num.trim());
+    for (const hit of flowHits) {
+        if (hit.seg.num) keys.add(hit.seg.kind + ' ' + hit.seg.num.trim());
     }
     return keys;
 }
@@ -329,13 +346,11 @@ function setVehiclesOn(on) {
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
     if (on) {
-        map.removeLayer(stopsLayer);
         vehiclesLayer.addTo(map);
         loadVehicles();
         vehiclesTimer = setInterval(loadVehicles, VEHICLES_REFRESH_MS);
     } else {
         map.removeLayer(vehiclesLayer);
-        stopsLayer.addTo(map);
     }
 }
 
@@ -368,9 +383,8 @@ const stopsReady = fetch('/api/stops')
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
         }
-        // Stan włącznika ◉ wraca z localStorage (patrz saveUiState) - dopiero
-        // teraz, gdy stopsLayer ma już swoje markery, żeby "wyłączone" nie
-        // mignęło pustą mapą przed ich wczytaniem.
+        stopsLayer.addTo(map);
+        // Stan włącznika ◉ wraca z localStorage (patrz saveUiState).
         setVehiclesOn(vehiclesOn);
     });
 
@@ -410,7 +424,7 @@ map.on('click', e => {
 // ------------------------------------------- moja lokalizacja jako start ----
 
 // Pozycja z przeglądarki to dla nas zwykły punkt mapy, nie przystanek -
-// backend sam znajdzie wokół niego słupki (zasięg z panelu ⚙).
+// backend dokłada go jako słupek i sam liczy dojście na okoliczne przystanki.
 const locateButton = $('locate');
 const locateMsg = $('locate-msg');
 
@@ -520,12 +534,16 @@ function endpointPoints() {
 // suwakami w panelu deweloperskim - sekcja jest z powrotem WIDOCZNA
 // (LOOK_TUNING niżej), żeby dało się stroić dalej.
 //
-// minWeight = maxWeight to świadomy wybór: grubość jest STAŁA, a różnicę
-// zapasu czasu niesie samo krycie (0.4 -> 1).
+// Grubość i krycie niosą tę samą różnicę razem: najbledszy kawałek jest i
+// cieńszy, i bardziej przezroczysty (2 px / 0.3), najjaśniejszy - grubszy i
+// pełny (3 px / 1). Do 2026-09-04 grubość była STAŁA (3 px) i całą różnicę
+// niosło samo krycie; przy szerokim oknie setka bladych kresek o tej samej
+// grubości sumowała się w plamę cięższą niż korytarz, który naprawdę
+// prowadzi do celu.
 const LOOK_DEFAULTS = {
-    minOpacity: 0.4,      // krycie najbledszego kawałka (w=0)
+    minOpacity: 0.3,      // krycie najbledszego kawałka (w=0)
     maxOpacity: 1,        // krycie najjaśniejszego (w=1)
-    minWeight: 3,         // grubość najbledszego kawałka [px]
+    minWeight: 2,         // grubość najbledszego kawałka [px]
     maxWeight: 3,         // grubość najjaśniejszego [px]
     casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
     dimFactor: 0.22,      // ile zostaje z krycia, gdy wybrana jest jedna trasa
@@ -605,6 +623,15 @@ const DOT_DEFAULTS = {
     start: false,      // wyróżnienie przystanku startowego
     tipCursor: true,   // dymek przy kursorze
     tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
+    // Godziny SAMEGO przejazdu rowerem - domyślnie zgaszone. Godzina "jesteś
+    // przy rowerze" pochodzi z rozkładu i jest pokazywana zawsze; ta druga
+    // jest jedyną liczbą na tej mapie, której w żadnym rozkładzie nie ma.
+    // Odległość obok mówi to samo, nie udając odczytanej.
+    bikeTimes: false,
+    // Nazwa przystanku, który przejazd otwiera, dopisana przy odległości -
+    // też domyślnie zgaszona. Powód sensowności przejazdu jest ważny dla
+    // ALGORYTMU; przy kilkunastu etykietkach naraz jest głównie tekstem.
+    bikeOpens: false,
 };
 
 const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
@@ -759,11 +786,17 @@ let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania be
 let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
 let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
 let flowDotLayer = null;    // węzły przesiadkowe wachlarza (patrz flowStopDots)
+let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
+let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
+let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
+    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
+    if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
+    clearBikeRides();
     hoveredStopDot = null;
     flowParts = [];
     flowHits = [];
@@ -830,6 +863,17 @@ function drawFlow(flow, refit) {
     flowLayer = L.layerGroup([...faint, ...casings, ...bright]).addTo(map);
     // Osobna warstwa, dodana PO korytarzach: kropka ma łapać kursor przed
     // linią, na której leży.
+    // Rowery pod autami i pod kropkami: stacja bywa dokładnie przy węźle, a
+    // najpierw pod kursor ma trafić to, co opisuje całe miejsce.
+    if (flowBikeLayer) map.removeLayer(flowBikeLayer);
+    clearBikeRides();
+    flowBikeLayer = L.layerGroup(
+        flowBikeMarkers(flow.bike_places, flow.bike_places_live)).addTo(map);
+    if (BIKE_RIDES_ALWAYS) showAllBikeRides(flow.bike_places);
+    // Auta pod kropkami przesiadek: gdy jedno stoi dokładnie na węźle, kursor
+    // ma trafić najpierw w kropkę - ona opisuje całe to miejsce.
+    if (flowCarLayer) map.removeLayer(flowCarLayer);
+    flowCarLayer = L.layerGroup(flowCarMarkers(flow.cars)).addTo(map);
     if (flowDotLayer) map.removeLayer(flowDotLayer);
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
@@ -837,6 +881,9 @@ function drawFlow(flow, refit) {
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
     seedStartPanel();
+    // Nowa mapa = inny zestaw linii, więc i inne pojazdy dotyczą tego, co
+    // widać (patrz vehiclesFilter). Przy zgaszonej warstwie to nic nie kosztuje.
+    renderVehicles();
     if (!refit) return;
 
     // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać do widoku
@@ -868,7 +915,19 @@ function showFastest() {
     if (!fastest || !fastest.legs || !fastest.legs.length) return;
     const halos = [], cores = [];
     for (const leg of fastest.legs) {
+        if (!leg.path || leg.path.length < 2) continue;
         const latlngs = leg.path.map(p => L.latLng(p));
+        if (leg.kind === 'walk') {
+            // Dojscie rysujemy tak, jak wszedzie indziej na tej mapie:
+            // kreskowana linia w kolorze marszu, bez czarnej otoczki. Bez
+            // tego podswietlona trasa zaczynala sie "w powietrzu", kawalek
+            // od zaznaczonego startu - i nic nie tlumaczylo tej dziury.
+            cores.push(L.polyline(latlngs, {
+                color: WALK_COLOR, weight: 4, opacity: 1,
+                dashArray: '1,7', lineCap: 'round', interactive: false,
+            }));
+            continue;
+        }
         halos.push(L.polyline(latlngs, {
             color: '#111', opacity: 0.85, weight: 9,
             lineCap: 'round', lineJoin: 'round', interactive: false,
@@ -885,6 +944,64 @@ function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
 }
 
+// Ręczne przedłużanie zakresu: "+X min" tuż za granicą okna. X to POŁOWA
+// tego, co mapa pokazuje w tej chwili, więc klik rozciąga zakres o połowę
+// (razy 1,5), kolejny znów - a przy suficie X jest już tylko tym, co do
+// sufitu zostało, żeby przycisk nie obiecywał minut, których nie doda.
+// Sufit (2 h) stoi po obu stronach: tutaj, żeby przycisk zniknął, i w
+// plannerze (MAX_HORIZON_SEC), bo szerokość okna to wprost koszt skanu i nie
+// może zależeć od frontu. Przedłużenie żyje do NASTĘPNEGO wyszukiwania -
+// nowa relacja zaczyna od okna z suwaków.
+const MAX_HORIZON_SEC = 2 * 3600;
+const HORIZON_GROWTH = 0.5;        // razy 1,5 na klik: dokładamy połowę okna
+const MIN_HORIZON_STEP_SEC = 60;   // mniej niż minuta to przycisk bez treści
+let mapHorizonSec = null;          // null = zakres z suwaków, bez przedłużenia
+let horizonBusy = false;           // klik w locie - drugi klik ma poczekać
+
+/** Ile jeszcze da się dołożyć: połowa tego, co mapa pokazuje teraz, ale nie
+    ponad sufit. W pełnych minutach, bo w minutach jest podpisany przycisk -
+    inaczej etykieta obiecywałaby co innego, niż dokłada klik. */
+function horizonStep(limitSec) {
+    const krok = Math.round(limitSec * HORIZON_GROWTH / 60) * 60;
+    const doSufitu = Math.floor((MAX_HORIZON_SEC - limitSec) / 60) * 60;
+    return Math.min(krok, doSufitu);
+}
+
+function extendHorizon(limitSec, stepSec) {
+    if (horizonBusy) return;
+    horizonBusy = true;
+    mapHorizonSec = limitSec + stepSec;
+    // Kadru NIE przestawiamy - tak samo jak przy suwakach okna czasowego:
+    // szersze okno dokłada linie, nie zmienia tego, na co user patrzy.
+    loadPlan(requestToken, false)
+        .catch(() => showError('Nie udało się połączyć z serwerem.'))
+        .finally(() => { horizonBusy = false; });
+}
+
+/** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
+    (patrz summaryHtml): dojscie OTWIERAJACE albo ZAMYKAJACE trase dostaje
+    wlasny znak, bo inaczej pasek obiecuje wsiadanie na przystanku, ktorego
+    nikt nie wskazywal; przejscie miedzy pojazdami zostaje kreska. */
+function headlineChips(legs) {
+    const parts = [];
+    let pendingWalk = false;
+    legs.forEach((leg, i) => {
+        if (leg.kind === 'walk') {
+            if (i === 0 || i === legs.length - 1) {
+                parts.push(`<span class="headline-walk" title="Przejście pieszo` +
+                           ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`);
+            } else {
+                pendingWalk = true;
+            }
+            return;
+        }
+        if (pendingWalk) parts.push('<span class="headline-hop"></span>');
+        pendingWalk = false;
+        parts.push(`<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`);
+    });
+    return parts.join('');
+}
+
 function renderTimeHeadline() {
     const el = $('time-headline');
     if (!el) return;
@@ -895,20 +1012,29 @@ function renderTimeHeadline() {
         hideFastest();
         return;
     }
-    const chips = ((flow.fastest && flow.fastest.legs) || []).map(leg =>
-        `<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`).join('');
+    const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
+    const step = horizonStep(flow.limit_sec);
+    const more = step >= MIN_HORIZON_STEP_SEC
+        ? `<button type="button" class="headline-more" title="Rysuj też trasy `
+          + `odjeżdżające później - zakres mapy do ${esc(fmtMins(flow.limit_sec + step))}">`
+          + `+${esc(fmtMins(step))}</button>`
+        : '';
     el.innerHTML =
         `<span class="headline-best" tabindex="0">Najszybciej o `
         + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
         + `<span class="headline-sep">·</span>`
         + `<span class="headline-limit">mapa pokazuje do `
-        + `<b>${esc(flow.deadline)}</b>, w <b>${esc(fmtMins(flow.limit_sec))}</b></span>`;
+        + `<b>${esc(flow.deadline)}</b>, w <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
+        + more;
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
     best.addEventListener('mouseleave', hideFastest);
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
+    const moreBtn = el.querySelector('.headline-more');
+    if (moreBtn) moreBtn.addEventListener('click',
+        () => extendHorizon(flow.limit_sec, step));
     // Na dotyku nie ma "mouseenter" - to jedyny sposób, żeby zobaczyć trasę
     // najszybszego dojazdu na telefonie. Toggle, nie show: drugie stuknięcie
     // (albo stuknięcie gdzie indziej, które i tak odpala renderTimeHeadline
@@ -1517,6 +1643,11 @@ function startDotIn(layer) {
 
 if (flowPanel) $('flow-panel-close').addEventListener('click', hideSidePanel);
 
+// Okienko w rogu jest jedynym miejscem, w którym tę tablicę da się KLIKNĄĆ:
+// dymek przy kursorze Leaflet trzyma poza zdarzeniami myszy (pointer-events),
+// więc przycisk "trasa" jest tam schowany stylem (patrz style.css).
+if (flowPanelBody) flowPanelBody.addEventListener('click', routeClick);
+
 // Odpowiedzi /api/timetable trzymamy pod (przystanek, doba, godzina) - ta
 // sama kropka pytana drugi raz (powrót kursorem, przerysowanie trasy po
 // suwaku) pokazuje dymek od razu, bez mrugnięcia "Ładowanie...".
@@ -1577,12 +1708,15 @@ function flowIcon(flow) {
 
 function timetableHtml(data) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
-    const head = `<div class="tt-head"><span class="tt-stop">${esc(data.stop)}</span>` +
+    const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
                  `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
     if (!data.departures.length) {
         return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
     }
-    const list = summariseRepeats(data.departures).slice(0, timetableRows());
+    // `all_departures` to tablica sprzed odsiewu - stąd bierze się takt
+    // linii, patrz summariseRepeats.
+    const list = summariseRepeats(data.departures, data.all_departures)
+        .slice(0, timetableRows());
     // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
     // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
     // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
@@ -1592,7 +1726,7 @@ function timetableHtml(data) {
         `<li>` + (flows ? flowIcon(d.flow) : '') +
         `<span class="tt-time">${esc(d.time)}</span>` +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
-        `<span class="tt-dir">${esc(d.headsign)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}</span>` +
         // "0 min", nie "teraz": nagłówek mówi "od 16:57", a to nie jest
         // godzina zegarowa, tylko najwcześniejsza, o której da się tu być -
         // "teraz" obok niej znaczyłoby coś innego niż znaczy. Rytm dopisany
@@ -1600,7 +1734,7 @@ function timetableHtml(data) {
         // wyższego od pozostałych.
         `<span class="tt-in">${esc(d.in_min < 1 ? 0 : d.in_min)} min` +
         (d.every_min ? `<small> · co ${esc(d.every_min)} min</small>` : '') +
-        `</span></li>`
+        `</span>` + routeButtonHtml(d, 'trasa') + `</li>`
     ).join('');
     return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
 }
@@ -1718,12 +1852,20 @@ function keepWithinHorizon(data, deadline) {
     "za 4 min, potem co 15 min" mówi to samo, w jednym wierszu i bez zgadywania,
     czy pominięte kursy w ogóle istnieją.
 
+    Takt bierze się z `rhythmSource` - PEŁNEJ tablicy przystanku, sprzed
+    odsiewu - więc pisze się go także wtedy, gdy następny kurs wypada już poza
+    zakresem mapy. To informacja o LINII, nie o oknie: "co 20 min" tak samo
+    trzeba wiedzieć, gdy ten kolejny kurs mapa jeszcze rysuje, jak i gdy już
+    nie. Liczony z listy po odsiewie znikał dokładnie tam, gdzie był
+    najpotrzebniejszy - na rzadkim węźle blisko granicy okna.
+
     Odstęp to MEDIANA przerw, nie średnia: jeden nocny przeskok o godzinę nie
     ma prawa przesunąć liczby opisującej normalny takt.
 
     Kierunek jest częścią tożsamości linii - ta sama linia w drugą stronę to
     osobna opcja i osobny wiersz. */
-function summariseRepeats(departures) {
+function summariseRepeats(departures, rhythmSource) {
+    const rytm = lineRhythms(rhythmSource || departures);
     const groups = new Map();
     for (const d of departures) {
         // `flow` w kluczu, bo przyjazd i odjazd tej samej linii to dwa różne
@@ -1736,11 +1878,34 @@ function summariseRepeats(departures) {
     }
     const out = [];
     for (const list of groups.values()) {
-        out.push(list.length > 1
-            ? {...list[0], every_min: medianGapMin(list)}
-            : list[0]);
+        const d = list[0];
+        // Wiersz przyjazdu to jedno zdarzenie z mapy, a nie oferta - takt
+        // przy nim mówiłby o odjazdach, o które nikt tu nie pyta.
+        const every = d.flow === 'end' ? undefined
+            : rytm.get(lineKey({kind: d.mode, num: d.num, headsign: d.headsign}));
+        out.push(every ? {...d, every_min: every} : d);
     }
     return out.sort((a, b) => a.sec - b.sec);
+}
+
+/** Takt każdej linii z tablicy: klucz linii -> mediana przerw w minutach.
+    Linie z jednym tylko odjazdem nie trafiają tu wcale - jeden kurs nie ma
+    rytmu, a "co 0 min" byłoby zdaniem o niczym. */
+function lineRhythms(departures) {
+    const groups = new Map();
+    for (const d of departures) {
+        // Przyjazd nie jest odjazdem: doklejony wiersz "end" tej samej linii
+        // stanąłby w rytmie obok jej odjazdów i zrobiłby takt z jednego kursu.
+        if (d.flow === 'end') continue;
+        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign});
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(d);
+    }
+    const out = new Map();
+    for (const [key, list] of groups) {
+        if (list.length > 1) out.set(key, medianGapMin(list));
+    }
+    return out;
 }
 
 function medianGapMin(list) {
@@ -1796,8 +1961,12 @@ function loadTimetable(dot, where, sec) {
             // Przyjazdy doklejamy PO obu sitach: oba pytają "czy tym odjazdem
             // jeszcze się dojedzie", a wiersz przyjazdu nie jest odjazdem -
             // to fakt z samej mapy, więc nie ma go czym odsiewać.
+            // Pełna tablica jedzie przez oba sita nietknięta (dokładamy ją
+            // do odpowiedzi, a sita przepisują tylko `departures`): takt linii
+            // ma się liczyć z rozkładu, nie z tego, co przeżyło odsiew.
+            const pelna = {...data, all_departures: data.departures};
             const html = timetableHtml(data.error ? data : withArrivals(
-                keepWithinHorizon(keepOfferedLines(data, where.lines), where.deadline),
+                keepWithinHorizon(keepOfferedLines(pelna, where.lines), where.deadline),
                 where.lines, sec));
             // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
             // nie: offline z service workera wraca jako {error}, a po powrocie
@@ -1875,11 +2044,21 @@ const START_DOT_STYLE = {color: '#1b5e20', weight: 4, fillColor: '#c8f0cd'};
 const FLOW_DOT_STYLE = {radius: 4, weight: 2, color: '#263238',
                         fillColor: '#fff', fillOpacity: 1};
 
-const flowDotStyle = () => ({
-    ...FLOW_DOT_STYLE,
-    radius: Math.max(2, dotOpts.size - 1),
-    weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
-});
+// Kropka waży tyle, co to, co przy niej leży: jej krycie idzie z jasności
+// węzła (backend, patrz planner._transfer_nodes) przez tę samą skalę, co
+// krycie kawałków - więc suwak „najbledsza linia" rusza jedno i drugie razem.
+// Bez tego blada okolica dostawała kropki tak samo mocne, jak najszybsza
+// trasa, i to one niosły ciężar obrazka zamiast linii.
+const flowDotStyle = (w = 1) => {
+    const krycie = lookOpacity(Math.max(0, Math.min(1, Number(w) || 0)));
+    return {
+        ...FLOW_DOT_STYLE,
+        radius: Math.max(2, dotOpts.size - 1),
+        weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
+        opacity: krycie,
+        fillOpacity: krycie,
+    };
+};
 
 /** Kropki węzłów wachlarza - jedna na MIEJSCE, nie na słupek.
 
@@ -1891,7 +2070,9 @@ const flowDotStyle = () => ({
 function flowStopDots(nodes, deadline) {
     return (nodes || []).map(n => stopDot(
         nodePoint(n), {name: n.name, lines: n.lines, deadline, start: n.start},
-        n.sec, flowDotStyle()));
+        // Start nigdy nie blednie: to nie jest jedna z opcji, tylko miejsce,
+        // w którym stoisz.
+        n.sec, flowDotStyle(n.start ? 1 : n.w)));
 }
 
 /** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
@@ -1902,6 +2083,211 @@ function nodePoint(node) {
     return dotOpts.center && node.clat !== undefined
         ? [node.clat, node.clon]
         : [node.lat, node.lon];
+}
+
+
+// Auto car-sharingu w zasięgu mapy. Fiolet, bo tym kolorem te auta jeżdżą
+// i po nim się je poznaje na ulicy (ten sam powód, co --car w style.css).
+const CAR_STYLE = {radius: 5, weight: 1, color: '#6a1b9a',
+                   fillColor: '#ab47bc', fillOpacity: 0.9};
+
+// Auto, przy którym jest coś do wzięcia w programie „Ogarniam", nosi złotą
+// obwódkę - inaczej trzeba by najeżdżać po kolei na wszystkie, żeby znaleźć
+// to jedno, za które Traficar płaci.
+const CAR_OGARNIAM_STYLE = {radius: 6, weight: 2.5, color: '#f9a825'};
+
+/** Znaczniki wolnych aut (patrz traficar.map_cars).
+
+    Auto jest MIEJSCEM, do którego mapa dowozi, a nie kursem: nie ma linii,
+    nie ma jasności, nie należy do wachlarza (kontrakt p.15). Cała treść
+    siedzi w dymku, bo o aucie mówi się to samo, co o przystanku - o której
+    się przy nim jest - plus to, czego o nim nie wiemy: ile stąd do celu
+    w linii prostej i ani słowa o czasie jazdy. */
+function flowCarMarkers(cars) {
+    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], {
+        ...CAR_STYLE,
+        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
+    }).bindTooltip(carTooltipHtml(car), {
+        direction: 'top', offset: [0, -4], opacity: 1,
+    }));
+}
+
+function carTooltipHtml(car) {
+    return [
+        `<b>${esc(car.model)} · ${esc(car.plate)}</b>`,
+        `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
+        `pieszo z „${esc(car.from)}”`,
+        `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
+        `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
+        ogarniamText(car.ogarniam),
+    ].join('<br>');
+}
+
+/** Program „Ogarniam" (w feedzie: `discounts`) - co przy tym aucie jest do
+    wzięcia i za ile. Zdanie pada ZAWSZE, także gdy nie ma nic: brak wiersza
+    znaczyłby naraz „nic tu nie ma" i „nie wiadomo", a to dwie różne rzeczy. */
+function ogarniamText(tasks) {
+    if (!tasks || !tasks.length) return 'Ogarniam: nic do wzięcia';
+    return 'Ogarniam: ' + tasks
+        .map(task => `${esc(task.co.toLowerCase())} ${task.ile} zł`)
+        .join(' · ');
+}
+
+function fmtDist(metres) {
+    return metres < 1000
+        ? `${metres} m`
+        : `${(metres / 1000).toFixed(1).replace('.', ',')} km`;
+}
+
+// Rower miejski na mapie. Pomarańcz jest ten sam, co plakietka etapu
+// rowerowego na wybranej trasie - „to jest rower" ma znaczyć jedno, niezależnie
+// czy patrzy się na kropkę stacji, czy na kreskę przejazdu.
+const BIKE_STYLE = {weight: 1, color: '#e65100', fillColor: '#ffb74d',
+                    fillOpacity: 0.9};
+// Rower stojący luzem, poza stojakiem: ta sama rodzina koloru, ale pusty
+// środek - to jeden rower, a nie miejsce, w którym stoi ich kilka.
+const BIKE_LOOSE_STYLE = {radius: 4, weight: 2, color: '#e65100',
+                          fillColor: '#fff', fillOpacity: 1};
+// Pytanie o inny dzień: stacja stoi tam zawsze, ale ile w niej będzie
+// rowerów - nie wiadomo. Szarość mówi to, zanim się przeczyta dymek.
+const BIKE_UNKNOWN_STYLE = {radius: 4, weight: 1.5, color: '#9e9e9e',
+                            fillColor: '#fff', fillOpacity: 0.35};
+// Drugi koniec przejazdu. Blada i bez własnego życia: pojawia się razem ze
+// strzałką, pod kursorem, bo opisuje przejazd, a nie miejsce, z którego coś
+// się bierze. Stacja, na której da się WSIĄŚĆ na rower, ma własną kropkę.
+const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
+                           fillColor: '#ffe0b2', fillOpacity: 0.85};
+// Kreska przejazdu kropkowana tak samo, jak etap rowerowy wybranej trasy.
+const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
+                         dashArray: '1, 6', interactive: false};
+
+// Kreski przejazdów pokazują się WYŁĄCZNIE pod kursorem: jest ich kilkaset
+// i narysowane naraz zasłaniają mapę, o którą się właśnie pyta. Stała, a nie
+// przełącznik - to nie jest decyzja, którą ma podejmować pasażer.
+const BIKE_RIDES_ALWAYS = false;
+
+/** Kropki rowerów w zasięgu mapy (patrz bikes.map_places).
+
+    Kropkę dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ NA ROWER: mapa
+    do niego dowozi i prowadzi z niego choć jeden sensowny przejazd. Drugi
+    koniec przejazdu pokazuje się razem ze strzałką, pod kursorem - a jeśli
+    sam jest miejscem do wsiadania, stoi na mapie z własnego tytułu.
+
+    Sam przejazd nie jest narysowany na stałe: dwie kropki mówią to samo, co
+    kreska między nimi, a kresek jest kilkaset. Pojawiają się pod kursorem. */
+function flowBikeMarkers(places, live) {
+    return (places || []).map(place => {
+        const dot = L.circleMarker([place.lat, place.lon],
+                                   bikeStyle(place, live))
+            .bindTooltip(bikeTooltipHtml(place, live),
+                         {direction: 'top', offset: [0, -4], opacity: 1});
+        dot.on('mouseover', () => showBikeRides(place));
+        dot.on('mouseout', () => {
+            if (!BIKE_RIDES_ALWAYS) clearBikeRides();
+            else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
+        });
+        return dot;
+    });
+}
+
+function bikeStyle(place, live) {
+    if (!live) return BIKE_UNKNOWN_STYLE;
+    if (place.loose) return BIKE_LOOSE_STYLE;
+    // Wielkość niesie liczbę rowerów, więc pełna i pusta stacja różnią się
+    // od siebie bez czytania. Sufit, bo powyżej kilkunastu "więcej" już nic
+    // nie zmienia w decyzji, a kropka zaczyna zasłaniać mapę.
+    return {...BIKE_STYLE, radius: 4 + Math.min(place.bikes, 16) * 0.4};
+}
+
+function bikeTooltipHtml(place, live) {
+    const rows = [`<b>${esc(place.name || 'Rower luzem')}</b>`];
+    rows.push(`Jesteś przy nim ${fmtClock(place.at)} — ` +
+              `${fmtMins(place.walk_sec)} pieszo z „${esc(place.from)}”`);
+    rows.push(live ? bikeCountText(place)
+                   : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
+                     'jest z tej chwili, a pytasz o inny dzień');
+    return rows.join('<br>');
+}
+
+function bikeCountText(place) {
+    if (place.loose) return place.electric ? 'Jeden rower, elektryczny'
+                                           : 'Jeden rower';
+    const bikes = `${place.bikes} ` +
+        plural(place.bikes, 'rower', 'rowery', 'rowerów');
+    return place.electric
+        ? `${bikes} (w tym ${place.electric} ` +
+          plural(place.electric, 'elektryczny', 'elektryczne', 'elektrycznych') + ')'
+        : bikes;
+}
+
+/** Strzałki przejazdów z jednej kropki - wszystkie, jakie z niej mają sens.
+
+    Z etykietką przy każdym drugim końcu, bo to jest cała odpowiedź na „po co
+    tu ten rower": o której się tam jest i jak daleko to stąd. */
+function showBikeRides(place) {
+    clearBikeRides();
+    flowBikeRideLayer = L.layerGroup(bikeRideLayers(place, true)).addTo(map);
+}
+
+/** Wszystkie przejazdy wszystkich kropek naraz (przełącznik pod zębatką).
+
+    Bez etykietek: kilkaset naraz to nie jest mapa, tylko ściana tekstu.
+    Etykietki wracają, gdy kursor wskaże konkretną kropkę. */
+function showAllBikeRides(places) {
+    clearBikeRides();
+    const layers = [];
+    for (const place of places || []) layers.push(...bikeRideLayers(place, false));
+    flowBikeRideLayer = L.layerGroup(layers).addTo(map);
+}
+
+function clearBikeRides() {
+    if (flowBikeRideLayer) map.removeLayer(flowBikeRideLayer);
+    flowBikeRideLayer = null;
+}
+
+function bikeRideLayers(place, labels) {
+    const layers = [];
+    for (const ride of place.rides) {
+        layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
+                               BIKE_RIDE_STYLE));
+        if (!labels) continue;
+        layers.push(L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
+            .bindTooltip(bikeRideTooltipHtml(ride),
+                         {direction: 'top', offset: [0, -4], opacity: 1}));
+        // Etykietka wisi na własnym, niewidzialnym uchwycie przezroczystym
+        // dla kursora: leży dokładnie na kropce wyżej, a to ona ma łapać
+        // najechanie.
+        layers.push(L.circleMarker([ride.lat, ride.lon],
+                                   {...BIKE_TARGET_STYLE, opacity: 0,
+                                    fillOpacity: 0, interactive: false})
+            .bindTooltip(bikeRideLabel(ride),
+                         {permanent: true, direction: 'right', offset: [6, 0],
+                          className: 'bike-ride-label', opacity: 1}));
+    }
+    return layers;
+}
+
+/** Etykietka przy drugim końcu. Domyślnie SAMA odległość: godzina przejazdu
+    jest policzona, nie odczytana, a nazwa otwieranego przystanku to powód,
+    dla którego ten przejazd w ogóle tu jest - ważny dla algorytmu, nie dla
+    patrzącego. Oba dopiski wracają przełącznikami pod zębatką. */
+function bikeRideLabel(ride) {
+    const parts = [];
+    if (dotOpts.bikeTimes) parts.push(fmtClock(ride.at));
+    parts.push(fmtDist(ride.m));
+    if (dotOpts.bikeOpens) parts.push(`→ ${esc(ride.opens)}`);
+    return parts.join(' · ');
+}
+
+function bikeRideTooltipHtml(ride) {
+    const rows = [`<b>${esc(ride.name)}</b>`];
+    rows.push(dotOpts.bikeTimes
+        ? `Stąd ${fmtDist(ride.m)} w linii prostej — ${fmtMins(ride.sec)} ` +
+          `z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
+        : `Stąd ${fmtDist(ride.m)} w linii prostej`);
+    rows.push(`${ride.bikes} ` + plural(ride.bikes, 'rower', 'rowery', 'rowerów') +
+              ` na miejscu, ${ride.docks} wolnych stojaków`);
+    return rows.join('<br>');
 }
 
 function legLayers(legs, {preview}) {
@@ -1915,9 +2301,50 @@ function legLayers(legs, {preview}) {
         if (!leg.path || leg.path.length < 2) continue;
         if (leg.kind === 'walk') {
             lines.push(L.polyline(leg.path, {
-                color: '#455a64', weight: 3, opacity: preview ? 0.7 : 1,
+                color: WALK_COLOR, weight: 3, opacity: preview ? 0.7 : 1,
                 dashArray: '1,6', lineCap: 'round', interactive: false,
             }));
+            continue;
+        }
+        if (leg.kind === 'bike') {
+            // Przerywana, bo to NIE jest przebieg ulicami: backend zna tylko
+            // dwie stacje i odcinek między nimi (patrz planner._bike_ride_leg).
+            // Ciągła kreska obiecywałaby trasę, której nikt tu nie policzył.
+            lines.push(L.polyline(leg.path, {
+                color: LINE_COLORS.bike, weight: preview ? 4 : 5,
+                opacity: preview ? 0.75 : 1, dashArray: '9,7',
+                lineCap: 'round', interactive: false,
+            }));
+            if (!preview) {
+                marks.push(L.marker(leg.path[Math.floor(leg.path.length / 2)], {
+                    icon: L.divIcon({
+                        className: 'line-badge solid bike',
+                        html: BIKE_ICON, iconSize: null,
+                    }),
+                    interactive: false,
+                }));
+            }
+            continue;
+        }
+        // Jazda Traficarem (patrz planner._car_drive_leg). Kreskowana i bez
+        // białej otoczki, czyli NIE tak, jak rysuje się kursy: to odcinek
+        // prosty od auta do celu, nie przebieg ulicami, bo przebiegu nikt tu
+        // nie liczy. Linia ciągła obiecywałaby trasę, której nie ma.
+        if (leg.kind === 'drive') {
+            lines.push(L.polyline(leg.path, {
+                color: LINE_COLORS.car, weight: preview ? 4 : 5,
+                opacity: preview ? 0.7 : 0.95, dashArray: '10,8',
+                lineCap: 'round', interactive: false,
+            }));
+            if (!preview) {
+                marks.push(L.marker(leg.path[Math.floor(leg.path.length / 2)], {
+                    icon: L.divIcon({
+                        className: 'line-badge solid car',
+                        html: esc(leg.num), iconSize: null,
+                    }),
+                    interactive: false,
+                }));
+            }
             continue;
         }
         const color = LINE_COLORS[leg.mode] || LINE_COLORS.other;
@@ -2034,15 +2461,111 @@ function badgeHtml(leg) {
     return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
 }
 
+// Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
+// bo rower numeru nie ma - a plakietka ma mówić „czym", nie „którym".
+const BIKE_ICON = '🚲';
+
+/** Znak trasy: nitka z krańcami na końcach - to samo, co przycisk rysuje na
+    mapie, tylko w 11 pikselach. Ta sama rodzina co FLOW_ICONS: kreska bierze
+    `currentColor`, więc chodzi za kolorem przycisku (przygaszony w spoczynku,
+    akcentowy pod kursorem), zamiast mieć własny, który trzeba by osobno
+    pamiętać przy każdej zmianie stanu. */
+const ROUTE_ICON =
+    '<svg class="tt-route-icon" viewBox="0 0 15 12" aria-hidden="true">'
+    + '<path d="M2.5 9.5h2.6l4.8-7h2.6"/>'
+    + '<circle cx="2.5" cy="9.5" r="1.5"/>'
+    + '<circle cx="12.5" cy="2.5" r="1.5"/></svg>';
+
+/** "A którędy ta linia jedzie w ogóle" - pytanie, na które wyszukiwarka nie
+    odpowiada wcale: propozycja pokazuje kawałek od wsiadania do wysiadania,
+    a tablica pod słupkiem sam moment odjazdu. Przycisk przeskakuje w rozkład
+    linii, tak jak "odjazdy" w rozkładzie linii przeskakuje w tablicę słupka.
+
+    Rysowany TYLKO dla linii, które rozkład zna (patrz timetableMode.hasLine):
+    pociągi PKP nie są w bazie rozkładów, więc ich wiersze zostają bez
+    przycisku zamiast prowadzić w komunikat o nieznanej linii. Kierunek jedzie
+    razem z numerem - rozkład ma się otworzyć na tym wariancie, którym jedzie
+    ten kurs, a nie na przeciwnym. */
+function routeButtonHtml(line, label) {
+    const tt = window.timetableMode;
+    if (!tt || !tt.hasLine || !tt.hasLine(line.num, line.mode)) return '';
+    return `<button type="button" class="tt-route"
+                    data-route-num="${esc(line.num)}"
+                    data-route-mode="${esc(line.mode)}"
+                    data-route-headsign="${esc(line.headsign || '')}"
+                    title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
+                    >${ROUTE_ICON}${esc(label)}</button>`;
+}
+
+/** Klik w "trasę" nigdy nie ma znaczyć tego, co klik w wiersz pod nią -
+    ani rozwinięcia propozycji, ani zamknięcia okienka. */
+function routeClick(event) {
+    const button = event.target.closest('[data-route-num]');
+    if (!button) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    window.timetableMode.openLine({
+        num: button.dataset.routeNum,
+        mode: button.dataset.routeMode,
+        headsign: button.dataset.routeHeadsign,
+    });
+    return true;
+}
+
+/** Ludzik idacy - monochromatyczny SVG, nie emoji: reszta ikon w interfejsie
+    (◉ ⚙ ⇅ ✕ ◷) tez jest jednobarwna, a kolorowe 🚶 wygladaloby jak wklejka
+    z innego programu i renderowaloby sie inaczej na kazdym systemie. */
+const WALK_ICON =
+    '<svg class="walk-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+    '<circle cx="9" cy="2.5" r="1.9" fill="currentColor"/>' +
+    '<path d="M9.2 5.4 6.4 7.2 5.1 10.4M9.2 5.4 11.2 7.6 11.6 10.8 12.9 13.6' +
+    'M9.2 5.4 7.1 9.8 4.4 13.4" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+
+function walkBadgeHtml(leg) {
+    const dokad = leg.from === leg.to ? ' na inne stanowisko' : ` do: ${leg.to}`;
+    return `<span class="badge walk" title="Przejście pieszo${esc(dokad)}` +
+           ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`;
+}
+
+function hopHtml(walk) {
+    if (!walk) return '<span class="hop"></span>';
+    return `<span class="hop walk" title="Przesiadka z przejściem pieszo` +
+           ` · ok. ${walk.minutes} min"></span>`;
+}
+
+/** Rzad plakietek pod godzinami karty: obraz trasy, etap po etapie.
+
+    Przejscie MIEDZY pojazdami zostaje kreska lacznika - jest wlasnoscia
+    przesiadki ("tu trzeba przejsc"), a nie osobnym przystankiem podrozy.
+    Wersja, w ktorej kazde przejscie dostawalo wlasna plakietke, byla wierna,
+    ale nieczytelna: odkad przesiadka miedzy roznymi slupkami niemal zawsze
+    kosztuje minimalne trzy minuty, trasa z trzema przesiadkami rozrastala sie
+    do "3 - 18 - 3 - 14 - 3 - 4 - 3 - 146" i zawijala do dwoch linii.
+
+    Plakietke dostaje przejscie OTWIERAJACE albo ZAMYKAJACE trase - i to jest
+    ta luka, ktora tu naprawiamy. Takie przejscie nie jest przesiadka, tylko
+    wlasnym etapem do/od sieci, i nie ma sasiedniego lacznika, ktory moglby je
+    ponies: karta "dojdz na stacje i wsiadz w pociag" wygladala przez to jak
+    sam pociag. Zglaszone na zywo. */
 function summaryHtml(legs) {
     const parts = [];
-    let pendingWalk = false;
-    for (const leg of legs) {
-        if (leg.kind === 'walk') { pendingWalk = true; continue; }
-        if (parts.length) parts.push(`<span class="hop${pendingWalk ? ' walk' : ''}"></span>`);
-        pendingWalk = false;
+    let pendingWalk = null;
+    legs.forEach((leg, i) => {
+        if (leg.kind === 'walk') {
+            if (i === 0 || i === legs.length - 1) {
+                if (parts.length) parts.push(hopHtml(null));
+                parts.push(walkBadgeHtml(leg));
+            } else {
+                pendingWalk = leg;
+            }
+            return;
+        }
+        if (parts.length) parts.push(hopHtml(pendingWalk));
+        pendingWalk = null;
         parts.push(badgeHtml(leg));
-    }
+    });
     return parts.join('');
 }
 
@@ -2060,10 +2583,102 @@ function detailHtml(journey) {
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
+            // Trasa OTWARTA dojsciem (patrz planner._origin_walk): os musi
+            // zaczac sie od tego, SKAD sie wychodzi i o ktorej - inaczej
+            // pierwszy wiersz mowi "przejdz do X", nie mowiac skad ani kiedy,
+            // a godzina z naglowka karty nie ma w osi odpowiednika.
+            if (i === 0) rows.push(stopRow(journey.departure, leg.from, 'first'));
+            // `note` to gotowy opis z backendu - przychodzi tylko z etapów
+            // dostawionych przez warstwę rowerową (planner._foot_leg), bo
+            // „Dojście do stacji WRM ..." nie da się złożyć z from/to: stacja
+            // roweru to nie przystanek.
+            //
+            // `to_car` to dojście do auta Traficar, nie na inny słupek
+            // (patrz planner._car_walk_leg): tam nie ma przystanku, tylko
+            // ulica, przy której stoi konkretne auto - i to trzeba napisać.
+            // Bez adresu z feedu (`to` puste) zostaje samo "dojście do auta" -
+            // KTÓRE to auto mówi i tak następny wiersz.
+            //
+            // Bez obu rozstrzygają NAZWY, nie miejsce: miejsce potrafi zbierać
+            // słupki nazwane różnie (stacja PKP i przystanek MPK przy niej -
+            // patrz naming.py), a wtedy "inne stanowisko" nie mówi
+            // wysiadającemu z pociągu, dokąd ma iść. Ta sama zasada co
+            // w planner._walk_leg - zdanie w osi i zdanie z serwera nie mogą
+            // rozstrzygać tego inaczej.
+            const dokad = leg.note
+                ? esc(leg.note)
+                : leg.to_car
+                    ? (leg.to ? `Dojście do auta · ${esc(leg.to)}` : 'Dojście do auta')
+                    : leg.from === leg.to
+                        ? 'Przejście na inne stanowisko'
+                        : `Przejście do ${esc(leg.to)}`;
+            const ile = leg.to_car && leg.metres ? ` (${leg.metres} m)` : '';
             rows.push(
                 `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
-                `<span class="tl-body">Przejście na inne stanowisko · ok. ${leg.minutes} min</span></li>`,
+                `<span class="tl-body">${dokad}${ile} · ok. ${leg.minutes} min</span></li>`,
             );
+            // Trasa ZAMKNIETA dojsciem (patrz planner._target_reach): wiersz
+            // z przyjazdem do celu nie ma juz skad wyjsc, bo emituje go
+            // przejazd, a po tym dojsciu zadnego przejazdu nie ma. Bez tego
+            // os konczy sie na "przejdz do X", nie mowiac o ktorej sie tam
+            // jest - a to jest godzina z naglowka karty.
+            if (i === journey.legs.length - 1) {
+                rows.push(stopRow(journey.arrival, leg.to, 'last'));
+            }
+            return;
+        }
+        if (leg.kind === 'bike') {
+            rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
+            rows.push(
+                `<li class="tl-ride bike"><span class="tl-time"></span>` +
+                `<span class="tl-dot"></span><span class="tl-body">` +
+                `${badgeHtml(leg)} <span class="tl-headsign">do stacji ` +
+                `${esc(leg.to)}</span>` +
+                // Rozbicie czasu na trzy części jest tu sednem, nie ozdobą:
+                // z 14 minut cztery to stanie przy stojaku (patrz
+                // planner._bike_ride_leg), a kto tego nie wie, ten planuje
+                // przesiadkę, której nie zdąży.
+                // Przecinek, nie kropka - reszta interfejsu jest po polsku.
+                `<span class="tl-info">${(leg.distance_m / 1000).toFixed(1).replace('.', ',')} km · ` +
+                `${leg.minutes} min (odblokowanie ${leg.unlock_minutes} min, ` +
+                `jazda ${leg.ride_minutes} min, zwrot ${leg.dock_minutes} min)<br>` +
+                `${esc(leg.from)}: ${leg.bikes_available} ` +
+                `${plural(leg.bikes_available, 'rower', 'rowery', 'rowerów')} · ` +
+                `${esc(leg.to)}: ${leg.docks_available} ` +
+                `${plural(leg.docks_available, 'wolne miejsce', 'wolne miejsca', 'wolnych miejsc')}` +
+                `</span></span></li>`,
+            );
+            const after = journey.legs[i + 1];
+            if (!after || after.kind === 'walk') {
+                rows.push(stopRow(leg.to_time, leg.to, after ? '' : 'last'));
+            }
+            return;
+        }
+        // Ostatni etap propozycji z Traficarem. Wszystkie liczby idą z "ok.":
+        // auto nie ma rozkładu, więc czas jazdy jest policzony z odległości,
+        // a nie odczytany (patrz traficar.drive_time). Osobny wiersz na sam
+        // odbiór auta, bo te pięć minut to nie jazda i nie dojście - a mija.
+        if (leg.kind === 'drive') {
+            rows.push(
+                `<li class="tl-walk"><span class="tl-time"></span><span class="tl-dot"></span>` +
+                `<span class="tl-body">Odbiór auta: rezerwacja i start · ` +
+                `ok. ${leg.start_min} min</span></li>`,
+            );
+            rows.push(stopRow(leg.from_time, leg.from, ''));
+            rows.push(
+                `<li class="tl-ride car"><span class="tl-time"></span>` +
+                `<span class="tl-dot"></span><span class="tl-body">` +
+                `${badgeHtml(leg)} <span class="tl-headsign">${CAR_ICON}` +
+                `${esc(leg.model)} · ${esc(leg.plate)}</span>` +
+                `<span class="tl-info">ok. ${leg.minutes} min · ok. ${leg.km} km · ` +
+                `paliwo ${leg.fuel}%, zasięg ${leg.range} km</span>` +
+                // Skąd te liczby - powiedziane wprost, a nie zostawione do
+                // domyślenia się z samego "ok.". Każda inna godzina w tej
+                // aplikacji jest odczytana z rozkładu; ta jedna nie ma skąd.
+                `<span class="tl-info est">Czas i dystans szacowane z odległości` +
+                ` — auto nie ma rozkładu</span></span></li>`,
+            );
+            rows.push(stopRow(leg.to_time, leg.to, 'last'));
             return;
         }
         const stopWord = leg.mode === 'train'
@@ -2073,7 +2688,12 @@ function detailHtml(journey) {
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
+            // Przycisk PRZED liczbą przystanków, choć czyta się go po niej:
+            // .tl-info zajmuje całą szerokość (flex-basis: 100%), więc wszystko
+            // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
+            // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
+            routeButtonHtml(leg, 'trasa') +
             `<span class="tl-info">${leg.stops_count} ${stopWord} · ` +
             `${leg.minutes} min</span></span></li>`,
         );
@@ -2093,6 +2713,30 @@ function detailHtml(journey) {
         </p>`;
 }
 
+/** Dlaczego na liście nie ma roweru, choć 🚲 jest odhaczone.
+
+    Bez tego zera nie da się od siebie odróżnić: „policzone, rowerem nie
+    dojedziesz tu w oknie mapy", „kanał operatora milczy" i „pytasz o inny
+    dzień, a stan stojaków jest żywy" wyglądają identycznie - czyli jak
+    zepsuta funkcja. Backend rozróżnia te trzy przypadki (patrz pole `bikes`
+    w odpowiedzi /api/flow), więc wystarczy je wypisać. */
+function bikeNoteHtml() {
+    const info = lastFlow && lastFlow.bikes;
+    if (!info || info.journeys > 0) return '';
+    const text = !info.live
+        ? 'Rower liczymy tylko dla dzisiejszych wyjazdów — stan stacji jest '
+          + 'z tej chwili, nie z rozkładu.'
+        : info.stations === 0
+            ? 'Nie udało się pobrać stanu stacji WRM. Reszta wyników jest '
+              + 'kompletna.'
+            : 'Żadna trasa ze stacją WRM nie mieści się w oknie czasowym '
+              + 'mapy — tutaj rower nic nie daje.';
+    // Kartka (.notice), a nie szara linijka jak .results-foot: ten tekst leży
+    // nad mapą, gdzie sam cień pod literami czyta się ledwo - a to jedyne
+    // miejsce, w którym pada odpowiedź na „czemu nic nie widzę".
+    return `<div class="notice bike-note"><p>🚲 ${esc(text)}</p></div>`;
+}
+
 function renderJourneys() {
     if (!journeys.length) return;
     const cards = journeys.map((j, i) => {
@@ -2104,9 +2748,23 @@ function renderJourneys() {
             transfers,
             j.wait_min > 0 ? `odjazd za ${j.wait_min} min` : 'odjazd teraz',
         ];
-        const lines = j.legs.filter(leg => leg.kind === 'ride')
-                            .map(leg => leg.line).join(', ');
-        const label = `${j.departure} – ${j.arrival}, ${j.duration_min} min, ` +
+        // Propozycja z autem kończy się czymś, czego nie ma w rozkładzie -
+        // i czym się płaci za przejazd. To ma być widać na karcie, zanim się
+        // ją rozwinie, a nie dopiero na osi trasy.
+        if (j.traficar) meta.push('ostatni odcinek autem');
+        // Etykieta dla czytnika ekranu opowiada te sama trase, co plakietki -
+        // razem z przejsciami, bo to one decyduja, czy trasa jest wykonalna.
+        const lines = j.legs.filter(
+            leg => leg.kind === 'walk' || leg.kind === 'ride'
+                || leg.kind === 'bike' || leg.kind === 'drive')
+            .map(leg => leg.kind === 'walk'
+                ? `pieszo ${leg.minutes} min`
+                : leg.line).join(', ');
+        // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
+        // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
+        // czyta się pierwszą, a nie dopiero w rozwinięciu karty.
+        const czas = j.traficar ? `ok. ${j.duration_min} min` : `${j.duration_min} min`;
+        const label = `${j.departure} – ${j.arrival}, ${czas}, ` +
                       `${transfers}, ${lines}`;
         return `
             <li class="journey${selected ? ' selected' : ''}" data-index="${i}"
@@ -2114,7 +2772,10 @@ function renderJourneys() {
                 aria-label="${esc(label)}">
                 <div class="j-head">
                     <span class="j-clock">${esc(j.departure)} – ${esc(j.arrival)}</span>
-                    <span class="j-duration">${j.duration_min} min</span>
+                    <span class="j-duration${j.traficar ? ' est' : ''}"${
+                        j.traficar ? ' title="Ostatni odcinek autem - czas jazdy'
+                                   + ' szacowany, auto nie ma rozkładu"' : ''
+                    }>${esc(czas)}</span>
                 </div>
                 <div class="j-lines">${summaryHtml(j.legs)}</div>
                 <div class="j-meta">${meta.join(' · ')}</div>
@@ -2132,6 +2793,7 @@ function renderJourneys() {
                     aria-expanded="${String(!resultsCollapsed)}">${resultsCollapsed ? '▸' : '▾'}</button>
         </div>
         <ol class="journeys">${cards}</ol>
+        ${bikeNoteHtml()}
         <p class="results-foot">
             Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
             tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
@@ -2155,6 +2817,8 @@ function scrollToSelected() {
 }
 
 resultsBox.addEventListener('click', event => {
+    if (routeClick(event)) return;
+
     if (event.target.closest('#results-toggle')) {
         resultsCollapsed = !resultsCollapsed;
         saveUiState({resultsCollapsed});
@@ -2185,6 +2849,7 @@ resultsBox.addEventListener('click', event => {
 });
 
 resultsBox.addEventListener('keydown', event => {
+    if (event.target.closest('[data-route-num]')) return;
     const card = event.target.closest('.journey');
     if (card && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault();
@@ -2233,12 +2898,18 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
-        range_m: $('range').value,
         extra_pct: $('extra').value,
         extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
         extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
+    // Ręczne przedłużenie zakresu ("+X min" nad mapą) - tylko gdy user je
+    // kliknął; bez niego o szerokości okna decydują wyłącznie suwaki.
+    if (mapHorizonSec !== null) params.set('horizon_sec', mapHorizonSec.toFixed(0));
+    // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
+    // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
+    // jak przed dodaniem warstwy rowerowej.
+    if (bikeToggle.checked) params.set('bikes', '1');
     if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
@@ -2283,12 +2954,32 @@ function adoptNames(data) {
     samą najszybszą trasę (pole `degraded` w odpowiedzi /api/flow, patrz
     plan_flow). Bez tego komunikatu rzadka mapa wygląda dokładnie tak samo
     jak "tędy naprawdę nic nie jedzie" i nie da się tych dwóch rzeczy
-    odróżnić na ekranie. */
+    odróżnić na ekranie.
+
+    Mówi też, CO z tym zrobić. Najczęstsza przyczyna to nie awaria, tylko za
+    wąskie okno na rzadkim kierunku: Bielany Wrocławskie - PKP -> Wojszyce
+    o 13:29 mieści w oknie z suwaków (12 min naddatku) dokładnie jeden kurs,
+    bo następny jedzie pół godziny później - wachlarz nie ma z czego powstać.
+    Poszerzenie zakresu jest wtedy jedynym wyjściem i to ono ma stać
+    w komunikacie, a nie sam fakt porażki. */
 function showDegradedNotice() {
     resultsBox.insertAdjacentHTML('afterbegin',
-        '<div class="notice error degraded"><p>Tryb awaryjny: nie udało się '
-        + 'ułożyć wachlarza połączeń, mapa pokazuje tylko najszybszą trasę.'
+        '<div class="notice error degraded"><p>Tryb awaryjny: w tym oknie '
+        + 'czasowym nie ułożył się wachlarz połączeń — mapa pokazuje samą '
+        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „+X min” nad mapą.'
         + '</p></div>');
+}
+
+/** Mapa narysowana, lista obok pusta. To NIE jest błąd i nie ma go udawać:
+    czerwona ramka nad kompletem połączeń mówiła "coś się zepsuło", a mapa
+    pod nią była w porządku. Do 2026-09-04 kazała w dodatku zawęzić okno
+    czasowe - czyli odwrócić dokładnie to, co użytkownik przed chwilą zrobił
+    przyciskiem "+X min". Zostaje sam fakt, neutralnym stylem, bez polecenia
+    (tak samo jak showRailOnlyNotice niżej: wyjaśnienie, nie awaria). */
+function showWideWindowNotice() {
+    resultsBox.innerHTML = '<div class="notice"><p>Mapa pokazuje wszystkie '
+        + 'połączenia z tego okna czasowego. Przy tak szerokim oknie nie '
+        + 'ułożyła się z nich lista tras obok.</p></div>';
 }
 
 /** Informacja przy relacji poza obszarem MPK Wrocławia (pole `rail_only`
@@ -2344,16 +3035,14 @@ function renderPlan(data, refit) {
     clearJourney();
     clearPreview();
     dimFlow(false);
-    renderVehicles();            // odtąd nic nie jest zawężone do trasy
+    renderVehicles();            // nowa mapa - inne linie, inne pojazdy
     if (!journeys.length) {
         // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
         // przeczyć (zdarza się przy szerokim oknie, gdy graf urośnie
         // ponad budżet szukania w _enumerate_journeys).
-        showError(data.segments.length
-            ? 'Mapa pokazuje połączenia, ale przy tak szerokim oknie nie '
-              + 'udało się z nich złożyć listy tras. Zawęź okno czasowe.'
-            : 'Nie znaleziono żadnego połączenia w tym oknie czasowym.');
+        if (data.segments.length) showWideWindowNotice();
+        else showError('Nie znaleziono żadnego połączenia w tym oknie czasowym.');
     } else {
         renderJourneys();
     }
@@ -2376,6 +3065,25 @@ function loadPlan(token, refit) {
             return true;      // znaleziono - patrz search() i playPipeDrop
         });
 }
+
+// Przełącznik roweru miejskiego. Stan przeżywa odświeżenie strony razem
+// z resztą ustawień panelu (patrz saveUiState): kto jeździ WRM-em, ten jeździ
+// nim stale, a kto nie ma konta, ten nie chce tego odhaczać przy każdej wizycie.
+const bikeToggle = $('bikes');
+bikeToggle.checked = !!uiState.bikes;
+$('bike-toggle').classList.toggle('on', bikeToggle.checked);
+bikeToggle.addEventListener('change', () => {
+    $('bike-toggle').classList.toggle('on', bikeToggle.checked);
+    saveUiState({bikes: bikeToggle.checked});
+    // Zmiana odpowiedzi, nie wyglądu: gotowy wynik trzeba przeliczyć od nowa,
+    // bo rowerowych propozycji nie ma w ostatniej odpowiedzi. Tą samą drogą
+    // co suwaki w ⚙ (loadPlan bez kadrowania), a nie przez search() - relacja
+    // się nie zmieniła, więc kadr ma zostać na miejscu i nie ma po co znowu
+    // odgrywać dźwięku znalezienia trasy.
+    if (!lastFlow || !startInput.value || !endInput.value) return;
+    loadPlan(requestToken, false)
+        .catch(() => showError('Nie udało się połączyć z serwerem.'));
+});
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
@@ -2436,6 +3144,7 @@ function setSearching(on) {
 function search() {
     if (!startInput.value || !endInput.value) return;
     const token = ++requestToken;
+    mapHorizonSec = null;      // nowa relacja zaczyna od okna z suwaków
     clearJourney();
     clearPreview();
     setSearching(true);
@@ -2498,19 +3207,43 @@ const STOP_LABELS = STOP_NAMES.map(prettyStopName);
 const STOP_KIND = new Map(STOP_ENTRIES.map(e => [prettyStopName(e.name), e.kind]));
 const FOLDED_LABELS = STOP_LABELS.map(fold);
 
+// Drugie złożenie: bez kropek i z rozwiniętymi skrótami, żeby "Plac
+// Grunwaldzki" podpowiadało "PL. GRUNWALDZKI". Tabela przychodzi z serwera
+// (patrz naming.ABBREVIATIONS, templates/index.html) - przepisana tutaj
+// rozjechałaby się z wyszukiwarką przy pierwszym dopisanym skrócie.
+//
+// To OSOBNY, ostatni przebieg, a nie zamiennik fold(): rozwinięcie zmienia
+// długość ("pl" -> "plac"), więc pozycja trafienia nie wskazuje już tego
+// samego fragmentu oryginalnej nazwy i nie ma czego podświetlić.
+const ABBREV = new Map(Object.entries(JSON.parse($('stop-abbrev').textContent)));
+const expand = folded => folded.replace(/\./g, ' ').split(/\s+/)
+                               .filter(Boolean)
+                               .map(word => ABBREV.get(word) || word).join(' ');
+const ALIAS_LABELS = STOP_LABELS.map(label => expand(fold(label)));
+
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
-    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie. */
+    chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie.
+    Trafienia po rozwinięciu skrótu idą na koniec: są najluźniejsze, tak samo
+    jak po stronie serwera (patrz gtfs.match_stop). */
 function suggestionsFor(query, names = STOP_LABELS, folded, limit = MAX_SUGGESTIONS) {
-    folded = folded || (names === STOP_LABELS ? FOLDED_LABELS : names.map(fold));
     const needle = fold(query.trim());
     if (!needle) return [];
-    const prefix = [], inside = [];
+    const own = names === STOP_LABELS;
+    folded = folded || (own ? FOLDED_LABELS : names.map(fold));
+    // Złożenia aliasowe idą tą samą drogą co `folded`: gotowe dla domyślnej
+    // listy przystanków, liczone w locie dla każdej innej (tryb rozkładów
+    // podaje własną listę numerów linii - patrz timetable.js).
+    const aliases = own ? ALIAS_LABELS : folded.map(expand);
+    const alias = expand(needle);
+    const prefix = [], inside = [], aliased = [];
     names.forEach((name, i) => {
         const at = folded[i].indexOf(needle);
         if (at === 0) prefix.push({name, at, len: needle.length});
         else if (at > 0) inside.push({name, at, len: needle.length});
+        // at/len na zero = nic nie podświetlamy (patrz wyżej, dlaczego).
+        else if (alias && aliases[i].includes(alias)) aliased.push({name, at: 0, len: 0});
     });
-    return [...prefix, ...inside].slice(0, limit);
+    return [...prefix, ...inside, ...aliased].slice(0, limit);
 }
 
 /** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów
@@ -2673,7 +3406,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['range', 'extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
+const DEV_SLIDER_IDS = ['extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
 
 function loadDevPrefs() {
     try {
@@ -2705,12 +3438,16 @@ function applyStoredDevPrefs() {
     }
 }
 
-function liveSlider(inputId, valueId) {
+function liveSlider(inputId, valueId, dropsHorizon) {
     const input = $(inputId);
     const valueEl = $(valueId);
     let timer = null;
     input.addEventListener('input', () => {
         valueEl.textContent = input.value;
+        // Ruszenie suwakiem okna to powrót do okna liczonego z suwaków -
+        // inaczej ręczne przedłużenie (szersze) i tak by je przykryło, a
+        // suwak wyglądałby na zepsuty.
+        if (dropsHorizon) mapHorizonSec = null;
         saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
@@ -2721,10 +3458,9 @@ function liveSlider(inputId, valueId) {
     });
 }
 applyStoredDevPrefs();
-liveSlider('range', 'range-value');
-liveSlider('extra', 'extra-value');
-liveSlider('extra-floor', 'extra-floor-value');
-liveSlider('extra-cap', 'extra-cap-value');
+liveSlider('extra', 'extra-value', true);
+liveSlider('extra-floor', 'extra-floor-value', true);
+liveSlider('extra-cap', 'extra-cap-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
 
 // --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
@@ -2954,6 +3690,8 @@ const DOT_TOGGLES = {
     'dot-start': 'start',
     'tip-cursor': 'tipCursor',
     'tip-panel': 'tipPanel',
+    'bike-times': 'bikeTimes',
+    'bike-opens': 'bikeOpens',
 };
 
 function applyDotOpts() {
@@ -3016,7 +3754,7 @@ bindDotOpts();
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
-    'fold-time', 'fold-window', 'fold-transfer', 'fold-range',
+    'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-dots', 'look-section', 'fold-version',
 ];
 
@@ -3045,6 +3783,9 @@ bindDevFolds();
 function suspendPlanner() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
+    if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
+    if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
+    clearBikeRides();
     flowParts = [];
     flowHits = [];
     clearFlowHover();
@@ -3054,6 +3795,10 @@ function suspendPlanner() {
     setBaseDim(false);          // przystanki wracają do pełnej widoczności - w
     const headline = $('time-headline');   // rozkładach to one są treścią mapy
     if (headline) headline.hidden = true;
+    // Okienko w rogu opisuje przystanek na mapie, którą właśnie zdejmujemy -
+    // zostawione, wisiałoby nad rozkładami z tablicą sprzed przejścia (a od
+    // niedawna również z przyciskiem „trasa", którym się tu weszło).
+    hideSidePanel();
 }
 
 function resumePlanner() {
@@ -3068,7 +3813,7 @@ window.plannerBridge = {
     // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
     // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
     // tablice w jednym API to zaproszenie do sięgnięcia po złą.
-    LINE_COLORS, MODE_LABEL, STOP_LABELS,
+    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
     prettyStopName, rawStopName,
     suspendPlanner, resumePlanner,
 };

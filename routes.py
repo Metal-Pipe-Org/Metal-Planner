@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import gtfs
+import naming
 import pkp
 import timetables
 import vehicles
@@ -138,6 +139,7 @@ def init_routes(app):
         return render_template(
             "index.html",
             stops=stops,
+            abbreviations=naming.ABBREVIATIONS,
             lines=lines,
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),
@@ -260,9 +262,16 @@ def init_routes(app):
             _parse_when(request.args.get("time"),request.args.get("date")),
             _point_arg("start"),
             _point_arg("end"),
-            _float_arg("range_m"),
             extra_pct=_float_arg("extra_pct"),
             extra_floor_sec=_float_arg("extra_floor_sec"),
             extra_cap_sec=_float_arg("extra_cap_sec"),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
+            # Ręczne "+X min" przy pasku nad mapą - żądana szerokość całego
+            # okna. Sufit i to, że może okno tylko poszerzyć, pilnuje planner.
+            horizon_sec=_float_arg("horizon_sec"),
+            # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
+            # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc
+            # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi
+            # (przełącznik 🚲 w karcie wyszukiwania).
+            use_bikes=request.args.get("bikes") == "1",
         ))

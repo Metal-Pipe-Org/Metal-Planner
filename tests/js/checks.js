@@ -228,6 +228,27 @@ checks.przelacznik_czasu_zmienia_grupki = (() => {
     };
 })();
 
+/* Mapa z połączeniami + pusta lista obok = wyjaśnienie, nie awaria. Nade
+   wszystko: żadnego "zawęź okno" - to dokładne odwrócenie tego, co użytkownik
+   robi przyciskiem "+X min". Pusta mapa to co innego i dalej jest błędem. */
+checks.pelna_mapa_bez_listy_nie_jest_bledem = (() => {
+    app.renderPlan({...FLOW_FIXTURE, journeys: []}, false);
+    const zMapa = app.resultsBox.innerHTML;
+
+    app.renderPlan({...FLOW_FIXTURE, journeys: [], segments: []}, false);
+    const bezMapy = app.resultsBox.innerHTML;
+
+    app.renderPlan(FLOW_FIXTURE, false);   // stan z fixture'a wraca na miejsce
+    return {
+        ok: !zMapa.includes('notice error')       // nie czerwone
+            && !zMapa.toLowerCase().includes('zawęź')
+            && zMapa.includes('notice')
+            && bezMapy.includes('notice error')   // pusta mapa to nadal błąd
+            && bezMapy.includes('Nie znaleziono'),
+        zMapa: zMapa.slice(0, 200), bezMapy: bezMapy.slice(0, 160),
+    };
+})();
+
 // --- tryb awaryjny widoczny na ekranie ------------------------------------
 
 checks.tryb_awaryjny_mowi_o_sobie_na_ekranie = (() => {
@@ -421,6 +442,25 @@ checks.kropki_wachlarza = (() => {
     };
 })();
 
+/* Kropka waży tyle, co to, co przy niej leży: krycie idzie z jasności węzła
+   przez tę samą skalę, co krycie linii. Start jest wyjątkiem - to nie jedna
+   z opcji, tylko miejsce, w którym stoisz (zgłoszone 2026-09-04). */
+checks.kropka_bierze_jasnosc_z_otoczenia = (() => {
+    const dots = app.flowStopDots([
+        {name: 'Jasny', lat: 51.13, lon: 16.95, sec: 48720, lines: [], w: 1},
+        {name: 'Blady', lat: 51.11, lon: 17.01, sec: 49000, lines: [], w: 0},
+        {name: 'Start', lat: 51.10, lon: 17.00, sec: 48000, lines: [],
+         w: 0, start: true},
+    ]);
+    const [jasny, blady, start] = dots.map(d => d.options.opacity);
+    return {
+        ok: jasny === app.lookOpacity(1) && blady === app.lookOpacity(0)
+            && blady < jasny && start === app.lookOpacity(1)
+            && dots.every(d => d.options.fillOpacity === d.options.opacity),
+        jasny, blady, start,
+    };
+})();
+
 /* Tablica pokazuje tylko to, w co MAPA pozwala tu wsiąść - z kierunkiem,
    bo ta sama linia mija węzeł w obie strony (zgłoszone 2026-08-29:
    dymek na Pilczycach wypisywał tramwaj jadący tam, skąd się przyjechało). */
@@ -503,6 +543,31 @@ checks.rytm_z_mediany_nie_ze_sredniej = (() => {
     // przerwy: 10, 10, 10, 120 -> mediana 10, średnia 37,5
     const wynik = app.summariseRepeats([dep(0), dep(10), dep(20), dep(30), dep(150)]);
     return {ok: wynik[0].every_min === 10, every_min: wynik[0].every_min};
+})();
+
+/* Takt pisze się także wtedy, gdy kolejny kurs wypada już POZA zakresem mapy:
+   "co 20 min" to informacja o linii, nie o oknie. Sprawdzane przez cały dymek,
+   bo chodzi też o to, czy pełna tablica w ogóle dochodzi tam, gdzie liczy się
+   rytm. */
+checks.rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem = (() => {
+    const dep = (min, num) => ({time: '00:00', sec: min * 60, in_min: min,
+                               num, mode: 'bus', headsign: 'KRZYKI'});
+    const kursy = [dep(3, '112'), dep(23, '112'), dep(43, '112'), dep(63, '112')];
+    const pelna = {stop: 'Sosnowiecka', from_time: '12:00',
+                   departures: kursy, all_departures: kursy};
+    // Przez PRAWDZIWE sito, nie obok niego: pełna tablica ma przez nie
+    // przejść nietknięta. W oknie zostaje tylko pierwszy kurs.
+    const poOdsiewie = app.keepWithinHorizon(pelna, 10 * 60);
+    const html = app.timetableHtml(poOdsiewie);
+    // ...a bez pełnej tablicy nie ma z czego policzyć rytmu i notki nie ma.
+    const bezPelnej = app.timetableHtml({
+        stop: 'Sosnowiecka', from_time: '12:00', departures: [kursy[0]],
+    });
+    return {
+        ok: poOdsiewie.departures.length === 1
+            && html.includes('co 20 min') && !bezPelnej.includes('co '),
+        html: html.slice(-160), bezPelnej: bezPelnej.slice(-160),
+    };
 })();
 
 /* Kierunek to osobna opcja - i osobny wiersz z własnym rytmem. */
@@ -874,5 +939,313 @@ checks.grupa_stacji_wraca_kanoniczna = (() => {
         etykieta, zwykly, start: params.get('start'), end: params.get('end'), wPolu,
     };
 })();
+
+/* Przycisk "+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
+   TERAZ (klik rozciąga zakres razy 1,5), klik przekazuje nowy zakres do
+   serwera, a przy suficie 2 h przycisku nie ma wcale - nie ma już czego
+   dokładać. */
+checks.przycisk_przedluza_zakres_mapy = (() => {
+    const pasek = () => document.getElementById('time-headline').innerHTML;
+    const etykieta = html => (html.match(/headline-more[^>]*>\+([^<]*)</) || [])[1] || '';
+
+    const krok = app.horizonStep(FLOW_FIXTURE.limit_sec);
+    const naStarcie = etykieta(pasek());
+
+    app.extendHorizon(FLOW_FIXTURE.limit_sec, krok);
+    const zapytanie = app.queryParams().toString();
+
+    // Sufit: zakres już na 2 h - nie ma czego dokładać, przycisk znika.
+    app.drawFlow({...FLOW_FIXTURE, limit_sec: app.MAX_HORIZON_SEC}, false);
+    const przySuficie = pasek();
+    // ...a tuż pod sufitem przycisk obiecuje tylko to, co zostało do sufitu,
+    // nie pełną połowę okna.
+    const podSufitem = app.horizonStep(app.MAX_HORIZON_SEC - 600);
+    app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
+
+    return {
+        ok: krok === FLOW_FIXTURE.limit_sec / 2          // połowa okna
+            && naStarcie === '35 min'                    // połowa z 1 h 10 min
+            && app.mapHorizonSec === 1.5 * FLOW_FIXTURE.limit_sec
+            && zapytanie.includes('horizon_sec=6300')    // i to leci do serwera
+            && !przySuficie.includes('headline-more')    // przy 2 h nie ma przycisku
+            && podSufitem === 600                        // przy 1h50 dokłada 10 min
+            && app.horizonStep(app.MAX_HORIZON_SEC) === 0,
+        krok, naStarcie, podSufitem,
+        horizon: app.mapHorizonSec,
+        zapytanie: zapytanie.slice(0, 200),
+        sufit: przySuficie.slice(0, 200),
+    };
+})();
+
+/* Warstwa żywych pojazdów (przycisk ◉) przy narysowanej mapie przepływów:
+   pokazuje TYLKO linie, które są na tej mapie. Pojazd linii, której mapa nie
+   rysuje, odpowiada na inne pytanie i ma jej nie zasłaniać; bez mapy nie ma
+   czego zawężać i widać wszystko. */
+checks.pojazdy_zawezone_do_linii_z_mapy = (function () {
+    app.drawFlow(FLOW_FIXTURE, false);
+    app.stopsLayer.addTo(app.map);      // w emulatorze /api/stops nie odpowiada
+    const zMapy = app.flowHits[0].seg;                  // linia, którą mapa rysuje
+    app.lastVehicles = [
+        {line: zMapy.num, kind: zMapy.kind, lat: 51.10, lon: 17.00},
+        {line: '999', kind: 'bus', lat: 51.11, lon: 17.02},   // spoza mapy
+    ];
+
+    // renderVehicles wprost: w emulatorze fetch nigdy nie odpowiada, więc samo
+    // włączenie warstwy nie doczekałoby się rysowania.
+    app.setVehiclesOn(true);
+    app.renderVehicles();
+    const przyMapie = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const slupki = app.map.hasLayer(app.stopsLayer);   // włącznik ich nie chowa
+
+    // Zgaszona mapa = brak powodu do zawężania.
+    app.clearFlow();
+    app.renderVehicles();
+    const bezMapy = app.vehiclesLayer.layers.length;
+    const filtrBezMapy = app.vehiclesFilter();
+
+    app.setVehiclesOn(false);
+    app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
+
+    return {
+        ok: przyMapie.length === 1 && przyMapie[0] === zMapy.num
+            && bezMapy === 2 && filtrBezMapy === null && slupki === true,
+        linia: zMapy.num, przyMapie, bezMapy, filtrBezMapy, slupki,
+    };
+})();
+
+/* Ostatni etap Traficarem (patrz planner._car_drive_leg). Front ma go
+   narysować INACZEJ niż kurs: odcinek auto -> cel jest prostą, nie przebiegiem
+   ulicami, więc kreskowana linia zamiast ciągłej i żadnej białej otoczki,
+   którą dostają prawdziwe kursy. */
+
+const DRIVE_LEGS = [
+    {kind: 'ride', mode: 'tram', num: '5', from: 'Katedra', to: 'Krakowska',
+     dep_sec: 50520, arr_sec: 51240, path: [[51.11, 17.04], [51.09, 17.05]]},
+    {kind: 'walk', to_car: true, minutes: 2, metres: 145, from: 'Krakowska',
+     to: 'ul. Testowa', path: [[51.09, 17.05], [51.089, 17.051]]},
+    {kind: 'drive', mode: 'car', num: 'Traficar', line: 'Traficar KK08703',
+     from: 'ul. Testowa', to: 'Iwiny', from_time: '14:21', to_time: '14:33',
+     dep_sec: 51660, arr_sec: 52380, minutes: 12, km: 5, start_min: 5,
+     plate: 'KK08703', model: 'Dacia Sandero', fuel: 26, range: 104,
+     estimated: true, path: [[51.089, 17.051], [51.03, 17.07]]},
+];
+
+checks.traficar_jedzie_kreskowana_a_nie_jak_kurs = (() => {
+    const layers = app.legLayers(DRIVE_LEGS, {preview: false});
+    const linie = layers.filter(l => l.kind === 'polyline');
+    const auto = linie.filter(l => l.options.dashArray === '10,8');
+    const otoczki = linie.filter(l => l.options.color === '#fff');
+    const plakietki = layers.filter(
+        l => l.kind === 'marker' && (l.options.icon.className || '').includes('car'));
+    return {
+        // Jedna kreskowana linia auta, jedna plakietka przy niej - i tylko
+        // JEDNA biała otoczka, ta od prawdziwego przejazdu tramwajem.
+        ok: auto.length === 1 && otoczki.length === 1 && plakietki.length === 1
+            && auto[0].options.color !== '#fff'
+            && auto[0].options.dashArray !== undefined,
+        kreskowanych: auto.length, otoczek: otoczki.length,
+        plakietek: plakietki.length,
+    };
+})();
+
+checks.traficar_widac_na_karcie_przed_rozwinieciem = (() => {
+    const zAutem = {
+        departure: '14:02', arrival: '14:33', duration_min: 31, wait_min: 2,
+        transfers: 1, traficar: true, legs: DRIVE_LEGS,
+    };
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zAutem]}, false);
+    const html = app.resultsBox.innerHTML;
+    return {
+        ok: html.includes('badge car') && html.includes('Traficar')
+            && html.includes('ostatni odcinek autem')
+            // Łącznik kropkowany: między tramwajem a autem trzeba dojść.
+            && html.includes('hop walk'),
+        html: html.slice(html.indexOf('j-lines'), html.indexOf('j-lines') + 260),
+    };
+})();
+
+/* Czas podróży kończącej się autem jest SZACUNKIEM i ma to być widać na
+   pierwszej liczbie, którą się czyta - nie dopiero w rozwiniętej karcie. */
+checks.traficar_czas_oznaczony_jako_szacunek = (() => {
+    const zAutem = {
+        departure: '14:02', arrival: '14:33', duration_min: 31, wait_min: 2,
+        transfers: 1, traficar: true, legs: DRIVE_LEGS,
+    };
+    const zwykla = {...zAutem, traficar: false, legs: DRIVE_LEGS.slice(0, 1)};
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zAutem]}, false);
+    const auto = app.resultsBox.innerHTML;
+    app.renderPlan({...FLOW_FIXTURE, journeys: [zwykla]}, false);
+    const bezAuta = app.resultsBox.innerHTML;
+
+    // Rozwinięta karta mówi wprost, skąd te liczby - i podaje dystans też
+    // z "ok.", bo jest obarczony tym samym szacunkiem co czas.
+    const szczegoly = app.detailHtml(zAutem);
+    return {
+        ok: auto.includes('j-duration est') && auto.includes('ok. 31 min')
+            // Zwykła trasa ma godziny z rozkładu i żadnego "ok." przy czasie.
+            && !bezAuta.includes('j-duration est') && bezAuta.includes('>31 min<')
+            && szczegoly.includes('auto nie ma rozkładu')
+            && szczegoly.includes('ok. 12 min') && szczegoly.includes('ok. 5 km')
+            && szczegoly.includes('ok. 5 min'),      // odbiór i start auta
+        auto: auto.slice(auto.indexOf('j-duration'), auto.indexOf('j-duration') + 90),
+        szczegoly: szczegoly.slice(szczegoly.indexOf('tl-info'),
+                                   szczegoly.indexOf('tl-info') + 220),
+    };
+})();
+
+/* Auto car-sharingu jest MIEJSCEM na mapie, nie kursem (kontrakt p.15):
+   dostaje własny znacznik z godziną, o której się przy nim jest, i z samą
+   odległością celu w linii prostej - a wachlarz wygląda dokładnie tak samo,
+   jak bez aut. */
+checks.auto_to_miejsce_a_nie_kurs = (() => {
+    const auto = {
+        lat: 51.09, lon: 17.02, plate: 'WE1AA11', model: 'Renault Clio',
+        where: 'ul. Testowa', fuel: 80, range: 300, ogarniam: [],
+        at: 56100, walk_sec: 420, walk_m: 300, from: 'Kamienna', to_dest_m: 2744,
+    };
+    app.drawFlow({...FLOW_FIXTURE, cars: [auto]}, false);
+    const znaczniki = app.flowCarLayer.getLayers();
+    const kawalkow_z_autem = app.flowParts.length;
+    const tip = znaczniki.length ? znaczniki[0]._tooltip.content : '';
+
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: znaczniki.length === 1
+            && kawalkow_z_autem === app.flowParts.length
+            && tip.includes('15:35')            // o której jest się przy aucie
+            && tip.includes('7 min')            // dojście - ta sama reguła, co każde
+            && tip.includes('Kamienna')
+            && tip.includes('2,7 km')           // do celu, w linii prostej
+            && !/jazd|ok\./.test(tip)           // o samej jeździe mapa milczy
+            && !tip.includes('Testowa')         // ulicy postoju nie pokazujemy
+            // Odpowiedź bez aut nie zostawia po nich znacznika.
+            && app.flowCarLayer.getLayers().length === 0,
+        znacznikow: znaczniki.length,
+        kawalkow_z_autem,
+        kawalkow_bez_auta: app.flowParts.length,
+        tip,
+    };
+})();
+
+/* Program „Ogarniam": przy aucie, za które Traficar płaci, ma być widać ZA CO
+   i ZA ILE - bez najeżdżania po kolei na wszystkie, stąd złota obwódka. Auto
+   bez nagrody mówi to wprost, zamiast milczeć. */
+checks.ogarniam_widac_na_aucie = (() => {
+    const wspolne = {
+        model: 'Renault Clio', fuel: 80, range: 300,
+        at: 56100, walk_sec: 420, walk_m: 300, from: 'Kamienna', to_dest_m: 2744,
+    };
+    const zNagroda = {...wspolne, lat: 51.09, lon: 17.02, plate: 'WE1AA11',
+                      ogarniam: [{co: 'Sprzątanie', ile: 30},
+                                 {co: 'Tankowanie', ile: 15}]};
+    const bezNagrody = {...wspolne, lat: 51.10, lon: 17.03, plate: 'WE2BB22',
+                        ogarniam: []};
+    app.drawFlow({...FLOW_FIXTURE, cars: [zNagroda, bezNagrody]}, false);
+    const [zlote, zwykle] = app.flowCarLayer.getLayers();
+    const tipZ = zlote._tooltip.content, tipBez = zwykle._tooltip.content;
+
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: tipZ.includes('Ogarniam: sprzątanie 30 zł · tankowanie 15 zł')
+            && tipBez.includes('Ogarniam: nic do wzięcia')
+            // Obwódka niesie tę samą wiadomość, co pierwszy wiersz dymka.
+            && zlote.options.color === '#f9a825'
+            && zwykle.options.color === app.CAR_STYLE.color,
+        tipZ, tipBez,
+        obwodki: [zlote.options.color, zwykle.options.color],
+    };
+})();
+
+/* Rower miejski na mapie: kropkę dostaje wyłącznie miejsce, w którym da się
+   WSIĄŚĆ na rower. Drugi koniec przejazdu pojawia się razem ze strzałką, pod
+   kursorem - kresek jest kilkaset i narysowane naraz zasłaniają mapę. Godzin
+   samego przejazdu nie pokazujemy: zostaje odległość, która mówi to samo, a
+   nie udaje odczytanej z rozkładu. */
+checks.rower_pokazuje_przejazdy_dopiero_pod_kursorem = (() => {
+    const stacja = {
+        id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
+        electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
+        walk_m: 300, from: 'Kamienna',
+        rides: [{
+            id: 'B', name: 'Legnicka (Park Magnolia)', lat: 51.10, lon: 17.03,
+            bikes: 3, docks: 12, m: 1826, sec: 840, at: 56940,
+            opens: 'Niedźwiedzia', opens_at: 57120, opens_last: 57300,
+            opens_walk_sec: 180, opens_m: 120,
+        }],
+    };
+    app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja],
+                  bike_places_live: true}, false);
+    const kropki = app.flowBikeLayer.getLayers();
+    const kawalkow_z_rowerem = app.flowParts.length;
+    const przed = app.flowBikeRideLayer;
+    kropki[0].fire('mouseover');
+    const po = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
+    const kreski = po.filter(l => l.kind === 'polyline');
+    const tipStacji = kropki[0]._tooltip.content;
+    const tipCelu = (po.find(l => l._tooltip && !l._tooltip.options.permanent)
+                     || {_tooltip: {content: ''}})._tooltip.content;
+    const etykieta = (po.find(l => l._tooltip && l._tooltip.options.permanent)
+                      || {_tooltip: {content: ''}})._tooltip.content;
+    kropki[0].fire('mouseout');
+    const poZejsciu = app.flowBikeRideLayer;
+
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: kropki.length === 1                 // tylko to, na czym można siąść
+            && przed === null                   // bez kursora żadnych kresek
+            && kreski.length === 1              // pod kursorem - jedna, do celu
+            && poZejsciu === null               // i znika razem z kursorem
+            && kawalkow_z_rowerem === app.flowParts.length
+            && tipStacji.includes('15:35')      // o której jest się PRZY rowerze
+            && tipStacji.includes('7 min')      // dojście - ta sama reguła co zawsze
+            && tipStacji.includes('Kamienna')
+            && tipStacji.includes('7 rowerów (w tym 2 elektryczne)')
+            // Zdania "ile przejazdów stąd" nie ma - kreski i tak to pokazują.
+            && !/przejazd/.test(tipStacji)
+            // Etykietka to SAMA odległość: godzina przejazdu jest policzona,
+            // nie odczytana, więc jej nie pokazujemy.
+            && etykieta.trim() === '1,8 km'
+            // Drugi koniec ma własny dymek, też bez zgadywanej godziny.
+            && tipCelu.includes('Legnicka (Park Magnolia)')
+            && tipCelu.includes('1,8 km')
+            && !/15:4|15:5/.test(tipCelu)
+            && app.flowBikeLayer.getLayers().length === 0,
+        kropek: kropki.length, kresek: kreski.length,
+        tipStacji, tipCelu, etykieta,
+    };
+})();
+
+/* Pytanie o inny dzień: stacja stoi tam zawsze, więc kropka zostaje - ale
+   liczba rowerów jest z TEJ chwili, więc mapa mówi wprost, że jej nie zna,
+   zamiast podać dzisiejszą jako jutrzejszą. */
+checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
+    const stacja = {
+        id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
+        electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
+        walk_m: 300, from: 'Kamienna',
+        rides: [{
+            id: 'B', name: 'Legnicka', lat: 51.10, lon: 17.03, bikes: 3,
+            docks: 12, m: 1826, sec: 960, at: 57060, opens: 'Niedźwiedzia',
+            opens_at: 57240, opens_last: 57300, opens_walk_sec: 180, opens_m: 120,
+        }],
+    };
+    app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja], bike_places_live: false},
+                 false);
+    const kropka = app.flowBikeLayer.getLayers()[0];
+    const tip = kropka._tooltip.content;
+
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: tip.includes('Nie wiadomo, czy będą tu rowery')
+            && !tip.includes('7 rowerów')
+            // Godzina "jesteś przy nim" pochodzi z ROZKŁADU tamtego dnia,
+            // więc zostaje - nieznany jest tylko stan stojaka.
+            && tip.includes('15:35')
+            && kropka.options.color === app.BIKE_UNKNOWN_STYLE.color
+            && kropka.options.color !== app.BIKE_STYLE.color,
+        tip, obwodka: kropka.options.color,
+    };
+})();
+
 
 JSON.stringify(checks);

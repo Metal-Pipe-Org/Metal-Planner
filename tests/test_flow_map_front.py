@@ -230,6 +230,13 @@ def test_flow_map_has_hoverable_dots_of_its_own(front):
     _check(front, "kropki_wachlarza")
 
 
+def test_a_dot_takes_its_brightness_from_its_surroundings(front):
+    """Kropka niczego nie rusza (punkt 11), więc jasność BIERZE: krycie idzie
+    z jasności węzła przez tę samą skalę, co krycie linii. Start zostaje pełny
+    - to nie jedna z opcji, tylko miejsce, w którym stoisz."""
+    _check(front, "kropka_bierze_jasnosc_z_otoczenia")
+
+
 def test_the_bubble_lists_only_what_the_map_offers_here(front):
     """Zgłoszone 2026-08-29: dymek na Pilczycach wypisywał wszystko, co przez
     nie przejeżdża - z tramwajem jadącym tam, skąd się przyjechało. Zostaje
@@ -249,6 +256,14 @@ def test_the_cadence_is_a_median_not_a_mean(front):
     """Jeden nocny przeskok o godzinę nie ma prawa przesunąć liczby opisującej
     normalny takt."""
     _check(front, "rytm_z_mediany_nie_ze_sredniej")
+
+
+def test_the_cadence_shows_even_past_the_map_range(front):
+    """„co 20 min" mówi o LINII, nie o oknie mapy: notka zostaje także wtedy,
+    gdy kolejny kurs wypada już poza zakresem. Takt liczy się z pełnej tablicy
+    przystanku, sprzed odsiewu - inaczej znikał dokładnie tam, gdzie był
+    najpotrzebniejszy: na rzadkim węźle blisko granicy okna."""
+    _check(front, "rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem")
 
 
 def test_the_cadence_keeps_directions_apart(front):
@@ -392,3 +407,95 @@ def test_a_station_group_travels_to_the_server_under_its_canonical_name(front):
     przystanku" (błąd zgłoszony na żywo, przez który etykieta wróciła kiedyś
     do myślnika - patrz docstring gtfs._match_city_group)."""
     _check(front, "grupa_stacji_wraca_kanoniczna")
+
+
+# ------------------------------------------------- przedłużanie zakresu ---
+
+def test_a_full_map_without_a_list_is_not_an_error(front):
+    """Narysowana mapa z pustą listą obok to wyjaśnienie, nie awaria -
+    czerwona ramka nad kompletem połączeń mówiła, że coś się zepsuło. I nie
+    każe zawężać okna czasowego: to dokładne odwrócenie tego, co użytkownik
+    przed chwilą zrobił przyciskiem „+X min". Pusta mapa zostaje błędem."""
+    _check(front, "pelna_mapa_bez_listy_nie_jest_bledem")
+
+
+def test_the_button_stretches_the_map_range_up_to_the_ceiling(front):
+    """„+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
+    w tej chwili (klik rozciąga zakres razy 1,5 i wysyła go do serwera jako
+    horizon_sec), a przy suficie 2 h przycisku nie ma - nie ma już czego
+    dokładać. Tuż pod sufitem obiecuje tylko resztę do sufitu."""
+    _check(front, "przycisk_przedluza_zakres_mapy")
+
+
+# ------------------------------------------------- pojazdy na żywo -
+
+def test_live_vehicles_are_narrowed_to_the_drawn_lines(front):
+    """Warstwa żywych pojazdów (◉) idzie za MAPĄ: przy narysowanym wachlarzu
+    pokazuje wyłącznie linie, które na nim są - pojazd linii, której mapa nie
+    rysuje, tylko by ją zasłaniał. Bez mapy nie ma czego zawężać i widać
+    wszystko, co jeździ. Słupki zostają widoczne - włącznik ich nie chowa."""
+    _check(front, "pojazdy_zawezone_do_linii_z_mapy")
+
+
+# ------------------------------------------------------------- Traficar ----
+
+def test_the_car_leg_is_drawn_as_an_estimate_not_as_a_ride(front):
+    """Ostatni etap Traficarem (patrz planner._car_drive_leg) biegnie prostą
+    od auta do celu - prawdziwego przebiegu jazdy nikt tu nie liczy. Linia
+    ciągła w otoczce, czyli tak jak rysuje się kursy z rozkładu, obiecywałaby
+    trasę, której nie ma; stąd kreska i żadnej otoczki."""
+    _check(front, "traficar_jedzie_kreskowana_a_nie_jak_kurs")
+
+
+def test_the_car_is_visible_on_the_card_before_expanding(front):
+    """Propozycja z autem kończy się czymś, czego nie ma w rozkładzie i czym
+    się płaci za przejazd - to ma być widać na zwiniętej karcie, a nie dopiero
+    po jej rozwinięciu."""
+    _check(front, "traficar_widac_na_karcie_przed_rozwinieciem")
+
+
+def test_the_estimated_time_says_so_on_the_card(front):
+    """Każda inna godzina w tej aplikacji jest odczytana z rozkładu - ta
+    jedna nie ma skąd. Karta mówi to „ok." przy czasie podróży (pierwszej
+    liczbie, którą się czyta), a rozwinięcie dopowiada wprost, skąd te liczby
+    się biorą. Zwykła trasa nie dostaje ani jednego, ani drugiego."""
+    _check(front, "traficar_czas_oznaczony_jako_szacunek")
+
+
+# ---------------------------------------------------------------------- 15 -
+
+def test_a_car_is_a_place_on_the_map_not_a_ride(front):
+    """Punkt 15: wolne auto w zasięgu mapy dostaje własny znacznik i mówi to
+    samo, co przystanek - o której się przy nim jest - plus to, czego o nim
+    nie wiadomo: ile stąd do celu w linii prostej. Ani jednej linii na mapie
+    i ani słowa o czasie jazdy; wachlarz wygląda dokładnie tak samo jak bez
+    aut."""
+    _check(front, "auto_to_miejsce_a_nie_kurs")
+
+
+def test_the_car_says_what_is_there_to_earn(front):
+    """Program „Ogarniam": przy aucie, za które Traficar płaci, dymek mówi ZA
+    CO i ZA ILE, a sam znacznik nosi złotą obwódkę — inaczej trzeba by
+    najeżdżać po kolei na wszystkie. Auto bez nagrody mówi to wprost, bo
+    milczenie znaczyłoby naraz „nic tu nie ma" i „nie wiadomo"."""
+    _check(front, "ogarniam_widac_na_aucie")
+
+
+# ------------------------------------------------------ rower na mapie -
+
+def test_a_bike_shows_its_rides_only_under_the_cursor(front):
+    """Rower miejski jest miejscem, do którego mapa dowozi, i z którego da się
+    jeszcze dojechać gdzieś, gdzie zdąży się w oknie mapy. Kropka stoi sama;
+    przejazdy - kilkaset naraz na całej mapie - pojawiają się dopiero pod
+    kursorem i znikają razem z nim. Wachlarz wygląda tak samo jak bez
+    rowerów."""
+    _check(front, "rower_pokazuje_przejazdy_dopiero_pod_kursorem")
+
+
+def test_a_bike_on_another_day_does_not_pretend_to_know(front):
+    """Stacja stoi w tym samym miejscu co jutro, więc kropka zostaje. Ile
+    w niej będzie rowerów - nie wiadomo, bo liczba jest z tej chwili; mapa
+    pisze to wprost i szarzeje, zamiast podać dzisiejszą liczbę jako
+    jutrzejszą. Godzina „jesteś przy nim" pochodzi z rozkładu tamtego dnia,
+    więc zostaje."""
+    _check(front, "rower_na_inny_dzien_nie_udaje_ze_wie")

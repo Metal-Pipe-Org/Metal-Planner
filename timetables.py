@@ -25,9 +25,13 @@ import gtfs
 # Ten sam podział, co planner._line_parts, tylko liczony z typu trasy, a nie
 # z etykiety tekstowej - tu mamy surowy wiersz z bazy.
 MODE_OF_TYPE = {0: "tram", 3: "bus"}
-MODE_LABEL = {"tram": "Tramwaj", "bus": "Autobus", "other": "Linia"}
+MODE_LABEL = {"tram": "Tramwaj", "bus": "Autobus", "train": "Pociąg",
+              "other": "Linia"}
 # Odwrotność: etykieta kursu z DayData ("Tramwaj 17") niesie rodzaj słowem.
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus"}
+# "Pociąg" bierze się z pkp.augment_day, nie z routes.route_type - kolej nie
+# przechodzi przez GTFS, więc MODE_OF_TYPE wyżej nigdy jej nie zobaczy
+# (ten sam słownik, co planner.MODE_OF_LABEL - i z tego samego powodu).
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
 
 
 def _mode_of(route_type):
@@ -48,7 +52,7 @@ def _line_sort_key(num, mode):
     """Ten sam porządek, co na mapie przepływów (planner._line_sort_key):
     tramwaje przed autobusami, w obrębie rodzaju numerycznie."""
     return (
-        {"tram": 0, "bus": 1}.get(mode, 2),
+        {"tram": 0, "bus": 1, "train": 2}.get(mode, 3),
         int(num) if num.isdigit() else 10 ** 6,
         num,
     )
@@ -235,13 +239,22 @@ def line_timetable(num, day, mode=None):
         db.close()
 
 
-def _trip_rows(db, trip):
-    """Cały kurs z bazy: [(stop_id, przyjazd, odjazd), ...] po kolei.
+def _trip_rows(db, trip, data):
+    """Cały kurs: [(stop_id, przyjazd, odjazd), ...] po kolei.
 
-    Czasy trzeba przesunąć tak samo jak przy budowie tablicy dnia -
-    egzemplarz kursu z doby poprzedniej jeździ na osi przesuniętej o -24 h
-    (patrz gtfs.db_trip).
+    Kurs kolejowy (prefiks "PKP:") nie ma wiersza w stop_times - kolej nie
+    przechodzi przez GTFS. Jego sekwencja leży w samym dniu, doklejona przy
+    jego budowaniu (pkp.augment_day), już na właściwej osi czasu - ten sam
+    podział, co w gtfs.trip_path, tylko prostszy: tu chcemy cały kurs, a nie
+    odcinek między wsiadaniem a wysiadaniem.
+
+    Czasy kursu miejskiego trzeba przesunąć tak samo jak przy budowie tablicy
+    dnia - egzemplarz kursu z doby poprzedniej jeździ na osi przesuniętej
+    o -24 h (patrz gtfs.db_trip).
     """
+    if trip.startswith("PKP:"):
+        return list(data.pkp_trip_stops.get(trip, ()))
+
     raw_trip, shift = gtfs.db_trip(trip)
     return [
         (stop_id, arrival_sec - shift, departure_sec - shift)
@@ -401,7 +414,7 @@ def trip_detail(trip, day, board_stop=None, board_dep=None):
     db = gtfs.open_db()
     gtfs.geo_generation()
     try:
-        rows = _trip_rows(db, trip)
+        rows = _trip_rows(db, trip, data)
         coords = [data.stop_coords[s] for s, _, _ in rows if s in data.stop_coords]
         path = _path_of(data.trip_shape.get(trip), coords, db)
 
