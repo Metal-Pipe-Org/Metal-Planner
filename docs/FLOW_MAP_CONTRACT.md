@@ -337,6 +337,13 @@ każde inne (punkt 14) — od czegoś, co mapa rysuje: od przystanku, na który
 dowozi, albo od samego startu. Auto stojące gdzieś w mieście, bez związku z tą
 relacją, nie jest częścią odpowiedzi.
 
+**Osobówki i dostawczaki to dwa osobne wybory.** Dostawczaków domyślnie nie
+ma na mapie wcale — pokazuje je dopiero przełącznik w ustawieniach. Wtedy
+wszystko niżej dotyczy każdego rodzaju osobno: dostawczak nigdy nie chowa
+osobówki ani osobówka dostawczaka, bo kto wiezie szafę, nie weźmie Clio, a kto
+jedzie sam, nie chce Mastera. Każdy rodzaj dostaje tę samą liczbę z suwaka.
+Który to rodzaj, mówi sam Traficar, a nie zgadywanie po nazwie modelu.
+
 **Auto porównuje się dwiema liczbami: o której się przy nim jest i ile daje
 za nie program „Ogarniam”.** Auto bije inne, jeśli jest co najmniej tak dobre
 w obu naraz i w którymś lepsze. Porównuje się z tą dokładnością, z jaką
