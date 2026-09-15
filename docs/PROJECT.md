@@ -790,8 +790,15 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   razem z `at_ceiling` — próg doszedł do sufitu skanu (60 min za najszybszym
   przyjazdem), więc kolejne kliknięcie nie miałoby czego dołożyć. Wynikowy
   próg widać w `limit_sec`/`deadline`. `cars` w odpowiedzi jest przesiane
-  przez `traficar.map_skyband`: auta, których nie bije żadne inne, zawsze,
-  kolejne poziomy w całości, aż uzbiera się żądana liczba.
+  przez `traficar.map_skyband`: przy `car_groups=1` z aut, do których idzie się
+  z tego samego miejsca, zostają niepobite w tej grupie (godzina przy aucie,
+  „Ogarniam"; domyślnie grupowania nie ma i każde auto jest osobno),
+  a spośród zwycięzców grup te, których nie bije żadne inne, zawsze, kolejne
+  poziomy w całości, aż uzbiera się żądana liczba. `bike_count` — ile
+  przejazdów rowerem pokazać (1–30, domyślnie 4, też razy `1 + more`);
+  `bike_places[].rides[].options` to podróże przez dany przejazd
+  (`arrival` — sekunda na osi doby, `vehicles` — pojazdy przed i po rowerze),
+  przesiane tą samą regułą przez `bikes.map_places`.
   Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
   akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
   (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
@@ -889,6 +896,20 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-15** — **auta w grupach, rowery wybierane jak auta** (punkty 15
+  i 16 kontraktu). Auta porównują się godziną przy aucie i „Ogarniam" —
+  odległość do celu przestała być kryterium, bo opłacalności jazdy autem nie
+  da się rzetelnie ocenić. Przełącznik pod zębatką (domyślnie zgaszony) robi
+  z aut, do których idzie się z tego samego miejsca, jeden wybór, a „Pokaż
+  więcej" poszerza wtedy tylko między takimi grupami. Przejazd
+  rowerem ocenia się w całej podróży: ile jedzie się rowerem, o której jest się
+  w celu i iloma pojazdami przed i po rowerze, z dojazdem i dalszą drogą
+  odczytanymi z narysowanych kursów. Rowery mają własny suwak (domyślnie 4
+  przejazdy), nie mają już progów długości (ani górnego, ani dolnego) i nie muszą dowozić przed
+  progiem mapy (ten dotyczy tylko kursów z rozkładem), a kropkę dostaje tylko
+  początek wybranego przejazdu. Pod zębatką
+  „Co przejazd otwiera" zastąpił przełącznik „Przejazdy rowerem zawsze
+  widoczne".
 - **2026-09-13** — **zakres mapy z gęstości, nie z minut** (punkty 2 i 15
   kontraktu). Trzy suwaki okna czasowego (procent, minimum, maksimum) i przycisk
   „+X min" zniknęły. Miara jakości została ta sama — o której opcja dociera do

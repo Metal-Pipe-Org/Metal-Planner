@@ -283,6 +283,9 @@ def map_cars(day, reach, dest):
             **car,
             "at": at,
             "from": day.stop_names.get(stop, stop),
+            # Po MIEJSCU, nie po słupku: dwa perony jednego placu to dla
+            # idącego do auta to samo miejsce (patrz map_skyband).
+            "from_place": day.place_of.get(stop, stop),
             "walk_sec": walk_sec,
             "walk_m": walk_m,
             "to_dest_m": round(gtfs._haversine_m(car["lat"], car["lon"],
@@ -293,42 +296,64 @@ def map_cars(day, reach, dest):
 
 
 def _shown_as(car):
-    """Trzy liczby, którymi mapa opisuje auto, z dokładnością, z jaką je
-    wypisuje (app.js: fmtClock, fmtDist, ogarniamText) - zwrócone tak, że
-    mniej znaczy lepiej. Ta sama wypisana minuta to remis, nie wygrana
-    o sekundy: pasażer nie ma jak zobaczyć różnicy, której mapa nie pokazuje."""
-    metres = car["to_dest_m"]
+    """Dwie liczby, którymi auto się porównuje, z dokładnością, z jaką mapa
+    je wypisuje (app.js: fmtClock, ogarniamText) - zwrócone tak, że mniej
+    znaczy lepiej. Ta sama wypisana minuta to remis, nie wygrana o sekundy:
+    pasażer nie ma jak zobaczyć różnicy, której mapa nie pokazuje.
+
+    Odległości do celu tu nie ma, choć mapa ją wypisuje: nagradzała auta
+    stojące tuż przy celu, a czy jazda autem się opłaca, rozstrzygnąć się nie
+    da - czasu jazdy nie ma skąd wziąć, bo zależy od korków (punkt 15)."""
     return (
         (car["at"] + 30) // 60,
-        metres if metres < 1000 else (metres + 50) // 100 * 100,
         -sum(task["ile"] for task in car["ogarniam"]),
     )
 
 
-def map_skyband(cars, limit):
-    """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband.
+def _beats(one, other):
+    return one != other and all(o <= m for o, m in zip(one, other))
 
-    Auto A bije auto B, gdy jest co najmniej tak dobre we wszystkich trzech
-    liczbach naraz (_shown_as) i w którejś lepsze. Poziom k to auta pobite
-    przez najwyżej k-1 innych; pierwszy poziom - te, których nie bije nic -
-    jest zawsze na mapie, choćby było ich więcej niż `limit`. Kolejne
+
+def map_skyband(cars, limit, groups=False):
+    """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband, przy `groups`
+    - zwycięzców grup.
+
+    Grupę tworzą auta, do których idzie się z tego samego miejsca (`from_place`)
+    - trzy auta obok siebie przy starcie to dla pasażera jeden wybór. Z grupy
+    zostają auta, których nic W TEJ GRUPIE nie bije, i dalej żadne: poszerzanie
+    nie dokłada kolejnego auta z tej samej grupy, bo już pierwsze "więcej"
+    przywracałoby auta stojące obok siebie. Grupowanie jest przełącznikiem pod
+    zębatką, domyślnie zgaszonym: auta nie różnią się tu modelem, więc ktoś
+    polujący na konkretny model straciłby przez nie auto, którego szuka.
+
+    Między autami (zwycięzcami grup): auto A bije auto B, gdy jest co najmniej tak dobre
+    w obu liczbach naraz (_shown_as) i w którejś lepsze. Poziom k to auta
+    pobite przez najwyżej k-1 innych; pierwszy poziom - te, których nie bije
+    nic - jest zawsze na mapie, choćby było ich więcej niż `limit`. Kolejne
     poziomy dokłada się, aż uzbiera się `limit`, i każdy wchodzi W CAŁOŚCI:
-    ucięcie poziomu w środku wymagałoby zważenia minut przeciw metrom
-    i złotówkom, a tego mapa nie robi. Stąd gwarancja - nigdy nie widać auta,
-    gdy schowane jest takie, które je bije.
+    ucięcie poziomu w środku wymagałoby zważenia minut przeciw złotówkom,
+    a tego mapa nie robi. Stąd gwarancja - nigdy nie widać auta, gdy schowane
+    jest takie, które je bije.
 
-    Auto z „Ogarniam" nie ma tu osobnej reguły: jego kwota jest trzecią
+    Auto z „Ogarniam" nie ma tu osobnej reguły: jego kwota jest drugą
     z tych liczb i tyle."""
-    shown = [_shown_as(car) for car in cars]
-    beaten_by = [
-        sum(other != mine and all(o <= m for o, m in zip(other, mine))
-            for other in shown)
-        for mine in shown
-    ]
-    if len(cars) <= limit:
-        return cars
+    grouped = {}
+    for car in cars:
+        grouped.setdefault(car["from_place"] if groups else id(car), []).append(car)
+    winners = []
+    for group in grouped.values():
+        shown = [_shown_as(car) for car in group]
+        winners += [car for car, mine in zip(group, shown)
+                    if not any(_beats(other, mine) for other in shown)]
+    order = {id(car): i for i, car in enumerate(cars)}
+    winners.sort(key=lambda car: order[id(car)])
+
+    shown = [_shown_as(car) for car in winners]
+    beaten_by = [sum(_beats(other, mine) for other in shown) for mine in shown]
+    if len(winners) <= limit:
+        return winners
     level = sorted(beaten_by)[limit - 1]
-    return [car for car, beaten in zip(cars, beaten_by) if beaten <= level]
+    return [car for car, beaten in zip(winners, beaten_by) if beaten <= level]
 
 
 def car_options(day, reachable, dest, limit=2):

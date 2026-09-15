@@ -1137,8 +1137,7 @@ checks.rower_pokazuje_przejazdy_dopiero_pod_kursorem = (() => {
         rides: [{
             id: 'B', name: 'Legnicka (Park Magnolia)', lat: 51.10, lon: 17.03,
             bikes: 3, docks: 12, m: 1826, sec: 840, at: 56940,
-            opens: 'Niedźwiedzia', opens_at: 57120, opens_last: 57300,
-            opens_walk_sec: 180, opens_m: 120,
+            options: [{arrival: 58200, vehicles: 2}],
         }],
     };
     app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja],
@@ -1194,8 +1193,8 @@ checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
         walk_m: 300, from: 'Kamienna',
         rides: [{
             id: 'B', name: 'Legnicka', lat: 51.10, lon: 17.03, bikes: 3,
-            docks: 12, m: 1826, sec: 960, at: 57060, opens: 'Niedźwiedzia',
-            opens_at: 57240, opens_last: 57300, opens_walk_sec: 180, opens_m: 120,
+            docks: 12, m: 1826, sec: 960, at: 57060,
+            options: [{arrival: 58200, vehicles: 2}],
         }],
     };
     app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja], bike_places_live: false},
@@ -1213,6 +1212,44 @@ checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
             && kropka.options.color === app.BIKE_UNKNOWN_STYLE.color
             && kropka.options.color !== app.BIKE_STYLE.color,
         tip, obwodka: kropka.options.color,
+    };
+})();
+
+/* Przełącznik pod zębatką: kreski wybranych przejazdów i ich stacje końcowe
+   stoją na mapie cały czas, a nie tylko pod kursorem - i zostają po zejściu
+   kursora z kropki. */
+checks.rower_przejazdy_na_stale_po_zapaleniu = (() => {
+    app.setBikesOn(true);
+    const stacja = {
+        id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
+        electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
+        walk_m: 300, from: 'Kamienna',
+        rides: [{
+            id: 'B', name: 'Legnicka', lat: 51.10, lon: 17.03, bikes: 3,
+            docks: 12, m: 1826, sec: 840, at: 56940,
+            options: [{arrival: 58200, vehicles: 2}],
+        }],
+    };
+    const bylo = app.dotOpts.bikeRides;
+    app.dotOpts.bikeRides = true;
+    app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja],
+                  bike_places_live: true}, false);
+    const warstwy = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
+    const kreski = warstwy.filter(l => l.kind === 'polyline').length;
+    const etykieta = (warstwy.find(l => l._tooltip && l._tooltip.options.permanent)
+                      || {_tooltip: {content: ''}})._tooltip.content;
+    const kropka = app.flowBikeLayer.getLayers()[0];
+    kropka.fire('mouseover');
+    kropka.fire('mouseout');
+    const poZejsciu = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
+
+    app.dotOpts.bikeRides = bylo;
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: kreski === 1
+            && etykieta.trim() === '1,8 km'
+            && poZejsciu.filter(l => l.kind === 'polyline').length === 1,
+        kreski, etykieta, poZejsciu: poZejsciu.length,
     };
 })();
 
@@ -1304,6 +1341,20 @@ checks.pasek_czasu_stoi_na_srodku_okna = (function () {
         ok: szeroko === (1200 - 320) / 2 && szeroko + 320 / 2 === 1200 / 2
             && wasko === przeszkoda && wasko > (700 - 320) / 2,
         szeroko, wasko, przeszkoda,
+    };
+})();
+
+checks.auta_grupowanie_leci_do_serwera = (() => {
+    const przelacznik = document.getElementById('car-groups');
+    const bylo = przelacznik.checked;
+    przelacznik.checked = false;
+    const zgaszone = app.queryParams().toString();
+    przelacznik.checked = true;
+    const zapalone = app.queryParams().toString();
+    przelacznik.checked = bylo;
+    return {
+        ok: zgaszone.includes('car_groups=0') && zapalone.includes('car_groups=1'),
+        zgaszone, zapalone,
     };
 })();
 

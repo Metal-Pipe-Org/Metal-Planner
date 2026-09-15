@@ -852,6 +852,17 @@ DEFAULT_MAP_CARS = 3
 MIN_MAP_CARS = 1
 MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
+# Ile przejazdów rowerem mapa pokazuje (punkt 16, patrz bikes.map_places) -
+# ta sama reguła co przy autach, osobny suwak.
+DEFAULT_MAP_BIKES = 4
+MIN_MAP_BIKES = 1
+MAX_MAP_BIKES = 30           # sufit suwaka pod zębatką - pilnowany tutaj
+
+# Ile pojazdów przed rowerem i ile po nim w ogóle się rozważa (punkt 16).
+# Każda runda to przejście po całej narysowanej mapie, a podróż z pięcioma
+# pojazdami po jednej stronie roweru nie jest tym, po co ktoś bierze rower.
+MAX_BIKE_SIDE_RIDES = 4
+
 Q_ANCHOR_TOL = 0.10     # tolerancja jasności przy porównaniu segmentów
                         # (patrz _extract_transfer_graph; kotwica końca mapy
                         # już jej nie używa - patrz _select_and_anchor)
@@ -1100,7 +1111,7 @@ def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
 def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, density=None, more=None,
               car_count=None, journey_limit=None, transfer_gain_sec=None,
-              use_bikes=False):
+              use_bikes=False, bike_count=None, car_groups=False):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -1149,7 +1160,9 @@ def plan_flow(start_query, end_query, when=None,
     jasność (q) służy już tylko do intensywności rysowania.
     car_count to ile aut car-sharingu pokazać przy mapie (suwak pod zębatką,
     patrz DEFAULT_MAP_CARS i traficar.map_skyband); "pokaż więcej" mnoży ją
-    tak samo jak gęstość.
+    tak samo jak gęstość. bike_count - to samo dla przejazdów rowerem (osobny
+    suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_groups - czy auta
+    spod tego samego miejsca to jeden wybór (przełącznik pod zębatką).
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -1282,6 +1295,8 @@ def plan_flow(start_query, end_query, when=None,
         more = 0 if more is None else int(max(0, min(MAX_MAP_MORE, more)))
         car_count = (DEFAULT_MAP_CARS if car_count is None
                      else int(max(MIN_MAP_CARS, min(MAX_MAP_CARS, car_count))))
+        bike_count = (DEFAULT_MAP_BIKES if bike_count is None
+                      else int(max(MIN_MAP_BIKES, min(MAX_MAP_BIKES, bike_count))))
         networks = {}
 
         def network_at(deadline):
@@ -1431,29 +1446,27 @@ def plan_flow(start_query, end_query, when=None,
                 # liniach - a auta, których nic nie bije, zostają i tak.
                 cars = traficar.map_skyband(
                     traficar.map_cars(day, reach, end_point_ll),
-                    car_count * (1 + more))
+                    car_count * (1 + more), car_groups)
 
-            # Rower miejski jako miejsce na mapie (patrz bikes.map_places).
-            # Inaczej niż auto: z roweru się JEDZIE, więc mapa mówi też,
-            # dokąd - ale wyłącznie tam, skąd da się jeszcze wsiąść w coś,
-            # co mapa RYSUJE. Stąd `_drawn_boardings`, a nie skan wstecz:
-            # `latest` zna pół miasta i uznałby za sensowny przejazd na
-            # przystanek, z którego mapa nie rysuje ani jednego odjazdu.
-            #
-            # Do tego same krańce relacji: dojechać rowerem pod sam cel to
-            # zakończenie podróży, a nie przesiadka, więc nie ma tam czego
-            # łapać - liczy się sam deadline.
+            # Rower miejski na mapie (punkt 16, patrz bikes.map_places).
+            # Inaczej niż auto: z roweru się JEDZIE, więc przejazd ocenia się
+            # w całej podróży - dojazd do roweru i dalsza droga po nim idą
+            # tym, co mapa RYSUJE, rundami po liczbie pojazdów. Nie skanem
+            # wstecz po całym dniu: ten zna pół miasta i uznałby za sensowny
+            # przejazd na przystanek, z którego mapa nie rysuje ani jednego
+            # odjazdu. Oba przebiegi są leniwe - bez kandydatów na rower nie
+            # odpala się żaden.
             #
             # Kropki zostają także przy pytaniu o inny dzień - stacje stoją
             # tam zawsze, a zniknięcie ich z mapy mówiłoby nieprawdę. Nieznany
             # jest wtedy sam STAN stojaka i `bikes_live` mówi to wprost, żeby
             # front nie podał zgadywania jako liczby rowerów.
-            board = _drawn_boardings(kept, ranges)
-            for stop in target_stops:
-                if deadline > board.get(stop, -INF):
-                    board[stop] = deadline
+            runs = _drawn_runs(day, kept, ranges)
             bike_places = bikes.map_places(
-                day, reach, board,
+                day,
+                lambda: _drawn_arrivals(day, runs, source_stops, dep_sec),
+                lambda: _drawn_onward(day, runs, target_set),
+                target_set, bike_count * (1 + more),
                 live=day_offset == 0 and when.date() == date.today())
     finally:
         geo_db.close()
@@ -1607,6 +1620,7 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
     raw = {}     # (linia, pełna trasa) -> dane segmentu
     for trip, idxs in trip_conns.items():
         stops_seq = None
+        run = []          # indeksy połączeń kursu, równolegle do kroków stops_seq
         departures = []   # (przystanek, odjazd) wzdłuż kursu - do przesiadek
         arrivals = []     # (przystanek, przyjazd) wzdłuż kursu - do etapów tras
         exits = []   # (pozycja w stops_seq, bound, przyjazd, przystanek)
@@ -1668,6 +1682,7 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
             seen_places.setdefault(arr_place, len(stops_seq))
             departures.append((dep_s, dep_t))
             arrivals.append((arr_s, arr_t))
+            run.append(i)
             stops_seq.append(arr_s)
             leave_by = latest.get(arr_s)
             if leave_by is None or arr_t > leave_by:
@@ -1720,11 +1735,15 @@ def _discover_segments(day, dep_sec, deadline, earliest, arrived_by, trip_board,
                 "best_deps": dict(departures),    # odjazdy najlepszego kursu
                 "arr_times": dict(arrivals),       # przyjazdy najlepszego kursu
                 "dep_times": entry["dep_times"] if entry else {},
+                # Wszystkie kursy tej trasy, nie tylko najlepszy - godziny
+                # najlepszego nie opisują pozostałych (patrz _drawn_runs).
+                "runs": entry["runs"] if entry else [],
                 "shape": day.trip_shape.get(trip),
                 "_raw_bound": best_bound,
             }
         for stop, dep in departures:
             entry["dep_times"].setdefault(stop, []).append(dep)
+        entry["runs"].append(run)
     return list(raw.values())
 
 
@@ -2512,27 +2531,108 @@ def _drawn_reach(kept, ranges):
     return reach
 
 
-def _drawn_boardings(kept, ranges):
-    """{słupek: najpóźniejsza godzina, o której MAPA pozwala tu wsiąść}.
+def _drawn_runs(day, kept, ranges):
+    """Narysowana mapa jako prawdziwe kursy: połączenia każdego kursu, który
+    stoi za narysowanym kawałkiem, na jego narysowanej długości.
 
-    "Wsiąść" znaczy: stoi tu narysowany kawałek, który jedzie DALEJ - stąd
-    `cut - 1`, bo na ostatnim narysowanym słupku kawałka już się wysiada.
-
-    To jest ta sama zasada, co przy `_drawn_reach`, tylko w drugą stronę
-    i z tego samego powodu: liczy się to, co widać na ekranie. Skan wstecz
-    (`latest`) zna pół miasta i powiedziałby "zdążysz" o przystanku, na
-    którym mapa nie rysuje ani jednego odjazdu - a taki przystanek niczego
-    nie otwiera, choćby dało się do niego dojść.
-    """
-    board = {}
+    Kawałek pamięta godziny tylko najlepszego kursu, a kursów o tej samej
+    trasie bywa kilka. Przesiadki przy rowerze (punkt 16) mają być odczytane
+    z rozkładu, więc idą po każdym z nich - bez przykładania godzin jednego
+    kursu do drugiego."""
+    conns = day.conns
+    runs = []
     for seg in kept:
         start_pos, cut = ranges[id(seg)]
-        for pos in range(start_pos, cut - 1):
-            stop = seg["stops"][pos]
-            when = (seg["best_deps"] if pos == start_pos else seg["arr_times"]).get(stop)
-            if when is not None and when > board.get(stop, -INF):
-                board[stop] = when
-    return board
+        for run in seg["runs"]:
+            if cut - 1 > start_pos:
+                runs.append([conns[i] for i in run[start_pos:cut - 1]])
+    return runs
+
+
+def _drawn_arrivals(day, runs, source_stops, dep_sec):
+    """{słupek: [(godzina, ile pojazdów), ...]} - o której mapa tu dowozi,
+    osobno dla każdej liczby pojazdów po drodze (punkt 16).
+
+    Rundami, jak RAPTOR: runda k to wszystko, dokąd da się dojechać najwyżej
+    k pojazdami po narysowanych kursach. Wpis przybywa tylko wtedy, gdy więcej
+    pojazdów daje wcześniejszą godzinę, więc lista jest krótka i każdy jej
+    wiersz to jedna prawdziwa droga. Start to zero pojazdów o godzinie wyjazdu
+    - i wsiada się na nim bez bufora przesiadki."""
+    best = dict.fromkeys(source_stops, dep_sec)
+    out = {stop: [(dep_sec, 0)] for stop in source_stops}
+    ready = dict(best)
+    for rides in range(1, MAX_BIKE_SIDE_RIDES + 1):
+        arrived = {}
+        for run in runs:
+            on = False
+            for dep_t, arr_t, dep_s, arr_s, _ in run:
+                if not on:
+                    if ready.get(dep_s, INF) > dep_t:
+                        continue
+                    on = True
+                if arr_t < arrived.get(arr_s, INF):
+                    arrived[arr_s] = arr_t
+        improved = {stop: when for stop, when in arrived.items()
+                    if when < best.get(stop, INF)}
+        if not improved:
+            break
+        for stop, when in improved.items():
+            best[stop] = when
+            out.setdefault(stop, []).append((when, rides))
+            for other, buffer in _reach_from(day, stop):
+                if when + buffer < ready.get(other, INF):
+                    ready[other] = when + buffer
+    return out
+
+
+def _drawn_onward(day, runs, target_set):
+    """{słupek: [(odjazd, w celu o, ile pojazdów), ...]} - wsiadając tu w ten
+    odjazd, o której jest się w celu i iloma pojazdami (punkt 16).
+
+    Lustro _drawn_arrivals: runda k to przyjazd do celu najwyżej k pojazdami
+    po narysowanych kursach, z dojściem na końcu tą samą regułą co wszędzie
+    (_target_reach). Wpis przybywa tylko wtedy, gdy poprawia to, co dawało
+    mniej pojazdów - więc godzina i liczba pojazdów w jednym wierszu są zawsze
+    z tej samej drogi, a nie najlepszą godziną z jednej i najmniejszą liczbą
+    z drugiej."""
+    near = _target_reach(day, target_set)
+    board_times, suffix_best, rows_of = {}, {}, {}
+
+    def value_at(stop, t):
+        # Najwcześniejszy przyjazd z poprzednich rund, stojąc tu o godzinie t.
+        times = board_times.get(stop)
+        if times is None:
+            return INF
+        i = bisect_left(times, t)
+        return suffix_best[stop][i] if i < len(times) else INF
+
+    out = {}
+    for rides in range(1, MAX_BIKE_SIDE_RIDES + 1):
+        found = []
+        for run in runs:
+            best = INF
+            for dep_t, arr_t, dep_s, arr_s, _ in reversed(run):
+                if arr_s in near:
+                    best = min(best, arr_t + near[arr_s][0])
+                if rides > 1:
+                    for other, buffer in _reach_from(day, arr_s):
+                        best = min(best, value_at(other, arr_t + buffer))
+                if best < value_at(dep_s, dep_t):
+                    found.append((dep_s, dep_t, best))
+        if not found:
+            break
+        for stop, dep_t, arrival in found:
+            out.setdefault(stop, []).append((dep_t, arrival, rides))
+            rows_of.setdefault(stop, []).append((dep_t, arrival))
+        for stop in {stop for stop, _, _ in found}:
+            rows = sorted(rows_of[stop])
+            board_times[stop] = [dep_t for dep_t, _ in rows]
+            running, suffix = INF, []
+            for _, arrival in reversed(rows):
+                running = min(running, arrival)
+                suffix.append(running)
+            suffix_best[stop] = suffix[::-1]
+    return out
 
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,

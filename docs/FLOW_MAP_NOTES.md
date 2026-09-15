@@ -1760,3 +1760,141 @@ dnia przesuwała im próg z powodów niezwiązanych z tym, co sprawdzają.
 5. **Przy długiej trasie panel odjazdów w prawym górnym rogu zasłania koniec
    paska** razem z przyciskiem. Było tak już przy „+X min" (zrzut Kozanowa
    „przed"). Dłuższy napis to pogarsza. Nie ruszane.
+
+## Gęstość skacze falami — „Pokaż więcej" x2, x3, x4 daje tę samą mapę (2026-09-14)
+
+Problem zapisany, nierozwiązany.
+
+### Objaw
+
+Psie Pole (Stacja kolejowa) → Wojszyce, poniedziałek 14.09, odjazd 14:18,
+domyślna gęstość 2,5. Najszybciej 15:26. Mapa x1 kończy się o 15:29, a x2, x3
+i x4 kończą się identycznie o 15:44. Po trzecim kliknięciu przycisk znika,
+bo to limit kliknięć, a nie sufit skanu.
+
+### Pomiar próg po progu
+
+| Próg | Gęstość (km/√km²) | Przejazdy na mapie |
+|---|---|---|
+| 15:26–15:29 | 2,33 | 4 |
+| 15:30–15:32 | 4,16 | 15 |
+| 15:33–15:44 | 4,21 | 16–17 |
+| 15:45–15:47 | 19,49 | 235 |
+| 15:48–15:53 | 21,65–22,20 | 243–245 |
+| 15:54 | 31,03 | 413 |
+
+Cele 5, 7,5 i 10 leżą w dziurze między 4,21 a 19,49, więc każdy wybiera
+ostatnią minutę przed skokiem. Mnożenie gęstości daje widoczny krok tylko
+wtedy, gdy mapa gęstnieje płynnie, a tu nie gęstnieje.
+
+### Przyczyna (sprawdzona)
+
+1. O 15:45 dochodzi jeden kurs: **kolejny 113** (Przystankowa 15:43 → Wojszyce
+   15:45), około kwadrans po poprzednim. Już samo odkrywanie kursów skacze
+   z 22 do 255, przed kotwiczeniem.
+2. Ten kurs przesuwa o kwadrans najpóźniejszy moment w węzłach: Dworzec Główny
+   15:06 → 15:21, pl. Grunwaldzki 14:49 → 15:04, Galeria Dominikańska
+   14:59 → 15:14, Arkady 15:05 → 15:20.
+3. Na starcie najpóźniejszy wyjazd przesuwa się z 14:23 na 14:53, bo łapie się
+   następna 924, która kursuje co 30 min. Otwiera się druga fala odjazdów.
+4. Pierwsza fala jest w centrum przed 14:50 i ma pół godziny zapasu. Każdy
+   przejazd między węzłami, po którym wciąż zdąża się na tego 113, spełnia
+   warunek „dojeżdża przed progiem", więc wchodzi na mapę. Nowe przejazdy kończą
+   się w węzłach (Dworzec Główny, pl. Grunwaldzki, Arkady, Galeria
+   Dominikańska), a nie w celu. Odjazdy rozkładają się od 14:20 do 15:30.
+
+Sedno: jedyną miarą jest godzina przyjazdu. Jeden kurs na końcu trasy zamienia
+cały zapas czasu w dozwolone kombinacje, także w krążenie po centrum, choć
+wystarczyłoby wyjechać później.
+
+### Odrzucony pomysł
+
+**Tylko opcje, których nic nie bije** (wyjazd nie wcześniej i przyjazd
+nie później). Użytkownik odrzucił go 2026-09-14, i słusznie:
+
+5. Z każdej fali zostaje jedna, najszybsza opcja, a alternatywy tej samej fali
+   wypadają, łącznie z 17 przejazdami mapy do 15:44 (111, 131, tramwaje przez
+   centrum). Mapa przestaje być siecią wyborów.
+6. Dołożenie K poziomów przywraca dokładnie te kombinacje, bo reguła nie
+   odróżnia prawdziwej alternatywy od zapychania czasu.
+
+### Do zrobienia
+
+Brakuje kryterium, które oddziela **prawdziwą alternatywę** od **przejazdu,
+który tylko zabija zapas czasu**. Zanim padnie kolejny pomysł, trzeba wypisać
+kilka konkretnych przejazdów spośród 218 nowych o 15:45, z trasą opcji każdego,
+i obejrzeć, czy to krążenie, czy sensowne objazdy.
+
+## Auta w grupach, rowery jak auta — punkty 15 i 16 (2026-09-15)
+
+Kontrakt przepisany na polecenie użytkownika, potem wdrożony.
+
+### Auta
+
+1. Kryteria: godzina przy aucie i „Ogarniam". Odległość do celu wypadła:
+   nagradzała auta tuż przy celu, a opłacalności jazdy autem nie da się
+   rzetelnie ocenić (użytkownik: w Google ta sama trasa autem to 14–30 min —
+   korki; rower i pieszo wychodzą stałe).
+2. Grupa to auta, do których dojście prowadzi z tego samego miejsca (start
+   albo ten sam przystanek, po miejscu, nie po słupku). Z grupy zostają tylko
+   niepobite w grupie. Promień odrzucony jako zgadywanie za użytkownika.
+3. k-skyband liczy się wyłącznie między zwycięzcami grup — poszerzanie nie
+   dokłada kolejnego auta z tej samej grupy (inaczej pierwsze „więcej"
+   przywracałoby auta obok siebie).
+4. Do wiadomości: zdanie kontraktu „nigdy nie widać auta, gdy schowane jest
+   inne, które je bije" jest teraz prawdą dla zwycięzców grup. Schowane auto
+   spoza zwycięzców może bić pokazane z innej grupy — ale wtedy w jego grupie
+   stoi pokazane auto, które bije je samo. Test sprawdza tę słabszą wersję.
+
+### Rowery
+
+5. Kandydatem jest przejazd A→B w całej podróży; trzy liczby z jednej drogi:
+   długość w linii prostej (więcej lepiej), godzina w celu, liczba pojazdów
+   przed i po rowerze. Pojazdy nie są przeliczane na minuty.
+6. Dojazd i dalsza droga liczone rundami (jak RAPTOR) po narysowanych kursach.
+   Kawałek mapy pamiętał godziny tylko najlepszego kursu, więc zapamiętuje
+   teraz połączenia wszystkich kursów o tej trasie — przesiadki są odczytane
+   z rozkładu, bez przykładania godzin jednego kursu do drugiego.
+7. Każda para (godzina, pojazdy) to jedna prawdziwa droga — nigdy najlepsza
+   godzina z jednej i najmniej pojazdów z drugiej. Oba przebiegi są leniwe:
+   bez kandydatów nie odpalają się.
+8. Wybór jak auta, na suwaku „Ile przejazdów rowerem" (domyślnie 4).
+   Pobicia liczone tylko do limitu — dokładne, bo pierwsze `limit` podróży
+   w porządku leksykograficznym ma nad sobą najwyżej `limit`-1 innych.
+9. „Co przejazd otwiera" usunięte — powodem obecności przejazdu są teraz jego
+   trzy liczby. Nowy przełącznik: kreski i stacje końcowe na stałe.
+
+### Pomiar — Psie Pole (Stacja kolejowa) → Wojszyce, 14:18
+
+| Mapa | Przejazdów | Miejsc z kropką | Wybór rowerów |
+|---|---|---|---|
+| x1 (do 15:29) | 3 | 3 | 1,6 s (z pierwszym pobraniem stanu stacji) |
+| x4 (do 15:44) | 19 | 17 | 0,02 s |
+
+10. Do wiadomości: wygrywają przejazdy blisko sufitu 5 km (4,2–5,0 km). To
+    wprost skutek kryterium „jak najwięcej rowerem" — każdy krótszy przejazd
+    z tą samą godziną i liczbą pojazdów jest pobity.
+
+### Tego samego dnia: grupowanie aut przełącznikiem, rower bez sufitu
+
+11. Grupowanie aut cofnięte do przełącznika pod zębatką, domyślnie zgaszonego.
+    Powód (użytkownik): mapa nie rozróżnia aut modelem, więc ktoś polujący na
+    konkretny model tracił auto stojące obok innego. Zgaszone — każde auto
+    konkuruje w k-skybandzie samodzielnie i pełna gwarancja („nigdy nie widać
+    auta, gdy schowane jest inne, które je bije") wraca. Kontrakt punktu 15
+    opisuje wciąż grupowanie jako stałe — nie zmieniony bez polecenia.
+12. Sufit długości przejazdu rowerem (pół godziny pedałowania, ~5 km) usunięty
+    na polecenie użytkownika — a zaraz potem także dolny próg 500 m. O każdym
+    przejeździe na mapie decydują teraz tylko jego trzy liczby. Lista
+    propozycji ma własne progi długości, nieruszane.
+13. Pytanie użytkownika: Księże Małe → Wojszyce, 12:59, suwak rowerów 30 —
+    najdłuższy przejazd (Opolska / pętla → Wojszyce PKP, 3,75 km, zero
+    pojazdów) pojawia się dopiero po „Pokaż więcej". Przyczyną nie jest wybór,
+    tylko próg mapy: przy x1 mapa kończy się na 13:27 (tyle co najszybszy
+    dojazd), a przejazd dowozi o 13:36. Przy x1 były tylko dwa przejazdy,
+    oba z 13:27; przy x2 (próg 13:41) — 32.
+14. Decyzja użytkownika: przejazd rowerem NIE musi dowozić przed progiem mapy.
+    Próg istnieje dla kursów z rozkładem, nie dla roweru ani auta (auta też
+    się pod niego nie podporządkowuje). Zostaje wymóg, że dojazd do roweru
+    i dalsza droga po nim idą tym, co mapa rysuje. Kontrakt punktu 16 tego
+    progu wprost nie wymieniał.

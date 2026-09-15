@@ -468,7 +468,7 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup(flowBikeMarkers(
             lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
-        if (BIKE_RIDES_ALWAYS) showAllBikeRides(lastFlow.bike_places);
+        if (dotOpts.bikeRides) showAllBikeRides(lastFlow.bike_places);
         return;
     }
     loadCityBikes();
@@ -777,10 +777,9 @@ const DOT_DEFAULTS = {
     // jest jedyną liczbą na tej mapie, której w żadnym rozkładzie nie ma.
     // Odległość obok mówi to samo, nie udając odczytanej.
     bikeTimes: false,
-    // Nazwa przystanku, który przejazd otwiera, dopisana przy odległości -
-    // też domyślnie zgaszona. Powód sensowności przejazdu jest ważny dla
-    // ALGORYTMU; przy kilkunastu etykietkach naraz jest głównie tekstem.
-    bikeOpens: false,
+    // Kreski wybranych przejazdów rowerem i ich stacje końcowe na stałe,
+    // a nie tylko pod kursorem - domyślnie zgaszone.
+    bikeRides: false,
 };
 
 const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
@@ -2350,20 +2349,15 @@ const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
 const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
                          dashArray: '1, 6', interactive: false};
 
-// Kreski przejazdów pokazują się WYŁĄCZNIE pod kursorem: jest ich kilkaset
-// i narysowane naraz zasłaniają mapę, o którą się właśnie pyta. Stała, a nie
-// przełącznik - to nie jest decyzja, którą ma podejmować pasażer.
-const BIKE_RIDES_ALWAYS = false;
-
 /** Kropki rowerów w zasięgu mapy (patrz bikes.map_places).
 
-    Kropkę dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ NA ROWER: mapa
-    do niego dowozi i prowadzi z niego choć jeden sensowny przejazd. Drugi
-    koniec przejazdu pokazuje się razem ze strzałką, pod kursorem - a jeśli
-    sam jest miejscem do wsiadania, stoi na mapie z własnego tytułu.
+    Kropkę dostaje wyłącznie początek przejazdu, który przeszedł wybór
+    (punkt 16). Drugi koniec przejazdu pokazuje się razem z kreską - a jeśli
+    sam jest początkiem wybranego przejazdu, stoi na mapie z własnego tytułu.
 
-    Sam przejazd nie jest narysowany na stałe: dwie kropki mówią to samo, co
-    kreska między nimi, a kresek jest kilkaset. Pojawiają się pod kursorem. */
+    Sam przejazd domyślnie nie jest narysowany na stałe: dwie kropki mówią to
+    samo, co kreska między nimi. Kreski pojawiają się pod kursorem, a na stałe
+    - po zapaleniu przełącznika pod zębatką (dotOpts.bikeRides). */
 function flowBikeMarkers(places, live) {
     return (places || []).map(place => {
         const dot = L.circleMarker([place.lat, place.lon],
@@ -2372,7 +2366,7 @@ function flowBikeMarkers(places, live) {
                          {direction: 'top', offset: [0, -4], opacity: 1});
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
-            if (!BIKE_RIDES_ALWAYS) clearBikeRides();
+            if (!dotOpts.bikeRides) clearBikeRides();
             else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
         });
         return dot;
@@ -2409,23 +2403,23 @@ function bikeCountText(place) {
         : bikes;
 }
 
-/** Strzałki przejazdów z jednej kropki - wszystkie, jakie z niej mają sens.
+/** Kreski przejazdów z jednej kropki - te, które przeszły wybór.
 
-    Z etykietką przy każdym drugim końcu, bo to jest cała odpowiedź na „po co
-    tu ten rower": o której się tam jest i jak daleko to stąd. */
+    Z etykietką przy każdym drugim końcu, bo to jest cała odpowiedź na „dokąd
+    tym rowerem": jak daleko to stąd. */
 function showBikeRides(place) {
     clearBikeRides();
     flowBikeRideLayer = L.layerGroup(bikeRideLayers(place, true)).addTo(map);
 }
 
-/** Wszystkie przejazdy wszystkich kropek naraz (przełącznik pod zębatką).
-
-    Bez etykietek: kilkaset naraz to nie jest mapa, tylko ściana tekstu.
-    Etykietki wracają, gdy kursor wskaże konkretną kropkę. */
+/** Przejazdy wszystkich kropek naraz (przełącznik pod zębatką) - z kreskami,
+    stacjami końcowymi i etykietkami, tak samo jak pod kursorem. Przejazdów
+    jest tyle, ile przeszło wybór (suwak pod zębatką), więc nie robi się z tego
+    ściana tekstu. */
 function showAllBikeRides(places) {
     clearBikeRides();
     const layers = [];
-    for (const place of places || []) layers.push(...bikeRideLayers(place, false));
+    for (const place of places || []) layers.push(...bikeRideLayers(place, true));
     flowBikeRideLayer = L.layerGroup(layers).addTo(map);
 }
 
@@ -2457,14 +2451,11 @@ function bikeRideLayers(place, labels) {
 }
 
 /** Etykietka przy drugim końcu. Domyślnie SAMA odległość: godzina przejazdu
-    jest policzona, nie odczytana, a nazwa otwieranego przystanku to powód,
-    dla którego ten przejazd w ogóle tu jest - ważny dla algorytmu, nie dla
-    patrzącego. Oba dopiski wracają przełącznikami pod zębatką. */
+    jest policzona, nie odczytana - wraca przełącznikiem pod zębatką. */
 function bikeRideLabel(ride) {
     const parts = [];
     if (dotOpts.bikeTimes) parts.push(fmtClock(ride.at));
     parts.push(fmtDist(ride.m));
-    if (dotOpts.bikeOpens) parts.push(`→ ${esc(ride.opens)}`);
     return parts.join(' · ');
 }
 
@@ -3085,6 +3076,8 @@ function queryParams() {
         date: $('date').value,
         density: $('density').value,
         cars: $('car-count').value,
+        bike_count: $('bike-count').value,
+        car_groups: $('car-groups').checked ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
@@ -3578,7 +3571,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['density', 'car-count', 'transfer-gain'];
+const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain'];
 
 function loadDevPrefs() {
     try {
@@ -3632,7 +3625,22 @@ function liveSlider(inputId, valueId, resetsMore) {
 applyStoredDevPrefs();
 liveSlider('density', 'density-value', true);
 liveSlider('car-count', 'car-count-value', true);
+liveSlider('bike-count', 'bike-count-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
+
+// Grupowanie aut zmienia odpowiedź serwera, więc jak suwak: pamiętane w tym
+// samym kluczu i od razu nowe zapytanie.
+{
+    const groups = $('car-groups');
+    groups.checked = loadDevPrefs()['car-groups'] === true;
+    groups.addEventListener('change', () => {
+        mapMore = 0;
+        saveDevPref('car-groups', groups.checked);
+        if (!startInput.value || !endInput.value) return;
+        loadPlan(requestToken, false)
+            .catch(() => showError('Nie udało się połączyć z serwerem.'));
+    });
+}
 
 // --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
 //
@@ -3862,7 +3870,7 @@ const DOT_TOGGLES = {
     'tip-cursor': 'tipCursor',
     'tip-panel': 'tipPanel',
     'bike-times': 'bikeTimes',
-    'bike-opens': 'bikeOpens',
+    'bike-rides': 'bikeRides',
 };
 
 function applyDotOpts() {

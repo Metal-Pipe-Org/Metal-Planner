@@ -510,3 +510,15 @@ def test_a_bike_on_another_day_does_not_pretend_to_know(front):
     jutrzejszą. Godzina „jesteś przy nim" pochodzi z rozkładu tamtego dnia,
     więc zostaje."""
     _check(front, "rower_na_inny_dzien_nie_udaje_ze_wie")
+
+
+def test_bike_rides_can_stay_on_the_map(front):
+    """Przełącznik pod zębatką: kreski wybranych przejazdów i ich stacje
+    końcowe stoją na mapie na stałe, a nie tylko pod kursorem."""
+    _check(front, "rower_przejazdy_na_stale_po_zapaleniu")
+
+
+def test_car_grouping_is_a_switch_sent_to_the_server(front):
+    """Grupowanie aut spod tego samego miejsca to przełącznik pod zębatką -
+    jego stan idzie w zapytaniu, bo wybór aut robi serwer."""
+    _check(front, "auta_grupowanie_leci_do_serwera")

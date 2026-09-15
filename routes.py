@@ -296,6 +296,11 @@ def init_routes(app):
             # Ile aut Traficara przy mapie (suwak pod zębatką) - "pokaż
             # więcej" mnoży ją w plannerze tak samo jak gęstość.
             car_count=_float_arg("cars"),
+            # Czy auta spod tego samego miejsca to jeden wybór (przełącznik
+            # pod zębatką, domyślnie zgaszony).
+            car_groups=request.args.get("car_groups") == "1",
+            # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
+            bike_count=_float_arg("bike_count"),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
             # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
             # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc
