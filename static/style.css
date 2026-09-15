@@ -1,6 +1,6 @@
 /* Planer podróży - warstwa UI nad pełnoekranową mapą.
    Kolejność: tokeny -> elementy wspólne -> panel -> lista tras -> mapa
-   -> panel deweloperski -> RWD. */
+   -> Ustawienia Developerskie -> RWD. */
 
 :root {
     --tram: #c62828;
@@ -546,8 +546,9 @@ body.panel-hidden #sidebar {
     margin-left: auto;
 }
 
-#results.collapsed .journeys,
-#results.collapsed .results-foot {
+/* Całość pod nagłówkiem, a nie elementy wymienione z nazwy: kartka o rowerze,
+   dopisana później między nie, zostawała na wierzchu zwiniętej listy. */
+#results.collapsed .results-body {
     display: none;
 }
 
@@ -642,7 +643,7 @@ body.panel-hidden #sidebar {
 .badge.car { background: var(--car); }
 
 /* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
-   a nie w panelu deweloperskim ⚙, bo to wybór PASAŻERA (mam konto w WRM
+   a nie w Ustawieniach Developerskich ⚙, bo to wybór PASAŻERA (mam konto w WRM
    albo nie), a nie strojenie algorytmu. */
 /* Wyjaśnienie „dlaczego nie ma tu roweru" pod listą propozycji. Kartka jak
    pozostałe komunikaty, z paskiem w kolorze warstwy - żeby od razu było
@@ -1090,8 +1091,8 @@ body.panel-hidden #sidebar {
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 
 /* Pasek nad mapą - jedyna liczba, której nie trzeba szukać kursorem. Stoi
-   w górnym rzędzie, nad panelem wyszukiwania (z lewej) i pod panelem
-   deweloperskim (z prawej), żeby nie wchodzić żadnemu w drogę.
+   w górnym rzędzie, nad panelem wyszukiwania (z lewej) i pod
+   Ustawieniami Developerskimi (z prawej), żeby nie wchodzić żadnemu w drogę.
 
    Środek jest środkiem OKNA, a nie wolnego skrawka mapy - i dlatego liczy go
    skrypt (placeTimeHeadline w app.js), a nie arkusz: żeby postawić pasek na
@@ -1395,7 +1396,7 @@ body.panel-hidden #sidebar {
     font-size: 12.5px;
 }
 
-/* ------------------------------------------------ panel deweloperski --- */
+/* ------------------------------------------------ Ustawienia Developerskie --- */
 
 #dev-panel {
     position: fixed;
@@ -1604,7 +1605,29 @@ body.dev-open #flow-panel { right: 322px; }
 
 #dev-panel .field.compact { margin-top: 10px; }
 #dev-panel .field.compact label { font-size: 12px; font-weight: 500; }
-#dev-panel #look-reset { margin-top: 14px; width: 100%; }
+.dev-foot { margin-top: 18px; }
+#dev-reset { width: 100%; }
+
+/* Opcja różna od domyślnej (patrz markChangedSettings w app.js): pasek z boku,
+   a przy nagłówku sekcji liczba takich opcji - widać ją też przy zwiniętej. */
+#dev-panel .changed {
+    margin-left: -9px;
+    padding-left: 6px;
+    border-left: 3px solid var(--accent);
+}
+
+.dev-fold > summary[data-changed]::after {
+    content: attr(data-changed);
+    margin-left: auto;
+    min-width: 18px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--surface);
+    font-size: 10px;
+    letter-spacing: 0;
+    text-align: center;
+}
 #look-dump { font-variant-numeric: tabular-nums; word-break: break-word; }
 
 .field-hint code {

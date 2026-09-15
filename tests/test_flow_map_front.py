@@ -156,7 +156,7 @@ def test_the_time_dot_sits_on_the_line(front):
 def test_a_dev_toggle_actually_changes_the_drawing(front):
     """Regresja, której do 2026-08-27 nie dało się w ogóle sprawdzić (brak
     node, AppleScript do żywej karty przeglądarki kończył się timeoutem):
-    czy przełącznik w panelu deweloperskim zmienia rysunek. Godzina pod
+    czy przełącznik w Ustawieniach Developerskich zmienia rysunek. Godzina pod
     numerkiem powiększa grupkę w OBU wymiarach - i musi wejść do pomiaru
     kolizji, inaczej grupki zaczęłyby na siebie wchodzić."""
     _check(front, "przelacznik_czasu_zmienia_grupki")
@@ -419,12 +419,11 @@ def test_a_full_map_without_a_list_is_not_an_error(front):
     _check(front, "pelna_mapa_bez_listy_nie_jest_bledem")
 
 
-def test_the_button_stretches_the_map_range_up_to_the_ceiling(front):
-    """„+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
-    w tej chwili (klik rozciąga zakres razy 1,5 i wysyła go do serwera jako
-    horizon_sec), a przy suficie 2 h przycisku nie ma - nie ma już czego
-    dokładać. Tuż pod sufitem obiecuje tylko resztę do sufitu."""
-    _check(front, "przycisk_przedluza_zakres_mapy")
+def test_show_more_adds_one_starting_density_per_click(front):
+    """„Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie wysyła do
+    serwera `more` razem z gęstością z suwaka, a po trzecim kliknięciu i przy
+    suficie skanu przycisku nie ma - nie ma już czego dokładać."""
+    _check(front, "pokaz_wiecej_doklada_gestosc")
 
 
 # ------------------------------------------------- pojazdy na żywo -
@@ -522,3 +521,21 @@ def test_a_bike_on_another_day_does_not_pretend_to_know(front):
     jutrzejszą. Godzina „jesteś przy nim" pochodzi z rozkładu tamtego dnia,
     więc zostaje."""
     _check(front, "rower_na_inny_dzien_nie_udaje_ze_wie")
+
+
+def test_bike_rides_can_stay_on_the_map(front):
+    """Przełącznik pod zębatką: kreski wybranych przejazdów i ich stacje
+    końcowe stoją na mapie na stałe, a nie tylko pod kursorem."""
+    _check(front, "rower_przejazdy_na_stale_po_zapaleniu")
+
+
+def test_car_grouping_is_a_switch_sent_to_the_server(front):
+    """Grupowanie aut spod tego samego miejsca to przełącznik pod zębatką -
+    jego stan idzie w zapytaniu, bo wybór aut robi serwer."""
+    _check(front, "auta_grupowanie_leci_do_serwera")
+
+
+def test_vans_are_a_switch_sent_to_the_server(front):
+    """Dostawczaki to przełącznik pod zębatką, domyślnie zgaszony - jego stan
+    idzie w zapytaniu, bo osobny wybór dostawczaków robi serwer."""
+    _check(front, "auta_dostawczaki_leca_do_serwera")

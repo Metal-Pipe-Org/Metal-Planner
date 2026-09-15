@@ -468,8 +468,8 @@ const INJECTION = `
     get flowBikeLayer() { return flowBikeLayer; },
     get flowBikeRideLayer() { return flowBikeRideLayer; },
     BIKE_STYLE, BIKE_UNKNOWN_STYLE,
-    horizonStep, extendHorizon, MAX_HORIZON_SEC,
-    get mapHorizonSec() { return mapHorizonSec; },
+    showMore, MAX_MAP_MORE,
+    get mapMore() { return mapMore; },
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },
 };

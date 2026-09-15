@@ -288,13 +288,22 @@ def init_routes(app):
             _parse_when(request.args.get("time"),request.args.get("date")),
             _point_arg("start"),
             _point_arg("end"),
-            extra_pct=_float_arg("extra_pct"),
-            extra_floor_sec=_float_arg("extra_floor_sec"),
-            extra_cap_sec=_float_arg("extra_cap_sec"),
+            # Docelowa gęstość mapy (suwak pod zębatką) i ile razy kliknięto
+            # "pokaż więcej" - z nich planner dobiera próg. Sufity obu pilnuje
+            # planner, nie front.
+            density=_float_arg("density"),
+            more=_float_arg("more"),
+            # Ile aut Traficara przy mapie (suwak pod zębatką) - "pokaż
+            # więcej" mnoży ją w plannerze tak samo jak gęstość.
+            car_count=_float_arg("cars"),
+            # Czy auta spod tego samego miejsca to jeden wybór (przełącznik
+            # pod zębatką, domyślnie zgaszony).
+            car_groups=request.args.get("car_groups") == "1",
+            # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
+            car_vans=request.args.get("car_vans") == "1",
+            # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
+            bike_count=_float_arg("bike_count"),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
-            # Ręczne "+X min" przy pasku nad mapą - żądana szerokość całego
-            # okna. Sufit i to, że może okno tylko poszerzyć, pilnuje planner.
-            horizon_sec=_float_arg("horizon_sec"),
             # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
             # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc
             # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi

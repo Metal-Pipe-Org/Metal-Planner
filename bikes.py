@@ -38,6 +38,7 @@ algorytmie, który go wplata w trasę.
 
 import json
 import math
+from bisect import bisect_left
 import os
 import threading
 import time
@@ -323,10 +324,6 @@ def stations_quiet():
 
 # ------------------------------------------ rower na mapie przepływów ----
 
-# Sufit przejazdu przeliczony na linię prostą już MAPOWĄ prędkością
-# (patrz MAP_RIDE_MPS) - pół godziny pedałowania to jakieś pięć kilometrów.
-MAP_MAX_RIDE_M = MAX_RIDE_SEC * MAP_RIDE_MPS
-
 # Bok komórki siatki: dokładnie promień dojścia, żeby dowolny punkt miał
 # wszystkich swoich sąsiadów w dziewięciu komórkach wokół siebie.
 _CELL_LAT = gtfs.WALK_M / 111_320
@@ -380,38 +377,43 @@ def ride_time_sec(straight_m):
     return MAP_OVERHEAD_SEC + _whole_minutes(straight_m / MAP_RIDE_MPS)
 
 
-def map_places(day, reach, board, live=True):
-    """Rowery na mapie przepływów: [{lat, lon, ..., rides: [...]}, ...].
+def map_places(day, arrivals, onward, target_set, limit, live=True):
+    """Rowery na mapie przepływów (punkt 16): [{lat, lon, ..., rides: [...]}, ...].
 
-    Dwa wejścia i obydwa pochodzą z tego, co mapa RYSUJE, nie z całego miasta:
+    Kandydatem jest PRZEJAZD - stąd do konkretnej stacji - oceniany w całej
+    podróży, bo z samego odcinka wiadomo tylko, jak jest długi. Obie połowy
+    podróży idą tym, co mapa RYSUJE, a nie całym miastem, i przychodzą
+    z plannera jako funkcje: ich policzenie to przejście po całej mapie, więc
+    woła się je dopiero wtedy, gdy jest dla kogo.
 
-    - `reach` - {słupek: godzina, o której mapa tu DOWOZI} (plus sam start).
+    - `arrivals()` - {słupek: [(godzina, pojazdy), ...]}: o której mapa tu
+      dowozi, osobno dla każdej liczby pojazdów (plus sam start z zerem).
       Stąd wiadomo, o której da się być PRZY rowerze: dojazd plus jedno
       dojście. Rower, do którego mapa nie dowozi, na mapie nie staje.
-    - `board` - {słupek: najpóźniejsza godzina, o której mapa pozwala tu
-      WSIĄŚĆ w coś, co jedzie dalej} (plus krańce relacji, liczone do
-      deadline'u). Stąd wiadomo, czy przejazd ma SENS.
+    - `onward()` - {słupek: [(odjazd, w celu o, pojazdy), ...]}: wsiadając tu
+      w ten narysowany odjazd, o której jest się w celu. Przystanek, z którego
+      mapa nie rysuje ani jednego odjazdu, niczego nie otwiera.
+    - `target_set` - słupki celu: dojechać rowerem pod sam cel to koniec
+      podróży, bez pojazdu po rowerze.
 
-    I to jest cała reguła sensu: przejazd zostaje, jeżeli po zsiadaniu zdąży
-    się jeszcze wsiąść w coś, co mapa rysuje - albo dojechać pod sam cel.
     Przejazd NIE musi być szybszy od tramwaju: ktoś może chcieć jechać
-    rowerem właśnie dlatego, że woli rower. Musi natomiast do czegoś
-    prowadzić, i to do czegoś WIDOCZNEGO - przystanek, z którego mapa nie
-    rysuje ani jednego odjazdu, niczego nie otwiera, choćby dało się do
-    niego dojść.
+    rowerem właśnie dlatego, że woli rower - dlatego długość przejazdu jest
+    osobnym kryterium. Nie musi też dowozić przed progiem mapy: próg jest
+    progiem kursów z rozkładem, a o rowerze decydują jego trzy liczby.
 
-    Na mapie stają wyłącznie miejsca, w których da się WSIĄŚĆ NA ROWER:
-    stacja z rowerami albo rower stojący luzem, do których mapa dowozi i
-    z których prowadzi choć jeden sensowny przejazd. Drugi koniec przejazdu
-    kropki sam z siebie nie dostaje - pokazuje się razem ze strzałką, pod
-    kursorem (a gdy sam jest takim miejscem, jest na mapie z własnego tytułu).
+    Które przejazdy pokazać - _skyband, ta sama reguła co przy autach, na
+    `limit` przejazdów. Na mapie stają wyłącznie miejsca, z których prowadzi
+    choć jeden wybrany przejazd, i tylko z wybranymi przejazdami. Drugi koniec
+    przejazdu kropki sam z siebie nie dostaje - pokazuje się razem z kreską
+    (a gdy sam jest początkiem wybranego przejazdu, jest na mapie z własnego
+    tytułu).
 
     Przejazd zaczyna się na stacji ALBO przy rowerze stojącym luzem, a kończy
     zawsze na stacji (patrz free_bikes). Przy pytaniu o inny dzień (`live`
     False) stan stojaków jest nieznany: kropki zostają, bo stacje stoją tam
     zawsze, ale liczby rowerów nie ma i nie udajemy, że jest.
     """
-    if not enabled() or not reach or not board:
+    if not enabled():
         return []
     try:
         docks = stations()
@@ -426,25 +428,74 @@ def map_places(day, reach, board, live=True):
     if not targets:
         return []
 
-    reach_cells = _cells(day, reach)
-    board_cells = _cells(day, board)
-    # Co która stacja otwiera, policzone RAZ na stację - te same słupki
-    # wychodziłyby inaczej przy każdym z kilkudziesięciu przejazdów do niej.
-    opens = {s["id"]: _walk_index(board_cells, s["lat"], s["lon"])
-             for s in targets}
-
     starts = [s for s in docks if s["bikes"] > 0 or not live]
     starts += [{**bike, "name": None, "bikes": 1,
                 "electric": 1 if bike["electric"] else 0} for bike in loose]
 
-    out = []
+    reach = arrivals()
+    reach_cells = _cells(day, reach)
+    reachable = []
     for place in starts:
-        at = _arrival_at(day, reach_cells, reach, place)
-        if at is None:
-            continue
-        rides = _rides_from(day, at["at"], place, targets, opens, board)
+        before = _before_bike(reach_cells, reach, place)
+        if before:
+            reachable.append((place, before))
+    if not reachable:
+        return []
+
+    ahead = onward()
+    ahead_cells = _cells(day, set(ahead) | set(target_set))
+    # Dalsza droga policzona RAZ na stację - te same słupki wychodziłyby
+    # inaczej przy każdym z kilkudziesięciu przejazdów do niej.
+    after = {}
+
+    found = []
+    for place, before in reachable:
+        rides = []
+        for target in targets:
+            if target["id"] == place["id"]:
+                continue
+            metres = haversine_m(place["lat"], place["lon"],
+                                 target["lat"], target["lon"])
+            if target["id"] not in after:
+                after[target["id"]] = _after_bike(ahead_cells, ahead,
+                                                  target_set, target)
+            ride_sec_ = ride_time_sec(metres)
+            options = _journeys(before, ride_sec_, after[target["id"]])
+            if not options:
+                continue
+            rides.append({
+                "id": target["id"],
+                "name": target["name"],
+                "lat": target["lat"],
+                "lon": target["lon"],
+                "bikes": target["bikes"],
+                "docks": target["docks"],
+                "m": round(metres),
+                "sec": ride_sec_,
+                "at": before[0][0] + ride_sec_,
+                "options": options,
+            })
+        if rides:
+            found.append((place, rides))
+
+    shown = [_shown_as(ride, option)
+             for _, rides in found for ride in rides for option in ride["options"]]
+    chosen = _skyband(shown, limit)
+
+    out = []
+    index = 0
+    for place, all_rides in found:
+        rides = []
+        for ride in all_rides:
+            kept = [option for k, option in enumerate(ride["options"])
+                    if index + k in chosen]
+            index += len(ride["options"])
+            if kept:
+                rides.append({**ride, "options": kept})
         if not rides:
             continue
+        at = _arrival_at(day, reach_cells, reach, place)
+        rides.sort(key=lambda ride: (ride["at"], ride["m"]))
         out.append({
             "id": place["id"],
             "name": place.get("name"),
@@ -464,11 +515,13 @@ def map_places(day, reach, board, live=True):
 
 
 def _arrival_at(day, reach_cells, reach, place):
-    """{at, from, walk_sec, walk_m} - o której i skąd się tu dochodzi."""
+    """{at, from, walk_sec, walk_m} - najwcześniej, o której i skąd się tu
+    dochodzi."""
     best = None
     for walk_sec_, metres, stop in _walk_index(reach_cells, place["lat"],
                                                place["lon"]):
-        option = (reach[stop] + walk_sec_, walk_sec_, metres, stop)
+        option = (min(when for when, _ in reach[stop]) + walk_sec_,
+                  walk_sec_, metres, stop)
         if best is None or option < best:
             best = option
     if best is None:
@@ -478,53 +531,116 @@ def _arrival_at(day, reach_cells, reach, place):
             "walk_sec": walk_sec_, "walk_m": metres}
 
 
-def _rides_from(day, at, place, targets, opens, board):
-    """Wszystkie sensowne przejazdy z tego miejsca, od najwcześniejszego."""
-    rides = []
-    for target in targets:
-        if target["id"] == place["id"]:
-            continue
-        metres = haversine_m(place["lat"], place["lon"],
-                             target["lat"], target["lon"])
-        # Dolny próg: poniżej pół kilometra samo odblokowanie i wpięcie trwa
-        # dłużej, niż idzie się na piechotę. Górny: pół godziny pedałowania
-        # to już osobna wycieczka, nie dojazd do tramwaju.
-        if not MIN_RIDE_M <= metres <= MAP_MAX_RIDE_M:
-            continue
-        ride_sec_ = ride_time_sec(metres)
+def _pareto(pairs):
+    """Z par (godzina, pojazdy) te, których żadna inna nie bije: wcześniej
+    albo mniej pojazdów. Rosnąco po godzinie."""
+    kept = []
+    for when, rides in sorted(pairs):
+        if not kept or rides < kept[-1][1]:
+            kept.append((when, rides))
+    return kept
+
+
+def _before_bike(reach_cells, reach, place):
+    """[(o której przy rowerze, iloma pojazdami), ...] - dojazd plus jedno
+    dojście, tylko pary, których nic nie bije."""
+    return _pareto(
+        (when + walk_sec_, rides)
+        for walk_sec_, _, stop in _walk_index(reach_cells, place["lat"],
+                                              place["lon"])
+        for when, rides in reach[stop])
+
+
+def _after_bike(ahead_cells, ahead, target_set, station):
+    """Dalsza droga ze stacji oddania: (dojście pod sam cel, schodki).
+
+    Dojście pod cel to sekundy marszu do najbliższego słupka celu (None, gdy
+    cel jest dalej niż jedno dojście). Schodki to dla każdej liczby pojazdów
+    k: rosnące "najpóźniej zsiąść z roweru, żeby zdążyć" i najwcześniejszy
+    przyjazd do celu z pojazdami najwyżej k - odczyt to jedno wyszukanie
+    binarne na przejazd, a nie przegląd odjazdów."""
+    finish = None
+    by_rides = {}
+    for walk_sec_, _, stop in _walk_index(ahead_cells, station["lat"],
+                                          station["lon"]):
+        if stop in target_set and (finish is None or walk_sec_ < finish):
+            finish = walk_sec_
+        for dep_t, arrival, rides in ahead.get(stop, ()):
+            by_rides.setdefault(rides, []).append((dep_t - walk_sec_, arrival))
+    steps = []
+    rows = []
+    for rides in sorted(by_rides):
+        rows = sorted(rows + by_rides[rides])
+        running, best = float("inf"), []
+        for _, arrival in reversed(rows):
+            running = min(running, arrival)
+            best.append(running)
+        steps.append((rides, [latest for latest, _ in rows], best[::-1]))
+    return finish, steps
+
+
+def _journeys(before, ride_sec_, after):
+    """Podróże przez ten przejazd: [{arrival, vehicles}, ...] - każda para to
+    jedna prawdziwa droga (dojazd, rower, dalsza droga), a nie najlepsza
+    godzina z jednej i najmniej pojazdów z drugiej. Tylko te, których nic
+    nie bije."""
+    finish, steps = after
+    pairs = []
+    for at, rides_before in before:
         there = at + ride_sec_
-        opened = _first_open(day, opens[target["id"]], there, board)
-        if opened is None:
-            continue
-        rides.append({
-            "id": target["id"],
-            "name": target["name"],
-            "lat": target["lat"],
-            "lon": target["lon"],
-            "bikes": target["bikes"],
-            "docks": target["docks"],
-            "m": round(metres),
-            "sec": ride_sec_,
-            "at": there,
-            **opened,
-        })
-    rides.sort(key=lambda ride: (ride["at"], ride["m"]))
-    return rides
+        if finish is not None:
+            pairs.append((there + finish, rides_before))
+        for rides_after, latest, best in steps:
+            i = bisect_left(latest, there)
+            if i < len(latest):
+                pairs.append((best[i], rides_before + rides_after))
+    return [{"arrival": when, "vehicles": rides}
+            for when, rides in _pareto(pairs)]
 
 
-def _first_open(day, index, there, board):
-    """Najbliższy słupek, na którym po zsiadaniu jeszcze się ZDĄŻY wsiąść.
+def _shown_as(ride, option):
+    """Trzy liczby, którymi przejazd się porównuje, z dokładnością, z jaką
+    mapa je wypisuje (app.js: fmtDist, fmtClock) - zwrócone tak, że mniej
+    znaczy lepiej. Więcej kilometrów rowerem jest lepiej: ktoś może chcieć
+    przejechać rowerem jak najwięcej. Pojazdów nie przelicza się na minuty -
+    kosztem przesiadki jest ryzyko, którego rozkład nie zawiera."""
+    metres = ride["m"]
+    return (
+        -(metres if metres < 1000 else (metres + 50) // 100 * 100),
+        (option["arrival"] + 30) // 60,
+        option["vehicles"],
+    )
 
-    Najbliższy, bo po zsiadaniu idzie się do najbliższego - a dalszy, na
-    który też by się zdążyło, nie jest przez ten przejazd "otwarty" bardziej.
-    `board` niesie wyłącznie słupki, z których mapa RYSUJE odjazd jadący
-    dalej (plus krańce relacji), więc "zdąży" nie może tu znaczyć "zdąży na
-    przystanek, z którego nic nie widać".
-    """
-    for walk_sec_, metres, stop in index:
-        when = there + walk_sec_
-        if when <= board[stop]:
-            return {"opens": day.stop_names.get(stop, stop), "opens_at": when,
-                    "opens_last": board[stop], "opens_walk_sec": walk_sec_,
-                    "opens_m": metres}
-    return None
+
+def _skyband(shown, limit):
+    """Które podróże pokazać (punkt 16): indeksy, k-skyband - jak auta.
+
+    Podróż bije inną, gdy jest co najmniej tak dobra we wszystkich trzech
+    liczbach naraz i w którejś lepsza. Pierwszy poziom - te, których nie bije
+    nic - jest zawsze; kolejne poziomy wchodzą w całości, aż uzbiera się
+    `limit`.
+
+    Pobić liczy się tylko do `limit`: pierwsze `limit` podróży w porządku
+    leksykograficznym ma przed sobą - a więc i nad sobą - najwyżej `limit`-1
+    innych, więc poziom wybrany z posortowanych liczników jest zawsze niższy
+    od `limit`. Podróż pobita `limit` razy nie wejdzie nigdy, a dokładna
+    liczba ponad to niczego nie zmienia - przy tysiącach podróży to różnica
+    między ułamkiem sekundy a kilkoma sekundami."""
+    if len(shown) <= limit:
+        return set(range(len(shown)))
+    order = sorted(range(len(shown)), key=lambda i: shown[i])
+    beaten = [0] * len(shown)
+    for pos, i in enumerate(order):
+        mine = shown[i]
+        count = 0
+        # Co bije, jest leksykograficznie mniejsze - więc stoi wcześniej.
+        for j in order[:pos]:
+            other = shown[j]
+            if (other != mine and other[0] <= mine[0] and other[1] <= mine[1]
+                    and other[2] <= mine[2]):
+                count += 1
+                if count == limit:
+                    break
+        beaten[i] = count
+    level = sorted(beaten)[limit - 1]
+    return {i for i, count in enumerate(beaten) if count <= level}
