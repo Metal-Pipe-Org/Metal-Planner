@@ -299,6 +299,8 @@ def init_routes(app):
             # Czy auta spod tego samego miejsca to jeden wybór (przełącznik
             # pod zębatką, domyślnie zgaszony).
             car_groups=request.args.get("car_groups") == "1",
+            # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
+            car_vans=request.args.get("car_vans") == "1",
             # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
             bike_count=_float_arg("bike_count"),
             transfer_gain_sec=_float_arg("transfer_gain_sec"),

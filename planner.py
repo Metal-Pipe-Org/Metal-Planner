@@ -25,8 +25,8 @@ TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupk
 # Nocne linie zjeżdżają się w węźle i ruszają z niego tą samą minutą tą samą
 # ulicą, więc różnice na końcu bywają czystym zaokrągleniem dwóch rozkładów -
 # a wysiadanie z pojazdu, który sam dowozi do celu, kosztuje przejście na
-# inny peron i ryzyko utraty połączenia na całe pół godziny. Suwak w panelu
-# deweloperskim (transfer_gain_sec w API).
+# inny peron i ryzyko utraty połączenia na całe pół godziny. Suwak w
+# Ustawieniach Developerskich (transfer_gain_sec w API).
 TRANSFER_GAIN_SEC = 600
 # W jakim oknie w ogóle SZUKAMY wariantu bez przesiadki. Celowo niezależne
 # od progu: suwak rozstrzyga, który wariant jest proponowany jako najlepszy,
@@ -54,6 +54,9 @@ def plan_route(start_query, end_query, when=None, transfer_gain_sec=None):
         return _unknown_stop(end_query, end_hints)
     if start_name == end_name:
         return {"error": "Przystanek początkowy i końcowy są takie same."}
+    group_error = _city_group_error(day, start_name, source_stops, end_name, target_stops)
+    if group_error:
+        return group_error
 
     dep_sec = when.hour * 3600 + when.minute * 60 + when.second
     best_stop, best_arr, journey = _scan(day, source_stops, target_stops, dep_sec)
@@ -204,6 +207,11 @@ def _target_reach(day, target_set):
     pętli - część z nich chodzi po wszystkich połączeniach doby.
     """
     reach = {stop: (0, stop) for stop in target_set}
+    if gtfs.is_city_group(day, target_set):
+        # Patrz _origin_walk: celem jest któraś stacja, a nie przystanek obok
+        # niej - "WARSZAWA -" -> "WROCŁAW -" rysowało inaczej autobusy
+        # dowożące pod wrocławskie stacje.
+        return reach
     for other, (sec, cel) in gtfs.walk_reach(day, target_set).items():
         if sec < reach.get(other, (INF, None))[0]:
             reach[other] = (sec, cel)
@@ -229,6 +237,13 @@ def _origin_walk(day, source_stops):
     i dokładanie im czasu przejścia mogłoby tylko opóźnić prawdziwy start
     (całe miejsce jest startem naraz - patrz gtfs.match_stop).
     """
+    # "Dowolna stacja w mieście" to wybór stacji, a nie miejsce, w którym się
+    # stoi. Dojście z każdej z trzydziestu wrocławskich stacji do przystanków
+    # MPK obok nich wpuszczało do mapy setki tramwajów, które kotwice i tak
+    # potem wycinały: "WROCŁAW -" -> Milicz liczyło się 15 s zamiast 3,5 s,
+    # przy identycznej mapie.
+    if gtfs.is_city_group(day, source_stops):
+        return {}
     return {
         other: (skad, sec)
         for other, (sec, skad) in gtfs.walk_reach(day, source_stops).items()
@@ -892,6 +907,29 @@ VISITS_PER_JOURNEY = 667      # propozycji faktycznie szukało głębiej, a nie 
                               # krócej listę tych samych paru znalezionych łańcuchów
 
 
+def _city_group_error(day, start_name, source_stops, end_name, target_stops):
+    """Błąd, gdy "dowolna stacja w mieście" (gtfs.is_city_group) stoi naprzeciw
+    czegoś innego niż kolej, albo None. Grupa ma sens tylko w podróży koleją:
+    na pl. Grunwaldzki i tak jedzie się tramwajem spod KONKRETNEJ stacji, więc
+    "dowolna stacja we Wrocławiu -> pl. Grunwaldzki" nie jest pytaniem, na
+    które da się uczciwie odpowiedzieć - zgłoszone przez użytkownika."""
+    for name, stops, other_name, other in (
+            (start_name, source_stops, end_name, target_stops),
+            (end_name, target_stops, start_name, source_stops)):
+        if not gtfs.is_city_group(day, stops):
+            continue
+        if not gtfs.is_rail(day, other):
+            return {"error": f"„{name}” to dowolna stacja w mieście — działa "
+                             f"tylko ze stacją kolejową po drugiej stronie."}
+        # Stacja z tej samej grupy: stoi się na niej od początku, więc nie ma
+        # dokąd jechać - bez tego "WROCŁAW -" -> Wrocław Brochów szukało przez
+        # tydzień do przodu, a odwrotnie rysowało pełną mapę po mieście.
+        if set(stops) & set(other):
+            return {"error": f"„{other_name}” to jedna ze stacji „{name}” — "
+                             f"dowolna stacja w mieście działa z inną miejscowością."}
+    return None
+
+
 def _resolve_endpoints(day, start_query, end_query, start_point, end_point):
     """Start i cel -> dzień, nazwy do pokazania + zbiory słupków do skanowania.
 
@@ -926,6 +964,10 @@ def _resolve_endpoints(day, start_query, end_query, start_point, end_point):
 
     if resolved["start"] == resolved["end"]:
         return {"error": "Przystanek początkowy i końcowy są takie same."}
+    group_error = _city_group_error(day, resolved["start"], resolved["source_stops"],
+                                    resolved["end"], resolved["target_stops"])
+    if group_error:
+        return group_error
     resolved["day"] = day
     return resolved
 
@@ -1111,7 +1153,7 @@ def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
 def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, density=None, more=None,
               car_count=None, journey_limit=None, transfer_gain_sec=None,
-              use_bikes=False, bike_count=None, car_groups=False):
+              use_bikes=False, bike_count=None, car_groups=False, car_vans=False):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -1162,7 +1204,8 @@ def plan_flow(start_query, end_query, when=None,
     patrz DEFAULT_MAP_CARS i traficar.map_skyband); "pokaż więcej" mnoży ją
     tak samo jak gęstość. bike_count - to samo dla przejazdów rowerem (osobny
     suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_groups - czy auta
-    spod tego samego miejsca to jeden wybór (przełącznik pod zębatką).
+    spod tego samego miejsca to jeden wybór (przełącznik pod zębatką), car_vans
+    - czy pokazać też dostawczaki, wybierane osobno od osobówek.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -1436,7 +1479,13 @@ def plan_flow(start_query, end_query, when=None,
         # wyżej). Auto przy przystanku, którego nikt nie narysował, mówiłoby
         # o mapie coś, czego na niej nie ma.
         cars, bike_places = [], []
-        if kept:
+        # Przy "dowolnej stacji w mieście" po którejkolwiek stronie aut
+        # i rowerów nie ma wcale - decyzja użytkownika: to podróż koleją między
+        # miastami, a auto czy rower przy którejś ze stacji nie jest na nią
+        # odpowiedzią ("WROCŁAW -" -> "WARSZAWA -" pokazywało auta przy
+        # Nadodrzu i Kuźnikach).
+        if kept and not (gtfs.is_city_group(day, source_stops)
+                         or gtfs.is_city_group(day, target_set)):
             reach = dict.fromkeys(source_stops, dep_sec)
             for stop, at in _drawn_reach(kept, ranges).items():
                 if at < reach.get(stop, INF):
@@ -1444,9 +1493,9 @@ def plan_flow(start_query, end_query, when=None,
             if day_offset == 0 and when.date() == date.today():
                 # Ile z nich: suwak razy to samo "pokaż więcej", co przy
                 # liniach - a auta, których nic nie bije, zostają i tak.
-                cars = traficar.map_skyband(
+                cars = traficar.map_choice(
                     traficar.map_cars(day, reach, end_point_ll),
-                    car_count * (1 + more), car_groups)
+                    car_count * (1 + more), car_groups, car_vans)
 
             # Rower miejski na mapie (punkt 16, patrz bikes.map_places).
             # Inaczej niż auto: z roweru się JEDZIE, więc przejazd ocenia się
@@ -2188,36 +2237,51 @@ def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
         new_ranges = {}
         for seg in kept:
             # --- kotwica początku ---
-            if seg["stops"][0] in source_stops:
-                start_pos = 0
+            # Przystanek startowy - wsiadanie BEZ marszu. Z kilku bierzemy
+            # OSTATNI, który kurs mija: na każdym z nich stoi się od początku,
+            # więc jazda między dwoma z nich niczego nie daje. Przy zwykłym
+            # starcie to perony jednego miejsca i różnicy nie ma; przy
+            # "dowolnej stacji w mieście" (gtfs._match_city_group) mapa
+            # rysowała inaczej regionalne pociągi z Grabiszyna czy Mikołajowa
+            # na Wrocław Główny, na którym też się już stoi - zgłoszone na żywo.
+            #
+            # Start w środku kursu liczy się tak samo jak na jego początku.
+            # Miejsce wsiadania wybrane w _discover_segments (stops[0]) to
+            # NAJWCZEŚNIEJSZE możliwe, a nie jedyne - kurs wyjeżdżający z pętli
+            # końcowej mija start dopiero w swoim środku (da się do niego
+            # wcześniej wsiąść, dojechawszy na tę pętlę czymś innym). Bez tego
+            # taki kurs mógłby się zakotwiczyć wyłącznie o segment jadący NA
+            # pętlę, a ten słusznie ginie na kotwicy końca (_leads_onward:
+            # z pętli wraca się po własnych śladach) - i cała sieć, opierając
+            # się o niego, rozplątywała się do zera, po czym plan_flow wchodził
+            # w tryb awaryjny. Zmierzone 2026-08-27 na Sosnowiecka -> Wojszyce
+            # 15:37: 31 kandydatów, 0 zatrzymanych.
+            last_stop = len(seg["stops"]) - 1
+            own_pos = max(
+                (p for stop2, p in seg["pos_of"].items()
+                 if stop2 in source_stops and p < last_stop
+                 and (p == 0 or seg["dep_times"].get(stop2) is not None)),
+                default=None,
+            )
+            if own_pos is not None:
+                # Kurs, który zatrzymuje się na przystanku STARTOWYM, rysujemy
+                # od niego - nawet jeśli wcześniej mija słupek, do którego
+                # dałoby się dojść pieszo. Marsz po pojazd, który i tak po nas
+                # przyjedzie, jest marszem donikąd (ta sama zasada, co
+                # w _cheaper_boarding). Zgłoszone na żywo: relacja z Wojszyc
+                # rysowała 112 od Parafialnej, o przystanek WCZEŚNIEJ na tym
+                # samym kursie, więc mapa zaczynała się obok wskazanego startu,
+                # a na samych Wojszycach nie było nawet kropki - 112 tylko tamtędy
+                # "przejeżdżało" (patrz _transfer_nodes).
+                start_pos = own_pos
             else:
                 start_pos = None
-                own_pos = None     # przystanek startowy - wsiadanie BEZ marszu
                 walk_best = None   # (sekundy marszu, pozycja) najtańszego dojścia
                 for stop2, p in seg["pos_of"].items():
-                    if p >= len(seg["stops"]) - 1:
+                    if p >= last_stop:
                         continue         # dołączenie na samym końcu - puste
                     times = seg["dep_times"].get(stop2)
                     if times is None:
-                        continue
-                    if stop2 in source_stops:
-                        # Wsiadamy tu wprost, bez żadnej przesiadki: to jeden
-                        # z przystanków startowych relacji, a kurs ma stąd
-                        # odjazd w oknie. Miejsce wsiadania wybrane w
-                        # _discover_segments (stops[0]) to NAJWCZEŚNIEJSZE
-                        # możliwe, a nie jedyne - kurs wyjeżdżający z pętli
-                        # końcowej mija start dopiero w swoim środku (da się
-                        # do niego wcześniej wsiąść, dojechawszy na tę pętlę
-                        # czymś innym). Bez tej gałęzi taki kurs mógłby się
-                        # zakotwiczyć wyłącznie o segment jadący NA pętlę, a
-                        # ten słusznie ginie na kotwicy końca (_leads_onward:
-                        # z pętli wraca się po własnych śladach) - i cała
-                        # sieć, opierając się o niego, rozplątywała się do
-                        # zera, po czym plan_flow wchodził w tryb awaryjny.
-                        # Zmierzone 2026-08-27 na Sosnowiecka -> Wojszyce
-                        # 15:37: 31 kandydatów, 0 zatrzymanych.
-                        if own_pos is None or p < own_pos:
-                            own_pos = p
                         continue
                     if stop2 in walk_stops:
                         # Tu wsiadamy po dojściu pieszo ze startu. Też jest to
@@ -2245,17 +2309,6 @@ def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
                 if walk_best is not None and (start_pos is None
                                               or walk_best[1] < start_pos):
                     start_pos = walk_best[1]
-                # Kurs, który zatrzymuje się na przystanku STARTOWYM, rysujemy
-                # od niego - nawet jeśli wcześniej mija słupek, do którego
-                # dałoby się dojść pieszo. Marsz po pojazd, który i tak po nas
-                # przyjedzie, jest marszem donikąd (ta sama zasada, co
-                # w _cheaper_boarding). Zgłoszone na żywo: relacja z Wojszyc
-                # rysowała 112 od Parafialnej, o przystanek WCZEŚNIEJ na tym
-                # samym kursie, więc mapa zaczynała się obok wskazanego startu,
-                # a na samych Wojszycach nie było nawet kropki - 112 tylko tamtędy
-                # "przejeżdżało" (patrz _transfer_nodes).
-                if own_pos is not None:
-                    start_pos = own_pos
                 if start_pos is None:
                     continue                 # nie da się tu dojechać widocznie
             # --- kotwica końca ---
@@ -2268,6 +2321,13 @@ def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
                     ridden += 1
                 if pos <= start_pos + 1:
                     continue                 # wyjście przed/na starcie segmentu
+                if stop in source_stops:
+                    # Druga połowa zasady z kotwicy początku: na przystanku
+                    # startowym stoi się od początku, więc dojechanie na niego
+                    # nie otwiera niczego. Pociąg z Grabiszyna kończący bieg na
+                    # Wrocławiu Głównym przy "dowolnej stacji w mieście" inaczej
+                    # zaczepiał się o IC odjeżdżający z Głównego.
+                    continue
                 if stop in near_target:
                     cut = max(cut, pos)      # cel jest "widoczny" z definicji
                     continue

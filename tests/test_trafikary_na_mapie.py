@@ -29,7 +29,7 @@ E = (51.16, 17.00)          # cel
 
 # Auto ~33 m od M - poniżej minimalnego czasu dojścia (gtfs.WALK_MIN_SEC).
 CAR = {"lat": 51.1203, "lon": 17.00, "plate": "WE1AA11", "model": "Renault Clio",
-       "where": "ul. Testowa", "fuel": 80, "range": 300, "ogarniam": []}
+       "van": False, "where": "ul. Testowa", "fuel": 80, "range": 300, "ogarniam": []}
 
 
 def _day():
@@ -181,7 +181,7 @@ def test_ogarniam_czytamy_z_feedu_takie_jakie_jest(monkeypatch):
          "available": True, "discounts": None},
     ]}
     monkeypatch.setattr(traficar, "_fetch", lambda url: feed)
-    monkeypatch.setattr(traficar, "_models", lambda: {1: "Renault Clio"})
+    monkeypatch.setattr(traficar, "_models", lambda: {1: ("Renault Clio", False)})
     monkeypatch.setattr(traficar, "_cars_cache",
                         {"at": 0.0, "cars": [], "generation": 0})
 
@@ -350,6 +350,60 @@ def test_trzy_auta_przy_jednym_przystanku_to_jedno_auto_na_mapie(install_day,
 
     assert _tablice(wynik["cars"]) == ["BLISKO"]
     assert _tablice(domyslnie["cars"]) == ["BLISKO", "DALEJ", "NAJDALEJ"]
+
+
+def test_rodzaj_auta_czytamy_z_listy_modeli(monkeypatch):
+    """Dostawczak to `type` 2 w liście modeli, nie zgadywanie po nazwie. Auto
+    o nieznanym modelu liczy się jako osobowe."""
+    feed = {"cars": [
+        {"lat": "51.12", "lng": "17.00", "regPlate": plate, "modelId": model,
+         "location": "Wrocław", "fuel": 80.0, "range": 300, "available": True,
+         "discounts": None}
+        for plate, model in (("OSOBOWE", 1), ("DOSTAWCZE", 2), ("NIEZNANE", 99))
+    ]}
+    monkeypatch.setattr(traficar, "_fetch", lambda url: feed)
+    monkeypatch.setattr(traficar, "_models", lambda: {1: ("RENAULT Clio V", False),
+                                                      2: ("RENAULT Master", True)})
+    monkeypatch.setattr(traficar, "_cars_cache",
+                        {"at": 0.0, "cars": [], "generation": 0})
+
+    osobowe, dostawcze, nieznane = traficar.car_list()
+
+    assert (osobowe["model"], osobowe["van"]) == ("RENAULT Clio V", False)
+    assert (dostawcze["model"], dostawcze["van"]) == ("RENAULT Master", True)
+    assert (nieznane["model"], nieznane["van"]) == ("Traficar", False)
+
+
+def test_dostawczakow_domyslnie_nie_ma_wcale():
+    auta = [_auto("A", 600, "S"), {**_auto("V", 300, "M"), "van": True}]
+
+    assert _tablice(traficar.map_choice(auta, 30)) == ["A"]
+
+
+def test_dostawczak_nie_konkuruje_z_osobowka():
+    """Po włączeniu dostawczaki wybiera się tylko między sobą: dostawczak
+    wcześniej i z nagrodą nie chowa osobówki, a osobówka nie chowa
+    dostawczaka. Każdy rodzaj dostaje tę samą liczbę z suwaka."""
+    osobowka = _auto("A", 900, "S")
+    pobita_osobowka = _auto("B", 1200, "X")
+    dostawczak = {**_auto("V", 300, "M", ogarniam=20), "van": True}
+    pobity_dostawczak = {**_auto("W", 1500, "Y"), "van": True}
+
+    pokazane = traficar.map_choice(
+        [osobowka, pobita_osobowka, dostawczak, pobity_dostawczak], 1, vans=True)
+
+    assert _tablice(pokazane) == ["A", "V"]
+
+
+def test_przelacznik_dostawczakow_dochodzi_do_mapy(install_day, monkeypatch):
+    install_day(_day())
+    _cars(monkeypatch, [CAR, {**CAR, "plate": "MASTER", "van": True}])
+
+    domyslnie = planner.plan_flow("Start", "Cel", WHEN)
+    z_dostawczakami = planner.plan_flow("Start", "Cel", WHEN, car_vans=True)
+
+    assert _tablice(domyslnie["cars"]) == ["WE1AA11"]
+    assert _tablice(z_dostawczakami["cars"]) == ["MASTER", "WE1AA11"]
 
 
 # ------------------------------------------------ kiedy aut nie ma w ogóle ----

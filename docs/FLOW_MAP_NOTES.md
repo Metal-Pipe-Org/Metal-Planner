@@ -1898,3 +1898,77 @@ Kontrakt przepisany na polecenie użytkownika, potem wdrożony.
     się pod niego nie podporządkowuje). Zostaje wymóg, że dojazd do roweru
     i dalsza droga po nim idą tym, co mapa rysuje. Kontrakt punktu 16 tego
     progu wprost nie wymieniał.
+
+## Dowolna stacja tylko dla kolei; dostawczaki osobno — punkt 15 (2026-09-15)
+
+Zgłoszenia #114 i #130. Kontrakt punktu 15 przepisany na polecenie użytkownika.
+
+### Dowolna stacja w mieście
+
+1. Pomiar przed zmianą: „WROCŁAW -" → „WARSZAWA -", 16.09 17:30. Mapa: 23
+   odcinki pociągów, 114 tramwajów i 86 autobusów spod dworców Głównego,
+   Nadodrza, Tarczyński Areny i innych. Najszybsza trasa: IC 6111 z Wrocławia
+   Głównego 18:20, Warszawa 21:55.
+2. Przyczyna tramwajów: grupa dokładała do każdej stacji całe jej miejsce,
+   razem z przystankami MPK. Teraz grupa to same perony. Po tej jednej zmianie
+   zostało 18 odcinków pociągów, z czego 11 to regionalne pociągi między
+   wrocławskimi stacjami (Grabiszyn, Mikołajów, Pracze, Partynice → Główny).
+3. Zdanie użytkownika: grupa ma działać tylko w podróży koleją — z przystankiem
+   MPK albo punktem z mapy po drugiej stronie wyszukiwarka odpowiada
+   komunikatem. Grupa naprzeciw innej grupy albo stacji działa.
+4. Wybrane rozwiązanie przejazdów między stacjami — bez warunku na grupę:
+   kurs rysuje się od OSTATNIEGO przystanku startowego, który mija. Samo to
+   nie wystarczyło: pociągi kończące bieg na Głównym zaczynały się wtedy na
+   Grabiszynie i kotwiczyły wysiadaniem na Głównym o IC. Druga połowa zasady:
+   wysiadanie na przystanku startowym niczego nie kotwiczy. Po obu zmianach
+   zostało 5 odcinków, wszystkie wyjeżdżające z miasta.
+5. Strona celu nie potrzebowała zmiany: kurs już wcześniej kończył się na
+   pierwszym przystanku celu.
+6. Zwykłe wyszukiwania: stara i nowa wersja uruchomione obok siebie na sześciu
+   relacjach (Katedra, Kozanów i Wrocław Główny → pl. Grunwaldzki,
+   Sosnowiecka → Wojszyce, Psie Pole → Wojszyce, Wrocław Główny → Warszawa
+   Centralna) dają identyczne odcinki, jasności i węzły.
+7. Do wiadomości, niewyjaśnione i poza tym zgłoszeniem: przy tej relacji
+   gałęzie IC 3716 do Poznania i KD przez Rawicz do Leszna kończą się tam i nie
+   dojeżdżają na mapie do Warszawy — wygląda to na wiszące gałęzie (punkt 4).
+
+### Dostawczaki
+
+8. Traficar sam podaje rodzaj modelu: `type` 1 to osobowe (Clio, Zoe, Sandero,
+   Arkana), 2 to dostawcze (Kangoo, Master, Dokker, Express).
+9. Decyzja użytkownika: domyślnie dostawczaków nie ma wcale; przełącznik pod
+   zębatką je dokłada i wtedy nie konkurują z osobówkami. Każdy rodzaj dostaje
+   tę samą liczbę z suwaka, a warstwa 🚗 bez wyszukiwania słucha tego samego
+   przełącznika.
+
+### Tego samego dnia: grupa to nie miejsce, w którym się stoi
+
+10. Zgłoszenie: „WROCŁAW -" → Wrocław Brochów działało (szukało tydzień do
+    przodu, a odwrotnie rysowało 141 odcinków po mieście). Teraz stacja z tej
+    samej grupy daje komunikat w obie strony.
+11. Zgłoszenie: „WROCŁAW -" → Milicz liczyło się bardzo długo. Pomiar: stara
+    wersja 4,0 s i 2 przybliżenia progu, po zmianach z #114 14,7 s i 14
+    przybliżeń — mapa z samych pociągów jest rzadka, więc dobór gęstości szedł
+    do sufitu, a każde przybliżenie odkrywało setki tramwajów dostępnych pieszo
+    spod trzydziestu stacji, które kotwice potem wycinały. Grupa nie ma już
+    dojścia pieszo ani na starcie, ani do celu: Milicz 2,5 s, Warszawa 3,7 s,
+    mapy identyczne jak przed tą zmianą. „WARSZAWA -" → „WROCŁAW -" nie rysuje
+    już 5 autobusów dowożących pod wrocławskie stacje.
+12. Zgłoszenie: przy „WROCŁAW -" → „WARSZAWA -" stały 3 auta (Nadodrze,
+    Brochów, Kuźniki) i rowery spod Brochowa i Partynic na Dworzec Główny.
+    Najpierw wybrana reguła „przy grupie auta i rowery tylko od miejsc, do
+    których mapa dowozi" (odrzucony: próg odległości celu) — ale przy
+    „WARSZAWA -" → „WROCŁAW -" zostawiała auta i rowery przy Wrocławiu
+    Głównym, Mikołajowie i Muchoborze. Ostateczna decyzja użytkownika: przy
+    grupie po którejkolwiek stronie aut i rowerów na mapie nie ma wcale.
+    Kontrakt punktów 15–16 nie wspomina grupy — nie zmieniony bez polecenia.
+13. Grupa rozpoznawana po słupkach, nie po nazwie: same stacje kolejowe
+    w więcej niż jednym miejscu. Sprawdzone: żadna z 3008 stacji nie dzieli
+    nazwy z inną, więc zwykła stacja to zawsze jedno miejsce.
+14. Zwykłe relacje (te same sześć, co wyżej) dalej dają mapę identyczną ze
+    starą wersją.
+15. Na polecenie użytkownika usunięte progi długości jazdy Traficarem
+    (1,5 km i 25 km). Zostaje zapas zasięgu auta. Do wiadomości: pilnowały,
+    żeby nie proponować kilkuset metrów jazdy ani całej podróży autem poza
+    miasto — teraz takie opcje wchodzą, jeśli auto ma zasięg, i konkurują
+    godziną przyjazdu.

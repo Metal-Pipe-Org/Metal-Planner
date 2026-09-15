@@ -1,5 +1,5 @@
 /* Planer podróży - cały frontend: mapa Leaflet, panel wyszukiwania,
-   lista propozycji tras i panel deweloperski.
+   lista propozycji tras i Ustawienia Developerskie.
 
    Dwa widoki tej samej odpowiedzi na to samo pytanie:
    - MAPA PRZEPŁYWÓW (/api/flow) - wachlarz wszystkich sensownych opcji,
@@ -53,7 +53,7 @@ $('sidebar-toggle').addEventListener('click', () => {
     saveUiState({sidebarHidden: hidden});
 });
 
-// Panel deweloperski jest schowany za przyciskiem - normalny użytkownik
+// Ustawienia Developerskie są schowane za przyciskiem - normalny użytkownik
 // nie ma po co go widzieć, a strojenie algorytmu musi zostać pod ręką.
 const devPanel = $('dev-panel');
 const devToggle = $('dev-toggle');
@@ -395,11 +395,8 @@ const bikesToggle = $('bikes-toggle');
 const flowOnScreen = () => !!flowLayer;
 
 function cityCarMarkers(cars) {
-    return cars.map(car => L.circleMarker([car.lat, car.lon], {
-        ...CAR_STYLE,
-        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
-    }).bindTooltip(
-        `<b>${esc(car.model)} · ${esc(car.plate)}</b><br>` +
+    return cars.map(car => L.circleMarker([car.lat, car.lon], carStyle(car)).bindTooltip(
+        `<b>${carName(car)}</b><br>` +
         // Opis miejsca postoju bywa w feedzie pusty - pusta linijka w dymku
         // wyglądałaby jak brakująca treść.
         (car.where ? `${esc(car.where)}<br>` : '') +
@@ -426,7 +423,11 @@ function loadCityCars() {
     fetch('/api/cars').then(r => r.json()).then(data => {
         if (data.error || !carsOn || flowOnScreen()) return;
         if (cityCarLayer) map.removeLayer(cityCarLayer);
-        cityCarLayer = L.layerGroup(cityCarMarkers(data.cars)).addTo(map);
+        // Feed miasta oddaje wszystkie auta - dostawczaki odsiewa się tutaj,
+        // tym samym przełącznikiem, który przy mapie przepływów idzie do serwera.
+        const vans = $('car-vans').checked;
+        cityCarLayer = L.layerGroup(
+            cityCarMarkers(data.cars.filter(car => vans || !car.van))).addTo(map);
     }).catch(() => {});   // sieć/timeout - kolejna próba za CARS_REFRESH_MS
 }
 
@@ -680,7 +681,7 @@ function endpointPoints() {
 // --- WYGLĄD: wartości do strojenia -----------------------------------------
 //
 // Wartości dobrane przez użytkownika na żywo, na realnej mapie (2026-08-16),
-// suwakami w panelu deweloperskim - sekcja jest z powrotem WIDOCZNA
+// suwakami w Ustawieniach Developerskich - sekcja jest z powrotem WIDOCZNA
 // (LOOK_TUNING niżej), żeby dało się stroić dalej.
 //
 // Grubość i krycie niosą tę samą różnicę razem: najbledszy kawałek jest i
@@ -702,7 +703,7 @@ const LOOK_DEFAULTS = {
 };
 
 // JEDYNY przełącznik strojenia wyglądu: `true` pokazuje sekcję „Wygląd mapy"
-// w panelu deweloperskim (i zaczyna pamiętać ustawienia suwaków w
+// w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków w
 // localStorage), `false` chowa ją w całości i zostawia same wartości wyżej.
 // Kod suwaków zostaje w repo celowo - patrz znaczniki TYMCZASOWE w
 // index.html i style.css.
@@ -740,7 +741,7 @@ const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * r
 // sasiednimi godzinami tego samego kursu, proporcjonalnie do przebytej drogi.
 // Nic poza tym - zadnej sredniej predkosci, zadnego sklejania kursow.
 //
-// Kazda rzecz siedzi na wlasnym przelaczniku w panelu deweloperskim - to
+// Kazda rzecz siedzi na wlasnym przelaczniku w Ustawieniach Developerskich - to
 // wciaz szukanie formy, a nie gotowa decyzja.
 const TIME_DEFAULTS = {
     hover: true,        // godzina w punkcie pod kursorem + przyjazd do celu
@@ -2284,6 +2285,23 @@ const CAR_STYLE = {radius: 5, weight: 1, color: '#6a1b9a',
 // to jedno, za które Traficar płaci.
 const CAR_OGARNIAM_STYLE = {radius: 6, weight: 2.5, color: '#f9a825'};
 
+// Dostawczak (tylko na życzenie, patrz traficar.map_choice) to pusty pierścień
+// zamiast pełnej kropki: to osobny wybór, więc ma być widać bez najeżdżania,
+// który jest który. Złota obwódka „Ogarniam" kładzie się na nim tak samo.
+const CAR_VAN_STYLE = {radius: 6, weight: 2.5, fillColor: '#ffffff'};
+
+function carStyle(car) {
+    return {
+        ...CAR_STYLE,
+        ...(car.van ? CAR_VAN_STYLE : {}),
+        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
+    };
+}
+
+function carName(car) {
+    return `${esc(car.model)}${car.van ? ' · dostawczy' : ''} · ${esc(car.plate)}`;
+}
+
 /** Znaczniki wolnych aut (patrz traficar.map_cars).
 
     Auto jest MIEJSCEM, do którego mapa dowozi, a nie kursem: nie ma linii,
@@ -2292,17 +2310,15 @@ const CAR_OGARNIAM_STYLE = {radius: 6, weight: 2.5, color: '#f9a825'};
     się przy nim jest - plus to, czego o nim nie wiemy: ile stąd do celu
     w linii prostej i ani słowa o czasie jazdy. */
 function flowCarMarkers(cars) {
-    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], {
-        ...CAR_STYLE,
-        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
-    }).bindTooltip(carTooltipHtml(car), {
+    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], carStyle(car))
+        .bindTooltip(carTooltipHtml(car), {
         direction: 'top', offset: [0, -4], opacity: 1,
     }));
 }
 
 function carTooltipHtml(car) {
     return [
-        `<b>${esc(car.model)} · ${esc(car.plate)}</b>`,
+        `<b>${carName(car)}</b>`,
         `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
         `pieszo z „${esc(car.from)}”`,
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
@@ -2972,13 +2988,15 @@ function renderJourneys() {
                     aria-label="${resultsCollapsed ? 'Pokaż' : 'Ukryj'} propozycje tras"
                     aria-expanded="${String(!resultsCollapsed)}">${resultsCollapsed ? '▸' : '▾'}</button>
         </div>
-        <ol class="journeys">${cards}</ol>
-        ${bikeNoteHtml()}
-        <p class="results-foot">
-            Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
-            tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
-            zobaczyć całą trasę.
-        </p>`;
+        <div class="results-body">
+            <ol class="journeys">${cards}</ol>
+            ${bikeNoteHtml()}
+            <p class="results-foot">
+                Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
+                tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
+                zobaczyć całą trasę.
+            </p>
+        </div>`;
     resultsBox.classList.toggle('collapsed', resultsCollapsed);
 
     setTabCount(journeys.length);
@@ -3078,6 +3096,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_groups: $('car-groups').checked ? '1' : '0',
+        car_vans: $('car-vans').checked ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
@@ -3561,7 +3580,7 @@ $('clear').addEventListener('click', () => {
     forgetLastSearch();
 });
 
-// Suwaki panelu deweloperskiego: etykieta od razu, mapa i lista propozycji
+// Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
 // więc każdy suwak siłą rzeczy odświeża i mapę, i listę - nie ma już
@@ -3628,14 +3647,15 @@ liveSlider('car-count', 'car-count-value', true);
 liveSlider('bike-count', 'bike-count-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
 
-// Grupowanie aut zmienia odpowiedź serwera, więc jak suwak: pamiętane w tym
-// samym kluczu i od razu nowe zapytanie.
-{
-    const groups = $('car-groups');
-    groups.checked = loadDevPrefs()['car-groups'] === true;
-    groups.addEventListener('change', () => {
+// Grupowanie aut i dostawczaki zmieniają odpowiedź serwera, więc jak suwak:
+// pamiętane w tym samym kluczu i od razu nowe zapytanie.
+for (const id of ['car-groups', 'car-vans']) {
+    const input = $(id);
+    input.checked = loadDevPrefs()[id] === true;
+    input.addEventListener('change', () => {
         mapMore = 0;
-        saveDevPref('car-groups', groups.checked);
+        saveDevPref(id, input.checked);
+        if (id === 'car-vans' && !flowOnScreen()) refreshCarLayer();
         if (!startInput.value || !endInput.value) return;
         loadPlan(requestToken, false)
             .catch(() => showError('Nie udało się połączyć z serwerem.'));
@@ -3706,15 +3726,6 @@ function bindLookSliders() {
             timer = setTimeout(applyLook, 60);
         });
     }
-    $('look-reset').addEventListener('click', () => {
-        Object.assign(look, LOOK_DEFAULTS);
-        for (const [id, key] of Object.entries(LOOK_KNOBS)) {
-            $(id).value = look[key];
-            show(id);
-        }
-        saveLookPrefs();
-        applyLook();
-    });
 }
 bindLookSliders();
 document.documentElement.style.setProperty('--chip-scale', look.labelScale);
@@ -3934,7 +3945,7 @@ bindDotOpts();
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer',
-    'fold-sound', 'fold-dots', 'look-section', 'fold-version',
+    'fold-sound', 'fold-dots', 'fold-bike', 'look-section', 'fold-version',
 ];
 
 function bindDevFolds() {
@@ -3948,6 +3959,47 @@ function bindDevFolds() {
     }
 }
 bindDevFolds();
+
+// --- zmienione ustawienia i powrót do domyślnych ----------------------------
+//
+// `value`/`checked` z index.html to wartości domyślne (patrz komentarz nad
+// panelem), więc opcja różna od nich dostaje znacznik, a nagłówek sekcji -
+// liczbę takich opcji, żeby było je widać także przy zwiniętej sekcji.
+function markChangedSettings() {
+    for (const fold of devPanel.querySelectorAll('.dev-fold')) {
+        let changed = 0;
+        for (const input of fold.querySelectorAll('input')) {
+            const differs = input.type === 'checkbox'
+                ? input.checked !== input.defaultChecked
+                : Number(input.value) !== Number(input.defaultValue);
+            input.closest('.field, .dev-check').classList.toggle('changed', differs);
+            if (differs) changed++;
+        }
+        const summary = fold.querySelector('summary');
+        if (changed) summary.dataset.changed = changed;
+        else delete summary.dataset.changed;
+    }
+}
+devPanel.addEventListener('input', markChangedSettings);
+devPanel.addEventListener('change', markChangedSettings);
+markChangedSettings();
+
+// Jeden przycisk na cały panel: kasuje wszystkie zapamiętane ustawienia
+// i przeładowuje stronę, więc każda wartość wraca z *_DEFAULTS tą samą drogą,
+// co przy pierwszej wizycie - bez osobnego "przywróć" dla każdej sekcji, które
+// trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma własny
+// klucz, więc mapa wraca ta sama.
+$('dev-reset').addEventListener('click', () => {
+    for (const key of [DEV_PREFS_KEY, TIME_PREFS_KEY, DOT_PREFS_KEY,
+                       LOOK_PREFS_KEY, SOUND_PREFS_KEY]) {
+        try {
+            localStorage.removeItem(key);
+        } catch {
+            // localStorage niedostępny - i tak nie ma czego kasować
+        }
+    }
+    location.reload();
+});
 
 // ------------------------------------------------- most do trybu rozkładów ----
 //

@@ -156,7 +156,7 @@ def test_the_time_dot_sits_on_the_line(front):
 def test_a_dev_toggle_actually_changes_the_drawing(front):
     """Regresja, której do 2026-08-27 nie dało się w ogóle sprawdzić (brak
     node, AppleScript do żywej karty przeglądarki kończył się timeoutem):
-    czy przełącznik w panelu deweloperskim zmienia rysunek. Godzina pod
+    czy przełącznik w Ustawieniach Developerskich zmienia rysunek. Godzina pod
     numerkiem powiększa grupkę w OBU wymiarach - i musi wejść do pomiaru
     kolizji, inaczej grupki zaczęłyby na siebie wchodzić."""
     _check(front, "przelacznik_czasu_zmienia_grupki")
@@ -522,3 +522,9 @@ def test_car_grouping_is_a_switch_sent_to_the_server(front):
     """Grupowanie aut spod tego samego miejsca to przełącznik pod zębatką -
     jego stan idzie w zapytaniu, bo wybór aut robi serwer."""
     _check(front, "auta_grupowanie_leci_do_serwera")
+
+
+def test_vans_are_a_switch_sent_to_the_server(front):
+    """Dostawczaki to przełącznik pod zębatką, domyślnie zgaszony - jego stan
+    idzie w zapytaniu, bo osobny wybór dostawczaków robi serwer."""
+    _check(front, "auta_dostawczaki_leca_do_serwera")

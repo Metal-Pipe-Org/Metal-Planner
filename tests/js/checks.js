@@ -1358,5 +1358,19 @@ checks.auta_grupowanie_leci_do_serwera = (() => {
     };
 })();
 
+checks.auta_dostawczaki_leca_do_serwera = (() => {
+    const przelacznik = document.getElementById('car-vans');
+    const bylo = przelacznik.checked;
+    przelacznik.checked = false;
+    const zgaszone = app.queryParams().toString();
+    przelacznik.checked = true;
+    const zapalone = app.queryParams().toString();
+    przelacznik.checked = bylo;
+    return {
+        ok: zgaszone.includes('car_vans=0') && zapalone.includes('car_vans=1'),
+        zgaszone, zapalone,
+    };
+})();
+
 
 JSON.stringify(checks);

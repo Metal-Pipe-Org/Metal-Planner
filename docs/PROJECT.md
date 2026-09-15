@@ -204,13 +204,18 @@ Gdy przełącznik jest włączony, a propozycji z rowerem nie ma, pod listą
 staje kartka mówiąca dlaczego (`bikeNoteHtml`) — brak wyniku i zepsuta
 funkcja wyglądają inaczej tylko wtedy, gdy ktoś to powie.
 
-Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
-⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
-Suwaki: trzy od okna czasowego mapy, zasięg szukania punktu oraz **próg
-opłacalności przesiadki** (`transfer_gain_sec`, domyślnie 10 min — patrz opis
-skanu wyżej; nie kasuje żadnej opcji, tylko decyduje, która jest proponowana
-jako najlepsza). Wartości lądują w `localStorage` i w query
-stringu `/api/flow`.
+Ustawienia Developerskie są schowane za przyciskiem ⚙ w nagłówku. Czysty JS
+bez frameworka, cała logika w `static/app.js`. Sekcje po kolei: „Co pokazuje
+mapa" (gęstość, auta z grupowaniem i dostawczakami, przejazdy rowerem), „Czas
+na mapie", „Przystanki i rozkład", „Rower miejski", schowane „Wygląd mapy"
+i „Dźwięk", „Wersja aplikacji", a na samym dole, zwinięte, „Tylko lista
+propozycji tras" z **progiem opłacalności przesiadki** (`transfer_gain_sec`,
+domyślnie 10 min — patrz opis skanu wyżej). Wartości lądują w `localStorage`,
+a te, od których zależy odpowiedź serwera, w query stringu `/api/flow`.
+`value`/`checked` w `index.html` są wartościami domyślnymi: opcja różna od
+nich dostaje pasek z boku, a nagłówek sekcji — liczbę takich opcji. Jeden
+przycisk „Przywróć domyślne" kasuje wszystkie zapamiętane ustawienia
+i przeładowuje stronę.
 
 ### 4. PWA — `static/manifest.webmanifest` + `static/sw.js` + `static/pwa.js`
 
@@ -387,9 +392,9 @@ który `plan_flow` i tak już ma policzony na potrzeby deadline'u
 „przystanek wysiadania + auto" liczy się godzina dotarcia do celu; zostają
 najwyżej dwie, po jednej na miejsce i na auto, i tylko te mieszczące się
 w tym samym oknie czasowym co reszta listy. Odpada auto dalej niż 600 m od
-przystanku, bliżej niż 1,5 km od celu (odpalenie trwa dłużej niż ten
-kawałek), dalej niż 25 km oraz takie, którego zasięg nie pokrywa przejazdu
-z zapasem.
+przystanku oraz takie, którego zasięg nie pokrywa przejazdu z zapasem.
+Długość samej jazdy nie ma progów (do 2026-09-15: 1,5–25 km) — o tym, czy
+auto się opłaca, rozstrzyga godzina przyjazdu.
 
 **Czas jazdy jest szacowany i jest to powiedziane wprost.** Auto nie ma
 rozkładu, a routingu samochodowego w projekcie nie ma — czas i dystans
@@ -702,8 +707,9 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   strony, a mapa proponuje jedną). Węzeł, z którego nie da się w nic wsiąść,
   nie trafia na listę — nie ma tam przesiadki.
   `cars` to wolne auta car-sharingu w zasięgu TEJ mapy (patrz
-  `traficar.map_cars`, punkt 15 kontraktu): `[{lat, lon, plate, model, where,
-  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m}, …]` — `at` to godzina,
+  `traficar.map_cars`, punkt 15 kontraktu): `[{lat, lon, plate, model, van, where,
+  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m}, …]` — `van` mówi,
+  czy to dostawczak (pole `type` listy modeli Traficara), `at` to godzina,
   o której da się być przy aucie (dojazd z narysowanej mapy plus dojście
   liczone tak samo jak każde inne), `from`/`walk_*` mówią skąd i jak daleko
   się idzie, a `to_dest_m` to odległość auta od celu W LINII PROSTEJ. Czasu
@@ -790,7 +796,9 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   razem z `at_ceiling` — próg doszedł do sufitu skanu (60 min za najszybszym
   przyjazdem), więc kolejne kliknięcie nie miałoby czego dołożyć. Wynikowy
   próg widać w `limit_sec`/`deadline`. `cars` w odpowiedzi jest przesiane
-  przez `traficar.map_skyband`: przy `car_groups=1` z aut, do których idzie się
+  przez `traficar.map_choice`: dostawczaki tylko przy `car_vans=1`, i wtedy
+  osobówki i dostawczaki wybiera się osobno, każde rodzajem z tym samym `cars`,
+  regułą `traficar.map_skyband`: przy `car_groups=1` z aut, do których idzie się
   z tego samego miejsca, zostają niepobite w tej grupie (godzina przy aucie,
   „Ogarniam"; domyślnie grupowania nie ma i każde auto jest osobno),
   a spośród zwycięzców grup te, których nie bije żadne inne, zawsze, kolejne
@@ -878,7 +886,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
-| `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
+| `templates/index.html` | szkielet strony: mapa, panel, Ustawienia Developerskie |
 | `static/app.js` | frontend wyszukiwarki: mapa, wyszukiwanie, lista propozycji |
 | `static/timetable.js` | frontend rozkładów (drugi tryb panelu, po moście z `app.js`) |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
@@ -896,6 +904,28 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-15** — **dowolna stacja tylko dla kolei, dostawczaki osobno,
+  porządek w Ustawieniach Developerskich** (zgłoszenia #114, #130, #131, #132;
+  punkt 15 kontraktu). „Dowolna stacja w mieście" to już same perony, bez
+  przystanków MPK pod dworcami, i działa wyłącznie ze stacją kolejową albo inną
+  grupą po drugiej stronie — z przystankiem MPK albo punktem z mapy daje
+  komunikat. Na mapie kurs rysuje się od OSTATNIEGO przystanku startowego, który
+  mija, a wysiadanie na przystanku startowym niczego nie kotwiczy: przy grupie
+  miasta znikają regionalne pociągi między wrocławskimi stacjami, a zwykłe
+  wyszukiwania dają identyczną mapę (sprawdzone na sześciu relacjach, stara
+  i nowa wersja obok siebie). Dostawczaki Traficara (pole `type` listy modeli)
+  domyślnie się nie pokazują; przełącznik pod zębatką je dokłada i wtedy są
+  osobnym wyborem, z tą samą liczbą z suwaka, na mapie jako puste pierścienie.
+  Panel ⚙ nazywa się wszędzie „Ustawienia Developerskie", ma nowy układ (mapa,
+  czas, przystanki, rower, sprawy techniczne, na dole zwinięty suwak listy
+  propozycji), opisy w jednym zdaniu, jeden „Przywróć domyślne" i podświetla
+  opcje różne od domyślnych. Zwinięta lista propozycji chowa też kartkę
+  o rowerze. Tego samego dnia: grupa nie działa ze stacją z tej samej grupy
+  („WROCŁAW -" → Wrocław Brochów); grupa nie jest miejscem, w którym się
+  stoi, więc nie ma z niej ani do niej dojścia pieszo („WROCŁAW -" → Milicz
+  2,5 s zamiast 14,7 s), a przy grupie po którejkolwiek stronie mapa nie
+  pokazuje aut ani rowerów. Usunięte progi długości jazdy Traficarem (1,5 km
+  i 25 km) — został zapas zasięgu.
 - **2026-09-15** — **auta w grupach, rowery wybierane jak auta** (punkty 15
   i 16 kontraktu). Auta porównują się godziną przy aucie i „Ogarniam" —
   odległość do celu przestała być kryterium, bo opłacalności jazdy autem nie

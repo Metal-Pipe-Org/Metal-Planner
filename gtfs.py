@@ -844,7 +844,32 @@ def _match_city_group(key, norm_key, data):
             group.add(stop_id)
     if not group:
         return None, None
-    return f"{city.upper()} -", _expand_to_places(data, list(group))
+    # Bez _expand_to_places, inaczej niż każde inne dopasowanie: miejsce stacji
+    # obejmuje przystanki MPK pod dworcem, a "dowolna stacja" to wybór samej
+    # stacji. Z tamtymi słupkami mapa "WROCŁAW -" -> "WARSZAWA -" rysowała
+    # tramwaje i autobusy spod sześciu dworców naraz - zgłoszone na żywo.
+    return f"{city.upper()} -", list(group)
+
+
+def is_rail(data, stops):
+    """Czy wśród słupków jest choć jedna stacja kolejowa (patrz
+    DayData.pkp_stations) - zwykła stacja jest MIEJSCEM razem z przystankami
+    MPK pod nią, więc wystarczy jedna."""
+    rail = {stop_id for _, stop_id in data.pkp_stations}
+    return any(stop in rail for stop in stops)
+
+
+def is_city_group(data, stops):
+    """Czy słupki to "dowolna stacja w mieście" (patrz _match_city_group):
+    same stacje kolejowe w więcej niż jednym miejscu. Rozpoznane po słupkach,
+    nie po nazwie, bo pytają o to także miejsca, które nazwy nie znają (patrz
+    planner._origin_walk). Zwykła stacja to zawsze jedno miejsce - sprawdzone
+    2026-09-15: żadna z 3008 stacji nie dzieli nazwy z inną."""
+    if len(stops) < 2:
+        return False
+    rail = {stop_id for _, stop_id in data.pkp_stations}
+    return (all(stop in rail for stop in stops)
+            and len({data.place_of.get(stop, stop) for stop in stops}) > 1)
 
 
 def match_stop(query, data):

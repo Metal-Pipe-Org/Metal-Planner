@@ -61,8 +61,8 @@ WALK_MIN_SEC = 60
 START_SEC = 300
 
 # Jazda autem - szacunek, patrz nagłówek modułu. Obie stałe są ZMIERZONE, nie
-# wzięte z głowy: 30 losowych par przystanków w oknie [MIN_DRIVE_M,
-# MAX_DRIVE_M] przepuszczonych przez prawdziwy routing samochodowy (OSRM na
+# wzięte z głowy: 30 losowych par przystanków w oknie 1,5-25 km
+# przepuszczonych przez prawdziwy routing samochodowy (OSRM na
 # danych OSM, jednorazowo, poza aplikacją - w runtime niczego takiego nie
 # wołamy). Z tej próbki mediana krętości (droga / linia prosta) to 1,30,
 # a mediana prędkości po drodze 36 km/h.
@@ -83,17 +83,13 @@ START_SEC = 300
 DRIVE_SPEED_MPS = 9.4
 DRIVE_DETOUR = 1.30
 DRIVE_MIN_SEC = 120
-# Poniżej tego auto nie ma czego załatwić: samo odpalenie (START_SEC) trwa
-# dłużej niż przejście tego kawałka, a opłata za przejazd zostaje.
-MIN_DRIVE_M = 1500
-# Powyżej - to już nie jest "ostatni kawałek podróży", tylko cała podróż
-# autem; na taką odpowiedź nikt nie pytał wyszukiwarki komunikacji miejskiej.
-MAX_DRIVE_M = 25000
 # Zapas zasięgu ponad sam przejazd. Feed podaje zasięg w km i bywa on niski
 # (auto z 9% paliwa ma ich czterdzieści) - a nasz dystans jest SZACOWANY
 # (linia prosta razy krętość), więc auto, które dojeżdża "na styk", nie jest
 # propozycją, tylko zaproszeniem na stację po drodze.
 RANGE_RESERVE_M = 5000
+
+UNKNOWN_MODEL = ("Traficar", False)   # patrz _models
 
 _cars_cache = {"at": 0.0, "cars": [], "generation": 0}
 _models_cache = {"at": 0.0, "models": {}}
@@ -140,13 +136,19 @@ def _spot_label(location):
 
 
 def _models():
-    """id modelu -> nazwa ("RENAULT Clio IV"). Pusty słownik, gdy się nie udało -
-    nazwa modelu jest ozdobą dymka, nie powodem, żeby nie proponować auta."""
+    """id modelu -> (nazwa, czy dostawczy): ("RENAULT Clio IV", False). Pusty
+    słownik, gdy się nie udało - model jest ozdobą dymka, nie powodem, żeby
+    nie proponować auta, więc auto bez znanego modelu liczy się jako osobowe
+    (patrz UNKNOWN_MODEL).
+
+    Rodzaj to pole `type` feedu: 1 - osobowe (Clio, Zoe, Sandero, Arkana),
+    2 - dostawcze (Kangoo, Master, Dokker, Express); sprawdzone na żywo
+    2026-09-15. Po nazwie nie zgadujemy - lista modeli rośnie z każdą dostawą."""
     if time.monotonic() - _models_cache["at"] >= MODELS_TTL_SEC:
         try:
             data = _fetch(f"{API}/car-models")
             _models_cache["models"] = {
-                m["id"]: m["name"] for m in data["carModels"]
+                m["id"]: (m["name"], m["type"] == 2) for m in data["carModels"]
             }
             _models_cache["at"] = time.monotonic()
         except (OSError, ValueError, KeyError, TypeError):
@@ -182,7 +184,8 @@ def car_list():
                     "lat": float(c["lat"]),
                     "lon": float(c["lng"]),
                     "plate": c["regPlate"],
-                    "model": models.get(c.get("modelId"), "Traficar"),
+                    "model": models.get(c.get("modelId"), UNKNOWN_MODEL)[0],
+                    "van": models.get(c.get("modelId"), UNKNOWN_MODEL)[1],
                     "where": _spot_label(c.get("location")),
                     "fuel": round(float(c["fuel"])),
                     "range": c["range"],
@@ -356,6 +359,20 @@ def map_skyband(cars, limit, groups=False):
     return [car for car, beaten in zip(winners, beaten_by) if beaten <= level]
 
 
+def map_choice(cars, limit, groups=False, vans=False):
+    """Auta na mapę (punkt 15): osobówki zawsze, dostawczaki tylko na życzenie
+    - i wtedy każdy rodzaj wybierany osobno (map_skyband), z tym samym `limit`.
+
+    Dostawczak nie konkuruje z osobówką: kto wiezie szafę, nie weźmie Clio
+    stojącego minutę bliżej, a kto jedzie sam, nie chce Mastera. Domyślnie
+    dostawczaków nie ma wcale - zgłoszone przez użytkownika."""
+    chosen = map_skyband([car for car in cars if not car["van"]], limit, groups)
+    if vans:
+        chosen += map_skyband([car for car in cars if car["van"]], limit, groups)
+    chosen_ids = {id(car) for car in chosen}
+    return [car for car in cars if id(car) in chosen_ids]
+
+
 def car_options(day, reachable, dest, limit=2):
     """Najlepsze zakończenia podróży autem: [{stop, car, walk_sec, ...}, ...].
 
@@ -383,8 +400,6 @@ def car_options(day, reachable, dest, limit=2):
     candidates = []
     for car in cars:
         drive_sec, drive_m = drive_time(car["lat"], car["lon"], dest_lat, dest_lon)
-        if not MIN_DRIVE_M <= drive_m <= MAX_DRIVE_M:
-            continue
         if (car["range"] or 0) * 1000 < drive_m + RANGE_RESERVE_M:
             continue
         for stop, arrival in reachable.items():
