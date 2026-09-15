@@ -219,6 +219,11 @@ def _city_group_labels(station_names, coords_by_name, literal_wildcards):
     prawdziwe miasto (nawet duże, patrz stała) przechodzi, dwie różne
     miejscowości o zbieżnym przedrostku - nie.
 
+    Myślnik zostaje TU postacią kanoniczną, mimo że użytkownik zobaczy
+    "Wrocław (dowolna stacja)" - czytelną etykietę robi front
+    (prettyStopName w static/app.js), bo ta sama nazwa jest zarazem kluczem
+    dopasowania w gtfs._match_city_group i musi wrócić na serwer niezmieniona.
+
     Pomija miasta, które mają już DOSŁOWNY wpis PKP (`literal_wildcards`) -
     dwie prawie identyczne podpowiedzi obok siebie tylko myliłyby, skoro
     obie i tak dopasowują się identycznie."""

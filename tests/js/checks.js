@@ -909,6 +909,37 @@ checks.czekanie_jest_widoczne = (() => {
     };
 })();
 
+/* Grupa stacji miasta: na ekranie czytelna etykieta, na serwer nazwa
+   kanoniczna. Para prettyStopName/rawStopName musi się znosić - inaczej
+   ładna nazwa poleci do /api/flow i wróci jako "nie znaleziono przystanku"
+   (błąd, przez który etykieta wróciła kiedyś do myślnika - patrz
+   gtfs._match_city_group). */
+checks.grupa_stacji_wraca_kanoniczna = (() => {
+    const etykieta = app.prettyStopName('WROCŁAW -');
+    const zwykly = app.prettyStopName('PL. GRUNWALDZKI');
+
+    // Najważniejsze: to, co widzi użytkownik w polu, wychodzi na serwer
+    // w postaci, którą rozumie wyszukiwarka.
+    app.startInput.value = etykieta;
+    app.endInput.value = 'Sosnowiecka';
+    const params = app.queryParams();
+
+    // Nazwa kanoniczna z odpowiedzi /api/flow wraca do pola jako etykieta.
+    app.adoptNames({start: 'WROCŁAW -', end: 'Sosnowiecka'});
+    const wPolu = app.startInput.value;
+
+    return {
+        ok: etykieta === 'WROCŁAW (dowolna stacja)'
+            && zwykly === 'PL. GRUNWALDZKI'
+            && app.rawStopName(etykieta) === 'WROCŁAW -'
+            && app.rawStopName(zwykly) === 'PL. GRUNWALDZKI'
+            && params.get('start') === 'WROCŁAW -'
+            && params.get('end') === 'Sosnowiecka'
+            && wPolu === 'WROCŁAW (dowolna stacja)',
+        etykieta, zwykly, start: params.get('start'), end: params.get('end'), wPolu,
+    };
+})();
+
 /* Przycisk "Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie dokłada
    jedną wyjściową gęstość i leci do serwera jako `more` razem z gęstością
    z suwaka. Po trzecim kliknięciu i przy suficie skanu przycisku nie ma - nie
