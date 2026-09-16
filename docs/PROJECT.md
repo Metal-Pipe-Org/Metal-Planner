@@ -204,13 +204,18 @@ Gdy przełącznik jest włączony, a propozycji z rowerem nie ma, pod listą
 staje kartka mówiąca dlaczego (`bikeNoteHtml`) — brak wyniku i zepsuta
 funkcja wyglądają inaczej tylko wtedy, gdy ktoś to powie.
 
-Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
-⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
-Suwaki: trzy od okna czasowego mapy, zasięg szukania punktu oraz **próg
-opłacalności przesiadki** (`transfer_gain_sec`, domyślnie 10 min — patrz opis
-skanu wyżej; nie kasuje żadnej opcji, tylko decyduje, która jest proponowana
-jako najlepsza). Wartości lądują w `localStorage` i w query
-stringu `/api/flow`.
+Ustawienia Developerskie są schowane za przyciskiem ⚙ w nagłówku. Czysty JS
+bez frameworka, cała logika w `static/app.js`. Sekcje po kolei: „Co pokazuje
+mapa" (gęstość, auta z grupowaniem i dostawczakami, przejazdy rowerem), „Czas
+na mapie", „Przystanki i rozkład", „Rower miejski", schowane „Wygląd mapy"
+i „Dźwięk", „Wersja aplikacji", a na samym dole, zwinięte, „Tylko lista
+propozycji tras" z **progiem opłacalności przesiadki** (`transfer_gain_sec`,
+domyślnie 10 min — patrz opis skanu wyżej). Wartości lądują w `localStorage`,
+a te, od których zależy odpowiedź serwera, w query stringu `/api/flow`.
+`value`/`checked` w `index.html` są wartościami domyślnymi: opcja różna od
+nich dostaje pasek z boku, a nagłówek sekcji — liczbę takich opcji. Jeden
+przycisk „Przywróć domyślne" kasuje wszystkie zapamiętane ustawienia
+i przeładowuje stronę.
 
 ### 4. PWA — `static/manifest.webmanifest` + `static/sw.js` + `static/pwa.js`
 
@@ -387,9 +392,9 @@ który `plan_flow` i tak już ma policzony na potrzeby deadline'u
 „przystanek wysiadania + auto" liczy się godzina dotarcia do celu; zostają
 najwyżej dwie, po jednej na miejsce i na auto, i tylko te mieszczące się
 w tym samym oknie czasowym co reszta listy. Odpada auto dalej niż 600 m od
-przystanku, bliżej niż 1,5 km od celu (odpalenie trwa dłużej niż ten
-kawałek), dalej niż 25 km oraz takie, którego zasięg nie pokrywa przejazdu
-z zapasem.
+przystanku oraz takie, którego zasięg nie pokrywa przejazdu z zapasem.
+Długość samej jazdy nie ma progów (do 2026-09-15: 1,5–25 km) — o tym, czy
+auto się opłaca, rozstrzyga godzina przyjazdu.
 
 **Czas jazdy jest szacowany i jest to powiedziane wprost.** Auto nie ma
 rozkładu, a routingu samochodowego w projekcie nie ma — czas i dystans
@@ -593,8 +598,12 @@ ten sam efekt daje analiza dwóch skanów:
 1. **Skan w przód** od przystanku startowego: najwcześniejszy możliwy
    przyjazd `earliest[s]` na każdy przystanek + dla każdego kursu miejsce,
    w którym najwcześniej da się do niego wsiąść.
-2. **Deadline**: najlepszy przyjazd + 50% czasu podróży (min. 5, maks.
-   30 minut). Wszystko, co dociera do celu po deadline, jest bezużyteczne.
+2. **Deadline** (próg mapy, od 2026-09-13): najpóźniejsza pełna minuta za
+   najlepszym przyjazdem, przy której narysowana sieć nie przekracza
+   docelowej gęstości — łącznej długości różnych korytarzy na pierwiastek
+   z powierzchni kadru relacji (`_choose_deadline`, `_map_density`); najwyżej 60 min za
+   najlepszym przyjazdem. Wszystko, co dociera do celu po deadline, nie jest
+   rysowane.
 3. **Skan wstecz** od celu: najpóźniejszy moment `latest[s]`, w którym można
    być na przystanku `s` i jeszcze zdążyć do celu przed deadline
    (połączenia przetwarzane malejąco po odjeździe).
@@ -680,7 +689,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
-- `GET /api/flow?start=&end=&time=HH:MM&extra_sec=600` (albo `start_lat`/
+- `GET /api/flow?start=&end=&time=HH:MM&density=0.6&cars=5` (albo `start_lat`/
   `start_lon`, `end_lat`/`end_lon` zamiast nazw — punkt wchodzi jako słupek
   z dojściem pieszo, patrz `gtfs.with_point`) — JEDNA
   odpowiedź niesie i mapę, i listę propozycji (dawniej dwa osobne
@@ -698,8 +707,9 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   strony, a mapa proponuje jedną). Węzeł, z którego nie da się w nic wsiąść,
   nie trafia na listę — nie ma tam przesiadki.
   `cars` to wolne auta car-sharingu w zasięgu TEJ mapy (patrz
-  `traficar.map_cars`, punkt 15 kontraktu): `[{lat, lon, plate, model, where,
-  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m}, …]` — `at` to godzina,
+  `traficar.map_cars`, punkt 15 kontraktu): `[{lat, lon, plate, model, van, where,
+  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m}, …]` — `van` mówi,
+  czy to dostawczak (pole `type` listy modeli Traficara), `at` to godzina,
   o której da się być przy aucie (dojazd z narysowanej mapy plus dojście
   liczone tak samo jak każde inne), `from`/`walk_*` mówią skąd i jak daleko
   się idzie, a `to_dest_m` to odległość auta od celu W LINII PROSTEJ. Czasu
@@ -778,12 +788,25 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   (gotowy opis — „Dojście do stacji WRM …" nie da się złożyć z `from`/`to`,
   bo stacja roweru to nie przystanek).
 
-  `horizon_sec` (opcjonalny) to ręczne przedłużenie zakresu mapy — przycisk
-  „+X min" przy pasku nad mapą: żądana szerokość CAŁEGO okna w sekundach,
-  liczona od godziny z zapytania. Może okno tylko poszerzyć (suwaki
-  `extra_*` zostają jedynym sposobem na jego przycięcie) i jest przycinany
-  do `planner.MAX_HORIZON_SEC` (2 h) — szerokość okna to wprost koszt skanu,
-  więc sufit stoi po stronie serwera. Efekt widać w `limit_sec`/`deadline`.
+  `density` to docelowa gęstość mapy w km różnych korytarzy na km boku kadru
+  (km/√km²; suwak pod zębatką, przycinana do [0,5; 15]), `more` — ile razy kliknięto
+  „Pokaż więcej" (0–3; cel gęstości to `density × (1 + more)`), `cars` — ile
+  aut car-sharingu pokazać (1–30, też razy `1 + more`). Z `density` i `more`
+  serwer dobiera próg mapy; odpowiedź niesie je z powrotem (`density`, `more`)
+  razem z `at_ceiling` — próg doszedł do sufitu skanu (60 min za najszybszym
+  przyjazdem), więc kolejne kliknięcie nie miałoby czego dołożyć. Wynikowy
+  próg widać w `limit_sec`/`deadline`. `cars` w odpowiedzi jest przesiane
+  przez `traficar.map_choice`: dostawczaki tylko przy `car_vans=1`, i wtedy
+  osobówki i dostawczaki wybiera się osobno, każde rodzajem z tym samym `cars`,
+  regułą `traficar.map_skyband`: przy `car_groups=1` z aut, do których idzie się
+  z tego samego miejsca, zostają niepobite w tej grupie (godzina przy aucie,
+  „Ogarniam"; domyślnie grupowania nie ma i każde auto jest osobno),
+  a spośród zwycięzców grup te, których nie bije żadne inne, zawsze, kolejne
+  poziomy w całości, aż uzbiera się żądana liczba. `bike_count` — ile
+  przejazdów rowerem pokazać (1–30, domyślnie 4, też razy `1 + more`);
+  `bike_places[].rides[].options` to podróże przez dany przejazd
+  (`arrival` — sekunda na osi doby, `vehicles` — pojazdy przed i po rowerze),
+  przesiane tą samą regułą przez `bikes.map_places`.
   Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
   akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
   (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
@@ -863,7 +886,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
-| `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
+| `templates/index.html` | szkielet strony: mapa, panel, Ustawienia Developerskie |
 | `static/app.js` | frontend wyszukiwarki: mapa, wyszukiwanie, lista propozycji |
 | `static/timetable.js` | frontend rozkładów (drugi tryb panelu, po moście z `app.js`) |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
@@ -881,6 +904,58 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-15** — **dowolna stacja tylko dla kolei, dostawczaki osobno,
+  porządek w Ustawieniach Developerskich** (zgłoszenia #114, #130, #131, #132;
+  punkt 15 kontraktu). „Dowolna stacja w mieście" to już same perony, bez
+  przystanków MPK pod dworcami, i działa wyłącznie ze stacją kolejową albo inną
+  grupą po drugiej stronie — z przystankiem MPK albo punktem z mapy daje
+  komunikat. Na mapie kurs rysuje się od OSTATNIEGO przystanku startowego, który
+  mija, a wysiadanie na przystanku startowym niczego nie kotwiczy: przy grupie
+  miasta znikają regionalne pociągi między wrocławskimi stacjami, a zwykłe
+  wyszukiwania dają identyczną mapę (sprawdzone na sześciu relacjach, stara
+  i nowa wersja obok siebie). Dostawczaki Traficara (pole `type` listy modeli)
+  domyślnie się nie pokazują; przełącznik pod zębatką je dokłada i wtedy są
+  osobnym wyborem, z tą samą liczbą z suwaka, na mapie jako puste pierścienie.
+  Panel ⚙ nazywa się wszędzie „Ustawienia Developerskie", ma nowy układ (mapa,
+  czas, przystanki, rower, sprawy techniczne, na dole zwinięty suwak listy
+  propozycji), opisy w jednym zdaniu, jeden „Przywróć domyślne" i podświetla
+  opcje różne od domyślnych. Zwinięta lista propozycji chowa też kartkę
+  o rowerze. Tego samego dnia: grupa nie działa ze stacją z tej samej grupy
+  („WROCŁAW -" → Wrocław Brochów); grupa nie jest miejscem, w którym się
+  stoi, więc nie ma z niej ani do niej dojścia pieszo („WROCŁAW -" → Milicz
+  2,5 s zamiast 14,7 s), a przy grupie po którejkolwiek stronie mapa nie
+  pokazuje aut ani rowerów. Usunięte progi długości jazdy Traficarem (1,5 km
+  i 25 km) — został zapas zasięgu.
+- **2026-09-15** — **auta w grupach, rowery wybierane jak auta** (punkty 15
+  i 16 kontraktu). Auta porównują się godziną przy aucie i „Ogarniam" —
+  odległość do celu przestała być kryterium, bo opłacalności jazdy autem nie
+  da się rzetelnie ocenić. Przełącznik pod zębatką (domyślnie zgaszony) robi
+  z aut, do których idzie się z tego samego miejsca, jeden wybór, a „Pokaż
+  więcej" poszerza wtedy tylko między takimi grupami. Przejazd
+  rowerem ocenia się w całej podróży: ile jedzie się rowerem, o której jest się
+  w celu i iloma pojazdami przed i po rowerze, z dojazdem i dalszą drogą
+  odczytanymi z narysowanych kursów. Rowery mają własny suwak (domyślnie 4
+  przejazdy), nie mają już progów długości (ani górnego, ani dolnego) i nie muszą dowozić przed
+  progiem mapy (ten dotyczy tylko kursów z rozkładem), a kropkę dostaje tylko
+  początek wybranego przejazdu. Pod zębatką
+  „Co przejazd otwiera" zastąpił przełącznik „Przejazdy rowerem zawsze
+  widoczne".
+- **2026-09-13** — **zakres mapy z gęstości, nie z minut** (punkty 2 i 15
+  kontraktu). Trzy suwaki okna czasowego (procent, minimum, maksimum) i przycisk
+  „+X min" zniknęły. Miara jakości została ta sama — o której opcja dociera do
+  celu — a próg staje tam, gdzie narysowana sieć osiąga docelową gęstość:
+  łączną długość RÓŻNYCH korytarzy w kadrze relacji na jego bok (pierwiastek
+  z powierzchni — tak gęsto, jak widać na ekranie; domyślnie 2,5).
+  Linie jadące jednym korytarzem liczą się raz, więc próg idzie za nimi dalej,
+  aż trafi na naprawdę inny korytarz. Jeden suwak gęstości pod zębatką; godzina
+  „mapa pokazuje do" jest skutkiem. „Pokaż więcej" dokłada po jednej wyjściowej
+  gęstości (x2, x3, x4) i znika po trzecim kliknięciu albo przy suficie skanu.
+  Auta Traficara wybiera k-skyband: auta, których nic nie bije (godzina przy
+  aucie, odległość do celu, kwota z „Ogarniam", w dokładności wyświetlania),
+  są zawsze, kolejne poziomy w całości do liczby z nowego suwaka, też razy
+  „Pokaż więcej" (domyślnie 3). Pomiar na dziesięciu relacjach, koszt skanu,
+  zrzuty i wybór miary (km/km² kontra to, co widać na ekranie) —
+  FLOW_MAP_NOTES.md. Testy: 334, było 311.
 - **2026-09-12** — **rower miejski na mapie przepływów** (punkt 16
   kontraktu). Wzorzec ten sam, co
   przy autach: kropka, do której mapa dowozi jednym dojściem. Różnica: z roweru

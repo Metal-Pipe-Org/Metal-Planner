@@ -940,40 +940,38 @@ checks.grupa_stacji_wraca_kanoniczna = (() => {
     };
 })();
 
-/* Przycisk "+X min" przy pasku nad mapą: X to połowa tego, co mapa pokazuje
-   TERAZ (klik rozciąga zakres razy 1,5), klik przekazuje nowy zakres do
-   serwera, a przy suficie 2 h przycisku nie ma wcale - nie ma już czego
-   dokładać. */
-checks.przycisk_przedluza_zakres_mapy = (() => {
+/* Przycisk "Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie dokłada
+   jedną wyjściową gęstość i leci do serwera jako `more` razem z gęstością
+   z suwaka. Po trzecim kliknięciu i przy suficie skanu przycisku nie ma - nie
+   ma już czego dokładać. */
+checks.pokaz_wiecej_doklada_gestosc = (() => {
     const pasek = () => document.getElementById('time-headline').innerHTML;
-    const etykieta = html => (html.match(/headline-more[^>]*>\+([^<]*)</) || [])[1] || '';
 
-    const krok = app.horizonStep(FLOW_FIXTURE.limit_sec);
-    const naStarcie = etykieta(pasek());
+    app.drawFlow({...FLOW_FIXTURE, more: 0, at_ceiling: false}, false);
+    const naStarcie = pasek();
 
-    app.extendHorizon(FLOW_FIXTURE.limit_sec, krok);
+    app.showMore();
     const zapytanie = app.queryParams().toString();
 
-    // Sufit: zakres już na 2 h - nie ma czego dokładać, przycisk znika.
-    app.drawFlow({...FLOW_FIXTURE, limit_sec: app.MAX_HORIZON_SEC}, false);
+    app.drawFlow({...FLOW_FIXTURE, more: app.MAX_MAP_MORE, at_ceiling: false}, false);
+    const poTrzecim = pasek();
+    app.drawFlow({...FLOW_FIXTURE, more: 1, at_ceiling: true}, false);
     const przySuficie = pasek();
-    // ...a tuż pod sufitem przycisk obiecuje tylko to, co zostało do sufitu,
-    // nie pełną połowę okna.
-    const podSufitem = app.horizonStep(app.MAX_HORIZON_SEC - 600);
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
 
     return {
-        ok: krok === FLOW_FIXTURE.limit_sec / 2          // połowa okna
-            && naStarcie === '35 min'                    // połowa z 1 h 10 min
-            && app.mapHorizonSec === 1.5 * FLOW_FIXTURE.limit_sec
-            && zapytanie.includes('horizon_sec=6300')    // i to leci do serwera
-            && !przySuficie.includes('headline-more')    // przy 2 h nie ma przycisku
-            && podSufitem === 600                        // przy 1h50 dokłada 10 min
-            && app.horizonStep(app.MAX_HORIZON_SEC) === 0,
-        krok, naStarcie, podSufitem,
-        horizon: app.mapHorizonSec,
+        ok: naStarcie.includes('headline-more')
+            && app.mapMore === 1
+            && zapytanie.includes('more=1')              // i to leci do serwera
+            && zapytanie.includes('density=')            // razem z gęstością z suwaka
+            && zapytanie.includes('cars=')               // i liczbą aut, którą też mnoży
+            && !zapytanie.includes('horizon_sec')
+            && !poTrzecim.includes('headline-more')      // po trzecim nie ma przycisku
+            && !przySuficie.includes('headline-more'),   // przy suficie też nie
+        more: app.mapMore,
         zapytanie: zapytanie.slice(0, 200),
-        sufit: przySuficie.slice(0, 200),
+        naStarcie: naStarcie.slice(-200),
+        poTrzecim: poTrzecim.slice(-200),
     };
 })();
 
@@ -1170,8 +1168,7 @@ checks.rower_pokazuje_przejazdy_dopiero_pod_kursorem = (() => {
         rides: [{
             id: 'B', name: 'Legnicka (Park Magnolia)', lat: 51.10, lon: 17.03,
             bikes: 3, docks: 12, m: 1826, sec: 840, at: 56940,
-            opens: 'Niedźwiedzia', opens_at: 57120, opens_last: 57300,
-            opens_walk_sec: 180, opens_m: 120,
+            options: [{arrival: 58200, vehicles: 2}],
         }],
     };
     app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja],
@@ -1227,8 +1224,8 @@ checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
         walk_m: 300, from: 'Kamienna',
         rides: [{
             id: 'B', name: 'Legnicka', lat: 51.10, lon: 17.03, bikes: 3,
-            docks: 12, m: 1826, sec: 960, at: 57060, opens: 'Niedźwiedzia',
-            opens_at: 57240, opens_last: 57300, opens_walk_sec: 180, opens_m: 120,
+            docks: 12, m: 1826, sec: 960, at: 57060,
+            options: [{arrival: 58200, vehicles: 2}],
         }],
     };
     app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja], bike_places_live: false},
@@ -1246,6 +1243,44 @@ checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
             && kropka.options.color === app.BIKE_UNKNOWN_STYLE.color
             && kropka.options.color !== app.BIKE_STYLE.color,
         tip, obwodka: kropka.options.color,
+    };
+})();
+
+/* Przełącznik pod zębatką: kreski wybranych przejazdów i ich stacje końcowe
+   stoją na mapie cały czas, a nie tylko pod kursorem - i zostają po zejściu
+   kursora z kropki. */
+checks.rower_przejazdy_na_stale_po_zapaleniu = (() => {
+    app.setBikesOn(true);
+    const stacja = {
+        id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
+        electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
+        walk_m: 300, from: 'Kamienna',
+        rides: [{
+            id: 'B', name: 'Legnicka', lat: 51.10, lon: 17.03, bikes: 3,
+            docks: 12, m: 1826, sec: 840, at: 56940,
+            options: [{arrival: 58200, vehicles: 2}],
+        }],
+    };
+    const bylo = app.dotOpts.bikeRides;
+    app.dotOpts.bikeRides = true;
+    app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja],
+                  bike_places_live: true}, false);
+    const warstwy = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
+    const kreski = warstwy.filter(l => l.kind === 'polyline').length;
+    const etykieta = (warstwy.find(l => l._tooltip && l._tooltip.options.permanent)
+                      || {_tooltip: {content: ''}})._tooltip.content;
+    const kropka = app.flowBikeLayer.getLayers()[0];
+    kropka.fire('mouseover');
+    kropka.fire('mouseout');
+    const poZejsciu = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
+
+    app.dotOpts.bikeRides = bylo;
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: kreski === 1
+            && etykieta.trim() === '1,8 km'
+            && poZejsciu.filter(l => l.kind === 'polyline').length === 1,
+        kreski, etykieta, poZejsciu: poZejsciu.length,
     };
 })();
 
@@ -1337,6 +1372,34 @@ checks.pasek_czasu_stoi_na_srodku_okna = (function () {
         ok: szeroko === (1200 - 320) / 2 && szeroko + 320 / 2 === 1200 / 2
             && wasko === przeszkoda && wasko > (700 - 320) / 2,
         szeroko, wasko, przeszkoda,
+    };
+})();
+
+checks.auta_grupowanie_leci_do_serwera = (() => {
+    const przelacznik = document.getElementById('car-groups');
+    const bylo = przelacznik.checked;
+    przelacznik.checked = false;
+    const zgaszone = app.queryParams().toString();
+    przelacznik.checked = true;
+    const zapalone = app.queryParams().toString();
+    przelacznik.checked = bylo;
+    return {
+        ok: zgaszone.includes('car_groups=0') && zapalone.includes('car_groups=1'),
+        zgaszone, zapalone,
+    };
+})();
+
+checks.auta_dostawczaki_leca_do_serwera = (() => {
+    const przelacznik = document.getElementById('car-vans');
+    const bylo = przelacznik.checked;
+    przelacznik.checked = false;
+    const zgaszone = app.queryParams().toString();
+    przelacznik.checked = true;
+    const zapalone = app.queryParams().toString();
+    przelacznik.checked = bylo;
+    return {
+        ok: zgaszone.includes('car_vans=0') && zapalone.includes('car_vans=1'),
+        zgaszone, zapalone,
     };
 })();
 

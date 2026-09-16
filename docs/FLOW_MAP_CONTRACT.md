@@ -31,7 +31,10 @@ stoi próg.
 **Próg wynika z czytelności, nie z minut.** Pokazanie za dużo to to samo, co
 nie pokazanie nic. Próg jakości przesuwa się więc tak, żeby narysowana sieć
 miała docelową gęstość: ile RÓŻNYCH korytarzy leży w kadrze, w którym mapa
-pokazuje relację, w stosunku do jego powierzchni. Linie leżące na sobie
+pokazuje relację, w stosunku do jego boku (pierwiastka z powierzchni). Liczy
+się gęstość na ekranie, a nie w mieście: każdy kadr jest wpasowany w to samo
+okno, a kreska ma zawsze tę samą grubość, więc kadr dziesięć razy szerszy
+jest na ekranie ciaśniejszy dziesięć razy, nie sto. Linie leżące na sobie
 (punkt 7) liczą się raz, bo w oku są jedną kreską — dwadzieścia numerów
 jednym korytarzem nie zajmuje miejsca innego korytarza. Trasa przez całe
 miasto ma większy kadr, więc mieści więcej niż trasa na kilometr. Docelowa
@@ -334,27 +337,48 @@ każde inne (punkt 14) — od czegoś, co mapa rysuje: od przystanku, na który
 dowozi, albo od samego startu. Auto stojące gdzieś w mieście, bez związku z tą
 relacją, nie jest częścią odpowiedzi.
 
-**Z tych aut widać te, których nic nie bije.** Auto porównuje się z innymi
-autami wyłącznie tym, co mapa przy nim pokazuje: o której się przy nim jest,
-jak daleko od niego do celu w linii prostej i ile daje za nie program
-„Ogarniam”. Auto bije inne, jeśli jest co najmniej tak dobre we wszystkich
-trzech naraz i w którymś lepsze. Porównuje się z tą dokładnością, z jaką
-liczby są wypisane — ta sama minuta to remis, a nie wygrana o sekundy.
+**Osobówki i dostawczaki to dwa osobne wybory.** Dostawczaków domyślnie nie
+ma na mapie wcale — pokazuje je dopiero przełącznik w ustawieniach. Wtedy
+wszystko niżej dotyczy każdego rodzaju osobno: dostawczak nigdy nie chowa
+osobówki ani osobówka dostawczaka, bo kto wiezie szafę, nie weźmie Clio, a kto
+jedzie sam, nie chce Mastera. Każdy rodzaj dostaje tę samą liczbę z suwaka.
+Który to rodzaj, mówi sam Traficar, a nie zgadywanie po nazwie modelu.
 
-**Zawsze widać każde auto, którego nie bije żadne inne** (zbiór Pareto).
-Każde z nich jest najlepsze w czymś, a wybór między nimi zostaje przy
-pasażerze — mapa nie waży minut przeciw metrom ani złotówkom. Auto z „Ogarniam” nie ma osobnej
-reguły: widać je dokładnie wtedy, gdy nie ma auta, przy którym jest się nie
-później, które stoi nie dalej od celu i daje co najmniej tyle samo.
+**Auto porównuje się dwiema liczbami: o której się przy nim jest i ile daje
+za nie program „Ogarniam”.** Auto bije inne, jeśli jest co najmniej tak dobre
+w obu naraz i w którymś lepsze. Porównuje się z tą dokładnością, z jaką
+liczby są wypisane — ta sama minuta to remis, a nie wygrana o sekundy.
+Odległość od auta do celu NIE jest kryterium: nagradzałaby auta stojące tuż
+przy celu, a rozstrzygnąć, czy jazda autem się opłaca, mapa nie potrafi —
+czasu jazdy autem nie da się rzetelnie oszacować, bo zależy od korków.
+Czy auto się opłaca, rozstrzyga pasażer.
+
+**Auta spod tego samego miejsca to jeden wybór.** Grupę tworzą auta, do
+których mapa prowadzi dojście z tego samego miejsca: ze startu albo z tego
+samego przystanku. W grupie widać tylko auta, których nic w tej grupie nie
+bije — zwykle jedno, najwyżej dwa, gdy przy jednym jest się wcześniej, a
+drugie daje więcej z „Ogarniam”. Trzy auta stojące obok siebie przy starcie
+to dla pasażera jeden wybór, więc mapa nie pokazuje trzech. Granica grupy
+nie jest promieniem wymyślonym za pasażera, tylko wynika z reguły dojścia
+(punkt 14): mapa i tak mówi, skąd do auta się idzie.
+
+**Zawsze widać każde auto, którego nie bije zwycięzca żadnej innej grupy**
+(zbiór Pareto zwycięzców grup). Każde z nich jest najlepsze w czymś, a wybór
+między nimi zostaje przy pasażerze — mapa nie waży minut przeciw złotówkom.
+Auto z „Ogarniam” nie ma osobnej reguły: widać je dokładnie wtedy, gdy nie ma
+auta, przy którym jest się nie później i które daje co najmniej tyle samo.
 
 **Więcej aut to luźniejsza reguła, nie wybrane auta** (k-skyband, którego
-zbiór Pareto jest pierwszym poziomem). Suwak mówi, ile aut mapa ma
-pokazać. Dokłada się wtedy auta pobite przez najwyżej jedno inne,
-potem przez najwyżej dwa i tak dalej, aż uzbiera się tyle, ile ustawiono.
-Kolejny poziom wchodzi w całości, choćby przekroczył liczbę z suwaka, bo
-ucięcie go w środku wymagałoby zważenia kryteriów. Skutek jest ten sam co
-przy liniach (punkt 2): nigdy nie widać auta, gdy schowane jest inne, które
-je bije. „Pokaż więcej” mnoży liczbę z suwaka tak samo jak gęstość linii.
+zbiór Pareto jest pierwszym poziomem) — **i tylko między grupami.** Suwak
+mówi, ile aut mapa ma pokazać. Spośród zwycięzców grup dokłada się wtedy
+auta pobite przez najwyżej jedno inne, potem przez najwyżej dwa i tak dalej,
+aż uzbiera się tyle, ile ustawiono. Kolejny poziom wchodzi w całości, choćby
+przekroczył liczbę z suwaka, bo ucięcie go w środku wymagałoby zważenia
+kryteriów. Poszerzanie nigdy nie dokłada kolejnego auta z tej samej grupy —
+inaczej już pierwsze „więcej” przywracałoby auta stojące obok siebie. Skutek
+jest ten sam co przy liniach (punkt 2): nigdy nie widać auta, gdy schowane
+jest inne, które je bije. „Pokaż więcej” mnoży liczbę z suwaka tak samo jak
+gęstość linii.
 
 **Auto mówi to samo, co przystanek: o której się przy nim jest.** Godzina
 z rozkładu plus marsz, razem z tym, skąd ten marsz prowadzi.
@@ -377,12 +401,13 @@ i nie wchodzi do wachlarza. Jest tym, czym pieszo (punkt 14), tylko szybszym:
 sposobem przemieszczenia się między dwoma miejscami, którego rozkład nie zna.
 Zdjęcie roweru zostawia mapę dokładnie taką, jaka była.
 
-**Widać tylko to, na czym da się WSIĄŚĆ.** Kropkę dostaje rower, do którego
+**Widać tylko to, na czym da się WSIĄŚĆ.** Kandydatem jest rower, do którego
 mapa dowozi jednym dojściem — tą samą regułą co każde inne (punkt 14) — od
 czegoś, co mapa rysuje, albo od samego startu. Stacja bez rowerów nie jest
-miejscem, z którego da się wyjechać. Drugi koniec przejazdu własnej kropki nie
+miejscem, z którego da się wyjechać. Kropkę dostaje początek przejazdu, który
+przeszedł wybór (niżej). Drugi koniec przejazdu własnej kropki nie
 dostaje: pokazuje się razem z nim, bo opisuje ten przejazd, a nie siebie. Jeśli
-sam jest miejscem do wsiadania, stoi na mapie z własnego tytułu.
+sam jest początkiem wybranego przejazdu, stoi na mapie z własnego tytułu.
 
 **Przejazd musi prowadzić do celu — przez to, co mapa RYSUJE.** Zostaje wtedy,
 gdy po zsiadaniu zdąży się jeszcze wsiąść w kawałek, który mapa pokazuje i
@@ -392,6 +417,42 @@ dowozić naprawdę. Przystanek, na który da się zdążyć, ale z którego mapa
 rysuje ani jednego odjazdu, niczego nie otwiera — „zdążę tam" to nie to samo,
 co „stamtąd dojadę". Tak samo nie liczy się przystanek, na którym narysowany
 kawałek się kończy: tam się wysiada.
+
+**Rowery dokłada się na gotową mapę.** Najpierw powstaje mapa komunikacji,
+z progiem z punktu 2, i rower niczego w niej nie przestawia. Każdy przejazd
+rowerem ocenia się na tej mapie BEZ innych rowerów: dojazd do niego i dalsza
+droga po nim idą tym, co mapa rysuje. Dwa rowery w jednej podróży to więc
+dwa niezależne przejazdy — każdy jest na mapie, jeśli sam się broni.
+
+**Przejazd rowerem ocenia się w całej podróży, nie jako sam odcinek.**
+Z samego odcinka wiadomo tylko, jak jest długi; godzina w celu i przesiadki
+istnieją dopiero dla drogi od startu do celu. Ocenia się trzema liczbami,
+wszystkimi z tej samej podróży:
+1. **Ile jedzie się rowerem** (długość przejazdu w linii prostej) — więcej
+   znaczy lepiej, bo ktoś może chcieć przejechać rowerem jak najwięcej.
+2. **O której jest się w celu** — wcześniej znaczy lepiej. Godzina zsiadania
+   jest policzona (wyjątek niżej), ale dalsza droga jest odczytana z rozkładu.
+   Ta jedna liczba mówi zarówno „rower jest szybszy”, jak i „rower traci
+   najmniej”, gdy żaden nie jest szybszy od samej komunikacji.
+3. **Ile jest przesiadek** — przed rowerem i po nim razem; mniej znaczy lepiej.
+   Przesiadka NIE jest przeliczana na minuty: jej kosztem jest ryzyko, że
+   kurs się nie zjawi albo się nie zdąży, a tego rozkład nie zawiera — kara
+   w minutach byłaby ważeniem kryteriów.
+
+**Każda para godziny i przesiadek to jedna prawdziwa podróż.** Najszybsza
+droga po rowerze bywa inna niż ta z najmniejszą liczbą przesiadek, więc ten
+sam przejazd daje zwykle kilka par — np. „w celu 15:30, dwie przesiadki”
+i „w celu 15:35, jedna”. Nie wolno wziąć najlepszej godziny z jednej drogi
+i najmniej przesiadek z drugiej: takiej podróży nie ma, a przejazd wygrywałby
+nią z przejazdami, które naprawdę coś dają. Ten sam przejazd może przejść
+wybór więcej niż raz; na mapie to wciąż jeden przejazd.
+
+**Wybór jak przy autach** (punkt 15). Podróż bije inną, jeśli jest co
+najmniej tak dobra we wszystkich trzech liczbach naraz i w którejś lepsza,
+z dokładnością, z jaką liczby są wypisane. Zawsze widać przejazdy z podróży,
+których nic nie bije, a więcej rowerów to kolejne poziomy tej samej reguły,
+wchodzące w całości. Rowery mają WŁASNY suwak liczby pod zębatką, osobny od
+aut; „Pokaż więcej” mnoży go tak samo jak gęstość linii i liczbę aut.
 
 **Skąd rower się bierze i gdzie wraca.** Wypożyczyć da się ze stojaka albo
 wprost z ulicy, bo rower stojący luzem wypożycza się tak samo jak ten ze
@@ -409,7 +470,8 @@ nie ma.
 
 **Przejazdu mapa nie rysuje.** Dwie kropki mówią to samo, co kreska między
 nimi, a kresek byłyby setki. Kreski pojawiają się pod kursorem, przy kropce,
-o którą się pyta. Obok drugiego końca stoi odległość w linii prostej — nie
+o którą się pyta — tylko przejazdów, które przeszły wybór, a nie do każdej
+stacji, do której z tej kropki dałoby się dojechać. Obok drugiego końca stoi odległość w linii prostej — nie
 godzina: godzina byłaby jedyną liczbą na tej mapie policzoną, a wyglądającą
 na odczytaną.
 

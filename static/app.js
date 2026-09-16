@@ -1,5 +1,5 @@
 /* Planer podróży - cały frontend: mapa Leaflet, panel wyszukiwania,
-   lista propozycji tras i panel deweloperski.
+   lista propozycji tras i Ustawienia Developerskie.
 
    Dwa widoki tej samej odpowiedzi na to samo pytanie:
    - MAPA PRZEPŁYWÓW (/api/flow) - wachlarz wszystkich sensownych opcji,
@@ -53,7 +53,7 @@ $('sidebar-toggle').addEventListener('click', () => {
     saveUiState({sidebarHidden: hidden});
 });
 
-// Panel deweloperski jest schowany za przyciskiem - normalny użytkownik
+// Ustawienia Developerskie są schowane za przyciskiem - normalny użytkownik
 // nie ma po co go widzieć, a strojenie algorytmu musi zostać pod ręką.
 const devPanel = $('dev-panel');
 const devToggle = $('dev-toggle');
@@ -416,11 +416,8 @@ const bikesToggle = $('bikes-toggle');
 const flowOnScreen = () => !!flowLayer;
 
 function cityCarMarkers(cars) {
-    return cars.map(car => L.circleMarker([car.lat, car.lon], {
-        ...CAR_STYLE,
-        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
-    }).bindTooltip(
-        `<b>${esc(car.model)} · ${esc(car.plate)}</b><br>` +
+    return cars.map(car => L.circleMarker([car.lat, car.lon], carStyle(car)).bindTooltip(
+        `<b>${carName(car)}</b><br>` +
         // Opis miejsca postoju bywa w feedzie pusty - pusta linijka w dymku
         // wyglądałaby jak brakująca treść.
         (car.where ? `${esc(car.where)}<br>` : '') +
@@ -447,7 +444,11 @@ function loadCityCars() {
     fetch('/api/cars').then(r => r.json()).then(data => {
         if (data.error || !carsOn || flowOnScreen()) return;
         if (cityCarLayer) map.removeLayer(cityCarLayer);
-        cityCarLayer = L.layerGroup(cityCarMarkers(data.cars)).addTo(map);
+        // Feed miasta oddaje wszystkie auta - dostawczaki odsiewa się tutaj,
+        // tym samym przełącznikiem, który przy mapie przepływów idzie do serwera.
+        const vans = $('car-vans').checked;
+        cityCarLayer = L.layerGroup(
+            cityCarMarkers(data.cars.filter(car => vans || !car.van))).addTo(map);
     }).catch(() => {});   // sieć/timeout - kolejna próba za CARS_REFRESH_MS
 }
 
@@ -489,7 +490,7 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup(flowBikeMarkers(
             lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
-        if (BIKE_RIDES_ALWAYS) showAllBikeRides(lastFlow.bike_places);
+        if (dotOpts.bikeRides) showAllBikeRides(lastFlow.bike_places);
         return;
     }
     loadCityBikes();
@@ -701,7 +702,7 @@ function endpointPoints() {
 // --- WYGLĄD: wartości do strojenia -----------------------------------------
 //
 // Wartości dobrane przez użytkownika na żywo, na realnej mapie (2026-08-16),
-// suwakami w panelu deweloperskim - sekcja jest z powrotem WIDOCZNA
+// suwakami w Ustawieniach Developerskich - sekcja jest z powrotem WIDOCZNA
 // (LOOK_TUNING niżej), żeby dało się stroić dalej.
 //
 // Grubość i krycie niosą tę samą różnicę razem: najbledszy kawałek jest i
@@ -723,7 +724,7 @@ const LOOK_DEFAULTS = {
 };
 
 // JEDYNY przełącznik strojenia wyglądu: `true` pokazuje sekcję „Wygląd mapy"
-// w panelu deweloperskim (i zaczyna pamiętać ustawienia suwaków w
+// w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków w
 // localStorage), `false` chowa ją w całości i zostawia same wartości wyżej.
 // Kod suwaków zostaje w repo celowo - patrz znaczniki TYMCZASOWE w
 // index.html i style.css.
@@ -761,7 +762,7 @@ const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * r
 // sasiednimi godzinami tego samego kursu, proporcjonalnie do przebytej drogi.
 // Nic poza tym - zadnej sredniej predkosci, zadnego sklejania kursow.
 //
-// Kazda rzecz siedzi na wlasnym przelaczniku w panelu deweloperskim - to
+// Kazda rzecz siedzi na wlasnym przelaczniku w Ustawieniach Developerskich - to
 // wciaz szukanie formy, a nie gotowa decyzja.
 const TIME_DEFAULTS = {
     hover: true,        // godzina w punkcie pod kursorem + przyjazd do celu
@@ -798,10 +799,9 @@ const DOT_DEFAULTS = {
     // jest jedyną liczbą na tej mapie, której w żadnym rozkładzie nie ma.
     // Odległość obok mówi to samo, nie udając odczytanej.
     bikeTimes: false,
-    // Nazwa przystanku, który przejazd otwiera, dopisana przy odległości -
-    // też domyślnie zgaszona. Powód sensowności przejazdu jest ważny dla
-    // ALGORYTMU; przy kilkunastu etykietkach naraz jest głównie tekstem.
-    bikeOpens: false,
+    // Kreski wybranych przejazdów rowerem i ich stacje końcowe na stałe,
+    // a nie tylko pod kursorem - domyślnie zgaszone.
+    bikeRides: false,
 };
 
 const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
@@ -1072,7 +1072,7 @@ function drawFlow(flow, refit) {
 // Jedyna liczba na mapie, której nie trzeba szukać kursorem - i jedyna, która
 // odpowiada na pytanie zadawane najpierw: "ile to w ogóle zajmuje". Podaje
 // dwie granice całego wachlarza: najszybszy dojazd i najpóźniejszy, jaki mapa
-// jeszcze rysuje (czyli dokładnie to, co ustawia suwak okna czasowego).
+// jeszcze rysuje (czyli skutek progu mapy - patrz showMore).
 // Najechanie na najszybszy czas pokazuje, KTÓRĄ trasą się go osiąga - obie
 // liczby przychodzą z serwera (best_sec/limit_sec/fastest), razem z gotową
 // geometrią tej trasy. Obie strony paska podają godzinę i czas jazdy w tej
@@ -1113,38 +1113,25 @@ function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
 }
 
-// Ręczne przedłużanie zakresu: "+X min" tuż za granicą okna. X to POŁOWA
-// tego, co mapa pokazuje w tej chwili, więc klik rozciąga zakres o połowę
-// (razy 1,5), kolejny znów - a przy suficie X jest już tylko tym, co do
-// sufitu zostało, żeby przycisk nie obiecywał minut, których nie doda.
-// Sufit (2 h) stoi po obu stronach: tutaj, żeby przycisk zniknął, i w
-// plannerze (MAX_HORIZON_SEC), bo szerokość okna to wprost koszt skanu i nie
-// może zależeć od frontu. Przedłużenie żyje do NASTĘPNEGO wyszukiwania -
-// nowa relacja zaczyna od okna z suwaków.
-const MAX_HORIZON_SEC = 2 * 3600;
-const HORIZON_GROWTH = 0.5;        // razy 1,5 na klik: dokładamy połowę okna
-const MIN_HORIZON_STEP_SEC = 60;   // mniej niż minuta to przycisk bez treści
-let mapHorizonSec = null;          // null = zakres z suwaków, bez przedłużenia
-let horizonBusy = false;           // klik w locie - drugi klik ma poczekać
+// "Pokaż więcej" tuż za granicą mapy (punkt 2 kontraktu): każde kliknięcie
+// dokłada jedną WYJŚCIOWĄ gęstość - pierwsze do dwukrotności, drugie do
+// trzykrotności, trzecie do czterokrotności. Próg z tego dobiera serwer i to
+// on pilnuje sufitu (MAX_MAP_MORE w plannerze), tutaj liczba służy tylko
+// temu, żeby przycisk zniknął, gdy nie ma już czego dokładać. Dokładka żyje
+// do NASTĘPNEGO wyszukiwania - nowa relacja zaczyna od gęstości z suwaka.
+const MAX_MAP_MORE = 3;
+let mapMore = 0;                   // ile razy kliknięto "pokaż więcej"
+let moreBusy = false;              // klik w locie - drugi klik ma poczekać
 
-/** Ile jeszcze da się dołożyć: połowa tego, co mapa pokazuje teraz, ale nie
-    ponad sufit. W pełnych minutach, bo w minutach jest podpisany przycisk -
-    inaczej etykieta obiecywałaby co innego, niż dokłada klik. */
-function horizonStep(limitSec) {
-    const krok = Math.round(limitSec * HORIZON_GROWTH / 60) * 60;
-    const doSufitu = Math.floor((MAX_HORIZON_SEC - limitSec) / 60) * 60;
-    return Math.min(krok, doSufitu);
-}
-
-function extendHorizon(limitSec, stepSec) {
-    if (horizonBusy) return;
-    horizonBusy = true;
-    mapHorizonSec = limitSec + stepSec;
-    // Kadru NIE przestawiamy - tak samo jak przy suwakach okna czasowego:
-    // szersze okno dokłada linie, nie zmienia tego, na co user patrzy.
+function showMore() {
+    if (moreBusy) return;
+    moreBusy = true;
+    mapMore += 1;
+    // Kadru NIE przestawiamy: gęstsza mapa dokłada linie, nie zmienia tego,
+    // na co user patrzy.
     loadPlan(requestToken, false)
         .catch(() => showError('Nie udało się połączyć z serwerem.'))
-        .finally(() => { horizonBusy = false; });
+        .finally(() => { moreBusy = false; });
 }
 
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
@@ -1182,11 +1169,11 @@ function renderTimeHeadline() {
         return;
     }
     const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
-    const step = horizonStep(flow.limit_sec);
-    const more = step >= MIN_HORIZON_STEP_SEC
-        ? `<button type="button" class="headline-more" title="Rysuj też trasy `
-          + `odjeżdżające później - zakres mapy do ${esc(fmtMins(flow.limit_sec + step))}">`
-          + `+${esc(fmtMins(step))}</button>`
+    // Po trzecim kliknięciu i przy suficie skanu (at_ceiling) nie ma już
+    // czego dokładać - przycisk, który nic nie robi, nie ma prawa stać.
+    const more = flow.more < MAX_MAP_MORE && !flow.at_ceiling
+        ? `<button type="button" class="headline-more" title="Rysuj też gorsze `
+          + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">Pokaż więcej</button>`
         : '';
     el.innerHTML =
         `<span class="headline-best" tabindex="0">Najszybciej o `
@@ -1202,8 +1189,7 @@ function renderTimeHeadline() {
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
     const moreBtn = el.querySelector('.headline-more');
-    if (moreBtn) moreBtn.addEventListener('click',
-        () => extendHorizon(flow.limit_sec, step));
+    if (moreBtn) moreBtn.addEventListener('click', showMore);
     // Na dotyku nie ma "mouseenter" - to jedyny sposób, żeby zobaczyć trasę
     // najszybszego dojazdu na telefonie. Toggle, nie show: drugie stuknięcie
     // (albo stuknięcie gdzie indziej, które i tak odpala renderTimeHeadline
@@ -2320,6 +2306,23 @@ const CAR_STYLE = {radius: 5, weight: 1, color: '#6a1b9a',
 // to jedno, za które Traficar płaci.
 const CAR_OGARNIAM_STYLE = {radius: 6, weight: 2.5, color: '#f9a825'};
 
+// Dostawczak (tylko na życzenie, patrz traficar.map_choice) to pusty pierścień
+// zamiast pełnej kropki: to osobny wybór, więc ma być widać bez najeżdżania,
+// który jest który. Złota obwódka „Ogarniam" kładzie się na nim tak samo.
+const CAR_VAN_STYLE = {radius: 6, weight: 2.5, fillColor: '#ffffff'};
+
+function carStyle(car) {
+    return {
+        ...CAR_STYLE,
+        ...(car.van ? CAR_VAN_STYLE : {}),
+        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
+    };
+}
+
+function carName(car) {
+    return `${esc(car.model)}${car.van ? ' · dostawczy' : ''} · ${esc(car.plate)}`;
+}
+
 /** Znaczniki wolnych aut (patrz traficar.map_cars).
 
     Auto jest MIEJSCEM, do którego mapa dowozi, a nie kursem: nie ma linii,
@@ -2328,17 +2331,15 @@ const CAR_OGARNIAM_STYLE = {radius: 6, weight: 2.5, color: '#f9a825'};
     się przy nim jest - plus to, czego o nim nie wiemy: ile stąd do celu
     w linii prostej i ani słowa o czasie jazdy. */
 function flowCarMarkers(cars) {
-    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], {
-        ...CAR_STYLE,
-        ...(car.ogarniam && car.ogarniam.length ? CAR_OGARNIAM_STYLE : {}),
-    }).bindTooltip(carTooltipHtml(car), {
+    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], carStyle(car))
+        .bindTooltip(carTooltipHtml(car), {
         direction: 'top', offset: [0, -4], opacity: 1,
     }));
 }
 
 function carTooltipHtml(car) {
     return [
-        `<b>${esc(car.model)} · ${esc(car.plate)}</b>`,
+        `<b>${carName(car)}</b>`,
         `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
         `pieszo z „${esc(car.from)}”`,
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
@@ -2385,20 +2386,15 @@ const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
 const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
                          dashArray: '1, 6', interactive: false};
 
-// Kreski przejazdów pokazują się WYŁĄCZNIE pod kursorem: jest ich kilkaset
-// i narysowane naraz zasłaniają mapę, o którą się właśnie pyta. Stała, a nie
-// przełącznik - to nie jest decyzja, którą ma podejmować pasażer.
-const BIKE_RIDES_ALWAYS = false;
-
 /** Kropki rowerów w zasięgu mapy (patrz bikes.map_places).
 
-    Kropkę dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ NA ROWER: mapa
-    do niego dowozi i prowadzi z niego choć jeden sensowny przejazd. Drugi
-    koniec przejazdu pokazuje się razem ze strzałką, pod kursorem - a jeśli
-    sam jest miejscem do wsiadania, stoi na mapie z własnego tytułu.
+    Kropkę dostaje wyłącznie początek przejazdu, który przeszedł wybór
+    (punkt 16). Drugi koniec przejazdu pokazuje się razem z kreską - a jeśli
+    sam jest początkiem wybranego przejazdu, stoi na mapie z własnego tytułu.
 
-    Sam przejazd nie jest narysowany na stałe: dwie kropki mówią to samo, co
-    kreska między nimi, a kresek jest kilkaset. Pojawiają się pod kursorem. */
+    Sam przejazd domyślnie nie jest narysowany na stałe: dwie kropki mówią to
+    samo, co kreska między nimi. Kreski pojawiają się pod kursorem, a na stałe
+    - po zapaleniu przełącznika pod zębatką (dotOpts.bikeRides). */
 function flowBikeMarkers(places, live) {
     return (places || []).map(place => {
         const dot = L.circleMarker([place.lat, place.lon],
@@ -2407,7 +2403,7 @@ function flowBikeMarkers(places, live) {
                          {direction: 'top', offset: [0, -4], opacity: 1});
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
-            if (!BIKE_RIDES_ALWAYS) clearBikeRides();
+            if (!dotOpts.bikeRides) clearBikeRides();
             else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
         });
         return dot;
@@ -2444,23 +2440,23 @@ function bikeCountText(place) {
         : bikes;
 }
 
-/** Strzałki przejazdów z jednej kropki - wszystkie, jakie z niej mają sens.
+/** Kreski przejazdów z jednej kropki - te, które przeszły wybór.
 
-    Z etykietką przy każdym drugim końcu, bo to jest cała odpowiedź na „po co
-    tu ten rower": o której się tam jest i jak daleko to stąd. */
+    Z etykietką przy każdym drugim końcu, bo to jest cała odpowiedź na „dokąd
+    tym rowerem": jak daleko to stąd. */
 function showBikeRides(place) {
     clearBikeRides();
     flowBikeRideLayer = L.layerGroup(bikeRideLayers(place, true)).addTo(map);
 }
 
-/** Wszystkie przejazdy wszystkich kropek naraz (przełącznik pod zębatką).
-
-    Bez etykietek: kilkaset naraz to nie jest mapa, tylko ściana tekstu.
-    Etykietki wracają, gdy kursor wskaże konkretną kropkę. */
+/** Przejazdy wszystkich kropek naraz (przełącznik pod zębatką) - z kreskami,
+    stacjami końcowymi i etykietkami, tak samo jak pod kursorem. Przejazdów
+    jest tyle, ile przeszło wybór (suwak pod zębatką), więc nie robi się z tego
+    ściana tekstu. */
 function showAllBikeRides(places) {
     clearBikeRides();
     const layers = [];
-    for (const place of places || []) layers.push(...bikeRideLayers(place, false));
+    for (const place of places || []) layers.push(...bikeRideLayers(place, true));
     flowBikeRideLayer = L.layerGroup(layers).addTo(map);
 }
 
@@ -2492,14 +2488,11 @@ function bikeRideLayers(place, labels) {
 }
 
 /** Etykietka przy drugim końcu. Domyślnie SAMA odległość: godzina przejazdu
-    jest policzona, nie odczytana, a nazwa otwieranego przystanku to powód,
-    dla którego ten przejazd w ogóle tu jest - ważny dla algorytmu, nie dla
-    patrzącego. Oba dopiski wracają przełącznikami pod zębatką. */
+    jest policzona, nie odczytana - wraca przełącznikiem pod zębatką. */
 function bikeRideLabel(ride) {
     const parts = [];
     if (dotOpts.bikeTimes) parts.push(fmtClock(ride.at));
     parts.push(fmtDist(ride.m));
-    if (dotOpts.bikeOpens) parts.push(`→ ${esc(ride.opens)}`);
     return parts.join(' · ');
 }
 
@@ -3016,13 +3009,15 @@ function renderJourneys() {
                     aria-label="${resultsCollapsed ? 'Pokaż' : 'Ukryj'} propozycje tras"
                     aria-expanded="${String(!resultsCollapsed)}">${resultsCollapsed ? '▸' : '▾'}</button>
         </div>
-        <ol class="journeys">${cards}</ol>
-        ${bikeNoteHtml()}
-        <p class="results-foot">
-            Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
-            tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
-            zobaczyć całą trasę.
-        </p>`;
+        <div class="results-body">
+            <ol class="journeys">${cards}</ol>
+            ${bikeNoteHtml()}
+            <p class="results-foot">
+                Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
+                tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
+                zobaczyć całą trasę.
+            </p>
+        </div>`;
     resultsBox.classList.toggle('collapsed', resultsCollapsed);
 
     setTabCount(journeys.length);
@@ -3122,14 +3117,16 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
-        extra_pct: $('extra').value,
-        extra_floor_sec: (Number($('extra-floor').value) * 60).toFixed(0),
-        extra_cap_sec: (Number($('extra-cap').value) * 60).toFixed(0),
+        density: $('density').value,
+        cars: $('car-count').value,
+        bike_count: $('bike-count').value,
+        car_groups: $('car-groups').checked ? '1' : '0',
+        car_vans: $('car-vans').checked ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
-    // Ręczne przedłużenie zakresu ("+X min" nad mapą) - tylko gdy user je
-    // kliknął; bez niego o szerokości okna decydują wyłącznie suwaki.
-    if (mapHorizonSec !== null) params.set('horizon_sec', mapHorizonSec.toFixed(0));
+    // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
+    // wynika z samej gęstości z suwaka.
+    if (mapMore) params.set('more', mapMore);
     // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
@@ -3190,7 +3187,7 @@ function showDegradedNotice() {
     resultsBox.insertAdjacentHTML('afterbegin',
         '<div class="notice error degraded"><p>Tryb awaryjny: w tym oknie '
         + 'czasowym nie ułożył się wachlarz połączeń — mapa pokazuje samą '
-        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „+X min” nad mapą.'
+        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „Pokaż więcej” nad mapą.'
         + '</p></div>');
 }
 
@@ -3360,7 +3357,7 @@ function setSearching(on) {
 function search() {
     if (!startInput.value || !endInput.value) return;
     const token = ++requestToken;
-    mapHorizonSec = null;      // nowa relacja zaczyna od okna z suwaków
+    mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     clearJourney();
     clearPreview();
     setSearching(true);
@@ -3617,7 +3614,7 @@ $('clear').addEventListener('click', () => {
     forgetLastSearch();
 });
 
-// Suwaki panelu deweloperskiego: etykieta od razu, mapa i lista propozycji
+// Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
 // więc każdy suwak siłą rzeczy odświeża i mapę, i listę - nie ma już
@@ -3627,7 +3624,7 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['extra', 'extra-floor', 'extra-cap', 'transfer-gain'];
+const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain'];
 
 function loadDevPrefs() {
     try {
@@ -3659,16 +3656,16 @@ function applyStoredDevPrefs() {
     }
 }
 
-function liveSlider(inputId, valueId, dropsHorizon) {
+function liveSlider(inputId, valueId, resetsMore) {
     const input = $(inputId);
     const valueEl = $(valueId);
     let timer = null;
     input.addEventListener('input', () => {
         valueEl.textContent = input.value;
-        // Ruszenie suwakiem okna to powrót do okna liczonego z suwaków -
-        // inaczej ręczne przedłużenie (szersze) i tak by je przykryło, a
-        // suwak wyglądałby na zepsuty.
-        if (dropsHorizon) mapHorizonSec = null;
+        // Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
+        // z "pokaż więcej" liczyłaby się inaczej od starej i suwak
+        // wyglądałby na zepsuty.
+        if (resetsMore) mapMore = 0;
         saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
@@ -3679,10 +3676,25 @@ function liveSlider(inputId, valueId, dropsHorizon) {
     });
 }
 applyStoredDevPrefs();
-liveSlider('extra', 'extra-value', true);
-liveSlider('extra-floor', 'extra-floor-value', true);
-liveSlider('extra-cap', 'extra-cap-value', true);
+liveSlider('density', 'density-value', true);
+liveSlider('car-count', 'car-count-value', true);
+liveSlider('bike-count', 'bike-count-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
+
+// Grupowanie aut i dostawczaki zmieniają odpowiedź serwera, więc jak suwak:
+// pamiętane w tym samym kluczu i od razu nowe zapytanie.
+for (const id of ['car-groups', 'car-vans']) {
+    const input = $(id);
+    input.checked = loadDevPrefs()[id] === true;
+    input.addEventListener('change', () => {
+        mapMore = 0;
+        saveDevPref(id, input.checked);
+        if (id === 'car-vans' && !flowOnScreen()) refreshCarLayer();
+        if (!startInput.value || !endInput.value) return;
+        loadPlan(requestToken, false)
+            .catch(() => showError('Nie udało się połączyć z serwerem.'));
+    });
+}
 
 // --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
 //
@@ -3748,15 +3760,6 @@ function bindLookSliders() {
             timer = setTimeout(applyLook, 60);
         });
     }
-    $('look-reset').addEventListener('click', () => {
-        Object.assign(look, LOOK_DEFAULTS);
-        for (const [id, key] of Object.entries(LOOK_KNOBS)) {
-            $(id).value = look[key];
-            show(id);
-        }
-        saveLookPrefs();
-        applyLook();
-    });
 }
 bindLookSliders();
 document.documentElement.style.setProperty('--chip-scale', look.labelScale);
@@ -3912,7 +3915,7 @@ const DOT_TOGGLES = {
     'tip-cursor': 'tipCursor',
     'tip-panel': 'tipPanel',
     'bike-times': 'bikeTimes',
-    'bike-opens': 'bikeOpens',
+    'bike-rides': 'bikeRides',
 };
 
 function applyDotOpts() {
@@ -3976,7 +3979,7 @@ bindDotOpts();
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer',
-    'fold-sound', 'fold-dots', 'look-section', 'fold-version',
+    'fold-sound', 'fold-dots', 'fold-bike', 'look-section', 'fold-version',
 ];
 
 function bindDevFolds() {
@@ -3990,6 +3993,47 @@ function bindDevFolds() {
     }
 }
 bindDevFolds();
+
+// --- zmienione ustawienia i powrót do domyślnych ----------------------------
+//
+// `value`/`checked` z index.html to wartości domyślne (patrz komentarz nad
+// panelem), więc opcja różna od nich dostaje znacznik, a nagłówek sekcji -
+// liczbę takich opcji, żeby było je widać także przy zwiniętej sekcji.
+function markChangedSettings() {
+    for (const fold of devPanel.querySelectorAll('.dev-fold')) {
+        let changed = 0;
+        for (const input of fold.querySelectorAll('input')) {
+            const differs = input.type === 'checkbox'
+                ? input.checked !== input.defaultChecked
+                : Number(input.value) !== Number(input.defaultValue);
+            input.closest('.field, .dev-check').classList.toggle('changed', differs);
+            if (differs) changed++;
+        }
+        const summary = fold.querySelector('summary');
+        if (changed) summary.dataset.changed = changed;
+        else delete summary.dataset.changed;
+    }
+}
+devPanel.addEventListener('input', markChangedSettings);
+devPanel.addEventListener('change', markChangedSettings);
+markChangedSettings();
+
+// Jeden przycisk na cały panel: kasuje wszystkie zapamiętane ustawienia
+// i przeładowuje stronę, więc każda wartość wraca z *_DEFAULTS tą samą drogą,
+// co przy pierwszej wizycie - bez osobnego "przywróć" dla każdej sekcji, które
+// trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma własny
+// klucz, więc mapa wraca ta sama.
+$('dev-reset').addEventListener('click', () => {
+    for (const key of [DEV_PREFS_KEY, TIME_PREFS_KEY, DOT_PREFS_KEY,
+                       LOOK_PREFS_KEY, SOUND_PREFS_KEY]) {
+        try {
+            localStorage.removeItem(key);
+        } catch {
+            // localStorage niedostępny - i tak nie ma czego kasować
+        }
+    }
+    location.reload();
+});
 
 // ------------------------------------------------- most do trybu rozkładów ----
 //

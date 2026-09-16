@@ -61,8 +61,8 @@ WALK_MIN_SEC = 60
 START_SEC = 300
 
 # Jazda autem - szacunek, patrz nagłówek modułu. Obie stałe są ZMIERZONE, nie
-# wzięte z głowy: 30 losowych par przystanków w oknie [MIN_DRIVE_M,
-# MAX_DRIVE_M] przepuszczonych przez prawdziwy routing samochodowy (OSRM na
+# wzięte z głowy: 30 losowych par przystanków w oknie 1,5-25 km
+# przepuszczonych przez prawdziwy routing samochodowy (OSRM na
 # danych OSM, jednorazowo, poza aplikacją - w runtime niczego takiego nie
 # wołamy). Z tej próbki mediana krętości (droga / linia prosta) to 1,30,
 # a mediana prędkości po drodze 36 km/h.
@@ -83,17 +83,13 @@ START_SEC = 300
 DRIVE_SPEED_MPS = 9.4
 DRIVE_DETOUR = 1.30
 DRIVE_MIN_SEC = 120
-# Poniżej tego auto nie ma czego załatwić: samo odpalenie (START_SEC) trwa
-# dłużej niż przejście tego kawałka, a opłata za przejazd zostaje.
-MIN_DRIVE_M = 1500
-# Powyżej - to już nie jest "ostatni kawałek podróży", tylko cała podróż
-# autem; na taką odpowiedź nikt nie pytał wyszukiwarki komunikacji miejskiej.
-MAX_DRIVE_M = 25000
 # Zapas zasięgu ponad sam przejazd. Feed podaje zasięg w km i bywa on niski
 # (auto z 9% paliwa ma ich czterdzieści) - a nasz dystans jest SZACOWANY
 # (linia prosta razy krętość), więc auto, które dojeżdża "na styk", nie jest
 # propozycją, tylko zaproszeniem na stację po drodze.
 RANGE_RESERVE_M = 5000
+
+UNKNOWN_MODEL = ("Traficar", False)   # patrz _models
 
 _cars_cache = {"at": 0.0, "cars": [], "generation": 0}
 _models_cache = {"at": 0.0, "models": {}}
@@ -140,13 +136,19 @@ def _spot_label(location):
 
 
 def _models():
-    """id modelu -> nazwa ("RENAULT Clio IV"). Pusty słownik, gdy się nie udało -
-    nazwa modelu jest ozdobą dymka, nie powodem, żeby nie proponować auta."""
+    """id modelu -> (nazwa, czy dostawczy): ("RENAULT Clio IV", False). Pusty
+    słownik, gdy się nie udało - model jest ozdobą dymka, nie powodem, żeby
+    nie proponować auta, więc auto bez znanego modelu liczy się jako osobowe
+    (patrz UNKNOWN_MODEL).
+
+    Rodzaj to pole `type` feedu: 1 - osobowe (Clio, Zoe, Sandero, Arkana),
+    2 - dostawcze (Kangoo, Master, Dokker, Express); sprawdzone na żywo
+    2026-09-15. Po nazwie nie zgadujemy - lista modeli rośnie z każdą dostawą."""
     if time.monotonic() - _models_cache["at"] >= MODELS_TTL_SEC:
         try:
             data = _fetch(f"{API}/car-models")
             _models_cache["models"] = {
-                m["id"]: m["name"] for m in data["carModels"]
+                m["id"]: (m["name"], m["type"] == 2) for m in data["carModels"]
             }
             _models_cache["at"] = time.monotonic()
         except (OSError, ValueError, KeyError, TypeError):
@@ -182,7 +184,8 @@ def car_list():
                     "lat": float(c["lat"]),
                     "lon": float(c["lng"]),
                     "plate": c["regPlate"],
-                    "model": models.get(c.get("modelId"), "Traficar"),
+                    "model": models.get(c.get("modelId"), UNKNOWN_MODEL)[0],
+                    "van": models.get(c.get("modelId"), UNKNOWN_MODEL)[1],
                     "where": _spot_label(c.get("location")),
                     "fuel": round(float(c["fuel"])),
                     "range": c["range"],
@@ -283,6 +286,9 @@ def map_cars(day, reach, dest):
             **car,
             "at": at,
             "from": day.stop_names.get(stop, stop),
+            # Po MIEJSCU, nie po słupku: dwa perony jednego placu to dla
+            # idącego do auta to samo miejsce (patrz map_skyband).
+            "from_place": day.place_of.get(stop, stop),
             "walk_sec": walk_sec,
             "walk_m": walk_m,
             "to_dest_m": round(gtfs._haversine_m(car["lat"], car["lon"],
@@ -290,6 +296,81 @@ def map_cars(day, reach, dest):
         })
     out.sort(key=lambda car: (car["at"], car["to_dest_m"]))
     return out
+
+
+def _shown_as(car):
+    """Dwie liczby, którymi auto się porównuje, z dokładnością, z jaką mapa
+    je wypisuje (app.js: fmtClock, ogarniamText) - zwrócone tak, że mniej
+    znaczy lepiej. Ta sama wypisana minuta to remis, nie wygrana o sekundy:
+    pasażer nie ma jak zobaczyć różnicy, której mapa nie pokazuje.
+
+    Odległości do celu tu nie ma, choć mapa ją wypisuje: nagradzała auta
+    stojące tuż przy celu, a czy jazda autem się opłaca, rozstrzygnąć się nie
+    da - czasu jazdy nie ma skąd wziąć, bo zależy od korków (punkt 15)."""
+    return (
+        (car["at"] + 30) // 60,
+        -sum(task["ile"] for task in car["ogarniam"]),
+    )
+
+
+def _beats(one, other):
+    return one != other and all(o <= m for o, m in zip(one, other))
+
+
+def map_skyband(cars, limit, groups=False):
+    """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband, przy `groups`
+    - zwycięzców grup.
+
+    Grupę tworzą auta, do których idzie się z tego samego miejsca (`from_place`)
+    - trzy auta obok siebie przy starcie to dla pasażera jeden wybór. Z grupy
+    zostają auta, których nic W TEJ GRUPIE nie bije, i dalej żadne: poszerzanie
+    nie dokłada kolejnego auta z tej samej grupy, bo już pierwsze "więcej"
+    przywracałoby auta stojące obok siebie. Grupowanie jest przełącznikiem pod
+    zębatką, domyślnie zgaszonym: auta nie różnią się tu modelem, więc ktoś
+    polujący na konkretny model straciłby przez nie auto, którego szuka.
+
+    Między autami (zwycięzcami grup): auto A bije auto B, gdy jest co najmniej tak dobre
+    w obu liczbach naraz (_shown_as) i w którejś lepsze. Poziom k to auta
+    pobite przez najwyżej k-1 innych; pierwszy poziom - te, których nie bije
+    nic - jest zawsze na mapie, choćby było ich więcej niż `limit`. Kolejne
+    poziomy dokłada się, aż uzbiera się `limit`, i każdy wchodzi W CAŁOŚCI:
+    ucięcie poziomu w środku wymagałoby zważenia minut przeciw złotówkom,
+    a tego mapa nie robi. Stąd gwarancja - nigdy nie widać auta, gdy schowane
+    jest takie, które je bije.
+
+    Auto z „Ogarniam" nie ma tu osobnej reguły: jego kwota jest drugą
+    z tych liczb i tyle."""
+    grouped = {}
+    for car in cars:
+        grouped.setdefault(car["from_place"] if groups else id(car), []).append(car)
+    winners = []
+    for group in grouped.values():
+        shown = [_shown_as(car) for car in group]
+        winners += [car for car, mine in zip(group, shown)
+                    if not any(_beats(other, mine) for other in shown)]
+    order = {id(car): i for i, car in enumerate(cars)}
+    winners.sort(key=lambda car: order[id(car)])
+
+    shown = [_shown_as(car) for car in winners]
+    beaten_by = [sum(_beats(other, mine) for other in shown) for mine in shown]
+    if len(winners) <= limit:
+        return winners
+    level = sorted(beaten_by)[limit - 1]
+    return [car for car, beaten in zip(winners, beaten_by) if beaten <= level]
+
+
+def map_choice(cars, limit, groups=False, vans=False):
+    """Auta na mapę (punkt 15): osobówki zawsze, dostawczaki tylko na życzenie
+    - i wtedy każdy rodzaj wybierany osobno (map_skyband), z tym samym `limit`.
+
+    Dostawczak nie konkuruje z osobówką: kto wiezie szafę, nie weźmie Clio
+    stojącego minutę bliżej, a kto jedzie sam, nie chce Mastera. Domyślnie
+    dostawczaków nie ma wcale - zgłoszone przez użytkownika."""
+    chosen = map_skyband([car for car in cars if not car["van"]], limit, groups)
+    if vans:
+        chosen += map_skyband([car for car in cars if car["van"]], limit, groups)
+    chosen_ids = {id(car) for car in chosen}
+    return [car for car in cars if id(car) in chosen_ids]
 
 
 def car_options(day, reachable, dest, limit=2):
@@ -319,8 +400,6 @@ def car_options(day, reachable, dest, limit=2):
     candidates = []
     for car in cars:
         drive_sec, drive_m = drive_time(car["lat"], car["lon"], dest_lat, dest_lon)
-        if not MIN_DRIVE_M <= drive_m <= MAX_DRIVE_M:
-            continue
         if (car["range"] or 0) * 1000 < drive_m + RANGE_RESERVE_M:
             continue
         for stop, arrival in reachable.items():

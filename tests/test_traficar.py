@@ -88,13 +88,13 @@ def test_auto_za_daleko_od_przystanku_odpada(monkeypatch):
     assert traficar.car_options(day, {"M": 600}, E) == []
 
 
-def test_auto_pod_samym_celem_nie_ma_czego_zalatwic(monkeypatch):
-    """Cel przesunięty tuż obok auta: zostaje kilkaset metrów jazdy, czyli
-    mniej, niż trwa samo odpalenie. To nie jest opcja, tylko koszt."""
+def test_krotka_jazda_tez_jest_propozycja(monkeypatch):
+    """Progów długości jazdy nie ma (zdanie użytkownika): cel kilkaset metrów
+    od auta to wciąż propozycja, a czy się opłaca, rozstrzyga godzina."""
     day = _day()
     _cars(monkeypatch, [CAR])
-    tuz_obok = (51.1250, 17.00)     # ~520 m od auta, poniżej MIN_DRIVE_M
-    assert traficar.car_options(day, {"M": 600}, tuz_obok) == []
+    tuz_obok = (51.1250, 17.00)     # ~520 m od auta
+    assert traficar.car_options(day, {"M": 600}, tuz_obok) != []
 
 
 def test_auto_bez_zasiegu_na_te_trase_odpada(monkeypatch):

@@ -54,8 +54,8 @@
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
                     aria-label="Zainstaluj aplikację" hidden>⤓</button>
-            <button id="dev-toggle" class="icon-button" title="Ustawienia deweloperskie"
-                    aria-label="Ustawienia deweloperskie" aria-expanded="false">⚙</button>
+            <button id="dev-toggle" class="icon-button" title="Ustawienia Developerskie"
+                    aria-label="Ustawienia Developerskie" aria-expanded="false">⚙</button>
         </div>
 
         {#
@@ -246,22 +246,76 @@
 <div id="dev-panel" class="card hidden">
 
     <header class="dev-head">
-        <h2>Strojenie algorytmu</h2>
+        <h2>Ustawienia Developerskie</h2>
         <button id="dev-close" class="icon-button" title="Zamknij"
-                aria-label="Zamknij panel deweloperski">✕</button>
+                aria-label="Zamknij Ustawienia Developerskie">✕</button>
     </header>
 
     {#
-      Czas na mapie — cała sekcja jest jednym eksperymentem (2026-08-27).
-      Każda rzecz osobno, bo to wciąż szukanie formy: co ma być widać zawsze,
-      co dopiero pod kursorem. Nic tutaj nie rusza serwera — liczby są już
-      w odpowiedzi, przełącznik tylko przemalowuje mapę.
+      Kolejność: najpierw to, co zmienia samą mapę, potem to, jak wygląda, na
+      końcu sprawy techniczne i suwak, który mapy nie dotyczy wcale.
+
+      `value` i `checked` w tym pliku to wartości DOMYŚLNE: z nimi porównuje
+      podświetlenie zmienionych opcji (markChangedSettings w app.js), więc
+      muszą się zgadzać z *_DEFAULTS w app.js i z domyślnymi w plannerze.
     #}
+    <details class="dev-fold" id="fold-window" open>
+    <summary>Co pokazuje mapa</summary>
+
+    <div class="field">
+        <label for="density">
+            Gęstość mapy <output id="density-value">2.5</output>
+        </label>
+        <input type="range" id="density" min="0.5" max="15" step="0.5" value="2.5">
+        <p class="field-hint">
+            Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru,
+            a godzina „mapa pokazuje do” jest tego skutkiem.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="car-count">
+            Ile aut Traficara <output id="car-count-value">3</output>
+        </label>
+        <input type="range" id="car-count" min="1" max="30" step="1" value="3">
+        <p class="field-hint">
+            Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”,
+            są zawsze, a suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.
+        </p>
+        <label class="dev-check">
+            <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
+        </label>
+        <p class="field-hint">
+            Z aut, do których idzie się z tego samego miejsca, zostaje tylko to,
+            przy którym jest się najwcześniej, albo to, które daje więcej z „Ogarniam”.
+        </p>
+        <label class="dev-check">
+            <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
+        </label>
+        <p class="field-hint">
+            Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
+            i stoją na mapie jako puste pierścienie.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="bike-count">
+            Ile przejazdów rowerem <output id="bike-count-value">4</output>
+        </label>
+        <input type="range" id="bike-count" min="1" max="30" step="1" value="4">
+        <p class="field-hint">
+            Przejazdy, których nic nie bije długością jazdy rowerem, godziną w celu
+            ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
+        </p>
+    </div>
+
+    </details>
+
     <details class="dev-fold" id="fold-time" open>
         <summary>Czas na mapie</summary>
 
         <label class="dev-check">
-            <input type="checkbox" id="time-hover"> Godzina w punkcie pod kursorem
+            <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
         </label>
         <label class="dev-check">
             <input type="checkbox" id="time-bar"> …z paskiem „ile do celu zostało”
@@ -270,140 +324,28 @@
             <input type="checkbox" id="time-ends"> …i kropką dokładnie w tym punkcie
         </label>
         <p class="field-hint">
-            Duża godzina to moment, w którym ten pojazd jest dokładnie pod
-            kursorem — interpolowany między dwoma sąsiednimi przystankami tego
-            kursu. Pod nią przyjazd do celu, jeśli jedzie się dalej stąd; to ta
-            sama liczba, z której policzona jest jasność, więc kolor i godzina
-            nie mogą powiedzieć czegoś innego. Kawałek bez odczytanej dalszej
-            drogi nie pokazuje jej wcale.
+            Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu,
+            jeśli jedzie się dalej stąd.
         </p>
 
         <label class="dev-check">
             <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
         </label>
         <label class="dev-check">
-            <input type="checkbox" id="time-show-headline"> Pasek nad mapą z czasem podróży
+            <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
         </label>
         <p class="field-hint">
-            Pasek podaje godzinę i czas najszybszego dojazdu oraz granicę,
-            do jakiej mapa jeszcze rysuje. Najechanie na pierwszą liczbę
-            pokazuje, którą trasą się ten czas osiąga. Przycisk „+X min” na
-            końcu paska rozciąga ten zakres o połowę (razy 1,5, do 2 h) —
-            kolejne wyszukiwanie wraca do okna z suwaków niżej.
+            Pasek podaje najszybszy dojazd i granicę mapy, a jego „Pokaż więcej”
+            zagęszcza mapę dwa, trzy, cztery razy.
         </p>
-    </details>
-
-    <details class="dev-fold" id="fold-window" open>
-    <summary>Okno czasowe</summary>
-
-    <div class="field">
-        <label for="extra">
-            Ile dłużej niż najszybsza trasa <output id="extra-value">125</output>%
-        </label>
-        <input type="range" id="extra" min="110" max="200" step="5" value="125">
-        <p class="field-hint">
-            Okno czasowe procentowo, nie w minutach — rośnie razem z długością
-            trasy zamiast być stałym naddatkiem. Dwa suwaki niżej łatają
-            skrajności: bardzo krótkie i bardzo długie trasy.
-        </p>
-    </div>
-
-    <div class="field">
-        <label for="extra-floor">
-            Minimalne okno (niezależnie od %) <output id="extra-floor-value">5</output> min
-        </label>
-        <input type="range" id="extra-floor" min="0" max="30" step="1" value="5">
-        <p class="field-hint">
-            Przy krótkich trasach sam procent daje grosze — 3-minutowa trasa
-            przy 110% to ledwie 18 s naddatku. Ten suwak gwarantuje co
-            najmniej tyle minut okna, nawet dla bardzo krótkich tras.
-        </p>
-    </div>
-
-    <div class="field">
-        <label for="extra-cap">
-            Maksymalne okno (sufit dla długich tras) <output id="extra-cap-value">15</output> min
-        </label>
-        <input type="range" id="extra-cap" min="10" max="120" step="5" value="15">
-        <p class="field-hint">
-            Odwrotność powyższego — przy bardzo długiej najszybszej trasie
-            wysoki procent otworzyłby absurdalnie szerokie okno. Ten suwak je
-            ogranicza. Do debugów; jeśli nie przeszkadza, można zostawić.
-        </p>
-    </div>
-
-    </details>
-
-    <details class="dev-fold" id="fold-transfer">
-    <summary>Przesiadki</summary>
-
-    <p class="field-hint strong">
-        Ten suwak NIE zmienia mapy — dotyczy wyłącznie listy „Propozycje tras”.
-    </p>
-
-    <div class="field">
-        <label for="transfer-gain">
-            Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
-        </label>
-        <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
-        <p class="field-hint">
-            Obie opcje — z przesiadką i bez — są na liście zawsze. Ten suwak
-            rozstrzyga tylko, którą planer proponuje jako najlepszą:
-            przesiadka wygrywa dopiero, gdy oszczędza co najmniej tyle,
-            inaczej pierwsza jest jazda tym samym pojazdem, o ile sam dowozi
-            do celu. Nocne linie ruszają z węzła tą samą minutą tą samą
-            ulicą, więc różnica na końcu bywa zaokrągleniem dwóch rozkładów,
-            a wysiadanie kosztuje przejście na inny peron. 0 = liczy się sam
-            przyjazd. Wachlarz na mapie rysuje się niezależnie od tej wartości.
-        </p>
-    </div>
-
     </details>
 
     {#
-      SEKCJA SCHOWANA (SOUND_TUNING = false w app.js) — na razie dźwięk po
-      prostu jest, bez ustawienia. Atrybut `hidden` niżej to tylko stan
-      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
-    #}
-    <details class="dev-fold" id="fold-sound" hidden>
-    <summary>Dźwięk</summary>
-
-        <label class="dev-check">
-            <input type="checkbox" id="sound-pipe"> Metalowa rura po znalezieniu trasy
-        </label>
-        <p class="field-hint">
-            Spadająca rura. Milczy, gdy system prosi o ograniczenie animacji
-            (<code>prefers-reduced-motion</code>) i gdy przeglądarka nie
-            pozwala jeszcze grać.
-        </p>
-
-    </details>
-
-    <details class="dev-fold" id="fold-version">
-    <summary>Wersja aplikacji</summary>
-
-    <div class="field" id="sw-field">
-        <div class="sw-row">
-            <code id="sw-version">—</code>
-            <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
-                Sprawdź
-            </button>
-        </div>
-        <p class="field-hint" id="sw-status" role="status">
-            Porównuje wersję działającą w przeglądarce z tą, którą serwer
-            wydaje w tej chwili.
-        </p>
-    </div>
-
-    </details>
-
-    {#
-      Kropki przystanków na mapie i to, gdzie pokazuje się ich rozkład.
       Nic tutaj nie rusza serwera: obie współrzędne kropki i cała tablica
       odjazdów są już w odpowiedziach, przełącznik tylko przemalowuje.
     #}
     <details class="dev-fold" id="fold-dots">
-    <summary>Kropki i rozkład</summary>
+    <summary>Przystanki i rozkład</summary>
 
         <div class="field compact">
             <label for="dot-size">
@@ -411,9 +353,8 @@
             </label>
             <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
             <p class="field-hint">
-                Kropki przystanków — na wybranej trasie i, o jeden mniejsze,
-                na węzłach wachlarza. To te do najechania: pokazują tablicę
-                odjazdów.
+                Kropki na wybranej trasie i, o piksel mniejsze, na węzłach
+                wachlarza — najechanie pokazuje tablicę odjazdów.
             </p>
         </div>
 
@@ -421,19 +362,16 @@
             <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
         </label>
         <p class="field-hint">
-            Węzeł wachlarza to jedno MIEJSCE, często o kilku słupkach.
-            Wyłączone — kropka stoi na tym słupku, z którego wzięta jest
-            godzina (peron). Włączone — pośrodku wszystkich słupków tego
-            miejsca, więc nie ląduje na jego przypadkowym krańcu.
+            Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie,
+            z którego wzięta jest godzina.
         </p>
 
         <label class="dev-check">
             <input type="checkbox" id="dot-start"> Wyróżnij przystanek startowy
         </label>
         <p class="field-hint">
-            Kropka na przystanku, z którego się wyrusza, dostaje zieloną
-            obwódkę, a jej tablica odjazdów — zielony nagłówek. To z niej
-            wsiada się naprawdę, więc nie ma jej gubić wśród przesiadek.
+            Kropka przystanku, z którego się wyrusza, i nagłówek jej tablicy
+            dostają zielony kolor.
         </p>
 
         <div class="field compact">
@@ -442,35 +380,10 @@
             </label>
             <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
             <p class="field-hint">
-                Tablica spod kropki. Powyżej dwudziestu dymek zasłania mapę,
-                o którą się właśnie pyta — stąd sufit. Dalsze odjazdy i tak są
-                poza horyzontem decyzji „czym stąd pojechać”.
+                Powyżej dwudziestu odjazdów tablica spod kropki zasłania mapę,
+                o którą się właśnie pyta.
             </p>
         </div>
-
-        <div class="dev-section-head">Rower miejski</div>
-
-        <label class="dev-check">
-            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
-        </label>
-        <p class="field-hint">
-            Godzina, o której jest się PRZY rowerze, pochodzi z rozkładu i jest
-            pokazywana zawsze. To ustawienie dotyczy tego, co jest za nią:
-            samego przejazdu, którego rozkładu nie ma i który jest policzony
-            z odległości. Domyślnie zgaszone — obok drugiego końca widać samą
-            odległość, która mówi to samo, nie udając odczytanej.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="bike-opens"> Co przejazd otwiera
-        </label>
-        <p class="field-hint">
-            Przy odległości dopisuje nazwę przystanku, z którego po zsiadaniu
-            zdąży się jeszcze pojechać dalej — czyli powód, dla którego ten
-            przejazd w ogóle jest na mapie. Domyślnie zgaszone: przy kilkunastu
-            etykietkach naraz to głównie tekst, a odległość wystarczy, żeby
-            wybrać.
-        </p>
 
         <div class="dev-section-head">Gdzie pokazać rozkład</div>
 
@@ -481,10 +394,29 @@
             <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
         </label>
         <p class="field-hint">
-            Dotyczy obu rzeczy naraz: tablicy odjazdów spod kropki i
-            podpowiedzi o linii spod kursora na trasie. Dymek znika, gdy
-            kursor zejdzie; okienko zostaje, podmienia się przy najechaniu na
-            coś innego i zamyka się krzyżykiem. Można mieć oba, można żaden.
+            Tablica odjazdów i podpowiedź o linii pokazują się w dymku, w okienku,
+            które zostaje do zamknięcia, w obu albo w żadnym.
+        </p>
+
+    </details>
+
+    <details class="dev-fold" id="fold-bike">
+    <summary>Rower miejski</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
+        </label>
+        <p class="field-hint">
+            Obok drugiego końca przejazdu staje godzina policzona z odległości,
+            a nie sama odległość.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
+        </label>
+        <p class="field-hint">
+            Kreski wybranych przejazdów i ich stacje końcowe stoją na mapie cały
+            czas, a nie tylko pod kursorem.
         </p>
 
     </details>
@@ -506,8 +438,8 @@
             </label>
             <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.3">
             <p class="field-hint">
-                Dolny próg widoczności (punkt 8 kontraktu). Najbledszy kawałek
-                ma być widoczny bez najeżdżania myszką.
+                Dolny próg widoczności z punktu 8 kontraktu: najbledszy kawałek ma
+                być widoczny bez najeżdżania.
             </p>
         </div>
 
@@ -538,8 +470,8 @@
             </label>
             <input type="range" id="look-casing" min="0" max="1.05" step="0.05" value="0.45">
             <p class="field-hint">
-                1.05 = nigdy, 0 = zawsze. Otoczka oddziela jasne korytarze od
-                tła, ale pogrubia całą sieć.
+                Otoczka oddziela jasne korytarze od tła, ale pogrubia sieć:
+                1.05 to nigdy, 0 to zawsze.
             </p>
         </div>
 
@@ -571,12 +503,69 @@
             <input type="range" id="look-label-op" min="0.3" max="1" step="0.05" value="1">
         </div>
 
-        <button type="button" id="look-reset" class="button">Przywróć domyślne</button>
         <p class="field-hint" id="look-dump">
             Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
             i skasuję tę sekcję.
         </p>
     </details>
+
+    {#
+      SEKCJA SCHOWANA (SOUND_TUNING = false w app.js) — na razie dźwięk po
+      prostu jest, bez ustawienia. Atrybut `hidden` niżej to tylko stan
+      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
+    #}
+    <details class="dev-fold" id="fold-sound" hidden>
+    <summary>Dźwięk</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
+        </label>
+        <p class="field-hint">
+            Spadająca rura milczy, gdy system prosi o ograniczenie animacji
+            (<code>prefers-reduced-motion</code>) albo przeglądarka nie pozwala
+            jeszcze grać.
+        </p>
+
+    </details>
+
+    <details class="dev-fold" id="fold-version">
+    <summary>Wersja aplikacji</summary>
+
+    <div class="field" id="sw-field">
+        <div class="sw-row">
+            <code id="sw-version">—</code>
+            <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
+                Sprawdź
+            </button>
+        </div>
+        <p class="field-hint" id="sw-status" role="status">
+            Porównuje wersję działającą w przeglądarce z tą, którą serwer
+            wydaje w tej chwili.
+        </p>
+    </div>
+
+    </details>
+
+    {# Na samym dole i zwinięte: jako jedyny nie zmienia niczego na mapie. #}
+    <details class="dev-fold" id="fold-transfer">
+    <summary>Tylko lista propozycji tras</summary>
+
+    <div class="field">
+        <label for="transfer-gain">
+            Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
+        </label>
+        <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
+        <p class="field-hint">
+            Lista proponuje przesiadkę jako pierwszą dopiero wtedy, gdy oszczędza
+            co najmniej tyle minut względem jazdy tym samym pojazdem.
+        </p>
+    </div>
+
+    </details>
+
+    <div class="dev-foot">
+        <button type="button" id="dev-reset" class="button">Przywróć domyślne</button>
+    </div>
 
 </div>
 

@@ -1,5 +1,5 @@
-"""Próg opłacalności przesiadki (planner.TRANSFER_GAIN_SEC, suwak w panelu
-deweloperskim jako `transfer_gain_sec`).
+"""Próg opłacalności przesiadki (planner.TRANSFER_GAIN_SEC, suwak w
+Ustawieniach Developerskich jako `transfer_gain_sec`).
 
 W przeciwieństwie do reguł z test_boarding_point.py to NIE jest rozstrzyganie
 remisu - tu świadomie oddajemy minutę czy dwie. Nocne linie ruszają z węzła
