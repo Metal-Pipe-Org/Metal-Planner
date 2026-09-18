@@ -295,6 +295,17 @@
             słupek na mapie.
         </p>
 
+        {#
+          Wyjście z rozkładów BEZ opuszczania mapy - tylko tam, gdzie nic
+          innego tego nie umie: telefon, widok mapy. Zakładka „Trasy" też
+          zamyka ten tryb, ale przy okazji zabiera z mapy na listę, a tu
+          patrzy się właśnie na mapę. W widoku listy przycisku nie ma (pod
+          listą stoją zakładki), na szerokim ekranie też nie (jest ◷).
+        #}
+        <button type="button" id="tt-close" class="button tt-close">
+            &#10005; Zamknij rozkład
+        </button>
+
     </div>
 
     <div id="tt-results" class="results" aria-live="polite"></div>
@@ -307,18 +318,18 @@
 <nav id="view-tabs" aria-label="Widok">
     <button class="tab active" data-view="map" aria-pressed="true">Mapa</button>
     <button class="tab" data-view="list" aria-pressed="false">
-        <span id="tab-list-label">Trasy</span>
+        Trasy
         <span id="tab-count" class="tab-count" hidden>0</span>
     </button>
     {#
-      Ten sam przełącznik trybów, co pływające ◷ - na telefonie pływające
-      przyciski są schowane (zastępują je te zakładki), a tryb rozkładów
-      musi być czymś osiągalny.
+      Rozkłady to trzecia zakładka, a nie ikonka ◷ dostawiona z boku paska:
+      na telefonie pływające przyciski są schowane, więc to jedyne wejście
+      w drugi tryb panelu - a wejście wielkości ikonki wyglądało na ozdobnik
+      przy dwóch podpisanych zakładkach. Sama zakładka mówi też, dokąd się
+      idzie; ◷ mówiło tylko tyle, że coś przełącza.
     #}
-    <button id="mode-toggle-m" class="tab-icon"
-            title="Rozkłady jazdy — linie i przystanki"
-            aria-label="Przełącz: wyszukiwanie trasy albo rozkłady jazdy"
-            aria-pressed="false">&#9719;</button>
+    <button class="tab" data-view="timetable" aria-pressed="false"
+            title="Rozkłady jazdy — linie i przystanki">Rozkład</button>
 </nav>
 
 <div id="dev-panel" class="card hidden">
