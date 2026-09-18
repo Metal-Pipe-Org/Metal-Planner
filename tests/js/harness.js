@@ -321,6 +321,8 @@ function fakeElement(id) {
     };
     if (id === 'stop-names') el.textContent = '[]';   // JSON.parse w app.js
     if (id === 'stop-abbrev') el.textContent = '{}';  // jw. - tabela skrótów
+    if (id === 'line-names') el.textContent = '[]';   // jw. - linie pod "jestem
+                                                      // w pojeździe" (onboard.py)
     return el;
 }
 

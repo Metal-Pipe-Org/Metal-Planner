@@ -13,6 +13,7 @@ from math import sqrt
 
 import bikes
 import gtfs
+import onboard
 import traficar
 
 TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
@@ -930,12 +931,20 @@ def _city_group_error(day, start_name, source_stops, end_name, target_stops):
     return None
 
 
-def _resolve_endpoints(day, start_query, end_query, start_point, end_point):
+def _resolve_endpoints(day, start_query, end_query, start_point, end_point,
+                       ride=None):
     """Start i cel -> dzień, nazwy do pokazania + zbiory słupków do skanowania.
 
     Każda strona niezależnie: nazwa przystanku (match_stop, całe kanoniczne
     miejsce) albo dowolny punkt z mapy. Wspólne dla mapy przepływów i listy
     propozycji - obie muszą rozumieć krańce relacji tak samo.
+
+    `ride` to rozpoznany kurs, w którym pasażer właśnie siedzi (patrz
+    onboard.find_ride). Startem jest wtedy DOKŁADNIE JEDEN SŁUPEK - ten, przy
+    którym pojazd zaraz stanie - a nie całe miejsce: z pokładu nie ma się do
+    wyboru trzech peronów placu, tylko ten jeden, pod którym otworzą się
+    drzwi. Na sąsiednie i tak da się przejść pieszo, zwykłym mostem, i będzie
+    to widać jako etap.
 
     Punkt z mapy wchodzi do dnia jako zwykły słupek bez połączeń
     (gtfs.with_point), więc niżej nikt już nie musi wiedzieć, że relacja
@@ -949,7 +958,10 @@ def _resolve_endpoints(day, start_query, end_query, start_point, end_point):
         ("end", end_query, end_point, "docelowego"),
     ):
         stops_key = "source_stops" if side == "start" else "target_stops"
-        if point is not None:
+        if side == "start" and ride is not None:
+            resolved[side] = ride["stop_name"]
+            resolved[stops_key] = {ride["stop"]}
+        elif point is not None:
             day, point_stop = gtfs.with_point(day, point[0], point[1], side)
             if not day.siblings[point_stop]:
                 return {"error": f"Brak przystanków w zasięgu wybranego punktu {missing}."}
@@ -1153,7 +1165,8 @@ def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
 def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, density=None, more=None,
               car_count=None, journey_limit=None, transfer_gain_sec=None,
-              use_bikes=False, bike_count=None, car_groups=False, car_vans=False):
+              use_bikes=False, bike_count=None, car_groups=False, car_vans=False,
+              in_vehicle=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -1218,6 +1231,16 @@ def plan_flow(start_query, end_query, when=None,
     stojaków jest żywy, a nie rozkładowy. Wyłączone zmienia dokładnie zero
     rzeczy w reszcie odpowiedzi - rower niczego tu nie przestawia, tylko
     dopisuje.
+
+    in_vehicle to start Z POKŁADU pojazdu (w API: parametry `onboard_*`,
+    patrz onboard.py): {"num", "mode", "headsign", "stop"} - czym pasażer
+    jedzie i który przystanek ma przed sobą. Zamiast `start_query`/
+    `start_point` startem jest wtedy ten jeden słupek, a godziną - sekunda,
+    o której pojazd z niego rusza. Sam ALGORYTM nie zmienia się przez to ani
+    o linijkę: siedzenie dalej w tym samym pojeździe jest dla skanu zwykłym
+    wsiadaniem w ten kurs na tym przystanku, z zerowym czekaniem. Zmienia się
+    tylko OPIS wyniku - każda propozycja dostaje `onboard` z przystankiem,
+    na którym trzeba wysiąść (patrz onboard.mark_journeys).
     """
     when = when or datetime.now()
     journey_limit = (
@@ -1230,14 +1253,30 @@ def plan_flow(start_query, end_query, when=None,
     except FileNotFoundError as e:
         return {"error": str(e)}
 
-    ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point)
+    asked_sec = when.hour * 3600 + when.minute * 60 + when.second
+
+    # Start z pokładu pojazdu: najpierw trzeba wiedzieć, KTÓRY to kurs - bo
+    # dopiero on mówi, gdzie i kiedy zaczyna się podróż (patrz onboard.py).
+    ride = None
+    if in_vehicle:
+        ride = onboard.find_ride(day, in_vehicle.get("num"),
+                                 in_vehicle.get("mode"), in_vehicle.get("stop"),
+                                 asked_sec, in_vehicle.get("headsign"))
+        if "error" in ride:
+            return ride
+
+    ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point,
+                              ride)
     if "error" in ends:
         return ends
     day = ends["day"]          # z punktem z mapy dołożonym jako słupek
     start_name, source_stops = ends["start"], ends["source_stops"]
     end_name, target_stops = ends["end"], ends["target_stops"]
 
-    dep_sec = when.hour * 3600 + when.minute * 60 + when.second
+    # Z pokładu godziną wyjazdu jest odjazd pojazdu z najbliższego przystanku,
+    # a nie godzina z formularza: przed tą sekundą nie da się zrobić NICZEGO -
+    # ani zostać w pojeździe, ani z niego wysiąść.
+    dep_sec = ride["sec"] if ride else asked_sec
     gain_sec = TRANSFER_GAIN_SEC if transfer_gain_sec is None else int(transfer_gain_sec)
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek") i jest zapasowym
@@ -1248,9 +1287,15 @@ def plan_flow(start_query, end_query, when=None,
     # "nie znaleziono połączenia" nie jest odpowiedzią na pytanie "jak tam
     # dojadę"). Doba rozkładowa zaczyna się o północy, więc pytamy od zera;
     # przystanki rozwiązujemy w niej od nowa, bo to dane tamtego dnia.
+    # Z pokładu pojazdu kolejnych dób nie przeszukujemy: pytanie brzmi "co
+    # zrobić z TYM przejazdem", a on kończy się dzisiaj. Odpowiedź "pojedź
+    # jutro" byłaby odpowiedzią na inne pytanie - i to z przystanku, na którym
+    # pasażer za chwilę stanie tylko przejazdem.
     day_offset = 0
-    asked_sec = dep_sec        # godzina z pytania - `dep_sec` zaraz może się przesunąć
-    while best_stop is None and day_offset < SEARCH_AHEAD_DAYS:
+    asked_sec = dep_sec        # godzina, od której liczy się czekanie: z pytania,
+                               # a z pokładu - odjazd pojazdu spod najbliższego
+                               # przystanku (czekaniem nie jest jazda w nim)
+    while best_stop is None and ride is None and day_offset < SEARCH_AHEAD_DAYS:
         day_offset += 1
         try:
             later = gtfs.load_day(when.date() + timedelta(days=day_offset))
@@ -1520,6 +1565,12 @@ def plan_flow(start_query, end_query, when=None,
     finally:
         geo_db.close()
 
+    # Wysiadka dopisuje się na samym końcu, po rowerze i po Traficarze: dotyczy
+    # KAŻDEJ propozycji, bez względu na to, który algorytm ją złożył, a pytanie
+    # jest zawsze to samo - gdzie opuścić pojazd, w którym się siedzi.
+    if ride:
+        onboard.mark_journeys(journeys, ride)
+
     return {
         "start": start_name,
         "end": end_name,
@@ -1566,6 +1617,13 @@ def plan_flow(start_query, end_query, when=None,
         # napisać, a nie pokazać wczorajszą liczbę jako dzisiejszą.
         "bike_places_live": day_offset == 0 and when.date() == date.today(),
         "journeys": journeys,
+        # Rozpoznany kurs, w którym siedzi pasażer - tylko przy starcie
+        # z pokładu (patrz onboard.py). Front pisze z tego nagłówek "jedziesz
+        # linią X w stronę Y" i ma po czym poznać, że KAŻDA propozycja na
+        # liście zaczyna się wysiadką, a nie wsiadaniem.
+        **({"onboard": {k: ride[k] for k in
+                        ("num", "mode", "line", "headsign", "stop_name", "at")}}
+           if ride else {}),
         # Stan warstwy rowerowej - tylko gdy o nią pytano. Front ma po czym
         # odróżnić "policzone, rower nic tu nie daje" od "kanał operatora nie
         # odpowiedział" (patrz bikes.stations_quiet): w obu przypadkach lista

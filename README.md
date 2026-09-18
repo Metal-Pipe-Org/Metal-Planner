@@ -11,6 +11,13 @@ propozycji podświetla ją na mapie, a kliknięcie linii na mapie otwiera
 propozycję, która nią jedzie. Start można ustawić przyciskiem ◎ na aktualną
 lokalizację. Na telefonie mapa i lista przełączają się dolnymi zakładkami.
 
+Startem nie musi być miejsce, w którym się STOI: przycisk **Jestem
+w pojeździe** nad polami zamienia „skąd" na linię, kierunek z czoła pojazdu
+i najbliższy przystanek. Aplikacja rozpoznaje z tego konkretny kurs, szuka
+dojazdów z jego dalszej trasy — razem z przesiadkami, rowerem miejskim,
+Traficarem i chodzeniem pieszo — i przy każdej propozycji pisze, **na którym
+przystanku i za ile to przystanków wysiąść**.
+
 Pełny opis projektu, architektury i algorytmów: **[docs/PROJECT.md](docs/PROJECT.md)**
 (szczegóły samego algorytmu mapy przepływów: **[docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md)**,
 gwarancje zachowania mapy, które to sprawdzają: **[docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md)**).

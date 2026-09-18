@@ -279,6 +279,101 @@ body.panel-hidden #sidebar {
 
 .search-card { flex: 0 0 auto; }
 
+/* --- skąd zaczyna się podróż: stoję czy jadę (patrz onboard.py) --- */
+
+/* Przełącznik dwóch PYTAŃ, nie ustawień - stąd wygląd segmentowanego
+   przycisku (jedna z dwóch odpowiedzi jest zawsze wybrana), a nie checkboxa.
+   Stoi nad polami, bo to od niego zależy, o co te pola pytają. */
+.start-mode {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--surface-alt);
+}
+
+.start-mode .seg {
+    flex: 1;
+    min-height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.start-mode .seg:hover { color: var(--ink); }
+
+.start-mode .seg.active {
+    background: var(--surface);
+    color: var(--accent);
+    box-shadow: 0 1px 2px rgba(16, 32, 48, 0.12);
+}
+
+/* Trzy pola zamiast "skąd": linia (wąska - to dwa, trzy znaki) i dwie listy
+   w drugim rzędzie, każda na pół szerokości. */
+.onboard-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+/* `display: grid` bije domyślne [hidden] przeglądarki, więc ukrycie trzeba
+   powiedzieć wprost - inaczej pola pojazdu stoją na ekranie także w trybie
+   "stoję tutaj". */
+.onboard-fields[hidden] { display: none; }
+
+.onboard-fields .ac-field { grid-column: 1 / -1; }
+
+.onboard-fields input,
+.onboard-fields select {
+    width: 100%;
+    height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    font: inherit;
+    color: var(--ink);
+}
+
+.onboard-fields input:focus,
+.onboard-fields select:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.onboard-fields select:disabled {
+    color: var(--ink-faint);
+    opacity: 1;                      /* Safari inaczej wyszarza całe pole */
+}
+
+.onboard-msg {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 12.5px;
+}
+
+/* Z pokładu pojazdu pola "skąd" nie ma - razem z nim znika szyna (kropka
+   startu nie ma czego oznaczać) i ⇅ (nie da się zamienić miejscami pojazdu,
+   w którym się siedzi, z celem). Zostaje samo "dokąd". */
+body.start-onboard .endpoints .rail,
+body.start-onboard .endpoints #swap,
+body.start-onboard .endpoint-fields .ac-field:first-child,
+body.start-onboard .hint-place { display: none; }
+
+.hint-onboard { display: none; }
+body.start-onboard .hint-onboard { display: block; }
+
 /* Pola "skąd/dokąd" z szyną: kropka - kreska - kropka, jak na schemacie linii. */
 .endpoints {
     display: flex;
@@ -606,6 +701,47 @@ body.panel-hidden #sidebar {
     color: var(--ink-faint);
 }
 
+/* Wysiadka - jedyna rzecz, którą pasażer startujący z pokładu MUSI zrobić,
+   więc na karcie stoi nad plakietkami linii i jest jedynym elementem
+   z własnym tłem: z listy siedmiu propozycji czyta się najpierw ją, a dopiero
+   potem godziny (patrz exitHtml w app.js). */
+.j-exit {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 8px;
+    padding: 6px 9px;
+    border-radius: 9px;
+    background: #eef5ff;
+    font-size: 13px;
+}
+
+.j-exit-what { color: var(--ink-soft); }
+
+.j-exit-stop {
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.j-exit-time {
+    margin-left: auto;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+}
+
+/* Nagłówek listy: czym się właściwie jedzie. Potwierdzenie, że serwer
+   rozpoznał TEN kurs - pomyłka w kierunku daje wyniki wyglądające równie
+   sensownie, tylko dla kogoś innego. */
+.onboard-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    color: var(--ink-soft);
+    font-size: 12.5px;
+}
+
 .j-lines {
     display: flex;
     align-items: center;
@@ -774,6 +910,29 @@ body.panel-hidden #sidebar {
 .tl-headsign {
     font-size: 12.5px;
     color: var(--ink-soft);
+}
+
+/* Etap, w którym się już siedzi, i przystanek, na którym trzeba z niego
+   wysiąść (patrz onboard.mark_journeys). Pierwszy wiersz osi wygląda
+   identycznie jak każde inne wsiadanie, więc bez tego nie widać różnicy
+   między "wsiądź" a "już w tym jedziesz". */
+.tl-tag {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: #eef5ff;
+    color: var(--accent);
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.tl-stop.exit .tl-name {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.tl-stop.exit .tl-dot::before {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
 }
 
 .tl-info {
