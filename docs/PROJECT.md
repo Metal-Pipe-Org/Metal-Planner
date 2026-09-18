@@ -169,15 +169,26 @@ skrótów front dostaje z serwera (`#stop-abbrev`, `naming.ABBREVIATIONS`),
 wyszukiwarka po stronie serwera (`gtfs._alias_key`).
 
 **Telefon (≤ 760 px) dostaje zakładki** zamiast panelu nachodzącego na mapę:
-dolny pasek „Mapa / Trasy (n)" przełącza to, co pod kartą wyszukiwania —
-albo lista propozycji na cały ekran, albo sama mapa (wtedy z panelu zostaje
+dolny pasek „Mapa / Trasy (n) / Rozkład" przełącza to, co pod kartą
+wyszukiwania — albo lista propozycji na cały ekran, albo sama mapa (wtedy z panelu zostaje
 tylko karta „skąd/dokąd", bez nagłówka i podpowiedzi, żeby nie zjadały
 ekranu). Lista leży na własnym, jednolitym tle — mapa **zostaje pod spodem
 w DOM**, bo Leaflet musi znać rozmiar swojego kontenera, żeby poprawnie
 kadrować także wtedy, gdy patrzymy na listę (przy `display: none` dostałby
 zerowy kontener i policzył bezsensowny kadr); po prostu jej nie widać. Po znalezieniu połączeń widok przeskakuje na listę, a ✕ wraca na
 mapę, bo tam wybiera się nową relację. Zakładki zastępują ☰ (dwa mechanizmy
-chowania panelu naraz tylko by myliły). Klasy `view-map`/`view-list` na
+chowania panelu naraz tylko by myliły).
+
+Trzecia zakładka, „Rozkład", to ta sama lista w **drugim trybie panelu**
+(rozkłady jazdy — patrz README) — na telefonie jedyne wejście w ten tryb, bo
+pływające ◷ jest tam schowane razem z ☰. Zakładek jest więc trzy, a stanu
+dwa wymiary: widok (`view-map`/`view-list`) i tryb (`mode-timetable`).
+Podświetlenie liczy się z obu klas na `<body>` (`syncTabs` w `app.js`),
+a nie z ostatniego kliknięcia — w rozkłady wchodzi się także spoza paska
+(przycisk „trasa" przy propozycji) i zakładki mają za tym nadążyć.
+„Mapa" trybu nie rusza: w rozkładach mapa to sposób wybrania przystanku
+(klik w słupek), a nie wyjście z nich; wychodzi się dopiero „Trasami",
+które przywracają wachlarz propozycji bez ponownego szukania. Klasy `view-map`/`view-list` na
 `<body>` na szerokim ekranie nie robią nic — tam widać oba widoki naraz.
 Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
 ten kadr zobaczymy po przełączeniu zakładki.

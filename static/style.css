@@ -1175,7 +1175,7 @@ body.panel-hidden #sidebar {
 @media (max-width: 760px) {
     /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
        pod niego i zwęża się do samych liczb. Odsunięty o tyle co zakładki
-       Mapa/Trasy (patrz #view-tabs/.toast) plus wcięcie ekranu na dole -
+       Mapa/Trasy/Rozkład (patrz #view-tabs/.toast) plus wcięcie ekranu na dole -
        bez tego pasek chował się pod zakładkami na telefonach z home
        indicatorem (np. w zainstalowanej aplikacji). Nie ma już nad sobą
        przycisków, więc wycinek nie musi ich omijać - liczy się tylko to,
@@ -1754,7 +1754,7 @@ body.dev-open #flow-panel { right: 322px; }
 .toast .toast-close:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
 
 @media (max-width: 760px) {
-    /* Nad zakładkami Mapa/Trasy, żeby żadnej z nich nie zasłaniać. */
+    /* Nad zakładkami Mapa/Trasy/Rozkład, żeby żadnej z nich nie zasłaniać. */
     .toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
 
@@ -2339,10 +2339,6 @@ ul.tt-legend {
 .tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
 .tt-more:hover { background: #e8edf3; }
 
-/* Przełącznik trybu w zakładkach - tylko telefon (pływające ◷ jest tam
-   schowane razem z ☰). */
-.tab-icon { display: none; }
-
 /* --------------------------------------------------------------- RWD --- */
 
 @media (max-width: 760px) {
@@ -2392,21 +2388,8 @@ ul.tt-legend {
        myliły, a przy schowanym ☰ nie byłoby czym go odsłonić. */
     .icon-button.floating { display: none; }
 
-    /* ...a razem z ☰ znika też pływający przełącznik trybu, więc rozkłady
-       dostają swoje miejsce w pasku zakładek. */
-    .tab-icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 44px;
-        border: none;
-        background: transparent;
-        color: var(--ink-soft);
-        font-size: 18px;
-        cursor: pointer;
-    }
-
-    .tab-icon.active { color: var(--accent); }
+    /* ...a razem z ☰ znika też pływający przełącznik trybu - rozkłady mają
+       tu własną zakładkę, równą dwóm pozostałym. */
 
     /* W trybie rozkładów widok mapy pokazuje samą kartę rozkładu - tak jak
        w wyszukiwarce pokazuje samą kartę wyszukiwania. */

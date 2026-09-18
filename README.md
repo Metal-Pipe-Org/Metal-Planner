@@ -34,8 +34,8 @@ domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
 ## Rozkłady jazdy — linie i przystanki
 
 Obok wyszukiwarki połączeń panel ma drugi tryb, przełączany przyciskiem
-**◷ Rozkłady** tuż obok ← (chowania panelu); na telefonie ten sam przycisk
-jest w pasku zakładek na dole. Oba tryby zajmują to samo miejsce — wejście w rozkłady
+**◷ Rozkłady** tuż obok ← (chowania panelu); na telefonie jest to trzecia
+zakładka na dole, „Rozkład", obok „Mapy" i „Tras". Oba tryby zajmują to samo miejsce — wejście w rozkłady
 chowa okienko wyszukiwania, wyjście przywraca je razem z tym, co było
 narysowane na mapie, bez ponownego szukania.
 

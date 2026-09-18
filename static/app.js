@@ -114,21 +114,44 @@ timeInput.addEventListener('blur', () => {
 const viewTabs = $('view-tabs');
 const tabCount = $('tab-count');
 
-function setView(view) {
+/** Zakładki są trzy, a stan, który opisują, ma dwa wymiary: widok
+    (mapa/lista) i tryb panelu (wyszukiwarka/rozkłady - patrz timetable.js).
+    "Trasy" i "Rozkład" to ta sama lista w dwóch trybach, więc podświetlenie
+    liczy się z obu klas na <body>, zamiast pamiętać ostatnio kliknięte:
+    w tryb rozkładów wchodzi się także spoza paska (pływające ◷, przycisk
+    "trasa" przy propozycji) i zakładki mają za tym nadążyć. */
+function syncTabs() {
     if (!viewTabs) return;
-    document.body.classList.toggle('view-list', view === 'list');
-    document.body.classList.toggle('view-map', view !== 'list');
+    const current = !document.body.classList.contains('view-list') ? 'map'
+        : document.body.classList.contains('mode-timetable') ? 'timetable'
+        : 'list';
     for (const tab of viewTabs.querySelectorAll('.tab')) {
-        const on = tab.dataset.view === view;
+        const on = tab.dataset.view === current;
         tab.classList.toggle('active', on);
         tab.setAttribute('aria-pressed', String(on));
     }
 }
 
+/** Sam widok; trybu panelu NIE rusza. Rozkłady wołają to po wczytaniu treści
+    ("pokaż listę"), a nie po to, żeby wrócić do wyszukiwarki. */
+function setView(view) {
+    if (!viewTabs) return;
+    document.body.classList.toggle('view-list', view === 'list');
+    document.body.classList.toggle('view-map', view !== 'list');
+    syncTabs();
+}
+
 if (viewTabs) {
     viewTabs.addEventListener('click', event => {
         const tab = event.target.closest('.tab');
-        if (tab) setView(tab.dataset.view);
+        if (!tab) return;
+        const view = tab.dataset.view;
+        // "Mapa" zostawia tryb taki, jaki jest: w rozkładach mapa to sposób
+        // wybrania przystanku (klik w słupek), a nie wyjście z rozkładów.
+        if (view !== 'map' && window.timetableMode) {
+            window.timetableMode.setMode(view === 'timetable');
+        }
+        setView(view === 'map' ? 'map' : 'list');
     });
     setView('map');
 }
@@ -4097,7 +4120,7 @@ refreshCarLayer();
 refreshBikeLayer();
 
 window.plannerBridge = {
-    map, esc, fitTo, setView, setBaseDim, renderVehicles,
+    map, esc, fitTo, setView, syncTabs, setBaseDim, renderVehicles,
     attachAutocomplete, suggestionsFor, suggestionHtml,
     // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
     // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne

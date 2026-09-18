@@ -173,8 +173,9 @@ function addRoute(path, mode) {
 
 // ------------------------------------------------------ przełącznik ----
 
-const modeButtons = [$('mode-toggle'), $('mode-toggle-m')].filter(Boolean);
-const tabLabel = $('tab-list-label');
+// Na telefonie tryb przełącza zakładka "Rozkład" (patrz #view-tabs), tu
+// zostaje samo pływające ◷ z szerokiego ekranu.
+const modeButtons = [$('mode-toggle')].filter(Boolean);
 
 const active = () => document.body.classList.contains('mode-timetable');
 
@@ -188,7 +189,7 @@ function setMode(on) {
         button.classList.toggle('active', on);
         button.setAttribute('aria-pressed', String(on));
     }
-    if (tabLabel) tabLabel.textContent = on ? 'Rozkład' : 'Trasy';
+    B.syncTabs();
 
     if (on) {
         document.body.classList.remove('panel-hidden');
@@ -208,6 +209,10 @@ for (const button of modeButtons) {
 
 // Klik w słupek na mapie: w tym trybie znaczy "pokaż rozkład tego przystanku".
 window.timetableMode = {
+    /** Wejście i wyjście dla paska zakładek - tam "Rozkład" stoi obok "Tras"
+        jako trzeci widok, a nie jako przełącznik czegoś już wybranego. */
+    setMode,
+
     pickStop(name) {
         if (!active() || !name) return false;
         queryInput.value = B.prettyStopName(name);
