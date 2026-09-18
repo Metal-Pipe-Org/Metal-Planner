@@ -126,13 +126,19 @@ nie zabrało wyników sprzed chwili.
 Nad polami stoi przełącznik **Stoję tutaj / Jestem w pojeździe**. Drugi tryb
 zamienia „skąd" na trzy pola — linia, kierunek i najbliższy przystanek — bo
 pasażer w jadącym autobusie nie stoi w żadnym miejscu, które dałoby się wpisać
-w „skąd" (patrz sekcja „Start z pokładu pojazdu" i `onboard.py`). Znika wtedy
+w „skąd" (patrz sekcja „Start z pokładu pojazdu" i `onboard.py`). Każde z nich
+ma PODPIS nad sobą, nie tylko placeholder: ten znika razem z wpisaniem
+wartości, a wtedy „113 / KRZYKI / Wojszyce" to trzy nazwy, o których nie
+wiadomo, która jest którą. Podpis dostaje też pole celu — w zwykłym trybie
+mówi to szyna z kropkami, a z pokładu jej nie ma. Znika wtedy
 szyna z kropką startu i ⇅ (nie da się zamienić miejscami pojazdu z celem),
 a klik w mapę ustawia sam cel. Komplet zwija się do JEDNEJ linijki
 („113 · Wojszyce · w stronę GALERIA DOMINIKAŃSKA · zmień") — trzy pola są
 potrzebne, dopóki się wybiera, a potem niosą jedno zdanie i zabierają trzy
 rzędy panelu, przez które nie widać propozycji; klik rozwija je z zachowanym
-wyborem. Zwijamy wyłącznie wybór KOMPLETNY, więc zmiana linii pokazuje pola
+wyborem. W zwiniętej linijce rolę podpisów grają plakietka linii, znaczek
+słupka (ten sam, co przy przystankach na liście podpowiedzi) i słowa
+„w stronę". Zwijamy wyłącznie wybór KOMPLETNY, więc zmiana linii pokazuje pola
 z powrotem sama. Wybór pojazdu nie przeżywa odświeżenia strony — sam
 przełącznik owszem.
 
@@ -1010,7 +1016,8 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   pojazdem" i przystanek wysiadania, a nad listą stoi rozpoznany kurs — bo
   pomyłka w kierunku daje wyniki wyglądające równie sensownie, tylko dla kogoś
   innego. Wybrany komplet zwija się do jednej linijki z przyciskiem „zmień",
-  żeby trzy pola nie zasłaniały wyników. Testy: 380, było 370.
+  żeby trzy pola nie zasłaniały wyników, a pola mają podpisy (placeholder
+  znika po wpisaniu, więc sam nie wystarczy). Testy: 380, było 370.
 - **2026-09-15** — **dowolna stacja tylko dla kolei, dostawczaki osobno,
   porządek w Ustawieniach Developerskich** (zgłoszenia #114, #130, #131, #132;
   punkt 15 kontraktu). „Dowolna stacja w mieście" to już same perony, bez

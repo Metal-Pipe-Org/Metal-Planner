@@ -329,7 +329,22 @@ body.panel-hidden #sidebar {
    "stoję tutaj". */
 .onboard-fields[hidden] { display: none; }
 
-.onboard-fields .ac-field { grid-column: 1 / -1; }
+/* Pole z podpisem: podpis nad kontrolką, bo obie listy stoją obok siebie
+   w dwóch kolumnach i na podpis z boku nie ma tam szerokości. */
+.ob-field {
+    min-width: 0;
+}
+
+.ob-field-line { grid-column: 1 / -1; }
+
+.ob-field-label {
+    display: block;
+    margin: 0 0 3px 2px;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
 
 .onboard-fields input,
 .onboard-fields select {
@@ -389,6 +404,10 @@ body.panel-hidden #sidebar {
 /* Nazwa przystanku jest tu najważniejsza, ale to kierunek bywa długi -
    ucinamy więc całą linijkę, a nie łamiemy jej na dwie: cały sens zwinięcia
    to jeden rząd. */
+/* Znaczek słupka w zwiniętej linijce - ten sam, co przy przystankach na
+   liście podpowiedzi, tylko bez jej marginesów (odstępy daje tu flex). */
+.onboard-summary .ac-pin { margin: 0; }
+
 .ob-summary-text {
     flex: 1;
     min-width: 0;
@@ -421,6 +440,11 @@ body.start-onboard .endpoints .rail,
 body.start-onboard .endpoints #swap,
 body.start-onboard .endpoint-fields .ac-field:first-child,
 body.start-onboard .hint-place { display: none; }
+
+/* Podpis celu zastępuje czerwoną kropkę szyny, która z pokładu znika razem
+   z polem "skąd" - w zwykłym trybie jest zbędny, bo kropka mówi to samo. */
+.endpoint-fields .for-end { display: none; }
+body.start-onboard .endpoint-fields .for-end { display: block; }
 
 .hint-onboard { display: none; }
 body.start-onboard .hint-onboard { display: block; }

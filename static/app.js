@@ -3225,7 +3225,10 @@ function syncOnboardView() {
         `<span class="badge ${esc(kurs.mode || 'other')}">${esc(kurs.num)}</span>`
         // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
         // linijki ucina się koniec, a stracić wolno kierunek (kontekst),
-        // nie przystanek, przy którym pojazd zaraz stanie.
+        // nie przystanek, przy którym pojazd zaraz stanie. Znaczek słupka
+        // mówi, że to przystanek, tak samo jak na liście podpowiedzi - bez
+        // niego zwinięta linijka to trzy nazwy bez podpisów.
+        + `<span class="ac-pin" aria-hidden="true"></span>`
         + `<span class="ob-summary-text"><b>${esc(przystanek)}</b>`
         + ` · w stronę ${esc(kierunek.headsign)}</span>`
         + `<span class="ob-summary-edit" aria-hidden="true">zmień</span>`;

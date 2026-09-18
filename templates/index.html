@@ -113,20 +113,36 @@
           w jadącym autobusie ma trafić w odpowiedź, nie w literówkę.
         #}
         <div id="onboard-fields" class="onboard-fields" hidden>
-            <div class="ac-field">
-                <input type="text" id="ob-line" autocomplete="off" role="combobox"
-                       aria-label="Linia, którą jadę" aria-autocomplete="list"
-                       aria-expanded="false" aria-controls="ob-line-list"
-                       placeholder="Linia — np. 145">
-                <ul class="ac-list" id="ob-line-list" role="listbox" hidden
-                    aria-label="Podpowiedzi linii"></ul>
+            {#
+              Podpisy nad polami, a nie same placeholdery: placeholder znika
+              razem z wpisaniem wartości, a wtedy „113 / KRZYKI / Wojszyce"
+              nie mówi już, co jest czym. Zwykłe <label for>, więc klik
+              w podpis ustawia kursor w polu i czytnik ekranu czyta to samo,
+              co widać.
+            #}
+            <div class="ob-field ob-field-line">
+                <label class="ob-field-label" for="ob-line">Linia</label>
+                <div class="ac-field">
+                    <input type="text" id="ob-line" autocomplete="off" role="combobox"
+                           aria-autocomplete="list" aria-expanded="false"
+                           aria-controls="ob-line-list"
+                           placeholder="np. 145">
+                    <ul class="ac-list" id="ob-line-list" role="listbox" hidden
+                        aria-label="Podpowiedzi linii"></ul>
+                </div>
             </div>
-            <select id="ob-dir" aria-label="Kierunek jazdy" disabled>
-                <option value="">Kierunek</option>
-            </select>
-            <select id="ob-stop" aria-label="Najbliższy przystanek" disabled>
-                <option value="">Przystanek</option>
-            </select>
+            <div class="ob-field">
+                <label class="ob-field-label" for="ob-dir">Kierunek</label>
+                <select id="ob-dir" disabled>
+                    <option value="">Kierunek</option>
+                </select>
+            </div>
+            <div class="ob-field">
+                <label class="ob-field-label" for="ob-stop">Najbliższy przystanek</label>
+                <select id="ob-stop" disabled>
+                    <option value="">Przystanek</option>
+                </select>
+            </div>
             <p class="onboard-msg" id="ob-msg" role="status" hidden></p>
         </div>
 
@@ -158,6 +174,11 @@
                     <ul class="ac-list" id="start-list" role="listbox" hidden
                         aria-label="Podpowiedzi przystanków"></ul>
                 </div>
+                {# Z pokładu pojazdu znika szyna z kropkami, a razem z nią
+                   jedyne oznaczenie, które z pól jest celem - a wpisana nazwa
+                   przystanku wygląda tak samo jak nazwa przystanku wyżej.
+                   Podpis wchodzi więc na miejsce kropki (patrz style.css). #}
+                <label class="ob-field-label for-end" for="end">Dokąd jadę</label>
                 <div class="ac-field">
                     <input type="text" id="end" autocomplete="off" role="combobox"
                            aria-label="Przystanek docelowy" aria-autocomplete="list"
