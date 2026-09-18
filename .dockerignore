@@ -1,5 +1,6 @@
 .git
 .gitignore
+.DS_Store
 .gitattributes
 .claude/
 .vscode/
@@ -11,6 +12,7 @@ venv/
 env/
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # Baza rozkładów mieszka w wolumenie, nie w obrazie.
 data/

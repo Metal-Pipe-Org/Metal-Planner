@@ -274,12 +274,31 @@ past it, it simply stops growing. Widening the window can now only ever
 leave a placeholder unchanged or replace it with something real and
 better — never make it worse.
 
-**The refine loop.** For every exit, the algorithm looks at what you could
-*actually, concretely* transfer onto right there, among the trips already
-in the pool, and uses that real number instead when one exists. This
-refinement is a short loop (at most 8 passes) because one segment's refined
-value can depend on another segment's refined value, and it settles down
-once nothing changes anymore.
+**Reading the real value.** For every exit, the algorithm asks a profile of
+the whole network — "I get off here at this time; when is the earliest I can
+be at the target?" — and uses that answer. The profile
+(`planner._target_profile`) is one backward scan over the same connections,
+Pareto-pruned per stop, so the answer is *read from the schedule* rather than
+estimated, and it covers every stop in the window, not just the ones already
+drawn. When the profile says INF, that is a statement, not a gap: getting off
+*here* leads nowhere within the window — almost always because the only way
+onward is to stay on this very vehicle and there isn't even a transfer buffer
+to spare. Such a position simply takes its value from the suffix, i.e. from
+riding on. The placeholder above survives only past a course's last useful
+exit, and is still never shown as a clock time.
+
+Until 2026-08-29 this was instead a fixed-point loop (at most 8 passes) over
+continuations *visible on the map*: take a neighbouring segment's finished
+value and shift it by how much later you board (`suffix[j] + shift`). That
+assumed a rigid timetable behaves elastically — that the entire downstream
+chain slides by exactly the boarding delay. It doesn't: a later run drops a
+connection and the arrival jumps by a quarter of an hour, not by the minute
+you were late. Worse, the result was flagged as *read* even though it was
+derived from an estimate (possibly of another estimate), so the map printed
+it as a definite time. On `LEŚNICA → BARTOSZOWICE, 16:44` that made 116 of
+232 exits optimistic by up to 10 minutes — and since a value below the
+optimum is clamped to `q = 1.0` anyway, half the map glowed at full
+brightness with nothing behind it.
 
 Once every exit has a final value, brightness for *that exit* is:
 

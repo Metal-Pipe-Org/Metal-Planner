@@ -6,7 +6,8 @@ tras (journeys) jest świadomie poza zakresem.
 
 Numeracja testów odpowiada numeracji punktów kontraktu:
   1. cały wachlarz opcji naraz, jasność ciągła (nie próg pokaż/ukryj)
-  2. okno czasowe liczone względem najszybszej trasy
+  2. próg jakości (względem najszybszej trasy) staje tam, gdzie narysowana
+     sieć osiąga docelową gęstość; "pokaż więcej" dokłada jej jednostki
   3. jasność W KA�ŻDYM PUNKCIE kursu - kurs może wyjść na mapie jako kilka
      kawałków o różnej jasności, cięte dokładnie tam, gdzie mijamy realną,
      lepszą przesiadkę
@@ -23,6 +24,9 @@ Numeracja testów odpowiada numeracji punktów kontraktu:
   9. pełny zakres jasności zawsze wykorzystany - liczony względem
      najgorszej FAKTYCZNIE pokazanej opcji, nie względem pełnej szerokości
      okna czasowego (poszerzanie okna nie rozjaśnia już pokazanych opcji)
+ 11. węzeł przesiadkowy mówi, co się tu dzieje z każdą linią - wsiadasz tu
+     pierwszy raz, jedziesz dalej czymś, czym można już jechać, czy właśnie
+     tym przyjechałeś (planner._transfer_nodes, pole `flow`)
 """
 
 import datetime
@@ -47,21 +51,152 @@ def _segs_by_num(result, num, kind):
 
 # --------------------------------------------------------------------- 2 ---
 
-def test_deadline_scales_with_best_route_duration():
-    # 150% -> 50% czasu trasy jako naddatek
-    d = planner._deadline(1000, 0, extra_pct=150, extra_floor_sec=0, extra_cap_sec=99999)
-    assert d == 1000 + 500
+def _gestosc_po_minutach(schodki):
+    """network_at dla _choose_deadline: gęstość rośnie schodkami
+    {od_minuty: gęstość}, a `pytane` zapisuje, o które minuty pytano."""
+    pytane = []
+
+    def network_at(deadline):
+        minuty = deadline // 60
+        pytane.append(minuty)
+        return {"density": max(g for od, g in schodki.items() if od <= minuty)}
+    return network_at, pytane
 
 
-def test_deadline_floor_protects_very_short_routes():
-    # 3-minutowa trasa (180 s) przy 110% to tylko 18 s naddatku - floor ma to podnieść
-    d = planner._deadline(180, 0, extra_pct=110, extra_floor_sec=600, extra_cap_sec=99999)
-    assert d == 180 + 600
+def test_threshold_is_the_latest_minute_that_keeps_the_target_density():
+    """Próg stoi na OSTATNIEJ pełnej minucie, przy której sieć nie jest gęstsza
+    niż cel - nie na pierwszej, przy której go dobija. Minuty są skutkiem."""
+    network_at, _ = _gestosc_po_minutach({0: 1.0, 7: 2.0, 20: 5.0})
+    assert planner._choose_deadline(network_at, 0, 2.0) == (19 * 60, False)
+    assert planner._choose_deadline(network_at, 0, 1.5) == (6 * 60, False)
 
 
-def test_deadline_cap_limits_very_long_routes():
-    d = planner._deadline(10_000, 0, extra_pct=200, extra_floor_sec=0, extra_cap_sec=3600)
-    assert d == 10_000 + 3600
+def test_the_fastest_route_stays_even_when_it_alone_is_too_dense():
+    network_at, _ = _gestosc_po_minutach({0: 3.0})
+    assert planner._choose_deadline(network_at, 600, 1.0) == (600, False)
+
+
+def test_a_sparse_relation_stops_at_the_scan_ceiling():
+    """Dalej niż MAX_THRESHOLD_SEC za najszybszym przyjazdem się nie szuka -
+    i odpowiedź mówi, że to sufit, a nie osiągnięta gęstość."""
+    network_at, pytane = _gestosc_po_minutach({0: 0.1})
+    assert planner._choose_deadline(network_at, 0, 1.0) == (planner.MAX_THRESHOLD_SEC, True)
+    assert max(pytane) * 60 == planner.MAX_THRESHOLD_SEC
+
+
+def test_the_search_never_probes_far_past_the_answer():
+    """Koszt jednej mapy rośnie z progiem ponadliniowo (0,3 s przy 45 min,
+    12 s przy 120 min), więc szukanie nie może skakać daleko za cel: skok
+    z 32 na 64 minuty kosztował 12 s tam, gdzie cel leżał w 35. minucie."""
+    network_at, pytane = _gestosc_po_minutach({0: 1.0, 36: 9.0})
+    assert planner._choose_deadline(network_at, 0, 2.0) == (35 * 60, False)
+    assert max(pytane) <= 35 * 1.5
+
+
+def _narysowane(*przebiegi):
+    """Narysowane kursy dla _corridor_km: każdy przebieg w całości."""
+    kept = [{"stops": list(p)} for p in przebiegi]
+    return kept, {id(seg): (0, len(seg["stops"])) for seg in kept}
+
+
+def test_lines_lying_on_each_other_count_once_towards_density():
+    """Dwadzieścia numerów jednym korytarzem to w oku jedna kreska - druga
+    linia tymi samymi przystankami nie dokłada ani metra, inny korytarz tak."""
+    day = make_day([
+        {"trip_id": "a", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("M", 60, 60), ("E", 120, 120)]},
+        {"trip_id": "b", "label": "Tramwaj 2",
+         "stops": [("S", 0, 0), ("X", 60, 60), ("E", 120, 120)]},
+    ])
+    jedna = planner._corridor_km(day, *_narysowane(["S", "M", "E"]))
+    na_sobie = planner._corridor_km(day, *_narysowane(["S", "M", "E"], ["S", "M", "E"]))
+    obok = planner._corridor_km(day, *_narysowane(["S", "M", "E"], ["S", "X", "E"]))
+    assert jedna > 0
+    assert na_sobie == jedna
+    assert obok > jedna
+
+
+def test_two_platforms_of_one_place_are_one_corridor():
+    """Tramwaj i autobus stają na osobnych słupkach tego samego placu - to
+    wciąż jedna ulica, nie dwie."""
+    day = make_day([
+        {"trip_id": "t", "label": "Tramwaj 1", "stops": [("S_t", 0, 0), ("E_t", 60, 60)]},
+        {"trip_id": "b", "label": "Autobus 2", "stops": [("S_b", 0, 0), ("E_b", 60, 60)]},
+    ], names={"S_t": "Plac", "S_b": "Plac", "E_t": "Cel", "E_b": "Cel"})
+    tramwaj = planner._corridor_km(day, *_narysowane(["S_t", "E_t"]))
+    oba = planner._corridor_km(day, *_narysowane(["S_t", "E_t"], ["S_b", "E_b"]))
+    assert oba == tramwaj
+
+
+def test_the_frame_is_never_narrower_than_a_kilometre():
+    day = make_day([{"trip_id": "a", "label": "Tramwaj 1",
+                     "stops": [("S", 0, 0), ("E", 60, 60)]}])
+    day.stop_coords["E"] = day.stop_coords["S"]      # relacja w jednym punkcie
+    assert planner._frame_km2(day, [], ["S", "E"]) == planner.MIN_FRAME_SIDE_KM ** 2
+
+
+def test_density_is_measured_per_side_of_the_frame_as_on_screen():
+    """Każdy kadr wpasowany jest w to samo okno, a kreska ma stałą grubość:
+    kadr dwa razy szerszy (cztery razy większy) mieści na ekranie dwa razy
+    więcej korytarza, nie cztery."""
+    assert planner._map_density(2.0, 1.0) == planner._map_density(4.0, 4.0)
+
+
+def _jeden_korytarz_i_objazd_day():
+    """Trzy linie jednym korytarzem S -> E (w celu o 600, 900 i 1400) i jedna
+    innym, przez X (w celu o 1000). Sam korytarz S-E ma gęstość ~1,5 km/√km²
+    w swoim kadrze, z objazdem ~6,0."""
+    return make_day([
+        {"trip_id": "fast", "label": "Tramwaj 1",
+         "stops": [("S", 0, 0), ("E", 600, 600)]},
+        {"trip_id": "mid", "label": "Autobus 2",
+         "stops": [("S", 0, 0), ("E", 900, 900)]},
+        {"trip_id": "slower", "label": "Autobus 4",
+         "stops": [("S", 0, 0), ("E", 1400, 1400)]},
+        {"trip_id": "obok", "label": "Autobus 7",
+         "stops": [("S", 0, 0), ("X", 500, 500), ("E", 1000, 1000)]},
+    ], names={"S": "Start", "E": "Cel", "X": "Objazd"})
+
+
+def _linie(result):
+    return sorted({s["num"] for s in result["segments"]}, key=int)
+
+
+def test_the_threshold_stops_at_a_new_corridor_and_leaves_no_holes(install_day):
+    """Linie jednym korytarzem nie zjadają gęstości, więc próg idzie za
+    Autobusem 2 dalej - i staje dopiero przed Autobusem 7, który dokłada
+    naprawdę inny korytarz. Autobus 4 nic by nie dołożył, a i tak go nie ma:
+    jest gorszy od czegoś, co się nie zmieściło, a jeden próg nie ma dziur."""
+    install_day(_jeden_korytarz_i_objazd_day())
+    wynik = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6)
+    assert "error" not in wynik
+    assert _linie(wynik) == ["1", "2"]
+    assert wynik["deadline_sec"] == 960          # ostatnia minuta przed 1000
+    assert wynik["at_ceiling"] is False
+
+
+def test_show_more_adds_whole_starting_densities(install_day):
+    """"Pokaż więcej" podnosi cel o jedną WYJŚCIOWĄ gęstość na kliknięcie -
+    to jednostki gęstości, nie minut: przy x3 objazd wciąż jest za gęsty,
+    przy x4 mieści się już wszystko do sufitu skanu. Więcej niż trzy
+    kliknięcia serwer nie przyjmuje."""
+    install_day(_jeden_korytarz_i_objazd_day())
+    x3 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=2)
+    x4 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=3)
+    ponad = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=10)
+
+    assert _linie(x3) == ["1", "2"]
+    assert _linie(x4) == ["1", "2", "4", "7"]
+    assert x4["at_ceiling"] is True
+    assert x4["deadline_sec"] == 600 + planner.MAX_THRESHOLD_SEC
+    assert ponad["more"] == planner.MAX_MAP_MORE
+    assert ponad["deadline_sec"] == x4["deadline_sec"]
+
+
+def test_the_density_slider_has_a_server_side_ceiling(install_day):
+    install_day(_jeden_korytarz_i_objazd_day())
+    wynik = planner.plan_flow("Start", "Cel", when=WHEN, density=999)
+    assert wynik["density"] == planner.MAX_MAP_DENSITY
 
 
 # ------------------------------------------------------------------- 1+2 ---
@@ -83,10 +218,11 @@ def _three_tier_fan_day():
     return make_day(trips, names={"S": "Start", "E": "Cel"})
 
 
-def test_whole_fan_shown_with_continuous_brightness_and_window_cutoff(install_day):
+def test_whole_fan_shown_with_continuous_brightness_and_window_cutoff(install_day, pin_deadline):
     """Cały sensowny wachlarz (nie tylko najszybsza trasa) jest pokazany,
     jasność jest ciągła (nie 0/1), a coś poza oknem czasowym w ogóle się
     nie pojawia."""
+    pin_deadline(2400)   # dawne okno 110%, co najmniej 30 min
     day = _three_tier_fan_day()
     install_day(day)
 
@@ -95,7 +231,6 @@ def test_whole_fan_shown_with_continuous_brightness_and_window_cutoff(install_da
     # "slower" (1400) w oknie, "excluded" (5000) wciąż poza nim.
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=110, extra_floor_sec=1800, extra_cap_sec=999999,
     )
     assert "error" not in result
 
@@ -128,19 +263,19 @@ def _skip_a_better_transfer_day():
     return make_day(trips, names={"S": "Start", "M": "Srodek", "E": "Cel"})
 
 
-def test_single_course_splits_brightness_at_a_real_skipped_transfer(install_day):
+def test_single_course_splits_brightness_at_a_real_skipped_transfer(install_day, pin_deadline):
     """To jest sedno punktu 3 kontraktu: jadąc autobusem, mijamy w Środku
     realną, szybszą przesiadkę na tramwaj (ta przesiadka to najlepsza trasa
     w ogóle). Dopóki jedziemy do Środka, jasność = jasność najlepszej trasy
     (moglibyśmy tam wysiąść i się przesiąść). Jadąc dalej BEZ przesiadki,
     jasność ma spaść - jeden fizyczny kurs autobusu wychodzi na mapie jako
     DWA kawałki o różnej jasności, nie jeden płaski odcinek."""
+    pin_deadline(1400)   # dawne okno 200%
     day = _skip_a_better_transfer_day()
     install_day(day)
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
     assert result["best_arrival"] == planner._fmt_time(700)
@@ -193,10 +328,11 @@ def test_single_course_splits_brightness_at_a_real_skipped_transfer(install_day)
     assert "corridor" not in start_to_mid
 
 
-def test_no_flicker_without_a_real_alternative_to_skip(install_day):
+def test_no_flicker_without_a_real_alternative_to_skip(install_day, pin_deadline):
     """Bez konkurencyjnej przesiadki po drodze kurs ma jedną, stałą jasność
     na całej narysowanej długości - punkt 3 nie ma tworzyć podziałów tam,
     gdzie nic naprawdę się nie zmienia."""
+    pin_deadline(2400)   # dawne okno 200%
     trips = [
         {"trip_id": "bus", "label": "Autobus 7",
          "stops": [("S", 0, 0), ("M", 400, 420), ("E", 1200, 1200)]},
@@ -206,7 +342,6 @@ def test_no_flicker_without_a_real_alternative_to_skip(install_day):
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
     bus_pieces = _segs_by_num(result, "7", "bus")
@@ -224,7 +359,7 @@ def test_exit_brightness_is_non_increasing_along_a_course(install_day):
     install_day(day)
     dep_sec = 0
     best_stop, best_arr, _ = planner._scan(day, {"S"}, {"E"}, dep_sec)
-    deadline = planner._deadline(best_arr, dep_sec, extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999)
+    deadline = 2 * best_arr - dep_sec    # szeroko: drugie tyle, co najszybsza trasa
     earliest, arrived_by, trip_board = planner._forward(day, {"S"}, dep_sec, deadline)
     latest = planner._backward(day, {"E"}, dep_sec, deadline)
     origin_latest = max(latest[s] for s in {"S"} if s in latest)
@@ -232,7 +367,8 @@ def test_exit_brightness_is_non_increasing_along_a_course(install_day):
         day, dep_sec, deadline, earliest, arrived_by, trip_board,
         latest, origin_latest, {"E"},
     )
-    planner._refine_brightness(day, segs, {"E"}, deadline, best_arr)
+    profile = planner._target_profile(day, {"E"}, dep_sec, deadline)
+    planner._refine_brightness(day, segs, {"E"}, deadline, best_arr, profile)
 
     for seg in segs:
         qs = seg["exit_q"]
@@ -243,26 +379,19 @@ def test_exit_brightness_is_non_increasing_along_a_course(install_day):
 
 # ----------------------------------------------------------------------- 9 -
 
-def test_brightness_uses_full_range_regardless_of_window_width(install_day):
-    """Poszerzenie suwaka okna czasowego nie ma prawa rozjaśniać już
-    pokazanych opcji - jasność jest liczona względem najgorszej opcji,
-    która FAKTYCZNIE się pokazuje, nie względem pełnej (dowolnie szerokiej)
-    szerokości okna. Ten sam wachlarz tras (fast/mid/slower), dwa różne,
-    dużo różniące się szerokością okna (naddatek podbity przez
-    extra_floor_sec, bo sam suwak % ma sufit 200% - patrz MAX_EXTRA_PCT) -
-    obie wciąż mieszczące "slower", a nie mieszczące "excluded" - mają dać
-    IDENTYCZNĄ jasność."""
+def test_brightness_uses_full_range_regardless_of_window_width(install_day, pin_deadline):
+    """Przesunięcie progu nie ma prawa rozjaśniać już pokazanych opcji -
+    jasność jest liczona względem najgorszej opcji, która FAKTYCZNIE się
+    pokazuje, nie względem miejsca progu. Ten sam wachlarz tras
+    (fast/mid/slower), dwa dużo różniące się progi - oba wciąż mieszczące
+    "slower", a nie mieszczące "excluded" - mają dać IDENTYCZNĄ jasność."""
     day = _three_tier_fan_day()
     install_day(day)
 
-    narrow = planner.plan_flow(
-        "Start", "Cel", when=WHEN,
-        extra_pct=110, extra_floor_sec=900, extra_cap_sec=999999,    # deadline 1500
-    )
-    wide = planner.plan_flow(
-        "Start", "Cel", when=WHEN,
-        extra_pct=110, extra_floor_sec=1800, extra_cap_sec=999999,   # deadline 2400
-    )
+    pin_deadline(1500)
+    narrow = planner.plan_flow("Start", "Cel", when=WHEN)
+    pin_deadline(2400)
+    wide = planner.plan_flow("Start", "Cel", when=WHEN)
     assert "error" not in narrow and "error" not in wide
 
     # membership niezmieniona w obu oknach (excluded=5000 dalej poza obydwoma)
@@ -278,7 +407,7 @@ def test_brightness_uses_full_range_regardless_of_window_width(install_day):
         )
 
 
-def test_previously_worst_option_brightens_when_a_new_worse_one_appears(install_day):
+def test_previously_worst_option_brightens_when_a_new_worse_one_appears(install_day, pin_deadline):
     """Druga strona punktu 9: gdy poszerzenie okna FAKTYCZNIE wprowadza nową,
     gorszą opcję, to dół skali przesuwa się niżej - opcja, która wcześniej
     była najgorsza pokazana (i świeciła na 0,0), ma się realnie rozjaśnić,
@@ -298,14 +427,10 @@ def test_previously_worst_option_brightens_when_a_new_worse_one_appears(install_
     day = make_day(trips, names={"S": "Start", "E": "Cel"})
     install_day(day)
 
-    narrow = planner.plan_flow(
-        "Start", "Cel", when=WHEN,
-        extra_pct=110, extra_floor_sec=900, extra_cap_sec=999999,    # deadline 1500
-    )
-    wide = planner.plan_flow(
-        "Start", "Cel", when=WHEN,
-        extra_pct=110, extra_floor_sec=1800, extra_cap_sec=999999,   # deadline 2400
-    )
+    pin_deadline(1500)
+    narrow = planner.plan_flow("Start", "Cel", when=WHEN)
+    pin_deadline(2400)
+    wide = planner.plan_flow("Start", "Cel", when=WHEN)
     assert "error" not in narrow and "error" not in wide
 
     assert _segs_by_num(narrow, "9", "tram") == []          # 2300 poza wąskim oknem
@@ -400,7 +525,7 @@ def _origin_latest_scenario_day():
     return make_day(trips, names={"S": "Start", "M": "Srodek", "P": "Posrodku", "E": "Cel"})
 
 
-def test_backtrack_reference_ignores_unrelated_faster_option_from_origin(install_day):
+def test_backtrack_reference_ignores_unrelated_faster_option_from_origin(install_day, pin_deadline):
     """Regresja (znaleziona 2026-08-12, ta sama zgłoszona przez użytkownika
     "trasy znikają przy poszerzeniu okna" - druga, niezależna przyczyna).
     origin_latest (punkt odniesienia reguły cofnięcia przy wyborze miejsca
@@ -414,14 +539,10 @@ def test_backtrack_reference_ignores_unrelated_faster_option_from_origin(install
     day = _origin_latest_scenario_day()
     install_day(day)
 
-    narrow = planner.plan_flow(
-        "Start", "Cel", when=WHEN,
-        extra_pct=110, extra_floor_sec=320, extra_cap_sec=999999,   # deadline 520 - bez Tramwaju 9 (odjazd 600)
-    )
-    wide = planner.plan_flow(
-        "Start", "Cel", when=WHEN,
-        extra_pct=110, extra_floor_sec=500, extra_cap_sec=999999,   # deadline 700 - Tramwaj 9 złapany
-    )
+    pin_deadline(520)      # bez Tramwaju 9 (odjazd 600)
+    narrow = planner.plan_flow("Start", "Cel", when=WHEN)
+    pin_deadline(700)      # Tramwaj 9 złapany
+    wide = planner.plan_flow("Start", "Cel", when=WHEN)
     assert "error" not in narrow and "error" not in wide
     assert narrow["best_arrival"] == planner._fmt_time(200)
     assert wide["best_arrival"] == planner._fmt_time(200)
@@ -443,10 +564,11 @@ def test_backtrack_reference_ignores_unrelated_faster_option_from_origin(install
 
 # ----------------------------------------------------------------------- 4 -
 
-def test_dead_end_branch_never_appears(install_day):
+def test_dead_end_branch_never_appears(install_day, pin_deadline):
     """Kurs prowadzący do przystanku, z którego nie da się już dojechać do
     celu w oknie czasowym, nie ma prawa pojawić się na mapie w ogóle -
     "nie mam fizycznie jak tam być" w sensie użytecznym."""
+    pin_deadline(1000)   # dawne okno 300%
     trips = [
         {"trip_id": "feeder_ok", "label": "Autobus 1",
          "stops": [("S", 0, 0), ("M", 200, 200)]},
@@ -460,7 +582,6 @@ def test_dead_end_branch_never_appears(install_day):
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
     assert result["best_arrival"] == planner._fmt_time(500)
@@ -470,7 +591,7 @@ def test_dead_end_branch_never_appears(install_day):
     assert len(_segs_by_num(result, "2", "tram")) == 1
 
 
-def test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back(install_day):
+def test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back(install_day, pin_deadline):
     """Zgłoszone przez użytkownika 2026-08-15 ("co to za odnoga?"): ogon
     wjeżdżający na pętlę końcową tylko po to, żeby zaraz z niej wrócić.
 
@@ -480,6 +601,7 @@ def test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back(install_day):
     kontynuacja, tylko droga powrotna, więc odcinek Srodek -> PETLA nie ma
     prawa się narysować (punkt 4), mimo że technicznie da się tam
     "przesiąść"."""
+    pin_deadline(900)   # dawne okno 300%
     trips = [
         {"trip_id": "into_loop", "label": "Tramwaj 1",
          "stops": [("S", 0, 0), ("M", 100, 100), ("L", 200, 200)]},
@@ -493,7 +615,6 @@ def test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back(install_day):
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
 
@@ -507,7 +628,7 @@ def test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back(install_day):
         )
 
 
-def test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line(install_day):
+def test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line(install_day, pin_deadline):
     """Zawrócenie liczy się względem CAŁEJ przejechanej drogi, nie tylko
     poprzedniego przystanku.
 
@@ -517,6 +638,7 @@ def test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line(insta
     reguły patrzyła tylko jeden przystanek wstecz ("czy wraca na Srodek?"),
     więc uznawała to za kontynuację i rysowała ogon aż na pętlę. Realna
     przesiadka jest na Wezle i tam ogon ma się kończyć."""
+    pin_deadline(1400)   # dawne okno 300%
     trips = [
         {"trip_id": "into_loop", "label": "Tramwaj 1",
          "stops": [("S", 0, 0), ("A", 100, 100), ("B", 200, 200), ("L", 300, 300)]},
@@ -529,7 +651,6 @@ def test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line(insta
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
 
@@ -545,7 +666,7 @@ def test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line(insta
             )
 
 
-def test_two_tails_propping_each_other_up_are_both_cut_back(install_day):
+def test_two_tails_propping_each_other_up_are_both_cut_back(install_day, pin_deadline):
     """Kontynuacja musi sama być narysowana DALEJ, nie tylko jechać dalej
     w rozkładzie.
 
@@ -555,6 +676,7 @@ def test_two_tails_propping_each_other_up_are_both_cut_back(install_day):
     fizycznie jedzie dalej - i tak wzajemnie się podpierały, zostawiając na
     mapie dwa kikuty kończące się w tym samym miejscu. Kontynuacja liczy
     się tylko wtedy, gdy sama jest narysowana poza ten przystanek."""
+    pin_deadline(1000)   # dawne okno 300%
     # Dwa kursy każdej linii, żeby dało się przesiąść z jednej w drugą w OBIE
     # strony - bez tego "wzajemne podpieranie się" nie powstaje.
     trips = [
@@ -578,7 +700,6 @@ def test_two_tails_propping_each_other_up_are_both_cut_back(install_day):
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=300, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
 
@@ -594,6 +715,129 @@ def test_two_tails_propping_each_other_up_are_both_cut_back(install_day):
                 f"nic nie ma prawa dojeżdżać do {day.stop_names[stop]!r}: "
                 "stamtąd nie da się pojechać dalej, można tylko wrócić"
             )
+
+
+def _origin_passed_after_a_terminus_loop_day():
+    """Realny układ z Sosnowieckiej (zmierzony 2026-08-27): przystanek
+    startowy ma dwa słupki, a linia obsługuje go PO drodze z pętli końcowej.
+
+    Autobus 124 dowozi ze Startu (słupek "w stronę pętli") na PETLA i tam
+    kończy. Z pętli wyjeżdża Autobus 134 i wraca tą samą ulicą - przez
+    Srodek i przez DRUGI słupek Startu - a dopiero potem jedzie w miasto do
+    celu. Pasażer nie ma po co jechać na pętlę: wsiada na drugim słupku
+    Startu, obok. Ale najwcześniejsze możliwe wsiadanie do 134 (a tym samym
+    początek jego segmentu) wypada na PETLI, bo da się tam dojechać
+    124-tką."""
+    trips = [
+        {"trip_id": "into_loop", "label": "Autobus 124",
+         "stops": [("S_in", 0, 0), ("M_in", 60, 60), ("L", 120, 120)]},
+        {"trip_id": "out_of_loop", "label": "Autobus 134",
+         "stops": [("L", 300, 300), ("M_out", 360, 360), ("S_out", 420, 420),
+                   ("P", 700, 700), ("E", 1000, 1000)]},
+        {"trip_id": "alt", "label": "Tramwaj 5",
+         "stops": [("P", 820, 820), ("Q", 950, 950), ("E", 1200, 1200)]},
+    ]
+    return make_day(
+        trips,
+        names={"S_in": "Start", "S_out": "Start", "M_in": "Srodek",
+               "M_out": "Srodek", "L": "PETLA", "P": "Wezel", "Q": "Objazd",
+               "E": "Cel"},
+        siblings={"S_in": ("S_out",), "S_out": ("S_in",),
+                  "M_in": ("M_out",), "M_out": ("M_in",)},
+    )
+
+
+def test_course_passing_the_origin_after_a_loop_is_anchored_at_the_origin(install_day, pin_deadline):
+    """Kotwica początku pyta "czy da się TU wsiąść", nie "czy kurs się tu
+    zaczyna".
+
+    Segment Autobusu 134 zaczyna się na PETLI (tam wypada najwcześniejsze
+    wsiadanie), ale mija przystanek startowy w swoim środku - i to właśnie
+    tam pasażer do niego wsiada. Gdyby kotwica początku patrzyła tylko na
+    PIERWSZY przystanek segmentu, 134 mógłby się zakotwiczyć wyłącznie o
+    124-tkę jadącą na pętlę - a ta słusznie ginie na kotwicy końca (punkt 4:
+    z pętli wraca się po własnych śladach). Wtedy ginie 134, za nim wszystko,
+    co się o niego opierało, i cała mapa schodzi do jednej trasy.
+
+    Zmierzone na żywych danych (Sosnowiecka -> Wojszyce, 15:37): 31
+    kandydatów, 0 zatrzymanych - dokładnie ten układ."""
+    pin_deadline(1580)   # dawne okno 300%
+    day = _origin_passed_after_a_terminus_loop_day()
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+    )
+    assert "error" not in result
+    assert result["best_arrival"] == planner._fmt_time(1000)
+
+    # 134 musi być na mapie i musi być narysowany OD przystanku startowego -
+    # stamtąd się w niego wsiada.
+    onward = _segs_by_num(result, "134", "bus")
+    assert onward != [], "kurs mijający start w środku musi się zakotwiczyć na starcie"
+    assert any(_coords_of(day, ["S_out"])[0] in seg["path"] for seg in onward)
+
+    # ...a skoro sieć się nie rozpadła, widać też przesiadkę na Wezle, czyli
+    # cały wachlarz, a nie samą najszybszą trasę (punkt 1).
+    assert _segs_by_num(result, "5", "tram") != [], (
+        "mapa zeszła do jednej trasy - kotwiczenie przycięło wszystko do zera"
+    )
+    assert result["degraded"] is False
+
+    # ...ale ogon na pętlę nadal się nie rysuje (punkt 4).
+    for seg in _segs_by_num(result, "124", "bus"):
+        assert _coords_of(day, ["L"])[0] not in seg["path"]
+
+
+def test_fallback_map_admits_that_it_is_a_fallback(install_day, pin_deadline):
+    """Tryb awaryjny plan_flow (kotwiczenie przycięło wszystko do zera)
+    rysuje JEDNĄ trasę z jasnościami wpisanymi na sztywno - łamie punkty 1,
+    2 i 9 kontraktu. Skoro zostaje jako zabezpieczenie, to musi się do tego
+    przyznawać, żeby rzadka mapa nie wyglądała identycznie jak "tędy
+    naprawdę nic nie jedzie".
+
+    Układ: Autobus 1 dowozi na Zawrotkę, a jedyne, co stamtąd odjeżdża,
+    wraca przez Pośrednią - czyli tam, skąd właśnie przyjechaliśmy - więc
+    ogon 1 nie ma się o co zakotwiczyć (punkt 4). Przesiadka piętro niżej,
+    na samej Pośredniej, też nie ratuje sprawy: Autobus 2 pojawia się tam
+    dopiero po ponad 20 minutach czekania (WAIT_CAP_SEC), a tyle nie łączy
+    już dwóch segmentów w jedną widoczną drogę. Autobus 2 traci więc swoją
+    jedyną kotwicę początku i sieć schodzi do zera. Przystanek startowy nie
+    leży po drodze żadnego z tych kursów, więc nie ratuje ich też kotwica
+    "da się tu wsiąść"."""
+    pin_deadline(3200)   # dawne okno 300%
+    trips = [
+        {"trip_id": "r1", "label": "Autobus 1",
+         "stops": [("S", 0, 0), ("A", 100, 100), ("M", 200, 200)]},
+        {"trip_id": "r2", "label": "Autobus 2",
+         "stops": [("M", 1400, 1400), ("A", 1500, 1500), ("E", 1600, 1600)]},
+    ]
+    day = make_day(trips, names={"S": "Start", "A": "Posrednia",
+                                 "M": "Zawrotka", "E": "Cel"})
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+    )
+    assert "error" not in result
+    assert result["segments"] != []          # coś jednak pokazujemy
+    assert result["degraded"] is True, (
+        "mapa zeszła do samej najszybszej trasy i musi to powiedzieć wprost"
+    )
+
+
+def test_a_normal_map_is_not_marked_as_a_fallback(install_day, pin_deadline):
+    """Odwrotna strona tego samego znacznika: zwykła mapa nie ma prawa go
+    podnosić, inaczej stałby się bezużyteczny."""
+    pin_deadline(2400)   # dawne okno 110%, co najmniej 30 min
+    day = _three_tier_fan_day()
+    install_day(day)
+
+    result = planner.plan_flow(
+        "Start", "Cel", when=WHEN,
+    )
+    assert "error" not in result
+    assert result["degraded"] is False
 
 
 # ----------------------------------------------------------------------- 6 -
@@ -644,7 +888,7 @@ def _fully_overlapping_lines_day():
     return make_day(trips, names={"S": "Start", "A": "A", "B": "B", "C": "C", "E": "Cel"})
 
 
-def test_lines_sharing_a_corridor_each_carry_the_whole_corridor(install_day):
+def test_lines_sharing_a_corridor_each_carry_the_whole_corridor(install_day, pin_deadline):
     """Sedno punktu 7: dwie linie na dokładnie tym samym korytarzu leżą na
     mapie JEDNA NA DRUGIEJ - i tak ma zostać. Geometria jest prawdziwa, po
     torach i ulicach (punkt 6), nikt jej nie rozsuwa; próby rozjeżdżania
@@ -658,12 +902,12 @@ def test_lines_sharing_a_corridor_each_carry_the_whole_corridor(install_day):
     Skład jest liczony z ROZKŁADU (te same, kolejne przystanki), nie z
     odległości na ekranie - to drugie przy widoku całego miasta doliczało
     linie z sąsiednich ulic i wypisywało "13 linii" tam, gdzie jadą dwie."""
+    pin_deadline(800)   # dawne okno 200%
     day = _fully_overlapping_lines_day()
     install_day(day)
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
 
@@ -712,7 +956,7 @@ def _corridor_covering(result, num, coords):
     return None
 
 
-def test_corridor_numbers_follow_one_global_order_everywhere(install_day):
+def test_corridor_numbers_follow_one_global_order_everywhere(install_day, pin_deadline):
     """Numery w grupce - a więc i kolejność przełączania pod kursorem - to
     zawsze obcięcie JEDNEGO, globalnego porządku linii
     (planner._line_sort_key) do linii obecnych na danym odcinku. Dzięki temu
@@ -722,12 +966,12 @@ def test_corridor_numbers_follow_one_global_order_everywhere(install_day):
     Dosiadający się Tramwaj 2 wchodzi więc POMIĘDZY 1 a 4, a nie na koniec
     listy - a względna kolejność 1 przed 4 zostaje ta sama po obu stronach
     przystanku B."""
+    pin_deadline(800)   # dawne okno 200%
     day = _joining_line_day()
     install_day(day)
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
 
@@ -742,7 +986,7 @@ def test_corridor_numbers_follow_one_global_order_everywhere(install_day):
     )
 
 
-def test_a_piece_never_claims_a_corridor_it_has_already_left(install_day):
+def test_a_piece_never_claims_a_corridor_it_has_already_left(install_day, pin_deadline):
     """Kawałek niesie JEDEN skład korytarza na całej swojej długości, więc
     musi być pocięty dokładnie tam, gdzie ten skład się zmienia - obok
     cięcia po jasności (punkt 3), tym samym mechanizmem.
@@ -750,12 +994,12 @@ def test_a_piece_never_claims_a_corridor_it_has_already_left(install_day):
     Bez tego kawałek Tramwaju 1 ciągnący się przez B twierdziłby "tędy jadą
     1, 2 i 4" także PRZED B, gdzie Tramwaju 2 jeszcze nie ma - grupka numerów
     stanęłaby nad odcinkiem, którym połowa z nich nie jeździ."""
+    pin_deadline(800)   # dawne okno 200%
     day = _joining_line_day()
     install_day(day)
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
 
@@ -768,10 +1012,11 @@ def test_a_piece_never_claims_a_corridor_it_has_already_left(install_day):
         )
 
 
-def test_solo_line_never_gets_a_corridor_list(install_day):
+def test_solo_line_never_gets_a_corridor_list(install_day, pin_deadline):
     """Kontrolne: linia, która NIE dzieli żadnego odcinka z inną linią, nie
     dostaje składu korytarza wcale - front rysuje wtedy jej numer sam, a pod
     kursorem nie ma się co przełączać."""
+    pin_deadline(2400)   # dawne okno 200%
     day = make_day(
         [{"trip_id": "bus", "label": "Autobus 7",
           "stops": [("S", 0, 0), ("M", 400, 420), ("E", 1200, 1200)]}],
@@ -781,10 +1026,424 @@ def test_solo_line_never_gets_a_corridor_list(install_day):
 
     result = planner.plan_flow(
         "Start", "Cel", when=WHEN,
-        extra_pct=200, extra_floor_sec=0, extra_cap_sec=999999,
     )
     assert "error" not in result
     pieces = _segs_by_num(result, "7", "bus")
     assert len(pieces) == 1
     assert pieces[0]["path"] == _coords_of(day, ["S", "M", "E"])
     assert "corridor" not in pieces[0]
+
+
+# ----------------------------------------------------------------------- 4 -
+
+def _turning_loop_day():
+    """Trzy kursy, które na poziomie MIEJSC wyglądają podobnie, a są czym innym.
+
+    „loop"    S -> Rondo -> Pętla -> Rondo -> Cel — zahacza o pętlę PO DRODZE
+              i jedzie dalej, do celu
+    „koncowa" S -> Kamieńskiego -> Rondo -> Pętla -> Rondo — pętla jest jej
+              KOŃCEM: po powrocie nie wiezie już nigdzie nowego
+    „prosty"  S -> Kamieńskiego -> Kamieńskiego -> Cel — dwa sąsiednie słupki
+              jednego miejsca, minięte jeden po drugim, jadąc prosto
+    """
+    trips = [
+        {"trip_id": "loop", "label": "Autobus 102",
+         "stops": [("S", 0, 0), ("R1", 300, 300), ("P", 420, 420),
+                   ("R2", 540, 540), ("E", 900, 900)]},
+        {"trip_id": "koncowa", "label": "Autobus 103",
+         "stops": [("S", 60, 60), ("K1", 150, 150), ("R1", 400, 400),
+                   ("P", 520, 520), ("R2", 640, 640)]},
+        {"trip_id": "prosty", "label": "Tramwaj 7",
+         "stops": [("S", 0, 0), ("K1", 300, 300), ("K2", 360, 360), ("E", 900, 900)]},
+    ]
+    return make_day(trips, names={
+        "R1": "Rondo", "R2": "Rondo",
+        "K1": "Kamieńskiego", "K2": "Kamieńskiego",
+        "P": "Petla", "S": "Start", "E": "Cel",
+    })
+
+
+def _discovered(day, dep_sec=0):
+    best_stop, best_arr, _ = planner._scan(day, {"S"}, {"E"}, dep_sec)
+    deadline = 2 * best_arr - dep_sec    # szeroko: drugie tyle, co najszybsza trasa
+    earliest, arrived_by, trip_board = planner._forward(day, {"S"}, dep_sec, deadline)
+    latest = planner._backward(day, {"E"}, dep_sec, deadline)
+    origin_latest = max(latest[s] for s in {"S"} if s in latest)
+    segs = planner._discover_segments(
+        day, dep_sec, deadline, earliest, arrived_by, trip_board,
+        latest, origin_latest, {"E"},
+    )
+    return {seg["label"]: seg["stops"] for seg in segs}
+
+
+def test_a_drawn_course_stops_where_the_loop_ends_it(install_day):
+    """Kurs, dla którego pętla jest KOŃCEM, urywa się na niej. Mapa nie ma
+    rysować wjazdu na pętlę końcową i natychmiastowego powrotu tą samą ulicą
+    (punkt 4; zgłoszone 2026-08-29 na autobusie 102 pod Kosmonautów)."""
+    day = _turning_loop_day()
+    install_day(day)
+    stops = _discovered(day)
+    assert stops["Autobus 103"] == ["S", "K1", "R1", "P"], stops["Autobus 103"]
+
+
+def test_a_course_that_rides_on_past_a_loop_is_drawn_whole(install_day):
+    """...ale kurs, który zahacza o pętelkę PO DRODZE i wiezie dalej, jedzie
+    dalej także na mapie.
+
+    Odwrócone 2026-09-04. Reguła zawracania ucinała na PIERWSZYM powrocie do
+    minionego miejsca, więc trafiała też w kursy jadące dalej. Zgłoszone na
+    Bielany Wrocławskie - PKP -> Wojszyce o 13:29: Autobus 612 obsługuje
+    osiedlową pętelkę i dopiero potem jedzie na Partynice, gdzie jest jedyna
+    przesiadka w stronę celu. Cięcie zabierało JEDYNE wyjście ze startu -
+    mapa rysowała 24 kawałki, ani jednego przy przystanku startowym, i wpadała
+    w tryb awaryjny.
+
+    Intencja punktu 4 zostaje (żadnych kikutów na pętli końcowej), zmienia się
+    miara: pętla kończy kurs tylko wtedy, gdy po powrocie nie ma już ani
+    jednego NOWEGO miejsca. Zmierzone na 24 prawdziwych relacjach: 22 bez
+    żadnej zmiany, 2 wychodzą z trybu awaryjnego, zero regresji."""
+    day = _turning_loop_day()
+    install_day(day)
+    stops = _discovered(day)
+    assert stops["Autobus 102"] == ["S", "R1", "P", "R2", "E"], stops["Autobus 102"]
+
+
+def test_two_stops_of_one_place_in_a_row_are_not_a_turn_back(install_day):
+    """Miejsce bywa grubsze od słupka: linia potrafi minąć dwa jego przystanki
+    jeden po drugim, jadąc PROSTO. Ucięcie takiego kursu odbierało jedynemu
+    dojazdowi do celu jego wyjście i cała relacja spadała do trybu awaryjnego
+    (POŚWIĘTNE -> KLECINA)."""
+    day = _turning_loop_day()
+    install_day(day)
+    stops = _discovered(day)
+    assert stops["Tramwaj 7"] == ["S", "K1", "K2", "E"], stops["Tramwaj 7"]
+
+
+# ---------------------------------------------------------------------- 11 -
+
+def _three_flows_at_one_node_day():
+    """Węzeł X, na którym dzieją się wszystkie trzy rzeczy naraz.
+
+    Tramwaj 1 wiezie z S przez X do celu (wolno, ale w oknie) - w X można
+    w niego wsiąść, ale można też już nim jechać: PRZEJAZD.
+    Autobus 2 zaczyna się w X i dowozi najszybciej - WSIADANIE.
+    Autobus 3 dowozi z S do X i tam się kończy - PRZYJAZD: mapa nim dalej
+    nie wiezie, ale to nim najwcześniej da się tu być.
+    """
+    return make_day([
+        {"trip_id": "tA", "label": "Tramwaj 1", "headsign": "CEL",
+         "stops": [("S", 0, 0), ("X", 600, 600), ("T", 1500, 1500)]},
+        {"trip_id": "tB", "label": "Autobus 2", "headsign": "CEL",
+         "stops": [("X", 900, 900), ("T", 1200, 1200)]},
+        {"trip_id": "tD", "label": "Autobus 3", "headsign": "WEZEL",
+         "stops": [("S", 0, 0), ("X", 500, 500)]},
+    ])
+
+
+def _node_named(result, name):
+    for node in result["nodes"]:
+        if node["name"] == name:
+            return node
+    raise AssertionError(
+        f"brak węzła {name!r}; są: {[n['name'] for n in result['nodes']]}")
+
+
+def _flow_of(node, num):
+    for line in node["lines"]:
+        if line["num"] == num:
+            return line
+    raise AssertionError(
+        f"węzeł {node['name']!r} nie wymienia linii {num!r}; ma: "
+        + str([f"{l['num']}/{l['flow']}" for l in node["lines"]]))
+
+
+def test_a_node_says_which_of_three_things_happens_with_each_line(install_day):
+    """Punkt 11: przesiadka to nie tylko "w co tu wsiąść". Ta sama kropka
+    odpowiada na trzy różne pytania i przy każdej linii mówi, o które chodzi -
+    inaczej pojazd, którym się tu właśnie przyjechało, w ogóle nie istnieje."""
+    install_day(_three_flows_at_one_node_day())
+    result = planner.plan_flow("S", "T", WHEN)
+    wezel = _node_named(result, "X")
+
+    assert _flow_of(wezel, "1")["flow"] == "through"
+    assert _flow_of(wezel, "2")["flow"] == "start"
+    assert _flow_of(wezel, "3")["flow"] == "end"
+
+
+def test_only_boardable_lines_carry_a_deadline_and_only_arrivals_a_time(install_day):
+    """Te dwie liczby odpowiadają na różne pytania i nie mają prawa się
+    pomylić: `depart_by` to "którym ostatnim odjazdem jeszcze zdążę"
+    (tylko dla linii do wsiadania), `arrive` to "o której tu tą linią jestem"
+    (tylko dla przyjazdu - w tablicy odjazdów przystanku tej godziny NIE MA,
+    bo przyjazd nie jest odjazdem)."""
+    install_day(_three_flows_at_one_node_day())
+    wezel = _node_named(planner.plan_flow("S", "T", WHEN), "X")
+
+    for num in ("1", "2"):
+        assert "depart_by" in _flow_of(wezel, num)
+        assert "arrive" not in _flow_of(wezel, num)
+
+    przyjazd = _flow_of(wezel, "3")
+    assert "depart_by" not in przyjazd
+    # 500 to godzina z rozkładu TEGO kursu, którym narysowano kawałek -
+    # nie najbliższy kurs tej linii i nie godzina węzła "tak w ogóle".
+    assert przyjazd["arrive"] == 500
+
+
+def test_the_node_hour_is_the_earliest_you_can_be_here(install_day):
+    """Od tej godziny liczy się "co stąd jeszcze odjedzie" i "za ile" w każdym
+    wierszu - także w wierszu przyjazdu. Najwcześniej da się tu być
+    autobusem 3 (500), nie tramwajem 1 (600)."""
+    install_day(_three_flows_at_one_node_day())
+    assert _node_named(planner.plan_flow("S", "T", WHEN), "X")["sec"] == 500
+
+
+def test_a_place_where_you_only_get_off_is_still_not_a_transfer(install_day):
+    """Dokładanie przyjazdów NIE rozsiewa kropek po mapie: miejsce, z którego
+    nie da się już nigdzie pojechać, nie jest przesiadką i kropki nie dostaje.
+    Zmienia się to, co mówi kropka, a nie to, gdzie stoi."""
+    install_day(_three_flows_at_one_node_day())
+    result = planner.plan_flow("S", "T", WHEN)
+
+    assert "T" not in [n["name"] for n in result["nodes"]]
+    # ...a węzeł, na którym da się wsiąść, zostaje - razem z przyjazdem.
+    assert {"S", "X"} == {n["name"] for n in result["nodes"]}
+
+
+def _passing_line_day():
+    """Odwzorowanie zgłoszenia z 2026-08-31 (Galeria Dominikańska -> pl. Grunwaldzki).
+
+    Autobus 10 jedzie B -> K -> T jednym, NIEPRZECIĘTYM kawałkiem, więc przez K
+    tylko PRZEJEŻDŻA - tak jak tramwaj 10 i autobus 111 przez Katedrę. Tramwaj 5
+    i tramwaj 3 na K się kończą - tak jak tam 5 i N. Na K nie zaczyna się nic.
+    """
+    return make_day([
+        {"trip_id": "t5", "label": "Tramwaj 5", "headsign": "PETLA",
+         "stops": [("S", 0, 0), ("U", 300, 300), ("K", 500, 500)]},
+        {"trip_id": "t7", "label": "Autobus 7", "headsign": "B",
+         "stops": [("S", 0, 0), ("B", 200, 200)]},
+        {"trip_id": "t10", "label": "Autobus 10", "headsign": "CEL",
+         "stops": [("B", 400, 400), ("K", 900, 900), ("T", 1200, 1200)]},
+        {"trip_id": "t3", "label": "Tramwaj 3", "headsign": "CEL",
+         "stops": [("U", 500, 500), ("K", 750, 750)]},
+    ])
+
+
+def test_a_line_passing_through_the_middle_of_a_piece_is_still_listed(install_day):
+    """Zgłoszone 2026-08-31: przez Urząd Wojewódzki mapa rysowała autobus N,
+    ale kropka go nie widziała - kawałek N miał tam swój ŚRODEK, a węzeł czytał
+    wyłącznie końce kawałków. Linia rysowana przez przystanek jest przy nim
+    opcją i ma być wypisana."""
+    install_day(_passing_line_day())
+    wezel = _node_named(planner.plan_flow("S", "T", WHEN), "K")
+
+    assert _flow_of(wezel, "10")["flow"] == "through"
+
+
+def test_a_stop_you_change_at_gets_a_dot_even_if_nothing_starts_there(install_day):
+    """Zgłoszone 2026-08-31: koło Katedry nie było kropki, choć dojeżdża się tam
+    piątką wyłącznie po to, żeby przesiąść się dalej. Kończyły się tam kawałki
+    5 i N, a 10 i 111 tylko tamtędy PRZEJEŻDŻAŁY - więc "nic się tu nie
+    zaczyna" kasowało kropkę razem z całą przesiadką."""
+    install_day(_passing_line_day())
+    result = planner.plan_flow("S", "T", WHEN)
+    wezel = _node_named(result, "K")
+
+    assert _flow_of(wezel, "3")["flow"] == "end"
+    assert _flow_of(wezel, "5")["flow"] == "end"
+    # ...i to przejeżdżająca dziesiątka jest tym, po co się tu wysiada
+    assert any(l["flow"] != "end" for l in wezel["lines"])
+
+
+def _drawing_seam_day():
+    """Kawałki tramwaju 10 i 20 stykają się na K, bo zmienia się tam wartość
+    jazdy dalej - ale ŻADNA z tych linii się na K nie zaczyna ani nie kończy:
+    obie tamtędy przejeżdżają. Tak wygląda Urząd Wojewódzki (Impart), gdzie D
+    i 146 dostały szew od zmiany składu korytarza."""
+    return make_day([
+        {"trip_id": "t7", "label": "Autobus 7", "headsign": "B",
+         "stops": [("S", 0, 0), ("B", 100, 100)]},
+        {"trip_id": "t8", "label": "Autobus 8", "headsign": "C",
+         "stops": [("S", 0, 0), ("C", 100, 100)]},
+        {"trip_id": "t10", "label": "Tramwaj 10", "headsign": "CEL",
+         "stops": [("B", 300, 300), ("K", 600, 600), ("T", 1250, 1250)]},
+        {"trip_id": "t20", "label": "Tramwaj 20", "headsign": "CEL",
+         "stops": [("C", 300, 300), ("K", 800, 800), ("T", 1000, 1000)]},
+    ])
+
+
+def test_a_seam_between_two_pieces_is_not_a_transfer(install_day, pin_deadline):
+    """Zgłoszone 2026-08-31: kropka stała na Urzędzie Wojewódzkim (Impart)
+    i nie miała nic do powiedzenia - D i 146 tylko tamtędy przejeżdżały.
+    Kawałki tnie także zmiana składu korytarza (punkt 7), czyli sprawa czysto
+    rysunkowa, a kropka dziedziczyła ten szew. Miejsce, przez które wszystko
+    tylko przejeżdża, nie jest przesiadką."""
+    install_day(_drawing_seam_day())
+    pin_deadline(4600)   # próg przy dawnej domyślnej gęstości 3,5
+    result = planner.plan_flow("S", "T", WHEN)
+
+    # Szew NAPRAWDĘ tam jest - inaczej test przechodziłby na pusto.
+    assert len(_segs_by_num(result, "10", "tram")) > 1
+    assert "K" not in [n["name"] for n in result["nodes"]]
+
+
+def _penultimate_stop_day():
+    """Na K da się być najwcześniej o 3600 - i o 3600 da się też być U CELU
+    (autobusem 9). Tramwaj 10 jedzie przez K DO celu, a autobus 4 na K się
+    kończy, więc kropka na K ma prawo stać."""
+    return make_day([
+        {"trip_id": "t9", "label": "Autobus 9", "headsign": "CEL",
+         "stops": [("S", 0, 0), ("T", 3600, 3600)]},
+        {"trip_id": "t4", "label": "Autobus 4", "headsign": "K",
+         "stops": [("S", 0, 0), ("K", 3600, 3600)]},
+        {"trip_id": "t7", "label": "Autobus 7", "headsign": "B",
+         "stops": [("S", 0, 0), ("B", 200, 200)]},
+        {"trip_id": "t10", "label": "Tramwaj 10", "headsign": "CEL",
+         "stops": [("B", 400, 400), ("K", 3800, 3800), ("T", 4100, 4100)]},
+    ])
+
+
+def test_the_stop_before_the_target_does_not_claim_the_line_ends_there(install_day, pin_deadline):
+    """O to, czy kawałek wiezie Z POWROTEM, pytamy o niego JAKO CAŁOŚĆ.
+
+    `_rides_back` uznaje za cofnięcie także RÓWNE godziny, a tuż przed celem
+    "najwcześniej tutaj" i "najwcześniej u celu" bywają identyczne. Pytany
+    o drogę OD TEGO przystanku orzekłby, że tramwaj 10 kończy się na K - choć
+    jedzie stamtąd jeszcze przystanek do celu - i skasowałby całą kropkę,
+    bo z K nie zostałoby już nic, czym da się jechać dalej (Reja, 2026-08-31).
+    """
+    pin_deadline(4500)   # dawne okno domyślne
+    install_day(_penultimate_stop_day())
+    wezel = _node_named(planner.plan_flow("S", "T", WHEN), "K")
+
+    assert _flow_of(wezel, "10")["flow"] == "through"
+    assert _flow_of(wezel, "4")["flow"] == "end"
+
+
+# ---- 13 - zawsze jakaś trasa, choćby za godzinę --------------------------
+
+def _dzien_z_jednym_kursem(odjazd, przyjazd):
+    """START -> CEL jednym autobusem, o zadanej godzinie i tylko o niej."""
+    return make_day([{
+        "trip_id": "T1", "label": "Autobus 1",
+        "stops": [("START", odjazd, odjazd), ("CEL", przyjazd, przyjazd)],
+    }])
+
+
+def test_the_departure_is_the_vehicle_not_the_question():
+    """Godzina czekania nie jest podróżą: wyjazd trasy to odjazd pojazdu,
+    nie godzina, o którą pytano."""
+    day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
+    stop, _, journey = planner._scan(day, ["START"], ["CEL"], 10 * 3600)
+    assert stop == "CEL"
+    wyjazd = planner._journey_start(day, journey, stop)
+    assert wyjazd == 12 * 3600, "odczytany ma być odjazd pojazdu, nie godzina pytania"
+
+
+def test_a_journey_that_starts_with_a_walk_still_reports_its_departure():
+    """Odjazdem trasy jest odjazd PIERWSZEGO PRZEJAZDU, nie moment wyjścia
+    z domu - przejście na sąsiedni słupek nie ma godziny w rozkładzie."""
+    day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
+    day.stop_names["OBOK"] = "OBOK"
+    day.stop_coords["OBOK"] = (51.11, 17.03)
+    day.siblings = {
+        "OBOK": {"START": gtfs.WALK_MIN_SEC},
+        "START": {"OBOK": gtfs.WALK_MIN_SEC},
+    }
+    stop, _, journey = planner._scan(day, ["START"], ["CEL"], 10 * 3600)
+    assert planner._journey_start(day, journey, stop) == 12 * 3600
+
+
+def test_nothing_today_is_answered_with_tomorrow(monkeypatch):
+    """"Nie znaleziono połączenia" nie jest odpowiedzią na pytanie "jak tam
+    dojadę". Gdy o podaną godzinę nic już nie jedzie, odpowiedzią jest
+    najbliższy wyjazd - choćby dopiero rano następnego dnia."""
+    dzis = _dzien_z_jednym_kursem(8 * 3600, 8 * 3600 + 1800)     # było o 8:00
+    jutro = _dzien_z_jednym_kursem(6 * 3600, 6 * 3600 + 1800)    # jest o 6:00
+    dni = {datetime.date(2026, 8, 31): dzis, datetime.date(2026, 9, 1): jutro}
+    monkeypatch.setattr(gtfs, "load_day", lambda d: dni[d])
+
+    wynik = planner.plan_flow("START", "CEL",
+                              datetime.datetime(2026, 8, 31, 22, 0))
+    assert "error" not in wynik, wynik.get("error")
+    assert wynik["day_offset"] == 1, "odpowiedź ma sięgnąć następnej doby"
+    assert wynik["starts"] == "06:00"
+    # Czekanie liczone od pytania, przez granicę doby: 22:00 -> 06:00 nazajutrz
+    # to osiem godzin, a nie sześć (tyle wyszłoby na osi samej nowej doby).
+    assert wynik["waits_sec"] == 8 * 3600
+
+
+def test_the_wait_does_not_move_the_map_threshold(monkeypatch):
+    """Okno liczy się od wyjazdu, nie od pytania (punkt 13): próg mapy stoi
+    względem najszybszego PRZYJAZDU, więc pytanie o 10:00 i o 11:59 o ten sam
+    autobus o 12:00 daje mapę do tej samej godziny."""
+    day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
+    monkeypatch.setattr(gtfs, "load_day", lambda d: day)
+    wczesnie = planner.plan_flow("START", "CEL",
+                                 datetime.datetime(2026, 8, 31, 10, 0))
+    tuz_przed = planner.plan_flow("START", "CEL",
+                                  datetime.datetime(2026, 8, 31, 11, 59))
+    assert "error" not in wczesnie, wczesnie.get("error")
+    assert wczesnie["starts_sec"] == 12 * 3600
+    assert wczesnie["deadline_sec"] == tuz_przed["deadline_sec"]
+
+
+def test_a_relation_with_no_service_at_all_still_says_so():
+    """Pusta mapa z komunikatem należy się relacji, której nie da się
+    przejechać w ogóle - obietnica "zawsze jakaś trasa" nie może zmienić się
+    w zmyślanie połączeń, których nie ma."""
+    day = _dzien_z_jednym_kursem(8 * 3600, 8 * 3600 + 1800)
+    stop, _, _ = planner._scan(day, ["CEL"], ["START"], 0)
+    assert stop is None
+
+
+def test_a_node_weighs_as_much_as_what_lies_next_to_it(install_day):
+    """Kropka niczego nie rusza (punkt 11), więc jasność BIERZE, a nie nadaje:
+    węzeł waży tyle, co najlepszy kawałek, który go dotyka - tą samą,
+    przeskalowaną miarą co linie (punkt 9). Bez tego setka kropek w bladej
+    okolicy niosła ciężar obrazka zamiast korytarza, który prowadzi do celu
+    (zgłoszone 2026-09-04). Najlepszy, a nie najgorszy: miejsce jest tak
+    dobre, jak najlepsza rzecz, którą się z niego jedzie - minimum gasiłoby
+    węzeł na najszybszej trasie, ilekroć mija go cokolwiek bladego."""
+    install_day(_three_flows_at_one_node_day())
+    wynik = planner.plan_flow("S", "T", WHEN)
+
+    assert wynik["nodes"], "bez węzłów nie ma czego mierzyć"
+    for wezel in wynik["nodes"]:
+        obok = [
+            seg["w"] for seg in wynik["segments"]
+            if any(punkt[0] == wezel["lat"] and punkt[1] == wezel["lon"]
+                   for punkt in seg.get("stops_t", ()))
+        ]
+        assert obok, f"węzeł {wezel['name']!r} nie leży przy żadnym kawałku"
+        assert wezel["w"] == max(obok), (
+            f"węzeł {wezel['name']!r} ma {wezel['w']}, a najjaśniejszy kawałek "
+            f"przy nim {max(obok)}")
+
+
+def _fast_and_slow_day():
+    """Korytarz i objazd, oba w oknie. Tramwaj 1 wiezie S -> T wprost i
+    najszybciej. Autobus 2 wozi S -> D, autobus 3 dowozi D -> T - ta sama
+    podróż objazdem, wolniej, ale wciąż na czas. Węzeł D leży wyłącznie przy
+    objeździe, więc ma być wyraźnie bledszy od startu."""
+    return make_day([
+        {"trip_id": "szybki", "label": "Tramwaj 1", "headsign": "CEL",
+         "stops": [("S", 0, 0), ("T", 600, 600)]},
+        {"trip_id": "objazd1", "label": "Autobus 2", "headsign": "OBJAZD",
+         "stops": [("S", 0, 0), ("D", 300, 300)]},
+        {"trip_id": "objazd2", "label": "Autobus 3", "headsign": "CEL",
+         "stops": [("D", 420, 420), ("T", 840, 840)]},
+    ])
+
+
+def test_a_node_by_a_detour_is_paler_than_one_on_the_fast_route(install_day, pin_deadline):
+    """Druga połowa tej samej obietnicy: skoro kropka bierze jasność z tego,
+    co przy niej leży, to węzeł stojący wyłącznie przy wolnym objeździe MUSI
+    być bledszy niż ten na najszybszej trasie. Bez tego cała zmiana byłaby
+    pustym polem - wszystkie kropki wychodziłyby na jedynkę."""
+    pin_deadline(900)   # dawne okno domyślne
+    install_day(_fast_and_slow_day())
+    wezly = {w["name"]: w["w"] for w in planner.plan_flow("S", "T", WHEN)["nodes"]}
+
+    assert wezly["S"] == 1.0
+    assert wezly["D"] < wezly["S"]

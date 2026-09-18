@@ -28,9 +28,36 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 2. Pobiera zip (~12 MB), parsuje pliki CSV (`stops`, `routes`, `trips`,
    `stop_times`, `calendar`, `shapes` — geometria tras po ulicach/torach…)
    i buduje `data/gtfs_new.sqlite`.
-3. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
+3. Dokleja do niej rozkład gminy Siechnice (`siechnice.py`), jeśli jest
+   włączony — patrz niżej.
+4. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
    aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
    wczorajsza baza zostaje nietknięta.
+
+#### Drugie źródło — `siechnice.py`
+
+Autobusów gminy Siechnice nie ma w żadnym otwartym zbiorze: ani we
+wrocławskim GTFS, ani na dane.gov.pl, ani w Krajowym Punkcie Dostępowym.
+Jedyne strukturalne źródło to niedokumentowane API systemu kiedyPrzyjedzie,
+z którego `siechnice.py` składa kompletne kursy: odjazdy o tym samym
+`trip_id`, ułożone po `index`, to jeden przejazd — czyli dokładnie `trip`
++ `stop_times`. Numer linii wychodzi z przecięcia zbiorów linii obsługujących
+kolejne słupki kursu.
+
+Słupki wspólne z Wrocławiem (Bardzka, Sucha, Iwiny — tamtędy jadą 800/810)
+sklejają się z istniejącymi po **zgodnej nazwie i bliskości**, więc kurs
+z Siechnic wjeżdża na ten sam `stop_id` co tramwaj: przesiadka bez kary za
+przejście i jeden marker na mapie zamiast dwóch.
+
+Każda pobrana data dostaje własny `service_id` i wpis w `calendar_dates`
+(`exception_type=1`), bo API oddaje rozkład per konkretny dzień — kalendarz
+odtworzony z reguły tygodniowej byłby zgadywaniem.
+
+Całość jest **domyślnie wyłączona** (`SIECHNICE_ENABLED=on` włącza):
+`robots.txt` tego serwisu to `Disallow: /` i nie ma tam regulaminu ani zgody
+na ponowne wykorzystanie. Awaria tego kroku nie przerywa aktualizacji —
+rozkład Wrocławia wjeżdża na miejsce niezależnie. Rozpoznanie źródeł, powody
+i wzór pisma do gminy o eksport GTFS: [SIECHNICE_DANE.md](SIECHNICE_DANE.md).
 
 Ma trzy punkty wejścia: wywołanie ręczne (albo z crona), start serwera
 i codzienny harmonogram. Ten ostatni to `start_daily_scheduler()` — wątek
@@ -63,8 +90,21 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
   `plan_route` (jedna najszybsza trasa, CSA) i `plan_flow` (mapa przepływów
   — zwraca teraz w jednej odpowiedzi i segmenty do rysowania, i listę
   gotowych propozycji, czytaną wprost z tego samego grafu) — opis niżej.
+- **`timetables.py`** — drugi tryb aplikacji: rozkład linii i tablica
+  odjazdów z przystanku. Rozkład linii idzie wprost z SQLite (kursy doby
+  rozkładowej, grupowane po ciągu przystanków), tablica przystanku — z tej
+  samej tablicy połączeń dnia co planer, bo odjazd z przystanku to po
+  prostu połączenie, które się w nim zaczyna.
+- **`bikes.py`** — trzecie źródło danych: stacje Wrocławskiego Roweru
+  Miejskiego oraz rowery stojące poza stojakami, z kanału GBFS operatora
+  (`nextbike_pl`, licencja CC0-1.0), razem z modelem czasu tego środka
+  transportu (dojście, odblokowanie, przejazd, zwrot) — osobnym dla
+  propozycji i dla mapy, patrz `map_places`. W przeciwieństwie do GTFS i PKP nie trafia do żadnej
+  bazy — to stan sprzed minuty, nie rozkład — więc żyje wyłącznie w pamięci
+  procesu, z krótkim cache, tak jak `vehicles.py`. Opis niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
-  `/api/flow` (szczegóły w sekcji API).
+  `/api/flow`, `/api/timetable`, `/api/line`, `/api/stop_board`,
+  `/api/trip` (szczegóły w sekcji API).
 
 ### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 
@@ -120,6 +160,14 @@ już wypełniona. Lista nazw jedzie w stronie jako JSON (`#stop-names`) —
 to ta sama lista, którą wcześniej dostawał `<datalist>`, bez dodatkowego
 zapytania.
 
+Na końcu dochodzi **drugie złożenie**: bez kropek i z rozwiniętymi skrótami
+(`pl.` → `plac`), żeby „Plac Grunwaldzki" podpowiadało `PL. GRUNWALDZKI`.
+Osobny przebieg, nie zamiennik pierwszego — rozwinięcie zmienia długość
+napisu, więc trafienie nie ma jak wskazać fragmentu do podświetlenia. Tabelę
+skrótów front dostaje z serwera (`#stop-abbrev`, `naming.ABBREVIATIONS`),
+żeby ta sama reguła nie istniała w dwóch kopiach: tej samej używa
+wyszukiwarka po stronie serwera (`gtfs._alias_key`).
+
 **Telefon (≤ 760 px) dostaje zakładki** zamiast panelu nachodzącego na mapę:
 dolny pasek „Mapa / Trasy (n)" przełącza to, co pod kartą wyszukiwania —
 albo lista propozycji na cały ekran, albo sama mapa (wtedy z panelu zostaje
@@ -143,8 +191,31 @@ Gasi je tylko odpowiedź na aktualne zapytanie (`requestToken`), a ✕ w trakcie
 szukania podbija token — porzucone zapytanie nie dorysuje już wyników relacji,
 której nie ma na ekranie.
 
-Panel deweloperski (suwaki strojenia algorytmu) jest schowany za przyciskiem
-⚙ w nagłówku. Czysty JS bez frameworka, cała logika w `static/app.js`.
+Pod polami relacji stoi przełącznik **🚲 Dojazd rowerem miejskim (WRM)** —
+w karcie wyszukiwania, a nie w panelu ⚙, bo to wybór PASAŻERA („mam konto
+w WRM" albo nie), a nie strojenie algorytmu. Zostaje widoczny także w widoku
+mapy na telefonie, w odróżnieniu od `.hint`: odhacza się go PRZED szukaniem,
+a szukanie odpala się samo po drugim kliknięciu w mapę. Stan przeżywa
+odświeżenie strony (`localStorage`, razem z resztą ustawień panelu), a jego
+zmiana przelicza gotowy wynik tą samą drogą co suwaki ⚙ (`loadPlan` bez
+kadrowania) — relacja się nie zmieniła, więc kadr ma zostać na miejscu.
+
+Gdy przełącznik jest włączony, a propozycji z rowerem nie ma, pod listą
+staje kartka mówiąca dlaczego (`bikeNoteHtml`) — brak wyniku i zepsuta
+funkcja wyglądają inaczej tylko wtedy, gdy ktoś to powie.
+
+Ustawienia Developerskie są schowane za przyciskiem ⚙ w nagłówku. Czysty JS
+bez frameworka, cała logika w `static/app.js`. Sekcje po kolei: „Co pokazuje
+mapa" (gęstość, auta z grupowaniem i dostawczakami, przejazdy rowerem), „Czas
+na mapie", „Przystanki i rozkład", „Rower miejski", schowane „Wygląd mapy"
+i „Dźwięk", „Wersja aplikacji", a na samym dole, zwinięte, „Tylko lista
+propozycji tras" z **progiem opłacalności przesiadki** (`transfer_gain_sec`,
+domyślnie 10 min — patrz opis skanu wyżej). Wartości lądują w `localStorage`,
+a te, od których zależy odpowiedź serwera, w query stringu `/api/flow`.
+`value`/`checked` w `index.html` są wartościami domyślnymi: opcja różna od
+nich dostaje pasek z boku, a nagłówek sekcji — liczbę takich opcji. Jeden
+przycisk „Przywróć domyślne" kasuje wszystkie zapamiętane ustawienia
+i przeładowuje stronę.
 
 ### 4. PWA — `static/manifest.webmanifest` + `static/sw.js` + `static/pwa.js`
 
@@ -221,10 +292,44 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
 
 - do połączenia można „wsiąść", jeśli już siedzimy w tym kursie, albo jesteśmy
   na jego przystanku odpowiednio wcześnie (bufor przesiadki 2 min; start
-  i dojście piesze bez bufora);
-- słupki o tej samej nazwie przystanku traktujemy jak jeden węzeł połączony
-  przejściem 3 min;
-- kursy po północy mają w GTFS godziny 24:xx+ i „po prostu działają";
+  i dojście piesze bez bufora — trzyminutowa podłoga przejścia jest od bufora
+  większa, więc go w sobie mieści);
+- między słupkami leżącymi blisko siebie przechodzi się PIESZO, bez względu na
+  nazwę i na to, czyja to sieć (`gtfs._nearby_bridges`, promień
+  `WALK_M` = 600 m — ten sam na starcie, w przesiadce, u celu i przy punkcie
+  klikniętym na mapie). Czas przejścia liczy się z samej odległości w linii
+  prostej (0,7 m/s, w górę do pełnych minut, nie mniej niż 3) i krawędź niesie
+  go ze sobą — stałej czasu przejścia nie ma. Tą samą drogą łączą się kolej
+  i MPK: dworzec i stojące pod nim przystanki nazywają się inaczej, a i tak
+  dzieli je kilka minut marszu. Przejście relaksuje się po wysiadaniu
+  z pojazdu albo z samego startu relacji, zawsze o JEDEN krok — nie da się iść
+  pieszo dwa razy pod rząd. Do kursu, który i tak zatrzymuje się tam, gdzie
+  stoimy, nie wolno dojść pieszo wcześniej (`_cheaper_boarding`): marsz ma
+  otwierać nowy kurs, a nie dosiadać nas do własnego;
+- kursy po północy mają w GTFS godziny 24:xx+ i liczą się do doby, w której
+  wyruszyły, więc rozkład dnia D obejmuje też ogon dnia D-1 przesunięty
+  o -24 h — to on obsługuje godziny 00:00-06:00 (patrz `gtfs.PREV_DAY_SEC`);
+- punkt wsiadania w kurs zapisuje się przy pierwszym jego przystanku, na
+  który zdążymy, ale jest przesuwany dalej, jeśli po drodze mijamy przystanek
+  osiągalny MNIEJSZĄ liczbą przejazdów (w skrajnym przypadku sam start).
+  Godziny to ten sam pojazd, więc przyjazd się nie zmienia — znika za to
+  etap "dojedź pod początek trasy tego autobusu, który i tak zaraz Cię
+  minie" (patrz `planner._cheaper_boarding`; odpowiednik reguły postępu,
+  którą mapa przepływów ma u siebie od 2026-07-18);
+- przy REMISIE na godzinie przyjazdu wygrywa droga z mniejszą liczbą
+  przejazdów. Bez tego o wyniku decyduje kolejność skanowania i potrafi
+  wyjść "wysiądź i przesiądź się do sąsiedniego autobusu, który dowozi
+  o tej samej minucie". Lista propozycji z mapy sortuje tak od dawna
+  (`_enumerate_journeys`), skan dostał to samo;
+- gdy pojazd, którym już jedziemy, sam dowozi do celu, obok trasy ze skanu
+  staje jej wariant **bez tej przesiadki** (`_seated_legs`; na celu relacji
+  liczy się też inny słupek tego samego przystanku — nocne linie zjeżdżają
+  na różne perony jednego dworca). Obie opcje idą na listę propozycji;
+  `TRANSFER_GAIN_SEC` (domyślnie 10 min, suwak w panelu ⚙) rozstrzyga
+  wyłącznie, która jest **proponowana jako najlepsza** — przesiadka musi
+  tyle oszczędzić, żeby wyprzedzić jazdę bez niej. Nic nie znika: przy
+  progu 0 kolejność wraca do samego przyjazdu. Okno czasowe mapy jest
+  nietknięte, `best_arr` zostaje najwcześniejszym możliwym przyjazdem;
 - trasę odtwarzamy wstecz po zapisanych wskaźnikach (które połączenie
   poprawiło który przystanek).
 
@@ -266,6 +371,224 @@ Etapy dostają geometrię wprost z segmentu (ten sam `gtfs.shape_slice`, jedno
 połączenie do bazy na całe zapytanie - i mapę, i listę), więc wybrana
 propozycja rysuje się po realnych ulicach i torach.
 
+#### Ostatni etap Traficarem (`traficar.py`)
+
+Do tej samej listy dokładają się **propozycje kończące się wynajętym autem**:
+komunikacja dowozi w okolicę celu, a ostatni kawałek — ten, na który nie ma
+już sensownej linii — jedzie się Traficarem. Propozycja ma cztery części po
+kolei: przejazd(y) komunikacją → dojście z przystanku do auta → pięć minut na
+odbiór i start → jazda do celu.
+
+Skąd auta: `fioletowe.live` (open source, GPLv3, `divadsn/traficar-map`)
+republikuje wewnętrzne API Traficara jako REST/JSON bez klucza; Wrocław to
+`zoneId=3`. To **strona trzecia**, nie sam operator, więc feed może zniknąć
+bez ostrzeżenia — stąd wyłącznik `TRAFICAR=0` i zasada, że każdy błąd tego
+źródła jest brakiem propozycji z autem, nigdy błędem wyszukiwania.
+
+Skąd kandydaci: NIE z grafu segmentów mapy (ten prowadzi do celu, a tu trzeba
+czegoś innego — dojazdu w okolicę auta), tylko wprost ze śladu skanu CSA,
+który `plan_flow` i tak już ma policzony na potrzeby deadline'u
+(`_reached_times` czyta z niego godziny bez drugiego skanu). Dla każdej pary
+„przystanek wysiadania + auto" liczy się godzina dotarcia do celu; zostają
+najwyżej dwie, po jednej na miejsce i na auto, i tylko te mieszczące się
+w tym samym oknie czasowym co reszta listy. Odpada auto dalej niż 600 m od
+przystanku oraz takie, którego zasięg nie pokrywa przejazdu z zapasem.
+Długość samej jazdy nie ma progów (do 2026-09-15: 1,5–25 km) — o tym, czy
+auto się opłaca, rozstrzyga godzina przyjazdu.
+
+**Czas jazdy jest szacowany i jest to powiedziane wprost.** Auto nie ma
+rozkładu, a routingu samochodowego w projekcie nie ma — czas i dystans
+wychodzą z odległości w linii prostej: krętość ×1,30, 34 km/h. Obie stałe są
+**zmierzone**, nie wzięte z głowy: 30 losowych par przystanków przepuszczonych
+jednorazowo (poza aplikacją, w runtime nic takiego nie jest wołane) przez
+prawdziwy routing samochodowy OSRM. Mediana krętości wyszła 1,30, mediana
+prędkości 36 km/h; bierzemy 34, bo profil OSRM liczy jazdę swobodną, bez
+korków, a plan ma bywać pesymistyczny (punkt 12 kontraktu).
+
+Ile to warte: błąd czasu 19% (mediana), 34% (90. centyl), zakres −23%…+54%,
+zawyżenie w 21 z 30 przypadków — czyli najczęściej w bezpieczną stronę. Błąd
+dystansu 10% / 22%. Stałe sprzed pomiaru (1,35 i 27 km/h) myliły się co do
+czasu o 47% mediany i zawyżały w 30 z 30 przypadków, w skrajnym dwukrotnie.
+
+Ten rozrzut dyktuje sposób pokazywania: dystans w **pełnych kilometrach**
+(przy 22% rozrzutu „7,7 km" udawałoby odczyt z licznika), wszystko z „ok.",
+czas podróży na karcie też z „ok." i przygaszony, a rozwinięta karta mówi
+wprost „czas i dystans szacowane z odległości — auto nie ma rozkładu".
+Szacunki idą w górę do pełnej minuty.
+
+**Czego ten szacunek nie dotyka: mapy przepływów.** Mapa rysuje wyłącznie
+godziny odczytane z rozkładu (punkt 10 kontraktu), a ta jedna odczytana nie
+jest. Propozycja z autem rysuje się więc dopiero po jej wybraniu, tak jak
+każda inna trasa z listy: kreskowaną linią bez otoczki, bo odcinek auto → cel
+jest prostą, a nie przebiegiem ulicami.
+
+#### Auto jako miejsce na mapie (`traficar.map_cars`)
+
+Samo auto na mapie już jest — od 2026-09-12, ale bez ani jednej liczby
+z tego szacunku (punkt 15 kontraktu). Mapa traktuje je tak, jak traktuje
+przystanek: to **miejsce, do którego da się dojść**. Wolne auto oddalone
+o jedno dojście (`gtfs.WALK_M`, czas z `gtfs.walk_time_sec` — ta sama reguła
+co wszędzie, punkt 14) od czegoś, co mapa NARYSOWAŁA (`planner._drawn_reach`)
+albo od samego startu, dostaje znacznik i mówi, o której da się przy nim być.
+
+Dalej mapa milczy: żadnego czasu jazdy, żadnego przebiegu, żadnej godziny
+w celu — tylko odległość auta od celu w linii prostej. To nie jest to samo
+pytanie co przy propozycjach: tam trzeba było ułożyć CAŁĄ trasę i podać
+godzinę przyjazdu, więc bez szacunku nie dało się jej w ogóle pokazać; tutaj
+odpowiedź brzmi „o 15:12 możesz stać przy tym aucie", a co dalej — wie
+pasażer, nie my.
+
+Znaczniki pojawiają się wyłącznie przy pytaniu o dziś (auta stoją tam, gdzie
+stoją teraz — ta sama zasada, co przy stojakach rowerowych), a milczący feed
+albo `TRAFICAR=0` po prostu je zabiera.
+
+#### Rower jako miejsce na mapie (`bikes.map_places`, punkt 16 kontraktu)
+
+Od 2026-09-12. Wzorzec ten sam, co przy aucie — kropka, do której mapa
+dowozi jednym dojściem — z jedną różnicą: **z roweru się JEDZIE**, więc mapa
+mówi też, dokąd. Auto zostaje bez ani jednej liczby o jeździe, bo routingu
+samochodowego nie ma; rower jest przejściem o innym tempie i wolno go liczyć
+z tego samego powodu, z którego wolno liczyć marsz (punkt 10: zakaz
+szacowania dotyczy pojazdów, które mają rozkład).
+
+**Reguła sensu: przejazd zostaje, jeżeli po zsiadaniu zdąży się jeszcze
+wsiąść w coś, co mapa RYSUJE** (albo dojechać pod sam cel). Nie musi być
+szybszy niż tramwaj — ktoś może chcieć jechać rowerem właśnie dlatego, że woli
+rower — ale musi prowadzić do czegoś widocznego. Technicznie: `planner` podaje
+`_drawn_boardings` (najpóźniejsza godzina, o której mapa pozwala na danym
+słupku wsiąść w kawałek jadący DALEJ) plus krańce relacji liczone do
+deadline'u, a przejazd przeżywa, gdy dla najbliższego słupka przy stacji
+docelowej `przyjazd + dojście ≤ board[słupek]`.
+
+Pierwsza wersja brała tu `latest` ze skanu wstecz i to był błąd tej samej
+klasy, co kiedyś przy autach: skan zna pół miasta, więc rower proponował
+przejazd „pod przystanek, z którego mapa nie rysuje ani jednego odjazdu".
+Efekt był drastyczny — na Kozanowie o 21:07 kropek było kilkadziesiąt, po
+poprawce jest dwanaście.
+
+Model czasu jest tu JEDNĄ prędkością liczoną po linii prostej
+(`MAP_RIDE_MPS`, 10 km/h — to 14 km/h realnej jazdy podzielone przez 1,35
+krętości miasta, zaokrąglone w dół) plus stały narzut na wypożyczenie
+i oddanie (`MAP_OVERHEAD_SEC`, 2 min). Rozbicie na prędkość × krętość ma sens
+tylko tam, gdzie zna się przebieg trasy — mapa zna wyłącznie odległość
+w linii prostej, więc dwie liczby udawałyby wiedzę, której nie ma. Propozycje
+mają własny model (`BIKE_SPEED_KMH`/`BIKE_DETOUR`/`UNLOCK_SEC`/`DOCK_SEC`)
+i ten nie został ruszony.
+
+Przejazd zaczyna się na stacji **albo przy rowerze stojącym luzem**
+(`free_bike_status` — we Wrocławiu jest ich ponad sto naraz), a kończy zawsze
+na stacji: za zostawienie roweru poza stojakiem operator liczy osobno i dużo.
+Przy pytaniu o inną dobę kropki zostają, znika tylko stan stojaka i rowery
+luzem.
+
+Wielkości z pomiaru (2026-09-12, 17:30): Kozanów → pl. Grunwaldzki 95 kropek
+i 807 przejazdów, Osobowice → Biskupin 68 i 567, Katedra → Leśnica 53 i 198,
+Wojszyce → Dworzec Główny zero. To ostatnie **nie** dlatego, że na południu nie
+ma stacji WRM — są, 31 poniżej Wojszyc, aż po Siechnice i Bielany. Powód jest
+inny: przy samych Wojszycach żadna stacja nie leży w promieniu dojścia od
+narysowanych przystanków, a te 16 stacji, do których ta mapa dociera, stoi
+dopiero przy samym celu — tam okno jest już wyczerpane i żaden przejazd się
+w nim nie mieści.
+
+Stąd decyzja, że mapa rysuje same kropki, a kreski przejazdów pokazuje pod
+kursorem — kilkaset kresek naraz zasłania mapę, a dwie kropki i tak mówią to
+samo, co kreska między nimi. Nie ma tu żadnego przełącznika dla pasażera: oba
+zachowania (kreski tylko pod kursorem, godziny samego przejazdu ukryte) są
+stałymi w `static/app.js` — `BIKE_RIDES_ALWAYS` i `BIKE_RIDE_TIMES` — bo to
+nie są decyzje, które ma podejmować użytkownik. Przy drugim końcu przejazdu
+widać SAMĄ odległość: godzina jest policzona, nie odczytana, a odległość mówi
+to samo, nie udając rozkładu.
+
+### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
+
+Włączany przełącznikiem 🚲 w karcie wyszukiwania (`bikes=1` w `/api/flow`);
+bez niego odpowiedź jest co do pola taka sama jak przed dodaniem tej
+warstwy. Rower jest wyborem pasażera, nie ustawieniem serwera — bez konta
+w WRM propozycja z rowerem jest bezużyteczna.
+
+Rower jeździ **między stacjami**, bo tak działa ten system: wypożyczenie
+zaczyna się i kończy w stojaku. Wolno mu przy tym stać w **dowolnym miejscu
+trasy** — i to bez czterech osobnych algorytmów, bo `plan_flow` ma już
+policzone obie połówki odpowiedzi:
+
+- `earliest[słupek]` — o której najwcześniej da się tu być, startując
+  z relacji (skan w przód, `_forward`);
+- `profile(słupek, t)` — stojąc tu o godzinie `t`, o której jest się w celu
+  (profilowy skan wstecz, `_target_profile`).
+
+Wstawienie roweru to złożenie tych dwóch funkcji przez parę stacji (A, B):
+
+```
+earliest[X] → dojście X→A → ODBLOKOWANIE → przejazd A→B → zwrot
+            → dojście B→Y → profile(Y, …)
+```
+
+Skrajne przypadki wychodzą z tego samego wzoru, nie z osobnego kodu: X bywa
+samym punktem startu (rower na POCZĄTKU), Y samym celem (na KOŃCU), obie
+naraz (sam rower), obie w środku sieci (rower w ŚRODKU — skrót między dwiema
+liniami). Pętla po parach stacji (`_bike_candidates`) zostawia po jednym,
+najlepszym przedstawicielu każdego z tych czterech **kształtów** — bez tego
+lista dostałaby kilka niemal identycznych propozycji z sąsiednich stacji tej
+samej okolicy. Odsiewanie par jest geometryczne i robi się przed dotknięciem
+rozkładu (dolne ograniczenia: minimalny sensowny przejazd, dojście od stacji
+B, odległość B od celu w linii prostej ÷ prędkość najszybszego pojazdu
+w sieci), więc 273 × 273 pary kosztują kilka milisekund.
+
+Wybrane pary są dopiero **odtwarzane** etap po etapie dwoma zwykłymi skanami
+CSA (`_scan` + `_reconstruct`) — po jednym na każdą połowę trasy. Godziny na
+karcie liczone są przy tym od nowa, do przodu, z faktycznie odtworzonych
+etapów, a nie przepisane z pętli po parach: tamte są dobre do WYBORU pary,
+ale kartę ogląda się minuta po minucie, więc musi się zgadzać sama ze sobą.
+
+Czas etapu rowerowego to trzy różne rzeczy i wszystkie trzy są widoczne
+osobno na karcie: **odblokowanie** (3 min — podejście do stojaka,
+wypożyczenie, wyjęcie roweru; jedyny moment podróży, w którym stoi się przed
+maszyną, a nie czeka na rozkład), **jazda** (14 km/h, odległość w linii
+prostej razy 1,35 na krętość) i **zwrot** (1 min). Dojście do stacji i od
+stacji to osobne etapy pieszne z własnym czasem (4,5 km/h, mnożnik 1,3),
+w promieniu do 500 m. Wszystkie te czasy zaokrągla się **w górę do pełnych
+minut** (`bikes._whole_minutes`): karta pokazuje godziny z dokładnością do
+minuty, więc przy sekundach „13:03 przyjazd, 1 min dojścia, 13:03 odjazd",
+a suma trzech części przejazdu nie równa się jego długości. W górę, bo każde
+z tych zaokrągleń jest marginesem.
+
+**Żadnego osobnego progu.** Rower podlega dokładnie tej samej regule co
+wszystko inne na liście: mieści się w oknie czasowym mapy (`_deadline`) —
+wchodzi, i staje tam, gdzie mu wypada wg wspólnego klucza (`_journey_key`).
+Gorsza opcja ląduje na dole, a nie znika.
+
+Kuszące jest dołożyć drugi próg („rower wchodzi tylko wtedy, gdy **wygrywa**
+z najlepszym dojazdem bez niego"), bo rower kosztuje osobno: konto, dojście
+do stojaka, wypożyczenie, pedałowanie. Odpada z dwóch powodów. Zgoda na ten
+koszt **już padła** — odhaczenie 🚲 jest właśnie nią. A przede wszystkim taki
+próg sprawdzano by na danych zmieniających się **co minutę** (stan stojaków),
+podczas gdy kandydaci potrafią stać dokładnie na jego styku: dwa wyszukania
+tej samej relacji w odstępie minuty dawałyby raz propozycję z rowerem, raz
+żadną. Z zewnątrz jest to nieodróżnialne od zepsutej funkcji (zmierzone na
+relacji Wojszyce → pl. Grunwaldzki: `bikes = 0` i `bikes = 1` w odstępie
+dwóch sekund).
+
+**Gdy roweru nie ma, front mówi dlaczego** (`bikeNoteHtml` w `app.js`).
+Trzy zera wyglądają identycznie, a znaczą co innego: „policzone, nic się nie
+mieści w oknie", „kanał operatora milczy" i „pytasz o inny dzień". Pole
+`bikes` w odpowiedzi rozróżnia je (`journeys`/`stations`/`live`), więc
+wystarczy je wypisać — bez tego brak propozycji jest nieodróżnialny od
+zepsutej funkcji.
+
+**Czego tu świadomie NIE ma: roweru na mapie przepływów.** Jasność segmentu
+znaczy tam „jak dobrym wyborem jest siedzieć teraz w tym kursie" i liczy się
+z rozkładu (patrz `FLOW_MAP_CONTRACT.md`) — rower rozkładu nie ma, więc nie
+ma też czego porównywać. Wybrana trasa z rowerem rysuje się natomiast
+w całości, tak jak każda inna; sam przejazd kreską **przerywaną**, bo znamy
+obie stacje, ale nie przebieg ulicami, a ciągła linia obiecywałaby
+geometrię, której nikt nie policzył.
+
+Awaria kanału operatora ma jeden skutek: propozycji z rowerem po prostu nie
+ma (`bikes.stations_quiet` oddaje pustą listę zamiast rzucać), a reszta
+wyszukiwarki działa bez zmian. Odpowiedź niesie wtedy `bikes.stations == 0`,
+żeby front miał po czym odróżnić „policzone, rower nic tu nie daje" od „nie
+było czego liczyć".
+
 ### Mapa przepływów / „symulacja mrówek" (`plan_flow`)
 
 Cel: pokazać **wszystkie** użyteczne opcje naraz, z intensywnością malejącą
@@ -275,8 +598,12 @@ ten sam efekt daje analiza dwóch skanów:
 1. **Skan w przód** od przystanku startowego: najwcześniejszy możliwy
    przyjazd `earliest[s]` na każdy przystanek + dla każdego kursu miejsce,
    w którym najwcześniej da się do niego wsiąść.
-2. **Deadline**: najlepszy przyjazd + 50% czasu podróży (min. 5, maks.
-   30 minut). Wszystko, co dociera do celu po deadline, jest bezużyteczne.
+2. **Deadline** (próg mapy, od 2026-09-13): najpóźniejsza pełna minuta za
+   najlepszym przyjazdem, przy której narysowana sieć nie przekracza
+   docelowej gęstości — łącznej długości różnych korytarzy na pierwiastek
+   z powierzchni kadru relacji (`_choose_deadline`, `_map_density`); najwyżej 60 min za
+   najlepszym przyjazdem. Wszystko, co dociera do celu po deadline, nie jest
+   rysowane.
 3. **Skan wstecz** od celu: najpóźniejszy moment `latest[s]`, w którym można
    być na przystanku `s` i jeszcze zdążyć do celu przed deadline
    (połączenia przetwarzane malejąco po odjeździe).
@@ -354,12 +681,17 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## API
 
-- `GET /api/stops` — wszystkie słupki: `[{name, lat, lon}, …]`.
+- `GET /api/stops` — wszystkie słupki MPK i (o ile skonfigurowano
+  `PKP_API_KEY` i geokodowanie zdążyło już znaleźć współrzędne - patrz
+  `pkp.py`/`update_pkp.py`) stacje PKP: `[{name, lat, lon, kind: "stop"|
+  "train"}, …]`. `kind` mówi frontowi, jakim stylem narysować marker
+  (`static/app.js`) - reszta pól jest taka sama dla obu rodzajów.
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
-- `GET /api/flow?start=&end=&time=HH:MM&extra_sec=600` (albo `start_lat`/
-  `start_lon`, `end_lat`/`end_lon` i `range_m` zamiast nazw) — JEDNA
+- `GET /api/flow?start=&end=&time=HH:MM&density=0.6&cars=5` (albo `start_lat`/
+  `start_lon`, `end_lat`/`end_lon` zamiast nazw — punkt wchodzi jako słupek
+  z dojściem pieszo, patrz `gtfs.with_point`) — JEDNA
   odpowiedź niesie i mapę, i listę propozycji (dawniej dwa osobne
   zapytania/endpointy — `/api/journeys` zniknął, patrz wyżej dlaczego):
   `{start, end, departure, best_arrival, deadline, segments: [{path:
@@ -367,12 +699,178 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   journeys: [{departure, arrival, duration_min, wait_min, transfers,
   legs: [...]}, …]}`. `segments` posortowane rosnąco po `w` (kolejność
   rysowania); `path` to kolejne przystanki od wsiadania do ostatniego
-  użytecznego wyjścia. `journeys` posortowane po godzinie przyjazdu; etap
+  użytecznego wyjścia. `nodes` to węzły przesiadkowe pod kropki na mapie:
+  `[{name, lat, lon, sec, lines: [{num, kind, headsign}, …]}, …]` — po jednym
+  na MIEJSCE, nie na słupek (plac z trzema peronami to jedna kropka), `sec` =
+  najwcześniejsza godzina, o której można tam być, `lines` = linie, w które
+  MAPA pozwala tam wsiąść, z kierunkiem (ta sama linia mija węzeł w obie
+  strony, a mapa proponuje jedną). Węzeł, z którego nie da się w nic wsiąść,
+  nie trafia na listę — nie ma tam przesiadki.
+  `cars` to wolne auta car-sharingu w zasięgu TEJ mapy (patrz
+  `traficar.map_cars`, punkt 15 kontraktu): `[{lat, lon, plate, model, van, where,
+  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m}, …]` — `van` mówi,
+  czy to dostawczak (pole `type` listy modeli Traficara), `at` to godzina,
+  o której da się być przy aucie (dojazd z narysowanej mapy plus dojście
+  liczone tak samo jak każde inne), `from`/`walk_*` mówią skąd i jak daleko
+  się idzie, a `to_dest_m` to odległość auta od celu W LINII PROSTEJ. Czasu
+  jazdy autem tu nie ma i nie będzie — mapa go nie zgaduje (to różnica wobec
+  propozycji z autem niżej, które szacują go z prędkości).
+  `ogarniam` to program Traficara, w którym za zajęcie się autem należy się
+  zniżka: `[{co: "Sprzątanie", ile: 30}, …]`, pusta lista = przy tym aucie nie
+  ma nic do wzięcia (w feedzie to `discounts`, nazwy z zamkniętej listy:
+  Tankowanie, Sprzątanie, Relokacja; kwota jest liczbą bez waluty — złotówki,
+  ale samo źródło tego nie mówi). Lista jest pusta
+  przy pytaniu o inną dobę niż dziś, przy `TRAFICAR=0` i przy milczącym
+  feedzie — brak aut nigdy nie jest błędem wyszukiwania.
+  `bike_places` to rowery miejskie w zasięgu TEJ mapy (patrz `bikes.map_places`):
+  `[{id, name, lat, lon, bikes, electric, docks, loose, at, from, walk_sec,
+  walk_m, rides: [...]}, …]` — WYŁĄCZNIE miejsca, w których da się wsiąść na
+  rower: mapa do nich dowozi i prowadzi z nich choć jeden sensowny przejazd.
+  Drugi koniec przejazdu osobnym wpisem nie jest (front rysuje go razem ze
+  strzałką, pod kursorem) — chyba że sam jest takim miejscem.
+  `at`/`from`/`walk_*` znaczą to samo, co przy autach — o której i skąd się
+  tu dochodzi. `loose` to rower stojący POZA stojakiem
+  (wtedy `name` jest `null` i `bikes` = 1); takim rowerem da się wyjechać, ale
+  nie da się go oddać, więc jako cel przejazdu nie występuje. `rides` to
+  WSZYSTKIE sensowne przejazdy stąd: `[{id, name, lat, lon, bikes, docks, m,
+  sec, at, opens, opens_at, opens_last, opens_walk_sec, opens_m}, …]` — `m` to
+  odległość w linii prostej, `sec` czas przejazdu (jedyna zgadywana liczba:
+  `bikes.MAP_RIDE_MPS` plus `bikes.MAP_OVERHEAD_SEC`), a `opens*` mówi, PO CO
+  ten przejazd: najbliższy słupek, na którym po zsiadaniu jeszcze się zdąży
+  WSIĄŚĆ w coś, co mapa rysuje, z godziną dotarcia i ostatnim momentem. To
+  jest cała reguła sensu — przejazd NIE musi być szybszy niż tramwaj, ale musi
+  prowadzić do czegoś WIDOCZNEGO. `bike_places_live` mówi, czy
+  liczby rowerów są z tej chwili: przy pytaniu o inną dobę kropki stacji
+  zostają (stacja stoi tam zawsze), ale stan stojaka jest nieznany i front ma
+  to napisać zamiast podać dzisiejszą liczbę jako jutrzejszą.
+  `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
-  to, to_time, minutes, stops, stops_count, path}`; etap pieszy:
-  `{kind: "walk", text, minutes, from, to, path}`.
+  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, path}`; etap
+  pieszy: `{kind: "walk", text, minutes, same_place, from, to, path}` —
+  `minutes` liczone z odległości (patrz wyżej), a `same_place` odróżnia zmianę
+  stanowiska w obrębie jednego przystanku od marszu na przystanek o innej
+  nazwie; przy `false` front musi powiedzieć DOKĄD iść, bo bez nazwy taki etap
+  jest niewykonalny. Nagłówek propozycji
+  niesie też `departure_sec`/`arrival_sec` — te same dwie godziny w sekundach,
+  żeby dało się ustawić propozycje w jednej kolejności niezależnie od tego,
+  który algorytm je złożył. `dep_sec`/`arr_sec`
+  to sekundy na osi doby rozkładowej (mogą przekroczyć 24 h) — `from_time`
+  i `to_time` po północy zawijają się do `00:xx` i nie da się z nich odtworzyć
+  doby (patrz `/api/timetable`).
+  Propozycja kończąca się autem (patrz `traficar.py`) jest oznaczona
+  `traficar: true` i ma dwa dodatkowe kształty etapów: dojście do auta to
+  zwykły `kind: "walk"` z `to_car: true` i `metres` (`to` jest wtedy miejscem
+  postoju, nie nazwą przystanku), a sama jazda to `{kind: "drive", mode:
+  "car", num: "Traficar", line, from, from_time, to, to_time, dep_sec,
+  arr_sec, minutes, km, start_min, plate, model, fuel, range, estimated:
+  true, path}`. `estimated` mówi wprost, że godziny są policzone z prędkości,
+  a nie odczytane z rozkładu — `path` to odcinek prosty auto → cel, nie
+  przebieg ulicami. `transfers` liczy wsiadanie do auta jak każdą inną zmianę
+  pojazdu. Gdy feed Traficara nie odpowiada albo `TRAFICAR=0`, takich pozycji
+  po prostu nie ma — reszta odpowiedzi jest bez zmian. `km` jest w PEŁNYCH
+  kilometrach, a `minutes` w pełnych minutach (w górę): przy zmierzonym
+  rozrzucie tego szacunku drobniejsza podziałka udawałaby dokładność.
+
+  `bikes=1` dokłada do `journeys` propozycje z rowerem miejskim (patrz sekcja
+  wyżej) i wstawia do odpowiedzi `bikes: {journeys, stations, live}` — ile ich
+  weszło, ile stacji w ogóle odpowiedziało (zero = kanał operatora milczy,
+  a nie „rower tu nic nie daje") i czy warstwa w ogóle się liczyła:
+  `live: false` znaczy „pytanie dotyczy innej doby niż dziś", a stan stojaków
+  jest żywy, nie rozkładowy, więc propozycja na jutro byłaby zgadywaniem
+  podanym jako fakt. Etap rowerowy:
+  `{kind: "bike", line: "Rower miejski", num: "WRM", mode: "bike", headsign,
+  from, from_time, to, to_time, dep_sec, arr_sec, minutes, ride_minutes,
+  unlock_minutes, dock_minutes, distance_m, bikes_available, docks_available,
+  station_from_id, station_to_id, path}` — `from`/`to` to nazwy STACJI WRM,
+  nie przystanków, `path` to odcinek między nimi (dwa punkty, nie przebieg
+  ulicami), a cztery pola minutowe sumują się dokładnie. Dojście do stacji
+  i od stacji jedzie jako zwykły etap `walk` z dodatkowym polem `note`
+  (gotowy opis — „Dojście do stacji WRM …" nie da się złożyć z `from`/`to`,
+  bo stacja roweru to nie przystanek).
+
+  `density` to docelowa gęstość mapy w km różnych korytarzy na km boku kadru
+  (km/√km²; suwak pod zębatką, przycinana do [0,5; 15]), `more` — ile razy kliknięto
+  „Pokaż więcej" (0–3; cel gęstości to `density × (1 + more)`), `cars` — ile
+  aut car-sharingu pokazać (1–30, też razy `1 + more`). Z `density` i `more`
+  serwer dobiera próg mapy; odpowiedź niesie je z powrotem (`density`, `more`)
+  razem z `at_ceiling` — próg doszedł do sufitu skanu (60 min za najszybszym
+  przyjazdem), więc kolejne kliknięcie nie miałoby czego dołożyć. Wynikowy
+  próg widać w `limit_sec`/`deadline`. `cars` w odpowiedzi jest przesiane
+  przez `traficar.map_choice`: dostawczaki tylko przy `car_vans=1`, i wtedy
+  osobówki i dostawczaki wybiera się osobno, każde rodzajem z tym samym `cars`,
+  regułą `traficar.map_skyband`: przy `car_groups=1` z aut, do których idzie się
+  z tego samego miejsca, zostają niepobite w tej grupie (godzina przy aucie,
+  „Ogarniam"; domyślnie grupowania nie ma i każde auto jest osobno),
+  a spośród zwycięzców grup te, których nie bije żadne inne, zawsze, kolejne
+  poziomy w całości, aż uzbiera się żądana liczba. `bike_count` — ile
+  przejazdów rowerem pokazać (1–30, domyślnie 4, też razy `1 + more`);
+  `bike_places[].rides[].options` to podróże przez dany przejazd
+  (`arrival` — sekunda na osi doby, `vehicles` — pojazdy przed i po rowerze),
+  przesiane tą samą regułą przez `bikes.map_places`.
+  Jeśli skonfigurowano `PKP_API_KEY`, `journeys` (i `segments`, o ile trasa
+  akurat przebiega w pobliżu Wrocławia) mogą zawierać etapy kolejowe
+  (`mode: "train"`) — routes.py nie wie o tym nic: `/api/flow` woła
+  `plan_flow` dokładnie tak samo, jak gdyby PKP nie istniało. Połączenia
+  kolejowe są doklejone WPROST do tablicy połączeń, którą skanuje CSA
+  (`gtfs.load_day` → `pkp.augment_day`, patrz `pkp.py`) — dla wyszukiwarki
+  stacja PKP to zwykły przystanek, a przesiadka pociąg↔MPK to zwykła
+  przesiadka — przez to samo `siblings`, co przejście między słupkami jednego
+  miejsca, bo stacja przechodzi przez to samo budowanie mostów pieszych co
+  każdy słupek. Od 2026-09-10 most bierze się z ODLEGŁOŚCI, nie z nazwy
+  (`gtfs._nearby_bridges`), więc dworzec łączy się z przystankami pod nim
+  także wtedy, gdy nazywają się zupełnie inaczej. Własnego promienia
+  przesiadkowego kolej nie ma (usunięty 2026-08-31) i nadal nie potrzebuje.
+  Efekt: relacja „Warszawa Centralna → Rynek” po prostu działa — jedna trasa,
+  etapy kolejowe i miejskie razem, bez żadnego specjalnego pola w odpowiedzi.
+  Stacja PKP bez ustalonych współrzędnych (geokodowanie w toku - patrz
+  `update_pkp.py`) jest dla wyszukiwarki niewidoczna, a etap kolejowy nie ma
+  geometrii trasy (`path: []` na etapie — sama stacja, jeśli ma współrzędne,
+  i tak ma marker na mapie, patrz `/api/stops`).
+- `GET /api/line?num=17&mode=tram&date=YYYY-MM-DD` — rozkład jednej linii:
+  `{num, mode, label, date, variants: [{headsign, from, to, trips: 55,
+  stops: [{id, name, lat, lon}, …], path: [[lat,lon], …]}, …]}`. Wariant =
+  jeden ciąg przystanków (kierunek albo kurs skrócony), warianty posortowane
+  po liczbie kursów malejąco. `trips` to LICZBA kursów, nie ich lista:
+  godziny wiszą na słupku i pyta się o nie `/api/stop_board` — tu zostaje
+  tylko to, po czym odróżnia się kierunek jeżdżący cały dzień od zjazdu do
+  zajezdni raz na dobę. `stops[].id` to słupek —
+  tym samym identyfikatorem posługuje się `points` z `/api/stop_board`, więc
+  front umie przeskoczyć z rozkładu linii na tablicę tej właśnie krawędzi.
+- `GET /api/stop_board?stop=&date=YYYY-MM-DD` — tablica odjazdów:
+  `{stop, date, center: [lat, lon], points: [{id, name, lat, lon}, …],
+  lines: [{mode, num, headsign, count}, …], departures: [{line, t: "12:03",
+  sec, trip, stop, platform?}, …]}`. `departures[].line` to indeks w `lines`.
+  `points` to słupki miejsca, z których cokolwiek odjeżdża — same nazwy
+  i współrzędne, bo co z którego jedzie, widać już po `departures[].stop`;
+  front składa z tego wybór „skąd dokładnie". Odjazdy obejmują jedną dobę
+  ZEGAROWĄ: ogon nocy z dnia poprzedniego wchodzi (autobus o 00:20 należy do
+  kalendarza soboty, ale odjeżdża w niedzielę), a nadwyżka tej doby
+  rozkładowej ponad 24 h już nie — stoi na tablicy następnego dnia. Bez tego
+  linia nocna byłaby na jednej tablicy dwa razy. Bez geometrii
+  — na dużym węźle jest ponad sto par (linia, kierunek), a naraz widać z
+  nich parę; trasy dociąga front przez `/api/trip`, dla linii faktycznie
+  zaznaczonych.
+- `GET /api/trip?trip=&date=&stop=&dep=` — jeden kurs: `{trip, num, mode,
+  line, headsign, board_index, stops: [{name, lat, lon, t, sec}, …],
+  path: [[lat,lon], …], tail: [[lat,lon], …]}`. `tail` to przebieg od
+  słupka podanego w `stop`/`dep` do końca kursu — front rysuje go
+  jaskrawo, a resztę `path` blado.
+- `GET /api/timetable?stop=&date=&from_sec=&limit=` (albo `lat`/`lon`
+  zamiast `stop`) — tablica odjazdów jednego przystanku, pod dymek kropki
+  przesiadki na mapie:
+  `{stop, from_time, departures: [{time, in_min, line, num, mode, headsign},
+  …]}`, najbliższe 8, po kolei. Przystanek rozumiany jako MIEJSCE (wszystkie
+  słupki, patrz `gtfs.match_stop`) — na węźle pasażer pyta o wszystko, co
+  stąd odjeżdża, a nie o peron, przy którym wysiadł. `from_sec` podaje
+  godzinę na osi doby rozkładowej; bez niego liczymy od godziny z `time`.
+  Ostatni przystanek kursu nie ma odjazdów — `departures` bywa puste.
+  Wersji z `lat`/`lon` używa mapa przepływów: kropki stawia z geometrii
+  kawałków, więc zna położenie słupka, a nie jego nazwę (`gtfs.stop_at`
+  dociąga najbliższy słupek w promieniu 60 m i całe jego miejsce).
+  `limit` (domyślnie 8, sufit 60) podnosi mapa przepływów: z tej listy
+  zostawia potem tylko linie z `nodes[].lines`, więc musi dostać z zapasem.
 - Błędy: `{error: "…", suggestions: […]}` — podpowiedzi przy literówce
-  w nazwie przystanku.
+  w nazwie przystanku albo numerze linii.
 
 ## Struktura plików
 
@@ -380,22 +878,920 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 |---|---|
 | `update_gtfs.py` | pobranie GTFS + budowa SQLite + atomowa podmiana |
 | `gtfs.py` | dostęp do bazy, cache dnia, dopasowanie nazw przystanków |
+| `naming.py` | tabele nazewnicze: pary stacja PKP ↔ przystanek MPK, rozwijane skróty - dane, nie algorytm |
 | `planner.py` | CSA (`plan_route`), mapa przepływów + lista propozycji, jedna odpowiedź (`plan_flow`) |
+| `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
+| `traficar.py` | auta Traficar z fioletowe.live: znaczniki w zasięgu mapy (`map_cars`) + para "przystanek + auto" na ostatni etap trasy |
+| `bikes.py` | stacje i wolne rowery WRM (GBFS) + model czasu roweru + rower jako miejsce na mapie |
+| `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
-| `templates/index.html` | szkielet strony: mapa, panel, panel deweloperski |
-| `static/app.js` | cały frontend: mapa, wyszukiwanie, lista propozycji |
+| `templates/index.html` | szkielet strony: mapa, panel, Ustawienia Developerskie |
+| `static/app.js` | frontend wyszukiwarki: mapa, wyszukiwanie, lista propozycji |
+| `static/timetable.js` | frontend rozkładów (drugi tryb panelu, po moście z `app.js`) |
 | `static/style.css` | style panelu, kart tras, plakietek linii itd. |
 | `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
-| `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`) |
+| `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`); na localhoście wszystko nasze idzie tylko z sieci |
 | `static/pwa.js` | rejestracja workera, przycisk instalacji, ciche przejście na nową wersję |
 | `static/offline.html` | awaryjna strona, gdy nie ma ani sieci, ani cache'u |
 | `static/icons/` | ikony aplikacji (192/512 px, wersje maskowalne, SVG) |
-| `data/gtfs.sqlite` | baza rozkładów (poza gitem) |
+| `data/gtfs.sqlite` | baza rozkładu MPK (poza gitem) |
+| `update_pkp.py` | pobranie rozkładu PKP + budowa SQLite + atomowa podmiana + geokodowanie stacji |
+| `data/pkp.sqlite` | baza rozkładu PKP, tylko z `PKP_API_KEY` (poza gitem) |
+| `data/pkp_station_coords.json` | współrzędne stacji PKP z geokodowania (poza gitem) |
 | `docs/` | dokumentacja: ten plik, `ROUTING_ALGORITHM.md`, `FLOW_MAP_CONTRACT.md` |
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-15** — **dowolna stacja tylko dla kolei, dostawczaki osobno,
+  porządek w Ustawieniach Developerskich** (zgłoszenia #114, #130, #131, #132;
+  punkt 15 kontraktu). „Dowolna stacja w mieście" to już same perony, bez
+  przystanków MPK pod dworcami, i działa wyłącznie ze stacją kolejową albo inną
+  grupą po drugiej stronie — z przystankiem MPK albo punktem z mapy daje
+  komunikat. Na mapie kurs rysuje się od OSTATNIEGO przystanku startowego, który
+  mija, a wysiadanie na przystanku startowym niczego nie kotwiczy: przy grupie
+  miasta znikają regionalne pociągi między wrocławskimi stacjami, a zwykłe
+  wyszukiwania dają identyczną mapę (sprawdzone na sześciu relacjach, stara
+  i nowa wersja obok siebie). Dostawczaki Traficara (pole `type` listy modeli)
+  domyślnie się nie pokazują; przełącznik pod zębatką je dokłada i wtedy są
+  osobnym wyborem, z tą samą liczbą z suwaka, na mapie jako puste pierścienie.
+  Panel ⚙ nazywa się wszędzie „Ustawienia Developerskie", ma nowy układ (mapa,
+  czas, przystanki, rower, sprawy techniczne, na dole zwinięty suwak listy
+  propozycji), opisy w jednym zdaniu, jeden „Przywróć domyślne" i podświetla
+  opcje różne od domyślnych. Zwinięta lista propozycji chowa też kartkę
+  o rowerze. Tego samego dnia: grupa nie działa ze stacją z tej samej grupy
+  („WROCŁAW -" → Wrocław Brochów); grupa nie jest miejscem, w którym się
+  stoi, więc nie ma z niej ani do niej dojścia pieszo („WROCŁAW -" → Milicz
+  2,5 s zamiast 14,7 s), a przy grupie po którejkolwiek stronie mapa nie
+  pokazuje aut ani rowerów. Usunięte progi długości jazdy Traficarem (1,5 km
+  i 25 km) — został zapas zasięgu.
+- **2026-09-15** — **auta w grupach, rowery wybierane jak auta** (punkty 15
+  i 16 kontraktu). Auta porównują się godziną przy aucie i „Ogarniam" —
+  odległość do celu przestała być kryterium, bo opłacalności jazdy autem nie
+  da się rzetelnie ocenić. Przełącznik pod zębatką (domyślnie zgaszony) robi
+  z aut, do których idzie się z tego samego miejsca, jeden wybór, a „Pokaż
+  więcej" poszerza wtedy tylko między takimi grupami. Przejazd
+  rowerem ocenia się w całej podróży: ile jedzie się rowerem, o której jest się
+  w celu i iloma pojazdami przed i po rowerze, z dojazdem i dalszą drogą
+  odczytanymi z narysowanych kursów. Rowery mają własny suwak (domyślnie 4
+  przejazdy), nie mają już progów długości (ani górnego, ani dolnego) i nie muszą dowozić przed
+  progiem mapy (ten dotyczy tylko kursów z rozkładem), a kropkę dostaje tylko
+  początek wybranego przejazdu. Pod zębatką
+  „Co przejazd otwiera" zastąpił przełącznik „Przejazdy rowerem zawsze
+  widoczne".
+- **2026-09-13** — **zakres mapy z gęstości, nie z minut** (punkty 2 i 15
+  kontraktu). Trzy suwaki okna czasowego (procent, minimum, maksimum) i przycisk
+  „+X min" zniknęły. Miara jakości została ta sama — o której opcja dociera do
+  celu — a próg staje tam, gdzie narysowana sieć osiąga docelową gęstość:
+  łączną długość RÓŻNYCH korytarzy w kadrze relacji na jego bok (pierwiastek
+  z powierzchni — tak gęsto, jak widać na ekranie; domyślnie 2,5).
+  Linie jadące jednym korytarzem liczą się raz, więc próg idzie za nimi dalej,
+  aż trafi na naprawdę inny korytarz. Jeden suwak gęstości pod zębatką; godzina
+  „mapa pokazuje do" jest skutkiem. „Pokaż więcej" dokłada po jednej wyjściowej
+  gęstości (x2, x3, x4) i znika po trzecim kliknięciu albo przy suficie skanu.
+  Auta Traficara wybiera k-skyband: auta, których nic nie bije (godzina przy
+  aucie, odległość do celu, kwota z „Ogarniam", w dokładności wyświetlania),
+  są zawsze, kolejne poziomy w całości do liczby z nowego suwaka, też razy
+  „Pokaż więcej" (domyślnie 3). Pomiar na dziesięciu relacjach, koszt skanu,
+  zrzuty i wybór miary (km/km² kontra to, co widać na ekranie) —
+  FLOW_MAP_NOTES.md. Testy: 334, było 311.
+- **2026-09-12** — **rower miejski na mapie przepływów** (punkt 16
+  kontraktu). Wzorzec ten sam, co
+  przy autach: kropka, do której mapa dowozi jednym dojściem. Różnica: z roweru
+  się jedzie, więc mapa mówi też dokąd — ale wyłącznie tam, gdzie po zsiadaniu
+  wciąż mieści się w oknie, które i tak rysuje. Ta sama miara sensowności, co
+  dla każdego kursu (punkt 2), a nie osobna: przejazd nie musi być SZYBSZY niż
+  tramwaj, ma realnie dowozić. Doszły wolne rowery spoza stojaków (ponad sto
+  naraz we Wrocławiu) jako początek przejazdu — końcem nie, bo operator liczy
+  za to osobno. Kropkę dostaje wyłącznie miejsce, w którym da się WSIĄŚĆ na
+  rower; drugi koniec przejazdu pojawia się razem ze strzałką, pod kursorem,
+  z samą odległością obok. Kreski przejazdów pokazują się tylko pod kursorem
+  (jest ich kilkaset), a godzin samego przejazdu nie pokazujemy wcale —
+  jedno i drugie to stałe w kodzie, nie opcje dla pasażera. Przy pytaniu
+  o inną dobę kropki zostają, ale mówią wprost, że stanu stojaka nie znają.
+  Model czasu przeliczony na jedną prędkość po linii prostej (10 km/h) plus
+  2 min stałego narzutu; model propozycji nietknięty. Pomiar: 12 kropek na
+  Kozanów → pl. Grunwaldzki o 21:07. Testy: 311, było 286.
+- **2026-09-12** — **auta car-sharingu na mapie przepływów** (punkt 15
+  kontraktu). Dotąd Traficar dotykał wyłącznie listy propozycji — mapa nie
+  wiedziała o nim nic. Teraz wolne auto, do którego da się dojść JEDNYM
+  dojściem od czegoś, co mapa rysuje (albo od samego startu), dostaje
+  fioletowy znacznik i po najechaniu mówi: o której się przy nim jest, skąd
+  i ile minut się idzie, ile stąd do celu w linii prostej oraz ile ma paliwa
+  i zasięgu. Marsz liczy ta sama funkcja, co każdy inny (`gtfs.walk_time_sec`,
+  punkt 14) — auto nie ma własnej, hojniejszej miary. Ulicy postoju w dymku
+  nie ma: znacznik i tak stoi dokładnie tam, gdzie auto.
+  **Program „Ogarniam"** (w feedzie `discounts`, udokumentowany jako
+  `CarDiscountV1`): przy części aut Traficar płaci zniżką za tankowanie,
+  sprzątanie albo relokację. Dymek mówi, ZA CO i ZA ILE — a gdy nie ma nic,
+  mówi i to, bo milczenie znaczyłoby naraz „nic tu nie ma" i „nie wiadomo".
+  Auto z nagrodą nosi dodatkowo złotą obwódkę, żeby dało się je znaleźć bez
+  najeżdżania po kolei na wszystkie. Pomiar 2026-09-12: 11 z 44 aut w mieście
+  ma coś do wzięcia, 15–30 zł za zadanie.
+  **Czasu jazdy autem mapa nie podaje w ogóle.** Propozycje szacują go
+  z prędkości (`traficar.DRIVE_*`), ale mapa ma nie zgadywać: bez rozkładu
+  i bez routingu samochodowego zostaje odległość w linii prostej i decyzja
+  pasażera.
+  Zasięg bierze się z NARYSOWANYCH kawałków (`planner._drawn_reach`), nie
+  z całego skanu — auto stoi przy tym, co widać, albo nie ma go wcale. Na
+  przemiarze relacji na żywo wychodzi 1–9 aut (wolnych jest we Wrocławiu
+  ok. 40 naraz), więc mapa nie tonie w fiolecie. Znaczniki tylko przy pytaniu
+  o dziś, dokładnie z tego powodu co stojaki rowerowe: auto stoi tam, gdzie
+  stoi TERAZ.
+  Wygląd (fiolet marki, dymek z rejestracją i zasięgiem) podebrany
+  z odrzuconej warstwy `archive/traficar-layer` (7fd7b66, 2026-07-22) — tamta
+  pokazywała wszystkie auta w mieście i nie wiedziała nic o wyszukiwanej
+  relacji, ta pokazuje tylko te, do których mapa dowozi.
+- **2026-09-12** — **jedna zasada chodzenia zamiast trzech**. Było: 300 m
+  w przesiadce z czasem marszu, 400 m na krańcach relacji z czasem marszu
+  i 1000 m wokół punktu klikniętego na mapie ZA DARMO — czyli 900 m na
+  starcie nie kosztowało ani minuty, a 350 m w środku trasy pięć. Jest jeden
+  promień (`gtfs.WALK_M`, 600 m) i jeden czas, ten sam wszędzie. Punkt z mapy
+  wchodzi do dnia jako zwykły słupek bez połączeń (`gtfs.with_point`), więc
+  most pieszy, oba skany, profil celu i mapa nie musiały się o nim niczego
+  dowiadywać; suwak „Zasięg szukania punktu" zniknął razem z parametrem
+  `range_m`, bo nie ma już czego regulować.
+  **Czas marszu liczy się z samej odległości w linii prostej** i jest hojny:
+  0,7 m/s (ok. 42 m/min), w górę do pełnych minut, nie mniej niż trzy.
+  Wcześniej było 1,3 m/s podzielone przez współczynnik nadłożenia drogi
+  (efektywnie 0,96 m/s) — ale skoro znamy tylko prostą, to cały brak wiedzy
+  (obejście kwartału, światła, przejście podziemne) ma siedzieć w jednej
+  liczbie. Za nią stoi ostrożny pieszy (1,07 m/s — wartość z inżynierii
+  ruchu, przekracza ją 85% ludzi) na drodze półtora raza dłuższej niż prosta.
+  Zasada: lepiej nie pokazać przesiadki, niż pokazać taką, na którą pasażer
+  nie zdąży. Widać to od razu — przejście z peronu Wrocław Główny na
+  przystanek „DWORZEC GŁÓWNY" kosztowało 3 minuty, teraz 7, i autobus,
+  którego się nie łapało, przestał być proponowany.
+  **Przejście musi coś otwierać.** Zgłoszone na żywo (`Wojszyce → DWORZEC
+  GŁÓWNY`, 11.09 18:08): 112 staje na Parafialnej o 18:13 i na Wojszycach
+  o 18:14, więc wyszukiwarka kazała iść cztery minuty WSTECZ po ten sam
+  autobus — z identyczną godziną w celu (18:32) — a mapa rysowała 112 i 113
+  od Parafialnej i na samych Wojszycach nie stawiała nawet kropki (linia
+  tylko tamtędy „przejeżdżała"). Marsz po pojazd, który i tak po nas
+  przyjedzie, jest marszem donikąd: wsiadanie przesuwa się teraz na własny
+  przystanek (`_cheaper_boarding`), a kotwica mapy dostała oba zbiory osobno
+  — przystanek startowy bije słupek „o cztery minuty stąd"
+  (`_select_and_anchor`). Po zmianie ta sama relacja: 112 od Wojszyc, kropka
+  na Wojszycach, ta sama godzina w celu.
+  Tego samego dnia zgłoszony drugi przypadek tego samego kształtu, tym razem
+  z punktu klikniętego w Radwanicach: APK1 staje na Mickiewicza o 15:00 i na
+  Skrajnej o 15:01 — ten sam kurs — a z punktu na Mickiewicza idzie się
+  14 minut, na Skrajną 7. Pierwsza wersja reguły tego nie łapała, bo oba
+  przystanki są „za marszem". Skan liczy więc teraz, ILE marszu kosztuje
+  dojście na każdy przystanek (`walked`), i przy remisie wybiera wsiadanie
+  z mniejszym; kotwica mapy wybiera spośród słupków osiągalnych pieszo ten
+  z najkrótszym dojściem, a nie ten mijany przez kurs najwcześniej. Wcześniejsza
+  pozycja na trasie kursu nie jest warta ani metra nadłożonej drogi — to ten
+  sam pojazd i ta sama godzina w celu (15:21).
+  Zmierzone na sześciu relacjach: sama reguła wsiadania nie zmienia map
+  (kawałki, linie, kropki co do sztuki takie same) — różnice biorą się
+  wyłącznie z wolniejszego marszu, i o to chodziło. Kontrakt mapy dostał
+  punkt 14, a punkty 4, 10 i 12 zostały pod niego dociągnięte.
+
+- **2026-09-11** — lista propozycji umie skończyć podróż **Traficarem**
+  (`traficar.py`): komunikacja dowozi w okolicę celu, dalej dojście do auta,
+  pięć minut na odbiór i start, i jazda do celu. Dodatkowa pozycja obok
+  zwykłych wariantów, nie osobny tryb — i wpleciona w listę tym samym
+  kluczem, którym sortuje się reszta, więc auto musi być realnie szybsze,
+  żeby stanąć wyżej. Auta z `fioletowe.live` (strona trzecia, wyłącznik
+  `TRAFICAR=0`), kandydaci ze śladu skanu CSA, który `plan_flow` już ma —
+  bez drugiego przeszukiwania. Mapy przepływów to nie dotyka: czas jazdy
+  jest szacowany, a nie odczytany z rozkładu, więc auto rysuje się dopiero
+  po wybraniu propozycji, kreskowaną linią. Stałe szacunku (krętość 1,30,
+  34 km/h) zmierzone na 30 losowych trasach prawdziwym routingiem
+  samochodowym: błąd czasu 19% mediany, najczęściej w górę. Że to szacunek,
+  widać na karcie („ok." przy czasie podróży) i w jej rozwinięciu (osobna
+  nota pod etapem).
+
+- **2026-09-11** — **rower miejski (WRM) w trasie**. Przełącznik 🚲 w karcie
+  wyszukiwania dokłada do listy propozycji takie, w których część drogi
+  pokonuje się rowerem — między stacjami, bo tak działa ten system, i w
+  DOWOLNYM miejscu trasy: na początku, na końcu, w środku (jako skrót
+  między dwiema liniami) albo zamiast całej trasy. Nie ma na to osobnego
+  algorytmu: cztery kształty wychodzą z jednego złożenia dwóch rzeczy, które
+  `plan_flow` i tak już liczy — skanu w przód (`earliest`) i profilu dojazdu
+  do celu (`_target_profile`) — przez parę stacji (patrz sekcja „Rower
+  miejski w trasie"). Źródło to kanał GBFS operatora (`nextbike_pl`, CC0-1.0,
+  rejestr MobilityData), czytany wyłącznie do pamięci, z cache 60 s na stan
+  stojaków; awaria cudzego serwera odbiera tylko propozycje z rowerem, nic
+  więcej. Etap rowerowy pokazuje osobno odblokowanie (3 min), jazdę i zwrot,
+  bo z tych trzech tylko jedna część to jazda — a kto tego nie wie, planuje
+  przesiadkę, której nie zdąży; wszystkie czasy tej warstwy zaokrąglają się
+  w górę do pełnych minut, żeby godziny na karcie zgadzały się z podanymi
+  długościami etapów. Rower podlega tej samej regule co reszta listy —
+  mieści się w oknie czasowym mapy, więc wchodzi i staje tam, gdzie mu
+  wypada; osobnego progu nie ma, bo odhaczenie 🚲 jest właśnie zgodą na koszt
+  roweru. Gdy propozycji nie ma, front mówi dlaczego (okno, milczący kanał
+  albo pytanie o inny dzień) — inaczej trzy różne zera wyglądają jak jedna
+  zepsuta funkcja. Na samej mapie przepływów roweru nie ma i to jest wybór —
+  jasność liczy się tam z rozkładu, a rower rozkładu nie ma.
+
+- **2026-09-10** — dojście widać też **poza kartą propozycji**: pasek
+  „Najszybciej o …" nad mapą pokazuje je jako plakietkę, a podświetlenie
+  najszybszej trasy rysuje je kreskowaną linią. `_fastest_summary` filtrował
+  etapy przez `kind == "ride"`, więc odkąd trasa potrafi zacząć się dojściem,
+  pasek obiecywał wsiadanie na przystanku, którego użytkownik nie wskazywał,
+  a podświetlona trasa zaczynała się „w powietrzu", kawałek od zaznaczonego
+  startu — i nic nie tłumaczyło tej dziury. `fastest.legs` niesie teraz także
+  etapy `kind: "walk"` (z `minutes`, `same_place`, `to` i geometrią).
+- **2026-09-10** — **przejście otwierające albo zamykające trasę ma na karcie
+  własną plakietkę** (ikona idącego + minuty, kreskowany obrys w kolorze
+  dojścia z mapy). Rząd plakietek pod godzinami niósł dotąd przejście jako
+  KRESKOWANY ŁĄCZNIK między liniami — dobre dla przesiadki („tu trzeba
+  przejść"), ale bezużyteczne, gdy przejścia nie ma między czym postawić:
+  trasa „dojdź na stację i wsiądź w pociąg" wyglądała na karcie jak sam
+  pociąg. Zgłoszone na żywo. Przejścia MIĘDZY pojazdami zostają łącznikiem —
+  wersja, w której plakietkę dostawało każde przejście, była wierna, ale
+  nieczytelna: odkąd przesiadka między różnymi słupkami niemal zawsze kosztuje
+  minimalne trzy minuty, trasa z trzema przesiadkami rozrastała się do
+  „3 – 18 – 3 – 14 – 3 – 4 – 3 – 146" i zawijała do dwóch linii. Etykieta dla
+  czytnika ekranu wymienia teraz przejścia razem z liniami.
+- **2026-09-10** — **dojście na KRAŃCACH relacji dostało własny promień**
+  (`gtfs.WALK_ACCESS_M` = 400 m, obok `WALK_MAX_M` = 300 m dla przesiadek).
+  To są dwie różne gotowości do marszu: do pociągu wychodzi się z domu i idzie
+  tyle, ile trzeba, a przesiadka w połowie trasy konkuruje z siedzeniem
+  w pojeździe, który już jedzie. Zlanie ich w jeden próg dawało wynik wprost
+  absurdalny, zgłoszony na żywo: ze słupka „Wojszyce" na stację Wrocław
+  Wojszyce jest 359 m, czyli poza promieniem — więc zamiast tam pójść, planer
+  proponował przejazd JEDEN przystanek autobusem na „Przystankową" i dopiero
+  stamtąd pięć minut marszu na tę samą stację. Podniesienie `WALK_MAX_M`
+  naprawiłoby ten przypadek, ale zagęszcza CAŁY graf przesiadek (zmierzone:
+  2,33 s → 4,90 s na pięciu relacjach, utrata dwóch propozycji na Leśnicy);
+  promień dojścia takich kosztów nie ma, bo dotyczy garstki słupków
+  krańcowych — benchmark po zmianie jest co do sekundy ten sam.
+  Skan honoruje go po obu stronach: `_origin_walk` przy wyjściu, a przy
+  dojeżdżaniu pod cel osobna relaksacja obok `day.siblings` (egress nie
+  przechodzi przez most, więc takiej pary tam po prostu nie ma).
+  `gtfs.walk_seconds` liczy teraz czas z odległości, gdy krawędzi mostu nie
+  ma — inaczej etap pieszy obiecywałby trzy minuty tam, gdzie skan założył
+  sześć. Dojścia ze startu NIE zapisujemy na słupku celu: byłoby trujące,
+  bo samo dojście celu nie ogłasza, a zasłoniłoby każdy późniejszy dojazd
+  (ten sam kształt błędu, co naprawiony kiedyś przy `note_target`).
+  Przy okazji **lista odsiewa propozycje zdominowane** — dowożące o DOKŁADNIE
+  tej samej godzinie, każące wyjść nie później, a wymagające przesiadki
+  więcej. Trasa dojeżdżająca później zostaje (niszowe opcje mają być
+  widoczne); odsiewamy wyłącznie pracę wykonaną za darmo. Na „Dworzec Główny
+  → Oleśnica" zwija to sześć wariantów „przejedź autobusem pod dworzec,
+  do którego masz pięć minut pieszo" w dwa realne pociągi.
+- **2026-09-10** — **„jestem u celu" przestało znaczyć „stoję na słupku
+  celu"**. Pięć miejsc pytało o to przynależnością do `target_set`, i przez
+  długi czas było to poprawne: most pieszy łączył wyłącznie słupki tej samej
+  nazwy, a cel to całe MIEJSCE, więc sąsiedzi celu sami byli celem. Po
+  rozszerzeniu mostu na różne przystanki przestało się zgadzać — i sypało
+  się cicho, każde miejsce inaczej. Skan wstecz nie zasiewał dojścia do celu,
+  więc stacja Wrocław Wojszyce dostawała `latest` z przypadkowego objazdu
+  (09:28 zamiast 09:39); reguła cofnięcia uznawała przez to wsiadanie tam za
+  oddalanie się od celu i kasowała cały dowożący kurs, ZANIM cokolwiek zdążyło
+  go zobaczyć. Lista propozycji nie umiała ZAKOŃCZYĆ trasy dojściem, więc
+  doklejała jeszcze jeden autobus, byle skończyć na słupku celu. Wspólny
+  `_target_reach` odpowiada teraz „ile stąd pieszo do celu i do którego jego
+  słupka", a propozycja może zamknąć się etapem pieszym — z przyjazdem
+  liczonym DO CELU. Wyjścia „do celu" sortują się po faktycznym przyjeździe
+  (razem z dojściem), bo deduplikacja łańcuchów patrzy na linię i miejsce
+  wsiadania: bez tego wariant „wysiądź wcześniej i idź" wypierał szybszy
+  „dojedź pod sam cel" jako rzekomy duplikat. Efekt na zgłoszonej relacji
+  „Wojszyce → Dworzec Główny": pociąg KD 60252 wreszcie jest na liście,
+  remisując z autobusem 113 na 09:49.
+- **2026-09-10** — **pieszo wychodzi się też ze STARTU relacji**, nie tylko
+  przy przesiadce. Do tej pory przejście relaksowało się wyłącznie po
+  wysiadaniu z pojazdu, więc z przystanku startowego nie dawało się nigdzie
+  odejść: relacja „Wojszyce → Dworzec Główny" pokazywała sam autobus, choć
+  cztery minuty marszu dalej stoi przystanek, z którego jedzie się szybciej.
+  Teraz otwiera ją etap „Przejście pieszo do: Parafialna", a karta podaje
+  godzinę WYJŚCIA (10:10), nie odjazdu pojazdu (10:14) — inaczej obiecywałaby
+  moment, w którym pasażer stoi jeszcze kilkaset metrów od słupka. Jeden krok,
+  tak samo jak przy przesiadce. Samo dojście pieszo NIE jest propozycją trasy
+  (`_scan` celowo nie ogłasza wtedy celu). Kotwiczenie mapy dostało osobny
+  zbiór `anchor_stops`, bo `origin_latest` MUSI zostać policzone z prawdziwego
+  startu — wpuszczenie tam słupka leżącego bliżej celu podniosłoby próg
+  cofnięcia dla całej mapy. Przy okazji `MAX_JOURNEY_VISITS` z 500 na 4000:
+  stara wartość była kalibrowana na graf sprzed kolei i sprzed chodzenia,
+  a przy gęstszym grafie budżet wyczerpywał się, ZANIM przeszukiwanie zeszło
+  do segmentów dojeżdżających do celu — „Wrocław Główny → Warszawa Centralna"
+  dawało PUSTĄ listę mimo mapy z 1300 segmentów. Podniesienie jest darmowe
+  (2,30 s → 2,38 s na pięciu relacjach); koszt zapytania siedzi gdzie indziej.
+  Promienia NIE ruszono — patrz wpis wyżej i znane ograniczenia: przy 300 m
+  pociąg z Wojszyc jest na liście (po jednym przystanku autobusem pod stację),
+  a 400 m dokłada tylko wariant „wyjdź z domu prosto na stację", za to
+  dwukrotnie wydłuża najcięższe zapytania i zabiera propozycje na LEŚNICY.
+- **2026-09-10** — **pieszo przechodzi się teraz między RÓŻNYMI przystankami**,
+  a nie tylko między słupkami o identycznej nazwie. Krawędź piesza bierze się
+  z odległości (`gtfs._nearby_bridges`, 300 m), więc dwa przystanki po dwóch
+  stronach skrzyżowania przestały być dla wyszukiwarki punktami
+  niepołączonymi. Najwięcej zmienia to na styku sieci: dworzec kolejowy prawie
+  nigdy nie nazywa się tak, jak przystanki pod nim („Wrocław Główny" vs
+  „DWORZEC GŁÓWNY"), więc kolej i MPK stykały się dotąd tylko tam, gdzie nazwy
+  przypadkiem się pokryły — dziś jest 414 takich przejść zamiast garstki, a
+  relacja „Dworzec Główny → Oleśnica" po raz pierwszy układa się jako
+  autobus + 5 min pieszo + pociąg. Czas przejścia przestał być stałą 3 min:
+  liczy się z odległości i krawędź niesie go ze sobą (podłoga 3 min została,
+  bo to w niej siedzi bufor przesiadki, którego przejście jako jedyne nie
+  dostaje). Przy okazji rozdzielone zostały dwa pytania, które przy dawnej,
+  wąskiej relacji miały zawsze tę samą odpowiedź: „czy da się tam dojść"
+  (`_sibling_places`) i „czy już tam byłem" (`_same_place_stops`) — reguła
+  zawracania pyta o to drugie i rozwijana zasięgiem marszu uznawałaby za
+  minięte wszystko w promieniu od trasy. Promień 300 m jest dobrany pomiarem,
+  nie z sufitu: 400 m dokłada głównie pary przystanków wzdłuż tej samej ulicy,
+  dwukrotnie wydłuża najcięższe zapytania i rozpycha kotwice mapy tak, że z
+  listy propozycji znikają dobre trasy; 250 m gubi już realne dojścia.
+  Znane ograniczenia (patrz niżej): dojścia pieszo z samego startu relacji
+  nadal nie ma, a lista propozycji bywa krótsza przez sposób kotwiczenia
+  punktów wsiadania.
+- **2026-09-10** — „Plac Grunwaldzki" i „PL. GRUNWALDZKI" to jedno zapytanie.
+  Do kaskady dopasowań (`gtfs.match_stop`) doszedł trzeci, najsłabszy poziom
+  kluczy: bez ogonków, bez kropek i z rozwiniętymi skrótami
+  (`naming.ABBREVIATIONS`, `gtfs._alias_key`). Nazwa przystanku i zapytanie
+  przechodzą przez to samo złożenie, więc to REGUŁA na całą klasę nazw,
+  a nie lista wyjątków — jeden wpis na skrót obsługuje dziś 17 nazw i te,
+  które MPK dopiero doda. `św.` celowo poza tabelą: to rzeczownik odmienny
+  (świętego/świętej), więc jedno rozwinięcie rozjechałoby przypadki zamiast
+  je scalić. Poziom wchodzi na DÓŁ kaskady — dokładna pisownia i ogonki
+  zachowują pierwszeństwo. Podpowiedzi we froncie składają nazwy tak samo,
+  z tabelą wziętą z serwera zamiast przepisanej do `app.js`. Przy okazji
+  indeksy nazw powstają raz, w `gtfs._register_stop_name`, zamiast
+  w dwóch kopiach (`load_day` i `pkp.augment_day`).
+- **2026-09-10** — stacja kolejowa i przystanek MPK przy niej to jedno
+  miejsce, także gdy nazywają się różnie. Sześć wrocławskich par
+  (`naming.PLACE_MERGES`: Wrocław Główny ↔ DWORZEC GŁÓWNY, Nadodrze ↔ DWORZEC
+  NADODRZE, Leśnica ↔ Rubczaka, Zachodni ↔ Awicenny, Stadion ↔ Tarczyński
+  Arena, Kuźniki ↔ KUŹNIKI) scalanych na końcu budowy miejsc, więc
+  przesiadka pociąg ↔ tramwaj bierze się z tego samego mostu pieszego co
+  zmiana peronu — nowego mechanizmu nie ma. Lista jest RĘCZNA, bo automat
+  po promieniu wsysałby do Wrocławia Głównego DWORZEC AUTOBUSOWY (94 m,
+  bliżej niż właściwy DWORZEC GŁÓWNY — 185 m), a słupek należy do dokładnie
+  jednego miejsca; strażnik odległości (`PLACE_MAX_SPAN_M`) obowiązuje ją
+  jednak tak samo jak automat. Nazw nie przemianowujemy: obie dalej wracają
+  ze swoją pisownią. Przy okazji etap pieszy między słupkami o RÓŻNYCH
+  nazwach mówi, dokąd iść, zamiast „na inne stanowisko".
+- **2026-09-05** — rozkład linii przestał być rozkładem GODZIN. Zostaje
+  wybór wariantu i lista przystanków — czyli odpowiedź na „którędy jedzie";
+  zniknął pasek godzin kursów i kolumna czasu przy przystankach. Powód jest
+  ten sam, co przy słupkach: rozkład wisi na SŁUPKU, a nie na trasie, więc
+  „o której to jedzie" ma sens dopiero razem z „skąd" — a od poprzedniej
+  zmiany jest na to przycisk przy każdym przystanku trasy. Wariant niesie
+  teraz samą liczbę kursów (`trips: 55`), po której odróżnia się kierunek
+  jeżdżący cały dzień od zjazdu do zajezdni; `/api/line` schudło o ~40 %
+  (linia 113: 195 → 112 kB), a zapytanie do SQLite przestało czytać godziny,
+  bo ciąg przystanków wystarczy za klucz wariantu. Przy okazji kierunki
+  zawijają się do drugiego rzędu — trzy naraz w szerokości panelu zostawiały
+  na nazwę tyle miejsca, że widać było pierwsze słowo.
+- **2026-09-05** — z rozkładu linii da się przejść **wprost na tablicę
+  przystanku**: przy każdym przystanku trasy (poza ostatnim — tam kurs się
+  kończy) stoi przycisk „odjazdy", który otwiera tablicę tego przystanku
+  z wybranym słupkiem i zaznaczoną tylko tą linią. Słupek bierze się z `id`
+  w wariancie, nie z nazwy — oba słupki „RYNKU" nazywają się tak samo,
+  a linia jedzie jednym z nich. Wybór nakłada się po odpowiedzi serwera: gdy
+  tej linii albo tego słupka na tablicy nie ma (inny dzień, kurs wycofany),
+  zostaje zwykła tablica całego przystanku. Przy okazji przełącznik trybu
+  dostał podpis „Rozkłady" — sama tarcza zegara nie mówiła, dokąd się klika.
+
+  Szerszy przycisk wyszedł na pasek „ile trwa podróż", który wjeżdżał pod
+  niego lewą połową — i przy okazji pokazał, że pasek stał źle od początku:
+  wyśrodkowany przez `left: 50%`, czyli nad OKNEM, choć jego własny komentarz
+  mówił „nad mapą" — a środek okna leży o pół panelu za daleko w lewo. Pasek
+  zostaje w górnym rzędzie, ale zamiast liczyć środek dostaje WYCINEK ekranu
+  (`left` za przyciskami, `right: 16px`) i centruje się w nim przez
+  `width: fit-content` z automatycznymi marginesami — to `margin: 0 auto`
+  dla elementu `position: fixed`. Samo liczenie środka mapy nie wystarczyło:
+  pasek bywa szeroki na pół ekranu i przy oknie 950 px między przyciskami
+  a prawą krawędzią zostaje mniej miejsca, niż on zajmuje. Wycinek go wtedy
+  przesuwa, a gdy i to nie starcza — pozwala mu się zawinąć na dwie linijki
+  (`flex-wrap`), zamiast wylać tekst poza własne tło.
+- **2026-09-05** — **godzina obok daty** i **pełny rozkład**. Pole godziny
+  jest jedno na oba rozkłady i nic nie dociąga (odpowiedź niesie całą dobę):
+  przesuwa tylko to, od czego zaczyna się tablica, i to, który kurs linii jest
+  „ten najbliższy". Zastąpiło regułę „teraz, ale tylko dla dzisiaj" — rozkład
+  na czwartek za tydzień też ma się od czegoś zaczynać. Przy okazji dzień
+  i godzina dostały ramkę pola czasu wyszukiwarki; surowy `<input type="date">`
+  na tle karty wyglądał jak nie z tej aplikacji.
+
+  Przełącznik tablicy to teraz **„podana godzina" / „pełny rozkład"** zamiast
+  „od teraz / cała doba". Pełny rozkład to zapis ze słupka: wiersz na godzinę,
+  w wierszu minuty kolejnych kursów — doba mieści się na jednym ekranie. Ma to
+  sens tylko dla JEDNEJ linii (pod zlanym ciągiem minut nie wiadomo, co
+  podjedzie), więc przełączenie zawęża zaznaczenie do jednej, a plakietki
+  linii stają się wyborem jednokrotnym; poprzednie zaznaczenie wraca przy
+  powrocie do listy. Kierunek odróżniają odnośniki, tak jak na papierze: kurs
+  jadący tam, gdzie większość, jest bez znaczka, każdy inny dostaje swój,
+  rozwinięty w legendzie pod siatką. Klik w minutę rozwija kurs, tak samo jak
+  klik w wiersz listy.
+
+  Ta siatka od razu pokazała błąd, którego w liście nie było widać: linia
+  nocna stała na tablicy **dwa razy**. Oś doby sięga poza 24 h, bo kurs
+  wyjeżdżający o 25:10 musi dać się doskanować wyszukiwarce — ale on odjeżdża
+  już następnego dnia i to tam ma stać, jako ogon nocy. `stop_board` tnie więc
+  odjazdy na 24 h (`gtfs.PREV_DAY_SEC`); rozkładu LINII to nie dotyczy, bo tam
+  jednostką jest doba rozkładowa, a nie kalendarzowa.
+- **2026-09-05** — tablica odjazdów daje się zawęzić do jednego **słupka**.
+  Nazwa taka jak „Wojszyce" to jedno miejsce scalone z kilku słupków (patrz
+  `gtfs._build_places`), a z każdego jedzie się gdzie indziej — tablica ze
+  wszystkich odpowiadała na „co tu odjeżdża", ale nie na „co odjeżdża stąd,
+  gdzie stoję". Karta „Słupki" wypisuje je kierunkami, nie nazwami, bo
+  nazywają się zwykle tak samo; nazwa dochodzi do podpisu tylko tam, gdzie
+  faktycznie rozróżnia (nazwane perony kierunkowe węzła). Wybór zawęża
+  tablicę, listę linii i trasy na mapie, a słupki są też punktami na mapie —
+  klik w przygaszony przełącza tablicę na niego. Serwer dokłada do
+  odpowiedzi samo `points` (nazwa + współrzędne); liczniki, kierunki i numery
+  liczy front z tablicy, którą i tak ma w całości.
+
+- **2026-09-04** — ciężar obrazka: najbledsza linia chudnie (2 px zamiast
+  stałych 3) i blednie mocniej (krycie 0.3 zamiast 0.4), a kropki przesiadkowe
+  przestały mieć krycie wpisane na sztywno — biorą jasność najjaśniejszego
+  kawałka, który ich dotyka, przez to samo przeskalowanie co segmenty (nowe
+  pole `w` przy węźle). Powód: przy szerokim oknie 240 z 271 kawałków siedzi
+  przy bladym końcu skali, ale przy jednakowej grubości sumują się w plamę
+  cięższą niż korytarz, który naprawdę prowadzi do celu; 66 jednakowo mocnych
+  kropek dokładało ten ciężar tam, gdzie było ich najwięcej. Kropka startowa
+  zostaje pełna zawsze. Kontrakt nietknięty — to wygląd, nie wybór.
+- **2026-09-04** — reguła zawracania przestała ucinać kursy, które zahaczają
+  o pętelkę PO DRODZE i jadą dalej (punkt 4 kontraktu: intencja bez zmian,
+  poprawiona miara — pętla kończy kurs tylko wtedy, gdy po powrocie nie ma już
+  nic nowego). Na Bielanach ucinała jedyne wyjście ze startu, przez co mapa
+  rysowała kawałki niepołączone z przystankiem startowym i wpadała w tryb
+  awaryjny. Przemiot 24 relacji: 22 bez zmian, 2 naprawione, zero regresji.
+- **2026-09-04** — komunikaty nad mapą przestały jej przeczyć: tryb awaryjny
+  wskazuje wyjście (poszerzenie zakresu przyciskiem „+X min"), a narysowana
+  mapa z pustą listą obok dostaje neutralną ramkę zamiast czerwonej i nie każe
+  już zawężać okna czasowego — było to dokładne odwrócenie tego, co użytkownik
+  robi tym przyciskiem. Zmiana dotyczy samych komunikatów, nie liczenia mapy.
+- **2026-09-04** — notka o takcie w dymku przystanku („co 20 min") liczy się
+  z PEŁNEJ tablicy przystanku, a nie z listy po odsiewie: takt jest cechą
+  linii, nie okna mapy, więc zostaje także wtedy, gdy kolejny kurs wypada
+  już poza zakresem. Wcześniej znikał dokładnie tam, gdzie był
+  najpotrzebniejszy — na rzadkim węźle blisko granicy okna.
+- **2026-09-04** — przycisk „+X min" przy pasku nad mapą (zgłoszenie #79):
+  X to połowa tego, co mapa pokazuje w tej chwili, więc klik rozciąga zakres
+  rysowania w przód razy 1,5, a kolejne klikają dalej — do twardego sufitu
+  2 h (`planner.MAX_HORIZON_SEC`), przy którym przycisk znika. W API nowy
+  parametr `horizon_sec`; może okno tylko poszerzyć, przycinanie zostaje
+  w gestii suwaków pod zębatką. Przy okazji naprawiony emulator frontu
+  (`tests/js/harness.js`), który od jakiegoś czasu w ogóle nie wstawał —
+  atrapie grupy warstw brakowało `clearLayers`.
+
+- **2026-08-31** — kolej przestała być doklejką: stacje dokładane do dnia
+  PRZED budowaniem miejsc, więc przechodzą przez to samo sklejanie po nazwie
+  co przystanki, a ich własny promień przesiadkowy (500 m) usunięty razem
+  z funkcją, która go liczyła. Czas kolejowy ucinany do pełnych minut
+  (odjazd w dół, przyjazd w górę), bo jedna oś czasu nie może mieć dwóch
+  dokładności. Reguła „ta sama nazwa" dostała zabezpieczenie odległością
+  (`gtfs._one_spot`) — ogólnopolski słownik stacji sklejał wrocławską
+  „Wiśniową" ze stacją 354 km dalej. Skutek uboczny zamierzony: dziś obie
+  sieci stykają się w JEDNYM punkcie (Wrocław Szczepin); porządne łączenie
+  stacji z przystankami to osobne zadanie.
+- **2026-08-31** — skan przestał gubić cel osiągalny wyłącznie przejściem
+  pieszo. Pytanie „czy to już cel" zadawało się tylko przy wysiadaniu
+  z pojazdu, więc relacja kończąca się przejściem na sąsiedni słupek była
+  ogłaszana jako nieistniejąca — mimo policzonej godziny.
+
+- **2026-08-30** — geokodowanie stacji PKP uproszczone na wyraźną prośbę
+  użytkownika do DWÓCH źródeł: WYŁĄCZNIE mapa PLK i portal pasażera -
+  OpenStreetMap/Overpass i Nominatim (razem z całym mechanizmem "stacje za
+  granicą", który na nich polegał) usunięte z `update_pkp.py` całkowicie,
+  nie tylko zdegradowane do zapasowych. Powód: oba to zewnętrzne geokodery
+  dopasowujące po samej nazwie miejscowości, bez wiedzy o tym, że Polska ma
+  wiele miejsc o tej samej nazwie w różnych regionach - historia tego
+  pliku to seria takich błędów (Augustów, Widuchowa, Słupca, ~300 innych
+  przez pospolite nazwy jak "Chałupy", a nawet sam portal pasażera dla
+  zagranicznego "Kolina", patrz wpis niżej) - PLK i portal to jedyne dwa
+  źródła PIERWSZOOSOBOWE (dane samego zarządcy sieci / własnego sprzedawcy
+  biletów), więc jedyne, które nie zgadują po nazwie. Konsekwencja: stacje
+  ZA GRANICĄ (Berlin, Wiedeń, Kijów, ...) nie mają już żadnego źródła
+  współrzędnych - żadne z dwóch pozostałych nie obejmuje zagranicy (patrz
+  nagłówek `_fetch_portalpasazera_point`) - zostają bez markera zamiast
+  zgadywanej pozycji; walidacja tras (`find_suspect_coords`) i mapa PLK/
+  portal pasażera zostają bez zmian poza tym. Usunięte też: eksperymentalne
+  automatyczne usuwanie ze słownika stacji tych bez żadnego kursu w danym
+  oknie rozkładu (`build_database`, wprowadzone i tego samego dnia cofnięte
+  na prośbę użytkownika) - `stations` znowu zawiera WSZYSTKO, co zwróci
+  słownik API, niezależnie od tego, czy dana stacja ma jakikolwiek `stops`.
+  Filtr w `pkp.all_station_names()` (tylko stacje z ustalonymi
+  współrzędnymi - patrz wpis niżej) zostaje bez zmian - to inny, celowo
+  zachowany mechanizm.
+
+- **2026-08-29** — drugi tryb panelu: **rozkłady jazdy**, przełączane
+  przyciskiem ◷ obok chowania panelu (na telefonie w pasku zakładek).
+  Rozkład linii (kierunki, kursy, przebieg na mapie) i tablica odjazdów
+  z przystanku, w której plakietkami linii składa się rozkład z dowolnego
+  ich podzbioru; trasy zaznaczonych linii — od tego przystanku dalej — idą
+  na mapę, a kliknięcie odjazdu pokazuje ten jeden kurs z godzinami.
+  Backend: `timetables.py` + `/api/line`, `/api/stop_board`, `/api/trip`.
+  Front: `static/timetable.js`, wpięty w mapę wyszukiwarki wąskim mostem
+  (`window.plannerBridge` na końcu `app.js`) — wejście w rozkłady chowa
+  wachlarz połączeń, wyjście odtwarza go z pamięci, bez ponownego zapytania.
+
+  Trzy decyzje z UI, bo każda odwraca to, co napisało się najpierw:
+  **jedno pole** zamiast zakładek „Linia / Przystanek" — zakładka kazała
+  wybrać rodzaj rozkładu, zanim było wiadomo, czego się szuka, a „17"
+  i „Katedra" i tak nie da się pomylić; rodzaj widać na liście podpowiedzi
+  (plakietka linii / znaczek słupka) i tam wystarczy. **Brak przycisku
+  „Pokaż"** — wybór podpowiedzi ładuje od razu, Enter też. **Rozkład linii
+  otwiera się na najbliższym kursie**, a nie na liście przystanków bez
+  godzin: pytanie brzmi „o której to jedzie", więc jakaś godzina musi być
+  na ekranie od razu, a pasek godzin sam przewija się na tę porę.
+  `attachAutocomplete` dostało przy okazji haki `suggest`/`render`, więc
+  klawiatura i ARIA listy podpowiedzi są nadal w jednym miejscu, a rozkłady
+  podstawiają tylko własne szukanie i własny wiersz.
+
+  Przy okazji: pole daty wyszukiwarki dostało wartość w formacie ISO —
+  `<input type="date">` innego nie przyjmuje, więc do tej pory startowało
+  puste.
+- **2026-08-29** — piąte źródło geokodowania: katalog stacji na
+  portalpasazera.pl (oficjalny portal sprzedaży biletów PKP,
+  `update_pkp._fetch_portalpasazera_point` - scraping pojedynczej strony,
+  brak publicznego API, więc bez zbiorczego zapytania jak PLK/OSM).
+  Zgłoszone przez użytkownika na żywo (Góra Śląska, Zwierzyniec - obu nie
+  miały ani PLK, ani OSM, ani Nominatim, a portal miał). Kolejność w
+  `geocode_missing_stations` zmieniona na wyraźną prośbę użytkownika: oba
+  źródła PIERWSZOOSOBOWE PKP/PLK (mapa PLK, potem ten portal) mają
+  pierwszeństwo przed zewnętrznymi geokoderami - dopiero to, czego żadne
+  z dwóch nie znajdzie, dogania OpenStreetMap, a na końcu Nominatim
+  (wcześniej było odwrotnie: OSM i Nominatim przed portalem). Uwaga
+  znaleziona przy okazji: portal miewa TĘ SAMĄ pułapkę zbieżności nazw co
+  Nominatim/OSM (patrz wpis niżej o Augustowie/Widuchowej) - dla
+  zagranicznej stacji „Kolin” (Czechy) portal zwraca współrzędne zupełnie
+  innej, przypadkowo tak samo nazwanej polskiej wsi (73-116 Kolin,
+  zachodniopomorskie); złapane i odrzucone automatycznie przez istniejącą
+  walidację tras (`find_suspect_coords` - sąsiedzi na trasie 350+ km od
+  tego wyniku), więc stacja zostaje bez markera zamiast dostać zły.
+
+- **2026-08-29** — `update_pkp.build_database` usuwa ze słownika stacji
+  (tabela `stations`) każdą, która nie ma ŻADNEGO wpisu w `stops` w tym
+  oknie rozkładu (`DELETE ... WHERE station_id NOT IN (SELECT DISTINCT
+  station_id FROM stops)`, tuż po ich wstawieniu). Zgłoszone przez
+  użytkownika: taka stacja i tak nigdy nie pojawi się w żadnej realnej
+  trasie (żaden kurs przez nią nie przejeżdża), więc nie ma sensu jej
+  geokodować (`_read_stations` czyta wprost z tej tabeli) ani pokazywać
+  w podpowiedziach wyszukiwarki (`pkp.all_station_names`/`all_stations_geo`,
+  ta sama tabela) - jedna zmiana zamiast osobnego filtra w obu miejscach.
+  Na żywej bazie usunęło to 59 z 3266 stacji - część to osobne, nieużywane
+  wpisy obok innych stacji o tej samej nazwie z realnym kursem (np. "Berlin
+  Zoolog Garten"/"Berlin Hbf" - dokładnie te, które wcześniej dostały
+  ręczną poprawkę nazwy w `NAME_OVERRIDES`/geokodowanie, na próżno - żaden
+  kurs przez nie nie jeździ), część to jawnie syntetyczne wpisy-zaślepki
+  ("WARSZAWA -", "BERLIN -", ...). Osierocone wpisy dla usuniętych stacji
+  wyczyszczone też z `data/pkp_station_coords.json` (59) i
+  `data/pkp_foreign_stations.json` (17) - pokrycie geokodowania: 3185/3207
+  (99,3%) na przeciętej już bazie.
+
+- **2026-08-29** — geokodowanie stacji PKP rozszerzone o trzy kolejne
+  źródła ponad sam Nominatim (patrz wpis niżej o dwóch pierwszych błędach) -
+  OFICJALNA mapa infrastruktury PLK (mapa.plk-sa.pl, warstwa "punkty
+  eksploatacyjne", WFS przez GeoServer, `update_pkp._fetch_plk_points`,
+  wymaga `pyproj` do konwersji EPSG:2180 → WGS84) jako NAJBARDZIEJ
+  wiarygodne źródło (ok. 93% trafień samą nazwą stacji, bez żadnego
+  dopasowania rozmytego); zbiorcze zapytanie do OpenStreetMap/Overpass
+  (`_fetch_osm_stations`) jako drugie; Nominatim - już istniejący,
+  ostrożny, per-stacja - dopiero jako trzecie, dla reszty. Osobny, czwarty
+  mechanizm dla stacji ZA GRANICĄ (PKP ma połączenia międzynarodowe) -
+  najpierw OSM/Overpass dla sąsiednich krajów (`FOREIGN_AREA_CODES`: DE,
+  CZ, SK, AT, HU, SI, LT, UA, HR), potem Nominatim ograniczony do tych
+  krajów, z trwałym oznaczeniem w `data/pkp_foreign_stations.json`, żeby
+  kolejne uruchomienia nie próbowały ich już (bez sensu) w Polsce.
+
+  Stała, automatyczna walidacja wpięta w `run_geocode()`:
+  `find_suspect_coords`/`purge_suspect_coords` porównuje odległość między
+  GEOGRAFICZNIE SĄSIADUJĄCYMI stacjami tej samej trasy (po `order_number`) -
+  realne sąsiednie przystanki nigdy nie są >100 km od siebie, więc duży
+  skok zdradza błędne dopasowanie nazwy (typowy przypadek: popularna nazwa
+  miejscowości w dwóch różnych częściach Polski, np. "Chałupy" z półwyspu
+  helskiego trafiające na Śląsk). Znaleziono i wyczyszczono tak ok. 300
+  błędnych wpisów ze starej bazy; podejrzany wpis skasowany w jednym
+  uruchomieniu dostaje szansę na poprawę z lepszego źródła w następnym,
+  zamiast trwale zaśmiecać cache błędną współrzędną.
+
+  Kolejność uzgadniania w `run_geocode()` ma znaczenie: OSM najpierw, PLK
+  na końcu, żeby ono miało ostatnie słowo (`_reconcile` nadpisuje
+  bezwarunkowo) - odwrotna kolejność niż intuicyjna "najpierw najlepsze
+  źródło" jest tu celowa; pierwotna wersja (PLK→OSM) miała realnego buga,
+  znalezionego i naprawionego w tej samej sesji - mniej wiarygodne OSM
+  nadpisywało właśnie ustawione dane PLK przy każdym uruchomieniu.
+
+  Dwa dodatkowe, ręcznie potwierdzone przypadki, których żadne z powyższych
+  źródeł nie łapie automatycznie: `NAME_OVERRIDES` (nazwy stacji PKP bywają
+  URWANE, nie tylko z literówką - "Berlin Zoolog Garten" zamiast "Berlin
+  Zoologischer Garten" nie złapie żadne dopasowanie tekstowe; poprawka na
+  wejściu do geokodowania w `_read_stations`, tylko dla zapytań - nazwa
+  wyświetlana w aplikacji zostaje bez zmian) i `_name_matches_abroad`
+  (dopasowanie zagraniczne bez węzła kolejowego wybierało dotąd PIERWSZY
+  wynik rankingu Nominatim bez sprawdzania, czy w ogóle pasuje nazwą -
+  "Vac" trafiało na niemieckie lotnisko zamiast węgierskiego Vác, "Rijeka"
+  na plac w Neuss zamiast Chorwacji; naprawione filtrem po nazwie bez
+  znaków diakrytycznych, z przepustką dla alfabetów niełacińskich, gdzie
+  porównanie litera-w-literę jest z definicji niemożliwe - patrz nagłówek
+  `_geocode_one_abroad`).
+
+  Wynik: pokrycie 3242/3266 stacji (99,2%).
+
+- **2026-08-29** — plakietka "PKP" przy nazwach stacji kolejowych na liście
+  podpowiedzi i na mapie, odróżniająca je od przystanków MPK - wyłącznie
+  warstwa wyświetlania (`routes.py`: dane podpowiedzi i markerów niosą
+  `{name, kind}` zamiast gołej nazwy; `static/app.js`/`static/style.css`:
+  `.ac-tag`) - nazwa w bazie (`stations.name`) zostaje czysta, żeby nie
+  zepsuć dopasowywania w wyszukiwarce.
+
+- **2026-08-29** — wyszukiwarka kolejowa (`pkp.py`) przebudowana z osobnego
+  silnika (własne zapytania SQL o połączenia bezpośrednie, sklejane
+  z wynikiem MPK w `routes.py` specjalnymi gałęziami — `rail_only`,
+  „stacja-brama") na PRAWDZIWE połączenie z Connection Scanem w
+  `planner.py`: `pkp.augment_day()` dokleja kursy kolejowe wprost do tej
+  samej tablicy połączeń (`gtfs.DayData.conns`), którą wczytuje
+  `gtfs.load_day()` — dla CSA stacja PKP to od tej pory zwykły przystanek,
+  a przesiadka pociąg↔MPK to zwykła przesiadka (przez `siblings`, gdy
+  stacja PKP leży bliżej niż `pkp.TRANSFER_RADIUS_M`=500 m od przystanku
+  MPK — ten sam mechanizm i ten sam bufor czasowy co przesiadka między
+  słupkami jednego miejsca, żaden nowy). Powód: poprzednia wersja umiała
+  tylko połączenia BEZPOŚREDNIE i wymagała w `routes.py` trzech osobnych
+  gałęzi (`_pkp_point_fallback`, `_combined_journeys`, `_rail_only_result`)
+  próbujących z zewnątrz odtworzyć to, co scalony CSA dostaje za darmo -
+  w tym przesiadki MIĘDZY pociągami, których stara wersja w ogóle nie
+  widziała. `/api/flow` woła teraz `plan_flow` dokładnie tak samo, jak przed
+  PKP - żadnego pola `rail_only` w odpowiedzi, żadnej wiedzy o PKP
+  w `routes.py`.
+
+  Stacja PKP dostaje syntetyczny stop_id `PKP:<id>` (prefiks jak
+  `siechnice.ID_PREFIX`) i wchodzi do rozkładu tylko z ustalonymi
+  współrzędnymi (geokodowanie, patrz wpis niżej) - stacje pośrednie kursu
+  bez współrzędnych są pomijane w sekwencji (pociąg "przeskakuje" przez nie
+  w grafie połączeń; realny rozkład się nie zmienia, zmienia się tylko to,
+  co da się pokazać). Czas kursu liczony jest z narastającą korektą +24h przy
+  przejściu przez północ (ten sam pomysł co `gtfs.PREV_DAY_SEC`, liczony
+  w locie, bo API PKP nie zapisuje godzin >23:59 tak jak GTFS).
+  `gtfs.trip_path()` dostał drugie źródło danych dla kursów `PKP:` -
+  sekwencję przystanków zapisaną przy doklejaniu (`day.pkp_trip_stops`),
+  bez drugiego zapytania do żadnej bazy (patrz `pkp.trip_path`) - dzięki
+  temu etap kolejowy w liście propozycji ma teraz dokładną liczbę stacji
+  (`stops_count`), a nie zgadywaną.
+
+  Przy okazji naprawiony realny bug znaleziony w trakcie tej przebudowy:
+  `gtfs.load_day()` woła teraz `pkp.augment_day()` bezwarunkowo, co bez
+  zabezpieczenia sprawiało, że KAŻDY test wołający `load_day` (nie tylko
+  testy PKP) sięgał po prawdziwy `data/pkp.sqlite` i prawdziwy
+  `PKP_API_KEY` ze środowiska uruchamiającego pytest - łamało to
+  hermetyczność całego zestawu testów i spowalniało go dziesięciokrotnie.
+  Naprawka: `tests/conftest.py` dostał autouse fixture wyłączający PKP
+  domyślnie dla wszystkich testów; testy, którym PKP jest faktycznie
+  potrzebne (`tests/test_pkp.py`), same je z powrotem włączają.
+- **2026-08-29** — dokładność geokodowania stacji PKP (`update_pkp.py`,
+  patrz `_geocode_one`) - dwa niezależne błędy znalezione na żywo, oba
+  naprawione zmianą samej strategii zapytań do Nominatim, bez nowej
+  zależności:
+  1. Samo imię stacji ("Augustów") trafiało w GRANICĘ ADMINISTRACYJNĄ
+     miasta (Nominatim zwraca ją jako najważniejszy wynik), nie w sam
+     dworzec - dla stacji nazwanych tak samo jak miejscowość (większość)
+     błąd bywał rzędu 1-2 km, czasem po drugiej stronie miasta. Naprawione
+     pytaniem wprost o STACJĘ KOLEJOWĄ ("stacja kolejowa {name}" - fraza
+     specjalna Nominatim, ogranicza wynik do węzłów `railway=station`);
+     sama nazwa zostaje tylko awaryjnym drugim poziomem, gdy to nic nie da
+     (małe przystanki bywają w OSM otagowane inaczej).
+  2. Na tym drugim, awaryjnym poziomie ujawnił się kolejny błąd: miejscowości
+     o tej samej nazwie w RÓŻNYCH częściach Polski (sprawdzone na żywo:
+     dwie „Widuchowa” - jedna pod Kielcami, druga pod Szczecinem, gdzie
+     naprawdę jest ta stacja) - Nominatim ocenia GRANICĘ administracyjną
+     złej miejscowości wyżej niż PUNKT osiedla właściwej. Naprawione
+     preferencją `class == "place"` nad `class == "boundary"` na tym
+     poziomie - dopiero gdy żadnego "place" nie ma, bierzemy cokolwiek się
+     trafiło.
+
+  Oba błędy wymagają pełnego przegeokodowania (stara baza
+  `data/pkp_station_coords.json` skasowana i budowana od zera - patrz
+  `geocode_missing_stations`, uzupełnia tylko BRAKUJĄCE wpisy, więc raz
+  zapisany błędny wynik nigdy by się sam nie poprawił). Przy okazji
+  znaleziona i naprawiona usterka we własnym kodzie: `_geocode_one` umie
+  wysłać DWA zapytania do Nominatim na stację (najpierw o stację kolejową,
+  potem - dopiero gdy to nic nie da - o samą nazwę), a limit tempa
+  (1 zapytanie/s, polityka użytkowania Nominatim) był pilnowany tylko RAZ
+  NA STACJĘ, nie raz na zapytanie - dwa zapytania dla tej samej stacji
+  potrafiły więc wyjść bez odstępu. Limit przeniesiony do samego
+  `_nominatim_search` (tuż przed wysłaniem żądania), więc pilnuje każdego
+  zapytania z osobna, niezależnie od tego, ile ich potrzebuje jedna stacja.
+- **2026-08-29** — dwie luki w wyszukiwarce kolejowej (patrz wpisy niżej),
+  obie w `routes.py`, obie bez zmian w planner.py:
+  1. Wpisanie nazwy, która jest stacją PKP, ale nie przystankiem MPK
+     (np. „Warszawa Centralna”), kończyło się błędem „nie znam przystanku” -
+     nawet jeśli druga strona relacji była zwykłym przystankiem MPK.
+     `plan_flow` już umiał przyjąć PUNKT zamiast nazwy (klik w mapę - MPK
+     samo szuka najbliższych swoich przystanków), więc `_pkp_point_fallback`
+     po prostu podaje mu współrzędne stacji PKP zamiast nazwy, której MPK
+     nie zna - bez dotykania planner.py. Błąd wraca dopiero, gdy ANI MPK
+     (nawet po tych współrzędnych), ANI PKP nie znajdą nic dla żadnej ze
+     stron.
+  2. Relacja, w której start jest stacją PKP bez ŻADNEGO przystanku MPK
+     w pobliżu (mała miejscowość bez komunikacji miejskiej), a cel jest
+     zwykłym przystankiem MPK bez stacji PKP w pobliżu, nie dawała nic - PKP
+     zna tylko połączenia BEZPOŚREDNIE (patrz pkp.py), a taki cel nigdy nie
+     jest stacją PKP. `_combined_journeys` szuka więc stacji-BRAMY: spośród
+     wszystkich stacji osiągalnych bezpośrednim pociągiem ze startu
+     (`pkp._direct_destinations`) bierze te, które mają choć jeden przystanek
+     MPK w pobliżu (`gtfs.nearby_stops`), i dokleja do najwcześniejszego
+     takiego pociągu najlepszą trasę MPK od bramy do celu (`plan_flow`
+     z punktem startowym = współrzędne bramy, wywołane na czas przyjazdu
+     pociągu + 8 min zapasu na przesiadkę) - jeden `journey` z etapami obu
+     trybów na liście, bez zmian we froncie (etapy już są generyczne po
+     `kind`/`mode`). Sprawdzanie samych współrzędnych (tanie: `nearby_stops`)
+     jest celowo hojniejsze (do 600 różnych stacji docelowych) niż próby
+     pełnego zapytania `plan_flow` do konkretnej bramy (tylko 6, bo to już
+     kosztowne) - z dużego węzła (Warszawa Centralna: 431 różnych stacji
+     docelowych tego samego dnia) większość bezpośrednich pociągów jedzie
+     gdzieś, gdzie MPK w ogóle nie kursuje, więc pierwszy, tańszy sufit musi
+     przejrzeć ich sporo, zanim w ogóle trafi na prawdziwą bramę.
+- **2026-08-29** — wyszukiwarka kolejowa (patrz wpis niżej) przepięta
+  z odpytywania API PKP przy KAŻDYM wyszukiwaniu na lokalny pipeline
+  (`update_pkp.py`), tym samym schematem co GTFS dla MPK: jedno zapytanie
+  o rozkład całego kraju na okno `SCHEDULE_WINDOW_DAYS` dni (dziś, sprawdzone
+  na żywo: ~26 MB, 18,6 tys. tras, 8 s budowy lokalnej bazy `data/pkp.sqlite`)
+  zamiast osobnego zapytania na każdą wpisaną parę stacji — `pkp.py` czyta
+  już tylko SQL do pliku na dysku, bez sieci. Powód: przy limicie 100
+  zapytań/h w planie Basic i suwakach panelu deweloperskiego (każdy ruch
+  suwaka odpala `/api/flow` od nowa) osobne zapytanie na wyszukiwanie
+  wyczerpałoby limit w kilka minut używania. `operatingDates` w odpowiedzi
+  API działa jak GTFS-owy `calendar.txt` (jeden wpis trasy niesie od razu
+  wszystkie daty w oknie, więc szersze okno nie mnoży liczby tras) —
+  harmonogram odświeżania (`PKP_AUTO_UPDATE_HOUR`/`PKP_UPDATE_ON_START`,
+  domyślnie jak GTFS) i atomowa podmiana (`os.replace`) są więc dosłownie
+  tym samym mechanizmem co `update_gtfs.py`, tylko osobnym plikiem — bo to
+  niezależny pipeline nad niezależnym źródłem.
+
+  Przy okazji: nazwy stacji PKP trafiły do TEJ SAMEJ listy podpowiedzi
+  w formularzu co przystanki MPK (`pkp.all_station_names()` dokładane
+  w `routes.py`/`index()`) — wcześniej dało się o nie zapytać przez API, ale
+  nie dało się ich wpisać z podpowiedzią na stronie. I stacje PKP dostały
+  markery na mapie (`/api/stops`, pole `kind: "train"`, styl w
+  `static/app.js`) — czego wcześniej nie było wcale, bo słownik stacji PKP
+  (jak cała reszta tego API — sprawdzone pole po polu w
+  `/api/v1/fields/schedules`) nie ma NIGDZIE współrzędnych. Jedyny sposób,
+  żeby jednak je zdobyć, to DRUGIE, niezależne źródło: `update_pkp.py`
+  geokoduje nazwy stacji przez publiczne, darmowe Nominatim (OpenStreetMap),
+  z limitem uprzejmościowym 1 zapytanie/s i trwałym cache'em na dysku
+  (`data/pkp_station_coords.json`) — raz znaleziona stacja nigdy nie jest
+  odpytywana drugi raz, więc pierwsze wypełnienie cache'u (~3266 stacji, ok.
+  godziny) jest zarazem jedynym kosztownym; kolejne przebudowy rozkładu
+  dogadują już tylko naprawdę nowe stacje. Współrzędne z geokodowania są
+  przybliżeniem (czasem trafiają w środek miasta zamiast w sam dworzec) -
+  stacja bez trafienia po prostu nie ma markera, reszta (wyszukiwanie,
+  podpowiedzi) działa dla niej mimo to.
+- **2026-08-29** — bezpośrednie połączenia kolejowe (`pkp.py`, PKP PLK
+  OpenData API, `pdp-api.plk-sa.pl`) dokładane do tej samej listy propozycji
+  co tramwaje i autobusy, bez osobnego formularza — działa na tych samych
+  polach „skąd"/„dokąd". Zakres świadomie ograniczony do połączeń BEZ
+  przesiadek: to API ma tylko rozkład per stacja i dzień (`/schedules`), nie
+  gotowy planer trasy, a własny CSA nad krajowym rozkładem (setki tysięcy
+  kursów dziennie) to osobny, dużo większy projekt. Kierunek pociągu
+  (start → cel, nie odwrotnie) czyta się z `orderNumber` — pozycji
+  przystanku w całej trasie — bo `/schedules?stations=A,B` oddaje wpisy
+  tylko dla stacji A i B, nie całą trasę. Etapy kolejowe nie mają geometrii
+  (słownik stacji PKP nie niesie współrzędnych) — trafiają na listę z pełnymi
+  godzinami i nazwami stacji, ale bez linii na mapie (`static/app.js`
+  dostał stąd guard na brakujący `leg.path`, wcześniej zakładany jako zawsze
+  obecny). Gdy MPK nie zna żadnej z podanych nazw (typowa relacja
+  międzymiastowa, np. do „Warszawa Centralna"), ale PKP zna obie stacje i
+  znalazło połączenie, `/api/flow` mimo to zwraca sukces (`rail_only: true`,
+  `segments: []`) zamiast błędu „nie znam przystanku" — błąd tramwajowo-
+  -autobusowy nie ma prawa ukryć wyniku kolejowego. Słownik stacji PKP
+  (3266 pozycji) cache'owany na dysku i odświeżany raz na dobę — przy
+  limicie 100 zapytań/h w planie Basic nie da się odpytywać go przy każdym
+  wyszukiwaniu; sam rozkład cache'owany w pamięci na kilka minut, bo panel
+  deweloperski odpala `/api/flow` przy każdym ruchu suwaka. Brak klucza
+  `PKP_API_KEY` (patrz `config.py`) wyłącza funkcję po cichu, tak samo jak
+  Siechnice bez `SIECHNICE_ENABLED` — awaria albo brak konfiguracji tego
+  kroku nie ma prawa wywrócić wyszukiwania tramwajowo-autobusowego.
+- **2026-08-29** — dźwięk spadającej metalowej rury po znalezieniu trasy
+  (`static/sounds/`). Nagranie, nie synteza. Dwa formaty, bo jeden nie
+  wystarcza: Ogg Opus i AAC w m4a dla Safari, wybór przez `canPlayType`;
+  oba w powłoce service workera, więc grają offline. Przyciszone do 0.35,
+  bo nagranie ma szczyt ponad 0 dBFS. Milczy przy `prefers-reduced-motion`.
+  Gra tylko po WYSZUKANIU — suwaki w panelu ⚙ też wołają `loadPlan`
+  i mają zostać ciche. Ustawienie jest schowane (`SOUND_TUNING = false`,
+  ten sam układ co `LOOK_TUNING`).
+
+- **2026-08-29** — mocna wersja reguły „tylko to, co jeszcze zdąży"
+  (`planner._line_deadlines`). Dotąd dymek odsiewał odjazdy warunkiem
+  KONIECZNYM — „czy odjazd mieści się w oknie mapy" — a to za mało:
+  autobus ruszający minutę przed zamknięciem okna do celu w nim nie dowiezie.
+  Teraz węzeł niesie przy każdej linii `depart_by`: ostatni odjazd, którym
+  DA SIĘ dojechać, odczytany z profilu (wsiadam w ten kurs tutaj — o której
+  jestem w celu). Jedna liczba na linię wystarcza, bo późniejszy kurs tej
+  samej linii w tę samą stronę nie dojedzie wcześniej.
+  `LEŚNICA → BARTOSZOWICE, 16:44`: stara reguła zostawiała 245 odjazdów,
+  nowa 115 — **130 wierszy udawało opcję, nie będąc nią**. Podobnie na
+  innych relacjach (118 z 223, 361 z 712). Linia, którą stąd nie dojedzie
+  się już wcale, znika z listy w całości.
+
+- **2026-08-29** — narysowany kurs urywa się tam, gdzie zawraca (punkt 4
+  kontraktu). Zgłoszone na autobusie 102 pod Kosmonautów: mapa rysowała
+  wjazd na pętlę i powrót tą samą ulicą. Porównujemy MIEJSCA, nie słupki —
+  pętla nawrotowa ma zwykle osobny słupek w każdą stronę. Ale dwa SĄSIEDNIE
+  przystanki jednego miejsca to nie zawrócenie, tylko grubsze grupowanie:
+  tramwaj 7 mija tak dwa razy Kamieńskiego, jadąc prosto na Klecinę, a
+  ucięcie go odbierało jedynemu dojazdowi jego wyjście i cała relacja
+  POŚWIĘTNE → KLECINA spadała do trybu awaryjnego. Zawróceniem jest dopiero
+  powrót o co najmniej dwa kroki. Po zmianie: 569 narysowanych kursów na
+  24 kombinacjach relacja/godzina, **zero powrotów**, bez straty pokrycia
+  (te same liczby kawałków, linii i punktów geometrii) i bez trybu
+  awaryjnego.
+
+- **2026-08-29** — tablica odjazdów: rytm powtórzeń („co X min") stoi w tej
+  samej linii co „za ile", a nie pod nim — osobny wiersz podnosił wysokość
+  akurat tym pozycjom, które się powtarzają, i tablica przestawała być
+  równa (wszystkie wiersze mają teraz 22,8 px). Najbliższy odjazd pisze się
+  „0 min", nie „teraz": nagłówek mówi „od 16:57", a to nie jest godzina
+  zegarowa, tylko najwcześniejsza, o której da się tu być — „teraz" obok
+  niej znaczyło co innego, niż czytelnik zakładał. Dymek 300 → 340 px, bo
+  prawa kolumna urosła i zjadała kierunek.
+
+- **2026-08-29** — jasność mapy ODCZYTANA, nie oszacowana
+  (`planner._target_profile`). Wartość każdego wyjścia („wysiadam tu o tej
+  godzinie — o której jestem w celu”) liczył dotąd punkt stały po
+  kontynuacjach widocznych na mapie: `join_value` brało gotową wartość
+  sąsiedniego segmentu i przesuwało ją o opóźnienie wsiadania
+  (`other["suffix"][j] + shift`). Zakładało więc, że sztywny rozkład jest
+  sprężysty — że cały dalszy łańcuch przesunie się dokładnie o tyle samo.
+  Nie przesuwa się: późniejszy kurs gubi przesiadkę i przyjazd skacze
+  o kwadrans, nie o minutę. Wynik był przy tym znakowany jako ODCZYTANY,
+  choć powstał z oszacowania — stąd sprzeczność widoczna gołym okiem:
+  kawałek podawał godzinę przyjazdu, a jego jedyna kontynuacja nie znała
+  żadnej.
+
+  Teraz liczy to profilowy CSA: jeden skan wstecz po tych samych
+  połączeniach daje odpowiedź dla KAŻDEGO przystanku w oknie, bez iteracji
+  i bez ograniczania się do tego, co narysowane. Przy okazji zniknął próg
+  `best_arr` na wartościach odczytanych — niepotrzebny, bo żadna z nich
+  optimum nie pobija (pilnuje tego test), a maskowałby prawdziwą
+  sprzeczność, gdyby wróciła. Zostaje tylko na surowej aproksymacji.
+
+  `LEŚNICA → BARTOSZOWICE, 16:44`: 116 z 232 wyjść obiecywało przyjazd
+  wcześniejszy, niż da się osiągnąć (do 10 min za wcześnie); **0 kawałków
+  bez godziny przyjazdu (było 39 na 151)**, a jasność wreszcie różnicuje —
+  dwie realne klasy, 17:57 i 18:07, zamiast 74 kawałków na `w = 1.00`.
+  Przemiat 20 relacji: zero kawałków bez godziny, zero trybu awaryjnego.
+  Koszt: 23 ms na zapytanie. Testy: `tests/test_profil_dojazdu.py`.
+
+  „Tu nie da się wysiąść” znaczy teraz INF, a nie wymyśloną karę: wartość
+  takiej POZYCJI bierze się z sufiksu (z dalszych wyjść tego samego kursu,
+  czyli z jazdy dalej). Wcześniej kar było więcej niż odczytów, więc to ONE
+  wyznaczały skalę jasności całej mapy. Surowa aproksymacja została tylko
+  tam, gdzie naprawdę nic już nie prowadzi dalej — ogon za ostatnim
+  użytecznym wyjściem — i dalej nie jest pokazywana jako godzina.
+
+- **2026-08-29** — naprawiona przyczyna sprzecznych godzin. Wartość wyjścia
+  („o której jest się w celu, jadąc dalej stąd”) dostała próg: nie może być
+  wcześniejsza niż `best_arr` ze skanu CSA, bo do tego wyjścia dojechało się
+  ze STARTU i nie ma prawa pobić optimum całej relacji. Bez progu przybliżenie
+  z `join_value` schodziło poniżej, a `q_of` obcinało wynik do 1.0 — kawałek
+  z niemożliwym przyjazdem świecił tak samo jak najlepsza trasa.
+  Na relacji LEŚNICA → BARTOSZOWICE (13:32): **105 z 354 kawałków obiecywało
+  przyjazd wcześniejszy niż możliwy — teraz 0.**
+
+  Węzeł przestał też proponować kursy WIOZĄCE Z POWROTEM (`_rides_back`):
+  jeśli tam, dokąd kurs wiezie, dało się być wcześniej niż tam, gdzie stoimy,
+  to nie jest to opcja. Mierzone `earliest` ze skanu w przód, nie geometrią
+  i nie luzem z `_backward` — luz się do tego nie nadaje, bo w szerokim oknie
+  objazd o przystanek kosztuje minutę terminu (Kamiennogórska: 13:52 → 13:51)
+  i próg cofnięcia go nie łapie. Dotyczy wyłącznie tego, co węzeł proponuje;
+  rysowanej mapy i stabilności jasności nie rusza.
+  Kamiennogórska nie oferuje już tramwaju 3 na Leśnicę osobie, która właśnie
+  z Leśnicy przyjechała; węzłów 78 → 56, ofert 323 → 249.
+
+
+- **2026-08-29** — kropki są też na SAMEJ mapie przepływów, nie tylko na
+  wybranej trasie: stoją na końcach kawałków, czyli tam, gdzie mapa widzi
+  sensowne wysiadanie — a więc dokładnie tam, gdzie da się przesiąść
+  (`flowStopDots`). Nazwy przystanku front tam nie zna, bo kropki bierze
+  z geometrii, więc `/api/timetable` przyjmuje też `lat`/`lon`.
+
+  Węzły liczy backend (`_transfer_nodes`, pole `nodes`), a nie front z
+  geometrii, i to z dwóch powodów, których front nie umiałby rozstrzygnąć sam.
+  Po pierwsze **jedna kropka na MIEJSCE**: plac z trzema peronami dostawał
+  wcześniej trzy kropki, każdą z inną zawartością — grupowanie po miejscu jest
+  w rozkładzie (`gtfs._build_places`), więc front nie ma go z czego odtworzyć
+  i nie powinien zgadywać po odległości na ekranie (168 kropek → 86 na relacji
+  Księże Małe → Leśnica). Po drugie **tylko to, w co mapa pozwala tu wsiąść**:
+  dymek na Pilczycach wypisywał wszystko, co przez nie przejeżdża, razem
+  z tramwajem jadącym dokładnie tam, skąd się przyjechało. Kierunek jest
+  częścią tożsamości linii, więc `lines` niosą headsign — samo „122" nie
+  wystarczy, bo mapa proponuje jedną stronę, a przez węzeł jadą obie.
+
+  Przy okazji naprawione: w jednym miejscu dymek potrafił pokazać dwie różne
+  godziny „tu jesteś" (13:02 albo 13:07, zależnie od drgnięcia kursora o
+  piksel). Pod kursorem leży kilka kawałków TEJ SAMEJ linii — to różne kursy,
+  a wybierany był ten bliższy w pikselach. Teraz wygrywa kurs dowożący do celu
+  najwcześniej, jednym wspólnym wyborem dla dymka i dla godzin w grupce
+  numerów (`hitFor`) — wcześniej te dwa miejsca mogły wskazać różne kursy.
+
+- **2026-08-29** — kropki na wsiadaniu i wysiadaniu każdego etapu są do
+  najechania: dymek pokazuje TABLICĘ ODJAZDÓW tego przystanku (`stopDot`
+  w `app.js`, `/api/timetable` → `planner.stop_timetable` →
+  `gtfs.stop_departures`). Mapa rysowała te kropki od dawna, ale mówiły
+  tylko „tu się przesiadasz" — a pytanie zadawane w tym miejscu brzmi „a jak
+  mi ucieknie, to co dalej?". Godzina idzie z etapu w SEKUNDACH doby
+  rozkładowej (`dep_sec`/`arr_sec`), nie jako „HH:MM": przesiadka o 24:40
+  należy do rozkładu dnia poprzedniego, a zapytana zegarową „00:40"
+  wypisałaby cały dzień od rana — czyli odjazdy dawno odjechane. Indeks
+  słupek → odjazdy powstaje leniwie przy pierwszym najechaniu (~30 ms raz na
+  dzień, tak jak `conns_by_trip`), więc skan CSA nic za to nie płaci.
+  Klik w kropkę nie zamyka trasy, choć klik obok niej nadal zamyka: na
+  telefonie dotknięcie jest jedynym sposobem otwarcia dymka i nie może przy
+  okazji sprzątać tego, czego dotyczy.
 
 - **2026-08-15** — przycisk ◎ „moja lokalizacja" w polu „skąd": pozycja
   z Geolocation API ląduje jako punkt mapy (backend znajduje słupki wokół
@@ -513,14 +1909,92 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   oknie bywa tego sporo.
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (2 min),
   nieco ostrożniej niż w skanie w przód.
-- Wyszukiwanie działa w ramach jednej doby rozkładowej: zapytanie o 0:30
-  nie widzi końcówek wczorajszych kursów (24:xx widać wieczorem).
-- Brak tras pieszych po mieście — przesiadka tylko między słupkami
-  o identycznej nazwie przystanku.
+- Chodzenie ma zasięg JEDNEGO kroku w promieniu 600 m — z przystanku
+  startowego (`_origin_walk`), po wysiadaniu z pojazdu albo z punktu
+  klikniętego na mapie. Nie ma więc łańcucha dwóch przejść pod rząd (nie
+  dojdziesz „przez" przystanek pośredni do trzeciego).
+- Nie ma prawdziwego routingu po chodnikach: znamy współrzędne słupków, nie
+  ulice, więc czas marszu bierze się z odległości w LINII PROSTEJ, a cały
+  zapas (obejście kwartału, światła, przejście podziemne) siedzi w jednej,
+  hojnej prędkości 0,7 m/s. Gdzieniegdzie będzie to wyraźnie za dużo (prosty
+  chodnik wzdłuż ulicy), i tak ma być — plan woli nie pokazać przesiadki, niż
+  pokazać taką, na którą się nie zdąży. Uczciwie byłoby policzyć te czasy raz,
+  prawdziwym routerem po OpenStreetMap, i wstawić gotowe (17 tys. par słupków
+  przy 600 m) — patrz „Pomysły na dalej".
+- Samo dojście pieszo NIGDY nie jest propozycją trasy: wyszukiwarka planuje
+  przejazdy, a trasa bez ani jednego przejazdu nie ma godziny wyjazdu, na
+  której opiera się okno mapy (`_journey_start`).
+- Mapa przepływów pozwala wsiąść w segment WYŁĄCZNIE w jego zakotwiczonym
+  początku (`_extract_transfer_graph`), a kotwica to najwcześniejsze
+  zdążalne dołączenie. Gęstsza siatka przejść pieszych przesuwa te kotwice
+  wstecz i zabiera ze sobą punkty przesiadki, więc na części relacji lista
+  propozycji bywa krótsza, niż mogłaby być. Próba dopuszczenia wsiadania
+  w KAŻDYM narysowanym punkcie segmentu (2026-09-10) skończyła się
+  wycofaniem: graf puchnie do zera propozycji, a wsiadanie w środku segmentu
+  wywraca `arr_times` — jeden punkt wsiadania jest nośny dla kilku struktur
+  naraz. Sama mapa i `plan_route` tego nie mają — to ograniczenie wyłącznie
+  listy propozycji.
+- Scalanie stacji PKP z przystankiem MPK o INNEJ nazwie w jedno miejsce
+  (`naming.PLACE_MERGES`) to ręczna tabela sześciu wrocławskich par —
+  pozostałe takie pary czekają na dopisanie. Przesiadki to nie blokuje
+  (most pieszy bierze się z odległości, nie z nazwy), dotyczy wyłącznie
+  tego, co wyszukiwarka rozwija jako jedno miejsce.
+- Rower miejski liczy dojście własną miarą (`bikes.WALK_MAX_M` i własna
+  prędkość) **w propozycjach tras**, a nie tą jedną zasadą chodzenia, co
+  reszta wyszukiwarki — więc dojście do stojaka i dojście na przystanek są tam
+  wyceniane różnie. Wyrównanie to podmiana miary w warstwie rowerowej. Na
+  mapie przepływów problemu nie ma: `bikes.map_places` chodzi wyłącznie
+  `gtfs.WALK_M`/`gtfs.walk_time_sec`, tak jak wszystko inne (punkt 14).
+- Przejazd rowerem nie ma geometrii: znamy obie stacje, długość trasy jest
+  szacowana (odległość w linii prostej × 1,35), a na mapie rysuje się
+  odcinek między stacjami, kreską przerywaną. Prawdziwy przebieg wymagałby
+  routera rowerowego, którego projekt nie ma.
+- Stan stojaków jest sprzed najwyżej minuty, ale nie jest przewidywaniem:
+  stacja z jednym rowerem może być pusta, zanim się do niej dojdzie. Karta
+  pokazuje więc liczbę rowerów i wolnych miejsc wprost, zamiast udawać, że
+  to gwarancja.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
+- Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
+  bo CSA widzi jedną tablicę połączeń (patrz wpis w changelogu) - ale bez
+  opóźnień na żywo (API ma je w `/operations`, ale wyszukiwarka czyta tylko
+  rozkład planowy z `/schedules`). Wymaga skonfigurowanego `PKP_API_KEY` —
+  bez klucza ta część wyników po prostu nie dochodzi. Stacje mają markery na
+  mapie (geokodowanie DWOMA źródłami - wyłącznie mapa PLK i portal
+  pasażera, oba oficjalne/PKP-owe, na wyraźną prośbę użytkownika - patrz
+  wpis w changelogu i nagłówek `update_pkp.py`), ale sama trasa przejazdu
+  (`legs[].path`) nie ma geometrii — słownik stacji PKP nie ma współrzędnych
+  torów, tylko nazwy, więc geokodowanie daje punkt stacji, nie kształt
+  trasy. Pokrycie ok. 98% (3202/3266 na 2026-08-30); stacja ZA GRANICĄ
+  (żadne z dwóch źródeł nie obejmuje zagranicy) albo stacja, której żadne
+  z dwóch źródeł nie ma (lub znajdzie coś, co automatyczna walidacja
+  odrzuci jako niespójne z sąsiadami na trasie - patrz
+  `find_suspect_coords`), po prostu nie ma markera, zamiast dostać
+  zgadniętą, złą pozycję.
 
 ## Pomysły na dalej
 
-- Dymki na węzłach przesiadkowych: „w co mogę się tu przesiąść i o której".
+- **Prawdziwe czasy przejść pieszo, policzone raz.** Dziś marsz liczy się
+  z linii prostej i jednej, hojnej prędkości — bo o chodnikach nie wiemy nic.
+  Router pieszy po OpenStreetMap (np. OSRM albo OpenTripPlanner, który i tak
+  to ma) potrafi dać prawdziwą drogę: schody, przejścia, tunel pod dworcem.
+  Nie musi przy tym stać w ścieżce zapytania — par słupków bliższych niż
+  `WALK_M` jest 17 tysięcy (przy 5524 słupkach), więc czasy liczy się RAZ,
+  przy aktualizacji rozkładu, i wstawia gotowe w to samo miejsce, w którym
+  dziś stoi `gtfs.walk_time_sec`. Wtedy zawyżona prędkość przestaje być
+  potrzebna, a przesiadka „z peronu pod wiatę" przestaje kosztować tyle samo
+  co marsz przez park. Rozważane 2026-09-12 przy ujednolicaniu chodzenia;
+  przeniesienie CAŁEGO backendu na OpenTripPlanner odrzucone — on zwraca
+  listę tras, a mapa przepływów (wachlarz, jasność, kotwice, kropki) i tak
+  zostałaby po naszej stronie.
+- **Odnośnik „prowadź" przy aucie car-sharingu.** Mapa mówi, gdzie stoi auto
+  i ile stąd do celu w linii prostej, ale trasy jazdy nie pokaże nigdy —
+  routingu samochodowego tu nie ma i nie ma go po co dorabiać. Zamiast tego
+  wystarczy w dymku auta gotowy odnośnik otwierający tę jazdę w Google Maps
+  (`https://www.google.com/maps/dir/?api=1&origin=…&destination=…&travelmode=
+  driving`): wszystko, czego potrzebuje, już jest w odpowiedzi — współrzędne
+  auta i celu. Wtedy „ile to potrwa" odpowiada ten, kto naprawdę wie, a my
+  dalej nie zgadujemy ani minuty.
 - Więcej odjazdów tej samej trasy na liście („następny kurs o…").
 - GTFS-RT: opóźnienia i pozycje pojazdów na żywo (portal je udostępnia).
+- Opóźnienia pociągów na żywo z `/api/v1/operations` (patrz `pkp.py`) -
+  dziś wyszukiwarka kolejowa czyta tylko rozkład planowy.

@@ -4,9 +4,15 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request
 
+import bikes
 import gtfs
-from planner import plan_flow, plan_route
-
+import naming
+import pkp
+import timetables
+import traficar
+import vehicles
+from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
+                     stop_timetable)
 
 def _frontend_digest(app):
     """Odcisk zawartości frontu - wersja cache'ów service workera.
@@ -50,6 +56,14 @@ def _point_arg(prefix):
         return None
 
 
+def _latlon_arg():
+    """Para (lat, lon) z `lat`/`lon` - punkt wskazany wprost, bez prefiksu."""
+    try:
+        return float(request.args["lat"]), float(request.args["lon"])
+    except (KeyError, ValueError):
+        return None
+
+
 def _parse_when(time_str,data_str):
     """Godzina 'HH:MM' z formularza -> datetime dzisiaj o tej porze (domyślnie teraz)."""
     when = datetime.now()
@@ -70,23 +84,71 @@ def _parse_when(time_str,data_str):
     return when
 
 
+def _day_arg():
+    """Data z query stringa (YYYY-MM-DD) jako `date`; brak/śmieci = dzisiaj.
+
+    Tryb rozkładów pyta o całą dobę, a nie o moment, więc w przeciwieństwie
+    do wyszukiwarki nie potrzebuje godziny (patrz _parse_when).
+    """
+    return _parse_when(None, request.args.get("date")).date()
+
+
+def _int_arg(name):
+    try:
+        return int(request.args[name])
+    except (KeyError, ValueError):
+        return None
+
+
 def init_routes(app):
 
     @app.route("/")
     def index():
         try:
             stops = gtfs.all_stop_names()
+            lines = timetables.all_lines()
             data_error = None
         except FileNotFoundError as e:
             stops = []
+            lines = []
             data_error = str(e)
+
+        # Stacje PKP (patrz pkp.py) w tej samej liście podpowiedzi co
+        # przystanki MPK - to jedyne miejsce, gdzie formularz w ogóle
+        # dowiaduje się, że taka nazwa istnieje (samo wyszukiwanie już zna
+        # obie sieci jednakowo - patrz gtfs.load_day/pkp.augment_day - to
+        # tu tylko podpowiedzi, zanim ktokolwiek cokolwiek wpisze).
+        # `pkp.all_station_names()` nigdy nie rzuca (pusta lista bez
+        # bazy/klucza), więc bez try/except.
+        #
+        # `kind` jedzie osobno od samej nazwy (nie doklejone do stringa) -
+        # front dokłada z niego plakietkę "PKP" w podpowiedziach (patrz
+        # static/app.js), ale do pola wyszukiwania i tak wstawia samą nazwę:
+        # doklejenie "PKP" wprost do nazwy zepsułoby dopasowanie po stronie
+        # wyszukiwarki, która zna stację tylko pod jej prawdziwą nazwą.
+        # Nazwa, która trafia do OBU list (MPK i PKP - w praktyce nie
+        # zdarza się w tych danych, ale nie ma gwarancji, że nigdy), zostaje
+        # bez plakietki: to nie tylko stacja kolejowa, więc oznaczenie
+        # "PKP" byłoby mylące.
+        gtfs_names = set(stops)
+        pkp_names = set(pkp.all_station_names())
+        train_only = pkp_names - gtfs_names
+        stops = [
+            {"name": name, "kind": "train" if name in train_only else "stop"}
+            for name in sorted(gtfs_names | pkp_names)
+        ]
 
         return render_template(
             "index.html",
             stops=stops,
+            abbreviations=naming.ABBREVIATIONS,
+            lines=lines,
             data_error=data_error,
             form_time=datetime.now().strftime("%H:%M"),
-            form_date=datetime.now().strftime("%d.%m.%y"),
+            # ISO, bo tego i tylko tego wymaga <input type="date"> - przy
+            # formacie dziennym pole zostawało puste i data nie docierała
+            # do serwera wcale.
+            form_date=datetime.now().strftime("%Y-%m-%d"),
         )
 
     @app.route("/sw.js")
@@ -111,9 +173,53 @@ def init_routes(app):
     @app.route("/api/stops")
     def api_stops():
         try:
-            return jsonify(gtfs.all_stops_geo())
+            stops = [{**s, "kind": "stop"} for s in gtfs.all_stops_geo()]
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
+        # Stacje PKP z ustalonymi współrzędnymi (patrz pkp.all_stations_geo -
+        # dogadane osobno przez geokodowanie, update_pkp.py) dostają marker
+        # na mapie tak jak słupki MPK, tylko oznaczone `kind: "train"`, żeby
+        # front mógł je odróżnić stylem (patrz static/app.js). To jedyne
+        # miejsce, gdzie PKP i MPK są traktowane inaczej - bo tylko to
+        # naprawdę je różni (markery), nie samo wyszukiwanie tras.
+        stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
+        return jsonify(stops)
+
+    @app.route("/api/vehicles")
+    def api_vehicles():
+        """Żywe pozycje autobusów/tramwajów (mpk.wroc.pl/bus_position, patrz
+        vehicles.py) - warstwa włączana przyciskiem ◉ w pasku warstw.
+
+        Odpowiedź niesie same pozycje: front zawęża je do linii narysowanych na
+        mapie i na tym koniec. Odstawione dopisywanie rozkładu kursu, którym
+        dany pojazd jedzie, czeka zakomentowane w vehicles.py.
+        """
+        try:
+            return jsonify({"vehicles": vehicles.get_vehicles()})
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+        except (OSError, ValueError) as e:
+            return jsonify({"error": f"Nie udało się pobrać pozycji pojazdów: {e}"}), 503
+
+    @app.route("/api/cars")
+    def api_cars():
+        """Wszystkie wolne auta Traficara we Wrocławiu - warstwa 🚗 włączana
+        w pasku warstw, gdy na mapie nie ma jeszcze wyszukiwania. Z narysowaną
+        mapą auta przychodzą razem z nią (patrz plan_flow), bo tam niosą też
+        godzinę dojścia; tutaj jest tylko to, co feed wie sam z siebie."""
+        try:
+            return jsonify({"cars": traficar.car_list()})
+        except traficar.TraficarDataError as e:
+            return jsonify({"error": f"Nie udało się pobrać aut: {e}"}), 503
+
+    @app.route("/api/bikes")
+    def api_bikes():
+        """Wszystkie stacje WRM i rowery stojące luzem - warstwa 🚲 w pasku
+        warstw, bez związku z wyszukiwaniem (patrz api_cars)."""
+        try:
+            return jsonify({"stations": bikes.stations(), "free": bikes.free_bikes()})
+        except (OSError, ValueError) as e:
+            return jsonify({"error": f"Nie udało się pobrać rowerów: {e}"}), 503
 
     @app.route("/api/plan")
     def api_plan():
@@ -121,18 +227,86 @@ def init_routes(app):
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time"),request.args.get("date")),
+            transfer_gain_sec=_float_arg("transfer_gain_sec"),
+        ))
+
+    @app.route("/api/line")
+    def api_line():
+        """Rozkład jednej linii: warianty trasy, przystanki, kursy, geometria."""
+        return jsonify(timetables.line_timetable(
+            request.args.get("num", ""),
+            _day_arg(),
+            request.args.get("mode") or None,
+        ))
+
+    @app.route("/api/stop_board")
+    def api_stop_board():
+        """Tablica odjazdów z jednego przystanku - wszystkie linie naraz."""
+        return jsonify(timetables.stop_board(
+            request.args.get("stop", ""),
+            _day_arg(),
+        ))
+
+    @app.route("/api/trip")
+    def api_trip():
+        """Jeden kurs: przystanki z godzinami i przebieg na mapie."""
+        return jsonify(timetables.trip_detail(
+            request.args.get("trip", ""),
+            _day_arg(),
+            request.args.get("stop") or None,
+            _int_arg("dep"),
+        ))
+
+    @app.route("/api/timetable")
+    def api_timetable():
+        """Tablica odjazdów przystanku - dymek pod kropką przesiadki na mapie.
+
+        `from_sec` to godzina na osi doby rozkładowej (patrz gtfs.load_day):
+        front podaje ją wprost z etapu trasy, żeby przesiadka po północy
+        pytała o właściwą dobę.
+        """
+        # `limit` z zapytania: mapa przepływów odsiewa potem linie, których
+        # z tego miejsca i tak nie proponuje, więc musi dostać z zapasem.
+        limit = _float_arg("limit")
+        return jsonify(stop_timetable(
+            request.args.get("stop", ""),
+            _parse_when(request.args.get("time"), request.args.get("date")),
+            _float_arg("from_sec"),
+            limit=min(int(limit), TIMETABLE_MAX) if limit else TIMETABLE_LIMIT,
+            point=_latlon_arg(),
         ))
 
     @app.route("/api/flow")
     def api_flow():
+        # Ani jedna wzmianka o PKP tutaj - patrz pkp.py: kursy kolejowe są
+        # doklejone wprost do tablicy połączeń, którą wczytuje gtfs.load_day
+        # (wołane z wnętrza plan_flow), więc dla tego endpointu to zwykłe
+        # wyszukiwanie MPK, tylko z szerszą siecią pod spodem.
         return jsonify(plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time"),request.args.get("date")),
             _point_arg("start"),
             _point_arg("end"),
-            _float_arg("range_m"),
-            extra_pct=_float_arg("extra_pct"),
-            extra_floor_sec=_float_arg("extra_floor_sec"),
-            extra_cap_sec=_float_arg("extra_cap_sec"),
+            # Docelowa gęstość mapy (suwak pod zębatką) i ile razy kliknięto
+            # "pokaż więcej" - z nich planner dobiera próg. Sufity obu pilnuje
+            # planner, nie front.
+            density=_float_arg("density"),
+            more=_float_arg("more"),
+            # Ile aut Traficara przy mapie (suwak pod zębatką) - "pokaż
+            # więcej" mnoży ją w plannerze tak samo jak gęstość.
+            car_count=_float_arg("cars"),
+            # Czy auta spod tego samego miejsca to jeden wybór (przełącznik
+            # pod zębatką, domyślnie zgaszony).
+            car_groups=request.args.get("car_groups") == "1",
+            # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
+            car_vans=request.args.get("car_vans") == "1",
+            # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
+            bike_count=_float_arg("bike_count"),
+            transfer_gain_sec=_float_arg("transfer_gain_sec"),
+            # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
+            # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc
+            # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi
+            # (przełącznik 🚲 w karcie wyszukiwania).
+            use_bikes=request.args.get("bikes") == "1",
         ))

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Planer podróży — Wrocław</title>
+    <title>Metal Planner — Wrocław</title>
     <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu — tramwaje i autobusy.">
 
     <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Planer">
+    <meta name="apple-mobile-web-app-title" content="Metal Planner">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -23,20 +23,62 @@
 
 <div id="map"></div>
 
+{#
+  Pasek nad mapą: ile w ogóle trwa ta podróż (patrz renderTimeHeadline
+  w app.js). Treść wstawia front z odpowiedzi serwera - tu tylko miejsce.
+#}
+<div id="time-headline" class="time-headline" hidden></div>
+
 <button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
         aria-label="Pokaż/ukryj panel">&larr;</button>
+
+{% if not data_error %}
+{#
+  Przełącznik dwóch trybów panelu: wyszukiwanie trasy albo rozkłady jazdy
+  (patrz static/timetable.js). Stoi obok przycisku chowania panelu, bo oba
+  odpowiadają na to samo pytanie - "co ma być teraz po lewej stronie".
+#}
+<button id="mode-toggle" class="icon-button floating second"
+        title="Rozkłady jazdy — linie i przystanki"
+        aria-label="Przełącz: wyszukiwanie trasy albo rozkłady jazdy"
+        aria-pressed="false">&#9719;<span>Rozkłady</span></button>
+{% endif %}
 
 <aside id="sidebar">
 
     <header class="app-bar">
-        <div class="brand">
-            <h1>Planer podróży</h1>
-            <p>Wrocław · tramwaje i autobusy</p>
+        <div class="app-bar-row">
+            <div class="brand">
+                <h1>Metal Planner</h1>
+                <p>Wrocław · tramwaje i autobusy</p>
+            </div>
+            <button id="install" class="icon-button" title="Zainstaluj aplikację"
+                    aria-label="Zainstaluj aplikację" hidden>⤓</button>
+            <button id="dev-toggle" class="icon-button" title="Ustawienia Developerskie"
+                    aria-label="Ustawienia Developerskie" aria-expanded="false">⚙</button>
         </div>
-        <button id="install" class="icon-button" title="Zainstaluj aplikację"
-                aria-label="Zainstaluj aplikację" hidden>⤓</button>
-        <button id="dev-toggle" class="icon-button" title="Ustawienia deweloperskie"
-                aria-label="Ustawienia deweloperskie" aria-expanded="false">⚙</button>
+
+        {#
+          Wszystko, co DOKŁADA warstwę na mapę, stoi w jednym rzędzie i wygląda
+          tak samo - przedtem żywe pojazdy siedziały przy ustawieniach, auta
+          i rowery nie miały włącznika wcale, a każda nowa warstwa lądowała
+          tam, gdzie akurat było miejsce. Instalacja i ustawienia zostają
+          wyżej: nie są warstwami, tylko rzeczami o samej aplikacji.
+        #}
+        <div class="layer-bar" role="group" aria-label="Warstwy na mapie">
+            <button id="vehicles-toggle" class="icon-button layer-button"
+                    title="Autobusy i tramwaje na żywo"
+                    aria-label="Pokaż autobusy i tramwaje na żywo"
+                    aria-pressed="false">◉<span>Na żywo</span></button>
+            <button id="cars-toggle" class="icon-button layer-button"
+                    title="Wolne auta Traficara"
+                    aria-label="Pokaż wolne auta Traficara"
+                    aria-pressed="false">🚗<span>Traficar</span></button>
+            <button id="bikes-toggle" class="icon-button layer-button"
+                    title="Rowery miejskie (WRM)"
+                    aria-label="Pokaż rowery miejskie"
+                    aria-pressed="false">🚲<span>Rowery</span></button>
+        </div>
     </header>
 
     {% if data_error %}
@@ -81,19 +123,25 @@
         <p class="locate-msg" id="locate-msg" role="status" hidden></p>
 
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
+        {# Tabela skrótów jedzie z serwera, a nie jest przepisana w app.js:
+           podpowiedzi mają składać nazwę dokładnie tak samo jak wyszukiwarka
+           (patrz naming.ABBREVIATIONS, gtfs._alias_key), a dwie kopie tej
+           samej reguły rozjechałyby się przy pierwszym dopisanym skrócie. #}
+        <script id="stop-abbrev" type="application/json">{{ abbreviations|tojson }}</script>
 
         <div class="search-row">
             <div class="time-field">
-                <div>
-                      <span>Odjazd</span>
-                    <input type="time" id="time" value="{{ form_time }}">
+                <div class="time-row">
+                    <span>Odjazd</span>
+                    <input type="text" id="time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
+                           maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
                     <button type="button" id="time-now" class="time-now-button">teraz</button>
                     <button type="button" id="day-toggle" class="icon-button" title="Więcej opcji czasu"
                             aria-label="Więcej opcji czasu" aria-expanded="false" aria-controls="day-panel">⌵</button>
                 </div>
-                <div id="day-panel" class="day-panel hidden">
-                <span>Data</span>
-                <input type="date" id="date" value="{{ form_date }}">
+                <div id="day-panel" class="day-panel hidden time-row">
+                    <span>Data</span>
+                    <input type="date" id="date" value="{{ form_date }}">
                 </div>
             </div>
             <button id="search" class="button primary">
@@ -103,6 +151,9 @@
                     aria-label="Wyczyść wybór">✕</button>
         </div>
 
+        {# Rower miejski ma JEDEN włącznik - ten w pasku warstw wyżej. Osobny
+           checkbox „dojazd rowerem" znaczył dokładnie to samo co on, tyle że
+           w drugim miejscu i tylko dla wyszukiwania. #}
         <p class="hint">
             Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
             potem cel. Inną relację zacznij od ✕.
@@ -112,6 +163,64 @@
 
     <div id="results" class="results" aria-live="polite"></div>
 
+    {#
+      Drugi tryb panelu - rozkłady. Leży w tym samym miejscu co karta
+      wyszukiwania i karta z nią nigdy nie stoją naraz: przełącznik ◷ podmienia
+      jedno na drugie (klasa `mode-timetable` na <body>).
+    #}
+    <div class="card timetable-card" id="timetable-card">
+
+        {#
+          JEDNO pole na linię i na przystanek. Rozdzielenie ich zakładkami
+          kazało wybrać rodzaj rozkładu, zanim w ogóle było wiadomo, czego się
+          szuka - a "17" i "Katedra" i tak nie da się ze sobą pomylić. Rodzaj
+          widać na liście podpowiedzi (plakietka linii / znaczek przystanku),
+          czyli tam, gdzie faktycznie potrzebny.
+        #}
+        <div class="ac-field tt-field">
+            <input type="text" id="tt-query" class="with-action" autocomplete="off"
+                   role="combobox" aria-label="Numer linii albo nazwa przystanku"
+                   aria-autocomplete="list" aria-expanded="false"
+                   aria-controls="tt-query-list"
+                   placeholder="Linia albo przystanek — np. 17, Katedra">
+            <button id="tt-clear" class="icon-button in-field" title="Wyczyść"
+                    aria-label="Wyczyść rozkład" hidden>&#10005;</button>
+            <ul class="ac-list" id="tt-query-list" role="listbox" hidden
+                aria-label="Podpowiedzi linii i przystanków"></ul>
+        </div>
+
+        <script id="line-names" type="application/json">{{ lines|tojson }}</script>
+
+        {#
+          Dzień i godzina w jednym polu, w takiej samej ramce, co czas
+          wyszukiwarki. Godzina nie odpytuje serwera - odpowiedź niesie całą
+          dobę, więc jest punktem odniesienia dla obu rozkładów naraz: od niej
+          lecą odjazdy tablicy i na niej otwiera się rozkład linii.
+        #}
+        <div class="tt-when">
+            <span class="tt-when-part">
+                <label for="tt-date">Dzień</label>
+                <input type="date" id="tt-date" value="{{ form_date }}">
+            </span>
+            <span class="tt-when-part">
+                <label for="tt-time">Godzina</label>
+                <input type="text" id="tt-time" inputmode="numeric"
+                       pattern="[0-9]{2}:[0-9]{2}" maxlength="5" size="5"
+                       placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
+                <button type="button" id="tt-now" class="time-now-button">teraz</button>
+            </span>
+            <span class="spinner tt-spinner" aria-hidden="true"></span>
+        </div>
+
+        <p class="hint" id="tt-hint">
+            Wpisz numer linii albo nazwę przystanku — możesz też kliknąć
+            słupek na mapie.
+        </p>
+
+    </div>
+
+    <div id="tt-results" class="results" aria-live="polite"></div>
+
     {% endif %}
 
 </aside>
@@ -120,78 +229,197 @@
 <nav id="view-tabs" aria-label="Widok">
     <button class="tab active" data-view="map" aria-pressed="true">Mapa</button>
     <button class="tab" data-view="list" aria-pressed="false">
-        Trasy <span id="tab-count" class="tab-count" hidden>0</span>
+        <span id="tab-list-label">Trasy</span>
+        <span id="tab-count" class="tab-count" hidden>0</span>
     </button>
+    {#
+      Ten sam przełącznik trybów, co pływające ◷ - na telefonie pływające
+      przyciski są schowane (zastępują je te zakładki), a tryb rozkładów
+      musi być czymś osiągalny.
+    #}
+    <button id="mode-toggle-m" class="tab-icon"
+            title="Rozkłady jazdy — linie i przystanki"
+            aria-label="Przełącz: wyszukiwanie trasy albo rozkłady jazdy"
+            aria-pressed="false">&#9719;</button>
 </nav>
 
 <div id="dev-panel" class="card hidden">
 
     <header class="dev-head">
-        <h2>Strojenie algorytmu</h2>
+        <h2>Ustawienia Developerskie</h2>
         <button id="dev-close" class="icon-button" title="Zamknij"
-                aria-label="Zamknij panel deweloperski">✕</button>
+                aria-label="Zamknij Ustawienia Developerskie">✕</button>
     </header>
 
+    {#
+      Kolejność: najpierw to, co zmienia samą mapę, potem to, jak wygląda, na
+      końcu sprawy techniczne i suwak, który mapy nie dotyczy wcale.
+
+      `value` i `checked` w tym pliku to wartości DOMYŚLNE: z nimi porównuje
+      podświetlenie zmienionych opcji (markChangedSettings w app.js), więc
+      muszą się zgadzać z *_DEFAULTS w app.js i z domyślnymi w plannerze.
+    #}
+    <details class="dev-fold" id="fold-window" open>
+    <summary>Co pokazuje mapa</summary>
+
     <div class="field">
-        <label for="extra">
-            Ile dłużej niż najszybsza trasa <output id="extra-value">125</output>%
+        <label for="density">
+            Gęstość mapy <output id="density-value">2.5</output>
         </label>
-        <input type="range" id="extra" min="110" max="200" step="5" value="125">
+        <input type="range" id="density" min="0.5" max="15" step="0.5" value="2.5">
         <p class="field-hint">
-            Okno czasowe procentowo, nie w minutach — rośnie razem z długością
-            trasy zamiast być stałym naddatkiem. Dwa suwaki niżej łatają
-            skrajności: bardzo krótkie i bardzo długie trasy.
+            Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru,
+            a godzina „mapa pokazuje do” jest tego skutkiem.
         </p>
     </div>
 
     <div class="field">
-        <label for="extra-floor">
-            Minimalne okno (niezależnie od %) <output id="extra-floor-value">5</output> min
+        <label for="car-count">
+            Ile aut Traficara <output id="car-count-value">3</output>
         </label>
-        <input type="range" id="extra-floor" min="0" max="30" step="1" value="5">
+        <input type="range" id="car-count" min="1" max="30" step="1" value="3">
         <p class="field-hint">
-            Przy krótkich trasach sam procent daje grosze — 3-minutowa trasa
-            przy 110% to ledwie 18 s naddatku. Ten suwak gwarantuje co
-            najmniej tyle minut okna, nawet dla bardzo krótkich tras.
+            Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”,
+            są zawsze, a suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.
+        </p>
+        <label class="dev-check">
+            <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
+        </label>
+        <p class="field-hint">
+            Z aut, do których idzie się z tego samego miejsca, zostaje tylko to,
+            przy którym jest się najwcześniej, albo to, które daje więcej z „Ogarniam”.
+        </p>
+        <label class="dev-check">
+            <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
+        </label>
+        <p class="field-hint">
+            Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
+            i stoją na mapie jako puste pierścienie.
         </p>
     </div>
 
     <div class="field">
-        <label for="extra-cap">
-            Maksymalne okno (sufit dla długich tras) <output id="extra-cap-value">15</output> min
+        <label for="bike-count">
+            Ile przejazdów rowerem <output id="bike-count-value">4</output>
         </label>
-        <input type="range" id="extra-cap" min="10" max="120" step="5" value="15">
+        <input type="range" id="bike-count" min="1" max="30" step="1" value="4">
         <p class="field-hint">
-            Odwrotność powyższego — przy bardzo długiej najszybszej trasie
-            wysoki procent otworzyłby absurdalnie szerokie okno. Ten suwak je
-            ogranicza. Do debugów; jeśli nie przeszkadza, można zostawić.
+            Przejazdy, których nic nie bije długością jazdy rowerem, godziną w celu
+            ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
         </p>
     </div>
 
-    <div class="field">
-        <label for="range">
-            Zasięg szukania punktu <output id="range-value">1000</output> m
-        </label>
-        <input type="range" id="range" min="200" max="1500" step="100" value="1000">
-        <p class="field-hint">
-            Przy kliknięciu w dowolny punkt mapy — jak daleko szukać słupków,
-            z których można wsiąść lub wysiąść.
-        </p>
-    </div>
+    </details>
 
-    <div class="field" id="sw-field">
-        <label>Wersja aplikacji</label>
-        <div class="sw-row">
-            <code id="sw-version">—</code>
-            <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
-                Sprawdź
-            </button>
+    <details class="dev-fold" id="fold-time" open>
+        <summary>Czas na mapie</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-bar"> …z paskiem „ile do celu zostało”
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-ends"> …i kropką dokładnie w tym punkcie
+        </label>
+        <p class="field-hint">
+            Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu,
+            jeśli jedzie się dalej stąd.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
+        </label>
+        <p class="field-hint">
+            Pasek podaje najszybszy dojazd i granicę mapy, a jego „Pokaż więcej”
+            zagęszcza mapę dwa, trzy, cztery razy.
+        </p>
+    </details>
+
+    {#
+      Nic tutaj nie rusza serwera: obie współrzędne kropki i cała tablica
+      odjazdów są już w odpowiedziach, przełącznik tylko przemalowuje.
+    #}
+    <details class="dev-fold" id="fold-dots">
+    <summary>Przystanki i rozkład</summary>
+
+        <div class="field compact">
+            <label for="dot-size">
+                Wielkość kropek <output id="dot-size-value">8</output> px
+            </label>
+            <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
+            <p class="field-hint">
+                Kropki na wybranej trasie i, o piksel mniejsze, na węzłach
+                wachlarza — najechanie pokazuje tablicę odjazdów.
+            </p>
         </div>
-        <p class="field-hint" id="sw-status" role="status">
-            Porównuje wersję działającą w przeglądarce z tą, którą serwer
-            wydaje w tej chwili.
+
+        <label class="dev-check">
+            <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
+        </label>
+        <p class="field-hint">
+            Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie,
+            z którego wzięta jest godzina.
         </p>
-    </div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="dot-start"> Wyróżnij przystanek startowy
+        </label>
+        <p class="field-hint">
+            Kropka przystanku, z którego się wyrusza, i nagłówek jej tablicy
+            dostają zielony kolor.
+        </p>
+
+        <div class="field compact">
+            <label for="dot-rows">
+                Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
+            </label>
+            <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
+            <p class="field-hint">
+                Powyżej dwudziestu odjazdów tablica spod kropki zasłania mapę,
+                o którą się właśnie pyta.
+            </p>
+        </div>
+
+        <div class="dev-section-head">Gdzie pokazać rozkład</div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="tip-cursor" checked> Dymek przy kursorze
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
+        </label>
+        <p class="field-hint">
+            Tablica odjazdów i podpowiedź o linii pokazują się w dymku, w okienku,
+            które zostaje do zamknięcia, w obu albo w żadnym.
+        </p>
+
+    </details>
+
+    <details class="dev-fold" id="fold-bike">
+    <summary>Rower miejski</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
+        </label>
+        <p class="field-hint">
+            Obok drugiego końca przejazdu staje godzina policzona z odległości,
+            a nie sama odległość.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
+        </label>
+        <p class="field-hint">
+            Kreski wybranych przejazdów i ich stacje końcowe stoją na mapie cały
+            czas, a nie tylko pod kursorem.
+        </p>
+
+    </details>
 
     {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
@@ -201,25 +429,25 @@
       LOOK_DEFAULTS w app.js i to one są domyślne, gdy sekcja jest schowana.
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
-    <div class="dev-section" id="look-section" hidden>
-        <h3>Wygląd mapy <span class="dev-temp">tymczasowe</span></h3>
+    <details class="dev-fold" id="look-section" hidden>
+        <summary>Wygląd mapy</summary>
 
         <div class="field compact">
             <label for="look-min-op">
-                Najbledsza linia — krycie <output id="look-min-op-value">0.4</output>
+                Najbledsza linia — krycie <output id="look-min-op-value">0.3</output>
             </label>
-            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.4">
+            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.3">
             <p class="field-hint">
-                Dolny próg widoczności (punkt 8 kontraktu). Najbledszy kawałek
-                ma być widoczny bez najeżdżania myszką.
+                Dolny próg widoczności z punktu 8 kontraktu: najbledszy kawałek ma
+                być widoczny bez najeżdżania.
             </p>
         </div>
 
         <div class="field compact">
             <label for="look-min-w">
-                Najbledsza linia — grubość <output id="look-min-w-value">3</output> px
+                Najbledsza linia — grubość <output id="look-min-w-value">2</output> px
             </label>
-            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="3">
+            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="2">
         </div>
 
         <div class="field compact">
@@ -242,8 +470,8 @@
             </label>
             <input type="range" id="look-casing" min="0" max="1.05" step="0.05" value="0.45">
             <p class="field-hint">
-                1.05 = nigdy, 0 = zawsze. Otoczka oddziela jasne korytarze od
-                tła, ale pogrubia całą sieć.
+                Otoczka oddziela jasne korytarze od tła, ale pogrubia sieć:
+                1.05 to nigdy, 0 to zawsze.
             </p>
         </div>
 
@@ -275,18 +503,87 @@
             <input type="range" id="look-label-op" min="0.3" max="1" step="0.05" value="1">
         </div>
 
-        <button type="button" id="look-reset" class="button">Przywróć domyślne</button>
         <p class="field-hint" id="look-dump">
             Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
             i skasuję tę sekcję.
         </p>
+    </details>
+
+    {#
+      SEKCJA SCHOWANA (SOUND_TUNING = false w app.js) — na razie dźwięk po
+      prostu jest, bez ustawienia. Atrybut `hidden` niżej to tylko stan
+      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
+    #}
+    <details class="dev-fold" id="fold-sound" hidden>
+    <summary>Dźwięk</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
+        </label>
+        <p class="field-hint">
+            Spadająca rura milczy, gdy system prosi o ograniczenie animacji
+            (<code>prefers-reduced-motion</code>) albo przeglądarka nie pozwala
+            jeszcze grać.
+        </p>
+
+    </details>
+
+    <details class="dev-fold" id="fold-version">
+    <summary>Wersja aplikacji</summary>
+
+    <div class="field" id="sw-field">
+        <div class="sw-row">
+            <code id="sw-version">—</code>
+            <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
+                Sprawdź
+            </button>
+        </div>
+        <p class="field-hint" id="sw-status" role="status">
+            Porównuje wersję działającą w przeglądarce z tą, którą serwer
+            wydaje w tej chwili.
+        </p>
     </div>
 
+    </details>
+
+    {# Na samym dole i zwinięte: jako jedyny nie zmienia niczego na mapie. #}
+    <details class="dev-fold" id="fold-transfer">
+    <summary>Tylko lista propozycji tras</summary>
+
+    <div class="field">
+        <label for="transfer-gain">
+            Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
+        </label>
+        <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
+        <p class="field-hint">
+            Lista proponuje przesiadkę jako pierwszą dopiero wtedy, gdy oszczędza
+            co najmniej tyle minut względem jazdy tym samym pojazdem.
+        </p>
+    </div>
+
+    </details>
+
+    <div class="dev-foot">
+        <button type="button" id="dev-reset" class="button">Przywróć domyślne</button>
+    </div>
+
+</div>
+
+{#
+  Okienko z rozkładem/linią w rogu ekranu - alternatywa dla dymka przy
+  kursorze (przełączniki w panelu ⚙, sekcja „Kropki i rozkład"). Poza #map
+  celowo: ma nie łapać zdarzeń myszy mapy ani nie znikać razem z warstwami.
+#}
+<div id="flow-panel" hidden>
+    <button id="flow-panel-close" class="icon-button" title="Zamknij okienko"
+            aria-label="Zamknij okienko z rozkładem">✕</button>
+    <div id="flow-panel-body"></div>
 </div>
 {% endif %}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='timetable.js') }}"></script>
 <script src="{{ url_for('static', filename='pwa.js') }}"></script>
 
 </body>

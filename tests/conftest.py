@@ -5,7 +5,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
+import bikes
 import gtfs
+import pkp
+import planner
+import traficar
 
 
 @pytest.fixture
@@ -15,3 +19,68 @@ def install_day(monkeypatch):
     def _install(day):
         monkeypatch.setattr(gtfs, "load_day", lambda d: day)
     return _install
+
+
+@pytest.fixture
+def pin_deadline(monkeypatch):
+    """pin_deadline(sekunda) ustawia próg mapy na sztywno, z pominięciem
+    doboru po gęstości (planner._choose_deadline).
+
+    Dla testów, które sprawdzają coś INNEGO niż sam próg - kotwiczenie,
+    jasność, kropki - i potrzebują mapy o znanym zakresie. Gęstość liczona na
+    syntetycznym dniu (słupki co półtora kilometra, kadr z kilku punktów)
+    przesuwałaby im próg z powodów, które nie mają nic wspólnego z tym, co
+    sprawdzają. Kolejne wywołanie w tym samym teście przestawia próg na nowo."""
+    def _pin(deadline_sec):
+        monkeypatch.setattr(planner, "_choose_deadline",
+                            lambda network_at, best_arr, target: (deadline_sec, False))
+    return _pin
+
+
+@pytest.fixture(autouse=True)
+def _pkp_disabled_by_default(monkeypatch):
+    """gtfs.load_day() dokleja rozkład kolejowy przez pkp.augment_day (patrz
+    pkp.py) - bez tej blokady KAŻDY test wołający load_day (nie tylko
+    test_pkp.py) sięgałby po prawdziwy data/pkp.sqlite i prawdziwy
+    PKP_API_KEY ze środowiska, w którym akurat działa pytest. To łamie
+    hermetyczność testów (wynik zależy od tego, czy ktoś ma skonfigurowany
+    klucz akurat na tej maszynie) i wolno robi się w każdym teście
+    dotykającym gtfs.load_day, nie tylko tych o PKP.
+
+    Testy, którym PKP faktycznie jest potrzebne (patrz tests/test_pkp.py),
+    same nadpisują `pkp.enabled` w swoim fixturze - ten sam `monkeypatch`
+    ma zasięg całego testu, więc kolejne setattr po prostu wygrywa."""
+    monkeypatch.setattr(pkp, "enabled", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def _traficar_disabled_by_default(monkeypatch):
+    """plan_flow dokłada do listy propozycje kończące się Traficarem (patrz
+    traficar.py) - a te biorą się z ŻYWEGO feedu fioletowe.live. Bez tej
+    blokady każdy test wołający plan_flow strzelałby w internet: wynik
+    zależałby od tego, ile aut akurat stoi we Wrocławiu i czy serwis żyje,
+    a testy chodziłyby tyle, ile trwa timeout HTTP.
+
+    Test, który Traficara faktycznie dotyczy, sam podstawia dane (ten sam
+    `monkeypatch` ma zasięg całego testu, więc kolejne setattr wygrywa) -
+    patrz tests/test_traficar.py.
+    """
+    monkeypatch.setattr(traficar, "enabled", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def _bikes_disabled_by_default(monkeypatch):
+    """Ten sam powód, co przy Traficarze, tylko źródłem jest kanał GBFS
+    operatora WRM. Odkąd rowery stoją NA MAPIE (patrz bikes.map_places),
+    sięga po nie każde wyszukanie, nie tylko to z odhaczonym rowerem - więc
+    bez tej blokady w internet strzelałby każdy test wołający plan_flow.
+
+    Zatkana jest sama granica sieci, a nie wyłącznik `bikes.enabled` - inaczej
+    nie dałoby się przetestować tego wyłącznika (patrz tests/test_rower.py).
+    Test o rowerach sam podstawia dane (patrz tests/test_rowery_na_mapie.py).
+    """
+    def _bez_sieci(url):
+        raise OSError(f"test nie wychodzi do sieci: {url}")
+
+    bikes._cache.clear()
+    monkeypatch.setattr(bikes, "_fetch", _bez_sieci)

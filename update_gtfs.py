@@ -30,6 +30,11 @@ import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+# Ten plik bywa uruchamiany sam (docker/entrypoint.sh, cron), poza
+# procesem serwera - musi wczytać data/.env na własną rękę.
+import config  # noqa: F401
+import siechnice
+
 # Portal Otwarte Dane Wrocław publikuje kolejne paczki GTFS nazwane datą
 # początku obowiązywania (GTFS_DDMMRRRR). Ta strona listuje je wszystkie:
 GTFS_LIST_URL = "https://open-data.cui.wroclaw.pl/hdb/ft/6/"
@@ -285,6 +290,21 @@ def build_database(zip_path, db_path):
     db.close()
 
 
+def _merge_siechnice(db_path):
+    """Dokleja rozkład gminy Siechnice do świeżo zbudowanej bazy.
+
+    Awaria tego kroku nie przerywa aktualizacji: to osobne, cudze API bez
+    żadnej gwarancji dostępności (patrz siechnice.py), a rozkład Wrocławia -
+    właściwy przedmiot tej aktualizacji - jest już w bazie i ma wjechać na
+    miejsce niezależnie od tego, czy Siechnice akurat odpowiadają.
+    """
+    try:
+        siechnice.update(db_path)
+    except Exception as e:
+        print(f"OSTRZEŻENIE: rozkład Siechnic nie wszedł ({e}) "
+              "- baza ma same dane Wrocławia.", file=sys.stderr)
+
+
 def run_update():
     """Pełne przejście: pobranie, budowa, atomowa podmiana. True = udało się."""
     started = time.monotonic()
@@ -292,6 +312,7 @@ def run_update():
     try:
         download(find_current_feed_url(), ZIP_PATH)
         build_database(ZIP_PATH, NEW_DB_PATH)
+        _merge_siechnice(NEW_DB_PATH)
     except Exception as e:
         # Stara baza zostaje nietknięta - aplikacja dalej działa na wczorajszych danych.
         print(f"BŁĄD aktualizacji: {e}", file=sys.stderr)

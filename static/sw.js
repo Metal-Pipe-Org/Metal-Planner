@@ -6,12 +6,21 @@
                                offline oddajemy JSON z błędem, który UI umie
                                pokazać jak każdy inny komunikat;
    - statyki i Leaflet      -> cache od razu, w tle odświeżenie;
-   - kafelki mapy           -> cache od razu, z ograniczeniem rozmiaru.
+   - kafelki mapy           -> cache od razu, z ograniczeniem rozmiaru;
+   - cokolwiek naszego na localhoście -> tylko sieć (patrz DEV niżej).
 
    VERSION to odcisk zawartości frontu, podstawiany przez Flaska przy
    serwowaniu /sw.js (patrz `_frontend_digest` w routes.py). Zmiana
    dowolnego pliku = nowa treść tego skryptu = nowe nazwy cache'ów,
    a stare lecą przy aktywacji. Niczego nie trzeba podbijać ręcznie. */
+
+// Przy pisaniu kodu wszystko z naszego serwera idzie WYŁĄCZNIE z sieci.
+// Strategia "cache od razu, w tle odświeżenie" jest dobra dla użytkownika
+// i fatalna dla autora: podaje POPRZEDNIĄ wersję pliku, więc każda poprawka
+// w app.js czy style.css pokazywała się dopiero po drugim odświeżeniu. To
+// wygląda jak "serwer nie widzi zmian", a serwer jest tu bez winy - swoje
+// statyki oddaje z Cache-Control: no-cache.
+const DEV = ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
 
 const VERSION = '__VERSION__';
 const SHELL = `planer-shell-${VERSION}`;
@@ -30,10 +39,16 @@ const SHELL_URLS = [
     '/static/offline.html',
     '/static/style.css',
     '/static/app.js',
+    '/static/timetable.js',
     '/static/pwa.js',
     '/static/manifest.webmanifest',
     '/static/icons/icon-192.png',
     '/static/icons/icon-512.png',
+    // Oba formaty do powłoki, nie ten "właściwy": który zagra, rozstrzyga
+    // przeglądarka (patrz PIPE_SOURCES w app.js), a offline nie ma już jak
+    // dobrać brakującego.
+    '/static/sounds/metal-pipe.ogg',
+    '/static/sounds/metal-pipe.m4a',
 ];
 
 // CDN bywa kapryśny, a brak Leafleta to tylko brak mapy - nie blokujemy
@@ -104,6 +119,8 @@ self.addEventListener('fetch', event => {
         event.respondWith(apiOnline(request));
     } else if (isTile(url)) {
         event.respondWith(cacheFirst(request, TILES, TILES_LIMIT));
+    } else if (DEV && url.origin === self.location.origin) {
+        event.respondWith(fetch(request));
     } else if (url.origin === self.location.origin || CDN_URLS.includes(url.href)) {
         event.respondWith(staleWhileRevalidate(request));
     }
