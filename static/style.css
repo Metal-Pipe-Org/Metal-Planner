@@ -1892,6 +1892,11 @@ body.mode-timetable .time-headline { display: none; }
     border-radius: 4px;
 }
 
+/* "Zamknij rozkład" - patrz index.html: pokazuje się TYLKO w widoku mapy na
+   telefonie, gdzie karta rozkładu jest jedyną rzeczą nad mapą. Stoi w miejscu
+   podpowiedzi (ta w tym widoku i tak jest schowana), więc karta nie rośnie. */
+.tt-close { display: none; }
+
 /* Kółko ładowania siedzi w wierszu daty - przycisku "Pokaż" nie ma, więc nie
    ma go gdzie postawić, a szukanie musi być widoczne. */
 .tt-spinner { display: none; margin-left: auto; color: var(--ink-faint); }
@@ -2394,6 +2399,18 @@ ul.tt-legend {
     /* W trybie rozkładów widok mapy pokazuje samą kartę rozkładu - tak jak
        w wyszukiwarce pokazuje samą kartę wyszukiwania. */
     body.mode-timetable.view-map #tt-results { display: none; }
+
+    /* ...a skoro została sama karta, to z niej musi dać się wyjść na mapę,
+       którą się właśnie ogląda (zakładka „Trasy" wyprowadza na listę). */
+    body.mode-timetable.view-map .tt-close {
+        display: flex;
+        width: 100%;
+        margin-top: 10px;
+        background: var(--surface-alt);
+        color: var(--ink-soft);
+    }
+
+    body.mode-timetable.view-map .tt-close:hover { background: #e8edf3; }
 
     body.panel-hidden #sidebar {
         transform: none;

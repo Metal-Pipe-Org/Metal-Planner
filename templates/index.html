@@ -217,6 +217,17 @@
             słupek na mapie.
         </p>
 
+        {#
+          Wyjście z rozkładów BEZ opuszczania mapy - tylko tam, gdzie nic
+          innego tego nie umie: telefon, widok mapy. Zakładka „Trasy" też
+          zamyka ten tryb, ale przy okazji zabiera z mapy na listę, a tu
+          patrzy się właśnie na mapę. W widoku listy przycisku nie ma (pod
+          listą stoją zakładki), na szerokim ekranie też nie (jest ◷).
+        #}
+        <button type="button" id="tt-close" class="button tt-close">
+            &#10005; Zamknij rozkład
+        </button>
+
     </div>
 
     <div id="tt-results" class="results" aria-live="polite"></div>

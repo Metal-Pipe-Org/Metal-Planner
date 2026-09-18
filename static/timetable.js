@@ -207,6 +207,11 @@ for (const button of modeButtons) {
     button.addEventListener('click', () => setMode(!active()));
 }
 
+// "Zamknij rozkład" z karty (telefon, widok mapy): wyjście z trybu BEZ zmiany
+// widoku - zostajemy na mapie, tyle że wraca na nią wachlarz połączeń.
+const closeButton = $('tt-close');
+if (closeButton) closeButton.addEventListener('click', () => setMode(false));
+
 // Klik w słupek na mapie: w tym trybie znaczy "pokaż rozkład tego przystanku".
 window.timetableMode = {
     /** Wejście i wyjście dla paska zakładek - tam "Rozkład" stoi obok "Tras"

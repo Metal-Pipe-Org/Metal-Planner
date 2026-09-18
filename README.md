@@ -35,7 +35,9 @@ domyślnie 5001 (5000 zajmuje AirPlay na macOS), można go zmienić zmienną
 
 Obok wyszukiwarki połączeń panel ma drugi tryb, przełączany przyciskiem
 **◷ Rozkłady** tuż obok ← (chowania panelu); na telefonie jest to trzecia
-zakładka na dole, „Rozkład", obok „Mapy" i „Tras". Oba tryby zajmują to samo miejsce — wejście w rozkłady
+zakładka na dole, „Rozkład", obok „Mapy" i „Tras". W widoku mapy karta
+rozkładu ma przycisk **„✕ Zamknij rozkład"** — wychodzi z trybu bez
+schodzenia z mapy. Oba tryby zajmują to samo miejsce — wejście w rozkłady
 chowa okienko wyszukiwania, wyjście przywraca je razem z tym, co było
 narysowane na mapie, bez ponownego szukania.
 

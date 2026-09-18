@@ -188,7 +188,11 @@ a nie z ostatniego kliknięcia — w rozkłady wchodzi się także spoza paska
 (przycisk „trasa" przy propozycji) i zakładki mają za tym nadążyć.
 „Mapa" trybu nie rusza: w rozkładach mapa to sposób wybrania przystanku
 (klik w słupek), a nie wyjście z nich; wychodzi się dopiero „Trasami",
-które przywracają wachlarz propozycji bez ponownego szukania. Klasy `view-map`/`view-list` na
+które przywracają wachlarz propozycji bez ponownego szukania. A że „Trasy"
+przy okazji zabierają z mapy na listę, karta rozkładu dostaje w tym jednym
+widoku (telefon + mapa) przycisk **„✕ Zamknij rozkład"** — to samo wyjście
+z trybu, tyle że zostawia na ekranie mapę, na którą się właśnie patrzyło.
+Stoi w miejscu podpowiedzi, która w widoku mapy i tak jest schowana. Klasy `view-map`/`view-list` na
 `<body>` na szerokim ekranie nie robią nic — tam widać oba widoki naraz.
 Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
 ten kadr zobaczymy po przełączeniu zakładki.
