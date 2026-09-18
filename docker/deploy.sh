@@ -4,8 +4,8 @@
 # Ten sam skrypt robi pierwszą instalację i każdą kolejną aktualizację -
 # jest idempotentny, można go puszczać dowolnie często.
 #
-# Wołany przez GitHub Actions po SSH (.github/workflows/deploy.yml), ale
-# działa też ręcznie:
+# Pisany pod wywołanie po SSH z GitHub Actions; samego workflow wdrożeniowego
+# w repo już nie ma, więc na co dzień odpala się go ręcznie:
 #     curl -fsSL https://raw.githubusercontent.com/Metal-Pipe-Org/Metal-Planner/main/docker/deploy.sh | bash
 #
 # Cała ciężka robota - klonowanie repo i budowa obrazu - dzieje się tutaj,
@@ -15,9 +15,10 @@
 set -euo pipefail
 
 REPO="${REPO:-Metal-Pipe-Org/Metal-Planner}"
-# testing jest gałęzią wdrożeniową - to do niej idą pull requesty, a wdrożenie
-# rusza dopiero po zmergowaniu. Workflow podaje tu gałąź, która go wywołała.
-BRANCH="${BRANCH:-testing}"
+# `main` jest gałęzią, do której idą pull requesty - stąd wstaje serwer testowy
+# i stąd domyślna wartość. Produkcję stawia się z `stable`, podając ją jawnie:
+#     BRANCH=stable bash deploy.sh
+BRANCH="${BRANCH:-main}"
 APP_DIR="${APP_DIR:-$HOME/metal-planner}"
 COMPOSE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH/docker-compose.yml"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:5002/healthz}"

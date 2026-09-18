@@ -1,7 +1,7 @@
 # Metal-Planner
 
-wszystko z brancha testing jest na https://metal-testing.sze.one/
-wszystko z brancha main jest na https://metal.sze.one/
+wszystko z brancha main jest na https://metal-testing.sze.one/
+wszystko z brancha stable jest na https://metal.sze.one/
 
 Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej
 wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz** —
@@ -292,5 +292,5 @@ plik po opis, co dokładnie który test sprawdza.
 
 ## Konwencja - branche
 - dla każdej funkcji tworzymy indywidualne branche w konwencji `username/feature`
-- tworzymy pull reguesty do testing gdy zmiany są gotowe
-- gdy zmiany są zebrane, przetestowane i gotowe to stworzenia następnego relase'a tworzymy pull request z `testing` do `main` 
+- tworzymy pull reguesty do `main` gdy zmiany są gotowe
+- gdy zmiany są zebrane, przetestowane i gotowe to stworzenia następnego relase'a tworzymy pull request z `main` do `stable` 

@@ -57,8 +57,8 @@ Szukaj rzeczy, które naprawdę bolą, w tej kolejności:
 - **Wydajność** — zapytania w pętli, przeliczanie tego samego w każdym żądaniu,
   wczytywanie całego rozkładu tam, gdzie wystarczy wycinek, pętle po wszystkich
   połączeniach w gorącej ścieżce (`plan_flow`, CSA).
-- **Gałąź bazowa** — w tym repo PR-y idą do `testing`; na `main` wchodzi dopiero
-  wydanie (`testing` -> `main`). PR z pojedynczą zmianą wycelowany w `main` to
+- **Gałąź bazowa** — w tym repo PR-y idą do `main`; na `stable` wchodzi dopiero
+  wydanie (`main` -> `stable`). PR z pojedynczą zmianą wycelowany w `stable` to
   uwaga do werdyktu, nie drobiazg.
 - **Zgodność z architekturą i konwencjami** — podział odpowiedzialności między
   `gtfs.py` / `planner.py` / `routes.py` / `static/app.js`, kontrakt mapy

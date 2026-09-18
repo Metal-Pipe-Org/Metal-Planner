@@ -80,27 +80,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: testing
+          ref: main
           fetch-depth: 0
 
       - name: Ustal gałąź bazową i posprzątaj gałęzie robocze
         id: base
         run: |
-          STABLE="claude/issue-${N}"
-          echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
+          ISSUE_BRANCH="claude/issue-${N}"
+          echo "issue_branch=$ISSUE_BRANCH" >> "$GITHUB_OUTPUT"
 
-          if ! git ls-remote --exit-code --heads origin "$STABLE" >/dev/null 2>&1; then
-            echo "Brak gałęzi $STABLE — pierwszy bieg dla tego zgłoszenia."
-            echo "branch=testing" >> "$GITHUB_OUTPUT"
+          if ! git ls-remote --exit-code --heads origin "$ISSUE_BRANCH" >/dev/null 2>&1; then
+            echo "Brak gałęzi $ISSUE_BRANCH — pierwszy bieg dla tego zgłoszenia."
+            echo "branch=main" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Gałąź zgłoszenia już jest — odgałęziamy się od niej, żeby Claude
           # zastał w drzewie dotychczasową pracę i ją poprawiał, zamiast
-          # zaczynać od `testing` i pisać wszystko od nowa.
-          echo "Kontynuacja pracy na $STABLE."
-          echo "branch=$STABLE" >> "$GITHUB_OUTPUT"
-          git fetch --no-tags origin "+refs/heads/${STABLE}:refs/remotes/origin/${STABLE}"
+          # zaczynać od `main` i pisać wszystko od nowa.
+          echo "Kontynuacja pracy na $ISSUE_BRANCH."
+          echo "branch=$ISSUE_BRANCH" >> "$GITHUB_OUTPUT"
+          git fetch --no-tags origin "+refs/heads/${ISSUE_BRANCH}:refs/remotes/origin/${ISSUE_BRANCH}"
 
           # Gałąź robocza z poprzedniego biegu zostaje celowo, żeby link
           # „View branch" w tamtym komentarzu nie umarł od razu. Kasujemy ją
@@ -108,14 +108,14 @@ jobs:
           # zgłoszenia — niedokończona praca z ubitego biegu zostaje do
           # ręcznej decyzji.
           git ls-remote --heads origin \
-            | awk '{print $2}' | sed 's|refs/heads/||' | grep "^${STABLE}-" \
+            | awk '{print $2}' | sed 's|refs/heads/||' | grep "^${ISSUE_BRANCH}-" \
           | while read -r B; do
               git fetch --no-tags origin "+refs/heads/${B}:refs/remotes/origin/${B}" || continue
-              if git merge-base --is-ancestor "origin/${B}" "origin/${STABLE}"; then
+              if git merge-base --is-ancestor "origin/${B}" "origin/${ISSUE_BRANCH}"; then
                 echo "Kasuję zbędną gałąź roboczą: $B"
                 git push origin --delete "$B" || true
               else
-                echo "Zostawiam $B — ma commity spoza $STABLE."
+                echo "Zostawiam $B — ma commity spoza $ISSUE_BRANCH."
               fi
             done
 
@@ -164,7 +164,7 @@ jobs:
         if: always() && steps.claude.outputs.branch_name != ''
         env:
           TMP: ${{ steps.claude.outputs.branch_name }}
-          STABLE: ${{ steps.base.outputs.stable }}
+          ISSUE_BRANCH: ${{ steps.base.outputs.issue_branch }}
         run: |
           # Bieg bez commitów: akcja sama kasuje swoją pustą gałąź roboczą,
           # więc nie ma czego przenosić. Sprawdzamy to osobnym `ls-remote`,
@@ -176,11 +176,12 @@ jobs:
           fi
           git fetch --no-tags origin "+refs/heads/${TMP}:refs/remotes/origin/${TMP}"
 
-          # Bez --force: gałąź robocza została odcięta od $STABLE na starcie
-          # tego biegu, więc to zawsze fast-forward. Gdyby ktoś w międzyczasie
-          # pushnął na $STABLE, push się wywali i lepiej, żeby to było widać.
-          echo "Fast-forward $STABLE <- $TMP"
-          git push origin "refs/remotes/origin/${TMP}:refs/heads/${STABLE}"
+          # Bez --force: gałąź robocza została odcięta od $ISSUE_BRANCH na
+          # starcie tego biegu, więc to zawsze fast-forward. Gdyby ktoś
+          # w międzyczasie pushnął na $ISSUE_BRANCH, push się wywali i lepiej,
+          # żeby to było widać.
+          echo "Fast-forward $ISSUE_BRANCH <- $TMP"
+          git push origin "refs/remotes/origin/${TMP}:refs/heads/${ISSUE_BRANCH}"
           echo "moved=true" >> "$GITHUB_OUTPUT"
 
       - name: Podaj link do PR-a (tylko gdy jeszcze go nie ma)
@@ -188,19 +189,20 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          STABLE: ${{ steps.base.outputs.stable }}
+          ISSUE_BRANCH: ${{ steps.base.outputs.issue_branch }}
         run: |
-          PR=$(gh pr list --repo "$REPO" --head "$STABLE" --state open \
+          PR=$(gh pr list --repo "$REPO" --head "$ISSUE_BRANCH" --state open \
                  --json number -q '.[0].number')
           if [ -n "$PR" ]; then
             echo "PR #$PR już istnieje i sam się zaktualizował — bez komentarza."
             exit 0
           fi
           # `body` wstawia workflow, więc `Closes #N` jest tu pewne — nie zależy
-          # od tego, czy model pamiętał o wpisaniu słowa kluczowego.
-          LINK="https://github.com/${REPO}/compare/testing...${STABLE}?expand=1&body=Closes+%23${N}"
+          # od tego, czy model pamiętał o wpisaniu słowa kluczowego. Baza `main`
+          # jest gałęzią domyślną, więc to słowo zamknie zgłoszenie samo.
+          LINK="https://github.com/${REPO}/compare/main...${ISSUE_BRANCH}?expand=1&body=Closes+%23${N}"
           gh issue comment "$N" --repo "$REPO" --body \
-            "Praca czeka na gałęzi \`${STABLE}\`. [Otwórz PR do \`testing\`](${LINK}) — kolejne poprawki z tego wątku będą się dokładać do niego automatycznie."
+            "Praca czeka na gałęzi \`${ISSUE_BRANCH}\`. [Otwórz PR do \`main\`](${LINK}) — kolejne poprawki z tego wątku będą się dokładać do niego automatycznie."
 
       - name: Oznacz zgłoszenie etykietą "claude"
         # Sam znacznik „Claude się tym zajmował" — nic nie uruchamia.
