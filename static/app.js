@@ -3159,6 +3159,7 @@ const obLineInput = $('ob-line');
 const obDirSelect = $('ob-dir');
 const obStopSelect = $('ob-stop');
 const obMsg = $('ob-msg');
+const obSummary = $('ob-summary');
 const modePlaceButton = $('mode-place');
 const modeVehicleButton = $('mode-vehicle');
 
@@ -3173,6 +3174,11 @@ const OB_LINE_LIMIT = 8;
 let onboardOn = false;
 let obDirections = [];     // kierunki wczytanej linii (patrz /api/onboard)
 let obToken = 0;           // odsiewa odpowiedzi na nieaktualną już linię
+// Czy komplet ma być zwinięty do jednej linijki. Chęć, nie stan: zwija się
+// tylko wtedy, gdy wybór jest KOMPLETNY (patrz syncOnboardView), więc zmiana
+// linii sama z siebie pokazuje pola z powrotem.
+let obCollapsed = false;
+let obLineAuto = null;     // uchwyt podpowiedzi linii (patrz attachAutocomplete)
 
 /** Co pojedzie do serwera jako `onboard_*` - albo null, gdy wybór jest jeszcze
     niekompletny. Kierunek jedzie razem z numerem i przystankiem, bo słupek
@@ -3195,6 +3201,39 @@ const onboardReady = () => onboardOn && !!onboardPick();
 const obDirection = () =>
     obDirSelect.value === '' ? null : obDirections[Number(obDirSelect.value)] || null;
 
+/** Zwinięty komplet albo trzy pola - jedno z dwóch, nigdy oba naraz.
+
+    Zwijamy WYŁĄCZNIE kompletny wybór: niepełny trzeba dokończyć, więc pola
+    muszą być widoczne, choćby ktoś wcześniej zwinął poprzedni. Dzięki temu
+    nie ma stanu "zwinięte, ale nie wiadomo co" - zmiana linii, wyczyszczenie
+    pola albo pusty kierunek rozwijają kartę same. */
+function syncOnboardView() {
+    const kurs = onboardPick();
+    const zwiniete = obCollapsed && !!kurs;
+    obFields.hidden = !onboardOn || zwiniete;
+    obSummary.hidden = !onboardOn || !zwiniete;
+    obSummary.setAttribute('aria-expanded', String(!zwiniete));
+    // Zwinięcie zabiera kursor z pola linii i zamyka jego podpowiedzi - razem
+    // z kursorem znika klawiatura telefonu, a lista schowana OTWARTA wróciłaby
+    // taka po rozwinięciu i zasłoniła kierunek z przystankiem.
+    if (zwiniete) { obLineInput.blur(); if (obLineAuto) obLineAuto.close(); }
+    if (!kurs) return;
+    const kierunek = obDirection();
+    const przystanek = prettyStopName(
+        obStopSelect.options[obStopSelect.selectedIndex].text);
+    obSummary.innerHTML =
+        `<span class="badge ${esc(kurs.mode || 'other')}">${esc(kurs.num)}</span>`
+        // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
+        // linijki ucina się koniec, a stracić wolno kierunek (kontekst),
+        // nie przystanek, przy którym pojazd zaraz stanie.
+        + `<span class="ob-summary-text"><b>${esc(przystanek)}</b>`
+        + ` · w stronę ${esc(kierunek.headsign)}</span>`
+        + `<span class="ob-summary-edit" aria-hidden="true">zmień</span>`;
+    obSummary.setAttribute('aria-label',
+        `Jadę linią ${kurs.num}, najbliższy przystanek ${przystanek}, `
+        + `w stronę ${kierunek.headsign} — zmień`);
+}
+
 function obNote(text) {
     obMsg.textContent = text || '';
     obMsg.hidden = !text;
@@ -3207,7 +3246,7 @@ function obNote(text) {
 function setStartMode(vehicle, focus = true) {
     onboardOn = vehicle;
     document.body.classList.toggle('start-onboard', vehicle);
-    obFields.hidden = !vehicle;
+    syncOnboardView();
     for (const [button, on] of [[modeVehicleButton, vehicle], [modePlaceButton, !vehicle]]) {
         button.classList.toggle('active', on);
         button.setAttribute('aria-pressed', String(on));
@@ -3269,6 +3308,7 @@ function fillStops() {
         + stops.map(stop =>
             `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
     obStopSelect.disabled = !stops.length;
+    syncOnboardView();
 }
 
 if (obLineInput) {
@@ -3278,7 +3318,7 @@ if (obLineInput) {
     // Podpowiedzi numerów linii - plakietka w kolorze pojazdu, tak samo jak
     // w trybie rozkładów (patrz timetable.js): numer JEST plakietką, więc
     // trafienia w nim nie podświetlamy.
-    attachAutocomplete(obLineInput, () => loadDirections(), {
+    obLineAuto = attachAutocomplete(obLineInput, () => loadDirections(), {
         suggest: query => suggestionsFor(query, LINE_NUMBERS, null, OB_LINE_LIMIT)
             .map(item => ({...item, mode: LINE_MODE_OF.get(item.name)})),
         render: item =>
@@ -3292,9 +3332,20 @@ if (obLineInput) {
 
     obDirSelect.addEventListener('change', () => { fillStops(); obNote(''); });
     // Wybór przystanku domyka pytanie - jeśli cel już jest, nie ma na co
-    // czekać. Ta sama zasada, co przy drugim kliknięciu w mapę.
+    // czekać. Ta sama zasada, co przy drugim kliknięciu w mapę. Domyka też
+    // samą kartę: komplet mówi jedno zdanie, a zajmuje trzy rzędy panelu.
     obStopSelect.addEventListener('change', () => {
+        obCollapsed = true;
+        syncOnboardView();
         if (onboardReady() && endInput.value) search();
+    });
+
+    // Rozwinięcie bez ustawiania kursora: klikający „zmień" najczęściej
+    // poprawia PRZYSTANEK, a kursor w polu linii otwiera nad listami
+    // podpowiedzi i zasłania dokładnie to, po co się tu przyszło.
+    obSummary.addEventListener('click', () => {
+        obCollapsed = false;
+        syncOnboardView();
     });
 
     // Tryb przeżywa odświeżenie strony (patrz saveUiState) - ale sam wybór
@@ -3806,6 +3857,11 @@ function attachAutocomplete(input, onPick, options = {}) {
         event.preventDefault();         // pole ma zostać z fokusem
         choose(Number(option.dataset.index));
     });
+
+    // Lista zamyka się sama (blur, Esc, wybór), ale bywa chowana razem z całym
+    // polem - a wtedy nie ma komu jej zamknąć i wraca otwarta, gdy pole wróci
+    // na ekran (patrz syncOnboardView: zwijanie kompletu w jedną linijkę).
+    return {close};
 }
 
 // Wybór podpowiedzi kończy tryb "wybrany punkt" i - gdy relacja jest

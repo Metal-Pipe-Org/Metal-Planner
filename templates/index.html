@@ -130,6 +130,16 @@
             <p class="onboard-msg" id="ob-msg" role="status" hidden></p>
         </div>
 
+        {#
+          Komplet zwija się do jednej linijki. Trzy pola są potrzebne, dopóki
+          się wybiera; potem niosą jedną informację („jadę 113 w stronę
+          Galerii, przed sobą mam Wojszyce") i zabierają trzy rzędy panelu,
+          przez które nie widać już propozycji. Klik rozwija je z powrotem,
+          z zachowanym wyborem.
+        #}
+        <button type="button" id="ob-summary" class="onboard-summary" hidden
+                aria-controls="onboard-fields" aria-expanded="true"></button>
+
         <div class="endpoints">
             <div class="rail" aria-hidden="true">
                 <span class="rail-dot start"></span>

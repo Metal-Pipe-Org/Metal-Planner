@@ -128,8 +128,13 @@ zamienia „skąd" na trzy pola — linia, kierunek i najbliższy przystanek —
 pasażer w jadącym autobusie nie stoi w żadnym miejscu, które dałoby się wpisać
 w „skąd" (patrz sekcja „Start z pokładu pojazdu" i `onboard.py`). Znika wtedy
 szyna z kropką startu i ⇅ (nie da się zamienić miejscami pojazdu z celem),
-a klik w mapę ustawia sam cel. Wybór pojazdu nie przeżywa odświeżenia strony —
-sam przełącznik owszem.
+a klik w mapę ustawia sam cel. Komplet zwija się do JEDNEJ linijki
+(„113 · Wojszyce · w stronę GALERIA DOMINIKAŃSKA · zmień") — trzy pola są
+potrzebne, dopóki się wybiera, a potem niosą jedno zdanie i zabierają trzy
+rzędy panelu, przez które nie widać propozycji; klik rozwija je z zachowanym
+wyborem. Zwijamy wyłącznie wybór KOMPLETNY, więc zmiana linii pokazuje pola
+z powrotem sama. Wybór pojazdu nie przeżywa odświeżenia strony — sam
+przełącznik owszem.
 
 W polu „skąd" siedzi przycisk **◎ — moja lokalizacja** (Geolocation API
 przeglądarki). Pozycja z GPS-a wchodzi tam jako zwykły punkt mapy, nie nazwa
@@ -1004,7 +1009,8 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   linii, czyli przed godzinami), oś trasy zaznacza etap „jedziesz tym
   pojazdem" i przystanek wysiadania, a nad listą stoi rozpoznany kurs — bo
   pomyłka w kierunku daje wyniki wyglądające równie sensownie, tylko dla kogoś
-  innego. Testy: 380, było 370.
+  innego. Wybrany komplet zwija się do jednej linijki z przyciskiem „zmień",
+  żeby trzy pola nie zasłaniały wyników. Testy: 380, było 370.
 - **2026-09-15** — **dowolna stacja tylko dla kolei, dostawczaki osobno,
   porządek w Ustawieniach Developerskich** (zgłoszenia #114, #130, #131, #132;
   punkt 15 kontraktu). „Dowolna stacja w mieście" to już same perony, bez
