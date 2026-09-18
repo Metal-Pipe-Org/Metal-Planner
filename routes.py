@@ -7,6 +7,7 @@ from flask import jsonify, render_template, request
 import bikes
 import gtfs
 import naming
+import onboard
 import pkp
 import timetables
 import traficar
@@ -98,6 +99,27 @@ def _int_arg(name):
         return int(request.args[name])
     except (KeyError, ValueError):
         return None
+
+
+def _onboard_arg():
+    """Start z pokładu pojazdu z `onboard_num`/`onboard_mode`/`onboard_headsign`/
+    `onboard_stop` albo None (patrz onboard.py).
+
+    Wystarczy numer linii i słupek, przy którym pojazd zaraz stanie - reszta
+    tylko zawęża wybór kursu. `onboard_stop` to identyfikator słupka z
+    /api/onboard, a nie nazwa: pasażer jedzie jedną krawędzią przystanku,
+    a nie całym placem, i tylko na niej otworzą się drzwi.
+    """
+    num = (request.args.get("onboard_num") or "").strip()
+    stop = (request.args.get("onboard_stop") or "").strip()
+    if not num or not stop:
+        return None
+    return {
+        "num": num,
+        "mode": request.args.get("onboard_mode") or None,
+        "headsign": request.args.get("onboard_headsign") or None,
+        "stop": stop,
+    }
 
 
 def init_routes(app):
@@ -239,6 +261,18 @@ def init_routes(app):
             request.args.get("mode") or None,
         ))
 
+    @app.route("/api/onboard")
+    def api_onboard():
+        """Kierunki linii i ich przystanki - pod wybór „jestem w pojeździe"
+        (patrz onboard.py). To samo źródło co /api/line, tylko pogrupowane po
+        napisie z czoła pojazdu i bez geometrii: ten wybór niczego nie rysuje,
+        a przebieg trasy jest najcięższą częścią tamtej odpowiedzi."""
+        return jsonify(onboard.directions(
+            request.args.get("num", ""),
+            _day_arg(),
+            request.args.get("mode") or None,
+        ))
+
     @app.route("/api/stop_board")
     def api_stop_board():
         """Tablica odjazdów z jednego przystanku - wszystkie linie naraz."""
@@ -309,4 +343,9 @@ def init_routes(app):
             # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi
             # (przełącznik 🚲 w karcie wyszukiwania).
             use_bikes=request.args.get("bikes") == "1",
+            # Start z pokładu pojazdu (patrz onboard.py): zamiast "skąd" jedzie
+            # linia, kierunek i NASTĘPNY przystanek. Bez numeru linii nie ma
+            # o czym mówić, więc reszta parametrów jest wtedy ignorowana -
+            # to zwykłe wyszukiwanie.
+            in_vehicle=_onboard_arg(),
         ))

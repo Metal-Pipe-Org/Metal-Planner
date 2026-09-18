@@ -89,6 +89,73 @@
 
     <div class="card search-card">
 
+        {#
+          Skąd zaczyna się podróż. Domyślnie ze STOJĄCEGO MIEJSCA — przystanku
+          albo punktu na mapie. Drugi przycisk mówi coś innego: „jestem
+          w pojeździe", czyli nie stoję nigdzie, tylko właśnie jadę — a wtedy
+          zamiast „skąd" pyta się o linię, kierunek i najbliższy przystanek
+          (patrz onboard.py i sekcja „start z pokładu" w app.js).
+
+          Przełącznik stoi NAD polami, bo zmienia to, o co te pola pytają —
+          a nie pod nimi, jak ustawienia, które tylko stroją wynik.
+        #}
+        <div class="start-mode" role="group" aria-label="Skąd zaczyna się podróż">
+            <button type="button" id="mode-place" class="seg active"
+                    aria-pressed="true">Stoję tutaj</button>
+            <button type="button" id="mode-vehicle" class="seg"
+                    aria-pressed="false">Jestem w pojeździe</button>
+        </div>
+
+        {#
+          Trzy pola zamiast „skąd": linia, kierunek z czoła pojazdu i przystanek,
+          który mam przed sobą. Kierunek i przystanek to listy, nie pola tekstowe
+          — obie mają skończoną, znaną treść (rozkład tej linii), a pasażer
+          w jadącym autobusie ma trafić w odpowiedź, nie w literówkę.
+        #}
+        <div id="onboard-fields" class="onboard-fields" hidden>
+            {#
+              Podpisy nad polami, a nie same placeholdery: placeholder znika
+              razem z wpisaniem wartości, a wtedy „113 / KRZYKI / Wojszyce"
+              nie mówi już, co jest czym. Zwykłe <label for>, więc klik
+              w podpis ustawia kursor w polu i czytnik ekranu czyta to samo,
+              co widać.
+            #}
+            <div class="ob-field ob-field-line">
+                <label class="ob-field-label" for="ob-line">Linia</label>
+                <div class="ac-field">
+                    <input type="text" id="ob-line" autocomplete="off" role="combobox"
+                           aria-autocomplete="list" aria-expanded="false"
+                           aria-controls="ob-line-list"
+                           placeholder="np. 145">
+                    <ul class="ac-list" id="ob-line-list" role="listbox" hidden
+                        aria-label="Podpowiedzi linii"></ul>
+                </div>
+            </div>
+            <div class="ob-field">
+                <label class="ob-field-label" for="ob-dir">Kierunek</label>
+                <select id="ob-dir" disabled>
+                    <option value="">Kierunek</option>
+                </select>
+            </div>
+            <div class="ob-field">
+                <label class="ob-field-label" for="ob-stop">Najbliższy przystanek</label>
+                <select id="ob-stop" disabled>
+                    <option value="">Przystanek</option>
+                </select>
+            </div>
+            <p class="onboard-msg" id="ob-msg" role="status" hidden></p>
+        </div>
+
+        {#
+          Komplet zwija się do jednej linijki. Trzy pola są potrzebne, dopóki
+          się wybiera; potem niosą jedną informację („jadę 113 w stronę
+          Galerii, przed sobą mam Wojszyce") i zabierają trzy rzędy panelu,
+          przez które nie widać już propozycji. Klik rozwija je z powrotem,
+          z zachowanym wyborem.
+        #}
+        <button type="button" id="ob-summary" class="onboard-summary" hidden
+                aria-controls="onboard-fields" aria-expanded="true"></button>
+
         <div class="endpoints">
             <div class="rail" aria-hidden="true">
                 <span class="rail-dot start"></span>
@@ -107,6 +174,11 @@
                     <ul class="ac-list" id="start-list" role="listbox" hidden
                         aria-label="Podpowiedzi przystanków"></ul>
                 </div>
+                {# Z pokładu pojazdu znika szyna z kropkami, a razem z nią
+                   jedyne oznaczenie, które z pól jest celem - a wpisana nazwa
+                   przystanku wygląda tak samo jak nazwa przystanku wyżej.
+                   Podpis wchodzi więc na miejsce kropki (patrz style.css). #}
+                <label class="ob-field-label for-end" for="end">Dokąd jadę</label>
                 <div class="ac-field">
                     <input type="text" id="end" autocomplete="off" role="combobox"
                            aria-label="Przystanek docelowy" aria-autocomplete="list"
@@ -154,9 +226,15 @@
         {# Rower miejski ma JEDEN włącznik - ten w pasku warstw wyżej. Osobny
            checkbox „dojazd rowerem" znaczył dokładnie to samo co on, tyle że
            w drugim miejscu i tylko dla wyszukiwania. #}
-        <p class="hint">
+        <p class="hint hint-place">
             Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
             potem cel. Inną relację zacznij od ✕.
+        </p>
+        {# Ta sama linijka, ale dla jadącego: startu nie wybiera się klikaniem,
+           bo startem jest pojazd. Klik w mapę ustawia wtedy sam cel. #}
+        <p class="hint hint-onboard">
+            Wpisz linię, wybierz kierunek z czoła pojazdu i przystanek, który
+            masz przed sobą. Cel wskaż na mapie albo wpisz obok.
         </p>
 
     </div>

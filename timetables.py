@@ -128,7 +128,7 @@ def _path_of(shape_id, coords, db):
     return [[round(lat, 5), round(lon, 5)] for lat, lon in sliced]
 
 
-def line_timetable(num, day, mode=None):
+def line_timetable(num, day, mode=None, geometry=True):
     """Rozkład jednej linii na dany dzień: którędy jedzie i przez co.
 
     Kursy grupujemy po CIĄGU PRZYSTANKÓW, nie po samym kierunku: linia ma
@@ -141,6 +141,12 @@ def line_timetable(num, day, mode=None):
     dobę. O godziny pyta się tablicę konkretnego przystanku (stop_board),
     bo rozkład wiszący na słupku dotyczy jednego słupka, a nie całej trasy:
     "o której to jedzie" ma sens dopiero razem z "skąd".
+
+    `geometry=False` zostawia warianty bez przebiegu (`path`). Przebieg jest
+    najdroższą częścią tej odpowiedzi - i w liczeniu (shape_slice na każdy
+    wariant), i w wadze - a pytającemu o SAM WYBÓR KIERUNKU nie jest do
+    niczego potrzebny (patrz onboard.directions: lista kierunków i przystanków
+    pod pole „jestem w pojeździe" niczego nie rysuje).
     """
     num = " ".join((num or "").split())
     if not num:
@@ -223,8 +229,9 @@ def line_timetable(num, day, mode=None):
                 # dobę (patrz front: mainVariants).
                 "trips": variant["trips"],
                 "stops": stops,
-                "path": _path_of(variant["shape"],
-                                 [(geo[s][1], geo[s][2]) for s in key], db),
+                **({"path": _path_of(variant["shape"],
+                                     [(geo[s][1], geo[s][2]) for s in key], db)}
+                   if geometry else {}),
             })
 
         # Najpierw warianty pełne (najwięcej kursów) - to one są "tą linią",

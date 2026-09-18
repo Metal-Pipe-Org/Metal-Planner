@@ -564,9 +564,13 @@ const stopsReady = fetch('/api/stops')
     wybranej trasie pierwszy taki klik po prostu ją odznacza. */
 function pickEndpoint(value) {
     if (selectedJourney !== null) { deselectJourney(); return; }
-    if (sel.start && sel.end) return;
+    if (sel.end && (sel.start || onboardOn)) return;
     const previous = [sel.start, sel.end];
-    if (!sel.start) {
+    // Z pokładu pojazdu startu się nie klika - startem jest pojazd - więc
+    // każdy klik w mapę wskazuje cel.
+    if (onboardOn) {
+        sel.end = value;
+    } else if (!sel.start) {
         sel.start = value;
     } else if (!samePlace(value, sel.start)) {
         sel.end = value;
@@ -576,7 +580,7 @@ function pickEndpoint(value) {
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
     restyle(...previous, sel.start, sel.end);
-    if (sel.start && sel.end) search();
+    if (sel.end && (onboardOn ? onboardReady() : sel.start)) search();
 }
 
 /** Czy tryb rozkładów przejął ten klik. Pusty punkt mapy nie znaczy tam nic -
@@ -2786,6 +2790,29 @@ function summaryHtml(legs) {
     return parts.join('');
 }
 
+/** Gdzie wysiąść z pojazdu, w którym się siedzi - jedyna rzecz, którą pasażer
+    startujący z pokładu MUSI zrobić, a o którą zwykła lista tras nigdy nie
+    pytała (pole `onboard` propozycji, patrz onboard.mark_journeys).
+
+    Trzy różne zdania, bo to trzy różne sytuacje: wysiadka od razu, wysiadka
+    za kilka przystanków z przesiadką i dojazd tym samym pojazdem pod sam cel.
+    Zlanie ich w jedno („wysiądź: X, za N przystanków") czytałoby się przy
+    N = 0 jak polecenie wyskoczenia w biegu. */
+function exitText(exit) {
+    const ile = `${exit.stops} ${plural(exit.stops, 'przystanek', 'przystanki', 'przystanków')}`;
+    if (!exit.stops) return ['Wysiądź na najbliższym przystanku', exit.stop];
+    if (!exit.transfer) return [`Dojedziesz tym pojazdem — wysiadka za ${ile}`, exit.stop];
+    return [`Wysiądź za ${ile}`, exit.stop];
+}
+
+function exitHtml(exit) {
+    if (!exit) return '';
+    const [co, gdzie] = exitText(exit);
+    return `<div class="j-exit"><span class="j-exit-what">${esc(co)}</span>`
+         + `<span class="j-exit-stop">${esc(prettyStopName(gdzie))}</span>`
+         + `<span class="j-exit-time">${esc(exit.time)}</span></div>`;
+}
+
 function plural(n, one, few, many) {
     if (n === 1) return one;
     const rest = n % 10, hundreds = n % 100;
@@ -2910,6 +2937,10 @@ function detailHtml(journey) {
             // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
             // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
+            // Etap, w którym się już siedzi (patrz onboard.mark_journeys),
+            // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
+            // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
+            (leg.onboard ? '<span class="tl-tag">jedziesz tym pojazdem</span>' : '') +
             routeButtonHtml(leg, 'trasa') +
             `<span class="tl-info">${leg.stops_count} ${stopWord} · ` +
             `${leg.minutes} min</span></span></li>`,
@@ -2919,7 +2950,14 @@ function detailHtml(journey) {
         // w osi dwa razy pod rząd.
         const next = journey.legs[i + 1];
         if (!next || next.kind === 'walk') {
-            rows.push(stopRow(leg.to_time, leg.to, next ? '' : 'last'));
+            rows.push(stopRow(leg.to_time, leg.to,
+                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`));
+        } else if (leg.onboard) {
+            // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
+            // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
+            // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
+            // całej osi - to jest ten moment, w którym trzeba wstać.
+            rows.push(stopRow(leg.to_time, leg.to, 'exit'));
         }
     });
 
@@ -2954,6 +2992,21 @@ function bikeNoteHtml() {
     return `<div class="notice bike-note"><p>🚲 ${esc(text)}</p></div>`;
 }
 
+/** Nagłówek listy przy starcie z pokładu: czym się jedzie i co jest najbliżej.
+
+    Bez tego lista wygląda jak każda inna - same godziny i linie - a to jest
+    jedyne miejsce, które potwierdza, że serwer rozpoznał TEN kurs, o który
+    chodziło. Pomyłka w kierunku albo przystanku daje przecież kompletne,
+    sensownie wyglądające wyniki, tylko dla kogoś innego. */
+function onboardNoteHtml() {
+    const kurs = lastFlow && lastFlow.onboard;
+    if (!kurs) return '';
+    return `<p class="onboard-head">`
+        + `<span class="badge ${esc(kurs.mode)}">${esc(kurs.num)}</span>`
+        + `<span>w stronę <b>${esc(kurs.headsign)}</b> — najbliższy przystanek `
+        + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
+}
+
 function renderJourneys() {
     if (!journeys.length) return;
     const cards = journeys.map((j, i) => {
@@ -2981,7 +3034,10 @@ function renderJourneys() {
         // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
         // czyta się pierwszą, a nie dopiero w rozwinięciu karty.
         const czas = j.traficar ? `ok. ${j.duration_min} min` : `${j.duration_min} min`;
-        const label = `${j.departure} – ${j.arrival}, ${czas}, ` +
+        // Wysiadka idzie NA POCZĄTEK etykiety: to pierwsza rzecz do zrobienia
+        // i pierwsza, którą ma usłyszeć czytnik ekranu.
+        const wysiadka = j.onboard ? exitText(j.onboard).join(': ') + ', ' : '';
+        const label = `${wysiadka}${j.departure} – ${j.arrival}, ${czas}, ` +
                       `${transfers}, ${lines}`;
         return `
             <li class="journey${selected ? ' selected' : ''}" data-index="${i}"
@@ -2994,6 +3050,7 @@ function renderJourneys() {
                                    + ' szacowany, auto nie ma rozkładu"' : ''
                     }>${esc(czas)}</span>
                 </div>
+                ${exitHtml(j.onboard)}
                 <div class="j-lines">${summaryHtml(j.legs)}</div>
                 <div class="j-meta">${meta.join(' · ')}</div>
                 ${selected ? detailHtml(j) : ''}
@@ -3010,6 +3067,7 @@ function renderJourneys() {
                     aria-expanded="${String(!resultsCollapsed)}">${resultsCollapsed ? '▸' : '▾'}</button>
         </div>
         <div class="results-body">
+            ${onboardNoteHtml()}
             <ol class="journeys">${cards}</ol>
             ${bikeNoteHtml()}
             <p class="results-foot">
@@ -3083,6 +3141,221 @@ resultsBox.addEventListener('mouseover', event => {
 });
 resultsBox.addEventListener('mouseleave', clearPreview);
 
+// ------------------------------------------------- start z pokładu pojazdu ----
+
+// "Skąd" zakłada, że pasażer gdzieś STOI. Siedzący w autobusie nie stoi
+// nigdzie - jedzie - i jego pytanie brzmi inaczej: nie "czym dojechać", tylko
+// "gdzie wysiąść". Przełącznik nad polami zamienia więc jedno pole na trzy:
+// linia, kierunek z czoła pojazdu i przystanek, który ma się przed sobą. Z tych
+// trzech serwer rozpoznaje konkretny kurs rozkładu (patrz onboard.py) i od
+// niego liczy całą resztę - wysiadkę, przesiadki, rower i pieszo tak samo jak
+// zawsze.
+//
+// Kierunek i przystanek to LISTY, nie pola tekstowe: ich treść jest skończona
+// i znana (rozkład tej linii), a wpisywanie nazwy przystanku w trzęsącym się
+// autobusie to proszenie się o literówkę.
+const obFields = $('onboard-fields');
+const obLineInput = $('ob-line');
+const obDirSelect = $('ob-dir');
+const obStopSelect = $('ob-stop');
+const obMsg = $('ob-msg');
+const obSummary = $('ob-summary');
+const modePlaceButton = $('mode-place');
+const modeVehicleButton = $('mode-vehicle');
+
+// Ta sama lista linii, co w trybie rozkładów (#line-names, patrz
+// timetables.all_lines) - jedzie w stronie, więc pole "linia" podpowiada bez
+// ani jednego zapytania.
+const LINE_ENTRIES = obLineInput ? JSON.parse($('line-names').textContent) : [];
+const LINE_NUMBERS = LINE_ENTRIES.map(line => line.num);
+const LINE_MODE_OF = new Map(LINE_ENTRIES.map(line => [line.num, line.mode]));
+const OB_LINE_LIMIT = 8;
+
+let onboardOn = false;
+let obDirections = [];     // kierunki wczytanej linii (patrz /api/onboard)
+let obToken = 0;           // odsiewa odpowiedzi na nieaktualną już linię
+// Czy komplet ma być zwinięty do jednej linijki. Chęć, nie stan: zwija się
+// tylko wtedy, gdy wybór jest KOMPLETNY (patrz syncOnboardView), więc zmiana
+// linii sama z siebie pokazuje pola z powrotem.
+let obCollapsed = false;
+let obLineAuto = null;     // uchwyt podpowiedzi linii (patrz attachAutocomplete)
+
+/** Co pojedzie do serwera jako `onboard_*` - albo null, gdy wybór jest jeszcze
+    niekompletny. Kierunek jedzie razem z numerem i przystankiem, bo słupek
+    rozstrzyga kierunek tylko wtedy, gdy linia mija go raz; na pętli i na
+    trasie zawrotnej mija go w obie strony. */
+function onboardPick() {
+    const num = obLineInput.value.trim();
+    const kierunek = obDirection();
+    const stop = obStopSelect.value;
+    if (!num || !kierunek || !stop) return null;
+    return {num, mode: LINE_MODE_OF.get(num) || '', headsign: kierunek.headsign, stop};
+}
+
+const onboardReady = () => onboardOn && !!onboardPick();
+
+/** Wybrany kierunek albo null. Pustej wartości pola NIE wolno tu przepuścić
+    przez Number(): Number('') to zero, czyli PIERWSZY kierunek z listy -
+    a wtedy „nie wybrałem jeszcze kierunku" znaczyłoby „jadę tam, gdzie
+    akurat jeździ najwięcej kursów". */
+const obDirection = () =>
+    obDirSelect.value === '' ? null : obDirections[Number(obDirSelect.value)] || null;
+
+/** Zwinięty komplet albo trzy pola - jedno z dwóch, nigdy oba naraz.
+
+    Zwijamy WYŁĄCZNIE kompletny wybór: niepełny trzeba dokończyć, więc pola
+    muszą być widoczne, choćby ktoś wcześniej zwinął poprzedni. Dzięki temu
+    nie ma stanu "zwinięte, ale nie wiadomo co" - zmiana linii, wyczyszczenie
+    pola albo pusty kierunek rozwijają kartę same. */
+function syncOnboardView() {
+    const kurs = onboardPick();
+    const zwiniete = obCollapsed && !!kurs;
+    obFields.hidden = !onboardOn || zwiniete;
+    obSummary.hidden = !onboardOn || !zwiniete;
+    obSummary.setAttribute('aria-expanded', String(!zwiniete));
+    // Zwinięcie zabiera kursor z pola linii i zamyka jego podpowiedzi - razem
+    // z kursorem znika klawiatura telefonu, a lista schowana OTWARTA wróciłaby
+    // taka po rozwinięciu i zasłoniła kierunek z przystankiem.
+    if (zwiniete) { obLineInput.blur(); if (obLineAuto) obLineAuto.close(); }
+    if (!kurs) return;
+    const kierunek = obDirection();
+    const przystanek = prettyStopName(
+        obStopSelect.options[obStopSelect.selectedIndex].text);
+    obSummary.innerHTML =
+        `<span class="badge ${esc(kurs.mode || 'other')}">${esc(kurs.num)}</span>`
+        // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
+        // linijki ucina się koniec, a stracić wolno kierunek (kontekst),
+        // nie przystanek, przy którym pojazd zaraz stanie. Znaczek słupka
+        // mówi, że to przystanek, tak samo jak na liście podpowiedzi - bez
+        // niego zwinięta linijka to trzy nazwy bez podpisów.
+        + `<span class="ac-pin" aria-hidden="true"></span>`
+        + `<span class="ob-summary-text"><b>${esc(przystanek)}</b>`
+        + ` · w stronę ${esc(kierunek.headsign)}</span>`
+        + `<span class="ob-summary-edit" aria-hidden="true">zmień</span>`;
+    obSummary.setAttribute('aria-label',
+        `Jadę linią ${kurs.num}, najbliższy przystanek ${przystanek}, `
+        + `w stronę ${kierunek.headsign} — zmień`);
+}
+
+function obNote(text) {
+    obMsg.textContent = text || '';
+    obMsg.hidden = !text;
+}
+
+/** Przełącznik "Stoję tutaj" / "Jestem w pojeździe". Zmienia PYTANIE, więc
+    zabiera poprzednią odpowiedź na nie: start z drugiego trybu przestaje
+    obowiązywać (nie da się naraz stać na przystanku i jechać autobusem).
+    Cel zostaje - ten się nie zmienia od tego, skąd się wyrusza. */
+function setStartMode(vehicle, focus = true) {
+    onboardOn = vehicle;
+    document.body.classList.toggle('start-onboard', vehicle);
+    syncOnboardView();
+    for (const [button, on] of [[modeVehicleButton, vehicle], [modePlaceButton, !vehicle]]) {
+        button.classList.toggle('active', on);
+        button.setAttribute('aria-pressed', String(on));
+    }
+    const previous = sel.start;
+    sel.start = null;
+    startInput.value = '';
+    updatePointMarker('start', null);
+    restyle(previous);
+    showLocateMsg('');
+    saveUiState({startOnboard: vehicle});
+    // Kursor w polu linii tylko wtedy, gdy ktoś sam kliknął przełącznik.
+    // Przy wracaniu do zapamiętanego trybu (odświeżenie strony) klawiatura
+    // telefonu wyskakiwałaby nad mapę, o nic nie zapytana.
+    if (vehicle && focus) obLineInput.focus();
+}
+
+/** Kierunki wpisanej linii (/api/onboard). Data z formularza jedzie razem
+    z numerem: rozkład linii zależy od dnia, a pytanie "jestem w pojeździe"
+    zwykle dotyczy dziś, ale nie musi - pole daty stoi tuż obok. */
+function loadDirections() {
+    const num = obLineInput.value.trim();
+    obDirections = [];
+    fillDirections();
+    if (!num) { obNote(''); return; }
+
+    const mine = ++obToken;
+    obNote('Szukam kierunków…');
+    fetch('/api/onboard?' + new URLSearchParams({
+        num, mode: LINE_MODE_OF.get(num) || '', date: $('date').value,
+    }))
+        .then(r => r.json())
+        .then(data => {
+            if (mine !== obToken) return;
+            if (data.error) { obNote(data.error); return; }
+            obDirections = data.directions || [];
+            fillDirections();
+            obNote(obDirections.length ? '' : (data.note || 'Ta linia dziś nie kursuje.'));
+        })
+        .catch(() => { if (mine === obToken) obNote('Nie udało się pobrać kierunków.'); });
+}
+
+/** Lista kierunków, a po niej lista przystanków - w tej kolejności, bo
+    przystanki są własnością kierunku. Jeden kierunek (linia okrężna, kurs
+    jednokierunkowy) wybiera się sam: nie ma z czego wybierać. */
+function fillDirections() {
+    obDirSelect.innerHTML = '<option value="">Kierunek</option>'
+        + obDirections.map((kierunek, i) =>
+            `<option value="${i}">${esc(kierunek.headsign)}</option>`).join('');
+    obDirSelect.disabled = !obDirections.length;
+    if (obDirections.length === 1) obDirSelect.value = '0';
+    fillStops();
+}
+
+function fillStops() {
+    const kierunek = obDirection();
+    const stops = kierunek ? kierunek.stops : [];
+    obStopSelect.innerHTML = '<option value="">Przystanek</option>'
+        + stops.map(stop =>
+            `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
+    obStopSelect.disabled = !stops.length;
+    syncOnboardView();
+}
+
+if (obLineInput) {
+    modePlaceButton.addEventListener('click', () => setStartMode(false));
+    modeVehicleButton.addEventListener('click', () => setStartMode(true));
+
+    // Podpowiedzi numerów linii - plakietka w kolorze pojazdu, tak samo jak
+    // w trybie rozkładów (patrz timetable.js): numer JEST plakietką, więc
+    // trafienia w nim nie podświetlamy.
+    obLineAuto = attachAutocomplete(obLineInput, () => loadDirections(), {
+        suggest: query => suggestionsFor(query, LINE_NUMBERS, null, OB_LINE_LIMIT)
+            .map(item => ({...item, mode: LINE_MODE_OF.get(item.name)})),
+        render: item =>
+            `<span class="badge ${esc(item.mode)}">${esc(item.name)}</span>`
+            + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
+        onEnter: () => loadDirections(),
+    });
+    // Wpisanie z ręki (bez wybrania podpowiedzi) też ma działać - linia to
+    // dwa, trzy znaki, więc lista bywa szybsza do minięcia niż do trafienia.
+    obLineInput.addEventListener('change', loadDirections);
+
+    obDirSelect.addEventListener('change', () => { fillStops(); obNote(''); });
+    // Wybór przystanku domyka pytanie - jeśli cel już jest, nie ma na co
+    // czekać. Ta sama zasada, co przy drugim kliknięciu w mapę. Domyka też
+    // samą kartę: komplet mówi jedno zdanie, a zajmuje trzy rzędy panelu.
+    obStopSelect.addEventListener('change', () => {
+        obCollapsed = true;
+        syncOnboardView();
+        if (onboardReady() && endInput.value) search();
+    });
+
+    // Rozwinięcie bez ustawiania kursora: klikający „zmień" najczęściej
+    // poprawia PRZYSTANEK, a kursor w polu linii otwiera nad listami
+    // podpowiedzi i zasłania dokładnie to, po co się tu przyszło.
+    obSummary.addEventListener('click', () => {
+        obCollapsed = false;
+        syncOnboardView();
+    });
+
+    // Tryb przeżywa odświeżenie strony (patrz saveUiState) - ale sam wybór
+    // pojazdu już nie: kurs sprzed odświeżenia zdążył odjechać.
+    if (uiState.startOnboard) setStartMode(true, false);
+}
+
 // ------------------------------------------------------------ wyszukiwanie ----
 
 function resetResults() {
@@ -3131,7 +3404,17 @@ function queryParams() {
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
     if (bikesOn) params.set('bikes', '1');
-    if (isPoint(sel.start)) {
+    const poklad = onboardOn ? onboardPick() : null;
+    if (poklad) {
+        // Start z pokładu pojazdu (patrz onboard.py): zamiast miejsca jedzie
+        // linia, kierunek i słupek, przy którym pojazd zaraz stanie. Serwer
+        // rozpoznaje z tego kurs i dopiero on mówi, gdzie i kiedy zaczyna się
+        // podróż - dlatego nie ma tu ani `start`, ani godziny "na oko".
+        params.set('onboard_num', poklad.num);
+        if (poklad.mode) params.set('onboard_mode', poklad.mode);
+        if (poklad.headsign) params.set('onboard_headsign', poklad.headsign);
+        params.set('onboard_stop', poklad.stop);
+    } else if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
     } else {
@@ -3154,7 +3437,10 @@ function queryParams() {
     nadpisujemy nazwą z odpowiedzi. */
 function adoptNames(data) {
     const previous = [sel.start, sel.end];
-    if (!isPoint(sel.start)) { sel.start = data.start; startInput.value = displayValue(data.start); }
+    // Z pokładu "skąd" nie ma pola na ekranie, ale przystanek, przy którym
+    // pojazd zaraz stanie, ma się podświetlić na mapie jak każdy inny start.
+    if (onboardOn) sel.start = data.start;
+    else if (!isPoint(sel.start)) { sel.start = data.start; startInput.value = displayValue(data.start); }
     if (!isPoint(sel.end)) { sel.end = data.end; endInput.value = displayValue(data.end); }
     // Poprzednie końce muszą wrócić do zwykłego stylu. Przemalowanie tylko
     // nowych wystarczało przy PIERWSZYM wyszukiwaniu, bo setBaseDim(true)
@@ -3301,6 +3587,10 @@ function replanForBikes() {
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
 function saveLastSearch() {
+    // Podróży z pokładu nie zapamiętujemy: kurs, którym się jechało, dawno
+    // odjechał, a przywrócona po godzinie linia z przystankiem byłaby
+    // odpowiedzią na pytanie, którego już nikt nie zadaje.
+    if (onboardOn) { forgetLastSearch(); return; }
     try {
         localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
             start: sel.start, end: sel.end,
@@ -3324,7 +3614,7 @@ function forgetLastSearch() {
     wpisać, zanim ten kod się uruchomił). Godzina wraca sama z siebie do
     "teraz", bo tak ustawia ją serwer przy każdym renderowaniu strony. */
 function restoreLastSearch() {
-    if (startInput.value || endInput.value) return;
+    if (onboardOn || startInput.value || endInput.value) return;
     let saved;
     try {
         saved = JSON.parse(localStorage.getItem(LAST_SEARCH_KEY));
@@ -3355,7 +3645,10 @@ function setSearching(on) {
 }
 
 function search() {
-    if (!startInput.value || !endInput.value) return;
+    // Z pokładu pola "skąd" nie ma - kompletem jest linia, kierunek
+    // i przystanek (patrz onboardReady).
+    if (!endInput.value) return;
+    if (onboardOn ? !onboardReady() : !startInput.value) return;
     const token = ++requestToken;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     clearJourney();
@@ -3567,6 +3860,11 @@ function attachAutocomplete(input, onPick, options = {}) {
         event.preventDefault();         // pole ma zostać z fokusem
         choose(Number(option.dataset.index));
     });
+
+    // Lista zamyka się sama (blur, Esc, wybór), ale bywa chowana razem z całym
+    // polem - a wtedy nie ma komu jej zamknąć i wraca otwarta, gdy pole wróci
+    // na ekran (patrz syncOnboardView: zwijanie kompletu w jedną linijkę).
+    return {close};
 }
 
 // Wybór podpowiedzi kończy tryb "wybrany punkt" i - gdy relacja jest
@@ -3605,6 +3903,9 @@ $('clear').addEventListener('click', () => {
     sel = {start: null, end: null};
     startInput.value = '';
     endInput.value = '';
+    // Pojazdu ✕ nie kasuje: pasażer wciąż siedzi w tym samym autobusie,
+    // a zmienia się to, dokąd chce nim dojechać. Kasowanie linii kazałoby
+    // wybierać ją od nowa po każdej zmianie celu.
     updatePointMarker('start', null);
     updatePointMarker('end', null);
     showLocateMsg('');

@@ -102,9 +102,16 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
   propozycji i dla mapy, patrz `map_places`. W przeciwieństwie do GTFS i PKP nie trafia do żadnej
   bazy — to stan sprzed minuty, nie rozkład — więc żyje wyłącznie w pamięci
   procesu, z krótkim cache, tak jak `vehicles.py`. Opis niżej.
+- **`onboard.py`** — start podróży Z POKŁADU pojazdu („jestem w 145,
+  następny przystanek Sucha"). Rozpoznaje z trójki linia + kierunek +
+  następny przystanek jeden konkretny KURS rozkładu i sprowadza cały tryb do
+  zwykłego wyszukiwania: podróż zaczyna się na tym przystanku, w sekundzie,
+  o której pojazd z niego rusza. Dokłada też do gotowych propozycji to, czego
+  ten pasażer naprawdę potrzebuje — gdzie wysiąść i za ile to przystanków.
+  Opis niżej.
 - **`routes.py`** — endpointy: `/` (strona), `/api/stops`, `/api/plan`,
-  `/api/flow`, `/api/timetable`, `/api/line`, `/api/stop_board`,
-  `/api/trip` (szczegóły w sekcji API).
+  `/api/flow`, `/api/timetable`, `/api/line`, `/api/onboard`,
+  `/api/stop_board`, `/api/trip` (szczegóły w sekcji API).
 
 ### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 
@@ -115,6 +122,25 @@ i wyszukiwanie odpala się samo; można też wpisać nazwy ręcznie. Klikanie
 uzupełnia tylko brakujący koniec relacji — **gotowego wyszukiwania nie
 kasuje żaden klik w mapę, tylko przycisk ✕**, żeby przypadkowe kliknięcie
 nie zabrało wyników sprzed chwili.
+
+Nad polami stoi przełącznik **Stoję tutaj / Jestem w pojeździe**. Drugi tryb
+zamienia „skąd" na trzy pola — linia, kierunek i najbliższy przystanek — bo
+pasażer w jadącym autobusie nie stoi w żadnym miejscu, które dałoby się wpisać
+w „skąd" (patrz sekcja „Start z pokładu pojazdu" i `onboard.py`). Każde z nich
+ma PODPIS nad sobą, nie tylko placeholder: ten znika razem z wpisaniem
+wartości, a wtedy „113 / KRZYKI / Wojszyce" to trzy nazwy, o których nie
+wiadomo, która jest którą. Podpis dostaje też pole celu — w zwykłym trybie
+mówi to szyna z kropkami, a z pokładu jej nie ma. Znika wtedy
+szyna z kropką startu i ⇅ (nie da się zamienić miejscami pojazdu z celem),
+a klik w mapę ustawia sam cel. Komplet zwija się do JEDNEJ linijki
+(„113 · Wojszyce · w stronę GALERIA DOMINIKAŃSKA · zmień") — trzy pola są
+potrzebne, dopóki się wybiera, a potem niosą jedno zdanie i zabierają trzy
+rzędy panelu, przez które nie widać propozycji; klik rozwija je z zachowanym
+wyborem. W zwiniętej linijce rolę podpisów grają plakietka linii, znaczek
+słupka (ten sam, co przy przystankach na liście podpowiedzi) i słowa
+„w stronę". Zwijamy wyłącznie wybór KOMPLETNY, więc zmiana linii pokazuje pola
+z powrotem sama. Wybór pojazdu nie przeżywa odświeżenia strony — sam
+przełącznik owszem.
 
 W polu „skąd" siedzi przycisk **◎ — moja lokalizacja** (Geolocation API
 przeglądarki). Pozycja z GPS-a wchodzi tam jako zwykły punkt mapy, nie nazwa
@@ -589,6 +615,56 @@ wyszukiwarki działa bez zmian. Odpowiedź niesie wtedy `bikes.stations == 0`,
 żeby front miał po czym odróżnić „policzone, rower nic tu nie daje" od „nie
 było czego liczyć".
 
+### Start z pokładu pojazdu (`onboard.py`)
+
+Pytanie „skąd" zakłada, że pasażer gdzieś STOI. Siedzący w autobusie nie stoi
+nigdzie — jedzie — i pyta o co innego: nie „czym dojechać", tylko **„gdzie
+wysiąść"**. Przycisk **Jestem w pojeździe** nad polami zamienia więc „skąd" na
+trzy pola: linia, kierunek z czoła pojazdu i przystanek, który ma się przed
+sobą (kierunek i przystanek z list — treść jest skończona i znana, a wpisywanie
+nazwy w jadącym autobusie to proszenie się o literówkę).
+
+Cała sztuczka jest w jednym zdaniu: **z pokładu podróż zaczyna się na NASTĘPNYM
+przystanku, w chwili, gdy pojazd z niego rusza**. Wszystko, co pasażer może
+zrobić, zaczyna się właśnie tam i wtedy — zostać w pojeździe (dla skanu:
+zwykłe wsiadanie w ten sam kurs na tym przystanku, z zerowym czekaniem),
+wysiąść i przesiąść się (wsiadanie w inny kurs stamtąd), wysiąść i pójść
+pieszo, po rower albo do auta (zwykłe przejście stamtąd). Algorytm nie
+dostaje przez to ani jednej nowej gałęzi: `plan_flow` dostaje słupek i sekundę
+jak przy każdym innym wyszukiwaniu, więc WRM, Traficar, kolej i mapa
+przepływów działają tu dokładnie tak samo jak wszędzie indziej.
+
+Zostają więc dwie rzeczy do zrobienia:
+
+1. **Rozpoznanie kursu** (`find_ride`) — z trójki linia + kierunek + przystanek
+   ten kurs, który z tego słupka rusza najbliżej godziny pytania. Idzie
+   indeksem odjazdów dnia (`gtfs.departures_between`), więc kosztuje
+   przeszukanie binarne; kurs KOŃCZĄCY bieg na wskazanym przystanku odjazdu nie
+   ma wcale, więc „jadę na pętlę, co dalej" znajduje się osobną, wolniejszą
+   drogą — po przyjeździe, w oknie połączeń. Nierozpoznany kurs to komunikat
+   („linia X nie przejeżdża już dziś przez Y"), a nie pusta lista: pomyłka
+   w którymś z trzech pól ma wyglądać jak pomyłka.
+2. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
+   samym słupku, więc przypadki są dokładnie dwa: pierwszy etap jedzie NASZYM
+   kursem (siedzimy dalej, wysiadka `stops` przystanków dalej) albo czymkolwiek
+   innym (wysiadka na najbliższym przystanku, `stops` = 0). „Nasz kurs"
+   poznajemy po tym, że pierwszy przejazd rusza z naszego słupka, naszą linią,
+   o naszej sekundzie — ta sama linia nie odjeżdża stamtąd dwa razy w tej samej
+   chwili.
+
+Na ekranie wysiadka jest pierwszą rzeczą na karcie propozycji (nad plakietkami
+linii — z listy siedmiu wariantów czyta się najpierw ją, a dopiero potem
+godziny), a na osi trasy etap, w którym się już siedzi, ma plakietkę „jedziesz
+tym pojazdem" i wyróżniony przystanek wysiadania. Nad listą stoi nagłówek „145
+w stronę BARTOSZOWICE — najbliższy przystanek Świeradowska o 13:29": pomyłka
+w kierunku albo przystanku daje przecież wyniki wyglądające równie sensownie,
+tylko dla kogoś innego, więc musi być gdzie sprawdzić, co serwer rozpoznał.
+
+Czego ten tryb świadomie NIE robi: nie szuka w kolejnych dobach (pytanie
+dotyczy tego przejazdu, a on kończy się dzisiaj) i nie zapamiętuje się między
+wizytami (kurs sprzed odświeżenia strony dawno odjechał — wraca sam
+przełącznik, nie wybór pojazdu).
+
 ### Mapa przepływów / „symulacja mrówek" (`plan_flow`)
 
 Cel: pokazać **wszystkie** użyteczne opcje naraz, z intensywnością malejącą
@@ -771,6 +847,20 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   kilometrach, a `minutes` w pełnych minutach (w górę): przy zmierzonym
   rozrzucie tego szacunku drobniejsza podziałka udawałaby dokładność.
 
+  `onboard_num`/`onboard_mode`/`onboard_headsign`/`onboard_stop` to start
+  Z POKŁADU pojazdu (patrz `onboard.py`) — zamiast `start`/`start_lat`.
+  `onboard_stop` to identyfikator SŁUPKA z `/api/onboard`, nie nazwa: pasażer
+  jedzie jedną krawędzią przystanku i tylko na niej otworzą się drzwi.
+  Odpowiedź niesie wtedy `onboard: {num, mode, line, headsign, stop_name, at}`
+  (rozpoznany kurs — front pisze z tego nagłówek listy), a KAŻDA propozycja
+  dostaje `onboard: {stop, stops, time, transfer}`: gdzie wysiąść, za ile to
+  przystanków, o której i czy po wysiadce jedzie się jeszcze dalej
+  (`stops: 0` = wysiadka na najbliższym przystanku, `transfer: false` = ten
+  pojazd dowozi pod sam cel). Etap przejazdu, w którym pasażer już siedzi, ma
+  `onboard: true`. `departure` odpowiedzi to wtedy odjazd pojazdu z najbliższego
+  przystanku, nie godzina z pytania. Nierozpoznany kurs jest błędem
+  (`{error: …}`), a nie pustą listą.
+
   `bikes=1` dokłada do `journeys` propozycje z rowerem miejskim (patrz sekcja
   wyżej) i wstawia do odpowiedzi `bikes: {journeys, stations, live}` — ile ich
   weszło, ile stacji w ogóle odpowiedziało (zero = kanał operatora milczy,
@@ -826,6 +916,14 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `update_pkp.py`) jest dla wyszukiwarki niewidoczna, a etap kolejowy nie ma
   geometrii trasy (`path: []` na etapie — sama stacja, jeśli ma współrzędne,
   i tak ma marker na mapie, patrz `/api/stops`).
+- `GET /api/onboard?num=145&mode=bus&date=YYYY-MM-DD` — kierunki linii pod
+  wybór „jestem w pojeździe" (patrz `onboard.directions`): `{num, mode, label,
+  date, directions: [{headsign, from, to, trips, stops: [{id, name, lat,
+  lon}, …]}, …]}`. To samo źródło co `/api/line`, tylko pogrupowane po NAPISIE
+  Z CZOŁA pojazdu (pasażer widzi kierunek, nie wariant rozkładu; `trips` sumuje
+  wszystkie warianty kierunku, a `stops` idą z tego, który ma ich najwięcej)
+  i bez geometrii — ten wybór niczego nie rysuje, a `path` jest najcięższą
+  częścią tamtej odpowiedzi.
 - `GET /api/line?num=17&mode=tram&date=YYYY-MM-DD` — rozkład jednej linii:
   `{num, mode, label, date, variants: [{headsign, from, to, trips: 55,
   stops: [{id, name, lat, lon}, …], path: [[lat,lon], …]}, …]}`. Wariant =
@@ -884,6 +982,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `traficar.py` | auta Traficar z fioletowe.live: znaczniki w zasięgu mapy (`map_cars`) + para "przystanek + auto" na ostatni etap trasy |
 | `bikes.py` | stacje i wolne rowery WRM (GBFS) + model czasu roweru + rower jako miejsce na mapie |
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
+| `onboard.py` | start z pokładu pojazdu: rozpoznanie kursu + opis wysiadki |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start aplikacji (port 5001) |
 | `templates/index.html` | szkielet strony: mapa, panel, Ustawienia Developerskie |
@@ -904,6 +1003,21 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-18** — **„jestem w pojeździe" jako punkt startowy**. Przełącznik
+  nad polami zamienia „skąd" na linię, kierunek z czoła pojazdu i najbliższy
+  przystanek; z tej trójki serwer rozpoznaje konkretny kurs rozkładu
+  (`onboard.py`, nowe `/api/onboard` i parametry `onboard_*` w `/api/flow`)
+  i zaczyna wyszukiwanie tam, gdzie ten pojazd zaraz stanie, w sekundzie, o
+  której z tego przystanku rusza. Algorytm zostaje nietknięty — zostanie
+  w pojeździe jest dla skanu zwykłym wsiadaniem w ten sam kurs — więc od razu
+  działają tu przesiadki, WRM, Traficar, kolej i cała mapa przepływów. Każda
+  propozycja mówi, GDZIE WYSIĄŚĆ i za ile to przystanków (nad plakietkami
+  linii, czyli przed godzinami), oś trasy zaznacza etap „jedziesz tym
+  pojazdem" i przystanek wysiadania, a nad listą stoi rozpoznany kurs — bo
+  pomyłka w kierunku daje wyniki wyglądające równie sensownie, tylko dla kogoś
+  innego. Wybrany komplet zwija się do jednej linijki z przyciskiem „zmień",
+  żeby trzy pola nie zasłaniały wyników, a pola mają podpisy (placeholder
+  znika po wpisaniu, więc sam nie wystarczy). Testy: 380, było 370.
 - **2026-09-15** — **dowolna stacja tylko dla kolei, dostawczaki osobno,
   porządek w Ustawieniach Developerskich** (zgłoszenia #114, #130, #131, #132;
   punkt 15 kontraktu). „Dowolna stacja w mieście" to już same perony, bez
