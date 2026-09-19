@@ -13,16 +13,17 @@
 #     docker compose up -d
 #
 # Opcjonalnie to samo da sie zautomatyzowac: docker/deploy.sh w repozytorium
-# jest napisany pod GitHub Actions (wdrozenie po zmergowaniu do testing).
+# stawia calosc jedna komenda (wdrozenie po zmergowaniu do main).
 # To dodatek - ten plik i powyzsza komenda wystarczaja same z siebie.
 
 services:
   planner:
     build:
-      # Po znaku # jest galaz, z ktorej Docker sklonuje kod. testing jest
-      # galezia wdrozeniowa - musi zgadzac sie z galezia, z ktorej pobrano
-      # ten plik (deploy.sh to sprawdza i przerywa przy rozjezdzie).
-      context: https://github.com/Metal-Pipe-Org/Metal-Planner.git#main
+      # Po znaku # jest galaz, z ktorej Docker sklonuje kod: `main` na serwerze
+      # testowym, `stable` na produkcyjnym. Musi zgadzac sie z galezia, z ktorej
+      # pobrano ten plik (deploy.sh to sprawdza i przerywa przy rozjezdzie) -
+      # dlatego kopia tego pliku na `stable` ma tutaj `#stable`.
+      context: https://github.com/Metal-Pipe-Org/Metal-Planner.git#stable
     container_name: metal-planner
     restart: unless-stopped
 
