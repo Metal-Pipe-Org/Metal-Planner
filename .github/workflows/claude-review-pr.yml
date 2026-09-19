@@ -28,29 +28,26 @@ name: Claude - oceń PR
 # kolejnymi ocenami pod ten sam PR. Po większych poprawkach ocenę można
 # powtórzyć ręcznie: Actions -> „Claude - oceń PR" -> Run workflow -> numer PR-a.
 #
-# Ten plik musi żyć na DWÓCH gałęziach naraz i nie jest to niechlujstwo —
-# każdy z dwóch wyzwalaczy czyta go skądinąd:
+# Do zwykłych PR-ów wystarcza kopia na `main` i oba wyzwalacze biorą ją
+# stamtąd: `pull_request` czyta workflow z commitu scalenia PR-a z gałęzią
+# bazową (a bazą jest `main`), `workflow_dispatch` — z gałęzi domyślnej
+# (znów `main`). Działa to również dla gałęzi odbitych, zanim ocena powstała:
+# commit scalenia dokłada plik z bazy, choć sama gałąź go nie ma.
 #
-#  * na `testing`, bo `pull_request` bierze workflow z commitu scalenia PR-a
-#    z gałęzią bazową, a bazą PR-ów w tym repo jest `testing` (na `main`
-#    wchodzi dopiero wydanie). Gdyby pliku tam nie było, PR-y do `testing` nie
-#    uruchamiałyby niczego. Działa to również dla gałęzi odbitych, zanim ocena
-#    powstała: commit scalenia dokłada plik z bazy, choć sama gałąź go nie ma.
-#
-#  * na `main`, bo `workflow_dispatch` uruchamia workflow tylko wtedy, gdy plik
-#    jest na gałęzi domyślnej. Bez kopii na `main` nie ma przycisku „Run
-#    workflow", czyli nie ma jak powtórzyć oceny ręcznie.
+# Kopia na `stable` jest tylko po to, żeby ocenę dostawały PR-y wydaniowe
+# `main` -> `stable`: ich bazą jest `stable`, więc `pull_request` szuka pliku
+# tam. Utrzymuje się sama — wjeżdża na `stable` z każdym wydaniem, więc
+# nie edytuj jej osobno, bo wydanie skończy się konfliktem.
 #
 # Pozostałe nasze workflow chodzą na zdarzeniach (`issues`, `issue_comment`,
 # `pull_request_target`), które GitHub czyta zawsze z gałęzi domyślnej — im
-# wystarcza `main`. Obie kopie tego pliku trzymaj identyczne: wtedy wydanie
-# `testing` -> `main` scala je bez konfliktu.
+# wystarcza `main`.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
-    # Bazy, których ocena dotyczy: zwykłe PR-y do `testing` i PR-y wydaniowe
-    # `testing` -> `main`. PR-y o innej bazie zostawiamy bez komentarza.
-    branches: [testing, main]
+    # Bazy, których ocena dotyczy: zwykłe PR-y do `main` i PR-y wydaniowe
+    # `main` -> `stable`. PR-y o innej bazie zostawiamy bez komentarza.
+    branches: [main, stable]
   workflow_dispatch:
     inputs:
       pr:

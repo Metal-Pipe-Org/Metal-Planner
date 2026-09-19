@@ -55,7 +55,7 @@ issue, co się nie udało, i zakończ.
 
 ## 5. Zamknij pracę
 
-- Bazą jest zawsze gałąź `testing` — nigdy `main`.
+- Bazą jest zawsze gałąź `main` — nigdy `stable`.
 - Pracuj na gałęzi, którą przygotował workflow, i tylko na niej. Nie zakładaj
   własnej gałęzi: workflow po Twoim zakończeniu przeniesie commity na trwałą
   gałąź zgłoszenia (`claude/issue-<ISSUE_NUMBER>`), na której zbiera się cała
