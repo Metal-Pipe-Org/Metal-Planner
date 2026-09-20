@@ -66,25 +66,32 @@
           wyżej: nie są warstwami, tylko rzeczami o samej aplikacji.
         #}
         <div class="layer-bar" role="group" aria-label="Warstwy na mapie">
+            {# Rodzaj roweru to osobny wybór, nie ranking (zgłoszenie #147):
+               kto chce elektryka, nie weźmie zwykłego. Oba zgaszone znaczą
+               dokładnie to, co dawniej zgaszony jeden przycisk „Rowery”.
+
+               Same ikonki, bez podpisów: czterech podpisów nie da się zmieścić
+               w szerokości panelu — ostatni wystawał poza kartę, a zawinięty
+               rząd zjadał wysokość. Co która włącza, mówi podpowiedź pod
+               kursorem i opis dla czytnika ekranu, oba pełnym zdaniem. Rower
+               dostaje przez to dwa RÓŻNE znaki: dwa takie same byłyby bez
+               podpisów nie do odróżnienia. #}
             <button id="vehicles-toggle" class="icon-button layer-button"
                     title="Autobusy i tramwaje na żywo"
                     aria-label="Pokaż autobusy i tramwaje na żywo"
-                    aria-pressed="false">◉<span>Na żywo</span></button>
+                    aria-pressed="false">◉</button>
             <button id="cars-toggle" class="icon-button layer-button"
                     title="Wolne auta Traficara"
                     aria-label="Pokaż wolne auta Traficara"
-                    aria-pressed="false">🚗<span>Traficar</span></button>
-            {# Rodzaj roweru to osobny wybór, nie ranking (zgłoszenie #147):
-               kto chce elektryka, nie weźmie zwykłego. Oba zgaszone znaczą
-               dokładnie to, co dawniej zgaszony jeden przycisk „Rowery”. #}
+                    aria-pressed="false">🚗</button>
             <button id="bikes-toggle" class="icon-button layer-button"
-                    title="Rowery miejskie bez wspomagania (WRM)"
+                    title="Rowery miejskie zwykłe, bez wspomagania (WRM)"
                     aria-label="Pokaż zwykłe rowery miejskie"
-                    aria-pressed="false">🚲<span>Rowery</span></button>
+                    aria-pressed="false">🚲</button>
             <button id="bikes-electric-toggle" class="icon-button layer-button"
                     title="Rowery miejskie elektryczne (WRM)"
                     aria-label="Pokaż elektryczne rowery miejskie"
-                    aria-pressed="false">⚡<span>Elektryki</span></button>
+                    aria-pressed="false">⚡</button>
         </div>
     </header>
 

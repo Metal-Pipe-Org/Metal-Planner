@@ -245,23 +245,15 @@ body.panel-hidden #sidebar {
 /* Warstwy mapy w jednym rzędzie, pod nazwą aplikacji: to jedyne przyciski,
    które zmieniają TREŚĆ mapy, więc trzymają się razem i wyglądają tak samo -
    podpisane, bo sama ikona nie mówi, co się włącza. */
+/* Warstwy to same ikonki w jednym rzędzie: odkąd rower rozdzielił się na
+   zwykły i elektryczny, są cztery, a czterech PODPISÓW nie da się zmieścić
+   w szerokości panelu - ostatni wystawał poza kartę, a zawinięty rząd zjadał
+   wysokość. Wielkość, zaokrąglenie i stan "zapalony" biorą się z .icon-button,
+   więc warstwa wygląda dokładnie jak zębatka obok; co która włącza, mówi
+   podpowiedź pod kursorem. */
 .layer-bar {
     display: flex;
     gap: 6px;
-}
-
-.layer-button {
-    width: auto;
-    flex: 1 1 0;
-    gap: 6px;
-    padding: 0 10px;
-    height: 32px;
-    font-size: 14px;
-}
-
-.layer-button span {
-    font-size: 12.5px;
-    font-weight: 600;
 }
 
 .brand h1 {

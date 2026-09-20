@@ -461,7 +461,7 @@ const INJECTION = `
     suggestionHtml, placeTimeHeadline,
     // Rower jest odtąd wyborem pasażera („mam konto w WRM"), więc na mapie
     // pojawia się dopiero po zapaleniu warstwy - testy muszą to zrobić same.
-    setBikesOn, setCarsOn,
+    setBikesOn, setBikeKind, setCarsOn,
     nodePoint, dotOpts, seedStartPanel,
     prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
     get startInput() { return startInput; },
