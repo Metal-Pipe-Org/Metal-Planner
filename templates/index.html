@@ -74,10 +74,17 @@
                     title="Wolne auta Traficara"
                     aria-label="Pokaż wolne auta Traficara"
                     aria-pressed="false">🚗<span>Traficar</span></button>
+            {# Rodzaj roweru to osobny wybór, nie ranking (zgłoszenie #147):
+               kto chce elektryka, nie weźmie zwykłego. Oba zgaszone znaczą
+               dokładnie to, co dawniej zgaszony jeden przycisk „Rowery”. #}
             <button id="bikes-toggle" class="icon-button layer-button"
-                    title="Rowery miejskie (WRM)"
-                    aria-label="Pokaż rowery miejskie"
+                    title="Rowery miejskie bez wspomagania (WRM)"
+                    aria-label="Pokaż zwykłe rowery miejskie"
                     aria-pressed="false">🚲<span>Rowery</span></button>
+            <button id="bikes-electric-toggle" class="icon-button layer-button"
+                    title="Rowery miejskie elektryczne (WRM)"
+                    aria-label="Pokaż elektryczne rowery miejskie"
+                    aria-pressed="false">⚡<span>Elektryki</span></button>
         </div>
     </header>
 
@@ -359,6 +366,17 @@
         <p class="field-hint">
             Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru,
             a godzina „mapa pokazuje do” jest tego skutkiem.
+        </p>
+    </div>
+
+    <div class="field">
+        <label class="dev-check">
+            <input type="checkbox" id="no-dawdling"> Bez jazdy na zabicie czasu (próba)
+        </label>
+        <p class="field-hint">
+            Mapa wyrusza najpóźniej, jak się da bez późniejszego przyjazdu — znika z niej
+            jazda, po której i tak wsiada się w ten sam pojazd. Do włączania i wyłączania,
+            żeby zobaczyć różnicę; jeszcze nie jest obietnicą kontraktu.
         </p>
     </div>
 

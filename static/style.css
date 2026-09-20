@@ -1551,6 +1551,28 @@ body.start-onboard .hint-onboard { display: block; }
     font-size: 12.5px;
 }
 
+/* Kreska "tu według mapy jesteś" (zgłoszenie #143). Tablica liczy od godziny
+   z formularza, więc nad kreską stoją odjazdy sprzed przyjazdu mapy - są tam
+   celowo, na wypadek gdyby mapa nie znała szybszego dojścia, ale nie wolno im
+   wyglądać na część tej podróży. Wiersz łamie siatkę kolumn własnym
+   grid-column, bo nie jest odjazdem i nie ma się do czego wyrównywać. */
+.tt-rows li.tt-here {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0 4px;
+    font-size: 11px;
+    color: var(--ink-faint);
+}
+
+.tt-rows li.tt-here::before,
+.tt-rows li.tt-here::after {
+    content: "";
+    flex: 1;
+    border-top: 1px dashed currentColor;
+    opacity: 0.45;
+}
+
 /* Wąska kolumna z lewej na znak "co się tu z tą linią dzieje" (patrz
    FLOW_ICONS w app.js). Dokładana tylko tam, gdzie jest czym ją wypełnić -
    tablica pod kropką wybranej trasy pyta o cały przystanek i tego nie wie,

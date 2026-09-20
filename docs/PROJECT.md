@@ -897,7 +897,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   (km/√km²; suwak pod zębatką, przycinana do [0,5; 15]), `more` — ile razy kliknięto
   „Pokaż więcej" (0–3; cel gęstości to `density × (1 + more)`), `cars` — ile
   aut car-sharingu pokazać (1–30, też razy `1 + more`). Z `density` i `more`
-  serwer dobiera próg mapy; odpowiedź niesie je z powrotem (`density`, `more`)
+  serwer dobiera próg mapy; `departure_sec` w odpowiedzi to godzina Z PYTANIA
+  na osi doby rozkładowej — od niej liczy dymek kropki przesiadkowej
+  (zgłoszenie #143), a nie od tego, o której mapa stawia tam pasażera;
+  odpowiedź niesie je z powrotem (`density`, `more`)
   razem z `at_ceiling` — próg doszedł do sufitu skanu (60 min za najszybszym
   przyjazdem), więc kolejne kliknięcie nie miałoby czego dołożyć. Wynikowy
   próg widać w `limit_sec`/`deadline`. `cars` w odpowiedzi jest przesiane
@@ -909,6 +912,17 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   a spośród zwycięzców grup te, których nie bije żadne inne, zawsze, kolejne
   poziomy w całości, aż uzbiera się żądana liczba. `bike_count` — ile
   przejazdów rowerem pokazać (1–30, domyślnie 4, też razy `1 + more`);
+  `bike_electric`/`bike_regular` — na jaki rodzaj roweru pasażer chce wsiąść
+  (dwa przyciski w pasku warstw; brak parametru znaczy „oba", patrz
+  `bikes.map_places`). Miejsce jest kandydatem, gdy stoi
+  w nim choć jeden rower włączonego rodzaju — odsiew idzie przed wyborem
+  przejazdów, dotyczy wsiadania, a przy nieznanym stanie stojaków nie odsiewa
+  nic. `no_dawdling` — PRÓBA za przełącznikiem (domyślnie zgaszona, poza
+  kontraktem): mapa wyrusza z najpóźniejszej godziny, z której wciąż osiąga
+  najszybszy przyjazd (`planner._latest_departure`), więc znika z niej jazda,
+  po której i tak wsiada się w ten sam pojazd. Godziny raportowane
+  (`departure`, `departure_sec`, `best_sec`, `limit_sec`) liczą się dalej od
+  pytania.
   `bike_places[].rides[].options` to podróże przez dany przejazd
   (`arrival` — sekunda na osi doby, `vehicles` — pojazdy przed i po rowerze),
   przesiane tą samą regułą przez `bikes.map_places`.
@@ -1018,6 +1032,28 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-20** — **zgłoszenia #141, #143 i #147** (kontrakt punkty 2, 10, 11,
+  15 i 16 przepisane na polecenie użytkownika; pomiar i uzasadnienia
+  w `FLOW_MAP_NOTES.md`):
+  - **„Pokaż więcej" zawsze coś dokłada.** Mapa gęstnieje falami, więc sam cel
+    gęstości tego nie gwarantuje: na Rynek → Sosnowiecka cztery kliknięcia
+    dawały tę samą mapę. Kliknięcie przesuwa próg o co najmniej minutę dalej
+    niż poprzednie, a gdy to nic nie zmienia — do pierwszej minuty, która
+    dokłada kawałek (`planner._first_richer`). Przy autach i rowerach to samo
+    robi `min_level`: reguła luzuje się o poziom, choćby suwak był już
+    przekroczony. Limit trzech kliknięć zostaje.
+  - **Dymek kropki liczy od godziny z formularza**, nie od tej, o której
+    według mapy pasażer tam stanie (nowe `departure_sec` w odpowiedzi,
+    `app.timetableAnchor`). Odjazdy sprzed przyjazdu mapy oddziela kreska
+    „tu według mapy jesteś" i zajmują najwyżej połowę wierszy. Pasek nad mapą
+    mówi „za", nie „w".
+  - **Rower elektryczny osobno od zwykłego** — dawny przycisk „Rowery"
+    w pasku warstw rozdzielony na dwa (`bike_electric`, `bike_regular`);
+    oba zgaszone gaszą rower tak jak dawniej jeden. Odsiew MIEJSC
+    przed wyborem przejazdów, jedna prędkość roweru, dotyczy wsiadania.
+  - **Odsiew krążenia jako PRÓBA** (`no_dawdling`, domyślnie zgaszony, poza
+    kontraktem): mapa wyrusza najpóźniej, jak się da bez późniejszego
+    przyjazdu. Na tej samej relacji 92 kawałki → 2, przy tym samym przyjeździe.
 - **2026-09-18** — **„jestem w pojeździe" jako punkt startowy**. Przełącznik
   nad polami zamienia „skąd" na linię, kierunek z czoła pojazdu i najbliższy
   przystanek; z tej trójki serwer rozpoznaje konkretny kurs rozkładu

@@ -425,14 +425,24 @@ const BIKES_REFRESH_MS = 60000;   // tyle deklaruje kanał WRM (`ttl`)
 // „mam konto w WRM": domyślnie nie, a kto go odhaczył wcześniej, ten ma go
 // dalej (stara pamięć `bikes`). Pojazdy na żywo zostają zgaszone jak dotąd.
 let carsOn = uiState.carsOn !== false;
-let bikesOn = uiState.bikesOn === undefined
+// Rodzaj roweru ma własny przycisk w pasku (zgłoszenie #147). Warstwa świeci,
+// gdy świeci choć jeden z nich - dwa zgaszone znaczą dokładnie to, co dawniej
+// zgaszone „Rowery". Kto miał zapamiętany stary włącznik, dostaje oba w jego
+// położeniu, więc nic mu się samo nie zapala ani nie gaśnie.
+const bikesWere = uiState.bikesOn === undefined
     ? !!uiState.bikes : !!uiState.bikesOn;
+let bikeRegularOn = uiState.bikeRegularOn === undefined
+    ? bikesWere : !!uiState.bikeRegularOn;
+let bikeElectricOn = uiState.bikeElectricOn === undefined
+    ? bikesWere : !!uiState.bikeElectricOn;
+let bikesOn = bikeRegularOn || bikeElectricOn;
 let cityCarLayer = null;
 let cityBikeLayer = null;
 let carsTimer = null;
 let bikesTimer = null;
 const carsToggle = $('cars-toggle');
 const bikesToggle = $('bikes-toggle');
+const bikesElectricToggle = $('bikes-electric-toggle');
 
 /** Czy na ekranie stoi wachlarz - to on rozstrzyga, z którego źródła biorą
     się auta i rowery. W rozkładach i przed wyszukiwaniem go nie ma. */
@@ -475,12 +485,24 @@ function loadCityCars() {
     }).catch(() => {});   // sieć/timeout - kolejna próba za CARS_REFRESH_MS
 }
 
+/** Na jaki rodzaj roweru pasażer chce wsiąść - dwa przyciski w pasku warstw
+    (zgłoszenie #147). Przy mapie przepływów idą do serwera, w warstwie
+    miejskiej odsiewają tutaj - tak samo jak dostawczaki. */
+function bikeKinds() {
+    return {electric: bikeElectricOn, regular: bikeRegularOn};
+}
+
 function loadCityBikes() {
     fetch('/api/bikes').then(r => r.json()).then(data => {
         if (data.error || !bikesOn || flowOnScreen()) return;
         if (cityBikeLayer) map.removeLayer(cityBikeLayer);
-        cityBikeLayer = L.layerGroup(
-            cityBikeMarkers(data.stations, data.free)).addTo(map);
+        // Kanał miasta oddaje wszystkie stacje - rodzaj odsiewa się tutaj,
+        // tym samym przełącznikiem, który przy mapie idzie do serwera.
+        const {electric, regular} = bikeKinds();
+        const stacje = data.stations.filter(s =>
+            (electric && s.electric > 0) || (regular && s.bikes - s.electric > 0));
+        const luzem = data.free.filter(b => b.electric ? electric : regular);
+        cityBikeLayer = L.layerGroup(cityBikeMarkers(stacje, luzem)).addTo(map);
     }).catch(() => {});
 }
 
@@ -532,13 +554,37 @@ function setCarsOn(on) {
     refreshCarLayer();
 }
 
-function setBikesOn(on) {
-    bikesOn = on;
-    saveUiState({bikesOn: on});
-    paintLayerButton(bikesToggle, on);
+/** Jeden rodzaj roweru. Warstwa świeci, gdy świeci choć jeden - więc
+    zgaszenie ostatniego gasi rower w całości, tak jak dawniej jeden włącznik.
+
+    Zmienia nie tylko mapę, ale i sam wynik z serwera: ten włącznik mówi też
+    „mam konto w WRM", a rodzaj rozstrzyga, które miejsca w ogóle są
+    kandydatami (patrz bikes.map_places). */
+function setBikeKind(kind, on) {
+    if (kind === 'electric') {
+        bikeElectricOn = on;
+        saveUiState({bikeElectricOn: on});
+    } else {
+        bikeRegularOn = on;
+        saveUiState({bikeRegularOn: on});
+    }
+    bikesOn = bikeRegularOn || bikeElectricOn;
+    saveUiState({bikesOn});
+    paintLayerButton(bikesToggle, bikeRegularOn);
+    if (bikesElectricToggle) paintLayerButton(bikesElectricToggle, bikeElectricOn);
     refreshBikeLayer();
-    // Ten włącznik mówi też „mam konto w WRM" - zastąpił dawny checkbox pod
-    // wyszukiwarką, więc zmienia nie tylko mapę, ale i sam wynik.
+    replanForBikes();
+}
+
+/** Rower w całości - oba rodzaje naraz. */
+function setBikesOn(on) {
+    bikeRegularOn = on;
+    bikeElectricOn = on;
+    saveUiState({bikeRegularOn: on, bikeElectricOn: on, bikesOn: on});
+    bikesOn = on;
+    paintLayerButton(bikesToggle, on);
+    if (bikesElectricToggle) paintLayerButton(bikesElectricToggle, on);
+    refreshBikeLayer();
     replanForBikes();
 }
 
@@ -548,8 +594,15 @@ if (carsToggle) {
 }
 
 if (bikesToggle) {
-    bikesToggle.addEventListener('click', () => setBikesOn(!bikesOn));
-    paintLayerButton(bikesToggle, bikesOn);
+    bikesToggle.addEventListener('click',
+                                 () => setBikeKind('regular', !bikeRegularOn));
+    paintLayerButton(bikesToggle, bikeRegularOn);
+}
+
+if (bikesElectricToggle) {
+    bikesElectricToggle.addEventListener(
+        'click', () => setBikeKind('electric', !bikeElectricOn));
+    paintLayerButton(bikesElectricToggle, bikeElectricOn);
 }
 
 // Kadrowanie wyniku potrzebuje współrzędnych startu i celu, a te znamy
@@ -1203,11 +1256,14 @@ function renderTimeHeadline() {
           + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">Pokaż więcej</button>`
         : '';
     el.innerHTML =
+        // "za", nie "w": obie liczby są mierzone od godziny z formularza,
+        // więc mówią, ZA ILE się tam będzie, a nie ile trwa sama jazda
+        // (zgłoszenie #143). Czekanie na pierwszy pojazd jest w nich zawarte.
         `<span class="headline-best" tabindex="0">Najszybciej o `
-        + `<b>${esc(flow.best_arrival)}</b>, w <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
+        + `<b>${esc(flow.best_arrival)}</b>, za <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
         + `<span class="headline-sep">·</span>`
         + `<span class="headline-limit">mapa pokazuje do `
-        + `<b>${esc(flow.deadline)}</b>, w <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
+        + `<b>${esc(flow.deadline)}</b>, za <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
         + more;
     el.hidden = false;
     const best = el.querySelector('.headline-best');
@@ -1943,7 +1999,13 @@ function flowIcon(flow) {
         + '</svg>';
 }
 
-function timetableHtml(data) {
+/** `mapSec` to godzina, o której MAPA stawia pasażera na tej kropce. Sama
+    tablica liczy od godziny z formularza (patrz timetableAnchor), więc na
+    liście bywają odjazdy sprzed tej chwili - i to jest cel zgłoszenia #143.
+    Żeby nic się przez to nie zacierało, dzieli je widoczna kreska, a wiersze
+    sprzed niej zajmują najwyżej połowę listy: inaczej na ruchliwym węźle
+    wypchnęłyby poza suwak dokładnie te odjazdy, po które się tu przyszło. */
+function timetableHtml(data, mapSec) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
     const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
                  `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
@@ -1952,14 +2014,29 @@ function timetableHtml(data) {
     }
     // `all_departures` to tablica sprzed odsiewu - stąd bierze się takt
     // linii, patrz summariseRepeats.
-    const list = summariseRepeats(data.departures, data.all_departures)
-        .slice(0, timetableRows());
+    const wszystkie = summariseRepeats(data.departures, data.all_departures);
+    const ile = timetableRows();
+    const przed = mapSec === undefined ? []
+                                       : wszystkie.filter(d => d.sec < mapSec);
+    const reszta = mapSec === undefined ? wszystkie
+                                        : wszystkie.filter(d => d.sec >= mapSec);
+    const list = [...przed.slice(0, Math.max(1, Math.floor(ile / 2))),
+                  ...reszta].slice(0, ile);
+    const kreskaPo = przed.length ? Math.min(przed.length,
+                                             Math.max(1, Math.floor(ile / 2))) : 0;
     // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
     // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
     // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
     // przesuwałaby jej wiersze bez powodu.
     const flows = list.some(d => FLOW_ICONS[d.flow]);
-    const rows = list.map(d =>
+    // Kreska stoi tam, gdzie kończą się odjazdy sprzed przyjazdu mapy - i mówi
+    // wprost, o której mapa cię tu stawia, żeby "za ile" nad nią nie wyglądało
+    // na obietnicę, że zdążysz.
+    const kreska = kreskaPo
+        ? `<li class="tt-here"><span>tu według mapy jesteś ` +
+          `${esc(fmtClock(mapSec))}</span></li>`
+        : '';
+    const rows = list.map((d, i) => (i === kreskaPo ? kreska : '') +
         `<li>` + (flows ? flowIcon(d.flow) : '') +
         `<span class="tt-time">${esc(d.time)}</span>` +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
@@ -2170,8 +2247,28 @@ function emitTimetable(dot, html) {
 // Kropka, której tablicę pokazujemy teraz - patrz emitTimetable.
 let timetableTarget = null;
 
+/** Od której godziny liczy dymek kropki (zgłoszenie #143).
+
+    Domyślnie od GODZINY Z FORMULARZA, a nie od tej, o której mapa sądzi, że
+    pasażer tu stanie: mapa zna tylko to, co sama narysowała, więc jej godzina
+    bywa za późna - a wtedy tablica gubiła nie kilka wierszy, lecz całą
+    odpowiedź. Kto jest tu wcześniej pieszo, rowerem albo linią spod progu,
+    i tak zobaczy, co odjeżdża.
+
+    Przy odpowiedzi z kolejnej doby (punkt 13 kontraktu) zostaje godzina mapy:
+    pytanie sprzed doby nie mówi już nic o tamtym dniu. Nigdy później niż
+    mapa - wcześniejsza godzina niczego nie ukrywa, późniejsza ukrywa. */
+function timetableAnchor(sec) {
+    const flow = lastFlow;
+    if (!flow || flow.day_offset !== 0 || typeof flow.departure_sec !== 'number') {
+        return sec;
+    }
+    return Math.min(flow.departure_sec, sec);
+}
+
 function loadTimetable(dot, where, sec) {
     const date = $('date').value;
+    const from = timetableAnchor(sec);
     // Do klucza wchodzi też `flow` i `arrive`: ta sama linia raz jest ofertą
     // do wsiadania, a raz pojazdem, którym się tu przyjechało - i wtedy dymek
     // ma pokazać co innego, choć przystanek i godzina się nie zmieniły.
@@ -2179,13 +2276,13 @@ function loadTimetable(dot, where, sec) {
         ? where.lines.map(l => `${lineKey(l)}/${l.flow || ''}/${l.arrive || ''}`).join('|')
         : '';
     const key = `${where.name || where.lat + ',' + where.lon}`
-        + `@${date}@${sec}@${filtr}@${where.deadline || ''}`;
+        + `@${date}@${from}@${sec}@${filtr}@${where.deadline || ''}`;
     const cached = timetableCache.get(key);
     if (cached !== undefined) { emitTimetable(dot, cached); return; }
 
     const query = where.name
-        ? {stop: where.name, date, from_sec: sec}
-        : {lat: where.lat, lon: where.lon, date, from_sec: sec};
+        ? {stop: where.name, date, from_sec: from}
+        : {lat: where.lat, lon: where.lon, date, from_sec: from};
     // Z zapasem PRZY KAŻDEJ kropce, nie tylko przy węźle wachlarza: przy
     // węźle część odjazdów odsiewamy, a przy kropce wybranej trasy pytamy
     // o tyle, ile suwak w ogóle pozwala pokazać. Bez tego serwerowa domyślna
@@ -2204,7 +2301,7 @@ function loadTimetable(dot, where, sec) {
             const pelna = {...data, all_departures: data.departures};
             const html = timetableHtml(data.error ? data : withArrivals(
                 keepWithinHorizon(keepOfferedLines(pelna, where.lines), where.deadline),
-                where.lines, sec));
+                where.lines, from), sec);
             // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
             // nie: offline z service workera wraca jako {error}, a po powrocie
             // sieci kropka miałaby go w pamięci na zawsze.
@@ -2459,11 +2556,24 @@ function bikeTooltipHtml(place, live) {
 function bikeCountText(place) {
     if (place.loose) return place.electric ? 'Jeden rower, elektryczny'
                                            : 'Jeden rower';
+    // Przy odhaczonym rodzaju liczba ma mówić o tym, na co MOŻNA tu wsiąść:
+    // łączna obiecywałaby rowery, których pasażer właśnie nie szuka.
+    const {electric, regular} = bikeKinds();
+    const elektryki = place.electric || 0;
+    const zwykle = place.bikes - elektryki;
+    if (electric && !regular) {
+        return `${elektryki} ` + plural(elektryki, 'rower elektryczny',
+                                        'rowery elektryczne', 'rowerów elektrycznych');
+    }
+    if (regular && !electric) {
+        return `${zwykle} ` + plural(zwykle, 'rower zwykły',
+                                     'rowery zwykłe', 'rowerów zwykłych');
+    }
     const bikes = `${place.bikes} ` +
         plural(place.bikes, 'rower', 'rowery', 'rowerów');
-    return place.electric
-        ? `${bikes} (w tym ${place.electric} ` +
-          plural(place.electric, 'elektryczny', 'elektryczne', 'elektrycznych') + ')'
+    return elektryki
+        ? `${bikes} (w tym ${elektryki} ` +
+          plural(elektryki, 'elektryczny', 'elektryczne', 'elektrycznych') + ')'
         : bikes;
 }
 
@@ -3418,6 +3528,9 @@ function queryParams() {
         bike_count: $('bike-count').value,
         car_groups: $('car-groups').checked ? '1' : '0',
         car_vans: $('car-vans').checked ? '1' : '0',
+        bike_electric: bikeElectricOn ? '1' : '0',
+        bike_regular: bikeRegularOn ? '1' : '0',
+        no_dawdling: $('no-dawdling').checked ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
@@ -4005,11 +4118,15 @@ liveSlider('car-count', 'car-count-value', true);
 liveSlider('bike-count', 'bike-count-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
 
-// Grupowanie aut i dostawczaki zmieniają odpowiedź serwera, więc jak suwak:
-// pamiętane w tym samym kluczu i od razu nowe zapytanie.
-for (const id of ['car-groups', 'car-vans']) {
+// Grupowanie aut, dostawczaki i rodzaj roweru zmieniają odpowiedź serwera,
+// więc jak suwak: pamiętane w tym samym kluczu i od razu nowe zapytanie.
+// Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
+// wygląda tak, jak wyglądała przed zgłoszeniem #147.
+for (const [id, domyslnie] of [['car-groups', false], ['car-vans', false],
+                               ['no-dawdling', false]]) {
     const input = $(id);
-    input.checked = loadDevPrefs()[id] === true;
+    const zapisane = loadDevPrefs()[id];
+    input.checked = zapisane === undefined ? domyslnie : zapisane === true;
     input.addEventListener('change', () => {
         mapMore = 0;
         saveDevPref(id, input.checked);

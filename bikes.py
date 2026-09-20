@@ -377,7 +377,20 @@ def ride_time_sec(straight_m):
     return MAP_OVERHEAD_SEC + _whole_minutes(straight_m / MAP_RIDE_MPS)
 
 
-def map_places(day, arrivals, onward, target_set, limit, live=True):
+def _ma_rodzaj(place, electric, regular):
+    """Czy w tym miejscu stoi choć jeden rower WŁĄCZONEGO rodzaju.
+
+    Kanał podaje, ile rowerów stoi razem i ile z nich to elektryki (patrz
+    _electric_count); zwykłe to reszta. Rower luzem ma tę samą parę liczb,
+    tylko zawsze o jednej sztuce."""
+    elektryki = place.get("electric") or 0
+    if electric and elektryki > 0:
+        return True
+    return regular and (place["bikes"] - elektryki) > 0
+
+
+def map_places(day, arrivals, onward, target_set, limit, live=True,
+               min_level=0, electric=True, regular=True):
     """Rowery na mapie przepływów (punkt 16): [{lat, lon, ..., rides: [...]}, ...].
 
     Kandydatem jest PRZEJAZD - stąd do konkretnej stacji - oceniany w całej
@@ -408,12 +421,22 @@ def map_places(day, arrivals, onward, target_set, limit, live=True):
     (a gdy sam jest początkiem wybranego przejazdu, jest na mapie z własnego
     tytułu).
 
+    `electric`/`regular` to rodzaj roweru, na który pasażer chce wsiąść (dwa
+    przyciski w pasku warstw, patrz app.js setBikeKind): miejsce jest
+    kandydatem, gdy stoi w nim choć jeden rower włączonego rodzaju. Dotyczy
+    to WSIADANIA - stacja, na której przejazd się kończy, żadnego roweru mieć
+    nie musi.
+
     Przejazd zaczyna się na stacji ALBO przy rowerze stojącym luzem, a kończy
     zawsze na stacji (patrz free_bikes). Przy pytaniu o inny dzień (`live`
     False) stan stojaków jest nieznany: kropki zostają, bo stacje stoją tam
     zawsze, ale liczby rowerów nie ma i nie udajemy, że jest.
     """
     if not enabled():
+        return []
+    # Oba rodzaje odhaczone to to samo, co zgaszony rower - nie ma na czym
+    # wsiąść, więc nie ma czego liczyć.
+    if not (electric or regular):
         return []
     try:
         docks = stations()
@@ -431,6 +454,18 @@ def map_places(day, arrivals, onward, target_set, limit, live=True):
     starts = [s for s in docks if s["bikes"] > 0 or not live]
     starts += [{**bike, "name": None, "bikes": 1,
                 "electric": 1 if bike["electric"] else 0} for bike in loose]
+
+    # Rodzaj roweru to osobny wybór, nie ranking (zgłoszenie #147): kto chce
+    # elektryka, nie weźmie zwykłego, i odwrotnie. Miejsce zostaje, gdy stoi
+    # w nim choć jeden rower włączonego rodzaju - a odsiew idzie PRZED
+    # wyborem przejazdów, nie po nim, żeby suwak dostał tyle kandydatów,
+    # ile obiecuje, i żeby nie zniknął zwycięzca, zostawiając gorszego.
+    #
+    # Przy nieznanym stanie stojaków (`live` False) nie odsiewamy nic:
+    # nie wiadomo, co tam wtedy stoi, a udawanie tej wiedzy jest gorsze niż
+    # pokazanie kropki, która wprost mówi, że stanu nie zna.
+    if live and not (electric and regular):
+        starts = [s for s in starts if _ma_rodzaj(s, electric, regular)]
 
     reach = arrivals()
     reach_cells = _cells(day, reach)
@@ -480,7 +515,7 @@ def map_places(day, arrivals, onward, target_set, limit, live=True):
 
     shown = [_shown_as(ride, option)
              for _, rides in found for ride in rides for option in ride["options"]]
-    chosen = _skyband(shown, limit)
+    chosen = _skyband(shown, limit, min_level)
 
     out = []
     index = 0
@@ -612,7 +647,7 @@ def _shown_as(ride, option):
     )
 
 
-def _skyband(shown, limit):
+def _skyband(shown, limit, min_level=0):
     """Które podróże pokazać (punkt 16): indeksy, k-skyband - jak auta.
 
     Podróż bije inną, gdy jest co najmniej tak dobra we wszystkich trzech
@@ -642,5 +677,5 @@ def _skyband(shown, limit):
                 if count == limit:
                     break
         beaten[i] = count
-    level = sorted(beaten)[limit - 1]
+    level = max(sorted(beaten)[limit - 1], min_level)
     return {i for i, count in enumerate(beaten) if count <= level}

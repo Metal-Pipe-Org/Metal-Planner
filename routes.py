@@ -337,6 +337,14 @@ def init_routes(app):
             car_vans=request.args.get("car_vans") == "1",
             # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
             bike_count=_float_arg("bike_count"),
+            # Na jaki rodzaj roweru pasażer chce wsiąść - dwa przyciski w pasku
+            # warstw. Brak parametru znaczy "oba" (inaczej niż przy
+            # dostawczakach, których domyślnie nie ma).
+            bike_electric=request.args.get("bike_electric", "1") == "1",
+            bike_regular=request.args.get("bike_regular", "1") == "1",
+            # Odsiew krążenia - przełącznik DO PORÓWNAŃ pod zębatką, domyślnie
+            # zgaszony i jeszcze nie w kontrakcie (patrz plan_flow).
+            no_dawdling=request.args.get("no_dawdling") == "1",
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
             # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
             # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc

@@ -1404,4 +1404,74 @@ checks.auta_dostawczaki_leca_do_serwera = (() => {
 })();
 
 
+/* Dymek liczy od godziny z FORMULARZA, nie od tej, o której mapa stawia tu
+   pasażera (zgłoszenie #143). Odjazdy sprzed przyjazdu mapy są więc na
+   liście celowo - oddziela je widoczna kreska i nigdy nie wypychają tych,
+   po które się tu przyszło. */
+checks.tablica_liczy_od_godziny_z_formularza = (() => {
+    const dep = sec => ({time: '00:00', sec, in_min: 0, num: String(sec / 100),
+                         mode: 'bus', headsign: 'PRACZE'});
+    const data = {stop: 'Halicka', from_time: '21:55',
+                  departures: [100, 200, 300, 400, 500].map(dep)};
+    const bylo = app.dotOpts.rows;
+    app.dotOpts.rows = 5;
+    const pelna = app.timetableHtml(data, 300);
+    app.dotOpts.rows = 2;
+    const ciasna = app.timetableHtml(data, 300);
+    app.dotOpts.rows = bylo;
+    const bezMapy = app.timetableHtml(data);
+
+    // Kreska stoi dokładnie między odjazdem sprzed przyjazdu a pierwszym od
+    // niego, a bez godziny mapy nie ma jej wcale.
+    const kreska = pelna.indexOf('tt-here');
+    const wMiejscu = kreska > pelna.indexOf('>2<') && kreska < pelna.indexOf('>3<');
+    // Suwak na dwa wiersze: odjazd od przyjazdu mapy MUSI się zmieścić.
+    const wierszy = (ciasna.match(/<li>/g) || []).length;
+    return {
+        ok: wMiejscu && !bezMapy.includes('tt-here')
+            && ciasna.includes('>3<') && wierszy === 2,
+        wMiejscu, wierszy, ciasna,
+    };
+})();
+
+/* Rodzaj roweru to dwa PRZYCISKI W PASKU warstw (zgłoszenie #147) - ich stan
+   idzie w zapytaniu, bo odsiew miejsc robi serwer. Zgaszenie obu gasi rower
+   w całości, więc zapytanie przestaje o niego prosić. */
+checks.rower_rodzaj_leci_do_serwera = (() => {
+    app.setBikesOn(true);
+    const oba = app.queryParams().toString();
+    app.setBikeKind('regular', false);
+    const same_elektryki = app.queryParams().toString();
+    app.setBikeKind('electric', false);
+    const zadne = app.queryParams().toString();
+    app.setBikesOn(true);
+    return {
+        ok: oba.includes('bike_electric=1') && oba.includes('bike_regular=1')
+            && oba.includes('bikes=1')
+            && same_elektryki.includes('bike_electric=1')
+            && same_elektryki.includes('bike_regular=0')
+            && same_elektryki.includes('bikes=1')
+            && !zadne.includes('bikes=1'),
+        oba, same_elektryki, zadne,
+    };
+})();
+
+
+/* Odsiew krążenia to przełącznik DO PORÓWNAŃ (zgłoszenie #141), domyślnie
+   zgaszony - jego stan idzie w zapytaniu, bo mapę liczy serwer. */
+checks.odsiew_krazenia_leci_do_serwera = (() => {
+    const przelacznik = document.getElementById('no-dawdling');
+    const bylo = przelacznik.checked;
+    przelacznik.checked = false;
+    const zgaszone = app.queryParams().toString();
+    przelacznik.checked = true;
+    const zapalone = app.queryParams().toString();
+    przelacznik.checked = bylo;
+    return {
+        ok: zgaszone.includes('no_dawdling=0') && zapalone.includes('no_dawdling=1'),
+        zgaszone, zapalone,
+    };
+})();
+
+
 JSON.stringify(checks);

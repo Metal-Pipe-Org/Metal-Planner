@@ -175,22 +175,40 @@ def test_the_threshold_stops_at_a_new_corridor_and_leaves_no_holes(install_day):
     assert wynik["at_ceiling"] is False
 
 
-def test_show_more_adds_whole_starting_densities(install_day):
-    """"Pokaż więcej" podnosi cel o jedną WYJŚCIOWĄ gęstość na kliknięcie -
-    to jednostki gęstości, nie minut: przy x3 objazd wciąż jest za gęsty,
-    przy x4 mieści się już wszystko do sufitu skanu. Więcej niż trzy
-    kliknięcia serwer nie przyjmuje."""
-    install_day(_jeden_korytarz_i_objazd_day())
-    x3 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=2)
-    x4 = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=3)
-    ponad = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=10)
+def test_show_more_always_adds_something(install_day):
+    """Każde kliknięcie "pokaż więcej" NAPRAWDĘ coś dokłada (zgłoszenie #141).
 
-    assert _linie(x3) == ["1", "2"]
-    assert _linie(x4) == ["1", "2", "4", "7"]
-    assert x4["at_ceiling"] is True
-    assert x4["deadline_sec"] == 600 + planner.MAX_THRESHOLD_SEC
+    Sam cel gęstości tego nie gwarantuje: mapa gęstnieje falami, więc dwa
+    kolejne cele potrafią wypaść w tej samej dziurze i dać tę samą mapę -
+    przycisk wygląda wtedy na zepsuty. Próg idzie więc o co najmniej minutę
+    dalej niż przy poprzednim kliknięciu, a jeśli to nic nie zmienia - aż do
+    pierwszej minuty, która dokłada kawałek, choćby przekroczyła cel
+    gęstości. To ta sama zasada, którą punkt 15 ma już przy autach.
+
+    Dziur to nie robi: tnie się nadal jednym progiem, tylko postawionym za
+    najbliższą nową rzeczą."""
+    install_day(_jeden_korytarz_i_objazd_day())
+    mapy = [planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=m)
+            for m in range(planner.MAX_MAP_MORE + 1)]
+
+    assert _linie(mapy[0]) == ["1", "2"]
+    assert _linie(mapy[1]) == ["1", "2", "7"]
+    assert _linie(mapy[2]) == ["1", "2", "4", "7"]
+
+    # Każde kliknięcie przesuwa próg dalej i nigdy niczego nie zabiera.
+    for wcze, poz in zip(mapy, mapy[1:]):
+        assert poz["deadline_sec"] > wcze["deadline_sec"]
+        assert set(_linie(wcze)) <= set(_linie(poz))
+
+    # Ostatnie kliknięcie dobija do sufitu skanu - dalej nie ma już czego
+    # dołożyć i odpowiedź mówi to wprost, zamiast udawać, że przycisk działa.
+    assert mapy[3]["at_ceiling"] is True
+    assert mapy[3]["deadline_sec"] == 600 + planner.MAX_THRESHOLD_SEC
+    assert _linie(mapy[3]) == _linie(mapy[2])
+
+    ponad = planner.plan_flow("Start", "Cel", when=WHEN, density=1.6, more=10)
     assert ponad["more"] == planner.MAX_MAP_MORE
-    assert ponad["deadline_sec"] == x4["deadline_sec"]
+    assert ponad["deadline_sec"] == mapy[3]["deadline_sec"]
 
 
 def test_the_density_slider_has_a_server_side_ceiling(install_day):
@@ -1447,3 +1465,52 @@ def test_a_node_by_a_detour_is_paler_than_one_on_the_fast_route(install_day, pin
 
     assert wezly["S"] == 1.0
     assert wezly["D"] < wezly["S"]
+
+
+# ---------------------------------- odsiew krążenia (#141, próba) --------
+
+def _krazenie_day():
+    """Tramwaj 1 rusza ze startu dopiero o 600 i jest w celu o 1200, mijając
+    po drodze X o 900. Autobus 9 rusza od razu, ale dowozi tylko do X - skąd
+    i tak wsiada się w tego samego Tramwaja 1. Wyjazd o 0 i wyjazd o 600 dają
+    więc TĘ SAMĄ godzinę w celu."""
+    return make_day([
+        {"trip_id": "tram", "label": "Tramwaj 1",
+         "stops": [("S", 600, 600), ("X", 900, 900), ("E", 1200, 1200)]},
+        {"trip_id": "zabicie", "label": "Autobus 9",
+         "stops": [("S", 0, 0), ("X", 300, 300)]},
+    ], names={"S": "Start", "E": "Cel", "X": "Objazd"})
+
+
+def test_dawdling_is_dropped_only_with_the_switch(install_day):
+    """Zgłoszenie #141, PRÓBA za przełącznikiem - nie obietnica kontraktu.
+
+    Skoro w celu jest się równie szybko, wyjeżdżając później, to wyjazd
+    wcześniejszy nie jest alternatywą, tylko zabijaniem zapasu czasu: Autobus
+    9 dowozi do X, gdzie i tak czeka się na tego samego Tramwaja 1. Domyślnie
+    mapa go rysuje, bo przełącznik jest zgaszony."""
+    install_day(_krazenie_day())
+
+    bez = planner.plan_flow("Start", "Cel", when=WHEN, density=15)
+    z_odsiewem = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
+                                   no_dawdling=True)
+
+    assert "9" in _linie(bez)
+    assert _linie(z_odsiewem) == ["1"]
+    assert bez["best_arrival"] == z_odsiewem["best_arrival"]
+
+
+def test_the_dawdling_switch_does_not_move_the_reported_hours(install_day):
+    """Przesuwa się godzina, od której mapa się RYSUJE - nie ta, o którą
+    pytano. "Za ile tam będziesz" i punkt zerowy dymka (#143) dalej liczą od
+    pytania, inaczej pasek obiecywałby krótszą podróż, niż jest."""
+    install_day(_krazenie_day())
+
+    bez = planner.plan_flow("Start", "Cel", when=WHEN, density=15)
+    z_odsiewem = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
+                                   no_dawdling=True)
+
+    for pole in ("departure", "departure_sec", "best_sec", "best_arrival"):
+        assert bez[pole] == z_odsiewem[pole], pole
+    # A sama trasa rusza tak samo - to ona była najszybsza od początku.
+    assert z_odsiewem["starts"] == bez["starts"]

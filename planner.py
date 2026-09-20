@@ -1128,6 +1128,65 @@ def _choose_deadline(network_at, best_arr, target):
     return best_arr + lo * 60, False
 
 
+def _latest_departure(day, source_stops, target_stops, dep_sec, best_arr):
+    """Najpóźniejsza godzina wyjazdu, z której WCIĄŻ osiąga się `best_arr`.
+
+    Wyjechanie później nie może dać wcześniejszego przyjazdu, więc warunek
+    "stąd wciąż zdążę na best_arr" jest prawdziwy na początku przedziału
+    i fałszywy dalej - wystarczy połowienie. Szukamy w pełnych minutach:
+    rozkład i tak jest w minutach, a każde przybliżenie to jeden skan.
+
+    Używane wyłącznie przez odsiew krążenia (patrz plan_flow, `no_dawdling`)."""
+    lo, hi = dep_sec, best_arr
+    while hi - lo > 60:
+        mid = lo + (hi - lo) // 2
+        _, arr, _ = _scan(day, source_stops, target_stops, mid)
+        if arr == best_arr:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _first_richer(network_at, best_arr, from_sec, prev_kept):
+    """Pierwsza minuta od `from_sec`, przy której mapa ma WIĘCEJ kawałków niż
+    `prev_kept` - czyli pierwszy próg, przy którym "pokaż więcej" naprawdę coś
+    pokazuje.
+
+    Po co: cel gęstości sam z siebie tego nie gwarantuje, bo mapa gęstnieje
+    falami, a nie płynnie. Zmierzone na Rynek -> Sosnowiecka (sobota 19.09,
+    pytanie 21:55): sześć kolejnych minut progu daje te same 92 kawałki,
+    a siódma - 310 naraz. Cel x2, x3 i x4 lądują wtedy w tej samej dziurze
+    i przycisk wygląda na zepsuty.
+
+    Szersza mapa dokłada kursy i nigdy nie zabiera (punkt 9), więc liczba
+    kawałków rośnie z progiem i wystarczy szukać skokami, a potem połowieniem
+    - tak samo jak w _choose_deadline. Zwraca (próg, sufit); `sufit` znaczy,
+    że do MAX_THRESHOLD_SEC nie dochodzi już nic."""
+    ceiling = MAX_THRESHOLD_SEC // 60
+
+    def richer(minutes):
+        return len(network_at(best_arr + minutes * 60)["kept"]) > prev_kept
+
+    start = max(0, min(ceiling, -(-(from_sec - best_arr) // 60)))
+    if richer(start):
+        return best_arr + start * 60, start >= ceiling
+    lo, probe = start, min(ceiling, start + 1)
+    while not richer(probe):
+        lo = probe
+        if probe >= ceiling:
+            return best_arr + ceiling * 60, True
+        probe = min(ceiling, probe + max(1, probe // 2))
+    hi = probe
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if richer(mid):
+            hi = mid
+        else:
+            lo = mid
+    return best_arr + hi * 60, hi >= ceiling
+
+
 def _no_connection(start_name, end_name, dep_sec):
     return {
         "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
@@ -1166,6 +1225,7 @@ def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, density=None, more=None,
               car_count=None, journey_limit=None, transfer_gain_sec=None,
               use_bikes=False, bike_count=None, car_groups=False, car_vans=False,
+              bike_electric=True, bike_regular=True, no_dawdling=False,
               in_vehicle=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
@@ -1219,6 +1279,14 @@ def plan_flow(start_query, end_query, when=None,
     suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_groups - czy auta
     spod tego samego miejsca to jeden wybór (przełącznik pod zębatką), car_vans
     - czy pokazać też dostawczaki, wybierane osobno od osobówek.
+    no_dawdling - przełącznik do porównań (zgłoszenie #141): mapa wyrusza
+    najpóźniej, jak się da bez utraty najszybszego przyjazdu, więc znika
+    z niej jazda, po której i tak wsiada się w ten sam pojazd. Domyślnie
+    zgaszony i NIE jest częścią kontraktu.
+    bike_electric/bike_regular - na jaki rodzaj roweru pasażer chce wsiąść
+    (dwa przyciski w pasku warstw, patrz bikes.map_places). To odsiew MIEJSC, nie zmiana wyceny przejazdu: rower
+    ma jedną prędkość niezależnie od rodzaju, więc odhaczenie jednego z nich
+    nie przesuwa na mapie żadnej godziny.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -1315,6 +1383,35 @@ def plan_flow(start_query, end_query, when=None,
     if best_stop is None:
         return _no_connection(start_name, end_name, dep_sec)
 
+    # Godzina, którą odpowiedź RAPORTUJE - z pytania. Odsiew krążenia niżej
+    # przesuwa `dep_sec`, od którego mapa się RYSUJE, ale "za ile tam będziesz"
+    # i punkt zerowy dymka (#143) muszą dalej liczyć od tego, o co pytano.
+    report_dep_sec = dep_sec
+
+    # Odsiew krążenia (zgłoszenie #141) - PRZEŁĄCZNIK DO PORÓWNAŃ, domyślnie
+    # zgaszony. To jeszcze nie jest obietnica kontraktu, tylko coś, co ma dać
+    # się włączyć i wyłączyć, żeby zobaczyć różnicę na żywej relacji.
+    #
+    # Zasada użytkownika: skoro można być na miejscu równie szybko, wychodząc
+    # później, to wolimy wyjść później. Jazda "byle jechać", kończąca się
+    # i tak wsiadaniem w ten sam pojazd, nie jest alternatywą - to zabijanie
+    # zapasu czasu, a właśnie ono rozdyma mapę (pomiar: Rynek -> Sosnowiecka,
+    # sobota 19.09, pytanie 21:55 - 92 kawałki, z czego 90 nie skraca podróży
+    # ani o minutę; patrz FLOW_MAP_NOTES.md).
+    #
+    # Realizacja: mapa wyrusza z NAJPÓŹNIEJSZEJ godziny, z której wciąż
+    # osiąga się najszybszy przyjazd. To odsiew po stronie STARTU i celowo
+    # WĘŻSZY niż pełna reguła: usuwa wyłącznie opcje, które coś bije
+    # (wyjeżdża nie wcześniej i przyjeżdża nie później), więc nie może
+    # schować niczego, co reguła zostawiłaby. Krążenia w ŚRODKU podróży nie
+    # rusza. Z pokładu pojazdu nie działa - tam godziny wyjazdu się nie
+    # wybiera, bo pasażer już jedzie.
+    if no_dawdling and ride is None:
+        dep_sec = _latest_departure(day, source_stops, target_stops,
+                                    dep_sec, best_arr)
+        best_stop, best_arr, best_journey = _scan(day, source_stops,
+                                                  target_stops, dep_sec)
+
     # Kiedy najszybsza trasa naprawdę RUSZA - czekanie ma być widoczne, nie
     # schowane (punkt 13). Progu mapy to nie dotyczy: liczy się go od
     # najszybszego PRZYJAZDU, więc godzina czekania niczego w nim nie rozdyma.
@@ -1394,8 +1491,24 @@ def plan_flow(start_query, end_query, when=None,
                     origin_latest, start_reach, frame_km2)
             return networks[deadline]
 
-        deadline, at_ceiling = _choose_deadline(network_at, best_arr,
-                                                density * (1 + more))
+        # "Pokaż więcej" ZAWSZE coś dokłada (zgłoszenie #141). Każde
+        # kliknięcie schodzi o co najmniej minutę niżej niż poprzednie, a gdy
+        # przy tym progu mapa nadal jest ta sama - dalej, do pierwszej minuty,
+        # która coś dokłada (_first_richer). Poziom wchodzi wtedy w całości,
+        # choćby przekroczył cel gęstości; to ta sama zasada, którą kontrakt
+        # ma już przy autach (punkt 15: "kolejny poziom wchodzi w całości,
+        # choćby przekroczył liczbę z suwaka").
+        deadline, at_ceiling = _choose_deadline(network_at, best_arr, density)
+        prev_kept = len(network_at(deadline)["kept"])
+        for level in range(1, more + 1):
+            chosen, at_ceiling = _choose_deadline(network_at, best_arr,
+                                                  density * (1 + level))
+            chosen = max(chosen, deadline + 60)
+            if len(network_at(chosen)["kept"]) <= prev_kept:
+                chosen, at_ceiling = _first_richer(network_at, best_arr,
+                                                   chosen, prev_kept)
+            deadline = chosen
+            prev_kept = len(network_at(deadline)["kept"])
         network = network_at(deadline)
         earliest, profile = network["earliest"], network["profile"]
         kept, ranges = network["kept"], network["ranges"]
@@ -1540,7 +1653,8 @@ def plan_flow(start_query, end_query, when=None,
                 # liniach - a auta, których nic nie bije, zostają i tak.
                 cars = traficar.map_choice(
                     traficar.map_cars(day, reach, end_point_ll),
-                    car_count * (1 + more), car_groups, car_vans)
+                    car_count * (1 + more), car_groups, car_vans,
+                    min_level=more)
 
             # Rower miejski na mapie (punkt 16, patrz bikes.map_places).
             # Inaczej niż auto: z roweru się JEDZIE, więc przejazd ocenia się
@@ -1561,7 +1675,8 @@ def plan_flow(start_query, end_query, when=None,
                 lambda: _drawn_arrivals(day, runs, source_stops, dep_sec),
                 lambda: _drawn_onward(day, runs, target_set),
                 target_set, bike_count * (1 + more),
-                live=day_offset == 0 and when.date() == date.today())
+                live=day_offset == 0 and when.date() == date.today(),
+                min_level=more, electric=bike_electric, regular=bike_regular)
     finally:
         geo_db.close()
 
@@ -1574,14 +1689,19 @@ def plan_flow(start_query, end_query, when=None,
     return {
         "start": start_name,
         "end": end_name,
-        "departure": _fmt_time(dep_sec),
+        "departure": _fmt_time(report_dep_sec),
+        # Ta sama godzina w sekundach doby rozkładowej. Od niej - a nie od
+        # tego, o której MAPA sądzi, że pasażer stanie na danej kropce - liczy
+        # swoje godziny dymek przesiadki (zgłoszenie #143, patrz app.js
+        # timetableAnchor).
+        "departure_sec": report_dep_sec,
         "best_arrival": _fmt_time(best_arr),
         "deadline": _fmt_time(deadline),
         # Cały zakres czasowy mapy w sekundach, tą samą miarą co kawałki:
         # od najszybszego możliwego dojazdu do najpóźniejszego, jaki mapa
         # jeszcze rysuje (deadline). "Najszybciej X, pokazane do Y".
-        "best_sec": best_arr - dep_sec,
-        "limit_sec": deadline - dep_sec,
+        "best_sec": best_arr - report_dep_sec,
+        "limit_sec": deadline - report_dep_sec,
         # Horyzont mapy na osi doby. Odjazd późniejszy nie należy do ŻADNEGO
         # rysowanego wariantu - to warunek konieczny, liczony z best_arr
         # (skan CSA), więc nie zależy od szacowanych przyjazdów kawałków.

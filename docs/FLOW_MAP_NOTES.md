@@ -1972,3 +1972,148 @@ Zgłoszenia #114 i #130. Kontrakt punktu 15 przepisany na polecenie użytkownika
     żeby nie proponować kilkuset metrów jazdy ani całej podróży autem poza
     miasto — teraz takie opcje wchodzą, jeśli auto ma zasięg, i konkurują
     godziną przyjazdu.
+
+## Zgłoszenia #141, #143 i #147 — pomiar i cztery zmiany (2026-09-20)
+
+Kontrakt (punkty 2, 10, 11, 15 i 16) przepisany na polecenie użytkownika,
+razem z tą zmianą. Reguła krążenia do kontraktu NIE weszła — jest próbą za
+przełącznikiem, opis niżej.
+
+### Pomiar: Rynek → Sosnowiecka, sobota 19.09, pytanie 21:55
+
+Relacja z życia, zgłoszona przez użytkownika. Najszybsza trasa to Tramwaj 3
+z 22:11 plus Autobus 133, w celu o 22:45.
+
+| pytanie | najszybszy przyjazd | kawałki | kropki |
+|---|---|---|---|
+| 21:55 | 22:45 | 92 | 25 |
+| 22:00 | 22:45 | 33 | 13 |
+| 22:05 | 22:45 | 2 | 3 |
+| 22:10 | 22:45 | 2 | 3 |
+| 22:15 | 22:51 | 4 | 6 |
+
+Sedno: **90 z 92 kawałków istnieje wyłącznie dlatego, że zapytano szesnaście
+minut wcześniej, i ani jeden z nich nie skraca podróży o minutę.** Dopiero
+pytanie o 22:15 gubi tę trójkę.
+
+### Gęstość dalej skacze falami — tu ścianą
+
+Próg minuta po minucie przy tym samym pytaniu (21:55):
+
+| próg | kawałki |
+|---|---|
+| 22:45–22:50 | 92 |
+| 22:51–22:53 | 310 |
+| 22:54–23:00 | 311 |
+| 23:05 | 718 |
+| 23:10 | 1145 |
+
+Sześć minut nie zmienia nic, siódma potraja mapę. Cel gęstości nawet na
+suficie suwaka (15) zatrzymywał się na 22:50 — czyli „pokaż więcej" przy tej
+relacji było **całkowicie martwe**: zero, jedno, dwa i trzy kliknięcia dawały
+te same 92 kawałki, te same 25 kropek i te same 23 linie.
+
+### 1. „Pokaż więcej" zawsze coś dokłada (#141, część pierwsza)
+
+Każde kliknięcie schodzi o co najmniej minutę niżej niż poprzednie, a gdy przy
+tym progu mapa jest nadal ta sama — dalej, do pierwszej minuty, która dokłada
+kawałek (`planner._first_richer`, szukanie takie samo jak w `_choose_deadline`,
+bo liczba kawałków rośnie z progiem). Po zmianie na tej relacji: 92 → 310 →
+311 → 718; przy pytaniu o 22:11: 2 → 8 → 186 → 343.
+
+Sama gwarancja „jedna minuta więcej", o którą prosił użytkownik, na tej
+relacji nie wystarczała: pierwsze dwa kliknięcia dalej nie pokazywałyby nic,
+bo ściana stoi dopiero w szóstej minucie. Stąd drugi warunek.
+
+Przy autach i rowerach to samo robi `min_level`: kliknięcie luzuje regułę
+o poziom, choćby liczba z suwaka była już przekroczona. Bez tego poziom,
+którego nic nie bije, bywa sam liczniejszy niż suwak i podniesienie liczby
+nie zmienia nic — przypadek zgłoszony przez użytkownika wprost.
+
+Limit trzech kliknięć **zostaje** (decyzja użytkownika, pytany o to osobno).
+
+### 2. Odsiew krążenia — PRÓBA za przełącznikiem (#141, część druga)
+
+Zasada użytkownika: *skoro można być na miejscu równie szybko, wychodząc
+później, to wolimy wyjść później.* To NIE jest pomysł odrzucony 2026-09-14
+(patrz sekcja wyżej): tamten bił opcje warunkiem „wyjazd nie wcześniej
+i przyjazd **nie później**", przez co z każdej fali zostawała jedna. Ten
+wymaga przyjazdu **w tej samej minucie**, a dokładny remis co do minuty jest
+odciskiem palca zabijania czasu: krążenie kończy się wsiadaniem w TEN SAM
+pojazd, więc godzina w celu nie drgnie. Dwie naprawdę różne trasy trafiają
+w tę samą minutę rzadko i przypadkiem.
+
+**Realizacja jest węższa od reguły, świadomie.** Mapa wyrusza
+z najpóźniejszej godziny, z której wciąż osiąga się najszybszy przyjazd
+(`planner._latest_departure`, połowienie po skanach). Niech D(a) będzie
+najpóźniejszym wyjazdem osiągającym przyjazd a; D rośnie razem z a, więc
+każda opcja wyjeżdżająca przed D(najszybszy przyjazd) jest bita przez jakąś
+inną — usuwamy wyłącznie opcje dominowane i nie możemy schować niczego, co
+pełna reguła by zostawiła. Czego to NIE robi: krążenia w środku podróży
+i opcji, które wyjeżdżają po D(najszybszy przyjazd), ale i tak są bite przez
+coś dla swojej własnej godziny przyjazdu.
+
+Pomiar tej samej relacji, przełącznik włączony: 92 kawałki → **2**, przyjazd
+bez zmiany 22:45, „za ile" bez zmiany 50 min. Kliknięcia: 2 → 8 → 186 → 343.
+Czyli mapa nie tyle chudnie, co **przenosi budżet**: zamiast 90 kawałków
+krążenia sprzed 22:11 próg idzie dalej i dociąga opcje naprawdę późniejsze.
+
+Przełącznik jest pod zębatką, domyślnie zgaszony, i celowo NIE ma go
+w kontrakcie — użytkownik chce najpierw zobaczyć różnicę na żywych relacjach.
+Zasadom (`PRINCIPLES.md`, punkt 1) nie przeczy: to odsiew Pareto po nazwanych
+kryteriach, tak samo jak wybór aut i rowerów, a nie chowanie pojedynczych
+opcji dlatego, że wydają się dziwne.
+
+Godziny RAPORTOWANE (`departure`, `departure_sec`, `best_sec`, `limit_sec`)
+liczą się dalej od pytania, nie od przesuniętego wyjazdu — inaczej pasek
+obiecywałby krótszą podróż, niż jest.
+
+### 3. Dymek kropki liczy od godziny z formularza (#143)
+
+Było: od najwcześniejszej, o której WEDŁUG MAPY można tam być. Użytkownik
+trafił na przypadek, w którym to założenie było za późne i tablica nie
+pokazała tego, o co pytał. Mapa zna tylko to, co sama narysowała — kto
+dojdzie pieszo, dojedzie rowerem albo złapie linię spod progu, jest tam
+wcześniej.
+
+Jest: punkt zerowy to godzina z formularza (`app.timetableAnchor`,
+`planner` oddaje ją jako `departure_sec`), a odjazdy sprzed przyjazdu mapy
+oddziela kreska „tu według mapy jesteś" i zajmują najwyżej połowę wierszy —
+inaczej na ruchliwym węźle wypchnęłyby poza suwak dokładnie te odjazdy, po
+które się tam przyszło. Pozostałe dwa odsiewy dymka zostają nietknięte: tylko
+linie, w które mapa pozwala wsiąść, i tylko odjazdy, którymi da się jeszcze
+dojechać do celu.
+
+Przy odpowiedzi z kolejnej doby (punkt 13) zostaje godzina mapy: pytanie
+sprzed doby nie mówi nic o tamtym dniu.
+
+Pasek nad mapą mówi teraz „za", nie „w" — obie liczby zawsze były mierzone od
+godziny z pytania, więc „w 50 min" opisywało je mylnie.
+
+### 4. Rower elektryczny osobno od zwykłego (#147)
+
+Dwa przyciski w pasku warstw, obok siebie — bo użytkownik prosił o
+„rozdzielenie PRZEŁĄCZNIKA rowerów", a przełącznikiem rowerów jest ten
+przycisk, nie pozycja w ustawieniach. Pierwsze podejście wstawiło je pod
+zębatkę i użytkownik ich tam po prostu nie znalazł („Gdzie elektryki?").
+Oba zgaszone znaczą to, co dawniej zgaszony jeden przycisk; kto miał
+zapamiętany stary włącznik, dostaje oba w jego położeniu. Miejsce zostaje, gdy stoi w nim choć
+jeden rower włączonego rodzaju; odsiew idzie PRZED wyborem przejazdów, więc
+nie zostawia dziury po zwycięzcy. Jedna prędkość roweru dla obu rodzajów —
+osobna prędkość elektryka byłaby zgadywaniem podanym jako fakt (zasady,
+punkt 2). Odsiew dotyczy wsiadania: stacja, na której przejazd się kończy,
+żadnego roweru mieć nie musi. Przy nieznanym stanie stojaków nie odsiewa nic.
+
+Dostawczaki zostały jak były — użytkownik odrzucił symetrię („nikt o zdrowych
+zmysłach nie chce dostawczaka zamiast osobówki"), więc zostają schowane pod
+zębatką.
+
+### Testy
+
+Razem 391 przechodzących, było 380. Nowe: gwarancja „pokaż więcej" przy liniach, autach
+i rowerach; rodzaj roweru (cztery przypadki, w tym nieznany stan stojaków
+i to, że odsiew dotyczy wsiadania, nie oddawania); odsiew krążenia i to, że
+nie rusza raportowanych godzin; we froncie — punkt zerowy dymka z kreską
+i trzy przełączniki lecące do serwera. Przepisany `test_show_more_*`: opisywał
+starą obietnicę („podnosi cel o jedną wyjściową gęstość"), która przestała być
+całą prawdą.

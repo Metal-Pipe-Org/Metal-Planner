@@ -539,3 +539,26 @@ def test_vans_are_a_switch_sent_to_the_server(front):
     """Dostawczaki to przełącznik pod zębatką, domyślnie zgaszony - jego stan
     idzie w zapytaniu, bo osobny wybór dostawczaków robi serwer."""
     _check(front, "auta_dostawczaki_leca_do_serwera")
+
+
+def test_the_dot_timetable_counts_from_the_asked_hour(front):
+    """Zgłoszenie #143: tablica w dymku liczy od godziny z formularza, a nie
+    od tej, o której mapa sądzi, że pasażer tu stanie - bo to założenie bywa
+    za późne i zabierało całą odpowiedź. Odjazdy sprzed przyjazdu mapy
+    oddziela widoczna kreska i nie wypychają z listy tych, po które się tu
+    przyszło."""
+    _check(front, "tablica_liczy_od_godziny_z_formularza")
+
+
+def test_bike_kinds_are_switches_sent_to_the_server(front):
+    """Zgłoszenie #147: rowery elektryczne i zwykłe to dwa przełączniki pod
+    zębatką, oba domyślnie włączone - ich stan idzie w zapytaniu, bo odsiew
+    miejsc robi serwer."""
+    _check(front, "rower_rodzaj_leci_do_serwera")
+
+
+def test_the_dawdling_filter_is_a_switch_sent_to_the_server(front):
+    """Zgłoszenie #141: odsiew jazdy na zabicie czasu to przełącznik pod
+    zębatką, domyślnie zgaszony - do włączania i wyłączania, żeby zobaczyć
+    różnicę. Jego stan idzie w zapytaniu, bo mapę liczy serwer."""
+    _check(front, "odsiew_krazenia_leci_do_serwera")

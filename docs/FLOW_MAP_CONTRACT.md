@@ -46,10 +46,17 @@ mapie jest opcja o danej jakości, jest na niej każda lepsza. Nie ma wyjątków
 „pokaż mimo to” ani ukrywania pojedynczych opcji — mapa kończy się w jednym
 miejscu skali, zamiast wybierać za pasażera.
 
-**„Pokaż więcej” dokłada jednostki gęstości.** Każde kliknięcie podnosi cel
-o jedną wyjściową gęstość: pierwsze do dwukrotności, drugie do
-trzykrotności, kolejne do czterokrotności. Tym samym kliknięciem rośnie
-liczba aut na mapie (punkt 15). Przedłużenie żyje do następnego wyszukiwania.
+**„Pokaż więcej” zawsze coś dokłada.** Każde kliknięcie podnosi cel gęstości
+o jedną wyjściową porcję: pierwsze do dwukrotności, drugie do trzykrotności,
+kolejne do czterokrotności. Sam cel tego jednak nie gwarantuje, bo mapa
+gęstnieje falami, a nie płynnie: dwa kolejne cele potrafią wypaść w tej samej
+dziurze i dać tę samą mapę, a przycisk wygląda wtedy na zepsuty. Dlatego
+kliknięcie przesuwa próg o co najmniej minutę dalej niż poprzednie, a jeśli to
+nic nie zmienia — aż do pierwszej minuty, która naprawdę coś dokłada, choćby
+przekroczyła cel gęstości. Dziury to nie robi: tnie się nadal jednym progiem,
+tylko postawionym za najbliższą nową rzeczą. Tym samym kliknięciem rośnie
+liczba aut i przejazdów rowerem (punkty 15 i 16), a ich reguła luzuje się
+o co najmniej jeden poziom. Przedłużenie żyje do następnego wyszukiwania.
 
 ## 3. Jasność w każdym punkcie kursu, nie jedna na cały kurs
 
@@ -169,7 +176,9 @@ Mapa odpowiada nie tylko na „jak dojechać”, ale też na „ile to trwa” i
 „o której”. Trzema warstwami, od najogólniejszej:
 
 **Bez ruszania myszą** widać czas całej podróży: najszybszy możliwy dojazd
-i najpóźniejszy, jaki mapa jeszcze rysuje.
+i najpóźniejszy, jaki mapa jeszcze rysuje. Obie godziny mają przy sobie
+„za ile", liczone od godziny z formularza — czekanie na pierwszy pojazd jest
+w tej liczbie zawarte, bo pasażer i tak czeka.
 
 **Pod kursorem, dla punktu pod kursorem** — nie dla całej linii i nie dla
 jakiegoś jej kawałka — widać dwie godziny: o której tym pojazdem jest się
@@ -236,9 +245,21 @@ opcjami, tylko rytmem jednej: najbliższy odjazd i „co X min". Ani wypisywania
 wszystkich, ani gubienia części. Przyjazd nie jest powtórzeniem odjazdu tej
 samej linii — to dwa różne zdarzenia i dwa wiersze.
 
-**Godzina, od której liczymy.** Najwcześniejsza, o której według mapy można tu
-być — nie „teraz" i nie godzina z formularza. Na osi doby rozkładowej, nie
-zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
+**Godzina, od której liczymy.** Ta z formularza — bo tylko o niej pasażer wie,
+że jest prawdziwa. Godzina „będziesz tu o" jest wyłącznie tym, co mapa
+policzyła z tego, co sama narysowała, i bywa za późna: kto dojdzie tu pieszo,
+dojedzie rowerem albo złapie linię spod progu, stoi tu wcześniej — a tablica
+liczona od tamtej godziny zabierała mu nie kilka wierszy, tylko całą
+odpowiedź. Przy każdym wierszu stoi też „za ile", liczone od tej samej
+godziny.
+
+Odjazdy sprzed chwili, w której mapa stawia tu pasażera, są więc na liście
+celowo. Oddziela je widoczna kreska „tu według mapy jesteś" i zajmują najwyżej
+połowę wierszy, żeby na ruchliwym węźle nie wypchnęły tych, po które się tu
+przyszło. Przy odpowiedzi z kolejnej doby (punkt 13) zostaje godzina mapy:
+pytanie sprzed doby nie mówi już nic o tamtym dniu. Wszystko na osi doby
+rozkładowej, nie zegarowej: przesiadka o 24:40 należy do rozkładu dnia
+poprzedniego.
 
 **Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
 ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne
@@ -375,7 +396,10 @@ auta pobite przez najwyżej jedno inne, potem przez najwyżej dwa i tak dalej,
 aż uzbiera się tyle, ile ustawiono. Kolejny poziom wchodzi w całości, choćby
 przekroczył liczbę z suwaka, bo ucięcie go w środku wymagałoby zważenia
 kryteriów. Poszerzanie nigdy nie dokłada kolejnego auta z tej samej grupy —
-inaczej już pierwsze „więcej” przywracałoby auta stojące obok siebie. Skutek
+inaczej już pierwsze „więcej” przywracałoby auta stojące obok siebie.
+Kliknięcie luzuje regułę o co najmniej jeden poziom także wtedy, gdy liczba
+z suwaka jest już przekroczona: poziom, którego nic nie bije, bywa sam
+liczniejszy niż suwak, a wtedy podniesienie samej liczby nie zmieniałoby nic. Skutek
 jest ten sam co przy liniach (punkt 2): nigdy nie widać auta, gdy schowane
 jest inne, które je bije. „Pokaż więcej” mnoży liczbę z suwaka tak samo jak
 gęstość linii.
@@ -417,6 +441,17 @@ dowozić naprawdę. Przystanek, na który da się zdążyć, ale z którego mapa
 rysuje ani jednego odjazdu, niczego nie otwiera — „zdążę tam" to nie to samo,
 co „stamtąd dojadę". Tak samo nie liczy się przystanek, na którym narysowany
 kawałek się kończy: tam się wysiada.
+
+**Rodzaj roweru to osobny wybór.** Elektryczny i zwykły mają własne przyciski
+w pasku warstw, obok siebie — kto chce elektryka, nie weźmie
+zwykłego, i odwrotnie. Miejsce jest kandydatem, gdy stoi w nim choć jeden
+rower włączonego rodzaju; zgaszenie obu znaczy to samo, co dawniej zgaszony
+jeden przycisk „Rowery”.
+To odsiew MIEJSC, a nie zmiana wyceny przejazdu: rower ma jedną prędkość
+niezależnie od rodzaju, więc odhaczenie jednego nie przesuwa na mapie żadnej
+godziny. Dotyczy wsiadania — stacja, na której przejazd się kończy, żadnego
+roweru mieć nie musi. Przy pytaniu o inny dzień stan stojaków jest nieznany,
+więc rodzaj nie odsiewa wtedy nic, zamiast udawać tę wiedzę.
 
 **Rowery dokłada się na gotową mapę.** Najpierw powstaje mapa komunikacji,
 z progiem z punktu 2, i rower niczego w niej nie przestawia. Każdy przejazd
