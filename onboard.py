@@ -156,6 +156,27 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
     }
 
 
+def _seated(journey, ride):
+    legs = journey.get("legs") or []
+    first = legs[0] if legs else None
+    return (first is not None and first.get("kind") == "ride"
+            and first.get("dep_sec") == ride["sec"]
+            and first.get("line") == ride["line"]
+            and first.get("from") == ride["stop_name"])
+
+
+def count_exit(journeys, ride):
+    """Wysiadka z pojazdu, w którym się siedzi, to przesiadka jak każda inna:
+    karta ma mówić "jedna przesiadka", gdy trzeba wysiąść z 146 i wsiąść do
+    7, choć etapów jazdy jest na niej tylko jeden. Wołane na każdej liście
+    propozycji PRZED ich scaleniem, bo z tej liczby liczy się też kolejność
+    (patrz planner._journey_key)."""
+    for journey in journeys:
+        if not _seated(journey, ride):
+            journey["transfers"] += 1
+    return journeys
+
+
 def mark_journeys(journeys, ride):
     """Dopisuje do gotowych propozycji to, czego pasażer w pojeździe naprawdę
     potrzebuje: GDZIE WYSIĄŚĆ i za ile to przystanków.
@@ -178,11 +199,7 @@ def mark_journeys(journeys, ride):
     for journey in journeys:
         legs = journey.get("legs") or []
         first = legs[0] if legs else None
-        siedzimy = (first is not None and first.get("kind") == "ride"
-                    and first.get("dep_sec") == ride["sec"]
-                    and first.get("line") == ride["line"]
-                    and first.get("from") == ride["stop_name"])
-        if siedzimy:
+        if _seated(journey, ride):
             first["onboard"] = True
             journey["onboard"] = {
                 "stop": first["to"],

@@ -139,6 +139,7 @@ def test_jazda_dalej_tym_samym_pojazdem(install_day, pin_deadline):
     assert jazda["legs"][0]["onboard"] is True
     assert jazda["onboard"] == {"stop": "CEL", "stops": 2, "time": "00:40",
                                 "transfer": False}
+    assert jazda["transfers"] == 0
 
 
 def test_przesiadka_od_razu_to_zero_przystankow(install_day, pin_deadline):
@@ -152,6 +153,7 @@ def test_przesiadka_od_razu_to_zero_przystankow(install_day, pin_deadline):
     assert tramwaj[0]["onboard"] == {"stop": "WSIADAM", "stops": 0,
                                      "time": "00:10", "transfer": True}
     assert "onboard" not in tramwaj[0]["legs"][0]
+    assert tramwaj[0]["transfers"] == 1
 
 
 def test_bez_pojazdu_odpowiedz_sie_nie_zmienia(install_day, pin_deadline):

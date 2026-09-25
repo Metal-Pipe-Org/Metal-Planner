@@ -1697,6 +1697,9 @@ def plan_flow(start_query, end_query, when=None,
             for wariant in warianty:
                 _drop_private(wariant)
 
+        if ride:
+            onboard.count_exit(journeys, ride)
+
         # Rower dokładamy PO obu gałęziach, bo obie zostawiają tę samą rzecz:
         # listę propozycji. Także po trybie awaryjnym - to właśnie tam, gdzie
         # z rozkładu nie składa się prawie nic, skrót rowerem bywa jedyną
@@ -1720,6 +1723,8 @@ def plan_flow(start_query, end_query, when=None,
                 day, source_stops, target_stops, report_dep_sec, deadline, earliest,
                 profile, geo_db, start_point, end_point, start_name, end_name,
                 (bike_mps, bike_overhead))
+            if ride:
+                onboard.count_exit(found, ride)
             journeys, bike_shown = _merge_journeys(journeys, found, gain_sec)
 
         # Dodatkowe propozycje kończące się Traficarem (patrz
@@ -1729,6 +1734,8 @@ def plan_flow(start_query, end_query, when=None,
         # świadoma (pierwszy = proponowany).
         with_car = _traficar_journeys(day, best_journey, dep_sec, deadline,
                                       end_point_ll, end_name, geo_db)
+        if ride:
+            onboard.count_exit(with_car, ride)
         if with_car:
             journeys = (journeys + with_car) if degraded else sorted(
                 journeys + with_car, key=lambda j: _journey_key(j, gain_sec))
