@@ -438,7 +438,7 @@ const INJECTION = `
     flowHitsAt, corridorOptions, pickFromCluster, handleFlowHover, clearFlowHover,
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
     legLayers, detailHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
-    waitNoticeHtml,
+    waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
     summariseRepeats, timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
     keepWithinHorizon,
     withArrivals, flowIcon, FLOW_ICONS,

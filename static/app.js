@@ -882,6 +882,8 @@ const DOT_DEFAULTS = {
     // Kreski wybranych przejazdów rowerem i ich stacje końcowe na stałe,
     // a nie tylko pod kursorem - domyślnie zgaszone.
     bikeRides: false,
+    // Debug: dlaczego rower i auto przeszły wybór (pole `why` z serwera).
+    why: false,
 };
 
 const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
@@ -2011,10 +2013,11 @@ function timetableHtml(data, mapSec) {
                                        : wszystkie.filter(d => d.sec < mapSec);
     const reszta = mapSec === undefined ? wszystkie
                                         : wszystkie.filter(d => d.sec >= mapSec);
-    const list = [...przed.slice(0, Math.max(1, Math.floor(ile / 2))),
-                  ...reszta].slice(0, ile);
-    const kreskaPo = przed.length ? Math.min(przed.length,
-                                             Math.max(1, Math.floor(ile / 2))) : 0;
+    // Odjazdy sprzed przyjazdu mapy to tło - najwyżej połowa wierszy, bez
+    // wymuszonego minimum: przy jednym wierszu zostaje ten, na który się
+    // zdąży, bo to o niego pyta tablica (#143).
+    const kreskaPo = Math.min(przed.length, Math.floor(ile / 2));
+    const list = [...przed.slice(0, kreskaPo), ...reszta].slice(0, ile);
     // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
     // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
     // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
@@ -2460,7 +2463,24 @@ function carTooltipHtml(car) {
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
         `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
         ogarniamText(car.ogarniam),
+        ...(dotOpts.why && car.why ? [
+            whyText(car.why) + (car.why.group > 1
+                ? ` · najlepsze z ${car.why.group} aut spod tego samego miejsca` : ''),
+        ] : []),
     ].join('<br>');
+}
+
+/** Debug: dlaczego rower albo auto przeszło wybór (pole `why`, patrz
+    bikes._why i traficar._why) - w czym jest najlepsze i co je bije. Poziom
+    to liczba tych, które je biją: 0 znaczy, że nie bije go nic. */
+function whyText(why) {
+    const parts = [];
+    if (why.records.length) parts.push(`najlepszy: ${why.records.join(', ')}`);
+    parts.push(why.beaten
+        ? `bije go ${why.beaten} z ${why.of}: ${why.beaten_by.map(esc).join(', ')}` +
+          (why.beaten > why.beaten_by.length ? ' …' : '') + ` (poziom ${why.beaten})`
+        : `nic go nie bije (z ${why.of})`);
+    return `<i>${parts.join(' · ')}</i>`;
 }
 
 /** Program „Ogarniam" (w feedzie: `discounts`) - co przy tym aucie jest do
@@ -2541,6 +2561,18 @@ function bikeTooltipHtml(place, live) {
     rows.push(live ? bikeCountText(place)
                    : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
                      'jest z tej chwili, a pytasz o inny dzień');
+    if (dotOpts.why && place.why) {
+        // Wybór przechodzi STACJA (punkt 16), więc powód stoi przy niej, a pod
+        // nim podróże, które stacja pokazuje - każda ze swoimi trzema liczbami.
+        rows.push(whyText(place.why));
+        for (const ride of place.rides) {
+            for (const option of ride.options) {
+                rows.push(`→ ${esc(ride.name)}: przy rowerze ` +
+                          `${fmtClock(option.bike_at)}, w celu ` +
+                          `${fmtClock(option.arrival)}, pojazdów ${option.vehicles}`);
+            }
+        }
+    }
     return rows.join('<br>');
 }
 
@@ -3008,8 +3040,8 @@ function detailHtml(journey) {
                 // przesiadkę, której nie zdąży.
                 // Przecinek, nie kropka - reszta interfejsu jest po polsku.
                 `<span class="tl-info">${(leg.distance_m / 1000).toFixed(1).replace('.', ',')} km · ` +
-                `${leg.minutes} min (odblokowanie ${leg.unlock_minutes} min, ` +
-                `jazda ${leg.ride_minutes} min, zwrot ${leg.dock_minutes} min)<br>` +
+                `${leg.minutes} min (jazda ${leg.ride_minutes} min, ` +
+                `wypożyczenie i zwrot ${leg.overhead_minutes} min)<br>` +
                 `${esc(leg.from)}: ${leg.bikes_available} ` +
                 `${plural(leg.bikes_available, 'rower', 'rowery', 'rowerów')} · ` +
                 `${esc(leg.to)}: ${leg.docks_available} ` +
@@ -3510,6 +3542,11 @@ function showError(message, suggestions) {
     resultsBox.innerHTML = html + '</div>';
 }
 
+// Tempo marszu to trzy stałe tempa (patrz gtfs.WALK_PACES), więc suwak ma
+// trzy pozycje, a obok stoi nazwa, nie numer pozycji.
+const WALK_PACES = ['wolno', 'zwykle', 'szybko'];
+const WALK_PACE_LABELS = ['wolne', 'zwykłe', 'szybkie'];
+
 function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
@@ -3523,6 +3560,9 @@ function queryParams() {
         bike_regular: bikeRegularOn ? '1' : '0',
         latest_start: $('latest-start').checked ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
+        walk_pace: WALK_PACES[$('walk-pace').value],
+        bike_kmh: $('bike-kmh').value,
+        bike_overhead_sec: (Number($('bike-overhead').value) * 60).toFixed(0),
     });
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
     // wynika z samej gęstości z suwaka.
@@ -3629,19 +3669,30 @@ function showRailOnlyNotice() {
         + '</p></div>');
 }
 
-/** Informacja, że trasa rusza dopiero innego dnia niż pytanie - czekanie ma
-    być widoczne, nie schowane (punkt 13 kontraktu).
+/** Informacja, że trasa rusza dopiero po dłuższym czekaniu albo innego dnia
+    niż pytanie - czekanie ma być widoczne, nie schowane (punkt 13 kontraktu).
 
-    Czekanie tego samego dnia mówi już pasek nad mapą ("wyjeżdżasz o"), więc
-    tu zostaje tylko zmiana doby, której godzina sama nie zdradza.
+    Godzinę wyjazdu mówi też pasek nad mapą ("wyjeżdżasz o"), ale łatwo ją
+    przeoczyć - dłuższe czekanie tego samego dnia dostaje więc i tak osobny
+    komunikat (decyzja użytkownika z 2026-09-25, po recenzji #141/#143/#147).
 
     Styl neutralny, nie czerwony: to nie błąd, tylko odpowiedź na pytanie
     "jak tam dojadę", gdy odpowiedź brzmi "za jakiś czas". */
+const WAIT_NOTICE_SEC = 20 * 60;
+
 function waitNoticeHtml(data) {
-    if (!data.day_offset) return '';
-    const dzien = data.day_offset === 1 ? 'jutro' : `za ${data.day_offset} dni`;
-    return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
-        + `Najbliższy wyjazd ${dzien} o ${esc(data.starts)}.</p></div>`;
+    if (data.day_offset) {
+        const dzien = data.day_offset === 1 ? 'jutro' : `za ${data.day_offset} dni`;
+        return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
+            + `Najbliższy wyjazd ${dzien} o ${esc(data.starts)}.</p></div>`;
+    }
+    if (!(data.waits_sec > WAIT_NOTICE_SEC)) return '';
+    // Tego samego dnia coś stąd zwykle jedzie wcześniej - tylko nie dowozi
+    // szybciej. "Nic już nie jedzie" byłoby nieprawdą; prawdą jest, że na
+    // najszybszy dojazd trzeba poczekać.
+    const ile = Math.round(data.waits_sec / 60);
+    return `<div class="notice"><p>Najszybszy dojazd wyjeżdża o `
+        + `${esc(data.starts)} — to za ${ile} min.</p></div>`;
 }
 
 function showWaitNotice(data) {
@@ -4043,7 +4094,8 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain'];
+const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
+                        'walk-pace', 'bike-kmh', 'bike-overhead'];
 
 function loadDevPrefs() {
     try {
@@ -4099,6 +4151,15 @@ liveSlider('density', 'density-value', true);
 liveSlider('car-count', 'car-count-value', true);
 liveSlider('bike-count', 'bike-count-value', true);
 liveSlider('transfer-gain', 'transfer-gain-value');
+liveSlider('walk-pace', 'walk-pace-value');
+liveSlider('bike-kmh', 'bike-kmh-value');
+liveSlider('bike-overhead', 'bike-overhead-value');
+
+function showWalkPace() {
+    $('walk-pace-value').textContent = WALK_PACE_LABELS[$('walk-pace').value];
+}
+$('walk-pace').addEventListener('input', showWalkPace);
+showWalkPace();
 
 // Grupowanie aut, dostawczaki i rodzaj roweru zmieniają odpowiedź serwera,
 // więc jak suwak: pamiętane w tym samym kluczu i od razu nowe zapytanie.
@@ -4339,6 +4400,7 @@ const DOT_TOGGLES = {
     'tip-panel': 'tipPanel',
     'bike-times': 'bikeTimes',
     'bike-rides': 'bikeRides',
+    'debug-why': 'why',
 };
 
 function applyDotOpts() {
@@ -4402,8 +4464,8 @@ bindDotOpts();
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer',
-    'fold-sound', 'fold-dots', 'fold-bike', 'fold-cars', 'fold-experiments',
-    'look-section',
+    'fold-sound', 'fold-dots', 'fold-bike', 'fold-cars', 'fold-assumptions',
+    'fold-experiments', 'fold-debug', 'look-section',
     'fold-version',
 ];
 

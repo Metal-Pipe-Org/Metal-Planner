@@ -362,7 +362,7 @@
       podświetlenie zmienionych opcji (markChangedSettings w app.js), więc
       muszą się zgadzać z *_DEFAULTS w app.js i z domyślnymi w plannerze.
     #}
-    <details class="dev-fold" id="fold-window" open>
+    <details class="dev-fold" id="fold-window">
     <summary>Co pokazuje mapa</summary>
 
     <div class="field">
@@ -389,18 +389,19 @@
 
     <div class="field">
         <label for="bike-count">
-            Ile przejazdów rowerem <output id="bike-count-value">4</output>
+            Ile stacji z rowerem <output id="bike-count-value">4</output>
         </label>
         <input type="range" id="bike-count" min="1" max="30" step="1" value="4">
         <p class="field-hint">
-            Przejazdy, których nic nie bije długością jazdy rowerem, godziną w celu
-            ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
+            Stacje, których żadna inna nie bije godziną przy rowerze, godziną
+            w celu ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
+            Przejazdy z każdej stacji widać pod kursorem.
         </p>
     </div>
 
     </details>
 
-    <details class="dev-fold" id="fold-time" open>
+    <details class="dev-fold" id="fold-time">
         <summary>Czas na mapie</summary>
 
         <label class="dev-check">
@@ -516,20 +517,57 @@
     <summary>Traficary</summary>
 
         <label class="dev-check">
-            <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
-        </label>
-        <p class="field-hint">
-            Z aut, do których idzie się z tego samego miejsca, zostaje tylko to,
-            przy którym jest się najwcześniej, albo to, które daje więcej z „Ogarniam”.
-        </p>
-
-        <label class="dev-check">
             <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
         </label>
         <p class="field-hint">
             Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
             i stoją na mapie jako puste pierścienie.
         </p>
+
+    </details>
+
+    {#
+      Założenia czasowe (zgłoszenie #151) - każdy ustawia swoje. Tempo marszu
+      to trzy stałe tempa, nie płynny suwak: przejścia liczy się raz na dzień
+      (gtfs.with_pace), więc każde tempo to jedno przeliczenie, a nie jedno
+      na każde zapytanie.
+    #}
+    <details class="dev-fold" id="fold-assumptions">
+    <summary>Założenia czasowe</summary>
+
+    <div class="field">
+        <label for="walk-pace">
+            Tempo marszu <output id="walk-pace-value">zwykłe</output>
+        </label>
+        <input type="range" id="walk-pace" min="0" max="2" step="1" value="1">
+        <p class="field-hint">
+            Wszystkie przejścia: między przystankami, ze startu, do celu, do auta
+            i do roweru. Zwykłe to ok. 42 m na minutę w linii prostej, wolne
+            ok. 33, szybkie ok. 54; krótsze przejście i tak trwa co najmniej
+            3 minuty.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="bike-kmh">
+            Prędkość roweru <output id="bike-kmh-value">10</output> km/h
+        </label>
+        <input type="range" id="bike-kmh" min="5" max="20" step="1" value="10">
+        <p class="field-hint">
+            Liczona w linii prostej między stacjami, więc objazdy ulicami już
+            w niej siedzą — 10 km/h to ok. 14 km/h realnej jazdy.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="bike-overhead">
+            Wypożyczenie i zwrot roweru <output id="bike-overhead-value">2</output> min
+        </label>
+        <input type="range" id="bike-overhead" min="0" max="10" step="1" value="2">
+        <p class="field-hint">
+            Stały czas każdego przejazdu, niezależny od jego długości.
+        </p>
+    </div>
 
     </details>
 
@@ -541,6 +579,14 @@
     <summary>Eksperymenty</summary>
 
         <label class="dev-check">
+            <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
+        </label>
+        <p class="field-hint">
+            Z aut, do których idzie się z tego samego miejsca, zostaje tylko to,
+            przy którym jest się najwcześniej, albo to, które daje więcej z „Ogarniam”.
+        </p>
+
+        <label class="dev-check">
             <input type="checkbox" id="latest-start"> Mapa od ostatniej chwili na najszybszy dojazd
         </label>
         <p class="field-hint">
@@ -548,6 +594,23 @@
             najszybciej, a wcześniejsze wyjazdy dokłada dopiero „Pokaż więcej”,
             cofając początek mapy do godziny z pytania. Na razie chowa też
             wcześniejsze dojazdy do aut i rowerów.
+        </p>
+
+    </details>
+
+    {#
+      Podgląd do oceniania reguł wyboru - nic tu nie rusza serwera, dane
+      przychodzą zawsze, przełącznik tylko je pokazuje.
+    #}
+    <details class="dev-fold" id="fold-debug">
+    <summary>Debug</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="debug-why"> Dlaczego rower i auto są na mapie
+        </label>
+        <p class="field-hint">
+            Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych
+            je bije i które — przy rowerze dla całej stacji, z listą jej podróży.
         </p>
 
     </details>

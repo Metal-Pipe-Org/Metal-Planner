@@ -11,14 +11,17 @@ pasażer może zrobić, zaczyna się właśnie tam i wtedy:
 
   * zostać w pojeździe - to zwykłe wsiadanie w ten sam kurs na tym przystanku,
     z zerowym czekaniem (kurs stoi tam dokładnie o tej sekundzie);
-  * wysiąść i przesiąść się - to zwykłe wsiadanie w inny kurs z tego przystanku;
+  * wysiąść i przesiąść się - to zwykła przesiadka na inny kurs z tego
+    przystanku, z jej minutą zapasu;
   * wysiąść i pójść pieszo (albo po rower, albo do auta) - to zwykłe przejście
     z tego przystanku.
 
-Dzięki temu planer nie potrzebuje ani jednej nowej gałęzi: dostaje słupek
-i sekundę jak przy każdym innym wyszukiwaniu (patrz planner.plan_flow), a cały
-tryb sprowadza się do ROZPOZNANIA KURSU - który to właściwie pojazd - i do
-opisania wyniku tak, żeby było widać, gdzie z niego wysiąść.
+Dzięki temu planer dostaje słupek i sekundę jak przy każdym innym
+wyszukiwaniu (patrz planner.plan_flow), a cały tryb sprowadza się do
+ROZPOZNANIA KURSU - który to właściwie pojazd - i do opisania wyniku tak, żeby
+było widać, gdzie z niego wysiąść. Jedyne, co planer musi o tym kursie
+wiedzieć, to że na przystanek startowy się nim PRZYJEŻDŻA: każdy inny pojazd
+jest stamtąd przesiadką (patrz planner._board_buffer).
 
 Rozpoznanie idzie po trzech rzeczach, bo dokładnie tyle widzi pasażer
 w pojeździe: numer linii, kierunek z czoła pojazdu i nazwa następnego
@@ -153,6 +156,27 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
     }
 
 
+def _seated(journey, ride):
+    legs = journey.get("legs") or []
+    first = legs[0] if legs else None
+    return (first is not None and first.get("kind") == "ride"
+            and first.get("dep_sec") == ride["sec"]
+            and first.get("line") == ride["line"]
+            and first.get("from") == ride["stop_name"])
+
+
+def count_exit(journeys, ride):
+    """Wysiadka z pojazdu, w którym się siedzi, to przesiadka jak każda inna:
+    karta ma mówić "jedna przesiadka", gdy trzeba wysiąść z 146 i wsiąść do
+    7, choć etapów jazdy jest na niej tylko jeden. Wołane na każdej liście
+    propozycji PRZED ich scaleniem, bo z tej liczby liczy się też kolejność
+    (patrz planner._journey_key)."""
+    for journey in journeys:
+        if not _seated(journey, ride):
+            journey["transfers"] += 1
+    return journeys
+
+
 def mark_journeys(journeys, ride):
     """Dopisuje do gotowych propozycji to, czego pasażer w pojeździe naprawdę
     potrzebuje: GDZIE WYSIĄŚĆ i za ile to przystanków.
@@ -175,11 +199,7 @@ def mark_journeys(journeys, ride):
     for journey in journeys:
         legs = journey.get("legs") or []
         first = legs[0] if legs else None
-        siedzimy = (first is not None and first.get("kind") == "ride"
-                    and first.get("dep_sec") == ride["sec"]
-                    and first.get("line") == ride["line"]
-                    and first.get("from") == ride["stop_name"])
-        if siedzimy:
+        if _seated(journey, ride):
             first["onboard"] = True
             journey["onboard"] = {
                 "stop": first["to"],

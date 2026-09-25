@@ -8,7 +8,7 @@ Cztery rzeczy, które muszą być prawdą:
 
 1. rower wolno wstawić w DOWOLNE miejsce trasy - na początek, na koniec,
    w środek i jako całą trasę;
-2. czas etapu to dojście + odblokowanie + jazda + zwrot + dojście, i to
+2. czas etapu to dojście + wypożyczenie ze zwrotem + jazda + dojście, i to
    wszystko widać w godzinach na karcie, a nie tylko w opisie;
 3. rower, który niczego nie wygrywa, nie trafia na listę;
 4. cokolwiek się stanie z cudzym serwerem, zwykłe wyszukiwanie ma działać
@@ -159,12 +159,13 @@ def test_sam_rower_bez_zadnego_przejazdu(install_day, install_stations, pin_dead
 
 # ------------------------------------------------------------- czas i marginesy ----
 
-def test_godziny_skladaja_sie_z_dojscia_odblokowania_jazdy_i_zwrotu(
+def test_godziny_skladaja_sie_z_dojscia_wypozyczenia_i_jazdy(
         install_day, install_stations, pin_deadline):
     """Każdy składnik jest w godzinach, nie tylko w opisie.
 
-    M o 600 -> dojście 120 s -> odblokowanie 180 s -> jazda 360 s ->
-    zwrot 60 s -> dojście 120 s = 1440 na przystanku P.
+    M o 600 -> dojście 180 s -> wypożyczenie ze zwrotem 120 s + jazda 360 s
+    -> dojście 180 s = 1440 na przystanku P. Dojście to zwykły marsz
+    (gtfs.walk_time_sec), jazda - ten sam model co na mapie.
     """
     pin_deadline(5400)   # dawne okno 200%
     install_day(_siec_z_luka())
@@ -173,19 +174,20 @@ def test_godziny_skladaja_sie_z_dojscia_odblokowania_jazdy_i_zwrotu(
     legs = _propozycja_z_rowerem(wynik)["legs"]
     dojscie, przejazd, zejscie = legs[1], legs[2], legs[3]
 
-    assert dojscie["dep_sec"] == 600 and dojscie["minutes"] == 2
+    assert dojscie["dep_sec"] == 600 and dojscie["minutes"] == 3
     # Etap zaczyna się PO dojściu, a kończy po zwrocie roweru.
-    assert przejazd["dep_sec"] == 720
-    assert przejazd["arr_sec"] == 720 + bikes.UNLOCK_SEC + 360 + bikes.DOCK_SEC
+    assert przejazd["dep_sec"] == 780
+    assert przejazd["arr_sec"] == 780 + bikes.MAP_OVERHEAD_SEC + 360
     assert zejscie["dep_sec"] == przejazd["arr_sec"]
-    # Trzy części sumują się dokładnie do długości etapu - liczby stoją na
+    assert zejscie["dep_sec"] + zejscie["minutes"] * 60 == 1440
+    # Obie części sumują się dokładnie do długości etapu - liczby stoją na
     # karcie obok siebie i nie mogą się nie zgadzać.
-    assert (przejazd["unlock_minutes"] + przejazd["ride_minutes"]
-            + przejazd["dock_minutes"]) == przejazd["minutes"]
-    assert przejazd["unlock_minutes"] == bikes.UNLOCK_SEC // 60
+    assert (przejazd["overhead_minutes"] + przejazd["ride_minutes"]
+            == przejazd["minutes"])
+    assert przejazd["overhead_minutes"] == bikes.MAP_OVERHEAD_SEC // 60
 
 
-def test_margines_na_odblokowanie_naprawde_przesuwa_godzine(
+def test_margines_na_wypozyczenie_naprawde_przesuwa_godzine(
         install_day, install_stations, monkeypatch, pin_deadline):
     """Podniesienie marginesu gubi kurs o 1600 - i propozycja ma to pokazać,
     a nie udawać, że zdąży. To jedyny etap trasy, na którym pasażer stoi
@@ -195,7 +197,7 @@ def test_margines_na_odblokowanie_naprawde_przesuwa_godzine(
     install_stations([STACJA_M, STACJA_P])
     # 1440 + TRANSFER_SEC = 1500, czyli kurs o 1600 jest do złapania z zapasem
     # 100 s. Margines dłuższy o dwie minuty ten zapas kasuje.
-    monkeypatch.setattr(bikes, "UNLOCK_SEC", bikes.UNLOCK_SEC + 120)
+    monkeypatch.setattr(bikes, "MAP_OVERHEAD_SEC", bikes.MAP_OVERHEAD_SEC + 120)
     wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     # Kurs o 1600 przepadł, zostaje ten o 2400 - i tę PRAWDZIWĄ godzinę
@@ -203,8 +205,24 @@ def test_margines_na_odblokowanie_naprawde_przesuwa_godzine(
     assert _propozycja_z_rowerem(wynik)["arrival_sec"] == 2700
 
 
+def test_predkosc_i_narzut_spod_zebatki_licza_sie_w_propozycji(
+        install_day, install_stations, pin_deadline):
+    """Założenia pytającego (zgłoszenie #151) liczą się tak samo jak na mapie:
+    913 m przy 20 km/h to 3 minuty jazdy, plus 5 minut narzutu."""
+    pin_deadline(5400)   # dawne okno 200%
+    install_day(_siec_z_luka())
+    install_stations([STACJA_M, STACJA_P])
+    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True,
+                              bike_kmh=20, bike_overhead_sec=300)
+    przejazd = _propozycja_z_rowerem(wynik)["legs"][2]
+
+    assert przejazd["ride_minutes"] == 3
+    assert przejazd["overhead_minutes"] == 5
+    assert przejazd["arr_sec"] - przejazd["dep_sec"] == 8 * 60
+
+
 def test_za_krotki_przejazd_nie_jest_proponowany(install_day, install_stations, pin_deadline):
-    """Poniżej bikes.MIN_RIDE_M odblokowanie i zwrot zjadają całą oszczędność -
+    """Poniżej bikes.MIN_RIDE_M wypożyczenie i zwrot zjadają całą oszczędność -
     szybciej jest przejść, więc takiej pary stacji w ogóle nie rozważamy."""
     pin_deadline(5400)   # dawne okno 200%
     install_day(_siec_z_luka())
@@ -358,16 +376,17 @@ def test_czasy_sa_w_pelnych_minutach_i_zaokraglane_w_gore():
     inaczej „13:03 przyjazd, 1 min dojścia, 13:03 odjazd". W górę, bo każde
     z tych zaokrągleń jest marginesem (patrz bikes._whole_minutes)."""
     for metry in (1, 100, 300, 1200, 5000):
-        assert bikes.walk_sec(metry) % 60 == 0
-        assert bikes.ride_sec(metry) % 60 == 0
-    assert bikes.walk_sec(1) == 60          # minimum to jedna minuta
-    assert bikes.UNLOCK_SEC % 60 == 0 and bikes.DOCK_SEC % 60 == 0
+        assert bikes.ride_time_sec(metry) % 60 == 0
+    # Minimum to jedna minuta jazdy ponad narzut.
+    assert bikes.ride_time_sec(1) == bikes.MAP_OVERHEAD_SEC + 60
+    assert bikes.MAP_OVERHEAD_SEC % 60 == 0
 
 
 def test_sufit_przejazdu_stoi_na_czasie_pedalowania():
     """MAX_RIDE_M jest wyliczony z MAX_RIDE_SEC, a nie wpisany osobno -
     inaczej zmiana prędkości roweru rozjechałaby jedno z drugim."""
-    assert bikes.ride_sec(bikes.MAX_RIDE_M) == bikes.MAX_RIDE_SEC
+    assert (bikes.ride_time_sec(bikes.MAX_RIDE_M)
+            == bikes.MAP_OVERHEAD_SEC + bikes.MAX_RIDE_SEC)
 
 
 def test_stacje_bez_pary_w_drugim_kanale_wypadaja():

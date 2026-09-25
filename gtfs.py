@@ -75,6 +75,14 @@ WALK_M = 600
 # pesymistyczny, nigdy optymistyczny (ta sama zasada, co przy zaokrąglaniu
 # godzin kolejowych - patrz pkp.py).
 WALK_SPEED_MPS = 0.7
+# Trzy tempa do wyboru pod zębatką (zgłoszenie #151) - każdy pasażer ustawia
+# swoje. Środkowe to WALK_SPEED_MPS, reszta wg tego samego rachunku: ktoś
+# wolniejszy (bagaż, dziecko, laska) idzie około 0,85 m/s, ktoś szybki
+# około 1,4 m/s, oba podzielone przez tę samą krętość ~1,5. Stałe tempa, a
+# nie suwak, bo przejścia liczy się raz na cały dzień (patrz with_pace) -
+# trzy tempa to trzy przeliczenia na dzień, a nie jedno na każde zapytanie.
+WALK_PACES = {"wolno": 0.55, "zwykle": WALK_SPEED_MPS, "szybko": 0.9}
+DEFAULT_WALK_PACE = "zwykle"
 # Podłoga: żadne przejście nie kosztuje mniej niż trzy minuty. Dwa powody,
 # oba istotne. Po pierwsze, sam dystans nie jest całym kosztem - trzeba
 # jeszcze ZNALEŹĆ właściwe stanowisko, co przy zmianie peronu potrafi być
@@ -282,14 +290,15 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     return _merge_named_places(places, stop_coords)
 
 
-def walk_time_sec(meters):
+def walk_time_sec(meters, mps=WALK_SPEED_MPS):
     """Ile trwa przejście pieszo na dystansie `meters` w linii prostej
     Zaokrąglamy W GÓRĘ do pełnej minuty - tak samo, jak cała reszta godzin
     w tej aplikacji jest w pełnych minutach (patrz punkt 12 kontraktu), i tak
     samo po bezpiecznej stronie: pasażer ma mieć na przejście całą minutę,
     a nie jej kawałek (patrz WALK_SPEED_MPS/WALK_MIN_SEC - tam uzasadnienie
-    samej prędkości)."""
-    return max(WALK_MIN_SEC, 60 * math.ceil(meters / WALK_SPEED_MPS / 60))
+    samej prędkości). `mps` to tempo pytającego - dzień je zna (day.walk_mps,
+    patrz with_pace)."""
+    return max(WALK_MIN_SEC, 60 * math.ceil(meters / mps / 60))
 
 
 def walk_seconds(day, from_stop, to_stop):
@@ -316,7 +325,8 @@ def walk_seconds(day, from_stop, to_stop):
     skad, dokad = day.stop_coords.get(from_stop), day.stop_coords.get(to_stop)
     if skad is None or dokad is None:
         return WALK_MIN_SEC
-    return walk_time_sec(_haversine_m(skad[0], skad[1], dokad[0], dokad[1]))
+    return walk_time_sec(_haversine_m(skad[0], skad[1], dokad[0], dokad[1]),
+                         day.walk_mps)
 
 
 def walk_reach(day, stops, max_m=WALK_M):
@@ -350,7 +360,7 @@ def walk_reach(day, stops, max_m=WALK_M):
             dist = _haversine_m(origin[0], origin[1], lat, lon)
             if dist > max_m:
                 continue
-            sec = walk_time_sec(dist)
+            sec = walk_time_sec(dist, day.walk_mps)
             known = reach.get(other)
             if known is None or sec < known[0]:
                 reach[other] = (sec, src)
@@ -476,7 +486,7 @@ class DayData:
         "stops_by_alias_key", "alias_display_name",
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
-        "pkp_stations", "deps_by_stop", "_reach",
+        "pkp_stations", "deps_by_stop", "_reach", "walk_mps", "_paced",
     )
 
     def __init__(self):
@@ -507,6 +517,10 @@ class DayData:
         self.conns_by_trip = None    # kurs -> indeksy w conns (leniwie, patrz trip_conns)
         self.deps_by_stop = None     # słupek -> odjazdy (leniwie, patrz stop_departures)
         self._reach = {}             # pamięć podręczna walk_reach (patrz wyżej)
+        # Tempo marszu, którym policzono `siblings` - domyślne; inne tempa to
+        # osobne kopie dnia (patrz with_pace), trzymane w `_paced`.
+        self.walk_mps = WALK_SPEED_MPS
+        self._paced = {}
         # trip_id "PKP:..." -> [(stop_id, przyjazd, odjazd), ...] po kolei -
         # odpowiednik stop_times.txt dla kursów kolejowych (patrz pkp.py:
         # augment_day/trip_path). GTFS-owe kursy tego nie używają - mają
@@ -739,6 +753,7 @@ def with_point(day, lat, lon, side):
     data.stop_names = dict(day.stop_names)
     data.siblings = dict(day.siblings)
     data._reach = {}          # inny zestaw słupków, więc cache dojść nie pasuje
+    data._paced = {}          # jw. - tempa liczy się z dnia bazowego (patrz with_pace)
 
     stop_id = f"__punkt__{side}"
     data.stop_coords[stop_id] = (lat, lon)
@@ -749,7 +764,7 @@ def with_point(day, lat, lon, side):
         dist = _haversine_m(lat, lon, slat, slon)
         if dist > WALK_M:
             continue
-        sec = walk_time_sec(dist)
+        sec = walk_time_sec(dist, day.walk_mps)
         edges[other] = sec
         # Most jest dwukierunkowy: z punktu się wychodzi (start relacji), ale
         # też do niego dochodzi (cel relacji), a skan wstecz i profil celu
@@ -757,6 +772,43 @@ def with_point(day, lat, lon, side):
         data.siblings[other] = {**day.siblings.get(other, {}), stop_id: sec}
     data.siblings[stop_id] = edges
     return data, stop_id
+
+
+def with_pace(day, pace):
+    """Dzień z przejściami policzonymi tempem `pace` (klucz WALK_PACES).
+
+    Przejścia (`siblings`) liczy się raz na dzień, bo to cała sieć mostów
+    pieszych miasta. Każde tempo to więc osobna kopia dnia, policzona przy
+    pierwszym pytaniu i trzymana na dniu bazowym (`_paced`) - żyje i umiera
+    razem z nim, jak cache dojść (patrz _REACH_CACHE_MAX). Tempo domyślne to
+    sam dzień, bez kopii.
+
+    Które słupki są w zasięgu, nie zmienia się: promień (WALK_M) jest jeden
+    dla wszystkich temp, zmienia się tylko cena przejścia. Krawędź bez
+    współrzędnych (syntetyczny dzień z testów) zostaje ze swoją ceną.
+    Kopia jest płytka, jak w with_point: tablica połączeń zostaje wspólna.
+    """
+    mps = WALK_PACES[pace]
+    if mps == day.walk_mps:
+        return day
+    paced = day._paced.get(pace)
+    if paced is not None:
+        return paced
+    coords = day.stop_coords
+    paced = copy.copy(day)
+    paced.walk_mps = mps
+    paced._reach = {}
+    paced._paced = {}
+    paced.siblings = {
+        stop: {
+            other: (walk_time_sec(_haversine_m(*coords[stop], *coords[other]), mps)
+                    if stop in coords and other in coords else sec)
+            for other, sec in edges.items()
+        }
+        for stop, edges in day.siblings.items()
+    }
+    day._paced[pace] = paced
+    return paced
 
 
 STOP_SNAP_M = 60   # kropka na mapie stoi NA słupku, nie "gdzieś w okolicy"
