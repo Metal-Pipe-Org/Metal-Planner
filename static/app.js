@@ -846,10 +846,10 @@ const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * r
 // wciaz szukanie formy, a nie gotowa decyzja.
 const TIME_DEFAULTS = {
     hover: true,        // godzina w punkcie pod kursorem + przyjazd do celu
-    bar: false,         // ...razem z paskiem: jaka to czesc najszybszej trasy
     ends: false,        // kropka dokladnie w punkcie, ktorego dotyczy godzina
     chips: false,       // godzina malym drukiem pod numerkiem w grupce
     headline: true,     // pasek nad mapa: najszybciej tyle, pokazane do tyle
+    ride: false,        // ...i w nim sam czas jazdy obok "za ile tam bedziesz"
 };
 
 const TIME_PREFS_KEY = 'metal-planner:time-prefs';
@@ -1255,15 +1255,21 @@ function renderTimeHeadline() {
         ? `<button type="button" class="headline-more" title="Rysuj też gorsze `
           + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">Pokaż więcej</button>`
         : '';
+    // Sama jazda to osobna liczba na życzenie: "za ile" zostaje zawsze.
+    const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
+        ? `, jazda <b>${esc(fmtMins(flow.ride_sec))}</b>` : '';
     el.innerHTML =
         // "za", nie "w": obie liczby są mierzone od godziny z formularza,
         // więc mówią, ZA ILE się tam będzie, a nie ile trwa sama jazda
         // (zgłoszenie #143). Czekanie na pierwszy pojazd jest w nich zawarte.
-        `<span class="headline-best" tabindex="0">Najszybciej o `
-        + `<b>${esc(flow.best_arrival)}</b>, za <b>${esc(fmtMins(flow.best_sec))}</b>${chips}</span>`
+        // "Wyjeżdżasz o" to najpóźniejszy wyjazd, który wciąż daje najszybszy
+        // przyjazd - wcześniej wychodzi się tylko po to, żeby gdzieś czekać.
+        `<span class="headline-best" tabindex="0">Najszybciej: wyjeżdżasz o `
+        + `<b>${esc(flow.starts)}</b>, dojeżdżasz o <b>${esc(flow.best_arrival)}</b>, `
+        + `za <b>${esc(fmtMins(flow.best_sec))}</b>${ride}${chips}</span>`
         + `<span class="headline-sep">·</span>`
-        + `<span class="headline-limit">mapa pokazuje do `
-        + `<b>${esc(flow.deadline)}</b>, za <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
+        + `<span class="headline-limit">mapa od <b>${esc(flow.map_from)}</b> `
+        + `do <b>${esc(flow.deadline)}</b>, za <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
         + more;
     el.hidden = false;
     const best = el.querySelector('.headline-best');
@@ -1709,13 +1715,7 @@ function flowPickHtml(when) {
     Duza liczba to godzina DOKLADNIE w punkcie pod kursorem (interpolowana,
     patrz timeAtPos). Pod nia przyjazd do celu, gdy jedzie sie dalej stad -
     ta sama liczba, z ktorej policzona jest jasnosc tego kawalka, wiec kolor
-    i godzina nigdy nie moga powiedziec czegos innego.
-
-    Pasek daje "18 min" skale: sama liczba nie mowi, czy to kawalek drogi, czy
-    prawie cala. Odniesieniem jest najszybsza trasa (best_sec), nie okno mapy -
-    okno rusza sie suwakiem, wiec pasek liczony wzgledem niego zmienialby
-    dlugosc przy samym "pokaz wiecej", nic nie mowiac o czasie (ten sam powod,
-    dla ktorego jasnosc odnosi sie do best_arr, patrz kontrakt p.9). */
+    i godzina nigdy nie moga powiedziec czegos innego. */
 function flowTipTimeHtml(when) {
     if (!timeOpts.hover || !when) return '';
     let html = '<span class="flow-tip-time">'
@@ -1729,15 +1729,6 @@ function flowTipTimeHtml(when) {
     const left = when.arrive - when.now;
     html += '<span class="flow-tip-goal">stąd w <b>'
         + `${esc(fmtMins(left))}</b> u celu (<b>${esc(fmtClock(when.arrive))}</b>)</span>`;
-    const total = lastFlow && lastFlow.best_sec;
-    if (timeOpts.bar && total) {
-        // Minimum 2%, zeby bardzo krotka reszta drogi nie wyszla paskiem o
-        // zerowej szerokosci - to czyta sie jak "brak danych", nie jak "blisko".
-        const pct = Math.max(2, Math.min(100, Math.round((100 * left) / total)));
-        html += `<span class="flow-tip-bar"><i style="width:${pct}%"></i></span>`
-            + `<span class="flow-tip-share">${pct}% najszybszej trasy `
-            + `(${esc(fmtMins(total))})</span>`;
-    }
     return html;
 }
 
@@ -3530,7 +3521,7 @@ function queryParams() {
         car_vans: $('car-vans').checked ? '1' : '0',
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
-        no_dawdling: $('no-dawdling').checked ? '1' : '0',
+        latest_start: $('latest-start').checked ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
     });
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
@@ -3638,28 +3629,19 @@ function showRailOnlyNotice() {
         + '</p></div>');
 }
 
-// Od ilu minut czekania mówimy o nim wprost. Ta sama miara, którą mapa uznaje
-// za "przesiadka jeszcze łączy odcinki" (WAIT_CAP_SEC w planner.py): czekanie
-// dłuższe niż to nie jest już częścią płynnej podróży i pasażer ma prawo
-// wiedzieć, że siedzi, a nie jedzie.
-const WAIT_NOTICE_SEC = 20 * 60;
+/** Informacja, że trasa rusza dopiero innego dnia niż pytanie - czekanie ma
+    być widoczne, nie schowane (punkt 13 kontraktu).
 
-/** Informacja, że trasa rusza wyraźnie później niż godzina z pytania -
-    czekanie ma być widoczne, nie schowane (punkt 13 kontraktu).
+    Czekanie tego samego dnia mówi już pasek nad mapą ("wyjeżdżasz o"), więc
+    tu zostaje tylko zmiana doby, której godzina sama nie zdradza.
 
     Styl neutralny, nie czerwony: to nie błąd, tylko odpowiedź na pytanie
-    "jak tam dojadę", gdy odpowiedź brzmi "za jakiś czas". Bez tego mapa
-    pokazywałaby trasę wyglądającą jak każda inna, a pasażer dowiadywałby się
-    o godzinie czekania dopiero z godzin przy etapach. */
+    "jak tam dojadę", gdy odpowiedź brzmi "za jakiś czas". */
 function waitNoticeHtml(data) {
-    if (!data.day_offset && !(data.waits_sec > WAIT_NOTICE_SEC)) return '';
-    const dzien = data.day_offset === 1 ? 'jutro'
-        : data.day_offset > 1 ? `za ${data.day_offset} dni` : '';
-    const kiedy = dzien ? `${dzien} o ${esc(data.starts)}` : `o ${esc(data.starts)}`;
-    const ile = Math.round((data.waits_sec || 0) / 60);
-    const czekanie = !dzien && ile ? ` — to za ${ile} min` : '';
+    if (!data.day_offset) return '';
+    const dzien = data.day_offset === 1 ? 'jutro' : `za ${data.day_offset} dni`;
     return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
-        + `Najbliższy wyjazd ${kiedy}${czekanie}.</p></div>`;
+        + `Najbliższy wyjazd ${dzien} o ${esc(data.starts)}.</p></div>`;
 }
 
 function showWaitNotice(data) {
@@ -4123,7 +4105,7 @@ liveSlider('transfer-gain', 'transfer-gain-value');
 // Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
 // wygląda tak, jak wyglądała przed zgłoszeniem #147.
 for (const [id, domyslnie] of [['car-groups', false], ['car-vans', false],
-                               ['no-dawdling', false]]) {
+                               ['latest-start', false]]) {
     const input = $(id);
     const zapisane = loadDevPrefs()[id];
     input.checked = zapisane === undefined ? domyslnie : zapisane === true;
@@ -4319,10 +4301,10 @@ bindSoundToggle();
 // (lastFlow), więc przełącznik przemalowuje mapę natychmiast, bez zapytania.
 const TIME_TOGGLES = {
     'time-hover': 'hover',
-    'time-bar': 'bar',
     'time-ends': 'ends',
     'time-chips': 'chips',
     'time-show-headline': 'headline',
+    'time-ride': 'ride',
 };
 
 function applyTimeOpts() {
@@ -4420,7 +4402,9 @@ bindDotOpts();
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer',
-    'fold-sound', 'fold-dots', 'fold-bike', 'look-section', 'fold-version',
+    'fold-sound', 'fold-dots', 'fold-bike', 'fold-cars', 'fold-experiments',
+    'look-section',
+    'fold-version',
 ];
 
 function bindDevFolds() {

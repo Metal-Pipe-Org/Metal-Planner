@@ -377,17 +377,6 @@
     </div>
 
     <div class="field">
-        <label class="dev-check">
-            <input type="checkbox" id="no-dawdling"> Bez jazdy na zabicie czasu (próba)
-        </label>
-        <p class="field-hint">
-            Mapa wyrusza najpóźniej, jak się da bez późniejszego przyjazdu — znika z niej
-            jazda, po której i tak wsiada się w ten sam pojazd. Do włączania i wyłączania,
-            żeby zobaczyć różnicę; jeszcze nie jest obietnicą kontraktu.
-        </p>
-    </div>
-
-    <div class="field">
         <label for="car-count">
             Ile aut Traficara <output id="car-count-value">3</output>
         </label>
@@ -395,20 +384,6 @@
         <p class="field-hint">
             Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”,
             są zawsze, a suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.
-        </p>
-        <label class="dev-check">
-            <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
-        </label>
-        <p class="field-hint">
-            Z aut, do których idzie się z tego samego miejsca, zostaje tylko to,
-            przy którym jest się najwcześniej, albo to, które daje więcej z „Ogarniam”.
-        </p>
-        <label class="dev-check">
-            <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
-        </label>
-        <p class="field-hint">
-            Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
-            i stoją na mapie jako puste pierścienie.
         </p>
     </div>
 
@@ -432,10 +407,7 @@
             <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
         </label>
         <label class="dev-check">
-            <input type="checkbox" id="time-bar"> …z paskiem „ile do celu zostało”
-        </label>
-        <label class="dev-check">
-            <input type="checkbox" id="time-ends"> …i kropką dokładnie w tym punkcie
+            <input type="checkbox" id="time-ends"> …z kropką dokładnie w tym punkcie
         </label>
         <p class="field-hint">
             Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu,
@@ -448,9 +420,14 @@
         <label class="dev-check">
             <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
         </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-ride"> …i w nim sam czas jazdy
+        </label>
         <p class="field-hint">
-            Pasek podaje najszybszy dojazd i granicę mapy, a jego „Pokaż więcej”
-            zagęszcza mapę dwa, trzy, cztery razy.
+            Pasek podaje, o której wyjechać i dojechać najszybszą trasą, oraz
+            zakres godzin mapy, a jego „Pokaż więcej” zagęszcza mapę dwa, trzy,
+            cztery razy. Czas jazdy liczy się od wejścia do pierwszego pojazdu,
+            bez czekania na niego.
         </p>
     </details>
 
@@ -531,6 +508,46 @@
         <p class="field-hint">
             Kreski wybranych przejazdów i ich stacje końcowe stoją na mapie cały
             czas, a nie tylko pod kursorem.
+        </p>
+
+    </details>
+
+    <details class="dev-fold" id="fold-cars">
+    <summary>Traficary</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
+        </label>
+        <p class="field-hint">
+            Z aut, do których idzie się z tego samego miejsca, zostaje tylko to,
+            przy którym jest się najwcześniej, albo to, które daje więcej z „Ogarniam”.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
+        </label>
+        <p class="field-hint">
+            Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
+            i stoją na mapie jako puste pierścienie.
+        </p>
+
+    </details>
+
+    {#
+      Próby: domyślnie zgaszone i jeszcze nie obietnica kontraktu — do
+      włączania i wyłączania, żeby zobaczyć różnicę na żywej relacji.
+    #}
+    <details class="dev-fold" id="fold-experiments">
+    <summary>Eksperymenty</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="latest-start"> Mapa od ostatniej chwili na najszybszy dojazd
+        </label>
+        <p class="field-hint">
+            Mapa zaczyna się od najpóźniejszej chwili, z której wciąż dojeżdża się
+            najszybciej, a wcześniejsze wyjazdy dokłada dopiero „Pokaż więcej”,
+            cofając początek mapy do godziny z pytania. Na razie chowa też
+            wcześniejsze dojazdy do aut i rowerów.
         </p>
 
     </details>

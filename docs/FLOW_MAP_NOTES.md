@@ -2117,3 +2117,138 @@ nie rusza raportowanych godzin; we froncie — punkt zerowy dymka z kreską
 i trzy przełączniki lecące do serwera. Przepisany `test_show_more_*`: opisywał
 starą obietnicę („podnosi cel o jedną wyjściową gęstość"), która przestała być
 całą prawdą.
+
+## Pasek z godziną wyjazdu, przesiadki piesze na mapie i „pokaż więcej" wstecz (2026-09-22 – 24)
+
+### 1. Pasek mówi, o której wyjść
+
+„Najszybciej: wyjeżdżasz o, dojeżdżasz o, za X · mapa od – do". Godziną
+wyjazdu jest najpóźniejsza chwila, z której wciąż dojeżdża się najszybciej —
+liczona zawsze, także przy zgaszonym odsiewie krążenia; przełącznik decyduje
+już tylko o tym, czy od tej chwili rusza też mapa. Wcześniej najszybsza trasa
+potrafiła kazać wyjść kwadrans za wcześnie, żeby na przesiadce czekać na ten
+sam pojazd. Koszt: kilka dodatkowych skanów, ok. 0,02 s na zapytanie. Sam
+czas jazdy (bez czekania na pierwszy pojazd) dopisuje do paska osobne
+ustawienie, domyślnie zgaszone — „za ile" zostaje zawsze.
+
+Komunikat „O tej porze nic już stąd nie jedzie" zostaje tylko przy zmianie
+doby. Czekanie tego samego dnia mówi godzina wyjazdu w pasku; próg 20 minut
+przy odsiewie krążenia potrafił zresztą ogłosić „nic nie jedzie", choć
+wcześniejsze wyjazdy były — przełącznik je tylko pomijał. Kontrakt, punkty 10
+i 13, zmieniony na polecenie użytkownika.
+
+### 2. Mapa gubiła przesiadki piesze, które wyszukiwanie uznawało
+
+Zgłoszone zrzutem: punkt na Księżu → Wojszyce, 22.09, 13:19, z odsiewem
+krążenia — tryb awaryjny. Najszybsza trasa: setka na pętlę GAJ o 13:51, trzy
+minuty pieszo na Morwową, osiemnastka o 13:54. Wyszukiwanie liczyło przesiadkę
+jako sam marsz (podłoga trzech minut zawiera już bufor przesiadki, patrz
+gtfs.WALK_MIN_SEC), a skan wstecz, z którego mapa bierze „najpóźniej trzeba tu
+być", doliczał do marszu jeszcze bufor przesiadki na tym samym słupku. Dla
+mapy tej przesiadki nie było, a odsiew krążenia zaczynał mapę dokładnie od tej
+trasy, bez zapasu — z mapy nie zostawało nic. Bez przełącznika start o 13:19
+dawał zapas i rozjazd był niewidoczny. Wersja sprzed paska zachowywała się
+identycznie.
+
+Naprawa przywraca punkt 14 („jedna cena na starcie, w przesiadce i u celu"):
+bufor tylko przy przesiadce na tym samym słupku, pieszo — sam marsz. Zmienia
+też zwykłe mapy, bo wracają na nie ciasne przesiadki piesze (bez przełącznika,
+24.09 wg rozkładu z 22.09):
+
+| relacja | przed | po |
+|---|---|---|
+| Rynek → Sosnowiecka 21:55 | 75 kawałków, do 22:45 | 89, do 22:45 |
+| Rynek → Sosnowiecka 8:10 | 33, do 08:56 | 54, do 08:56 |
+| Leśnica → Bartoszowice 16:44 | 27, do 18:06 | 34, do 18:06 |
+| Pl. Grunwaldzki → Wojszyce 13:00 | 97, do 13:42 | 102, do 13:42 |
+| Sosnowiecka → Wojszyce 15:37 | 9, do 16:32 | 6, do 16:26 |
+| Dworzec Główny → Kozanów 17:30 | 10, do 18:07 | 7, do 18:05 |
+
+Tam, gdzie kawałków ubyło, mapa szybciej dobija do docelowej gęstości i kończy
+się kilka minut wcześniej. Żadna nie wpada w tryb awaryjny.
+
+### 3. „Pokaż więcej" najpierw w stronę pytania (tylko z odsiewem krążenia)
+
+Gdy mapa rusza później niż pytanie, kliknięcia najpierw cofają jej początek
+ku godzinie z pytania — tą samą miarą gęstości co krok naprzód i z tą samą
+gwarancją, że każde coś dokłada — a dopiero gdy nie ma dokąd cofać, przesuwają
+koniec dalej. Uzasadnienie użytkownika: „pokaż więcej" poszerza zakres, a od
+godziny, o której jest się gotowym, bliżej niż od przyjazdów jeszcze
+późniejszych. Rynek → Sosnowiecka 21:55: bez kliknięcia 22:09–22:50 (2
+kawałki), potem 22:01 (26), 21:57 (70), 21:55 (89). Poza kontraktem, jak cały
+przełącznik; gdyby przestał być próbą, punkt 2 potrzebuje drugiego cięcia
+(początek mapy) i tej kolejności.
+
+Odłożony pomysł: przy cofaniu odsiewać czyste krążenie — jazdę kończącą się
+w pojeździe osiągalnym też z późniejszego wyjazdu. Użytkownik nie jest
+przekonany: gdy kilka dojazdów prowadzi do tego samego pojazdu, trzeba wybrać,
+który zostaje, a to już wybieranie za pasażera.
+
+### 4. Przesiadka na tym samym słupku: minuta zamiast dwóch
+
+Decyzja użytkownika (24.09). Najpierw — przez nieporozumienie — przesiadka na
+tym samym słupku dostała cenę marszu (podłoga trzech minut); użytkownikowi
+chodziło o słupki o tej samej nazwie, a te i tak są przejściem pieszym.
+Cofnięte: na dokładnie tym samym słupku nie ma dokąd iść, więc trzy minuty to
+za dużo. Zero też nie, bo na mapie — inaczej niż w liście połączeń — nie widać,
+ile czasu zostaje na przesiadkę, i pasażer nie oceni tego sam. Stanęło na
+minucie; dawniej dwie. Kontrakt, punkt 14, dopisany.
+
+Najszybszy przyjazd na sprawdzanych relacjach bez zmian; mapy odrobinę
+gęstsze (mapa od godziny z pytania, dwie minuty → minuta): Rynek →
+Sosnowiecka 21:55 89 → 90 kawałków, Leśnica → Bartoszowice 34 → 36,
+Pl. Grunwaldzki → Wojszyce 102 → 111; Rynek 8:10, Sosnowiecka → Wojszyce
+i Dworzec → Kozanów bez zmian. Dwa testy zależały od długości zapasu: profil
+liczy granicę co do sekundy z samej stałej, a test marginesu roweru wydłuża
+odblokowanie o dwie minuty zamiast jednej, bo zapas na kurs urósł do 100 s.
+
+Otwarte: wszystkie zakładane prędkości i czasy (marsz, przesiadka, rower,
+auto) mają trafić do osobnej kategorii ustawień — zgłoszenie do utworzenia.
+
+### 5. Początek mapy od ostatniej chwili — domyślnie i w kontrakcie
+
+Decyzja użytkownika (24.09): odsiew krążenia przestaje być próbą. Włączony
+domyślnie, w kontrakcie jako punkt 2 („Mapa zaczyna się od ostatniej chwili na
+najszybszy dojazd", „Najpierw w stronę pasażera"). Nowa nazwa pod zębatką,
+„Mapa od ostatniej chwili na najszybszy dojazd", bo „bez jazdy na zabicie
+czasu" opisywało skutek, nie regułę. Pod nową nazwą przeglądarki zapominają
+zapamiętane „wyłączone" ze starego przełącznika.
+
+Włączenie na stałe wyciągnęło błąd, którego przełącznik jako próba nie
+pokazywał: rower i auto spod startu liczyły się od przesuniętego początku
+mapy. Rower, którym na miejscu jest się szybciej niż komunikacją, czekał
+wtedy na chwilę wyliczoną z komunikacji (test: przyjazd o 1627 zamiast 840).
+Czekanie opłaca się tylko komunikacji — przy starcie rower i auto liczą się
+od godziny z pytania.
+
+### Testy
+
+Razem 395 przechodzących, było 391. Nowe: godzina wyjazdu to najpóźniejszy
+wyjazd także bez przełącznika; mapa uznaje przesiadkę pieszą, którą uznaje
+wyszukiwanie; „pokaż więcej" najpierw cofa początek; we froncie — pasek
+z wyjazdem, przyjazdem i zakresem mapy, czas jazdy tylko z ustawieniem.
+Komunikat o czekaniu sprawdzany już tylko przy zmianie doby.
+
+### 6. Początek mapy od ostatniej chwili z powrotem jako próba
+
+Decyzja użytkownika (25.09), jeszcze przed PR-em: włączenie na stałe cofnięte.
+Mapa od ostatniej chwili chowa wcześniejsze przejazdy, które dowożą do auta
+albo roweru — autobus o jeden przystanek do Traficara znika, bo sam do celu
+nie przyjeżdża szybciej. Przy rowerze łamało to nawet własną regułę cięcia
+(„niczego, co przyjeżdża wcześniej, nie chowa”). Zamiast łatać wyjątkiem,
+temat wraca do przemyślenia razem z #150 (zostawiać tylko wyjazdy prowadzące
+do czegoś własnego — auto i rower też się liczą).
+
+Z kontraktu, punkt 2, zdjęte „Mapa zaczyna się od ostatniej chwili” i
+„Najpierw w stronę pasażera”. Działanie zostaje w kodzie, za przełącznikiem
+domyślnie zgaszonym: z kolejnością „pokaż więcej” najpierw wstecz i z rowerem
+oraz autem spod startu od godziny z pytania. Pasek z godziną wyjazdu,
+przesiadki piesze i minuta na słupku zostają bez zmian.
+
+### 7. Ustawienia: Traficary i Eksperymenty
+
+Na polecenie użytkownika pod zębatką dwie nowe sekcje. „Traficary” —
+grupowanie aut spod jednego miejsca i dostawczaki, wyjęte z „Co pokazuje
+mapa” (suwak liczby aut tam zostaje). „Eksperymenty” — na razie tylko
+mapa od ostatniej chwili. Pasek „ile do celu zostało” w dymku usunięty
+całkiem, razem z przełącznikiem.

@@ -291,6 +291,13 @@ def test_a_route_that_starts_much_later_says_so(front):
     _check(front, "czekanie_jest_widoczne")
 
 
+def test_the_headline_says_when_to_leave(front):
+    """Pasek nad mapą mówi, o której wyjechać i o której się dojedzie
+    najszybszą trasą, oraz od kiedy do kiedy sięga mapa. Sam czas jazdy
+    dopisuje dopiero ustawienie - "za ile tam będziesz" zostaje zawsze."""
+    _check(front, "pasek_mowi_kiedy_wyjechac")
+
+
 def test_departures_past_the_map_horizon_are_dropped(front):
     """Dymek na rzadkim węźle wypisywał odjazdy o 17:51 na mapie kończącej się
     o 15:12 - godziny prawdziwe, ale bez związku z podróżą, o którą pytamy.

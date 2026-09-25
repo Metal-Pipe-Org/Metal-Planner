@@ -342,9 +342,10 @@ def init_routes(app):
             # dostawczakach, których domyślnie nie ma).
             bike_electric=request.args.get("bike_electric", "1") == "1",
             bike_regular=request.args.get("bike_regular", "1") == "1",
-            # Odsiew krążenia - przełącznik DO PORÓWNAŃ pod zębatką, domyślnie
-            # zgaszony i jeszcze nie w kontrakcie (patrz plan_flow).
-            no_dawdling=request.args.get("no_dawdling") == "1",
+            # Początek mapy od najpóźniejszego wyjazdu na najszybszy dojazd -
+            # PRÓBA w Eksperymentach pod zębatką, domyślnie zgaszona i jeszcze
+            # nie w kontrakcie (patrz plan_flow).
+            latest_start=request.args.get("latest_start") == "1",
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
             # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
             # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc

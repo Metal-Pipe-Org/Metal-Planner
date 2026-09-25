@@ -53,11 +53,12 @@ def test_profil_czyta_realny_przyjazd_a_nie_przesuwa_gotowej_wartosci(install_da
     # Z M o 900 już nie: zostaje B o 1100, N o 1300 i dopiero C o 2400.
     # Sprężysta zgadywanka dawała tu 1800.
     assert planner._profile_value(day, profile, "M", 900) == 2700
-    # Bufor przesiadki jest respektowany co do sekundy: o 980 na B o 1100
-    # jeszcze się zdąży (980 + 120 == 1100), o 981 już nie - a wtedy z M nie
+    # Bufor przesiadki jest respektowany co do sekundy: o 1040 na B o 1100
+    # jeszcze się zdąży (1040 + 60 == 1100), o 1041 już nie - a wtedy z M nie
     # odjeżdża już nic, co dowozi do celu.
-    assert planner._profile_value(day, profile, "M", 980) == 2700
-    assert planner._profile_value(day, profile, "M", 981) is planner.INF
+    ostatnia = 1100 - planner.TRANSFER_SEC
+    assert planner._profile_value(day, profile, "M", ostatnia) == 2700
+    assert planner._profile_value(day, profile, "M", ostatnia + 1) is planner.INF
 
 
 def test_profil_jest_niemalejacy_wzgledem_godziny(install_day):

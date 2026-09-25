@@ -175,10 +175,12 @@ działająca w drugą stronę.
 Mapa odpowiada nie tylko na „jak dojechać”, ale też na „ile to trwa” i
 „o której”. Trzema warstwami, od najogólniejszej:
 
-**Bez ruszania myszą** widać czas całej podróży: najszybszy możliwy dojazd
-i najpóźniejszy, jaki mapa jeszcze rysuje. Obie godziny mają przy sobie
-„za ile", liczone od godziny z formularza — czekanie na pierwszy pojazd jest
-w tej liczbie zawarte, bo pasażer i tak czeka.
+**Bez ruszania myszą** widać czas całej podróży: o której wyjść na najszybszą
+trasę, o której się nią dojedzie i od kiedy do kiedy sięga mapa. Wyjście to
+najpóźniejsza chwila, z której wciąż dojeżdża się najszybciej — wcześniejsze
+kazałoby tylko gdzieś czekać. Godziny przyjazdu mają przy sobie „za ile",
+liczone od godziny z formularza — czekanie na pierwszy pojazd jest w tej
+liczbie zawarte, bo pasażer i tak czeka.
 
 **Pod kursorem, dla punktu pod kursorem** — nie dla całej linii i nie dla
 jakiegoś jej kawałka — widać dwie godziny: o której tym pojazdem jest się
@@ -307,8 +309,10 @@ jedzie — choćby za godzinę, choćby dopiero rano następnego dnia — i mów
 wprost, o której ona wyrusza. Pusta mapa z komunikatem należy się wyłącznie
 relacji, której nie da się przejechać w ogóle.
 
-**Czekanie jest widoczne, nie schowane.** Trasa zaczynająca się później niż
-pytanie ma to napisane przy sobie. Mapa nigdy nie udaje, że coś jedzie teraz.
+**Czekanie jest widoczne, nie schowane.** Godzina wyjazdu stoi na pasku nad
+mapą, więc trasa ruszająca później niż pytanie ma to napisane przy sobie. Gdy
+rusza dopiero innego dnia, mapa mówi to osobno, bo sama godzina tego nie
+zdradza. Mapa nigdy nie udaje, że coś jedzie teraz.
 
 **Okno czasowe liczy się od wyjazdu, nie od pytania.** Wachlarz wariantów
 wokół takiej trasy jest tak samo szeroki jak wokół każdej innej — godzina
@@ -322,6 +326,12 @@ sieć — i kosztuje to tyle samo na starcie relacji, w przesiadce, u celu oraz
 przy punkcie wskazanym kliknięciem w mapę. Jeden promień, jedna cena. Punkt
 z mapy jest krańcem relacji jak każdy inny: przystanki wokół niego nie są
 „dostępne od razu", tylko oddalone o tyle a tyle minut marszu.
+
+**Przesiadka na dokładnie tym samym słupku to nie przejście.** Nie ma dokąd
+iść, więc nie kosztuje marszu, tylko minutę zapasu — nie zero, bo na mapie nie
+widać, ile czasu zostaje na przesiadkę, i pasażer nie oceni tego sam. Każdy
+inny słupek, także o tej samej nazwie, to już przejście wyceniane jak każde
+inne.
 
 **Czas przejścia liczy się z odległości i jest zawyżony.** Rozkład czasu
 marszu nie zna, a my znamy tylko odległość w linii prostej — nie chodniki,

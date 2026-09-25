@@ -1467,7 +1467,7 @@ def test_a_node_by_a_detour_is_paler_than_one_on_the_fast_route(install_day, pin
     assert wezly["D"] < wezly["S"]
 
 
-# ---------------------------------- odsiew krążenia (#141, próba) --------
+# ------------------------- początek mapy od najpóźniejszego wyjazdu (#141) --
 
 def _krazenie_day():
     """Tramwaj 1 rusza ze startu dopiero o 600 i jest w celu o 1200, mijając
@@ -1487,13 +1487,14 @@ def test_dawdling_is_dropped_only_with_the_switch(install_day):
 
     Skoro w celu jest się równie szybko, wyjeżdżając później, to wyjazd
     wcześniejszy nie jest alternatywą, tylko zabijaniem zapasu czasu: Autobus
-    9 dowozi do X, gdzie i tak czeka się na tego samego Tramwaja 1. Domyślnie
-    mapa go rysuje, bo przełącznik jest zgaszony."""
+    9 dowozi do X, gdzie i tak czeka się na tego samego Tramwaja 1. Mapa
+    od godziny z pytania - przełącznik zgaszony - rysuje go."""
     install_day(_krazenie_day())
 
-    bez = planner.plan_flow("Start", "Cel", when=WHEN, density=15)
+    bez = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
+                             latest_start=False)
     z_odsiewem = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
-                                   no_dawdling=True)
+                                   latest_start=True)
 
     assert "9" in _linie(bez)
     assert _linie(z_odsiewem) == ["1"]
@@ -1506,11 +1507,71 @@ def test_the_dawdling_switch_does_not_move_the_reported_hours(install_day):
     pytania, inaczej pasek obiecywałby krótszą podróż, niż jest."""
     install_day(_krazenie_day())
 
-    bez = planner.plan_flow("Start", "Cel", when=WHEN, density=15)
+    bez = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
+                             latest_start=False)
     z_odsiewem = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
-                                   no_dawdling=True)
+                                   latest_start=True)
 
     for pole in ("departure", "departure_sec", "best_sec", "best_arrival"):
         assert bez[pole] == z_odsiewem[pole], pole
     # A sama trasa rusza tak samo - to ona była najszybsza od początku.
     assert z_odsiewem["starts"] == bez["starts"]
+
+
+def test_show_more_first_widens_towards_the_asked_hour(install_day):
+    """Po odsiewie krążenia mapa rusza później, niż pytano. "Pokaż więcej"
+    poszerza wtedy zakres najpierw w stronę pasażera - cofa początek mapy
+    ku godzinie z pytania, nie ruszając końca - i dopiero gdy nie ma już
+    dokąd cofać, przesuwa koniec dalej, jak bez przełącznika."""
+    install_day(_krazenie_day())
+
+    poziomy = [planner.plan_flow("Start", "Cel", when=WHEN, density=15,
+                                 latest_start=True, more=more)
+               for more in range(planner.MAX_MAP_MORE + 1)]
+
+    assert poziomy[0]["map_from"] != poziomy[0]["departure"]
+    doszedl = next(i for i, wynik in enumerate(poziomy)
+                   if wynik["map_from"] == wynik["departure"])
+    for wynik in poziomy[:doszedl + 1]:
+        assert wynik["deadline"] == poziomy[0]["deadline"]
+    assert "9" in _linie(poziomy[doszedl])     # wcześniejszy wyjazd wrócił
+
+
+def test_the_map_accepts_a_walking_transfer_the_search_accepts():
+    """Przesiadka pieszo kosztuje sam marsz - bez bufora przesiadki, tak jak
+    w wyszukiwaniu. Autobus 100 jest na pętli o 600, marsz na przystanek
+    tramwaju trwa 180, tramwaj odjeżdża o 780: wyszukiwanie ją uznaje, więc
+    skan wstecz, z którego mapa bierze "najpóźniej trzeba tu być", też musi.
+    Doliczał do marszu bufor i z mapy znikała wtedy sama najszybsza trasa
+    (Sosnowiecka -> Wojszyce 22.09, setka na pętlę GAJ i osiemnastka
+    z Morwowej)."""
+    day = make_day([
+        {"trip_id": "bus", "label": "Autobus 100",
+         "stops": [("S", 0, 0), ("P", 600, 600)]},
+        {"trip_id": "tram", "label": "Tramwaj 18",
+         "stops": [("M", 780, 780), ("E", 1200, 1200)]},
+    ], siblings={"P": {"M": 180}, "M": {"P": 180}})
+
+    stop, arr, _ = planner._scan(day, ["S"], ["E"], 0)
+    assert (stop, arr) == ("E", 1200)
+    assert planner._backward(day, ["E"], 0, 1200)["S"] == 0
+
+
+def test_the_headline_departure_is_the_latest_one_even_without_the_switch(install_day):
+    """"Wyjeżdżasz o" w pasku to najpóźniejszy wyjazd, który wciąż daje
+    najszybszy przyjazd - także przy zgaszonym przełączniku. Autobus 9 o 0
+    kazałby wyjść dziesięć minut wcześniej tylko po to, żeby czekać na X na
+    tego samego Tramwaja 1. Przełącznik przesuwa już wyłącznie początek MAPY."""
+    install_day(_krazenie_day())
+
+    bez = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
+                             latest_start=False)
+    z_odsiewem = planner.plan_flow("Start", "Cel", when=WHEN, density=15,
+                                   latest_start=True)
+
+    for wynik in (bez, z_odsiewem):
+        assert wynik["starts_sec"] == 600
+        assert wynik["ride_sec"] == 600          # 600 -> 1200, bez czekania
+        assert wynik["best_sec"] == 1200         # "za ile" dalej od pytania
+    assert bez["map_from"] == bez["departure"]
+    assert z_odsiewem["map_from"] != z_odsiewem["departure"]

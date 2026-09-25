@@ -1264,34 +1264,6 @@ body.start-onboard .hint-onboard { display: block; }
 
 .flow-tip-goal b { color: var(--ink); }
 
-.flow-tip-bar {
-    display: block;
-    /* Dymek zwęża się do treści, więc pasek bez własnej szerokości potrafiłby
-       zniknąć do zera przy krótkim podpisie - a zerowy pasek czyta się jak
-       "brak danych", nie jak "bardzo krótki odcinek". */
-    min-width: 130px;
-    height: 4px;
-    margin-top: 3px;
-    border-radius: 2px;
-    background: rgba(0, 0, 0, 0.10);
-    overflow: hidden;
-}
-
-.flow-tip-bar i {
-    display: block;
-    height: 100%;
-    border-radius: 2px;
-    background: var(--accent);
-}
-
-.flow-tip-share {
-    display: block;
-    margin-top: 2px;
-    font-size: 10px;
-    color: var(--ink-faint);
-    font-variant-numeric: tabular-nums;
-}
-
 /* Numer i jego czas to jeden cel myszy - kursor na czasie wskazuje tę samą
    linię co kursor na numerze (patrz bindCluster). */
 .line-chip-slot {
