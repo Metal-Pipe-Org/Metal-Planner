@@ -193,9 +193,9 @@ def test_margines_na_odblokowanie_naprawde_przesuwa_godzine(
     pin_deadline(5400)   # dawne okno 200%
     install_day(_siec_z_luka())
     install_stations([STACJA_M, STACJA_P])
-    # 1440 + TRANSFER_SEC = 1560, czyli kurs o 1600 jest do złapania z zapasem
-    # 40 s. Margines dłuższy o minutę ten zapas kasuje.
-    monkeypatch.setattr(bikes, "UNLOCK_SEC", bikes.UNLOCK_SEC + 60)
+    # 1440 + TRANSFER_SEC = 1500, czyli kurs o 1600 jest do złapania z zapasem
+    # 100 s. Margines dłuższy o dwie minuty ten zapas kasuje.
+    monkeypatch.setattr(bikes, "UNLOCK_SEC", bikes.UNLOCK_SEC + 120)
     wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     # Kurs o 1600 przepadł, zostaje ten o 2400 - i tę PRAWDZIWĄ godzinę

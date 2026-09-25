@@ -66,9 +66,9 @@ ONWARD = {"X": [(9000, 9600, 1)]}
 TARGETS = {"E"}
 
 
-def _map(day=None, arrive=ARRIVE, onward=ONWARD, limit=30, live=True):
+def _map(day=None, arrive=ARRIVE, onward=ONWARD, limit=30, live=True, **opcje):
     return bikes.map_places(day or _day(), lambda: arrive, lambda: onward,
-                            TARGETS, limit, live=live)
+                            TARGETS, limit, live=live, **opcje)
 
 
 # ------------------------------------------ co w ogóle trafia na mapę ----
@@ -358,8 +358,8 @@ def _podsluch(monkeypatch):
     """Co planner podaje do wyboru rowerów - policzone już obie połowy."""
     seen = {}
 
-    def spy(day, arrivals, onward, target_set, limit, live=True):
-        seen.update(arrive=arrivals(), onward=onward(), limit=limit)
+    def spy(day, arrivals, onward, target_set, limit, **opcje):
+        seen.update(arrive=arrivals(), onward=onward(), limit=limit, **opcje)
         return []
 
     monkeypatch.setattr(bikes, "map_places", spy)
@@ -488,3 +488,67 @@ def test_rower_przypisany_do_stacji_nie_jest_luzem(monkeypatch):
 
     assert [b["id"] for b in loose] == ["na-chodniku"]
     assert loose[0]["electric"] is True
+
+
+def test_pokaz_wiecej_luzuje_regule_przejazdow_o_poziom():
+    """To samo co przy autach (zgłoszenie #141): gdy pierwszy poziom mieści
+    się już w suwaku, podniesienie samej liczby nic nie dokłada. Kliknięcie
+    schodzi więc o poziom niżej - tu z jednej podróży na dwie."""
+    # Trzy pierwsze nie biją się nawzajem (dłuższy przejazd za późniejszą
+    # godzinę), czwarta jest pobita dokładnie raz.
+    podroze = [(1, 3, 1), (2, 2, 1), (3, 1, 1), (1, 4, 1)]
+
+    assert bikes._skyband(podroze, 3) == {0, 1, 2}
+    assert bikes._skyband(podroze, 3, min_level=1) == {0, 1, 2, 3}
+
+
+# ------------------------------------------- rodzaj roweru (#147) --------
+
+# Dwa miejsca obok siebie: w jednym stoją same elektryki, w drugim same
+# zwykłe. Mapa dowozi do obu, więc bez odsiewu widać oba.
+ELEKTRYCZNA = {**A, "bikes": 2, "electric": 2}
+ZWYKLA = B                                  # 3 rowery, ani jednego elektryka
+OBA_STARTY = {"M": [(600, 1)], "X": [(600, 1)]}
+OBA_DALEJ = {**ONWARD, "M": [(9000, 9600, 1)]}
+
+
+def _rodzaje(monkeypatch, **opcje):
+    _feed(monkeypatch, stations=(ELEKTRYCZNA, ZWYKLA))
+    places = _map(arrive=OBA_STARTY, onward=OBA_DALEJ, **opcje)
+    return sorted(place["id"] for place in places)
+
+
+def test_rodzaj_roweru_to_osobny_wybor(monkeypatch):
+    """Zgłoszenie #147: kto chce elektryka, nie weźmie zwykłego. Miejsce
+    zostaje na mapie, gdy stoi w nim choć jeden rower włączonego rodzaju -
+    oba rodzaje są domyślnie włączone, więc bez ruszania czegokolwiek mapa
+    wygląda tak, jak wyglądała."""
+    assert _rodzaje(monkeypatch) == ["A", "B"]
+    assert _rodzaje(monkeypatch, regular=False) == ["A"]
+    assert _rodzaje(monkeypatch, electric=False) == ["B"]
+
+
+def test_bez_zadnego_rodzaju_roweru_nie_ma_wcale(monkeypatch):
+    """Odhaczenie obu rodzajów znaczy to samo, co zgaszony rower: nie ma na
+    czym wsiąść."""
+    assert _rodzaje(monkeypatch, electric=False, regular=False) == []
+
+
+def test_przy_nieznanym_stanie_stojakow_rodzaju_nie_zgadujemy(monkeypatch):
+    """Pytanie o inny dzień: ile i jakich rowerów tam stoi, wiadomo tylko
+    z tej chwili. Odsiew po rodzaju milczy wtedy zamiast udawać wiedzę -
+    kropki zostają, a to, że stanu nie znamy, mapa mówi osobno."""
+    assert _rodzaje(monkeypatch, live=False, regular=False) == ["A", "B"]
+
+
+def test_odsiew_rodzaju_dotyczy_wsiadania_nie_oddawania(monkeypatch):
+    """Rodzaj odsiewa miejsca, w których się WSIADA. Stacja z samymi
+    elektrykami przy odhaczonym elektryku przestaje być początkiem przejazdu,
+    ale zostaje jego końcem: oddaje się rower tam, gdzie jest wolny stojak,
+    bez względu na to, co w nim akurat stoi."""
+    _feed(monkeypatch, stations=(ELEKTRYCZNA, ZWYKLA))
+
+    places = _map(arrive=OBA_STARTY, onward=OBA_DALEJ, electric=False)
+
+    assert [place["id"] for place in places] == ["B"]
+    assert [ride["id"] for ride in places[0]["rides"]] == ["A"]

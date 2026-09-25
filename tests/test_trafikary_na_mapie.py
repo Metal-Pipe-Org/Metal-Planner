@@ -334,6 +334,28 @@ def test_suwak_i_pokaz_wiecej_mnoza_liczbe_aut(install_day, monkeypatch):
     assert _tablice(dwa["cars"]) == ["PRZY_M", "PRZY_STARCIE"]
 
 
+def test_pokaz_wiecej_luzuje_regule_nawet_gdy_suwak_jest_juz_przekroczony():
+    """Zgłoszenie #141: pierwszy poziom sam z siebie bywa liczniejszy niż
+    suwak - wtedy podniesienie limitu nie zmienia NIC i przycisk wygląda na
+    zepsuty. Kliknięcie ma więc luzować regułę o poziom, nie tylko podnosić
+    liczbę: tu trzy auta, których nic nie bije, przy suwaku na dwa - a czwarte,
+    pobite raz, wchodzi dopiero po kliknięciu."""
+    auta = [
+        {"plate": "NIEPOBITE_A", "at": 600, "ogarniam": [], "van": False},
+        {"plate": "NIEPOBITE_B", "at": 660, "ogarniam": [{"ile": 30}], "van": False},
+        {"plate": "NIEPOBITE_C", "at": 720, "ogarniam": [{"ile": 50}], "van": False},
+        {"plate": "POBITE_RAZ", "at": 660, "ogarniam": [{"ile": 20}], "van": False},
+    ]
+
+    bez = traficar.map_skyband(auta, 2)
+    po_kliknieciu = traficar.map_skyband(auta, 2, min_level=1)
+
+    assert [car["plate"] for car in bez] == ["NIEPOBITE_A", "NIEPOBITE_B",
+                                             "NIEPOBITE_C"]
+    assert [car["plate"] for car in po_kliknieciu] == [
+        "NIEPOBITE_A", "NIEPOBITE_B", "NIEPOBITE_C", "POBITE_RAZ"]
+
+
 def test_trzy_auta_przy_jednym_przystanku_to_jedno_auto_na_mapie(install_day,
                                                                monkeypatch):
     """Trzy auta obok siebie przy M, grupowanie włączone: nawet „pokaż więcej"

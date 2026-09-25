@@ -245,23 +245,15 @@ body.panel-hidden #sidebar {
 /* Warstwy mapy w jednym rzędzie, pod nazwą aplikacji: to jedyne przyciski,
    które zmieniają TREŚĆ mapy, więc trzymają się razem i wyglądają tak samo -
    podpisane, bo sama ikona nie mówi, co się włącza. */
+/* Warstwy to same ikonki w jednym rzędzie: odkąd rower rozdzielił się na
+   zwykły i elektryczny, są cztery, a czterech PODPISÓW nie da się zmieścić
+   w szerokości panelu - ostatni wystawał poza kartę, a zawinięty rząd zjadał
+   wysokość. Wielkość, zaokrąglenie i stan "zapalony" biorą się z .icon-button,
+   więc warstwa wygląda dokładnie jak zębatka obok; co która włącza, mówi
+   podpowiedź pod kursorem. */
 .layer-bar {
     display: flex;
     gap: 6px;
-}
-
-.layer-button {
-    width: auto;
-    flex: 1 1 0;
-    gap: 6px;
-    padding: 0 10px;
-    height: 32px;
-    font-size: 14px;
-}
-
-.layer-button span {
-    font-size: 12.5px;
-    font-weight: 600;
 }
 
 .brand h1 {
@@ -1272,34 +1264,6 @@ body.start-onboard .hint-onboard { display: block; }
 
 .flow-tip-goal b { color: var(--ink); }
 
-.flow-tip-bar {
-    display: block;
-    /* Dymek zwęża się do treści, więc pasek bez własnej szerokości potrafiłby
-       zniknąć do zera przy krótkim podpisie - a zerowy pasek czyta się jak
-       "brak danych", nie jak "bardzo krótki odcinek". */
-    min-width: 130px;
-    height: 4px;
-    margin-top: 3px;
-    border-radius: 2px;
-    background: rgba(0, 0, 0, 0.10);
-    overflow: hidden;
-}
-
-.flow-tip-bar i {
-    display: block;
-    height: 100%;
-    border-radius: 2px;
-    background: var(--accent);
-}
-
-.flow-tip-share {
-    display: block;
-    margin-top: 2px;
-    font-size: 10px;
-    color: var(--ink-faint);
-    font-variant-numeric: tabular-nums;
-}
-
 /* Numer i jego czas to jeden cel myszy - kursor na czasie wskazuje tę samą
    linię co kursor na numerze (patrz bindCluster). */
 .line-chip-slot {
@@ -1549,6 +1513,28 @@ body.start-onboard .hint-onboard { display: block; }
     column-gap: 7px;
     padding: 2px 0;
     font-size: 12.5px;
+}
+
+/* Kreska "tu według mapy jesteś" (zgłoszenie #143). Tablica liczy od godziny
+   z formularza, więc nad kreską stoją odjazdy sprzed przyjazdu mapy - są tam
+   celowo, na wypadek gdyby mapa nie znała szybszego dojścia, ale nie wolno im
+   wyglądać na część tej podróży. Wiersz łamie siatkę kolumn własnym
+   grid-column, bo nie jest odjazdem i nie ma się do czego wyrównywać. */
+.tt-rows li.tt-here {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0 4px;
+    font-size: 11px;
+    color: var(--ink-faint);
+}
+
+.tt-rows li.tt-here::before,
+.tt-rows li.tt-here::after {
+    content: "";
+    flex: 1;
+    border-top: 1px dashed currentColor;
+    opacity: 0.45;
 }
 
 /* Wąska kolumna z lewej na znak "co się tu z tą linią dzieje" (patrz

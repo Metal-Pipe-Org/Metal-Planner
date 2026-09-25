@@ -16,7 +16,11 @@ import gtfs
 import onboard
 import traficar
 
-TRANSFER_SEC = 120   # bufor bezpieczeństwa przy przesiadce na tym samym słupku
+# Przesiadka na DOKŁADNIE tym samym słupku - bez marszu, więc nie wycenia się
+# jej jak przejścia (punkt 14 kontraktu). Minuta, a nie zero: na mapie nie
+# widać, ile czasu zostaje na przesiadkę, więc pasażer nie oceni tego sam.
+# Decyzja użytkownika z 2026-09-24; wcześniej były tu dwie minuty.
+TRANSFER_SEC = 60
 # Czasu przejścia pieszo nie ma tu jako stałej: krawędź piesza niesie własny
 # koszt, policzony z odległości przy budowie dnia (patrz gtfs.walk_seconds
 # i gtfs._nearby_bridges). Bufora przesiadki krawędź piesza NIE dostaje -
@@ -1128,6 +1132,109 @@ def _choose_deadline(network_at, best_arr, target):
     return best_arr + lo * 60, False
 
 
+def _latest_departure(day, source_stops, target_stops, dep_sec, best_arr):
+    """Najpóźniejsza godzina wyjazdu, z której WCIĄŻ osiąga się `best_arr`.
+
+    Wyjechanie później nie może dać wcześniejszego przyjazdu, więc warunek
+    "stąd wciąż zdążę na best_arr" jest prawdziwy na początku przedziału
+    i fałszywy dalej - wystarczy połowienie. Szukamy w pełnych minutach:
+    rozkład i tak jest w minutach, a każde przybliżenie to jeden skan.
+
+    Godzina "wyjeżdżasz o" i początek mapy (patrz plan_flow, `latest_start`)."""
+    lo, hi = dep_sec, best_arr
+    while hi - lo > 60:
+        mid = lo + (hi - lo) // 2
+        _, arr, _ = _scan(day, source_stops, target_stops, mid)
+        if arr == best_arr:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _first_richer(network_at, best_arr, from_sec, prev_kept):
+    """Pierwsza minuta od `from_sec`, przy której mapa ma WIĘCEJ kawałków niż
+    `prev_kept` - czyli pierwszy próg, przy którym "pokaż więcej" naprawdę coś
+    pokazuje.
+
+    Po co: cel gęstości sam z siebie tego nie gwarantuje, bo mapa gęstnieje
+    falami, a nie płynnie. Zmierzone na Rynek -> Sosnowiecka (sobota 19.09,
+    pytanie 21:55): sześć kolejnych minut progu daje te same 92 kawałki,
+    a siódma - 310 naraz. Cel x2, x3 i x4 lądują wtedy w tej samej dziurze
+    i przycisk wygląda na zepsuty.
+
+    Szersza mapa dokłada kursy i nigdy nie zabiera (punkt 9), więc liczba
+    kawałków rośnie z progiem i wystarczy szukać skokami, a potem połowieniem
+    - tak samo jak w _choose_deadline. Zwraca (próg, sufit); `sufit` znaczy,
+    że do MAX_THRESHOLD_SEC nie dochodzi już nic."""
+    ceiling = MAX_THRESHOLD_SEC // 60
+
+    def richer(minutes):
+        return len(network_at(best_arr + minutes * 60)["kept"]) > prev_kept
+
+    start = max(0, min(ceiling, -(-(from_sec - best_arr) // 60)))
+    if richer(start):
+        return best_arr + start * 60, start >= ceiling
+    lo, probe = start, min(ceiling, start + 1)
+    while not richer(probe):
+        lo = probe
+        if probe >= ceiling:
+            return best_arr + ceiling * 60, True
+        probe = min(ceiling, probe + max(1, probe // 2))
+    hi = probe
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if richer(mid):
+            hi = mid
+        else:
+            lo = mid
+    return best_arr + hi * 60, hi >= ceiling
+
+
+def _choose_start(network_from, asked_sec, from_sec, target, prev_kept):
+    """"Pokaż więcej" w stronę pytania: nowy POCZĄTEK mapy, między godziną
+    z pytania (`asked_sec`) a obecnym początkiem (`from_sec`).
+
+    Po odsiewie krążenia mapa rusza później, niż pytano. Poszerzanie zakresu
+    idzie wtedy najpierw w stronę pasażera - od godziny, o której jest gotów,
+    bliżej niż od przyjazdów jeszcze późniejszych - i tą samą miarą co krok
+    naprzód (_choose_deadline): najwcześniejszy początek, przy którym mapa
+    nie jest gęstsza niż `target`, co najmniej minutę przed poprzednim,
+    a gdy mapa i tak się nie zmienia - dalej, do pierwszej minuty, która coś
+    dokłada (ta sama zasada co _first_richer). Wcześniejszy start dokłada
+    kursy, a nie zabiera, więc wystarczy połowienie."""
+    top = -(-(from_sec - asked_sec) // 60)     # tyle minut da się jeszcze cofnąć
+
+    def start(minutes):
+        return max(asked_sec, from_sec - minutes * 60)
+
+    def too_dense(minutes):
+        return network_from(start(minutes))["density"] > target
+
+    def richer(minutes):
+        return len(network_from(start(minutes))["kept"]) > prev_kept
+
+    def bisect(ok, lo, hi):
+        """Najmniejsze minuty z (lo, hi], dla których `ok` - przy ok(hi)."""
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if ok(mid):
+                hi = mid
+            else:
+                lo = mid
+        return hi
+
+    if not too_dense(top):
+        minutes = top
+    elif too_dense(1):
+        minutes = 1
+    else:
+        minutes = bisect(too_dense, 1, top) - 1
+    if not richer(minutes):
+        minutes = bisect(richer, minutes, top) if richer(top) else top
+    return start(minutes)
+
+
 def _no_connection(start_name, end_name, dep_sec):
     return {
         "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
@@ -1166,6 +1273,7 @@ def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, density=None, more=None,
               car_count=None, journey_limit=None, transfer_gain_sec=None,
               use_bikes=False, bike_count=None, car_groups=False, car_vans=False,
+              bike_electric=True, bike_regular=True, latest_start=False,
               in_vehicle=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
@@ -1219,6 +1327,14 @@ def plan_flow(start_query, end_query, when=None,
     suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_groups - czy auta
     spod tego samego miejsca to jeden wybór (przełącznik pod zębatką), car_vans
     - czy pokazać też dostawczaki, wybierane osobno od osobówek.
+    latest_start - PRÓBA pod zębatką, w Eksperymentach (zgłoszenie #141):
+    mapa zaczyna się od najpóźniejszego wyjazdu, który wciąż daje najszybszy
+    przyjazd, a nie od godziny z pytania. Domyślnie zgaszona i NIE jest
+    częścią kontraktu - chowała dojazdy do aut i rowerów (patrz #150).
+    bike_electric/bike_regular - na jaki rodzaj roweru pasażer chce wsiąść
+    (dwa przyciski w pasku warstw, patrz bikes.map_places). To odsiew MIEJSC, nie zmiana wyceny przejazdu: rower
+    ma jedną prędkość niezależnie od rodzaju, więc odhaczenie jednego z nich
+    nie przesuwa na mapie żadnej godziny.
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -1315,6 +1431,43 @@ def plan_flow(start_query, end_query, when=None,
     if best_stop is None:
         return _no_connection(start_name, end_name, dep_sec)
 
+    # Godzina, którą odpowiedź RAPORTUJE - z pytania. Odsiew krążenia niżej
+    # przesuwa `dep_sec`, od którego mapa się RYSUJE, ale "za ile tam będziesz"
+    # i punkt zerowy dymka (#143) muszą dalej liczyć od tego, o co pytano.
+    report_dep_sec = dep_sec
+
+    # Początek mapy (zgłoszenie #141) - PRÓBA za przełącznikiem, domyślnie
+    # zgaszona i poza kontraktem.
+    #
+    # Zasada użytkownika: skoro można być na miejscu równie szybko, wychodząc
+    # później, to wolimy wyjść później. Jazda "byle jechać", kończąca się
+    # i tak wsiadaniem w ten sam pojazd, nie jest alternatywą - to zabijanie
+    # zapasu czasu, a właśnie ono rozdyma mapę (pomiar: Rynek -> Sosnowiecka,
+    # sobota 19.09, pytanie 21:55 - 92 kawałki, z czego 90 nie skraca podróży
+    # ani o minutę; patrz FLOW_MAP_NOTES.md).
+    #
+    # Realizacja: mapa wyrusza z NAJPÓŹNIEJSZEJ godziny, z której wciąż
+    # osiąga się najszybszy przyjazd. To odsiew po stronie STARTU i celowo
+    # WĘŻSZY niż pełna reguła: usuwa wyłącznie opcje, które coś bije
+    # (wyjeżdża nie wcześniej i przyjeżdża nie później), więc nie może
+    # schować niczego, co reguła zostawiłaby. Krążenia w ŚRODKU podróży nie
+    # rusza. Z pokładu pojazdu nie działa - tam godziny wyjazdu się nie
+    # wybiera, bo pasażer już jedzie.
+    #
+    # Sam najpóźniejszy wyjazd liczy się ZAWSZE, bez względu na przełącznik:
+    # to on jest godziną "wyjeżdżasz o" w pasku nad mapą. Najszybsza trasa
+    # z krążeniem na początku kazałaby wyjść wcześniej, niż trzeba, żeby
+    # i tak wsiąść w ten sam pojazd. Przełącznik decyduje już tylko o tym,
+    # czy od tej godziny rusza też MAPA. Wcześniejsze wyjazdy dokłada wtedy
+    # "pokaż więcej", cofając początek mapy ku godzinie z pytania.
+    if ride is None:
+        latest_dep = _latest_departure(day, source_stops, target_stops,
+                                       dep_sec, best_arr)
+        best_stop, best_arr, best_journey = _scan(day, source_stops,
+                                                  target_stops, latest_dep)
+        if latest_start:
+            dep_sec = latest_dep
+
     # Kiedy najszybsza trasa naprawdę RUSZA - czekanie ma być widoczne, nie
     # schowane (punkt 13). Progu mapy to nie dotyczy: liczy się go od
     # najszybszego PRZYJAZDU, więc godzina czekania niczego w nim nie rozdyma.
@@ -1387,15 +1540,44 @@ def plan_flow(start_query, end_query, when=None,
                       else int(max(MIN_MAP_BIKES, min(MAX_MAP_BIKES, bike_count))))
         networks = {}
 
-        def network_at(deadline):
-            if deadline not in networks:
-                networks[deadline] = _drawn_network(
-                    day, dep_sec, deadline, best_arr, source_stops, target_set,
+        def network_at(deadline, start=None):
+            start = dep_sec if start is None else start
+            if (start, deadline) not in networks:
+                networks[start, deadline] = _drawn_network(
+                    day, start, deadline, best_arr, source_stops, target_set,
                     origin_latest, start_reach, frame_km2)
-            return networks[deadline]
+            return networks[start, deadline]
 
-        deadline, at_ceiling = _choose_deadline(network_at, best_arr,
-                                                density * (1 + more))
+        # "Pokaż więcej" ZAWSZE coś dokłada (zgłoszenie #141). Każde
+        # kliknięcie schodzi o co najmniej minutę niżej niż poprzednie, a gdy
+        # przy tym progu mapa nadal jest ta sama - dalej, do pierwszej minuty,
+        # która coś dokłada (_first_richer). Poziom wchodzi wtedy w całości,
+        # choćby przekroczył cel gęstości; to ta sama zasada, którą kontrakt
+        # ma już przy autach (punkt 15: "kolejny poziom wchodzi w całości,
+        # choćby przekroczył liczbę z suwaka").
+        #
+        # Gdy odsiew krążenia zaczął mapę później, niż pytano, kliknięcia
+        # najpierw cofają jej POCZĄTEK w stronę pytania (_choose_start),
+        # a dopiero potem przesuwają koniec dalej.
+        deadline, at_ceiling = _choose_deadline(network_at, best_arr, density)
+        prev_kept = len(network_at(deadline)["kept"])
+        for level in range(1, more + 1):
+            if dep_sec > report_dep_sec:
+                dep_sec = _choose_start(
+                    lambda start: network_at(deadline, start), report_dep_sec,
+                    dep_sec, density * (1 + level), prev_kept)
+                prev_kept = len(network_at(deadline)["kept"])
+                continue
+            chosen, at_ceiling = _choose_deadline(network_at, best_arr,
+                                                  density * (1 + level))
+            chosen = max(chosen, deadline + 60)
+            if len(network_at(chosen)["kept"]) <= prev_kept:
+                chosen, at_ceiling = _first_richer(network_at, best_arr,
+                                                   chosen, prev_kept)
+            deadline = chosen
+            prev_kept = len(network_at(deadline)["kept"])
+        # Sufit dotyczy tylko kroku naprzód - wstecz może być jeszcze dokąd.
+        at_ceiling = at_ceiling and dep_sec <= report_dep_sec
         network = network_at(deadline)
         earliest, profile = network["earliest"], network["profile"]
         kept, ranges = network["kept"], network["ranges"]
@@ -1487,8 +1669,11 @@ def plan_flow(start_query, end_query, when=None,
         bike_shown, bike_stations = 0, 0
         bikes_live = use_bikes and day_offset == 0 and when.date() == date.today()
         if bikes_live:
+            # Rower spod startu liczy się od godziny z pytania, nie od
+            # początku mapy: czekanie na późniejszy wyjazd opłaca się tylko
+            # komunikacji, a rowerem można ruszyć od razu.
             found, bike_stations = _bike_journeys(
-                day, source_stops, target_stops, dep_sec, deadline, earliest,
+                day, source_stops, target_stops, report_dep_sec, deadline, earliest,
                 profile, geo_db, start_point, end_point, start_name, end_name)
             journeys, bike_shown = _merge_journeys(journeys, found, gain_sec)
 
@@ -1531,7 +1716,10 @@ def plan_flow(start_query, end_query, when=None,
         # Nadodrzu i Kuźnikach).
         if kept and not (gtfs.is_city_group(day, source_stops)
                          or gtfs.is_city_group(day, target_set)):
-            reach = dict.fromkeys(source_stops, dep_sec)
+            # Na starcie jest się od godziny z pytania, nie od początku mapy -
+            # do auta czy roweru pod nosem idzie się od razu (tak samo jak
+            # przy propozycjach z rowerem wyżej).
+            reach = dict.fromkeys(source_stops, report_dep_sec)
             for stop, at in _drawn_reach(kept, ranges).items():
                 if at < reach.get(stop, INF):
                     reach[stop] = at
@@ -1540,7 +1728,8 @@ def plan_flow(start_query, end_query, when=None,
                 # liniach - a auta, których nic nie bije, zostają i tak.
                 cars = traficar.map_choice(
                     traficar.map_cars(day, reach, end_point_ll),
-                    car_count * (1 + more), car_groups, car_vans)
+                    car_count * (1 + more), car_groups, car_vans,
+                    min_level=more)
 
             # Rower miejski na mapie (punkt 16, patrz bikes.map_places).
             # Inaczej niż auto: z roweru się JEDZIE, więc przejazd ocenia się
@@ -1558,10 +1747,11 @@ def plan_flow(start_query, end_query, when=None,
             runs = _drawn_runs(day, kept, ranges)
             bike_places = bikes.map_places(
                 day,
-                lambda: _drawn_arrivals(day, runs, source_stops, dep_sec),
+                lambda: _drawn_arrivals(day, runs, source_stops, report_dep_sec),
                 lambda: _drawn_onward(day, runs, target_set),
                 target_set, bike_count * (1 + more),
-                live=day_offset == 0 and when.date() == date.today())
+                live=day_offset == 0 and when.date() == date.today(),
+                min_level=more, electric=bike_electric, regular=bike_regular)
     finally:
         geo_db.close()
 
@@ -1574,14 +1764,19 @@ def plan_flow(start_query, end_query, when=None,
     return {
         "start": start_name,
         "end": end_name,
-        "departure": _fmt_time(dep_sec),
+        "departure": _fmt_time(report_dep_sec),
+        # Ta sama godzina w sekundach doby rozkładowej. Od niej - a nie od
+        # tego, o której MAPA sądzi, że pasażer stanie na danej kropce - liczy
+        # swoje godziny dymek przesiadki (zgłoszenie #143, patrz app.js
+        # timetableAnchor).
+        "departure_sec": report_dep_sec,
         "best_arrival": _fmt_time(best_arr),
         "deadline": _fmt_time(deadline),
         # Cały zakres czasowy mapy w sekundach, tą samą miarą co kawałki:
         # od najszybszego możliwego dojazdu do najpóźniejszego, jaki mapa
         # jeszcze rysuje (deadline). "Najszybciej X, pokazane do Y".
-        "best_sec": best_arr - dep_sec,
-        "limit_sec": deadline - dep_sec,
+        "best_sec": best_arr - report_dep_sec,
+        "limit_sec": deadline - report_dep_sec,
         # Horyzont mapy na osi doby. Odjazd późniejszy nie należy do ŻADNEGO
         # rysowanego wariantu - to warunek konieczny, liczony z best_arr
         # (skan CSA), więc nie zależy od szacowanych przyjazdów kawałków.
@@ -1597,6 +1792,12 @@ def plan_flow(start_query, end_query, when=None,
         # schowane (punkt 13). `day_offset` 0 to dzień z pytania.
         "starts": _fmt_time(best_dep),
         "starts_sec": best_dep,
+        # Sama jazda, od odjazdu pierwszego pojazdu do celu - bez czekania,
+        # które siedzi w `best_sec`. Pasek dopisuje ją tylko na życzenie.
+        "ride_sec": best_arr - best_dep,
+        # Od kiedy mapa się RYSUJE: godzina z pytania, a przy odsiewie
+        # krążenia - najpóźniejszy wyjazd. Lewy kraniec zakresu w pasku.
+        "map_from": _fmt_time(dep_sec),
         # Czekanie liczone od PYTANIA, przez granicę doby: po zejściu na
         # kolejny dzień `dep_sec` jest już zerem tamtej doby, więc sama
         # różnica pokazywałaby kilka minut zamiast prawie doby.
@@ -3995,6 +4196,16 @@ def _backward(day, target_set, dep_sec, deadline):
     # i kasowała cały kurs, ZANIM cokolwiek zdążyło go zobaczyć.
     for stop, (sec, _cel) in _target_reach(day, target_set).items():
         latest[stop] = deadline - sec
+    # `latest` to najpóźniejsza z dwóch dróg dalej, ale po wysiadce kosztują
+    # one co innego: przesiadka na TYM SAMYM słupku - bufor przesiadki, dalej
+    # pieszo - sam marsz. Tak samo liczy skan w przód (_scan, _forward)
+    # i profil (_reach_from). Dopóki tu bufor doliczało się zawsze, mapa
+    # odrzucała przesiadki, które wyszukiwanie uznawało: setka na pętlę GAJ
+    # o 13:51, trzy minuty pieszo na osiemnastkę z Morwowej o 13:54
+    # (22.09, odsiew krążenia zaczynał mapę dokładnie od tej trasy, więc
+    # z mapy nie zostawało nic i wpadała w tryb awaryjny).
+    board = {}                  # słupek -> najpóźniejsze wsiadanie na nim
+    on_foot = dict(latest)      # słupek -> najpóźniej stąd pieszo (albo cel)
     trip_ok = set()
 
     for i in range(bisect_left(day.dep_times, deadline) - 1, -1, -1):
@@ -4002,20 +4213,20 @@ def _backward(day, target_set, dep_sec, deadline):
         if dep_t < dep_sec:
             break
         if trip not in trip_ok:
-            leave_by = latest.get(arr_s)
-            if leave_by is None:
-                continue
-            # Na przystanku końcowym nie ma przesiadki, więc bez bufora.
-            buffer = 0 if arr_s in target_set else TRANSFER_SEC
-            if arr_t + buffer > leave_by:
+            if not (arr_t <= on_foot.get(arr_s, -1)
+                    or arr_t + TRANSFER_SEC <= board.get(arr_s, -1)):
                 continue
             trip_ok.add(trip)
-        if dep_t > latest.get(dep_s, -1):
-            latest[dep_s] = dep_t
+        if dep_t > board.get(dep_s, -1):
+            board[dep_s] = dep_t
+            if dep_t > latest.get(dep_s, -1):
+                latest[dep_s] = dep_t
             for sibling in day.siblings.get(dep_s, ()):
                 walk_dep = dep_t - gtfs.walk_seconds(day, sibling, dep_s)
-                if walk_dep > latest.get(sibling, -1):
-                    latest[sibling] = walk_dep
+                if walk_dep > on_foot.get(sibling, -1):
+                    on_foot[sibling] = walk_dep
+                    if walk_dep > latest.get(sibling, -1):
+                        latest[sibling] = walk_dep
     return latest
 
 

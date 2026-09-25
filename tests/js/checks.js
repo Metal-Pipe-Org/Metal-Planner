@@ -892,20 +892,49 @@ checks.tablica_miesza_przyjazdy_z_odjazdami = (() => {
     };
 })();
 
-/* Czekanie jest widoczne, nie schowane (punkt 13 kontraktu). */
+/* Czekanie jest widoczne, nie schowane (punkt 13 kontraktu). Komunikat
+   zostaje tylko przy zmianie doby - czekanie tego samego dnia mówi pasek
+   nad mapą godziną "wyjeżdżasz o" (patrz pasek_mowi_kiedy_wyjechac). */
 checks.czekanie_jest_widoczne = (() => {
     const jutro = app.waitNoticeHtml(
         {day_offset: 1, starts: '00:03', waits_sec: 240});
+    const zaDwa = app.waitNoticeHtml(
+        {day_offset: 2, starts: '05:10', waits_sec: 30 * 3600});
     const dzis = app.waitNoticeHtml(
         {day_offset: 0, starts: '12:30', waits_sec: 88 * 60});
-    const zaraz = app.waitNoticeHtml(
-        {day_offset: 0, starts: '11:10', waits_sec: 8 * 60});
     return {
         ok: jutro.includes('jutro') && jutro.includes('00:03')
-            && dzis.includes('12:30') && dzis.includes('88 min')
-            && !dzis.includes('jutro')
-            && zaraz === '',
-        jutro, dzis, zaraz,
+            && zaDwa.includes('za 2 dni') && zaDwa.includes('05:10')
+            && dzis === '',
+        jutro, zaDwa, dzis,
+    };
+})();
+
+/* Pasek nad mapą: o której wyjechać i dojechać najszybszą trasą, "za ile"
+   zawsze, sam czas jazdy tylko z ustawieniem, i zakres godzin mapy. */
+checks.pasek_mowi_kiedy_wyjechac = (() => {
+    const pasek = () => document.getElementById('time-headline').innerHTML
+        .replace(/<[^>]+>/g, '');
+    const flow = {...FLOW_FIXTURE, starts: '12:25', best_arrival: '12:40',
+                  best_sec: 40 * 60, ride_sec: 15 * 60,
+                  map_from: '12:00', deadline: '12:55', limit_sec: 55 * 60};
+    const bylo = app.timeOpts.ride;
+
+    app.timeOpts.ride = false;
+    app.drawFlow(flow, false);
+    const bez = pasek();
+    app.timeOpts.ride = true;
+    app.drawFlow(flow, false);
+    const z = pasek();
+
+    app.timeOpts.ride = bylo;
+    app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
+    return {
+        ok: bez.includes('wyjeżdżasz o 12:25') && bez.includes('dojeżdżasz o 12:40')
+            && bez.includes('za 40 min') && !bez.includes('jazda')
+            && bez.includes('mapa od 12:00 do 12:55')
+            && z.includes('za 40 min, jazda 15 min'),
+        bez, z,
     };
 })();
 
@@ -1399,6 +1428,76 @@ checks.auta_dostawczaki_leca_do_serwera = (() => {
     przelacznik.checked = bylo;
     return {
         ok: zgaszone.includes('car_vans=0') && zapalone.includes('car_vans=1'),
+        zgaszone, zapalone,
+    };
+})();
+
+
+/* Dymek liczy od godziny z FORMULARZA, nie od tej, o której mapa stawia tu
+   pasażera (zgłoszenie #143). Odjazdy sprzed przyjazdu mapy są więc na
+   liście celowo - oddziela je widoczna kreska i nigdy nie wypychają tych,
+   po które się tu przyszło. */
+checks.tablica_liczy_od_godziny_z_formularza = (() => {
+    const dep = sec => ({time: '00:00', sec, in_min: 0, num: String(sec / 100),
+                         mode: 'bus', headsign: 'PRACZE'});
+    const data = {stop: 'Halicka', from_time: '21:55',
+                  departures: [100, 200, 300, 400, 500].map(dep)};
+    const bylo = app.dotOpts.rows;
+    app.dotOpts.rows = 5;
+    const pelna = app.timetableHtml(data, 300);
+    app.dotOpts.rows = 2;
+    const ciasna = app.timetableHtml(data, 300);
+    app.dotOpts.rows = bylo;
+    const bezMapy = app.timetableHtml(data);
+
+    // Kreska stoi dokładnie między odjazdem sprzed przyjazdu a pierwszym od
+    // niego, a bez godziny mapy nie ma jej wcale.
+    const kreska = pelna.indexOf('tt-here');
+    const wMiejscu = kreska > pelna.indexOf('>2<') && kreska < pelna.indexOf('>3<');
+    // Suwak na dwa wiersze: odjazd od przyjazdu mapy MUSI się zmieścić.
+    const wierszy = (ciasna.match(/<li>/g) || []).length;
+    return {
+        ok: wMiejscu && !bezMapy.includes('tt-here')
+            && ciasna.includes('>3<') && wierszy === 2,
+        wMiejscu, wierszy, ciasna,
+    };
+})();
+
+/* Rodzaj roweru to dwa PRZYCISKI W PASKU warstw (zgłoszenie #147) - ich stan
+   idzie w zapytaniu, bo odsiew miejsc robi serwer. Zgaszenie obu gasi rower
+   w całości, więc zapytanie przestaje o niego prosić. */
+checks.rower_rodzaj_leci_do_serwera = (() => {
+    app.setBikesOn(true);
+    const oba = app.queryParams().toString();
+    app.setBikeKind('regular', false);
+    const same_elektryki = app.queryParams().toString();
+    app.setBikeKind('electric', false);
+    const zadne = app.queryParams().toString();
+    app.setBikesOn(true);
+    return {
+        ok: oba.includes('bike_electric=1') && oba.includes('bike_regular=1')
+            && oba.includes('bikes=1')
+            && same_elektryki.includes('bike_electric=1')
+            && same_elektryki.includes('bike_regular=0')
+            && same_elektryki.includes('bikes=1')
+            && !zadne.includes('bikes=1'),
+        oba, same_elektryki, zadne,
+    };
+})();
+
+
+/* Początek mapy od najpóźniejszego wyjazdu - próba w Eksperymentach, domyślnie
+   zgaszona; jej stan idzie w zapytaniu, bo mapę liczy serwer. */
+checks.odsiew_krazenia_leci_do_serwera = (() => {
+    const przelacznik = document.getElementById('latest-start');
+    const bylo = przelacznik.checked;
+    przelacznik.checked = false;
+    const zgaszone = app.queryParams().toString();
+    przelacznik.checked = true;
+    const zapalone = app.queryParams().toString();
+    przelacznik.checked = bylo;
+    return {
+        ok: zgaszone.includes('latest_start=0') && zapalone.includes('latest_start=1'),
         zgaszone, zapalone,
     };
 })();
