@@ -13,6 +13,7 @@ Sprawdzamy dwie rzeczy osobno:
 
 import datetime
 
+import gtfs
 import planner
 import traficar
 from tests.gtfs_builder import make_day
@@ -64,8 +65,9 @@ def test_auto_przy_przystanku_jest_propozycja(monkeypatch):
     option = options[0]
     assert option["stop"] == "M"
     assert option["car"]["plate"] == "WE1AA11"
-    # Dojście krótsze niż minuta liczymy jako minutę (WALK_MIN_SEC).
-    assert option["walk_sec"] == traficar.WALK_MIN_SEC
+    # Dojście do auta to zwykły marsz: krótkie trwa tyle, ile podłoga
+    # każdego przejścia (gtfs.WALK_MIN_SEC).
+    assert option["walk_sec"] == gtfs.WALK_MIN_SEC
     assert option["start_sec"] == traficar.START_SEC
     # ~4,42 km w linii prostej razy zmierzona krętość (patrz DRIVE_DETOUR).
     assert 5600 < option["drive_m"] < 5900
@@ -83,7 +85,7 @@ def test_slupek_startowy_nie_jest_wysiadaniem(monkeypatch):
 
 def test_auto_za_daleko_od_przystanku_odpada(monkeypatch):
     day = _day()
-    # ~1,1 km na północ od M - dalej niż WALK_TO_CAR_M.
+    # ~1,1 km na północ od M - dalej niż gtfs.WALK_M.
     _cars(monkeypatch, [{**CAR, "lat": 51.13}])
     assert traficar.car_options(day, {"M": 600}, E) == []
 

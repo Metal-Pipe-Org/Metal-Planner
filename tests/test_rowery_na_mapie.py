@@ -4,8 +4,8 @@ To jest coś innego niż tests/test_bikes.py i tests/test_bike_transfer.py:
 tamte pilnują propozycji z etapem rowerowym, te - kropki na mapie.
 
 Rower jest tu przejściem o innym tempie, nie kursem. Kandydatem jest
-PRZEJAZD, oceniany w całej podróży trzema liczbami z tej samej drogi: ile
-jedzie się rowerem, o której jest się w celu i iloma pojazdami. Dojazd do
+PRZEJAZD, oceniany w całej podróży trzema liczbami z tej samej drogi: jak
+o której jest się przy rowerze, o której w celu i iloma pojazdami. Dojazd do
 roweru i dalsza droga po nim idą tym, co mapa RYSUJE. Przejazd NIE musi być
 szybszy niż tramwaj - ktoś może chcieć jechać rowerem dlatego, że woli rower.
 
@@ -82,7 +82,7 @@ def test_stacja_z_ktorej_da_sie_dojechac_trafia_na_mape(monkeypatch):
     assert [ride["id"] for ride in places[0]["rides"]] == ["B"]
     assert places[0]["from"] == "Środek"
     # Pojazd przed rowerem i pojazd po nim.
-    assert places[0]["rides"][0]["options"] == [{"arrival": 9600, "vehicles": 2}]
+    assert _cel(places[0]["rides"][0]) == [{"arrival": 9600, "vehicles": 2}]
 
 
 def test_kropke_dostaje_tylko_to_na_czym_mozna_SIASC(monkeypatch):
@@ -161,7 +161,7 @@ def test_przejazd_po_progu_mapy_zostaje(monkeypatch):
 
     ride = _map(onward={"X": [(9000, pozno, 1)]})[0]["rides"][0]
 
-    assert ride["options"] == [{"arrival": pozno, "vehicles": 2}]
+    assert _cel(ride) == [{"arrival": pozno, "vehicles": 2}]
 
 
 # --------------------------------------------- ile to trwa i skąd to wiemy ----
@@ -223,7 +223,7 @@ def test_dojechac_rowerem_pod_sam_cel_to_zero_pojazdow_po_rowerze(monkeypatch):
 
     ride = _map(onward={})[0]["rides"][0]
 
-    assert ride["options"] == [
+    assert _cel(ride) == [
         {"arrival": ride["at"] + gtfs.WALK_MIN_SEC, "vehicles": 1}]
 
 
@@ -237,57 +237,109 @@ def test_kazda_para_to_jedna_prawdziwa_droga(monkeypatch):
 
     ride = _map(onward={"X": [(9000, 9600, 1), (9000, 9300, 2)]})[0]["rides"][0]
 
-    assert ride["options"] == [{"arrival": 9300, "vehicles": 3},
+    assert _cel(ride) == [{"arrival": 9300, "vehicles": 3},
                                {"arrival": 9600, "vehicles": 2}]
 
 
 def test_dojazd_do_roweru_tez_liczy_pojazdy(monkeypatch):
     """Do M da się dojechać wcześniej dwoma pojazdami albo później jednym.
-    W celu i tak jest się o tej samej godzinie, więc zostaje droga z mniejszą
-    liczbą pojazdów."""
+    W celu i tak jest się o tej samej godzinie, więc na stacji zostaje droga
+    z mniejszą liczbą pojazdów - godzina przy rowerze mówi o stacji, a nie
+    o tym, który przejazd z niej pokazać."""
     _feed(monkeypatch)
 
     ride = _map(arrive={"M": [(600, 2), (900, 1)]})[0]["rides"][0]
 
-    assert ride["options"] == [{"arrival": 9600, "vehicles": 2}]
+    assert _cel(ride) == [{"arrival": 9600, "vehicles": 2}]
 
 
 # ------------------------------------------------ które przejazdy pokazać ----
 
-# Trzy stacje docelowe na południku, coraz dalej od A (~1, ~2,2 i ~3,3 km),
-# i druga stacja startowa F ~334 m od M.
-C = {**B, "id": "C", "name": "Stacja C", "lat": 51.150}
-D = {**B, "id": "D", "name": "Stacja D", "lat": 51.140}
-F = {**A, "id": "F", "name": "Stacja F", "lat": M[0] + 0.003}
-WYBOR = {"X": [(9000, 9300, 1)], "Z": [(9000, 9600, 1)], "Y": [(9000, 9600, 1)]}
+# Druga stacja startowa G ~334 m od M: mapa dowozi do obu tym samym pojazdem
+# do M, ale przy A jest się od razu, a do G idzie się jeszcze 8 minut.
+# K stoi przy samym starcie - dochodzi się do niej pieszo, bez pojazdu.
+G = {**A, "id": "G", "name": "Stacja G", "lat": M[0] - 0.003}
+K = {**A, "id": "K", "name": "Stacja K", "lat": S[0]}
+
+
+def _cel(ride):
+    """Opcje przejazdu bez godziny przy rowerze i podglądu - tylko to, o co
+    pyta test: o której w celu i iloma pojazdami."""
+    return [{"arrival": o["arrival"], "vehicles": o["vehicles"]}
+            for o in ride["options"]]
 
 
 def _przejazdy(places):
     return sorted((p["id"], ride["id"]) for p in places for ride in p["rides"])
 
 
-def test_zawsze_widac_przejazdy_ktorych_nic_nie_bije(monkeypatch):
-    """A->B dojeżdża najwcześniej, A->C jedzie rowerem najdłużej - oba są
-    najlepsze w czymś i oba są na mapie, choć suwak mówi dwa. Reszta jest
-    pobita: A->D przez A->C (krócej, ta sama godzina), a przejazdy z F przez
-    te same z A, bo z F jedzie się rowerem krócej."""
-    _feed(monkeypatch, stations=(A, B, C, D, F))
+def test_rower_osiagalny_wczesniej_bije_pozniejszy(monkeypatch):
+    """A->B i G->B łapią ten sam odjazd z X, więc w celu są o tej samej
+    godzinie i tymi samymi pojazdami. Przy A jest się wcześniej, więc A bije
+    G: rower, do którego najpierw trzeba dojść w bok, niczego tu nie dodaje."""
+    _feed(monkeypatch, stations=(A, B, G))
 
-    places = _map(onward=WYBOR, limit=2)
+    places = _map(onward={"X": [(9000, 9300, 1)]}, limit=1)
 
-    assert _przejazdy(places) == [("A", "B"), ("A", "C")]
+    assert _przejazdy(places) == [("A", "B")]
+
+
+def test_pozniej_osiagalny_zostaje_gdy_oszczedza_pojazd(monkeypatch):
+    """Do K idzie się ze startu pieszo - później niż do A, ale bez pojazdu.
+    K->B dowozi o tej samej godzinie co A->B, o jeden pojazd taniej, więc
+    każdy z nich jest najlepszy w czymś innym i oba są na mapie."""
+    _feed(monkeypatch, stations=(A, B, K))
+
+    places = _map(arrive={"M": [(600, 1)], "S": [(900, 0)]},
+                  onward={"X": [(9000, 9300, 1)]}, limit=1)
+
+    assert _przejazdy(places) == [("A", "B"), ("K", "B")]
+
+
+def test_stacja_po_drodze_zostaje_gdy_jest_najszybsza_przy_swoich_pojazdach(
+        monkeypatch):
+    """Obawa z 2026-09-25: rower w środku trasy zawsze przegrywa z rowerem
+    przy starcie - tamten jest osiągalny wcześniej i bez pojazdu. Ale stacja
+    odpada dopiero wtedy, gdy inna daje KAŻDĄ jej podróż co najmniej tak samo
+    dobrze. Z K (przy starcie, bez pojazdu) rowerem pod sam cel jest się
+    o 2940; z A (po jednym pojeździe) - o 2700. K jest osiągalna wcześniej
+    i bez pojazdu, ale podróży tak szybkiej jak z A nie daje, więc A zostaje,
+    a z nią obie - każda w czymś najlepsza."""
+    day = _day()
+    blisko_celu = {**B, "id": "C", "name": "Stacja przy celu", "lat": E[0]}
+    _feed(monkeypatch, stations=(A, K, blisko_celu))
+
+    places = _map(day, arrive={"M": [(600, 1)], "S": [(0, 0)]},
+                  onward={"X": [(9000, 9300, 1)]}, limit=1)
+
+    assert {p["id"] for p in places} == {"A", "K"}
+    assert {p["id"]: p["why"]["beaten"] for p in places} == {"A": 0, "K": 0}
 
 
 def test_kropka_tylko_przy_wybranym_przejezdzie(monkeypatch):
-    """Z F prowadzą przejazdy, tylko żaden nie przeszedł wyboru - więc F nie
-    ma kropki. Suwak o jeden wyżej wpuszcza cały kolejny poziom, a z nim F."""
-    _feed(monkeypatch, stations=(A, B, C, D, F))
+    """Z G prowadzi przejazd, tylko nie przeszedł wyboru - więc G nie ma
+    kropki. Suwak o jeden wyżej wpuszcza kolejny poziom, a z nim G."""
+    _feed(monkeypatch, stations=(A, B, G))
 
-    dwa = _map(onward=WYBOR, limit=2)
-    trzy = _map(onward=WYBOR, limit=3)
+    jeden = _map(onward={"X": [(9000, 9300, 1)]}, limit=1)
+    dwa = _map(onward={"X": [(9000, 9300, 1)]}, limit=2)
 
-    assert "F" not in {p["id"] for p in dwa}
-    assert _przejazdy(trzy) == [("A", "B"), ("A", "C"), ("F", "B"), ("F", "C")]
+    assert "G" not in {p["id"] for p in jeden}
+    assert _przejazdy(dwa) == [("A", "B"), ("G", "B")]
+
+
+def test_podglad_mowi_dlaczego_rower_jest_na_mapie(monkeypatch):
+    """Podgląd pod zębatką (Debug): przy każdej wybranej stacji - w czym
+    jest najlepsza, ile stacji ją bije i które."""
+    _feed(monkeypatch, stations=(A, B, G))
+
+    places = {p["id"]: p for p in _map(onward={"X": [(9000, 9300, 1)]}, limit=2)}
+    a = places["A"]["why"]
+    g = places["G"]["why"]
+
+    assert a["beaten"] == 0 and "najwcześniej przy rowerze" in a["records"]
+    assert g["beaten"] == 1 and g["beaten_by"] == ["Stacja A"]
+    assert "najwcześniej przy rowerze" not in g["records"]
 
 
 def test_bez_kandydatow_nie_liczy_sie_dalsza_droga(monkeypatch):
@@ -494,12 +546,11 @@ def test_pokaz_wiecej_luzuje_regule_przejazdow_o_poziom():
     """To samo co przy autach (zgłoszenie #141): gdy pierwszy poziom mieści
     się już w suwaku, podniesienie samej liczby nic nie dokłada. Kliknięcie
     schodzi więc o poziom niżej - tu z jednej podróży na dwie."""
-    # Trzy pierwsze nie biją się nawzajem (dłuższy przejazd za późniejszą
-    # godzinę), czwarta jest pobita dokładnie raz.
-    podroze = [(1, 3, 1), (2, 2, 1), (3, 1, 1), (1, 4, 1)]
+    # Trzy stacje, których nic nie bije, i czwarta pobita dokładnie raz.
+    pobite = [0, 0, 0, 1]
 
-    assert bikes._skyband(podroze, 3) == {0, 1, 2}
-    assert bikes._skyband(podroze, 3, min_level=1) == {0, 1, 2, 3}
+    assert bikes._skyband(pobite, 3) == {0, 1, 2}
+    assert bikes._skyband(pobite, 3, min_level=1) == {0, 1, 2, 3}
 
 
 # ------------------------------------------- rodzaj roweru (#147) --------

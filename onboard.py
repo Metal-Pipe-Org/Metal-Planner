@@ -11,14 +11,17 @@ pasażer może zrobić, zaczyna się właśnie tam i wtedy:
 
   * zostać w pojeździe - to zwykłe wsiadanie w ten sam kurs na tym przystanku,
     z zerowym czekaniem (kurs stoi tam dokładnie o tej sekundzie);
-  * wysiąść i przesiąść się - to zwykłe wsiadanie w inny kurs z tego przystanku;
+  * wysiąść i przesiąść się - to zwykła przesiadka na inny kurs z tego
+    przystanku, z jej minutą zapasu;
   * wysiąść i pójść pieszo (albo po rower, albo do auta) - to zwykłe przejście
     z tego przystanku.
 
-Dzięki temu planer nie potrzebuje ani jednej nowej gałęzi: dostaje słupek
-i sekundę jak przy każdym innym wyszukiwaniu (patrz planner.plan_flow), a cały
-tryb sprowadza się do ROZPOZNANIA KURSU - który to właściwie pojazd - i do
-opisania wyniku tak, żeby było widać, gdzie z niego wysiąść.
+Dzięki temu planer dostaje słupek i sekundę jak przy każdym innym
+wyszukiwaniu (patrz planner.plan_flow), a cały tryb sprowadza się do
+ROZPOZNANIA KURSU - który to właściwie pojazd - i do opisania wyniku tak, żeby
+było widać, gdzie z niego wysiąść. Jedyne, co planer musi o tym kursie
+wiedzieć, to że na przystanek startowy się nim PRZYJEŻDŻA: każdy inny pojazd
+jest stamtąd przesiadką (patrz planner._board_buffer).
 
 Rozpoznanie idzie po trzech rzeczach, bo dokładnie tyle widzi pasażer
 w pojeździe: numer linii, kierunek z czoła pojazdu i nazwa następnego

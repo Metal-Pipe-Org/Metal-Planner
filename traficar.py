@@ -47,14 +47,9 @@ API = "https://fioletowe.live/api/v1"
 CARS_TTL_SEC = 20    # feed sam deklaruje Cache-Control: max-age=12 - nie odpytujemy częściej
 MODELS_TTL_SEC = 6 * 3600   # lista modeli zmienia się w skali miesięcy, nie minut
 
-# Dojście z przystanku do auta. Promień większy niż rozpiętość jednego
-# miejsca (gtfs.PLACE_MAX_SPAN_M, 400 m): tam chodzi o przejście między
-# peronami tego samego węzła, a tu o konkretne, jedno auto stojące gdzieś
-# w okolicy - po nie idzie się dalej niż na sąsiedni peron, ale nie przez
-# pół dzielnicy.
-WALK_TO_CAR_M = 600
-WALK_SPEED_MPS = 1.3        # ~4,7 km/h - tyle, ile daje planner.WALK_SEC na 400 m
-WALK_MIN_SEC = 60
+# Dojście z przystanku do auta liczy się tak samo jak każde inne przejście
+# (gtfs.WALK_M, gtfs.walk_time_sec) - i w propozycjach, i na mapie
+# (zgłoszenie #151; wcześniej propozycje miały własne, szybsze tempo).
 
 # Odpalenie auta: rezerwacja w aplikacji, dojście dookoła, przegląd,
 # odjazd z miejsca postojowego. Pięć minut, w których nie jedzie się nigdzie.
@@ -224,12 +219,6 @@ def drive_time(from_lat, from_lon, to_lat, to_lon):
     return max(DRIVE_MIN_SEC, _full_minutes(metres / DRIVE_SPEED_MPS)), round(metres)
 
 
-def walk_time(metres):
-    """Sekundy dojścia pieszego na podanym dystansie - ta sama miara, co przy
-    przejściu między słupkami."""
-    return max(WALK_MIN_SEC, _full_minutes(metres / WALK_SPEED_MPS))
-
-
 def _in_box(lat, lon, clat, clon, metres):
     """Zgrubne "czy w kwadracie ~`metres`" - żeby nie liczyć haversine'a dla
     każdego z kilku tysięcy słupków razy każde z kilkudziesięciu aut."""
@@ -275,7 +264,7 @@ def map_cars(day, reach, dest):
             metres = gtfs._haversine_m(*coords, car["lat"], car["lon"])
             if metres > gtfs.WALK_M:
                 continue
-            walk_sec = gtfs.walk_time_sec(metres)
+            walk_sec = gtfs.walk_time_sec(metres, day.walk_mps)
             option = (arrival + walk_sec, walk_sec, round(metres), stop)
             if best is None or option < best:
                 best = option
@@ -317,6 +306,27 @@ def _beats(one, other):
     return one != other and all(o <= m for o, m in zip(one, other))
 
 
+# Nazwy dwóch liczb z _shown_as - do podglądu "dlaczego to auto" (Debug).
+WHY_CRITERIA = ("najwcześniej przy aucie", "najwięcej z Ogarniam")
+
+
+def _why(car, shown, pool, group_size):
+    """Dlaczego auto przeszło wybór - dla podglądu pod zębatką (Debug): w czym
+    jest najlepsze spośród zwycięzców grup, ile z nich je bije (jego poziom:
+    0 = nie bije go nic) i które - najwyżej trzy - oraz z ilu aut spod tego
+    samego miejsca wygrało (1, gdy grupowanie jest zgaszone)."""
+    mine = _shown_as(car)
+    beaten_by = [other for other, theirs in zip(pool, shown) if _beats(theirs, mine)]
+    return {
+        "records": [name for k, name in enumerate(WHY_CRITERIA)
+                    if mine[k] == min(theirs[k] for theirs in shown)],
+        "beaten": len(beaten_by),
+        "beaten_by": [other["plate"] for other in beaten_by[:3]],
+        "of": len(pool),
+        "group": group_size,
+    }
+
+
 def map_skyband(cars, limit, groups=False, min_level=0):
     """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband, przy `groups`
     - zwycięzców grup.
@@ -351,19 +361,26 @@ def map_skyband(cars, limit, groups=False, min_level=0):
     for car in cars:
         grouped.setdefault(car["from_place"] if groups else id(car), []).append(car)
     winners = []
+    group_size = {}
     for group in grouped.values():
         shown = [_shown_as(car) for car in group]
-        winners += [car for car, mine in zip(group, shown)
-                    if not any(_beats(other, mine) for other in shown)]
+        for car, mine in zip(group, shown):
+            if not any(_beats(other, mine) for other in shown):
+                winners.append(car)
+                group_size[id(car)] = len(group)
     order = {id(car): i for i, car in enumerate(cars)}
     winners.sort(key=lambda car: order[id(car)])
 
     shown = [_shown_as(car) for car in winners]
     beaten_by = [sum(_beats(other, mine) for other in shown) for mine in shown]
     if len(winners) <= limit:
-        return winners
-    level = max(sorted(beaten_by)[limit - 1], min_level)
-    return [car for car, beaten in zip(winners, beaten_by) if beaten <= level]
+        chosen = winners
+    else:
+        level = max(sorted(beaten_by)[limit - 1], min_level)
+        chosen = [car for car, beaten in zip(winners, beaten_by) if beaten <= level]
+    for car in chosen:
+        car["why"] = _why(car, shown, winners, group_size[id(car)])
+    return chosen
 
 
 def map_choice(cars, limit, groups=False, vans=False, min_level=0):
@@ -414,12 +431,12 @@ def car_options(day, reachable, dest, limit=2):
         for stop, arrival in reachable.items():
             coords = day.stop_coords.get(stop)
             if coords is None or not _in_box(*coords, car["lat"], car["lon"],
-                                             WALK_TO_CAR_M):
+                                             gtfs.WALK_M):
                 continue
             walk_m = gtfs._haversine_m(*coords, car["lat"], car["lon"])
-            if walk_m > WALK_TO_CAR_M:
+            if walk_m > gtfs.WALK_M:
                 continue
-            walk_sec = walk_time(walk_m)
+            walk_sec = gtfs.walk_time_sec(walk_m, day.walk_mps)
             candidates.append({
                 "stop": stop,
                 "car": car,

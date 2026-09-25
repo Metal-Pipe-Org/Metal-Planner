@@ -163,3 +163,60 @@ def test_bez_pojazdu_odpowiedz_sie_nie_zmienia(install_day, pin_deadline):
 
     assert "onboard" not in wynik
     assert all("onboard" not in j for j in wynik["journeys"])
+
+
+# ------------------------------------------- mapa: siedzisz już w pojeździe
+
+
+def _dzien_z_tramwajem(odjazd, przyjazd):
+    """Nasz autobus 146 jak w _day(), a z WSIADAM tramwaj 7 o `odjazd`,
+    w CELU o `przyjazd`."""
+    return make_day([
+        {"trip_id": "nasz", "label": "Autobus 146", "headsign": "CEL",
+         "stops": [("POCZATEK", 0, 0), ("WSIADAM", 600, 600),
+                   ("SRODEK", 1200, 1200), ("CEL", 2400, 2400)]},
+        {"trip_id": "szybki", "label": "Tramwaj 7", "headsign": "CEL",
+         "stops": [("WSIADAM", odjazd, odjazd), ("CEL", przyjazd, przyjazd)]},
+    ])
+
+
+def _linie_na_mapie(wynik):
+    return {s["num"] for s in wynik["segments"]}
+
+
+def test_przesiadka_na_starcie_z_pokladu_wymaga_zapasu(install_day, pin_deadline):
+    """Z pokładu na przystanek się PRZYJEŻDŻA, więc tramwaj, który rusza pół
+    minuty po naszym autobusie, jest przesiadką bez zapasu - mapa go nie
+    rysuje. Stojąc na tym przystanku (zwykłe wyszukiwanie) zdąży się na niego
+    bez problemu i tam ma zostać."""
+    install_day(_dzien_z_tramwajem(630, 1500))
+    pin_deadline(3000)
+
+    z_pokladu = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie())
+    assert _linie_na_mapie(z_pokladu) == {"146"}
+
+    z_przystanku = planner.plan_flow("WSIADAM", "CEL", WHEN.replace(minute=10))
+    assert "7" in _linie_na_mapie(z_przystanku)
+
+
+def test_dalsza_jazda_wygrywa_z_przesiadka_ktora_malo_daje(install_day,
+                                                            pin_deadline):
+    """Wysiadka i zmiana pojazdu to przesiadka, więc musi się opłacić tak jak
+    każda inna (TRANSFER_GAIN_SEC). Tramwaj szybszy o pięć minut nie wyprzedza
+    więc dalszej jazdy autobusem, w którym się siedzi."""
+    install_day(_dzien_z_tramwajem(700, 2100))
+    pin_deadline(3000)
+
+    wynik = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie())
+
+    assert _linie_na_mapie(wynik) == {"146", "7"}
+    assert wynik["journeys"][0]["legs"][0]["num"] == "146"
+    assert wynik["journeys"][0]["onboard"]["transfer"] is False
+
+
+def test_przesiadka_ktora_sie_oplaca_dalej_wygrywa(install_day, pin_deadline):
+    """Tramwaj szybszy o pół godziny (z _day()) wyprzedza jazdę dalej mimo
+    przesiadki - próg ma odsiewać drobne zyski, a nie każdą zmianę pojazdu."""
+    wynik = _plan(install_day, pin_deadline)
+
+    assert wynik["journeys"][0]["legs"][0]["num"] == "7"

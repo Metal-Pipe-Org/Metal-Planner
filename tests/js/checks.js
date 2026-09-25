@@ -893,8 +893,8 @@ checks.tablica_miesza_przyjazdy_z_odjazdami = (() => {
 })();
 
 /* Czekanie jest widoczne, nie schowane (punkt 13 kontraktu). Komunikat
-   zostaje tylko przy zmianie doby - czekanie tego samego dnia mówi pasek
-   nad mapą godziną "wyjeżdżasz o" (patrz pasek_mowi_kiedy_wyjechac). */
+   staje przy zmianie doby i przy czekaniu dłuższym niż 20 minut tego samego
+   dnia; krótsze mówi sam pasek nad mapą (patrz pasek_mowi_kiedy_wyjechac). */
 checks.czekanie_jest_widoczne = (() => {
     const jutro = app.waitNoticeHtml(
         {day_offset: 1, starts: '00:03', waits_sec: 240});
@@ -902,11 +902,16 @@ checks.czekanie_jest_widoczne = (() => {
         {day_offset: 2, starts: '05:10', waits_sec: 30 * 3600});
     const dzis = app.waitNoticeHtml(
         {day_offset: 0, starts: '12:30', waits_sec: 88 * 60});
+    const zaraz = app.waitNoticeHtml(
+        {day_offset: 0, starts: '11:10', waits_sec: 8 * 60});
     return {
         ok: jutro.includes('jutro') && jutro.includes('00:03')
             && zaDwa.includes('za 2 dni') && zaDwa.includes('05:10')
-            && dzis === '',
-        jutro, zaDwa, dzis,
+            && dzis.includes('Najszybszy dojazd wyjeżdża o 12:30')
+            && dzis.includes('88 min')
+            && !dzis.includes('nic już') && !dzis.includes('jutro')
+            && zaraz === '',
+        jutro, zaDwa, dzis, zaraz,
     };
 })();
 
@@ -1447,6 +1452,8 @@ checks.tablica_liczy_od_godziny_z_formularza = (() => {
     const pelna = app.timetableHtml(data, 300);
     app.dotOpts.rows = 2;
     const ciasna = app.timetableHtml(data, 300);
+    app.dotOpts.rows = 1;
+    const jedna = app.timetableHtml(data, 300);
     app.dotOpts.rows = bylo;
     const bezMapy = app.timetableHtml(data);
 
@@ -1456,10 +1463,14 @@ checks.tablica_liczy_od_godziny_z_formularza = (() => {
     const wMiejscu = kreska > pelna.indexOf('>2<') && kreska < pelna.indexOf('>3<');
     // Suwak na dwa wiersze: odjazd od przyjazdu mapy MUSI się zmieścić.
     const wierszy = (ciasna.match(/<li>/g) || []).length;
+    // Jeden wiersz: tylko odjazd, na który się zdąży - odjazd sprzed
+    // przyjazdu mapy nie może zająć jedynego miejsca (recenzja #141/#143/#147).
+    const jedenWiersz = (jedna.match(/<li>/g) || []).length;
     return {
         ok: wMiejscu && !bezMapy.includes('tt-here')
-            && ciasna.includes('>3<') && wierszy === 2,
-        wMiejscu, wierszy, ciasna,
+            && ciasna.includes('>3<') && wierszy === 2
+            && jedna.includes('>3<') && jedenWiersz === 1,
+        wMiejscu, wierszy, ciasna, jedenWiersz, jedna,
     };
 })();
 
@@ -1499,6 +1510,36 @@ checks.odsiew_krazenia_leci_do_serwera = (() => {
     return {
         ok: zgaszone.includes('latest_start=0') && zapalone.includes('latest_start=1'),
         zgaszone, zapalone,
+    };
+})();
+
+/* Debug pod zębatką: dymek roweru i auta mówi, dlaczego przeszły wybór -
+   ale tylko z zapalonym przełącznikiem. Bez niego dymek jest taki jak był. */
+checks.debug_mowi_dlaczego = (() => {
+    const why = {records: ['najwcześniej przy aucie'], beaten: 0,
+                 beaten_by: [], of: 4, group: 3};
+    const car = {model: 'Clio', plate: 'WE1', at: 600, walk_sec: 180, from: 'Rynek',
+                 to_dest_m: 900, fuel: 80, range: 400, ogarniam: [], why};
+    const place = {name: 'Stacja A', at: 600, walk_sec: 180, from: 'Rynek',
+                   bikes: 3, electric: 0,
+                   why: {records: [], beaten: 2, beaten_by: ['Stacja X', 'Stacja Z'],
+                         of: 9},
+                   rides: [{name: 'Stacja B', options: [
+                       {bike_at: 780, arrival: 1500, vehicles: 1}]}]};
+    const bylo = app.dotOpts.why;
+    app.dotOpts.why = false;
+    const autoBez = app.carTooltipHtml(car);
+    const rowerBez = app.bikeTooltipHtml(place, true);
+    app.dotOpts.why = true;
+    const auto = app.carTooltipHtml(car);
+    const rower = app.bikeTooltipHtml(place, true);
+    app.dotOpts.why = bylo;
+    return {
+        ok: !autoBez.includes('nic go nie bije') && !rowerBez.includes('bije go')
+            && auto.includes('nic go nie bije') && auto.includes('z 3 aut')
+            && rower.includes('bije go 2 z 9') && rower.includes('Stacja X')
+            && rower.includes('Stacja B'),
+        auto, rower,
     };
 })();
 

@@ -340,7 +340,10 @@ wystarczy, by policzyć najwcześniejszy przyjazd wszędzie:
   `WALK_M` = 600 m — ten sam na starcie, w przesiadce, u celu i przy punkcie
   klikniętym na mapie). Czas przejścia liczy się z samej odległości w linii
   prostej (0,7 m/s, w górę do pełnych minut, nie mniej niż 3) i krawędź niesie
-  go ze sobą — stałej czasu przejścia nie ma. Tą samą drogą łączą się kolej
+  go ze sobą — stałej czasu przejścia nie ma. Tempo pytający może zmienić pod
+  zębatką na jedno z trzech (`gtfs.WALK_PACES`: 0,55 / 0,7 / 0,9 m/s); każde
+  inne niż domyślne to osobna kopia dnia z przeliczonymi krawędziami
+  (`gtfs.with_pace`), liczona raz i trzymana razem z dniem. Tą samą drogą łączą się kolej
   i MPK: dworzec i stojące pod nim przystanki nazywają się inaczej, a i tak
   dzieli je kilka minut marszu. Przejście relaksuje się po wysiadaniu
   z pojazdu albo z samego startu relacji, zawsze o JEDEN krok — nie da się iść
@@ -513,8 +516,9 @@ krętości miasta, zaokrąglone w dół) plus stały narzut na wypożyczenie
 i oddanie (`MAP_OVERHEAD_SEC`, 2 min). Rozbicie na prędkość × krętość ma sens
 tylko tam, gdzie zna się przebieg trasy — mapa zna wyłącznie odległość
 w linii prostej, więc dwie liczby udawałyby wiedzę, której nie ma. Propozycje
-mają własny model (`BIKE_SPEED_KMH`/`BIKE_DETOUR`/`UNLOCK_SEC`/`DOCK_SEC`)
-i ten nie został ruszony.
+tras liczą tym samym modelem, a dojście do stacji zwykłym marszem
+(`gtfs.WALK_M`, `gtfs.walk_time_sec`) — od zgłoszenia #151 nie ma już osobnego
+modelu propozycji.
 
 Przejazd zaczyna się na stacji **albo przy rowerze stojącym luzem**
 (`free_bike_status` — we Wrocławiu jest ich ponad sto naraz), a kończy zawsze
@@ -642,12 +646,18 @@ nazwy w jadącym autobusie to proszenie się o literówkę).
 Cała sztuczka jest w jednym zdaniu: **z pokładu podróż zaczyna się na NASTĘPNYM
 przystanku, w chwili, gdy pojazd z niego rusza**. Wszystko, co pasażer może
 zrobić, zaczyna się właśnie tam i wtedy — zostać w pojeździe (dla skanu:
-zwykłe wsiadanie w ten sam kurs na tym przystanku, z zerowym czekaniem),
+wsiadanie w ten sam kurs na tym przystanku, z zerowym czekaniem),
 wysiąść i przesiąść się (wsiadanie w inny kurs stamtąd), wysiąść i pójść
-pieszo, po rower albo do auta (zwykłe przejście stamtąd). Algorytm nie
-dostaje przez to ani jednej nowej gałęzi: `plan_flow` dostaje słupek i sekundę
-jak przy każdym innym wyszukiwaniu, więc WRM, Traficar, kolej i mapa
-przepływów działają tu dokładnie tak samo jak wszędzie indziej.
+pieszo, po rower albo do auta (zwykłe przejście stamtąd). `plan_flow` dostaje
+słupek i sekundę jak przy każdym innym wyszukiwaniu, więc WRM, Traficar, kolej
+i mapa przepływów działają tu tak samo jak wszędzie indziej.
+
+Jedna różnica wobec stania na przystanku (zgłoszenie #67): na ten przystanek
+się PRZYJEŻDŻA. Dalsza jazda naszym kursem nie wymaga zapasu, ale każdy inny
+pojazd to już przesiadka — dostaje minutę bufora (`TRANSFER_SEC`, reguła
+w `planner._board_buffer`, ta sama w skanie, w mapie i przy wyborze miejsca
+wsiadania), a w liście propozycji liczy się jako przesiadka, więc musi się
+opłacić (`TRANSFER_GAIN_SEC`), żeby wyprzedzić jazdę dalej.
 
 Zostają więc dwie rzeczy do zrobienia:
 
@@ -885,12 +895,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   podanym jako fakt. Etap rowerowy:
   `{kind: "bike", line: "Rower miejski", num: "WRM", mode: "bike", headsign,
   from, from_time, to, to_time, dep_sec, arr_sec, minutes, ride_minutes,
-  unlock_minutes, dock_minutes, distance_m, bikes_available, docks_available,
+  overhead_minutes, distance_m, bikes_available, docks_available,
   station_from_id, station_to_id, path}` — `from`/`to` to nazwy STACJI WRM,
   nie przystanków, `path` to odcinek między nimi (dwa punkty, nie przebieg
-  ulicami), a cztery pola minutowe sumują się dokładnie. Dojście do stacji
-  i od stacji jedzie jako zwykły etap `walk` z dodatkowym polem `note`
-  (gotowy opis — „Dojście do stacji WRM …" nie da się złożyć z `from`/`to`,
+  ulicami), a `minutes` to dokładnie `ride_minutes` + `overhead_minutes`
+  (wypożyczenie ze zwrotem). Dojście do stacji i od stacji jedzie jako zwykły
+  etap `walk` z dodatkowym polem `note` (gotowy opis — „Dojście do stacji WRM …" nie da się złożyć z `from`/`to`,
   bo stacja roweru to nie przystanek).
 
   `density` to docelowa gęstość mapy w km różnych korytarzy na km boku kadru
@@ -917,7 +927,12 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   `bikes.map_places`). Miejsce jest kandydatem, gdy stoi
   w nim choć jeden rower włączonego rodzaju — odsiew idzie przed wyborem
   przejazdów, dotyczy wsiadania, a przy nieznanym stanie stojaków nie odsiewa
-  nic. `no_dawdling` — PRÓBA za przełącznikiem (domyślnie zgaszona, poza
+  nic. `walk_pace` (`wolno`/`zwykle`/`szybko`, nieznane = `zwykle`),
+  `bike_kmh` (5–20, domyślnie 10) i `bike_overhead_sec` (0–600, domyślnie 120) —
+  założenia czasowe pytającego spod zębatki (zgłoszenie #151): tempo każdego
+  przejścia pieszego oraz prędkość roweru w linii prostej i stały narzut jego
+  przejazdu, te same dla mapy i dla propozycji; sufity pilnuje planner.
+  `no_dawdling` — PRÓBA za przełącznikiem (domyślnie zgaszona, poza
   kontraktem): mapa wyrusza z najpóźniejszej godziny, z której wciąż osiąga
   najszybszy przyjazd (`planner._latest_departure`), więc znika z niej jazda,
   po której i tak wsiada się w ten sam pojazd. Godziny raportowane
@@ -1031,6 +1046,52 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-25** — **rower najszybciej osiągalny zamiast najdłuższej jazdy**
+  (punkt 16 kontraktu). Kryterium „więcej kilometrów rowerem" nagradzało
+  rowery, do których najpierw idzie się w złą stronę; zastępuje je godzina,
+  o której jest się przy rowerze, z tej samej podróży (wcześniej = lepiej). Dwa pozostałe kryteria (godzina
+  w celu, liczba pojazdów) bez zmian; wypożyczenie roweru nadal nie jest
+  przesiadką. Przy okazji dwie uwagi z recenzji #141/#143/#147: tablica
+  odjazdów przy jednym wierszu pokazuje odjazd, na który się zdąży (odjazdy
+  sprzed przyjazdu mapy zajmują najwyżej połowę wierszy, bez wymuszonego
+  minimum), a komunikat o czekaniu dłuższym niż 20 minut tego samego dnia
+  wraca — godzinę na pasku łatwo przeoczyć — jako „Najszybszy dojazd
+  wyjeżdża o … — to za … min" (dawne „nic już stąd nie jedzie" zostaje tylko
+  przy zmianie doby, bo tego samego dnia zwykle coś jedzie, tylko nie
+  szybciej). Nowa sekcja **Debug** pod zębatką: przy zapalonym przełączniku
+  dymek roweru i auta mówi, w czym są najlepsze, ile innych je bije i które
+  (pole `why` w `bike_places[]` i w `cars[]`). Rowery wybierane są od teraz
+  w dwóch etapach (punkt 16): najpierw STACJE — stacja odpada, gdy inna daje
+  każdą jej podróż co najmniej tak samo dobrze, a suwak liczy stacje — potem
+  każda stacja osobno pokazuje swoje niepobite przejazdy. Na sześciu
+  relacjach 1–7 z 4–9 pokazanych stacji to stacje po drodze. Grupowanie aut
+  przeniesione do Eksperymentów i zdjęte z punktu 15 kontraktu (domyślnie
+  i tak było wyłączone).
+
+- **2026-09-25** — **z pokładu na przystanek się przyjeżdża** (zgłoszenie #67).
+  Mapa traktowała start z pojazdu jak stanie na przystanku: tramwaj ruszający
+  pół minuty po naszym autobusie uchodził za osiągalny, a wysiadka i zmiana
+  pojazdu nie była przesiadką. Teraz dalsza jazda tym samym kursem jest
+  kontynuacją bez zapasu, każdy inny pojazd na tym przystanku wymaga minuty
+  przesiadki, a w liście propozycji zmiana pojazdu liczy się jako przesiadka.
+  Wyszukiwania bez startu z pojazdu się nie zmieniają. Testy: 398, było 395.
+- **2026-09-25** — **jeden marsz i jeden rower wszędzie** (zgłoszenie #151,
+  punkty 9 i 10). Dojście do auta w propozycjach tras szło 1,3 m/s z minutą
+  minimum, a do roweru 4,5 km/h z własnym zasięgiem 500 m; teraz oba to ten sam
+  marsz co na mapie (0,7 m/s, minimum 3 min, zasięg 600 m). Rower
+  w propozycjach liczy się modelem mapy: 10 km/h w linii prostej plus 2 min na
+  wypożyczenie i zwrot (wcześniej 14 km/h × krętość plus 3 + 1 min). Karta
+  trasy pokazuje „jazda X min, wypożyczenie i zwrot 2 min".
+- **2026-09-25** — **Założenia czasowe pod zębatką** (zgłoszenie #151). Nowa
+  sekcja: tempo marszu (wolne / zwykłe / szybkie — trzy stałe tempa, bo
+  przejścia liczy się raz na dzień, więc każde tempo to jedno przeliczenie
+  dnia, a nie jedno na zapytanie), prędkość roweru i czas wypożyczenia ze
+  zwrotem. Każdy ustawia swoje, pamiętane w przeglądarce jak reszta suwaków;
+  domyślne to dotychczasowe liczby, więc bez ruszania zębatki nic się nie
+  zmienia. Auta nie mają tu suwaków: mapa nie liczy czasu jazdy autem wcale.
+  Przesiadka na tym samym słupku (1 min) też zostaje stała — siedzi w samym
+  rdzeniu skanu i nie może przekroczyć podłogi przejścia. Testy: 406.
 
 - **2026-09-20** — **zgłoszenia #141, #143 i #147** (kontrakt punkty 2, 10, 11,
   15 i 16 przepisane na polecenie użytkownika; pomiar i uzasadnienia
@@ -2104,12 +2165,6 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   pozostałe takie pary czekają na dopisanie. Przesiadki to nie blokuje
   (most pieszy bierze się z odległości, nie z nazwy), dotyczy wyłącznie
   tego, co wyszukiwarka rozwija jako jedno miejsce.
-- Rower miejski liczy dojście własną miarą (`bikes.WALK_MAX_M` i własna
-  prędkość) **w propozycjach tras**, a nie tą jedną zasadą chodzenia, co
-  reszta wyszukiwarki — więc dojście do stojaka i dojście na przystanek są tam
-  wyceniane różnie. Wyrównanie to podmiana miary w warstwie rowerowej. Na
-  mapie przepływów problemu nie ma: `bikes.map_places` chodzi wyłącznie
-  `gtfs.WALK_M`/`gtfs.walk_time_sec`, tak jak wszystko inne (punkt 14).
 - Przejazd rowerem nie ma geometrii: znamy obie stacje, długość trasy jest
   szacowana (odległość w linii prostej × 1,35), a na mapie rysuje się
   odcinek między stacjami, kreską przerywaną. Prawdziwy przebieg wymagałby

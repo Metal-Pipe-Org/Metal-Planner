@@ -216,6 +216,26 @@ def test_zawsze_widac_auta_ktorych_nic_nie_bije():
     assert _tablice(pokazane) == ["A", "C"]
 
 
+def test_podglad_mowi_dlaczego_auto_jest_na_mapie():
+    """Podgląd pod zębatką (Debug): w czym auto jest najlepsze, ile aut je
+    bije i które, oraz z ilu aut spod tego samego miejsca wygrało."""
+    wczesne = _auto("A", 600, "S")
+    platne = _auto("C", 1800, "X", ogarniam=20)
+    pobite = _auto("D", 1800, "Y")
+    obok = _auto("E", 700, "S")              # przegrywa w grupie z A
+
+    pokazane = {car["plate"]: car["why"] for car in traficar.map_skyband(
+        [wczesne, platne, pobite, obok], 30, groups=True)}
+
+    assert pokazane["A"]["records"] == ["najwcześniej przy aucie"]
+    assert pokazane["A"]["beaten"] == 0 and pokazane["A"]["group"] == 2
+    assert pokazane["C"]["records"] == ["najwięcej z Ogarniam"]
+    # D bije i A (wcześniej), i C (ta sama godzina, ale z nagrodą).
+    assert pokazane["D"]["beaten"] == 2
+    assert sorted(pokazane["D"]["beaten_by"]) == ["A", "C"]
+    assert "E" not in pokazane
+
+
 def test_odleglosc_do_celu_nie_jest_kryterium():
     """Auto tuż przy celu nie wygrywa samym położeniem: czy jazda autem się
     opłaca, mapa nie rozstrzyga, bo czasu jazdy nie da się rzetelnie

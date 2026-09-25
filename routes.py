@@ -357,4 +357,9 @@ def init_routes(app):
             # o czym mówić, więc reszta parametrów jest wtedy ignorowana -
             # to zwykłe wyszukiwanie.
             in_vehicle=_onboard_arg(),
+            # Założenia czasowe pytającego - sekcja pod zębatką (zgłoszenie
+            # #151). Brak to dzisiejsze wartości; sufity pilnuje planner.
+            walk_pace=request.args.get("walk_pace") or None,
+            bike_kmh=_float_arg("bike_kmh"),
+            bike_overhead_sec=_float_arg("bike_overhead_sec"),
         ))

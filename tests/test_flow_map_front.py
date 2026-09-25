@@ -557,6 +557,13 @@ def test_the_dot_timetable_counts_from_the_asked_hour(front):
     _check(front, "tablica_liczy_od_godziny_z_formularza")
 
 
+def test_debug_says_why_a_bike_or_car_is_on_the_map(front):
+    """Podgląd pod zębatką (Debug): przy zapalonym przełączniku dymek roweru
+    i auta mówi, w czym są najlepsze i co je bije; zgaszony niczego nie
+    dokłada."""
+    _check(front, "debug_mowi_dlaczego")
+
+
 def test_bike_kinds_are_switches_sent_to_the_server(front):
     """Zgłoszenie #147: rowery elektryczne i zwykłe to dwa przełączniki pod
     zębatką, oba domyślnie włączone - ich stan idzie w zapytaniu, bo odsiew
