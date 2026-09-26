@@ -20,7 +20,17 @@
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    {#
+      Pasek statusu nieprzezroczysty (biały, ciemny tekst), a nie
+      black-translucent. Przy przezroczystym iOS 26 rysuje zainstalowaną
+      aplikację od samej góry ekranu, ale jej wysokość liczy bez paska
+      statusu - na dole zostawał pusty biały pas pod zakładkami, poza
+      zasięgiem strony (WebKit bug 301108; stylami ani skryptem tego się nie
+      odzyska). W nieprzezroczystym trybie błędu nie ma i nie wróci po jego
+      naprawie. Zmiana działa dopiero po ponownym dodaniu aplikacji do ekranu
+      - iOS czyta ten znacznik tylko przy instalacji.
+    #}
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Metal Planner">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">

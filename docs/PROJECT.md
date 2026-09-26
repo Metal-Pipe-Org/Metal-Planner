@@ -1080,7 +1080,10 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   i autobusy), a w zakładce Rozkład nie ma przycisków warstw. Pusty rozkład
   zakładka „Mapa" zamyka sama; wybrany zostaje na mapie z „Zamknij rozkład",
   jak dotąd. Telefon obrócony poziomo zostaje układem telefonu, a
-  zainstalowana aplikacja działa tylko w pionie. Pilnuje tego `tests/test_uklad_telefonu.py`: prawdziwa przeglądarka
+  zainstalowana aplikacja działa tylko w pionie. Zainstalowana aplikacja
+  na iPhonie ma nieprzezroczysty (biały) pasek statusu: przy przezroczystym
+  iOS 26 zostawiał pusty pas pod zakładkami (WebKit bug 301108) — działa po
+  ponownym dodaniu aplikacji do ekranu. Pilnuje tego `tests/test_uklad_telefonu.py`: prawdziwa przeglądarka
   (playwright) w rozmiarze dwóch telefonów sprawdza w każdym stanie ekranu,
   że nic nie wystaje poza ekran ani kartę, a nakładki na mapie nie nachodzą
   na siebie; bez playwright albo bazy rozkładów test się pomija.
