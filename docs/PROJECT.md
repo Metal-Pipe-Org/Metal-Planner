@@ -921,7 +921,7 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   „Ogarniam"; domyślnie grupowania nie ma i każde auto jest osobno),
   a spośród zwycięzców grup te, których nie bije żadne inne, zawsze, kolejne
   poziomy w całości, aż uzbiera się żądana liczba. `bike_count` — ile
-  przejazdów rowerem pokazać (1–30, domyślnie 4, też razy `1 + more`);
+  przejazdów rowerem pokazać (1–30, domyślnie 3, też razy `1 + more`);
   `bike_electric`/`bike_regular` — na jaki rodzaj roweru pasażer chce wsiąść
   (dwa przyciski w pasku warstw; brak parametru znaczy „oba", patrz
   `bikes.map_places`). Miejsce jest kandydatem, gdy stoi
@@ -1032,7 +1032,9 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `templates/index.html` | szkielet strony: mapa, panel, Ustawienia Developerskie |
 | `static/app.js` | frontend wyszukiwarki: mapa, wyszukiwanie, lista propozycji |
 | `static/timetable.js` | frontend rozkładów (drugi tryb panelu, po moście z `app.js`) |
-| `static/style.css` | style panelu, kart tras, plakietek linii itd. |
+| `static/style.css` | style panelu, kart tras, plakietek linii itd. — szeroki ekran i wszystko wspólne |
+| `static/phone.css` | układ na telefon: jedyne miejsce na reguły tylko dla wąskiego ekranu (ładowany z `media` w `index.html`) |
+| `static/phone.js` | zachowanie na telefon: czy to telefon, zwijanie wyszukiwarki, ile mapy zasłaniają nakładki |
 | `static/manifest.webmanifest` | manifest PWA: nazwa, kolory, ikony, tryb okna |
 | `static/sw.js` | service worker: cache powłoki, kafelków i statyk (serwowany z `/sw.js`); na localhoście wszystko nasze idzie tylko z sieci |
 | `static/pwa.js` | rejestracja workera, przycisk instalacji, ciche przejście na nową wersję |
@@ -1046,6 +1048,42 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-26** — **telefon jako osobny układ** (zgłoszenie #117). Reguły
+  dla wąskiego ekranu były rozsiane po trzech miejscach `style.css`, a skrypt
+  w dwóch miejscach osobno sprawdzał szerokość — każda zmiana robiona pod
+  komputer psuła telefon po cichu. Teraz telefon ma własny arkusz
+  (`phone.css`) i własny skrypt (`phone.js`), a granica szerokości jest
+  zapisana raz, w `index.html`. Na ekranie mapy: wyszukiwarka po wyszukaniu
+  zwija się do jednej linijki „skąd → dokąd, godzina" (stuknięcie rozwija),
+  przyciski warstw stoją kolumną przy prawej krawędzi mapy zamiast w zakładce
+  „Trasy", pasek z czasem podróży i okienko z rozkładem leżą w jednym doku
+  nad zakładkami (wcześniej jedno na drugim, a pasek wystawał poza ekran),
+  bez przycisków +/− (chowały się pod zakładkami). Poprawione przy okazji:
+  ✕ wystający poza kartę na wąskim telefonie, Ustawienia Developerskie
+  otwierające się same po odświeżeniu na telefonie, pusty pasek z czasem
+  widoczny jako biała pigułka, podpowiedzi „kliknij na mapie" → „wskaż".
+  Kolumna warstw kładzie się w rząd (albo znika), gdy między panelem a dokiem
+  brakuje na nią miejsca. Na szerokim ekranie pasek z czasem omija teraz też
+  okienko z rozkładem i panel ⚙ z prawej (wcześniej na nie wchodził), a gdy
+  obok nie mieści się zdanie o najszybszym dojeździe, schodzi pod okienko.
+  Strona się nie przybliża, tylko mapa (wcześniej blokada działała tylko
+  w zainstalowanej aplikacji, a iPhone przybliżał stronę przy każdym
+  stuknięciu w pole tekstowe). Nowa sekcja ⚙ → Layout: przełącznik
+  „Stoję tutaj / Jestem w pojeździe" da się schować (wszędzie; start jest
+  wtedy zawsze stojącym miejscem), a na samym telefonie także zakładkę
+  „Trasy" (poza telefonem tego ustawienia nie widać). Przystanki, rowery
+  i Traficary to w ⚙ jedna sekcja, „Wielkość kropek" przeszła do „Wyglądu
+  mapy", domyślnie 3 stacje z rowerem zamiast 4. Przed nazwą aplikacji jej
+  ikona. Nagłówek „Metal Planner" z ⚙ widać też nad
+  mapą, podpis to samo „Wrocław" obok nazwy (to już nie tylko tramwaje
+  i autobusy), a w zakładce Rozkład nie ma przycisków warstw. Pusty rozkład
+  zakładka „Mapa" zamyka sama; wybrany zostaje na mapie z „Zamknij rozkład",
+  jak dotąd. Telefon obrócony poziomo zostaje układem telefonu, a
+  zainstalowana aplikacja działa tylko w pionie. Pilnuje tego `tests/test_uklad_telefonu.py`: prawdziwa przeglądarka
+  (playwright) w rozmiarze dwóch telefonów sprawdza w każdym stanie ekranu,
+  że nic nie wystaje poza ekran ani kartę, a nakładki na mapie nie nachodzą
+  na siebie; bez playwright albo bazy rozkładów test się pomija.
 
 - **2026-09-25** — **rower najszybciej osiągalny zamiast najdłuższej jazdy**
   (punkt 16 kontraktu). Kryterium „więcej kilometrów rowerem" nagradzało

@@ -891,7 +891,7 @@ MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
 # Ile przejazdów rowerem mapa pokazuje (punkt 16, patrz bikes.map_places) -
 # ta sama reguła co przy autach, osobny suwak.
-DEFAULT_MAP_BIKES = 4
+DEFAULT_MAP_BIKES = 3
 MIN_MAP_BIKES = 1
 MAX_MAP_BIKES = 30           # sufit suwaka pod zębatką - pilnowany tutaj
 

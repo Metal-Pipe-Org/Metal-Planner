@@ -425,6 +425,10 @@ const window = {
     setTimeout() { return 0; }, clearTimeout() {},
 };
 
+/* Na stronie przed app.js ładuje się static/phone.js i to on mówi, czy to
+   telefon. Emulator jest szerokim ekranem, tak jak matchMedia wyżej. */
+const phoneLayout = {active: () => false, mapInsets: () => ({top: 40, bottom: 40})};
+
 // --- uruchomienie app.js ---------------------------------------------------
 
 /* Eksport wnętrza bloku `if (startInput) { ... }`. Gettery, nie wartości:

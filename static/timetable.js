@@ -218,6 +218,12 @@ window.timetableMode = {
         jako trzeci widok, a nie jako przełącznik czegoś już wybranego. */
     setMode,
 
+    /** Czy w rozkładzie coś wybrano - pusty rozkład zakładka "Mapa" zamyka
+        od razu (patrz #view-tabs w app.js). */
+    hasContent() {
+        return data !== null;
+    },
+
     pickStop(name) {
         if (!active() || !name) return false;
         queryInput.value = B.prettyStopName(name);

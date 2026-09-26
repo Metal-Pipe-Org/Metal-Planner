@@ -1,6 +1,7 @@
 /* Planer podróży - warstwa UI nad pełnoekranową mapą.
    Kolejność: tokeny -> elementy wspólne -> panel -> lista tras -> mapa
-   -> Ustawienia Developerskie -> RWD. */
+   -> Ustawienia Developerskie. Telefon ma własny arkusz, phone.css - tu nie
+   ma ani jednej reguły tylko dla wąskiego ekranu. */
 
 :root {
     --tram: #c62828;
@@ -39,10 +40,10 @@ body {
     inset: 0;
 }
 
-/* Blokada zoomu strony w zainstalowanej PWA (patrz pwa.js, klasa dodawana
-   tylko w display-mode: standalone) - mapa dostaje touch-action: none już z
-   leaflet.css (.leaflet-container), więc jej gest przybliżania działa dalej. */
-html.standalone-app body {
+/* Strona się nie przybliża (patrz viewport w templates/index.html) - palcem
+   można ją tylko przewijać. Mapa dostaje touch-action: none już z leaflet.css
+   (.leaflet-container), więc jej gest przybliżania działa dalej. */
+body {
     touch-action: pan-x pan-y;
 }
 
@@ -256,6 +257,20 @@ body.panel-hidden #sidebar {
     gap: 6px;
 }
 
+/* Miasto w jednej linii z nazwą, a nie pod nią - o wiersz mniej wysokości.
+   Przed nazwą ikona aplikacji, ta sama co na ekranie telefonu. */
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.brand-icon {
+    align-self: center;
+    flex: none;
+    border-radius: 5px;
+}
+
 .brand h1 {
     margin: 0;
     font-size: 16px;
@@ -264,7 +279,7 @@ body.panel-hidden #sidebar {
 }
 
 .brand p {
-    margin: 1px 0 0;
+    margin: 0;
     color: var(--ink-faint);
     font-size: 12px;
 }
@@ -284,6 +299,9 @@ body.panel-hidden #sidebar {
     border-radius: 10px;
     background: var(--surface-alt);
 }
+
+/* Schowany w ⚙ → Layout (patrz start-mode-switch w app.js). */
+body.start-mode-off .start-mode { display: none; }
 
 .start-mode .seg {
     flex: 1;
@@ -1297,8 +1315,8 @@ body.start-onboard .hint-onboard { display: block; }
    środku okna i JEDNOCZEŚNIE nie wpuścić go na panel ani na pływające
    przyciski, trzeba znać jego szerokość, a tej CSS nie umie użyć w
    obliczeniach. Arkusz daje więc sam wygląd i zawijanie (flex-wrap), a `left`
-   i `max-width` przychodzą stąd zmierzone. Na telefonie pasek zjeżdża pod
-   panel na sam dół i ustawia się w całości tutaj (patrz RWD). */
+   i `max-width` przychodzą stąd zmierzone. Na telefonie pasek stoi w dolnym
+   doku i ustawia go phone.css. */
 .time-headline {
     position: fixed;
     top: 16px;
@@ -1322,6 +1340,10 @@ body.start-onboard .hint-onboard { display: block; }
     font-size: 12.5px;
     color: var(--ink-soft);
 }
+
+/* `display: flex` wyżej przebija atrybut hidden - pusty pasek zostawał na
+   ekranie jako biała pigułka bez treści. */
+.time-headline[hidden] { display: none; }
 
 .time-headline b {
     color: var(--ink);
@@ -1370,26 +1392,13 @@ body.start-onboard .hint-onboard { display: block; }
 .headline-more:hover { background: var(--ink); color: #fff; }
 .headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
-@media (max-width: 760px) {
-    /* Na telefonie pasek wyszukiwania zajmuje górę ekranu - czas schodzi
-       pod niego i zwęża się do samych liczb. Odsunięty o tyle co zakładki
-       Mapa/Trasy/Rozkład (patrz #view-tabs/.toast) plus wcięcie ekranu na dole -
-       bez tego pasek chował się pod zakładkami na telefonach z home
-       indicatorem (np. w zainstalowanej aplikacji). Nie ma już nad sobą
-       przycisków, więc wycinek nie musi ich omijać - liczy się tylko to,
-       żeby pasek nie leżał na panelu. Środek liczy tu arkusz, a nie skrypt
-       (patrz placeTimeHeadline): wycinek idzie od krawędzi do krawędzi, więc
-       jego środek JEST środkiem okna. */
-    .time-headline {
-        top: auto;
-        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
-        font-size: 12px;
-        left: var(--sidebar-w);
-        right: 16px;
-        margin-inline: auto;
-    }
-    body.panel-hidden .time-headline { left: 16px; }
-}
+/* Ustawienia, które dotyczą tylko układu na telefonie - tu ich nie widać
+   (pokazuje je phone.css). */
+.phone-only { display: none; }
+
+/* Dok z templates/index.html: tu go nie ma, pasek i okienko w rogu stoją
+   każde osobno. Kolumną jest tylko na telefonie (patrz phone.css). */
+#map-dock { display: contents; }
 
 /* ------------------------------------ tablica odjazdów przesiadki --- */
 
@@ -1972,11 +1981,6 @@ body.dev-open #flow-panel { right: 322px; }
 }
 
 .toast .toast-close:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
-
-@media (max-width: 760px) {
-    /* Nad zakładkami Mapa/Trasy/Rozkład, żeby żadnej z nich nie zasłaniać. */
-    .toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
-}
 
 /* ------------------------------------------------------- rozkłady jazdy --- */
 
@@ -2563,102 +2567,3 @@ ul.tt-legend {
 
 .tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
 .tt-more:hover { background: #e8edf3; }
-
-/* --------------------------------------------------------------- RWD --- */
-
-@media (max-width: 760px) {
-    #view-tabs { display: flex; }
-
-    /* Panel jest tu nakładką na całą szerokość, a nie kolumną obok mapy -
-       nie ma czego omijać, pasek bierze całą szerokość okna. */
-    .time-headline,
-    body.panel-hidden .time-headline { left: 16px; }
-
-    #sidebar {
-        /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu
-           (viewport-fit=cover), więc panel musi je omijać sam. */
-        top: calc(8px + env(safe-area-inset-top, 0px));
-        left: 8px;
-        right: 8px;
-        bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
-        width: auto;
-    }
-
-    /* Widok mapy: z panelu zostaje sama karta wyszukiwania, reszta ekranu
-       to mapa. */
-    body.view-map #sidebar { bottom: auto; }
-    body.view-map .app-bar,
-    body.view-map .hint,
-    body.view-map .results { display: none; }
-
-    /* Widok listy: panel na cały ekran, na własnym tle - mapa pod spodem
-       zostaje w DOM (Leaflet musi znać rozmiar kontenera, żeby poprawnie
-       kadrować także wtedy, gdy patrzymy na listę), ale nie prześwituje
-       między kartami. */
-    body.view-list #sidebar {
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-        padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
-        background: var(--sheet);
-    }
-
-    /* Poświata pod tekstem była na czytelność nad mapą - na jednolitym tle
-       tylko brudzi. */
-    body.view-list .results-head h2,
-    body.view-list .results-foot { text-shadow: none; }
-
-    /* Zakładki zastępują ☰ - dwa mechanizmy chowania panelu naraz tylko by
-       myliły, a przy schowanym ☰ nie byłoby czym go odsłonić. */
-    .icon-button.floating { display: none; }
-
-    /* ...a razem z ☰ znika też pływający przełącznik trybu - rozkłady mają
-       tu własną zakładkę, równą dwóm pozostałym. */
-
-    /* W trybie rozkładów widok mapy pokazuje samą kartę rozkładu - tak jak
-       w wyszukiwarce pokazuje samą kartę wyszukiwania. */
-    body.mode-timetable.view-map #tt-results { display: none; }
-
-    /* ...a skoro została sama karta, to z niej musi dać się wyjść na mapę,
-       którą się właśnie ogląda (zakładka „Trasy" wyprowadza na listę). */
-    body.mode-timetable.view-map .tt-close {
-        display: flex;
-        width: 100%;
-        margin-top: 10px;
-        background: var(--surface-alt);
-        color: var(--ink-soft);
-    }
-
-    body.mode-timetable.view-map .tt-close:hover { background: #e8edf3; }
-
-    body.panel-hidden #sidebar {
-        transform: none;
-        opacity: 1;
-        visibility: visible;
-        pointer-events: auto;
-    }
-
-    #dev-panel {
-        /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu, tak jak
-           #sidebar - bez tego górna krawędź panelu (z przyciskiem ✕) chowa
-           się pod notchem/paskiem statusu. */
-        top: calc(16px + env(safe-area-inset-top, 0px));
-        left: 8px;
-        right: 8px;
-        width: auto;
-        max-height: calc(70vh - env(safe-area-inset-top, 0px));
-        overflow-y: auto;
-    }
-
-    /* Wąski ekran: panel ⚙ zajmuje całą szerokość, więc odsuwanie w bok nic
-       nie da - okienko schodzi nad dolne zakładki. */
-    #flow-panel,
-    body.dev-open #flow-panel {
-        top: auto;
-        right: 8px;
-        left: 8px;
-        width: auto;
-        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
-    }
-}
