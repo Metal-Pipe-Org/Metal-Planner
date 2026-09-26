@@ -1,0 +1,275 @@
+/* Układ na telefon - osobny arkusz, ładowany tylko na wąskim ekranie (granica
+   w <link id="phone-css">, templates/index.html). style.css opisuje szeroki
+   ekran i nie ma w nim ani jednej reguły tylko dla telefonu; tutaj jest tylko
+   to, co na telefonie wygląda inaczej. To, co inaczej DZIAŁA, jest w phone.js.
+
+   Ekran mapy, od góry:
+   - panel: karta wyszukiwania, po wyszukaniu zwinięta do jednej linijki;
+   - kolumna warstw przy prawej krawędzi, tuż pod panelem;
+   - dok: pasek z czasem podróży i okienko z rozkładem, jedno nad drugim;
+   - zakładki Mapa / Trasy / Rozkład.
+   Zakładki „Trasy" i „Rozkład" to ten sam panel na cały ekran. */
+
+:root {
+    /* Wysokość zakładek razem z wcięciem ekranu na dole (home indicator
+       w zainstalowanej aplikacji). Wszystko, co stoi nad zakładkami, odsuwa
+       się o tyle - jedna liczba zamiast kilku przepisanych z ręki. */
+    --tabs-h: calc(57px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ------------------------------------------------------------ zakładki --- */
+
+#view-tabs { display: flex; }
+
+/* Zakładka „Trasy" schowana w panelu ⚙ (sekcja Layout, patrz phone.js). */
+body.routes-tab-off #view-tabs [data-view="list"] { display: none; }
+
+/* Zakładki zastępują ☰ i ◷ - dwa mechanizmy chowania panelu naraz tylko by
+   myliły, a rozkłady mają tu własną zakładkę, równą dwóm pozostałym. */
+.icon-button.floating { display: none; }
+
+/* Mapę przybliża się palcami. Przyciski +/− chowały się pod dokiem
+   i zakładkami, a na telefonie nikt ich nie szuka. */
+.leaflet-control-zoom { display: none; }
+
+/* --------------------------------------------------------------- panel --- */
+
+#sidebar {
+    /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu
+       (viewport-fit=cover), więc panel musi je omijać sam. */
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    left: 8px;
+    right: 8px;
+    bottom: calc(var(--tabs-h) + 8px);
+    width: auto;
+}
+
+/* Chowanie panelu to mechanizm szerokiego ekranu - tu panel zawsze jest,
+   a co pod nim, przełączają zakładki. */
+body.panel-hidden #sidebar {
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+/* Widok mapy: z panelu zostaje sama karta, reszta ekranu to mapa. */
+body.view-map #sidebar { bottom: auto; }
+body.view-map .hint,
+body.view-map .results { display: none; }
+
+/* Widok listy: panel na cały ekran, na własnym tle - mapa pod spodem
+   zostaje w DOM (Leaflet musi znać rozmiar kontenera, żeby poprawnie
+   kadrować także wtedy, gdy patrzymy na listę), ale nie prześwituje
+   między kartami. */
+body.view-list #sidebar {
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: var(--tabs-h);
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
+    background: var(--sheet);
+}
+
+/* Poświata pod tekstem była na czytelność nad mapą - na jednolitym tle
+   tylko brudzi. */
+body.view-list .results-head h2,
+body.view-list .results-foot { text-shadow: none; }
+
+/* ------------------------------------------------ warstwy nad mapą --- */
+
+/* Warstwy zmieniają to, co widać NA MAPIE, więc w widoku mapy stoją na niej:
+   kolumna przy prawej krawędzi, tuż pod panelem (jego dolną krawędź podaje
+   phone.js). W pasku aplikacji zostaje jedna linijka: nazwa, a z prawej ⚙. */
+body.view-map .app-bar { padding: 6px 8px 6px 12px; }
+
+body.view-map .layer-bar {
+    position: fixed;
+    top: calc(var(--panel-bottom, 0px) + 8px);
+    right: 8px;
+    flex-direction: column;
+}
+
+/* Za mało miejsca między panelem a dokiem na kolumnę - rząd pod panelem,
+   a gdy i na rząd brakuje, warstwy znikają do czasu, aż panel zmaleje
+   (miejsce liczy phone.js). */
+body.view-map.layers-row .layer-bar { flex-direction: row; }
+body.view-map.layers-off .layer-bar { display: none; }
+
+body.view-map .layer-button {
+    width: 44px;
+    height: 44px;
+    box-shadow: var(--shadow);
+}
+
+body.view-map .layer-button:not(.active) { background: var(--surface); }
+
+/* Zakładka Rozkład to sama lista rozkładów - warstw mapy nie ma tam na czym
+   pokazać. */
+body.mode-timetable.view-list .layer-bar { display: none; }
+
+/* --------------------------------------------- karta wyszukiwania --- */
+
+/* Na wąskim ekranie „Odjazd" przepychał ✕ poza kartę, a kółko ładowania na
+   „Szukaj" robiło to samo na każdym telefonie. Pole godziny z „teraz" obok
+   mówi samo za siebie, a przycisk ma się kurczyć, a nie pchać sąsiadów. */
+.time-row > span:first-child { display: none; }
+.search-row .button.primary { min-width: 0; padding: 0 12px; }
+
+/* Zwinięta: jedna linijka „skąd → dokąd  godzina" (tworzy ją phone.js).
+   Stuknięcie rozwija formularz z powrotem. */
+body.search-collapsed .search-card { padding: 0; }
+body.search-collapsed .search-card > :not(.search-summary) { display: none; }
+
+body.search-collapsed .search-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 48px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius);
+    background: none;
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.search-summary-from,
+.search-summary-to {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Te same kropki, co na szynie rozwiniętego formularza i na markerach -
+   zielona to start, czerwona to cel. */
+.search-summary-from::before,
+.search-summary-to::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+    vertical-align: 1px;
+}
+
+.search-summary-from::before { background: #43a047; }
+.search-summary-to::before { background: #e53935; }
+
+.search-summary-arrow { flex: none; color: var(--ink-faint); }
+
+.search-summary-time {
+    flex: none;
+    margin-left: auto;
+    color: var(--ink-soft);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ rozkłady --- */
+
+/* W trybie rozkładów widok mapy pokazuje samą kartę rozkładu - tak jak
+   w wyszukiwarce pokazuje samą kartę wyszukiwania. */
+body.mode-timetable.view-map #tt-results { display: none; }
+
+/* ...a skoro została sama karta, to z niej musi dać się wyjść na mapę,
+   którą się właśnie ogląda (zakładka „Trasy" wyprowadza na listę). */
+body.mode-timetable.view-map .tt-close {
+    display: flex;
+    width: 100%;
+    margin-top: 10px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+}
+
+body.mode-timetable.view-map .tt-close:hover { background: #e8edf3; }
+
+/* ----------------------------------------------------------------- dok --- */
+
+/* Pasek z czasem podróży i okienko z rozkładem w jednej kolumnie nad
+   zakładkami. Osobno oba stały przy dolnej krawędzi i leżały jedno na
+   drugim, a pasek - szerszy niż ekran - wystawał spod okienka. */
+#map-dock {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: calc(var(--tabs-h) + 8px);
+    z-index: 900;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;            /* pusty skrawek doku to wciąż mapa */
+}
+
+#map-dock > * { pointer-events: auto; }
+
+/* Dok opisuje mapę - nad listą nie ma czego opisywać. */
+body.view-list #map-dock { display: none; }
+
+/* Rozwinięty formularz to zmiana wyszukiwania: dok mówi jeszcze o starym
+   wyniku, a na niskim ekranie (telefon obrócony poziomo) formularz na niego
+   wchodził. Wraca razem z nowym wyszukaniem, które zwija formularz. */
+body:not(.search-collapsed) #map-dock { display: none; }
+
+/* Pasek to tu zwykły tekst w dwóch linijkach: najszybszy dojazd, pod nim
+   zakres mapy. Rząd kafelków ze style.css na tej szerokości ciął zdania
+   w przypadkowych miejscach („wyjeżdżasz / o"). */
+.time-headline {
+    position: static;
+    display: block;
+    max-width: 100%;
+    padding: 7px 12px;
+    border-radius: var(--radius);
+    font-size: 12px;
+    text-align: center;
+}
+
+.headline-best { display: block; margin: 0; padding: 0; }
+.headline-sep { display: none; }
+.headline-more { margin: 0 0 0 6px; }
+
+#flow-panel,
+body.dev-open #flow-panel {
+    /* relative, nie static: ✕ okienka stoi w jego rogu (absolute), a nie
+       w rogu całego doku. */
+    position: relative;
+    inset: auto;                     /* odsunięcia do rogu ekranu ze style.css */
+    width: 100%;
+    max-width: none;
+    max-height: 34vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* Tablica przystanku stoi w doku - ten sam rozkład w dymku nad kropką
+   zasłaniałby mapę drugi raz tuż obok. Dymek zostaje tam, gdzie okienka
+   akurat nie ma (np. wyłączone w ⚙). */
+body:has(#flow-panel:not([hidden])) .timetable-tip { display: none; }
+
+/* -------------------------------------------------------- reszta ekranu --- */
+
+/* Nad zakładkami, żeby żadnej z nich nie zasłaniać. */
+.toast { bottom: calc(var(--tabs-h) + 8px); }
+
+/* Ustawienia tylko dla telefonu (⚙ → Layout) - style.css chowa je poza nim. */
+.phone-only { display: block; }
+
+#dev-panel {
+    /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu, tak jak
+       #sidebar - bez tego górna krawędź panelu (z przyciskiem ✕) chowa
+       się pod notchem/paskiem statusu. */
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: calc(70vh - env(safe-area-inset-top, 0px));
+    overflow-y: auto;
+}
