@@ -38,6 +38,8 @@ const SHELL_URLS = [
     '/',
     '/static/offline.html',
     '/static/style.css',
+    '/static/phone.css',
+    '/static/phone.js',
     '/static/app.js',
     '/static/timetable.js',
     '/static/pwa.js',

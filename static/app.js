@@ -68,7 +68,9 @@ if (devPanel) {
         document.body.classList.toggle('dev-open', open);
         if (persist) saveUiState({devOpen: open});
     };
-    setDev(!!uiState.devOpen, false);
+    // Na telefonie panel przykrywa cały ekran - otwarty sam po odświeżeniu
+    // zasłaniałby aplikację, o którą nikt jeszcze nie zapytał.
+    setDev(!!uiState.devOpen && !phoneLayout.active(), false);
     devToggle.addEventListener('click', () => setDev(devPanel.classList.contains('hidden')));
     $('dev-close').addEventListener('click', () => setDev(false));
 }
@@ -146,10 +148,13 @@ if (viewTabs) {
         const tab = event.target.closest('.tab');
         if (!tab) return;
         const view = tab.dataset.view;
-        // "Mapa" zostawia tryb taki, jaki jest: w rozkładach mapa to sposób
-        // wybrania przystanku (klik w słupek), a nie wyjście z rozkładów.
-        if (view !== 'map' && window.timetableMode) {
-            window.timetableMode.setMode(view === 'timetable');
+        // "Mapa" zostawia tryb taki, jaki jest: w rozkładach mapa pokazuje
+        // wybrany rozkład (i ma „Zamknij rozkład"). Pusty rozkład nie ma czego
+        // pokazać - wtedy "Mapa" wraca od razu do wyszukiwarki, zamiast
+        // kazać zamykać coś, w czym nic nie wybrano.
+        if (window.timetableMode) {
+            if (view !== 'map') window.timetableMode.setMode(view === 'timetable');
+            else if (!window.timetableMode.hasContent()) window.timetableMode.setMode(false);
         }
         setView(view === 'map' ? 'map' : 'list');
     });
@@ -730,27 +735,17 @@ if (!navigator.geolocation) {
 
 function fitTo(points) {
     if (!points.length) return;
-    const wide = window.matchMedia('(min-width: 761px)').matches;
     const panelVisible = !document.body.classList.contains('panel-hidden');
     const gutter = 40;
     // maxZoom: krótka trasa nie ma wjeżdżać w widok pojedynczej ulicy.
     const options = {maxZoom: 16};
-    if (wide) {
+    if (phoneLayout.active()) {
+        const inset = phoneLayout.mapInsets();
+        options.paddingTopLeft = [gutter, inset.top];
+        options.paddingBottomRight = [gutter, inset.bottom];
+    } else {
         options.paddingTopLeft = [panelVisible ? sidebar.offsetWidth + gutter : gutter, gutter];
         options.paddingBottomRight = [gutter, gutter];
-    } else {
-        // Telefon: kadrujemy zawsze pod widok mapy (nad kartą wyszukiwania,
-        // nad zakładkami) - także wtedy, gdy akurat patrzymy na listę, bo to
-        // ten kadr zobaczymy po przełączeniu zakładki.
-        // Karta bywa wysoka (dwa pola + godzina), a przy dosłownym odsunięciu
-        // się od niej na kadr zostaje pasek na dole ekranu - stąd sufit.
-        const card = document.querySelector('.search-card');
-        const top = panelVisible && card
-            ? Math.min(card.getBoundingClientRect().bottom + 12,
-                       window.innerHeight * 0.35)
-            : gutter;
-        options.paddingTopLeft = [gutter, top];
-        options.paddingBottomRight = [gutter, (viewTabs ? viewTabs.offsetHeight : 0) + 12];
     }
     map.fitBounds(L.latLngBounds(points), options);
 }
@@ -1295,54 +1290,75 @@ function renderTimeHeadline() {
 // Odstęp paska od krawędzi okna i od tego, co może mu stanąć na drodze.
 const HEADLINE_GAP = 16;
 
-/** Dokąd z lewej sięga to, na czym paskowi stawać nie wolno: panel i pływające
-    przyciski - ale tylko te, które leżą na jego wysokości. Mierzone, a nie
-    wpisane liczbą: szerokość panelu zmienia suwak, a napis na przycisku trybu
-    zmienia jego szerokość; wpisana liczba rozjeżdżała się z każdą taką zmianą.
-    Schowany panel sam wyjeżdża poza ekran, więc przestaje być przeszkodą bez
-    osobnej reguły. */
+/** Dokąd z lewej i z prawej sięga to, na czym paskowi stawać nie wolno - ale
+    tylko to, co leży na jego wysokości. Z lewej panel i pływające przyciski,
+    z prawej okienko z rozkładem i panel ⚙ (pasek wchodził na okienko, bo
+    omijał tylko lewą stronę). Mierzone, a nie wpisane liczbą: szerokość panelu
+    zmienia suwak, a napis na przycisku trybu zmienia jego szerokość; wpisana
+    liczba rozjeżdżała się z każdą taką zmianą. Schowany panel sam wyjeżdża
+    poza ekran, więc przestaje być przeszkodą bez osobnej reguły. */
 function headlineGuard(band) {
-    let guard = HEADLINE_GAP;
+    const onBand = el => {
+        const box = el.getBoundingClientRect();
+        return box.bottom > band.top && box.top < band.bottom ? box : null;
+    };
+    let left = HEADLINE_GAP;
     for (const el of [sidebar, $('sidebar-toggle'), $('mode-toggle')]) {
         if (!el || el.hidden) continue;
-        const box = el.getBoundingClientRect();
-        if (box.bottom <= band.top || box.top >= band.bottom) continue;
-        guard = Math.max(guard, box.right + HEADLINE_GAP);
+        const box = onBand(el);
+        if (box) left = Math.max(left, box.right + HEADLINE_GAP);
     }
-    return guard;
+    let right = window.innerWidth - HEADLINE_GAP;
+    for (const el of [flowPanel, devPanel]) {
+        if (!el || el.hidden || el.classList.contains('hidden')) continue;
+        const box = onBand(el);
+        if (box) right = Math.min(right, box.left - HEADLINE_GAP);
+    }
+    return {left, right};
 }
 
 /** Pasek stoi na środku OKNA - tam patrzy oko, a nie na środek wolnego
-    skrawka mapy. Gdy wyśrodkowany wszedłby na panel albo na przyciski,
-    odsuwa się w prawo dokładnie o tyle, o ile trzeba; gdy i wtedy brakuje mu
+    skrawka mapy. Gdy wyśrodkowany wszedłby na panel, przyciski albo okienko
+    z prawej, odsuwa się w bok dokładnie o tyle, o ile trzeba; gdy i wtedy brakuje mu
     miejsca, zawija się na kolejne linijki (flex-wrap) zamiast wystawać poza
     ekran. Idealny środek jest więc regułą, a nie obietnicą: przy wąskim oknie
     granica wygrywa - ale dopiero wtedy. */
 function placeTimeHeadline() {
     const el = $('time-headline');
     if (!el || el.hidden) return;
-    // Na telefonie panel jest nakładką na całą szerokość, a pasek schodzi pod
-    // niego na sam dół - nie ma tam czego omijać i całe ustawianie oddaje się
-    // arkuszowi (patrz RWD w style.css).
-    if (!window.matchMedia('(min-width: 761px)').matches) {
+    // Na telefonie pasek stoi w doku nad zakładkami - nie ma tam czego
+    // omijać i całe ustawianie oddaje się arkuszowi (patrz phone.css).
+    if (phoneLayout.active()) {
         el.style.maxWidth = '';
         el.style.left = '';
+        el.style.top = '';
         return;
     }
     el.style.maxWidth = '';
-    const band = el.getBoundingClientRect();
-    const guard = headlineGuard(band);
-    const room = window.innerWidth - HEADLINE_GAP - guard;
-    el.style.maxWidth = room + 'px';
+    el.style.top = '';
+    let guard = headlineGuard(el.getBoundingClientRect());
+    // Pasek może zejść do dwóch linijek, ale zdanie o najszybszym dojeździe
+    // ma się nie łamać - ściśnięte obok okienka z rozkładem rozpadało się na
+    // słupek po słowie („wyjeżdżasz / o"). Gdy obok nie mieści się w całości,
+    // pasek schodzi pod okienko.
+    const best = el.querySelector('.headline-best');
+    const needed = best.getBoundingClientRect().width + 2 * HEADLINE_GAP;
+    if (guard.right - guard.left < needed && flowPanel && !flowPanel.hidden) {
+        el.style.top = flowPanel.getBoundingClientRect().bottom + HEADLINE_GAP + 'px';
+        guard = headlineGuard(el.getBoundingClientRect());
+    }
+    el.style.maxWidth = (guard.right - guard.left) + 'px';
     // Szerokość po przycięciu: zawinięty pasek jest węższy, więc znów może
     // zmieścić się na środku.
     const width = el.getBoundingClientRect().width;
-    el.style.left = Math.max(guard, (window.innerWidth - width) / 2) + 'px';
+    const centred = (window.innerWidth - width) / 2;
+    el.style.left = Math.max(guard.left, Math.min(centred, guard.right - width)) + 'px';
 }
 
 window.addEventListener('resize', placeTimeHeadline);
-// Panel zjeżdża z animacją, więc miejsce na pasek zmienia się dopiero po niej.
+// Panele zjeżdżają z animacją, więc miejsce na pasek zmienia się dopiero po niej.
 sidebar.addEventListener('transitionend', placeTimeHeadline);
+if (devPanel) devPanel.addEventListener('transitionend', placeTimeHeadline);
 
 // --- numery linii: jedna grupka na cały wspólny korytarz -------------------
 //
@@ -1894,10 +1910,12 @@ function showSidePanel(html) {
     if (!flowPanel || !dotOpts.tipPanel) return;
     flowPanelBody.innerHTML = html;
     flowPanel.hidden = false;
+    placeTimeHeadline();    // okienko stoi obok paska i zmienia wysokość z treścią
 }
 
 function hideSidePanel() {
     if (flowPanel) flowPanel.hidden = true;
+    placeTimeHeadline();
 }
 
 /** Okienko w rogu otwiera się z tablicą przystanku, z którego wyruszamy -
@@ -1942,7 +1960,7 @@ const timetableCache = new Map();
 // Która kropka jest pod kursorem - patrz handleFlowHover.
 let hoveredStopDot = null;
 
-// Promienie idą z ustawień (sekcja „Kropki i rozkład"), więc to nie są stałe,
+// Promienie idą z ustawień (sekcja „Wygląd mapy"), więc to nie są stałe,
 // tylko wartości czytane przy każdym rysowaniu - stąd funkcje, nie obiekty.
 const STOP_DOT_STYLE = {radius: 5, weight: 3, color: '#263238',
                         fillColor: '#fff', fillOpacity: 1};
@@ -2047,7 +2065,7 @@ function timetableHtml(data, mapSec) {
     return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
 }
 
-// Ile wierszy pokazuje dymek - suwak w panelu, sekcja „Kropki i rozkład”.
+// Ile wierszy pokazuje dymek - suwak w panelu, sekcja „Przystanki, rowery i Traficary”.
 // Rzecz do dostrojenia PRZY MAPIE, bo o tym, ile wierszy jest za dużo,
 // decyduje to, ile z niej zasłaniają - a tego nie widać z pliku konfiguracji.
 const TIMETABLE_ROWS_MAX = 20;  // wyżej dymek przykrywa mapę, o którą się pyta
@@ -3818,6 +3836,9 @@ function search() {
     // i przystanek (patrz onboardReady).
     if (!endInput.value) return;
     if (onboardOn ? !onboardReady() : !startInput.value) return;
+    // Dla układu na telefonie: formularz zwija się wtedy do jednej linijki
+    // (patrz phone.js).
+    document.dispatchEvent(new Event('planner:search'));
     const token = ++requestToken;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     clearJourney();
@@ -4180,6 +4201,23 @@ for (const [id, domyslnie] of [['car-groups', false], ['car-vans', false],
     });
 }
 
+// „Stoję tutaj / Jestem w pojeździe" da się schować - kto nie jeździ
+// z pokładu, ma o jeden rząd formularza mniej. Bez przełącznika nie byłoby
+// jak wrócić z trybu pojazdu, więc start jest wtedy zawsze stojącym miejscem.
+const startModeSwitch = $('start-mode-switch');
+
+function showStartMode(on) {
+    document.body.classList.toggle('start-mode-off', !on);
+    if (!on && onboardOn) setStartMode(false);
+}
+
+startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
+showStartMode(startModeSwitch.checked);
+startModeSwitch.addEventListener('change', () => {
+    saveDevPref('start-mode-switch', startModeSwitch.checked);
+    showStartMode(startModeSwitch.checked);
+});
+
 // --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
 //
 // Te suwaki nie dotykają serwera - kręcą wyłącznie liczbami z LOOK_DEFAULTS,
@@ -4464,9 +4502,9 @@ bindDotOpts();
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer',
-    'fold-sound', 'fold-dots', 'fold-bike', 'fold-cars', 'fold-assumptions',
+    'fold-sound', 'fold-places', 'fold-assumptions',
     'fold-experiments', 'fold-debug', 'look-section',
-    'fold-version',
+    'fold-layout', 'fold-version',
 ];
 
 function bindDevFolds() {
@@ -4512,7 +4550,7 @@ markChangedSettings();
 // klucz, więc mapa wraca ta sama.
 $('dev-reset').addEventListener('click', () => {
     for (const key of [DEV_PREFS_KEY, TIME_PREFS_KEY, DOT_PREFS_KEY,
-                       LOOK_PREFS_KEY, SOUND_PREFS_KEY]) {
+                       LOOK_PREFS_KEY, SOUND_PREFS_KEY, phoneLayout.PREFS_KEY]) {
         try {
             localStorage.removeItem(key);
         } catch {

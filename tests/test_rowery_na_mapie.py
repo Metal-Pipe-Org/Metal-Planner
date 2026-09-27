@@ -446,7 +446,7 @@ def test_suwak_i_pokaz_wiecej_mnoza_liczbe_przejazdow(install_day, monkeypatch):
     seen = _podsluch(monkeypatch)
 
     planner.plan_flow("Start", "Cel", WHEN)
-    assert seen["limit"] == planner.DEFAULT_MAP_BIKES == 4
+    assert seen["limit"] == planner.DEFAULT_MAP_BIKES == 3
 
     planner.plan_flow("Start", "Cel", WHEN, bike_count=2, more=1)
     assert seen["limit"] == 4

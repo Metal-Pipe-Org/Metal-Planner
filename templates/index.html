@@ -2,9 +2,16 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    {#
+      Strona się nie przybliża - przybliża się tylko mapa (Leaflet ma własny
+      gest). Panel i zakładki leżą przyklejone do ekranu nad mapą i po
+      przybliżeniu strony rozjeżdżały się z nią; iPhone przybliżał ją sam przy
+      każdym stuknięciu w pole tekstowe (napis mniejszy niż 16 px).
+      Zabezpieczenie dla Safari, które user-scalable=no ignoruje - phone.js.
+    #}
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <title>Metal Planner — Wrocław</title>
-    <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu — tramwaje i autobusy.">
+    <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu.">
 
     <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
     <meta name="theme-color" content="#2563eb">
@@ -13,21 +20,37 @@
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    {#
+      Pasek statusu nieprzezroczysty (biały, ciemny tekst), a nie
+      black-translucent. Przy przezroczystym iOS 26 rysuje zainstalowaną
+      aplikację od samej góry ekranu, ale jej wysokość liczy bez paska
+      statusu - na dole zostawał pusty biały pas pod zakładkami, poza
+      zasięgiem strony (WebKit bug 301108; stylami ani skryptem tego się nie
+      odzyska). W nieprzezroczystym trybie błędu nie ma i nie wróci po jego
+      naprawie. Zmiana działa dopiero po ponownym dodaniu aplikacji do ekranu
+      - iOS czyta ten znacznik tylko przy instalacji.
+    #}
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Metal Planner">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {#
+      Telefon to osobny układ, a nie łatki rozsiane po style.css: wszystko, co
+      wygląda na wąskim ekranie inaczej, siedzi w phone.css, a to, co inaczej
+      DZIAŁA, w phone.js. Granica „co jest telefonem" jest zapisana tylko tutaj
+      - phone.js czyta ją z tego atrybutu, więc arkusz i skrypt nie mogą się
+      rozjechać. Drugi warunek to telefon obrócony poziomo: ekran szeroki, ale
+      niski i dotykowy - ma zostać układem telefonu, a nie przeskakiwać na
+      komputerowy.
+    #}
+    <link rel="stylesheet" id="phone-css"
+          media="(max-width: 760px), (pointer: coarse) and (max-height: 500px)"
+          href="{{ url_for('static', filename='phone.css') }}">
 </head>
 <body>
 
 <div id="map"></div>
-
-{#
-  Pasek nad mapą: ile w ogóle trwa ta podróż (patrz renderTimeHeadline
-  w app.js). Treść wstawia front z odpowiedzi serwera - tu tylko miejsce.
-#}
-<div id="time-headline" class="time-headline" hidden></div>
 
 <button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
         aria-label="Pokaż/ukryj panel">&larr;</button>
@@ -49,8 +72,10 @@
     <header class="app-bar">
         <div class="app-bar-row">
             <div class="brand">
+                <img class="brand-icon" src="{{ url_for('static', filename='icons/icon.svg') }}"
+                     alt="" width="22" height="22">
                 <h1>Metal Planner</h1>
-                <p>Wrocław · tramwaje i autobusy</p>
+                <p>Wrocław</p>
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
                     aria-label="Zainstaluj aplikację" hidden>⤓</button>
@@ -241,7 +266,7 @@
            checkbox „dojazd rowerem" znaczył dokładnie to samo co on, tyle że
            w drugim miejscu i tylko dla wyszukiwania. #}
         <p class="hint hint-place">
-            Kliknij na mapie przystanek albo dowolny punkt — najpierw start,
+            Wskaż na mapie przystanek albo dowolny punkt — najpierw start,
             potem cel. Inną relację zacznij od ✕.
         </p>
         {# Ta sama linijka, ale dla jadącego: startu nie wybiera się klikaniem,
@@ -305,7 +330,7 @@
         </div>
 
         <p class="hint" id="tt-hint">
-            Wpisz numer linii albo nazwę przystanku — możesz też kliknąć
+            Wpisz numer linii albo nazwę przystanku — możesz też wskazać
             słupek na mapie.
         </p>
 
@@ -389,9 +414,9 @@
 
     <div class="field">
         <label for="bike-count">
-            Ile stacji z rowerem <output id="bike-count-value">4</output>
+            Ile stacji z rowerem <output id="bike-count-value">3</output>
         </label>
-        <input type="range" id="bike-count" min="1" max="30" step="1" value="4">
+        <input type="range" id="bike-count" min="1" max="30" step="1" value="3">
         <p class="field-hint">
             Stacje, których żadna inna nie bije godziną przy rowerze, godziną
             w celu ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
@@ -433,22 +458,13 @@
     </details>
 
     {#
-      Nic tutaj nie rusza serwera: obie współrzędne kropki i cała tablica
-      odjazdów są już w odpowiedziach, przełącznik tylko przemalowuje.
+      To, co stoi na mapie poza samymi liniami: przystanki z rozkładem, rowery
+      miejskie i Traficary. Przystanki i rowery nie ruszają serwera (wszystko
+      jest już w odpowiedziach, przełącznik tylko przemalowuje); dostawczaki
+      tak - zmieniają to, co serwer wybiera.
     #}
-    <details class="dev-fold" id="fold-dots">
-    <summary>Przystanki i rozkład</summary>
-
-        <div class="field compact">
-            <label for="dot-size">
-                Wielkość kropek <output id="dot-size-value">8</output> px
-            </label>
-            <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
-            <p class="field-hint">
-                Kropki na wybranej trasie i, o piksel mniejsze, na węzłach
-                wachlarza — najechanie pokazuje tablicę odjazdów.
-            </p>
-        </div>
+    <details class="dev-fold" id="fold-places">
+    <summary>Przystanki, rowery i Traficary</summary>
 
         <label class="dev-check">
             <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
@@ -490,10 +506,7 @@
             które zostaje do zamknięcia, w obu albo w żadnym.
         </p>
 
-    </details>
-
-    <details class="dev-fold" id="fold-bike">
-    <summary>Rower miejski</summary>
+        <div class="dev-section-head">Rower miejski</div>
 
         <label class="dev-check">
             <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
@@ -511,10 +524,7 @@
             czas, a nie tylko pod kursorem.
         </p>
 
-    </details>
-
-    <details class="dev-fold" id="fold-cars">
-    <summary>Traficary</summary>
+        <div class="dev-section-head">Traficary</div>
 
         <label class="dev-check">
             <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
@@ -627,6 +637,17 @@
         <summary>Wygląd mapy</summary>
 
         <div class="field compact">
+            <label for="dot-size">
+                Wielkość kropek <output id="dot-size-value">8</output> px
+            </label>
+            <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
+            <p class="field-hint">
+                Kropki na wybranej trasie i, o piksel mniejsze, na węzłach
+                wachlarza — najechanie pokazuje tablicę odjazdów.
+            </p>
+        </div>
+
+        <div class="field compact">
             <label for="look-min-op">
                 Najbledsza linia — krycie <output id="look-min-op-value">0.3</output>
             </label>
@@ -722,6 +743,31 @@
 
     </details>
 
+    {# Co widać na ekranie aplikacji, poza samą mapą. #}
+    <details class="dev-fold" id="fold-layout">
+    <summary>Layout</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
+        </label>
+        <p class="field-hint">
+            Bez niego start jest zawsze stojącym miejscem — przystankiem albo
+            punktem na mapie.
+        </p>
+
+        {# Tylko telefon (patrz phone.js) - na szerokim ekranie zakładek nie ma,
+           więc nie ma też czego chować. #}
+        <div class="phone-only">
+            <label class="dev-check">
+                <input type="checkbox" id="phone-routes-tab" checked> Zakładka „Trasy"
+            </label>
+            <p class="field-hint">
+                Bez niej na dole zostają tylko Mapa i Rozkład.
+            </p>
+        </div>
+
+    </details>
+
     <details class="dev-fold" id="fold-version">
     <summary>Wersja aplikacji</summary>
 
@@ -764,18 +810,35 @@
 </div>
 
 {#
-  Okienko z rozkładem/linią w rogu ekranu - alternatywa dla dymka przy
-  kursorze (przełączniki w panelu ⚙, sekcja „Kropki i rozkład"). Poza #map
-  celowo: ma nie łapać zdarzeń myszy mapy ani nie znikać razem z warstwami.
+  Dok: to, co opisuje wynik na mapie. Na szerokim ekranie go nie widać
+  (display: contents) i każde z dwóch stoi, gdzie stało. Na telefonie to
+  jedna kolumna nad zakładkami - pasek i okienko leżały tam wcześniej osobno
+  i nachodziły na siebie.
 #}
-<div id="flow-panel" hidden>
-    <button id="flow-panel-close" class="icon-button" title="Zamknij okienko"
-            aria-label="Zamknij okienko z rozkładem">✕</button>
-    <div id="flow-panel-body"></div>
+<div id="map-dock">
+
+    {#
+      Pasek nad mapą: ile w ogóle trwa ta podróż (patrz renderTimeHeadline
+      w app.js). Treść wstawia front z odpowiedzi serwera - tu tylko miejsce.
+    #}
+    <div id="time-headline" class="time-headline" hidden></div>
+
+    {#
+      Okienko z rozkładem/linią w rogu ekranu - alternatywa dla dymka przy
+      kursorze (przełączniki w panelu ⚙, sekcja „Przystanki, rowery i Traficary"). Poza #map
+      celowo: ma nie łapać zdarzeń myszy mapy ani nie znikać razem z warstwami.
+    #}
+    <div id="flow-panel" hidden>
+        <button id="flow-panel-close" class="icon-button" title="Zamknij okienko"
+                aria-label="Zamknij okienko z rozkładem">✕</button>
+        <div id="flow-panel-body"></div>
+    </div>
+
 </div>
 {% endif %}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='phone.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script src="{{ url_for('static', filename='timetable.js') }}"></script>
 <script src="{{ url_for('static', filename='pwa.js') }}"></script>
