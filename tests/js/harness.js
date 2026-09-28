@@ -337,8 +337,13 @@ const document = {
     createElement: tag => (tag === 'audio' ? fakeAudio() : fakeElement(tag)),
     querySelector: sel => document.body.querySelector(sel),
     querySelectorAll: () => [],
-    addEventListener() {}, removeEventListener() {},
+    addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; },
 };
+
+// search() ogłasza start wyszukiwania zdarzeniem na document (patrz phone.js).
+class Event {
+    constructor(type) { this.type = type; }
+}
 
 const localStorage = {
     _data: new Map(),
@@ -468,6 +473,7 @@ const INJECTION = `
     setBikesOn, setBikeKind, setCarsOn,
     nodePoint, dotOpts, seedStartPanel,
     prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
+    pickEndpoint,
     get startInput() { return startInput; },
     get endInput() { return endInput; },
     get flowCarLayer() { return flowCarLayer; }, CAR_STYLE,

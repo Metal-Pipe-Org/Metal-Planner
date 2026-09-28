@@ -642,26 +642,33 @@ const stopsReady = fetch('/api/stops')
 
 /** Klik w mapę (pusty punkt albo słupek) uzupełnia brakujący koniec relacji.
     Nigdy nie kasuje gotowego wyszukiwania - od tego jest przycisk ✕; przy
-    wybranej trasie pierwszy taki klik po prostu ją odznacza. */
+    wybranej trasie pierwszy taki klik po prostu ją odznacza.
+
+    O tym, który koniec jest już wybrany, mówią POLA, nie `sel`: nazwa
+    wpisana ręcznie albo wzięta z podpowiedzi siedzi tylko w polu (sel zostaje
+    null). Patrząc na samo `sel`, klik po wpisaniu celu brał go za pusty i
+    kasował (#154). Z tego samego powodu ruszamy wyłącznie pole, które klik
+    uzupełnia - drugiego nie przepisujemy z `sel`. */
 function pickEndpoint(value) {
     if (selectedJourney !== null) { deselectJourney(); return; }
-    if (sel.end && (sel.start || onboardOn)) return;
+    const hasStart = startInput.value.trim() !== '';
+    const hasEnd = endInput.value.trim() !== '';
+    if (hasEnd && (hasStart || onboardOn)) return;
     const previous = [sel.start, sel.end];
     // Z pokładu pojazdu startu się nie klika - startem jest pojazd - więc
     // każdy klik w mapę wskazuje cel.
-    if (onboardOn) {
+    if (onboardOn || hasStart) {
+        if (!onboardOn && samePlace(value, sel.start)) return;
         sel.end = value;
-    } else if (!sel.start) {
+        endInput.value = displayValue(sel.end);
+        updatePointMarker('end', sel.end);
+    } else {
         sel.start = value;
-    } else if (!samePlace(value, sel.start)) {
-        sel.end = value;
+        startInput.value = displayValue(sel.start);
+        updatePointMarker('start', sel.start);
     }
-    startInput.value = displayValue(sel.start);
-    endInput.value = displayValue(sel.end);
-    updatePointMarker('start', sel.start);
-    updatePointMarker('end', sel.end);
     restyle(...previous, sel.start, sel.end);
-    if (sel.end && (onboardOn ? onboardReady() : sel.start)) search();
+    if (endInput.value && (onboardOn ? onboardReady() : startInput.value)) search();
 }
 
 /** Czy tryb rozkładów przejął ten klik. Pusty punkt mapy nie znaczy tam nic -

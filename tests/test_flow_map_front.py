@@ -576,3 +576,12 @@ def test_the_dawdling_filter_is_a_switch_sent_to_the_server(front):
     zębatką, domyślnie zgaszony - do włączania i wyłączania, żeby zobaczyć
     różnicę. Jego stan idzie w zapytaniu, bo mapę liczy serwer."""
     _check(front, "odsiew_krazenia_leci_do_serwera")
+
+
+# ------------------------------------------------- wybór końców relacji -
+
+def test_map_click_keeps_a_typed_destination(front):
+    """#154: cel wpisany w pole (albo wzięty z podpowiedzi) nie ma śladu w
+    `sel` - klik w mapę, który wybiera start, brał go więc za pusty i
+    kasował. Klik uzupełnia brakujący koniec, a drugiego pola nie rusza."""
+    _check(front, "klik_w_mape_nie_kasuje_wpisanego_celu")
