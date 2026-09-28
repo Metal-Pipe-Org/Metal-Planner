@@ -25,8 +25,10 @@ name: Claude - oceń PR
 #
 # Wyzwalacze celowo nie obejmują `synchronize`: ocena leci raz, przy otwarciu
 # (albo przy wyjściu z wersji roboczej), żeby dosyłanie commitów nie sypało
-# kolejnymi ocenami pod ten sam PR. Po większych poprawkach ocenę można
-# powtórzyć ręcznie: Actions -> „Claude - oceń PR" -> Run workflow -> numer PR-a.
+# kolejnymi ocenami pod ten sam PR. Po większych poprawkach albo gdy ocena się
+# nie udała, wystarczy napisać `@claude` w komentarzu pod PR-em — workflow sam
+# weźmie numer z wątku. Awaryjnie zostaje też ręczny bieg: Actions -> „Claude -
+# oceń PR" -> Run workflow -> numer PR-a (tylko tam jest przełącznik debug).
 #
 # Do zwykłych PR-ów wystarcza kopia na `main` i oba wyzwalacze biorą ją
 # stamtąd: `pull_request` czyta workflow z commitu scalenia PR-a z gałęzią
@@ -39,15 +41,19 @@ name: Claude - oceń PR
 # tam. Utrzymuje się sama — wjeżdża na `stable` z każdym wydaniem, więc
 # nie edytuj jej osobno, bo wydanie skończy się konfliktem.
 #
-# Pozostałe nasze workflow chodzą na zdarzeniach (`issues`, `issue_comment`,
-# `pull_request_target`), które GitHub czyta zawsze z gałęzi domyślnej — im
-# wystarcza `main`.
+# Wołanie `@claude` przychodzi zdarzeniem `issue_comment`, które GitHub czyta
+# zawsze z gałęzi domyślnej — dla niego liczy się wyłącznie kopia na `main`,
+# także przy PR-ach wydaniowych do `stable`.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
     # Bazy, których ocena dotyczy: zwykłe PR-y do `main` i PR-y wydaniowe
     # `main` -> `stable`. PR-y o innej bazie zostawiamy bez komentarza.
     branches: [main, stable]
+  # Komentarz z `@claude` w dyskusji pod PR-em powtarza ocenę. Wołania spod
+  # zwykłych zgłoszeń obsługuje claude-issue.yml — tu odsiewa je bramka.
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       pr:
@@ -58,24 +64,94 @@ on:
         type: boolean
         default: false
 
-# Jedna ocena na PR. Nowsze wołanie ubija starsze, żeby dwa biegi nie
-# podmieniały sobie nawzajem komentarza.
-concurrency:
-  group: claude-review-${{ github.event.pull_request.number || github.event.inputs.pr }}
-  cancel-in-progress: true
-
 jobs:
+  # Bramka tylko dla wołań z komentarza. `issue_comment` tworzy bieg przy
+  # każdym komentarzu w repo, więc warunek `if` odsiewa bez runnera wszystko,
+  # co nie jest `@claude` pod PR-em, a job dokłada to, czego w wyrażeniach nie
+  # da się zrobić: odrzucenie `@claude` z cytatu i sprawdzenie uprawnień.
+  gate:
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && github.event_name == 'issue_comment'
+      && github.event.issue.pull_request
+      && github.event.sender.type != 'Bot'
+      && contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - name: Sprawdź wołanie i uprawnienia
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BODY: ${{ github.event.comment.body }}
+          WHO: ${{ github.event.sender.login }}
+        run: |
+          set -euo pipefail
+
+          # Jak w claude-issue.yml: odpowiedź cytująca wcześniejszy wpis
+          # przepisuje razem z nim jego @claude — liczy się tylko to spoza
+          # linii cytatu.
+          if ! printf '%s\n' "$BODY" | grep -v '^[[:space:]]*>' | grep -q '@claude'; then
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "Wszystkie @claude w tym wpisie są w cytacie — pomijam." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Ocena idzie na sekretach i pobiera kod PR-a, więc wołać może
+          # tylko ktoś z prawem zapisu — tak jak ręczny bieg, który
+          # też wymaga zapisu. `author_association` się nie nadaje: przy
+          # prywatnym członkostwie w organizacji kłamie (patrz claude-issue.yml),
+          # stąd pytanie wprost o uprawnienia. Endpointowi wystarcza
+          # `metadata: read`, które token ma zawsze, stąd `permissions: {}`.
+          # Błąd API ma wywrócić bramkę na czerwono, a nie udawać „brak
+          # uprawnień" — inaczej zepsute sprawdzanie po cichu wyłączyłoby
+          # wołanie `@claude` dla wszystkich.
+          perm=$(gh api "repos/$REPO/collaborators/$WHO/permission" --jq .permission)
+          case "$perm" in
+            admin|write) echo "go=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "go=false" >> "$GITHUB_OUTPUT"
+              echo "@$WHO nie ma prawa zapisu (uprawnienia: $perm) — pomijam." \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
   review:
+    needs: gate
+    # `!cancelled()` jest potrzebne, bo przy `pull_request` i ręcznym biegu
+    # bramka jest pominięta, a pominięty `needs` domyślnie pomija i ten job.
+    #
     # Wersje robocze pomijamy — do oceny zgłasza je dopiero „Ready for review",
-    # które przychodzi tu osobnym zdarzeniem.
+    # które przychodzi tu osobnym zdarzeniem. Wołanie `@claude` działa także
+    # pod wersją roboczą: ktoś wprost o ocenę poprosił.
     #
     # PR-y z forków odsiewamy, bo przy `pull_request` z obcego repozytorium
     # GitHub nie daje sekretów (nie byłoby czym uwierzytelnić Claude'a), a sam
     # wyzwalacz `pull_request_target` odpada: pobieramy tu kod z PR-a.
+    #
+    # Nazwa repozytorium wpisana na sztywno: forki kopiują workflow razem
+    # z kodem, a ocena ma chodzić tylko tutaj, nie w cudzych kopiach.
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || (github.event.pull_request.draft == false
-          && github.event.pull_request.head.repo.full_name == github.repository)
+      !cancelled()
+      && github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && (github.event_name == 'workflow_dispatch'
+          || needs.gate.outputs.go == 'true'
+          || (github.event_name == 'pull_request'
+              && github.event.pull_request.draft == false
+              && github.event.pull_request.head.repo.full_name == github.repository))
+    # Jedna ocena na PR. Nowsze wołanie ubija starsze, żeby dwa biegi nie
+    # podmieniały sobie nawzajem komentarza. Na poziomie joba, nie workflow:
+    # każdy komentarz pod PR-em tworzy bieg, a grupa na poziomie workflow
+    # sprawiłaby, że zwykłe „dzięki" ubija trwającą ocenę, zanim bramka
+    # zdąży je odsiać.
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -91,20 +167,40 @@ jobs:
       - name: Ustal PR do oceny
         id: pr
         env:
-          N: ${{ github.event.pull_request.number || github.event.inputs.pr }}
+          N: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
         run: |
           set -euo pipefail
 
-          # Ręczny bieg dostaje sam numer, więc czubek i gałąź bazową
+          # Komentarz i ręczny bieg dają sam numer, więc czubek i gałąź bazową
           # dociągamy z API — dla obu ścieżek dalej wygląda to tak samo.
           json=$(gh api "repos/$REPO/pulls/$N")
           head_sha=$(printf '%s' "$json" | jq -r .head.sha)
           base_ref=$(printf '%s' "$json" | jq -r .base.ref)
           state=$(printf '%s' "$json" | jq -r .state)
+          head_repo=$(printf '%s' "$json" | jq -r '.head.repo.full_name // ""')
 
           if [ "$state" != open ]; then
             echo "PR #$N nie jest otwarty (stan: $state) — nie oceniam." \
               | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Oceniamy wyłącznie PR-y z gałęzi tego repozytorium. Przy
+          # `pull_request` forki odsiewa już warunek joba, ale `issue_comment`
+          # i ręczny bieg dostają pełne sekrety bez względu na pochodzenie
+          # PR-a. Obcy kod (i ewentualny prompt injection w nim albo w opisie)
+          # nie może trafić do Claude'a z tokenami w zasięgu tylko dlatego, że
+          # ktoś z zespołu napisał pod nim `@claude` albo odpalił bieg ręcznie.
+          # Skasowany fork daje pusty `head.repo` i też tu odpada.
+          if [ "$head_repo" != "$REPO" ]; then
+            msg="PR #$N pochodzi z forka (${head_repo:-skasowane repozytorium}) — nie oceniam."
+            echo "$msg" | tee -a "$GITHUB_STEP_SUMMARY"
+            if [ "$GITHUB_EVENT_NAME" = issue_comment ]; then
+              gh pr comment "$N" --repo "$REPO" --body \
+                "⚪ Nie oceniam PR-ów z forków — ich kod nie może trafić do Claude'a razem z sekretami repozytorium." \
+                || true
+            fi
             echo "go=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -236,6 +332,7 @@ jobs:
         env:
           ID: ${{ steps.hello.outputs.id }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EXEC: ${{ steps.claude.outputs.execution_file }}
         run: |
           set -euo pipefail
 
@@ -245,11 +342,42 @@ jobs:
             *) echo "Ocena doszła — nie ruszam komentarza."; exit 0 ;;
           esac
 
-          cat > "$RUNNER_TEMP/failed.md" <<MD
+          # Przyczynę bierzemy z zapisu rozmowy, który action zostawia na
+          # runnerze także przy porażce. Patrzymy wyłącznie na końcowy wynik
+          # i na błędy API, nie na całą rozmowę — w przeczytanym kodzie też
+          # może paść „rate limit", a to nie znaczy, że limit się skończył.
+          exec_file=${EXEC:-$RUNNER_TEMP/claude-execution-output.json}
+          reason=""
+          if [ -f "$exec_file" ]; then
+            reason=$(jq -r '
+                .[]? | select(.type == "result" and .is_error == true) | .result // empty,
+                .[]? | select(.type == "assistant" and .error != null) | .error
+              ' "$exec_file" 2>/dev/null | head -c 300 || true)
+          fi
+          echo "Przyczyna z zapisu rozmowy: ${reason:-brak}"
+
+          if printf '%s' "$reason" | grep -qiE 'limit reached|hit your limit|usage limit|rate.?limit|\b429\b'; then
+            # Starszy format to „Claude AI usage limit reached|<epoch>" —
+            # wtedy zamieniamy znacznik czasu na godzinę po polsku.
+            when=""
+            epoch=$(printf '%s' "$reason" | grep -oE '\|[0-9]{10}' | tr -d '|' || true)
+            if [ -n "$epoch" ]; then
+              when=" Limit odnowi się około $(TZ=Europe/Warsaw date -d "@$epoch" '+%H:%M (%d.%m)')."
+            elif printf '%s' "$reason" | grep -qi 'reset'; then
+              when=" Komunikat: „${reason//$'\n'/ }”."
+            fi
+            cat > "$RUNNER_TEMP/failed.md" <<MD
+          ⏳ **Ocena się nie udała — skończył się limit Claude'a**
+
+          Konto, na którym działa ocena, wyczerpało limit użycia.${when} To nie ma nic wspólnego z samym PR-em — [log biegu](${RUN}). Po odnowieniu limitu napisz w komentarzu pod tym PR-em \`@claude\`, żeby spróbować jeszcze raz.
+          MD
+          else
+            cat > "$RUNNER_TEMP/failed.md" <<MD
           ⚪ **Ocena się nie udała**
 
-          Claude nie dokończył analizy tego PR-a — [log biegu](${RUN}). Ocenę można powtórzyć ręcznie: Actions → „Claude - oceń PR" → Run workflow → numer tego PR-a.
+          Claude nie dokończył analizy tego PR-a — [log biegu](${RUN}). Żeby spróbować jeszcze raz, napisz w komentarzu pod tym PR-em \`@claude\`.
           MD
+          fi
           gh api --method PATCH "repos/$REPO/issues/comments/$ID" \
             -F body=@"$RUNNER_TEMP/failed.md"
 

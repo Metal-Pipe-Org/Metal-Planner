@@ -18,13 +18,6 @@ on:
   issue_comment:
     types: [created]
 
-# Jeden bieg na zgłoszenie. `cancel-in-progress` sprawia, że dwa wołania pod
-# rząd nie mielą się równolegle na dwóch gałęziach — nowsze ubija starsze.
-# Realizuje przy okazji zasadę „najświeższy wpis jest wiążący" z promptu.
-concurrency:
-  group: claude-issue-${{ github.event.issue.number }}
-  cancel-in-progress: true
-
 jobs:
   # Tania bramka. Warunek `if` odsiewa bez uruchamiania runnera; sam job dokłada
   # to, czego w wyrażeniach GitHuba nie da się zrobić — odróżnienie prawdziwego
@@ -64,6 +57,15 @@ jobs:
   solve-issue:
     needs: gate
     if: needs.gate.outputs.go == 'true'
+    # Jeden bieg na zgłoszenie. `cancel-in-progress` sprawia, że dwa wołania pod
+    # rząd nie mielą się równolegle na dwóch gałęziach — nowsze ubija starsze.
+    # Realizuje przy okazji zasadę „najświeższy wpis jest wiążący" z promptu.
+    # Na poziomie joba, nie workflow: każdy komentarz pod zgłoszeniem tworzy
+    # bieg, a grupa na poziomie workflow sprawiłaby, że wpis bez @claude ubija
+    # trwającą pracę, zanim bramka zdąży go odsiać.
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -1,9 +1,9 @@
 name: Sprzątanie pominiętych run'ów
 
-# Wyzwalacz `issue_comment` w claude-issue.yml tworzy bieg przy KAŻDYM komentarzu
-# w repo — GitHub nie umie filtrować po treści, więc te bez @claude odbija dopiero
-# warunek `if` w jobie. Tak samo claude-review-pr.yml pomija PR-y robocze
-# i te z forków. Pominięcia nie kosztują minut (job nie dostaje runnera),
+# Wyzwalacz `issue_comment` w claude-issue.yml i claude-review-pr.yml tworzy bieg
+# przy KAŻDYM komentarzu w repo — GitHub nie umie filtrować po treści, więc te bez
+# @claude odbija dopiero warunek `if` w jobie. claude-review-pr.yml pomija też
+# PR-y robocze i te z forków. Pominięcia nie kosztują minut (job nie dostaje runnera),
 # ale zapychają listę w zakładce Actions. Ten workflow je stamtąd usuwa.
 #
 # claude-review-pr.yml leży i na `main`, i na `stable` (szczegóły w nagłówku
