@@ -1260,6 +1260,18 @@ def trip_conns(data, trip_id):
     return data.conns_by_trip.get(trip_id, ())
 
 
+def deps_by_stop(data):
+    """{słupek: [(odjazd, trip_id), ...]} po kolei - cała doba."""
+    if data.deps_by_stop is None:
+        index = {}
+        # conns są posortowane po odjeździe, więc każda lista wychodzi z tej
+        # pętli już uporządkowana - bisect w stop_departures może na tym polegać.
+        for dep, _arr, from_stop, _to_stop, trip in data.conns:
+            index.setdefault(from_stop, []).append((dep, trip))
+        data.deps_by_stop = index
+    return data.deps_by_stop
+
+
 def stop_departures(data, stop_ids, from_sec, limit=20):
     """Najbliższe odjazdy z podanych słupków, od `from_sec` na osi dnia.
 
@@ -1273,17 +1285,10 @@ def stop_departures(data, stop_ids, from_sec, limit=20):
     Ostatni przystanek kursu nie ma tu wpisu: połączenia opisują przejazd
     MIĘDZY słupkami, a na pętli i tak nie ma do czego wsiąść.
     """
-    if data.deps_by_stop is None:
-        index = {}
-        # conns są posortowane po odjeździe, więc każda lista wychodzi z tej
-        # pętli już uporządkowana - bisect niżej może na tym polegać.
-        for dep, _arr, from_stop, _to_stop, trip in data.conns:
-            index.setdefault(from_stop, []).append((dep, trip))
-        data.deps_by_stop = index
-
+    index = deps_by_stop(data)
     upcoming = []
     for stop_id in stop_ids:
-        deps = data.deps_by_stop.get(stop_id)
+        deps = index.get(stop_id)
         if not deps:
             continue
         start = bisect_left(deps, (from_sec,))

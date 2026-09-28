@@ -493,6 +493,15 @@
             </p>
         </div>
 
+        <label class="dev-check">
+            <input type="checkbox" id="tt-past" checked> Szare godziny w tablicy
+        </label>
+        <p class="field-hint">
+            Odjazdy od godziny wyszukania, wcześniejsze niż chwila, w której
+            według mapy tu jesteś - szare. Wyłączone: tablica zaczyna się od tej
+            chwili.
+        </p>
+
         <div class="dev-section-head">Gdzie pokazać rozkład</div>
 
         <label class="dev-check">
@@ -532,6 +541,15 @@
         <p class="field-hint">
             Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
             i stoją na mapie jako puste pierścienie.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="car-times"> Godzina dojazdu autem
+        </label>
+        <p class="field-hint">
+            Dymek auta mówi też, o której mniej więcej dowiezie do celu — godzina
+            policzona z odległości w linii prostej i założeń czasowych, nie
+            odczytana. Auta wybierane są nią zawsze, przełącznik tylko ją pokazuje.
         </p>
 
     </details>
@@ -579,6 +597,29 @@
         </p>
     </div>
 
+    <div class="field">
+        <label for="car-kmh">
+            Prędkość Traficara <output id="car-kmh-value">22</output> km/h
+        </label>
+        <input type="range" id="car-kmh" min="10" max="40" step="1" value="22">
+        <p class="field-hint">
+            Liczona w linii prostej do celu, więc objazdy ulicami i światła już
+            w niej siedzą — 22 km/h to ok. 29 km/h realnej jazdy, trochę wolniej
+            niż miasto bez korków.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="car-overhead">
+            Ruszenie i parkowanie Traficara <output id="car-overhead-value">8</output> min
+        </label>
+        <input type="range" id="car-overhead" min="0" max="20" step="1" value="8">
+        <p class="field-hint">
+            Stały czas każdej jazdy: otwarcie i wyjazd z miejsca, a na końcu
+            szukanie miejsca, zakończenie najmu i dojście pod cel.
+        </p>
+    </div>
+
     </details>
 
     {#
@@ -606,6 +647,29 @@
             wcześniejsze dojazdy do aut i rowerów.
         </p>
 
+        <label class="dev-check">
+            <input type="checkbox" id="old-map"> Stara mapa (z progiem jasności)
+        </label>
+        <p class="field-hint">
+            Powrót do mapy sprzed „Mapy z wartości podróży”. Domyślnie mapa
+            rysuje podróże, które są w czymś najlepsze: najwcześniej w celu
+            albo najpóźniejsze wyjście; chodzenie i przesiadki liczą się tylko
+            w minutach, „Pokaż więcej” wybacza podróże o tyle minut dłuższe,
+            a trasa jadąca tymi samymi numerkami co lepsza — albo tymi samymi
+            z dołożonymi innymi — nie pokazuje się. Stara mapa ma jasność i progi.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="tt-old"> Stara tablica odjazdów
+        </label>
+        <p class="field-hint">
+            Powrót do tablicy z „za ile” i „co N min”. Domyślnie tablica ma
+            jeden wiersz na linię i kierunek, a w nim po kolei godziny odjazdów —
+            do ostatniego, którym jeszcze się dojedzie, bez godziny w rogu.
+            Szare godziny są wcześniejsze niż chwila, w której według mapy tu
+            jesteś.
+        </p>
+
     </details>
 
     {#
@@ -621,6 +685,15 @@
         <p class="field-hint">
             Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych
             je bije i które — przy rowerze dla całej stacji, z listą jej podróży.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="debug-why-seg"> Dlaczego kawałek jest na mapie
+        </label>
+        <p class="field-hint">
+            Tylko przy „Mapie z wartości podróży”: dymek linii wymienia podróże,
+            które tędy jadą, i przy każdej mówi, od jakiej tolerancji jest na
+            mapie i czemu, a pod spodem — co ukryły numerki.
         </p>
 
     </details>

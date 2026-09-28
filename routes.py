@@ -362,4 +362,11 @@ def init_routes(app):
             walk_pace=request.args.get("walk_pace") or None,
             bike_kmh=_float_arg("bike_kmh"),
             bike_overhead_sec=_float_arg("bike_overhead_sec"),
+            # To samo dla jazdy Traficarem (zgłoszenie #150): z tego mapa
+            # szacuje, o której auto dowiezie do celu.
+            car_kmh=_float_arg("car_kmh"),
+            car_overhead_sec=_float_arg("car_overhead_sec"),
+            # Mapa z wartości podróży zamiast progu jasności - PRÓBA
+            # w Eksperymentach pod zębatką (zgłoszenie #150, patrz plan_flow).
+            value_map=request.args.get("value_map") == "1",
         ))

@@ -1248,6 +1248,35 @@ body.start-onboard .hint-onboard { display: block; }
 
 .flow-tip-row .line-chip { background: rgba(0, 0, 0, 0.07); }
 
+/* Debug "dlaczego tu jest": wiersz na podróż, powód pod nim mniejszym
+   drukiem - dymek ma się dać przeczytać, a nie rozszyfrować. */
+.flow-tip-why {
+    display: block;
+    max-width: 330px;
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    font-size: 11.5px;
+    line-height: 1.35;
+    white-space: normal;
+}
+.flow-tip-why .why-head {
+    display: block;
+    margin: 4px 0 2px;
+    font-size: 10px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.flow-tip-why .why-journey { display: block; margin-top: 3px; }
+.flow-tip-why .why-reason,
+.flow-tip-why .why-more {
+    display: block;
+    padding-left: 10px;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+}
+
 /* ------------------------------------------------- czas na mapie --- */
 
 /* Czas w dymku: liczba ma być pierwszą rzeczą, którą się tu czyta po numerze
@@ -1524,28 +1553,6 @@ body.start-onboard .hint-onboard { display: block; }
     font-size: 12.5px;
 }
 
-/* Kreska "tu według mapy jesteś" (zgłoszenie #143). Tablica liczy od godziny
-   z formularza, więc nad kreską stoją odjazdy sprzed przyjazdu mapy - są tam
-   celowo, na wypadek gdyby mapa nie znała szybszego dojścia, ale nie wolno im
-   wyglądać na część tej podróży. Wiersz łamie siatkę kolumn własnym
-   grid-column, bo nie jest odjazdem i nie ma się do czego wyrównywać. */
-.tt-rows li.tt-here {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 0 4px;
-    font-size: 11px;
-    color: var(--ink-faint);
-}
-
-.tt-rows li.tt-here::before,
-.tt-rows li.tt-here::after {
-    content: "";
-    flex: 1;
-    border-top: 1px dashed currentColor;
-    opacity: 0.45;
-}
-
 /* Wąska kolumna z lewej na znak "co się tu z tą linią dzieje" (patrz
    FLOW_ICONS w app.js). Dokładana tylko tam, gdzie jest czym ją wypełnić -
    tablica pod kropką wybranej trasy pyta o cały przystanek i tego nie wie,
@@ -1623,6 +1630,51 @@ body.start-onboard .hint-onboard { display: block; }
 .tt-note {
     color: var(--ink-soft);
     font-size: 12.5px;
+}
+
+/* Tablica „godziny w wierszu linii": plakietka - kierunek - rząd godzin.
+   Kolumny ma cała lista (wiersze to subgrid), więc godziny stoją w jednej
+   osi, a dymek i okienko w rogu są tak szerokie, jak ich treść - godziny
+   w jednej linii, bez zawijania (na stałych 340 px starej tablicy dymek
+   świecił pustką z prawej, a okienko łamało godziny jedna pod drugą). */
+.tt-rows.tt-lines {
+    display: grid;
+    grid-template-columns: minmax(34px, max-content) max-content max-content auto;
+    column-gap: 7px;
+}
+.tt-rows.tt-lines.has-flow {
+    grid-template-columns: 15px minmax(34px, max-content) max-content max-content auto;
+    column-gap: 6px;
+}
+/* W dymku nie ma przycisku "trasa" - i jego kolumny. */
+.timetable-tip .tt-rows.tt-lines {
+    grid-template-columns: minmax(34px, max-content) max-content max-content;
+}
+.timetable-tip .tt-rows.tt-lines.has-flow {
+    grid-template-columns: 15px minmax(34px, max-content) max-content max-content;
+}
+.tt-rows.tt-lines li,
+.tt-rows.tt-lines.has-flow li,
+.timetable-tip .tt-rows.tt-lines li,
+.timetable-tip .tt-rows.tt-lines.has-flow li {
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+}
+.tt-lines .tip-dir { max-width: 12em; }
+.timetable-tip:has(.tt-lines),
+#flow-panel:has(.tt-lines) {
+    width: max-content;
+}
+.tt-times {
+    display: flex;
+    gap: 7px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.tt-times .tt-past {
+    color: var(--ink-faint);
+    font-weight: 600;
 }
 
 /* ------------------------------------------------ Ustawienia Developerskie --- */

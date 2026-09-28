@@ -865,6 +865,8 @@ const timeOpts = {...TIME_DEFAULTS, ...loadTimePrefs()};
 const DOT_DEFAULTS = {
     size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
     rows: 20,          // ile odjazdów wypisuje tablica pod kropką
+    ttPast: true,      // szare godziny sprzed chwili z mapy (timetableLinesHtml)
+    ttOld: false,      // powrót do starej tablicy (bez timetableLinesHtml)
     center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
     start: false,      // wyróżnienie przystanku startowego
     tipCursor: true,   // dymek przy kursorze
@@ -877,8 +879,15 @@ const DOT_DEFAULTS = {
     // Kreski wybranych przejazdów rowerem i ich stacje końcowe na stałe,
     // a nie tylko pod kursorem - domyślnie zgaszone.
     bikeRides: false,
+    // Szacowany przyjazd autem do celu w dymku auta - domyślnie zgaszony, z tego
+    // samego powodu co godziny roweru: policzony, nie odczytany. Auta wybiera
+    // się nim zawsze (zgłoszenie #150), przełącznik mówi tylko, czy go pokazać.
+    carTimes: false,
     // Debug: dlaczego rower i auto przeszły wybór (pole `why` z serwera).
     why: false,
+    // Debug: dlaczego kawałek jest na mapie - tylko przy próbie „Mapa
+    // z wartości podróży" (pole `why` kawałka, patrz planner._value_map).
+    whySeg: false,
 };
 
 const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
@@ -1204,11 +1213,18 @@ function showMore() {
     if (moreBusy) return;
     moreBusy = true;
     mapMore += 1;
+    // To samo kółko co przy „Szukaj" - gęstsza mapa liczy się tak samo długo,
+    // a bez niego klik wyglądał na zignorowany.
+    setSearching(true);
+    const token = requestToken;
     // Kadru NIE przestawiamy: gęstsza mapa dokłada linie, nie zmienia tego,
     // na co user patrzy.
-    loadPlan(requestToken, false)
+    loadPlan(token, false)
         .catch(() => showError('Nie udało się połączyć z serwerem.'))
-        .finally(() => { moreBusy = false; });
+        .finally(() => {
+            moreBusy = false;
+            if (token === requestToken) setSearching(false);
+        });
 }
 
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
@@ -1246,9 +1262,10 @@ function renderTimeHeadline() {
         return;
     }
     const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
-    // Po trzecim kliknięciu i przy suficie skanu (at_ceiling) nie ma już
-    // czego dokładać - przycisk, który nic nie robi, nie ma prawa stać.
-    const more = flow.more < MAX_MAP_MORE && !flow.at_ceiling
+    // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
+    // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
+    // z wartości podróży wie to dopiero po szerszym szukaniu.
+    const more = flow.more < MAX_MAP_MORE
         ? `<button type="button" class="headline-more" title="Rysuj też gorsze `
           + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">Pokaż więcej</button>`
         : '';
@@ -1726,7 +1743,53 @@ function flowPickHtml(when) {
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
+    if (dotOpts.whySeg && sel.hit && sel.hit.seg.why) {
+        html += segWhyHtml(sel.hit.seg.why);
+    }
     return html;
+}
+
+/** Debug: dlaczego kawałek jest na mapie z wartości podróży (pole `why`,
+    patrz planner._value_map). Każda podróż, która tędy jedzie, to jeden
+    wiersz: numerki, godziny i słowami, od jakiej tolerancji jest na mapie
+    i czemu tyle - tolerancja to suma dwóch strat w minutach. Pod spodem
+    warianty, które ukryły numerki, i przez co. */
+function segWhyHtml(why) {
+    const span = (from, to) => `${fmtClock(from)} → ${fmtClock(to)}`;
+    let html = '<span class="flow-tip-why">'
+        + `<span class="why-head">Dlaczego tu jest · tolerancja mapy ${why.tolerance} min`
+        + ` · najszybciej w celu ${fmtClock(why.fastest)}</span>`;
+    for (const j of why.journeys) {
+        const reasons = [];
+        if (j.late) reasons.push(`w celu ${j.late} min po najszybszej`);
+        if (j.early) {
+            reasons.push(`wychodzi ${j.early} min wcześniej niż ${esc(j.early_by.lines)} ` +
+                         `(${span(j.early_by.dep, j.early_by.arr)}), która w celu nie jest później`);
+        }
+        html += '<span class="why-journey">'
+            + `<b>${j.lines.map(esc).join(' lub ')}</b> ${span(j.dep, j.arr)}`
+            + ` · ${j.transfers} ` + plural(j.transfers, 'przesiadka', 'przesiadki', 'przesiadek')
+            + '<span class="why-reason">'
+            + (j.entry ? `od ${j.entry} min: ${reasons.join(' + ')}` : 'od razu — najwcześniej w celu')
+            + '</span></span>';
+    }
+    if (why.others) {
+        html += `<span class="why-more">i ${why.others} ` +
+                plural(why.others, 'inna podróż', 'inne podróże', 'innych podróży') +
+                ' tędy, później na mapie</span>';
+    }
+    if (why.hidden.length) {
+        html += '<span class="why-head">Ukryte przez numerki</span>';
+        for (const h of why.hidden) {
+            const same = h.added.length
+                ? `to ${esc(h.by.lines)} z dołożonym ${h.added.map(esc).join(', ')}`
+                : `te same numerki co ${esc(h.by.lines)}`;
+            html += `<span class="why-journey"><b>${esc(h.lines)}</b> ${span(h.dep, h.arr)}`
+                + `<span class="why-reason">${same} (${span(h.by.dep, h.by.arr)})` +
+                  ', a nie jest w niczym lepsza</span></span>';
+        }
+    }
+    return html + '</span>';
 }
 
 /** Godziny w dymku - odpowiedz na "o ktorej tu jestem i o ktorej bede u celu".
@@ -2013,11 +2076,12 @@ function flowIcon(flow) {
 /** `mapSec` to godzina, o której MAPA stawia pasażera na tej kropce. Sama
     tablica liczy od godziny z formularza (patrz timetableAnchor), więc na
     liście bywają odjazdy sprzed tej chwili - i to jest cel zgłoszenia #143.
-    Żeby nic się przez to nie zacierało, dzieli je widoczna kreska, a wiersze
-    sprzed niej zajmują najwyżej połowę listy: inaczej na ruchliwym węźle
-    wypchnęłyby poza suwak dokładnie te odjazdy, po które się tu przyszło. */
+    Zajmują najwyżej połowę listy: inaczej na ruchliwym węźle wypchnęłyby
+    poza suwak dokładnie te odjazdy, po które się tu przyszło. Kreski "tu
+    według mapy jesteś" między nimi już nie ma (decyzja użytkownika, 28.09). */
 function timetableHtml(data, mapSec) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
+    if (!dotOpts.ttOld && data.departures.length) return timetableLinesHtml(data, mapSec);
     const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
                  `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
     if (!data.departures.length) {
@@ -2034,21 +2098,14 @@ function timetableHtml(data, mapSec) {
     // Odjazdy sprzed przyjazdu mapy to tło - najwyżej połowa wierszy, bez
     // wymuszonego minimum: przy jednym wierszu zostaje ten, na który się
     // zdąży, bo to o niego pyta tablica (#143).
-    const kreskaPo = Math.min(przed.length, Math.floor(ile / 2));
-    const list = [...przed.slice(0, kreskaPo), ...reszta].slice(0, ile);
+    const ilePrzed = Math.min(przed.length, Math.floor(ile / 2));
+    const list = [...przed.slice(0, ilePrzed), ...reszta].slice(0, ile);
     // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
     // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
     // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
     // przesuwałaby jej wiersze bez powodu.
     const flows = list.some(d => FLOW_ICONS[d.flow]);
-    // Kreska stoi tam, gdzie kończą się odjazdy sprzed przyjazdu mapy - i mówi
-    // wprost, o której mapa cię tu stawia, żeby "za ile" nad nią nie wyglądało
-    // na obietnicę, że zdążysz.
-    const kreska = kreskaPo
-        ? `<li class="tt-here"><span>tu według mapy jesteś ` +
-          `${esc(fmtClock(mapSec))}</span></li>`
-        : '';
-    const rows = list.map((d, i) => (i === kreskaPo ? kreska : '') +
+    const rows = list.map(d =>
         `<li>` + (flows ? flowIcon(d.flow) : '') +
         `<span class="tt-time">${esc(d.time)}</span>` +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
@@ -2064,6 +2121,53 @@ function timetableHtml(data, mapSec) {
     ).join('');
     return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
 }
+
+/** Tablica domyślna (stara wraca przełącznikiem w Eksperymentach, dotOpts.ttOld):
+    jeden wiersz na linię i kierunek, a w nim same
+    godziny odjazdów po kolei - do ostatniej, którą przepuściło sito mapy,
+    czyli do ostatniego kursu, którym jeszcze się dojedzie (keepOfferedLines).
+    Bez "za ile", bez "co N min" i bez godziny w nagłówku: takt z trzech
+    kursów pod rząd mylił ("co 2 min"), a rząd godzin mówi to samo bez
+    uogólniania. Godziny sprzed chwili z mapy są szare, a bez nich (ustawienie
+    „Szare godziny w tablicy", dotOpts.ttPast) tablica zaczyna się od tej
+    chwili. */
+function timetableLinesHtml(data, mapSec) {
+    const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span></div>`;
+    const groups = new Map();
+    for (const d of [...data.departures].sort((a, b) => a.sec - b.sec)) {
+        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
+            + '|' + (d.flow || '');
+        if (!groups.has(key)) groups.set(key, {d, secs: []});
+        groups.get(key).secs.push(d.sec);
+    }
+    const rows = [];
+    for (const {d, secs} of groups.values()) {
+        const przed = mapSec === undefined ? [] : secs.filter(s => s < mapSec);
+        const po = mapSec === undefined ? secs : secs.filter(s => s >= mapSec);
+        const pokazane = [...(dotOpts.ttPast ? przed : []), ...po].slice(0, TT_TIMES_MAX);
+        if (!pokazane.length) continue;
+        rows.push({d, pokazane, zdazy: po.length > 0, first: po.length ? po[0] : pokazane[0]});
+    }
+    // Linie, na które według mapy już się nie zdąży (same szare godziny), na
+    // koniec - przy ciasnym suwaku nie mogą wypchnąć tych, w które się wsiądzie.
+    rows.sort((a, b) => (b.zdazy - a.zdazy) || (a.first - b.first));
+    const list = rows.slice(0, timetableRows());
+    const flows = list.some(r => FLOW_ICONS[r.d.flow]);
+    const html = list.map(({d, pokazane}) =>
+        '<li>' + (flows ? flowIcon(d.flow) : '') +
+        `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}</span>` +
+        '<span class="tt-times">' + pokazane.map(s =>
+            `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
+            `${esc(fmtClock(s))}</span>`).join('') + '</span>' +
+        routeButtonHtml(d, 'trasa') + '</li>',
+    ).join('');
+    return head + `<ul class="tt-rows tt-lines${flows ? ' has-flow' : ''}">${html}</ul>`;
+}
+
+// Ile godzin najwyżej w jednym wierszu tablicy (timetableLinesHtml) - więcej
+// nie mieści się w dymku obok numeru i kierunku.
+const TT_TIMES_MAX = 6;
 
 // Ile wierszy pokazuje dymek - suwak w panelu, sekcja „Przystanki, rowery i Traficary”.
 // Rzecz do dostrojenia PRZY MAPIE, bo o tym, ile wierszy jest za dużo,
@@ -2207,9 +2311,11 @@ function summariseRepeats(departures, rhythmSource) {
         const d = list[0];
         // Wiersz przyjazdu to jedno zdarzenie z mapy, a nie oferta - takt
         // przy nim mówiłby o odjazdach, o które nikt tu nie pyta.
+        // Takt z serwera liczy się z całego rozkładu linii (planner._every_min),
+        // więc jest także przy linii, która w pobranej tablicy wypada raz.
         const every = d.flow === 'end' ? undefined
-            : rytm.get(lineKey({kind: d.mode, num: d.num, headsign: d.headsign}));
-        out.push(every ? {...d, every_min: every} : d);
+            : d.every_min || rytm.get(lineKey({kind: d.mode, num: d.num, headsign: d.headsign}));
+        out.push({...d, every_min: every});
     }
     return out.sort((a, b) => a.sec - b.sec);
 }
@@ -2479,6 +2585,10 @@ function carTooltipHtml(car) {
         `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
         `pieszo z „${esc(car.from)}”`,
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
+        ...(dotOpts.carTimes ? [
+            `W celu ok. ${fmtClock(car.arrival)} — ${fmtMins(car.drive_sec)} ` +
+            'jazdy z ruszeniem i parkowaniem',
+        ] : []),
         `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
         ogarniamText(car.ogarniam),
         ...(dotOpts.why && car.why ? [
@@ -3581,6 +3691,10 @@ function queryParams() {
         walk_pace: WALK_PACES[$('walk-pace').value],
         bike_kmh: $('bike-kmh').value,
         bike_overhead_sec: (Number($('bike-overhead').value) * 60).toFixed(0),
+        car_kmh: $('car-kmh').value,
+        car_overhead_sec: (Number($('car-overhead').value) * 60).toFixed(0),
+        // Mapa z wartości podróży jest domyślna; stara wraca przełącznikiem.
+        value_map: $('old-map').checked ? '0' : '1',
     });
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
     // wynika z samej gęstości z suwaka.
@@ -4116,7 +4230,8 @@ $('clear').addEventListener('click', () => {
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
 const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
-                        'walk-pace', 'bike-kmh', 'bike-overhead'];
+                        'walk-pace', 'bike-kmh', 'bike-overhead',
+                        'car-kmh', 'car-overhead'];
 
 function loadDevPrefs() {
     try {
@@ -4175,6 +4290,8 @@ liveSlider('transfer-gain', 'transfer-gain-value');
 liveSlider('walk-pace', 'walk-pace-value');
 liveSlider('bike-kmh', 'bike-kmh-value');
 liveSlider('bike-overhead', 'bike-overhead-value');
+liveSlider('car-kmh', 'car-kmh-value');
+liveSlider('car-overhead', 'car-overhead-value');
 
 function showWalkPace() {
     $('walk-pace-value').textContent = WALK_PACE_LABELS[$('walk-pace').value];
@@ -4187,7 +4304,7 @@ showWalkPace();
 // Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
 // wygląda tak, jak wyglądała przed zgłoszeniem #147.
 for (const [id, domyslnie] of [['car-groups', false], ['car-vans', false],
-                               ['latest-start', false]]) {
+                               ['latest-start', false], ['old-map', false]]) {
     const input = $(id);
     const zapisane = loadDevPrefs()[id];
     input.checked = zapisane === undefined ? domyslnie : zapisane === true;
@@ -4438,7 +4555,9 @@ const DOT_TOGGLES = {
     'tip-panel': 'tipPanel',
     'bike-times': 'bikeTimes',
     'bike-rides': 'bikeRides',
+    'car-times': 'carTimes',
     'debug-why': 'why',
+    'debug-why-seg': 'whySeg',
 };
 
 function applyDotOpts() {
@@ -4477,6 +4596,31 @@ function bindDotOpts() {
             saveDotPrefs();
             // W pamięci leży GOTOWY html, przycięty do starej liczby wierszy -
             // bez tego suwak działałby dopiero na kropkach jeszcze nietkniętych.
+            timetableCache.clear();
+            if (timetableTarget) {
+                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
+            }
+        });
+    }
+    const ttOld = $('tt-old');
+    if (ttOld) {
+        ttOld.checked = dotOpts.ttOld;
+        ttOld.addEventListener('change', () => {
+            dotOpts.ttOld = ttOld.checked;
+            saveDotPrefs();
+            // W pamięci leży gotowy HTML starej tablicy.
+            timetableCache.clear();
+            if (timetableTarget) {
+                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
+            }
+        });
+    }
+    const ttPast = $('tt-past');
+    if (ttPast) {
+        ttPast.checked = dotOpts.ttPast;
+        ttPast.addEventListener('change', () => {
+            dotOpts.ttPast = ttPast.checked;
+            saveDotPrefs();
             timetableCache.clear();
             if (timetableTarget) {
                 loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);

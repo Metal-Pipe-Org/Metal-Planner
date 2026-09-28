@@ -190,6 +190,13 @@ def test_hover_preview_has_no_dots(front):
     _check(front, "stop_dots_only_when_drawn")
 
 
+def test_the_board_lists_departure_times_per_line(front):
+    """Tablica domyślna: wiersz na linię i kierunek, w nim godziny odjazdów po
+    kolei - bez "za ile", "co N min" i godziny w rogu; godziny sprzed chwili
+    z mapy szare, a linia, na którą się już nie zdąży, na końcu."""
+    _check(front, "tablica_godziny_w_wierszu_linii")
+
+
 def test_timetable_bubble_names_line_direction_and_wait(front):
     """Dymek odpowiada na "czym stąd pojadę": godzina, numer w kolorze
     środka transportu, kierunek i za ile - a kolejny kurs tej samej linii
@@ -428,8 +435,8 @@ def test_a_full_map_without_a_list_is_not_an_error(front):
 
 def test_show_more_adds_one_starting_density_per_click(front):
     """„Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie wysyła do
-    serwera `more` razem z gęstością z suwaka, a po trzecim kliknięciu i przy
-    suficie skanu przycisku nie ma - nie ma już czego dokładać."""
+    serwera `more` razem z gęstością z suwaka, a po trzecim kliknięciu
+    przycisku nie ma - zwykły licznik, niezależny od serwera."""
     _check(front, "pokaz_wiecej_doklada_gestosc")
 
 
@@ -551,9 +558,8 @@ def test_vans_are_a_switch_sent_to_the_server(front):
 def test_the_dot_timetable_counts_from_the_asked_hour(front):
     """Zgłoszenie #143: tablica w dymku liczy od godziny z formularza, a nie
     od tej, o której mapa sądzi, że pasażer tu stanie - bo to założenie bywa
-    za późne i zabierało całą odpowiedź. Odjazdy sprzed przyjazdu mapy
-    oddziela widoczna kreska i nie wypychają z listy tych, po które się tu
-    przyszło."""
+    za późne i zabierało całą odpowiedź. Odjazdy sprzed przyjazdu mapy nie
+    wypychają z listy tych, po które się tu przyszło."""
     _check(front, "tablica_liczy_od_godziny_z_formularza")
 
 
