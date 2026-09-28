@@ -2371,21 +2371,29 @@ let timetableTarget = null;
     pasażer tu stanie: mapa zna tylko to, co sama narysowała, więc jej godzina
     bywa za późna - a wtedy tablica gubiła nie kilka wierszy, lecz całą
     odpowiedź. Kto jest tu wcześniej pieszo, rowerem albo linią spod progu,
-    i tak zobaczy, co odjeżdża.
-
-    Przy odpowiedzi z kolejnej doby (punkt 13 kontraktu) zostaje godzina mapy:
-    pytanie sprzed doby nie mówi już nic o tamtym dniu. Nigdy później niż
+    i tak zobaczy, co odjeżdża. Odpowiedź z kolejnej doby nie jest wyjątkiem:
+    jej mapa liczy od północy tamtego dnia i tablica też. Nigdy później niż
     mapa - wcześniejsza godzina niczego nie ukrywa, późniejsza ukrywa. */
 function timetableAnchor(sec) {
     const flow = lastFlow;
-    if (!flow || flow.day_offset !== 0 || typeof flow.departure_sec !== 'number') {
-        return sec;
-    }
+    if (!flow || typeof flow.departure_sec !== 'number') return sec;
     return Math.min(flow.departure_sec, sec);
 }
 
-function loadTimetable(dot, where, sec) {
+/** Dzień, którego dotyczy mapa: data z formularza, a przy odpowiedzi
+    z kolejnej doby (punkt 13) - tamten dzień. Godziny kropek są na jego osi,
+    więc tablica z daty formularza pokazywałaby odjazdy z innego dnia. */
+function mapDate() {
     const date = $('date').value;
+    const offset = (lastFlow && lastFlow.day_offset) || 0;
+    if (!offset) return date;
+    const [y, m, d] = date.split('-').map(Number);
+    const day = new Date(Date.UTC(y, m - 1, d + offset));
+    return day.toISOString().slice(0, 10);
+}
+
+function loadTimetable(dot, where, sec) {
+    const date = mapDate();
     const from = timetableAnchor(sec);
     // Do klucza wchodzi też `flow` i `arrive`: ta sama linia raz jest ofertą
     // do wsiadania, a raz pojazdem, którym się tu przyjechało - i wtedy dymek

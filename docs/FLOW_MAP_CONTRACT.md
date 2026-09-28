@@ -219,9 +219,10 @@ nie dojedzie, przestaje być odjazdem — ale jeśli mapa nią tu dowozi, zostaj
 jako przyjazd.
 
 **Powtórzenia to jeden wiersz.** Kolejne kursy tej samej linii nie są kolejnymi
-opcjami, tylko rytmem jednej: najbliższy odjazd i „co X min". Ani wypisywania
-wszystkich, ani gubienia części. Przyjazd nie jest powtórzeniem odjazdu tej
-samej linii — to dwa różne zdarzenia i dwa wiersze.
+opcjami, tylko jedną: jej godziny stoją obok siebie w jednym wierszu, do
+ostatniego kursu, którym jeszcze się dojedzie. Linia, którą mapa tu dowozi
+i wiezie dalej, to też jeden wiersz — ze znakiem „możesz już nim jechać",
+a nie osobny przyjazd i osobny odjazd.
 
 **Godzina, od której liczymy.** Ta z formularza — bo tylko o niej pasażer wie,
 że jest prawdziwa. Godzina „będziesz tu o" jest wyłącznie tym, co mapa
@@ -231,12 +232,11 @@ liczona od tamtej godziny zabrałaby mu nie kilka wierszy, tylko całą
 odpowiedź.
 
 Odjazdy sprzed chwili, w której mapa stawia tu pasażera, są więc na liście
-celowo. Oddziela je widoczna kreska „tu według mapy jesteś" i zajmują najwyżej
-połowę wierszy, żeby na ruchliwym węźle nie wypchnęły tych, po które się tu
-przyszło. Przy odpowiedzi z kolejnej doby (punkt 13) zostaje godzina mapy:
-pytanie sprzed doby nie mówi już nic o tamtym dniu. Wszystko na osi doby
-rozkładowej, nie zegarowej: przesiadka o 24:40 należy do rozkładu dnia
-poprzedniego.
+celowo — jako szare godziny. Linia, na którą według mapy już się nie zdąży,
+idzie na koniec, żeby na ruchliwym węźle nie wypchnęła tych, po które się tu
+przyszło. Szare godziny da się wyłączyć w ustawieniach (domyślnie są) — wtedy
+tablica zaczyna się od chwili z mapy. Wszystko na osi doby rozkładowej, nie
+zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
 
 **Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
 ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne

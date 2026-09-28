@@ -2523,3 +2523,13 @@ o przełącznikach powrotu („Stara mapa", „Stara tablica odjazdów") i zdani
 w rodzaju „dawniej…" — to wszystko jest tutaj. Stara mapa z jasnością dalej
 działa za przełącznikiem w Eksperymentach; jej gwarancje (dawne 3, 8, 9)
 i ich testy zostają w kodzie bez zmian.
+
+#### Tablica przy odpowiedzi z kolejnej doby — bez wyjątku (28.09)
+
+Decyzja użytkownika: odpowiedź z kolejnej doby nie jest traktowana inaczej.
+Tablica przy kropce liczy od początku mapy jak zawsze (a mapa kolejnej doby
+zaczyna się o północy tamtego dnia), godziny sprzed chwili z mapy są szare.
+Wyjątek „zostaje godzina mapy" usunięty z kontraktu (punkt 11) i z kodu.
+Przy okazji: tablica pytała o odjazdy z daty formularza, choć godziny kropek
+są na osi dnia odpowiedzi — przy trasie jutrzejszej pokazywała inny dzień.
+Teraz pyta o dzień, którego dotyczy mapa.
