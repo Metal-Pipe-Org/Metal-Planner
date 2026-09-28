@@ -1544,4 +1544,37 @@ checks.debug_mowi_dlaczego = (() => {
 })();
 
 
+// Klik w mapę uzupełnia BRAKUJĄCY koniec relacji (#154): cel wpisany ręcznie
+// albo z podpowiedzi siedzi tylko w polu (sel.end == null) - i klik, który
+// wybiera start, nie ma prawa go skasować.
+checks.klik_w_mape_nie_kasuje_wpisanego_celu = (() => {
+    const byl = {sel: app.sel, start: app.startInput.value, end: app.endInput.value};
+    app.sel = {start: null, end: null};
+    app.startInput.value = '';
+    app.endInput.value = 'Wojszyce';
+    const punkt = {lat: 51.1, lon: 17.03};
+    app.pickEndpoint(punkt);
+    const poStarcie = {start: app.startInput.value, end: app.endInput.value,
+                       selStart: app.sel.start};
+
+    // Odwrotnie: wpisany start, klik wskazuje cel - startu też nie rusza.
+    app.sel = {start: null, end: null};
+    app.startInput.value = 'Sosnowiecka';
+    app.endInput.value = '';
+    app.pickEndpoint(punkt);
+    const poCelu = {start: app.startInput.value, end: app.endInput.value,
+                    selEnd: app.sel.end};
+
+    app.sel = byl.sel;
+    app.startInput.value = byl.start;
+    app.endInput.value = byl.end;
+    return {
+        ok: poStarcie.end === 'Wojszyce' && poStarcie.start !== ''
+            && poStarcie.selStart === punkt
+            && poCelu.start === 'Sosnowiecka' && poCelu.end !== ''
+            && poCelu.selEnd === punkt,
+        poStarcie, poCelu,
+    };
+})();
+
 JSON.stringify(checks);
