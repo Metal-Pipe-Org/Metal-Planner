@@ -71,7 +71,8 @@ jobs:
   # da się zrobić: odrzucenie `@claude` z cytatu i sprawdzenie uprawnień.
   gate:
     if: >-
-      github.event_name == 'issue_comment'
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && github.event_name == 'issue_comment'
       && github.event.issue.pull_request
       && github.event.sender.type != 'Bot'
       && contains(github.event.comment.body, '@claude')
@@ -101,13 +102,16 @@ jobs:
             exit 0
           fi
 
-          # Ocena idzie na sekretach i pobiera kod PR-a (także z forka), więc
-          # wołać może tylko ktoś z prawem zapisu — tak jak ręczny bieg, który
+          # Ocena idzie na sekretach i pobiera kod PR-a, więc wołać może
+          # tylko ktoś z prawem zapisu — tak jak ręczny bieg, który
           # też wymaga zapisu. `author_association` się nie nadaje: przy
           # prywatnym członkostwie w organizacji kłamie (patrz claude-issue.yml),
-          # stąd pytanie wprost o uprawnienia.
-          perm=$(gh api "repos/$REPO/collaborators/$WHO/permission" --jq .permission \
-                   2>/dev/null || echo none)
+          # stąd pytanie wprost o uprawnienia. Endpointowi wystarcza
+          # `metadata: read`, które token ma zawsze, stąd `permissions: {}`.
+          # Błąd API ma wywrócić bramkę na czerwono, a nie udawać „brak
+          # uprawnień" — inaczej zepsute sprawdzanie po cichu wyłączyłoby
+          # wołanie `@claude` dla wszystkich.
+          perm=$(gh api "repos/$REPO/collaborators/$WHO/permission" --jq .permission)
           case "$perm" in
             admin|write) echo "go=true" >> "$GITHUB_OUTPUT" ;;
             *)
@@ -129,8 +133,12 @@ jobs:
     # PR-y z forków odsiewamy, bo przy `pull_request` z obcego repozytorium
     # GitHub nie daje sekretów (nie byłoby czym uwierzytelnić Claude'a), a sam
     # wyzwalacz `pull_request_target` odpada: pobieramy tu kod z PR-a.
+    #
+    # Nazwa repozytorium wpisana na sztywno: forki kopiują workflow razem
+    # z kodem, a ocena ma chodzić tylko tutaj, nie w cudzych kopiach.
     if: >-
       !cancelled()
+      && github.repository == 'Metal-Pipe-Org/Metal-Planner'
       && (github.event_name == 'workflow_dispatch'
           || needs.gate.outputs.go == 'true'
           || (github.event_name == 'pull_request'
@@ -169,10 +177,30 @@ jobs:
           head_sha=$(printf '%s' "$json" | jq -r .head.sha)
           base_ref=$(printf '%s' "$json" | jq -r .base.ref)
           state=$(printf '%s' "$json" | jq -r .state)
+          head_repo=$(printf '%s' "$json" | jq -r '.head.repo.full_name // ""')
 
           if [ "$state" != open ]; then
             echo "PR #$N nie jest otwarty (stan: $state) — nie oceniam." \
               | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Oceniamy wyłącznie PR-y z gałęzi tego repozytorium. Przy
+          # `pull_request` forki odsiewa już warunek joba, ale `issue_comment`
+          # i ręczny bieg dostają pełne sekrety bez względu na pochodzenie
+          # PR-a. Obcy kod (i ewentualny prompt injection w nim albo w opisie)
+          # nie może trafić do Claude'a z tokenami w zasięgu tylko dlatego, że
+          # ktoś z zespołu napisał pod nim `@claude` albo odpalił bieg ręcznie.
+          # Skasowany fork daje pusty `head.repo` i też tu odpada.
+          if [ "$head_repo" != "$REPO" ]; then
+            msg="PR #$N pochodzi z forka (${head_repo:-skasowane repozytorium}) — nie oceniam."
+            echo "$msg" | tee -a "$GITHUB_STEP_SUMMARY"
+            if [ "$GITHUB_EVENT_NAME" = issue_comment ]; then
+              gh pr comment "$N" --repo "$REPO" --body \
+                "⚪ Nie oceniam PR-ów z forków — ich kod nie może trafić do Claude'a razem z sekretami repozytorium." \
+                || true
+            fi
             echo "go=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -304,6 +332,7 @@ jobs:
         env:
           ID: ${{ steps.hello.outputs.id }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EXEC: ${{ steps.claude.outputs.execution_file }}
         run: |
           set -euo pipefail
 
@@ -313,11 +342,42 @@ jobs:
             *) echo "Ocena doszła — nie ruszam komentarza."; exit 0 ;;
           esac
 
-          cat > "$RUNNER_TEMP/failed.md" <<MD
+          # Przyczynę bierzemy z zapisu rozmowy, który action zostawia na
+          # runnerze także przy porażce. Patrzymy wyłącznie na końcowy wynik
+          # i na błędy API, nie na całą rozmowę — w przeczytanym kodzie też
+          # może paść „rate limit", a to nie znaczy, że limit się skończył.
+          exec_file=${EXEC:-$RUNNER_TEMP/claude-execution-output.json}
+          reason=""
+          if [ -f "$exec_file" ]; then
+            reason=$(jq -r '
+                .[]? | select(.type == "result" and .is_error == true) | .result // empty,
+                .[]? | select(.type == "assistant" and .error != null) | .error
+              ' "$exec_file" 2>/dev/null | head -c 300 || true)
+          fi
+          echo "Przyczyna z zapisu rozmowy: ${reason:-brak}"
+
+          if printf '%s' "$reason" | grep -qiE 'limit reached|hit your limit|usage limit|rate.?limit|\b429\b'; then
+            # Starszy format to „Claude AI usage limit reached|<epoch>" —
+            # wtedy zamieniamy znacznik czasu na godzinę po polsku.
+            when=""
+            epoch=$(printf '%s' "$reason" | grep -oE '\|[0-9]{10}' | tr -d '|' || true)
+            if [ -n "$epoch" ]; then
+              when=" Limit odnowi się około $(TZ=Europe/Warsaw date -d "@$epoch" '+%H:%M (%d.%m)')."
+            elif printf '%s' "$reason" | grep -qi 'reset'; then
+              when=" Komunikat: „${reason//$'\n'/ }”."
+            fi
+            cat > "$RUNNER_TEMP/failed.md" <<MD
+          ⏳ **Ocena się nie udała — skończył się limit Claude'a**
+
+          Konto, na którym działa ocena, wyczerpało limit użycia.${when} To nie ma nic wspólnego z samym PR-em — [log biegu](${RUN}). Po odnowieniu limitu napisz w komentarzu pod tym PR-em \`@claude\`, żeby spróbować jeszcze raz.
+          MD
+          else
+            cat > "$RUNNER_TEMP/failed.md" <<MD
           ⚪ **Ocena się nie udała**
 
           Claude nie dokończył analizy tego PR-a — [log biegu](${RUN}). Żeby spróbować jeszcze raz, napisz w komentarzu pod tym PR-em \`@claude\`.
           MD
+          fi
           gh api --method PATCH "repos/$REPO/issues/comments/$ID" \
             -F body=@"$RUNNER_TEMP/failed.md"
 
