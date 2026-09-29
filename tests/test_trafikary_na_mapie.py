@@ -1,10 +1,11 @@
 """Testy aut car-sharingu NA MAPIE przepływów (punkt 15 kontraktu).
 
 To jest coś innego niż tests/test_traficar.py: tamte pilnują propozycji
-kończącej się jazdą autem, te - samego znacznika na mapie. Mapa o jeździe
-autem nie mówi nic. Mówi tylko dwie rzeczy: o której da się być PRZY aucie
-(dojazd z rozkładu plus dojście liczone tą samą regułą, co każde inne -
-punkt 14) i ile stąd do celu w linii prostej.
+kończącej się jazdą autem, te - samego znacznika na mapie. O aucie mapa wie
+trzy rzeczy: o której da się być PRZY nim (dojazd z rozkładu plus dojście
+liczone tą samą regułą, co każde inne - punkt 14), ile stąd do celu w linii
+prostej i - szacunkiem, jak przy rowerze - o której auto tam dowiezie
+(zgłoszenie #150).
 
 Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
@@ -124,15 +125,33 @@ def test_najkrotsze_dojscie_wygrywa(install_day, monkeypatch):
     assert car["at"] == car["walk_sec"]
 
 
-def test_do_celu_tylko_w_linii_prostej(install_day, monkeypatch):
-    """Czasu jazdy autem nie ma skąd wziąć i mapa go nie zgaduje - podaje samą
-    odległość, resztę zostawia pasażerowi."""
+def test_przyjazd_autem_to_szacunek_z_linii_prostej(install_day, monkeypatch):
+    """Jazdy autem nie ma skąd odczytać, więc mapa ją szacuje tak jak rower:
+    jedna prędkość w linii prostej, w pełnych minutach w górę, plus stały
+    narzut na ruszenie i parkowanie (zgłoszenie #150). Długości trasy nie
+    podaje - znana jest tylko odległość w linii prostej."""
     car = _flow(install_day, monkeypatch)["cars"][0]
 
-    assert car["to_dest_m"] == round(
-        gtfs._haversine_m(CAR["lat"], CAR["lon"], *E))
-    assert "drive_sec" not in car
+    metry = round(gtfs._haversine_m(CAR["lat"], CAR["lon"], *E))
+    jazda = -(-int(metry / traficar.MAP_DRIVE_MPS) // 60) * 60
+    assert car["to_dest_m"] == metry
+    assert car["arrival"] == car["at"] + traficar.MAP_OVERHEAD_SEC + jazda
+    assert car["drive_sec"] == traficar.MAP_OVERHEAD_SEC + jazda
     assert "drive_m" not in car
+
+
+def test_zalozenia_auta_spod_zebatki_zmieniaja_szacunek(install_day,
+                                                        monkeypatch):
+    """Prędkość i narzut pytający ustawia sobie sam - z nich, a nie ze stałych,
+    liczy się przyjazd autem."""
+    install_day(_day())
+    _cars(monkeypatch, [CAR])
+
+    car = planner.plan_flow("Start", "Cel", WHEN, car_kmh=36,
+                            car_overhead_sec=0)["cars"][0]
+
+    metry = round(gtfs._haversine_m(CAR["lat"], CAR["lon"], *E))
+    assert car["arrival"] == car["at"] + (-(-int(metry / 10) // 60) * 60)
 
 
 def test_auto_nie_jest_kursem_na_mapie(install_day, monkeypatch):
@@ -193,9 +212,12 @@ def test_ogarniam_czytamy_z_feedu_takie_jakie_jest(monkeypatch):
 
 # ------------------------------------------------- które auta pokazać ----
 
-def _auto(tablica, at, skad, ogarniam=0, do_celu=3000):
+def _auto(tablica, at, skad, ogarniam=0, do_celu=3000, w_celu=None):
+    # Szacowany przyjazd domyślnie rośnie z godziną przy aucie - wtedy nie
+    # rozstrzyga niczego ponad nią i test mówi o tym, o czym mówi jego nazwa.
     return {**CAR, "plate": tablica, "at": at, "from_place": skad,
             "to_dest_m": do_celu,
+            "arrival": at + 3000 if w_celu is None else w_celu,
             "ogarniam": [{"co": "Tankowanie", "ile": ogarniam}] if ogarniam else []}
 
 
@@ -227,7 +249,8 @@ def test_podglad_mowi_dlaczego_auto_jest_na_mapie():
     pokazane = {car["plate"]: car["why"] for car in traficar.map_skyband(
         [wczesne, platne, pobite, obok], 30, groups=True)}
 
-    assert pokazane["A"]["records"] == ["najwcześniej przy aucie"]
+    assert pokazane["A"]["records"] == ["najwcześniej przy aucie",
+                                        "najwcześniej w celu (szacunek)"]
     assert pokazane["A"]["beaten"] == 0 and pokazane["A"]["group"] == 2
     assert pokazane["C"]["records"] == ["najwięcej z Ogarniam"]
     # D bije i A (wcześniej), i C (ta sama godzina, ale z nagrodą).
@@ -237,15 +260,26 @@ def test_podglad_mowi_dlaczego_auto_jest_na_mapie():
 
 
 def test_odleglosc_do_celu_nie_jest_kryterium():
-    """Auto tuż przy celu nie wygrywa samym położeniem: czy jazda autem się
-    opłaca, mapa nie rozstrzyga, bo czasu jazdy nie da się rzetelnie
-    oszacować (korki)."""
-    wczesne_daleko = _auto("A", 600, "S", do_celu=9000)
-    pozne_przy_celu = _auto("B", 1200, "M", do_celu=300)
+    """Auto tuż przy celu nie wygrywa samym położeniem - liczy się, o której
+    dowiezie. Tu auto przy celu, choć bliżej, dowozi później."""
+    wczesne_daleko = _auto("A", 600, "S", do_celu=9000, w_celu=2400)
+    pozne_przy_celu = _auto("B", 1200, "M", do_celu=300, w_celu=2700)
 
     pokazane = traficar.map_skyband([wczesne_daleko, pozne_przy_celu], 1)
 
     assert _tablice(pokazane) == ["A"]
+
+
+def test_auto_dalej_od_startu_ktore_dowozi_szybciej_jest_na_mapie():
+    """Tramwaj od razu na Księże Małe, tam Traficar do Radwanic: przy aucie
+    jest się później niż przy tym pod startem i bez „Ogarniam" - ale dowozi
+    wcześniej. Najlepsze w czymś, więc zostaje (zgłoszenie #150)."""
+    pod_startem = _auto("A", 600, "S", w_celu=3600)
+    dalej_ale_szybciej = _auto("B", 1500, "M", w_celu=2700)
+
+    pokazane = traficar.map_skyband([pod_startem, dalej_ale_szybciej], 1)
+
+    assert _tablice(pokazane) == ["A", "B"]
 
 
 def test_auta_spod_tego_samego_miejsca_to_jeden_wybor():
@@ -366,6 +400,8 @@ def test_pokaz_wiecej_luzuje_regule_nawet_gdy_suwak_jest_juz_przekroczony():
         {"plate": "NIEPOBITE_C", "at": 720, "ogarniam": [{"ile": 50}], "van": False},
         {"plate": "POBITE_RAZ", "at": 660, "ogarniam": [{"ile": 20}], "van": False},
     ]
+    for car in auta:
+        car["arrival"] = car["at"] + 3000
 
     bez = traficar.map_skyband(auta, 2)
     po_kliknieciu = traficar.map_skyband(auta, 2, min_level=1)

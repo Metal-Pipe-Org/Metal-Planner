@@ -310,7 +310,55 @@ checks.stop_dots_only_when_drawn = (() => {
     return {ok: dots.length === 0, dots: dots.length};
 })();
 
-checks.timetable_html = (() => {
+/* Stara tablica (z "za ile" i "co N min") wraca przełącznikiem w
+   Eksperymentach - te sprawdzenia pilnują jej, a nie tablicy domyślnej. */
+function staraTablica(fn) {
+    const bylo = app.dotOpts.ttOld;
+    app.dotOpts.ttOld = true;
+    try {
+        return fn();
+    } finally {
+        app.dotOpts.ttOld = bylo;
+    }
+}
+
+/* Tablica domyślna: jeden wiersz na linię i kierunek, w nim godziny po kolei;
+   bez "za ile", "co N min" i godziny w nagłówku. Godziny sprzed chwili
+   z mapy są szare, a linia, na którą się już nie zdąży, idzie na koniec. */
+checks.tablica_godziny_w_wierszu_linii = (() => {
+    const dep = (sec, num, headsign) => ({time: '00:00', sec, in_min: 0, num,
+                                          mode: 'bus', headsign});
+    const data = {stop: 'Park Wschodni', from_time: '22:27', departures: [
+        dep(80820, '134', 'KSIĘŻE WIELKIE'),     // 22:27 - przed chwilą z mapy
+        dep(81720, '114', 'Zajezdnia TYSKA'),    // 22:42
+        dep(82740, '114', 'Zajezdnia TYSKA'),    // 22:59
+        dep(81000, '5', 'KSIĘŻE MAŁE'),          // 22:30 - przed
+        dep(84000, '5', 'KSIĘŻE MAŁE'),          // 23:20
+    ]};
+    const html = app.timetableHtml(data, 81600);   // według mapy jesteś 22:40
+    const wiersze = html.match(/<li>.*?<\/li>/g) || [];
+    // Bez szarych godzin tablica zaczyna się od chwili z mapy - linia, która
+    // miała tylko wcześniejsze, znika.
+    const bylo = app.dotOpts.ttPast;
+    app.dotOpts.ttPast = false;
+    const bezSzarych = app.timetableHtml(data, 81600);
+    app.dotOpts.ttPast = bylo;
+    return {
+        ok: wiersze.length === 3
+            && wiersze[0].includes('>114<') && wiersze[0].includes('22:42')
+            && wiersze[0].includes('22:59')
+            && wiersze[1].includes('>5<')
+            && wiersze[1].includes('class="tt-past">22:30')
+            && wiersze[1].includes('23:20')
+            && wiersze[2].includes('>134<')          // już się nie zdąży - na koniec
+            && !html.includes('min') && !html.includes('tt-from')
+            && !bezSzarych.includes('tt-past') && !bezSzarych.includes('>134<')
+            && bezSzarych.includes('23:20'),
+        wiersze,
+    };
+})();
+
+checks.timetable_html = staraTablica(() => {
     const html = app.timetableHtml({
         stop: 'Bardzka',
         from_time: '16:06',
@@ -340,7 +388,7 @@ checks.timetable_html = (() => {
         wierszy,
         html: html.slice(0, 200),
     };
-})();
+});
 
 checks.timetable_html_empty = (() => {
     const html = app.timetableHtml({stop: 'Pętla', from_time: '23:59', departures: []});
@@ -549,7 +597,7 @@ checks.rytm_z_mediany_nie_ze_sredniej = (() => {
    "co 20 min" to informacja o linii, nie o oknie. Sprawdzane przez cały dymek,
    bo chodzi też o to, czy pełna tablica w ogóle dochodzi tam, gdzie liczy się
    rytm. */
-checks.rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem = (() => {
+checks.rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem = staraTablica(() => {
     const dep = (min, num) => ({time: '00:00', sec: min * 60, in_min: min,
                                num, mode: 'bus', headsign: 'KRZYKI'});
     const kursy = [dep(3, '112'), dep(23, '112'), dep(43, '112'), dep(63, '112')];
@@ -568,7 +616,7 @@ checks.rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem = (() => {
             && html.includes('co 20 min') && !bezPelnej.includes('co '),
         html: html.slice(-160), bezPelnej: bezPelnej.slice(-160),
     };
-})();
+});
 
 /* Kierunek to osobna opcja - i osobny wiersz z własnym rytmem. */
 checks.notka_rozroznia_kierunki = (() => {
@@ -868,7 +916,7 @@ checks.przyjazd_nie_zwija_sie_z_odjazdem = (() => {
    tablica pod kropką WYBRANEJ trasy pyta o cały przystanek i nie wie, co się
    tu z którą linią dzieje - pusta kolumna przesuwałaby jej wiersze bez powodu.
    Przyjazd stoi w kolejności czasowej, nie na końcu listy. */
-checks.tablica_miesza_przyjazdy_z_odjazdami = (() => {
+checks.tablica_miesza_przyjazdy_z_odjazdami = staraTablica(() => {
     const html = app.timetableHtml({stop: 'Bardzka', from_time: '16:00', departures: [
         {time: '16:04', sec: 57840, in_min: 4, num: '3', mode: 'tram',
          headsign: 'LEŚNICA', flow: 'start'},
@@ -890,7 +938,7 @@ checks.tablica_miesza_przyjazdy_z_odjazdami = (() => {
             && !bezPrzeplywu.includes('<svg'),
         html: html.slice(0, 160),
     };
-})();
+});
 
 /* Czekanie jest widoczne, nie schowane (punkt 13 kontraktu). Komunikat
    staje przy zmianie doby i przy czekaniu dłuższym niż 20 minut tego samego
@@ -976,8 +1024,8 @@ checks.grupa_stacji_wraca_kanoniczna = (() => {
 
 /* Przycisk "Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie dokłada
    jedną wyjściową gęstość i leci do serwera jako `more` razem z gęstością
-   z suwaka. Po trzecim kliknięciu i przy suficie skanu przycisku nie ma - nie
-   ma już czego dokładać. */
+   z suwaka. Po trzecim kliknięciu przycisku nie ma - to zwykły licznik, bez
+   pytania serwera, czy jest jeszcze co dołożyć. */
 checks.pokaz_wiecej_doklada_gestosc = (() => {
     const pasek = () => document.getElementById('time-headline').innerHTML;
 
@@ -1001,7 +1049,7 @@ checks.pokaz_wiecej_doklada_gestosc = (() => {
             && zapytanie.includes('cars=')               // i liczbą aut, którą też mnoży
             && !zapytanie.includes('horizon_sec')
             && !poTrzecim.includes('headline-more')      // po trzecim nie ma przycisku
-            && !przySuficie.includes('headline-more'),   // przy suficie też nie
+            && przySuficie.includes('headline-more'),    // sufit serwera go nie chowa
         more: app.mapMore,
         zapytanie: zapytanie.slice(0, 200),
         naStarcie: naStarcie.slice(-200),
@@ -1442,7 +1490,7 @@ checks.auta_dostawczaki_leca_do_serwera = (() => {
    pasażera (zgłoszenie #143). Odjazdy sprzed przyjazdu mapy są więc na
    liście celowo - oddziela je widoczna kreska i nigdy nie wypychają tych,
    po które się tu przyszło. */
-checks.tablica_liczy_od_godziny_z_formularza = (() => {
+checks.tablica_liczy_od_godziny_z_formularza = staraTablica(() => {
     const dep = sec => ({time: '00:00', sec, in_min: 0, num: String(sec / 100),
                          mode: 'bus', headsign: 'PRACZE'});
     const data = {stop: 'Halicka', from_time: '21:55',
@@ -1457,22 +1505,22 @@ checks.tablica_liczy_od_godziny_z_formularza = (() => {
     app.dotOpts.rows = bylo;
     const bezMapy = app.timetableHtml(data);
 
-    // Kreska stoi dokładnie między odjazdem sprzed przyjazdu a pierwszym od
-    // niego, a bez godziny mapy nie ma jej wcale.
-    const kreska = pelna.indexOf('tt-here');
-    const wMiejscu = kreska > pelna.indexOf('>2<') && kreska < pelna.indexOf('>3<');
+    // Kreski "tu według mapy jesteś" nie ma (decyzja z 28.09); odjazdy sprzed
+    // przyjazdu mapy stoją przed tymi od niego.
+    const wMiejscu = !pelna.includes('tt-here')
+        && pelna.indexOf('>2<') < pelna.indexOf('>3<');
     // Suwak na dwa wiersze: odjazd od przyjazdu mapy MUSI się zmieścić.
     const wierszy = (ciasna.match(/<li>/g) || []).length;
     // Jeden wiersz: tylko odjazd, na który się zdąży - odjazd sprzed
     // przyjazdu mapy nie może zająć jedynego miejsca (recenzja #141/#143/#147).
     const jedenWiersz = (jedna.match(/<li>/g) || []).length;
     return {
-        ok: wMiejscu && !bezMapy.includes('tt-here')
+        ok: wMiejscu && bezMapy.includes('>1<')
             && ciasna.includes('>3<') && wierszy === 2
             && jedna.includes('>3<') && jedenWiersz === 1,
         wMiejscu, wierszy, ciasna, jedenWiersz, jedna,
     };
-})();
+});
 
 /* Rodzaj roweru to dwa PRZYCISKI W PASKU warstw (zgłoszenie #147) - ich stan
    idzie w zapytaniu, bo odsiew miejsc robi serwer. Zgaszenie obu gasi rower

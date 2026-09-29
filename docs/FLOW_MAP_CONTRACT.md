@@ -1,6 +1,6 @@
 # Kontrakt mapy przepływów
 
-Gwarancje zachowania **rysowania mapy przepływów** (segmenty, jasność,
+Gwarancje zachowania **rysowania mapy przepływów** (segmenty, próg,
 kształt sieci) — nie dotyczy listy „Propozycje tras” obok mapy. Testy dla
 każdego punktu, historia wdrożeń i otwarte pytania są w
 [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md); jak to jest policzone — w
@@ -18,18 +18,29 @@ wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 
 ## 1. Cały wachlarz, nie jedna trasa
 
-Mapa pokazuje wszystkie sensowne dojazdy naraz, nie tylko najszybszy.
-Jasność linii to ciągła miara jakości (0–1), nie binarne pokaż/ukryj.
+Mapa pokazuje wszystkie sensowne dojazdy naraz, nie tylko najszybszy. Każdy
+dojazd to cała podróż od startu do celu, opisana dwiema liczbami: o której
+jest się w celu i o której trzeba wyjść. Na mapie jest to, co w którejś z nich
+jest najlepsze albo mieści się w progu (punkt 2). Każda narysowana linia
+wygląda tak samo — o tym, czy coś jest na mapie, rozstrzyga próg.
 
 ## 2. Sensowność względem najlepszej trasy
 
-To, co się liczy jako „sensowne”, jest mierzone tym, jak blisko dana opcja
-dociera do celu w porównaniu z najlepszym możliwym (najszybszą trasą).
-To jedyna miara jakości linii — regulować wolno tylko to, gdzie na niej
-stoi próg.
+To, co się liczy jako „sensowne”, jest mierzone tym, **o ile dłużej trwa
+podróż**. Każda podróż ma tolerancję w minutach, a to SUMA dwóch strat:
+o ile później jest w celu niż najszybsza i o ile wcześniej wychodzi niż
+podróż, która w celu nie jest później — wcześniejsze wyjście, żeby i tak nie
+być wcześniej, to czekanie. Przy tolerancji 16 minut są więc na mapie podróże
+najwyżej 16 minut dłuższe. To jedyna miara — regulować wolno tylko to, gdzie na niej stoi
+próg.
+
+**Przesiadki i chodzenie liczą się tylko w minutach.** Nie są osobną wartością
+i niczego same nie rozstrzygają: trasa z dwiema przesiadkami 5 minut później
+wchodzi tak samo jak każda inna 5 minut później. Dłuższy marsz to po prostu
+późniejszy przyjazd albo wcześniejsze wyjście.
 
 **Próg wynika z czytelności, nie z minut.** Pokazanie za dużo to to samo, co
-nie pokazanie nic. Próg jakości przesuwa się więc tak, żeby narysowana sieć
+nie pokazanie nic. Próg przesuwa się więc tak, żeby narysowana sieć
 miała docelową gęstość: ile RÓŻNYCH korytarzy leży w kadrze, w którym mapa
 pokazuje relację, w stosunku do jego boku (pierwiastka z powierzchni). Liczy
 się gęstość na ekranie, a nie w mieście: każdy kadr jest wpasowany w to samo
@@ -42,39 +53,34 @@ gęstość to jedyne pokrętło progu i jest suwakiem. Godzina, do której mapa
 rysuje (punkt 10), jest skutkiem progu, a nie jego ustawieniem.
 
 **Jeden próg, bez dziur.** Tnie się wyłącznie tym jednym progiem. Jeśli na
-mapie jest opcja o danej jakości, jest na niej każda lepsza. Nie ma wyjątków
-„pokaż mimo to” ani ukrywania pojedynczych opcji — mapa kończy się w jednym
-miejscu skali, zamiast wybierać za pasażera.
+mapie jest opcja o danej tolerancji, jest na niej każda o mniejszej. Nie ma
+wyjątków „pokaż mimo to” ani ukrywania pojedynczych opcji — mapa kończy się
+w jednym miejscu skali, zamiast wybierać za pasażera. Jedyne, czego nie ma
+przy żadnym progu, to trasy, które niczego nie dają (niżej).
 
-**„Pokaż więcej” zawsze coś dokłada.** Każde kliknięcie podnosi cel gęstości
-o jedną wyjściową porcję: pierwsze do dwukrotności, drugie do trzykrotności,
-kolejne do czterokrotności. Sam cel tego jednak nie gwarantuje, bo mapa
-gęstnieje falami, a nie płynnie: dwa kolejne cele potrafią wypaść w tej samej
-dziurze i dać tę samą mapę, a przycisk wygląda wtedy na zepsuty. Dlatego
+**Te same numery to ta sama trasa.** Trasa jadąca tymi samymi numerami linii
+co podróż nie gorsza w minutach — albo tymi samymi i jeszcze innymi — nie
+pojawia się przy żadnym progu: to ta sama podróż, tylko gorzej. Tak odpada
+przesiadka w pojazd, który i tak zaraz przyjedzie (tramwaj 14 na Borku:
+piątka i siedemnastka z dołożoną czternastką, te same godziny). Z dróg tymi
+samymi numerami o tych samych minutach rysuje się najkrótsza — przejechanie
+przystanku przesiadki i powrót tym samym kursem to nie wariant, tylko
+ogonek. Trasa INNYMI numerami wchodzi, nawet gdy jest dłuższa, a nie
+szybsza: to już inna trasa.
+
+**„Pokaż więcej” zawsze coś dokłada.** Przycisk to zwykły licznik: da się go
+kliknąć trzy razy, niezależnie od tego, ile jeszcze zostało do pokazania.
+Każde kliknięcie podnosi cel gęstości o jedną wyjściową porcję: pierwsze do
+dwukrotności, drugie do trzykrotności, trzecie do czterokrotności. Sam cel
+tego jednak nie gwarantuje, bo mapa gęstnieje falami, a nie płynnie: dwa
+kolejne cele potrafią wypaść w tej samej dziurze i dać tę samą mapę, a
+przycisk wygląda wtedy na zepsuty. Dlatego
 kliknięcie przesuwa próg o co najmniej minutę dalej niż poprzednie, a jeśli to
 nic nie zmienia — aż do pierwszej minuty, która naprawdę coś dokłada, choćby
 przekroczyła cel gęstości. Dziury to nie robi: tnie się nadal jednym progiem,
 tylko postawionym za najbliższą nową rzeczą. Tym samym kliknięciem rośnie
 liczba aut i przejazdów rowerem (punkty 15 i 16), a ich reguła luzuje się
 o co najmniej jeden poziom. Przedłużenie żyje do następnego wyszukiwania.
-
-## 3. Jasność w każdym punkcie kursu, nie jedna na cały kurs
-
-Ten sam korytarz, którym i tak każdy by pojechał, nie ma prawa migać —
-losowo ciemnieć i jaśnieć między sąsiednimi przystankami bez powodu. Ale
-to nie znaczy, że jeden, fizyczny kurs musi mieć jedną, stałą jasność od
-wsiadania do wysiadania.
-
-Jasność w danym punkcie kursu odzwierciedla, jak dobrym wyborem jest
-siedzieć w tym pojeździe **właśnie tutaj** — nie jak dobrym wyborem było
-wsiadanie do niego na starcie. Przykład: jedziemy przez korytarz, po
-drodze mijamy przystanek, z którego dałoby się przesiąść na wyraźnie
-szybszą linię do celu — jeśli się NIE przesiadamy i jedziemy dalej tym
-samym pojazdem, dalszy odcinek tego samego, fizycznego kursu ma być
-rysowany **ciemniej** niż odcinek przed tą przesiadką. Jeden kurs może
-więc wyjść na mapie jako kilka kolejnych kawałków o różnej jasności,
-cięte dokładnie w miejscach realnych, pominiętych, lepszych przesiadek —
-i tylko tam, gdzie coś naprawdę się zmienia.
 
 ## 4. Brak wiszących w powietrzu gałęzi
 
@@ -84,17 +90,14 @@ docelowego. Gałąź zaczynająca się w miejscu **nieosiągalnym niczym już
 narysowanym**, albo kończąca się w miejscu **niezwiązanym z dotarciem do
 celu**, nie ma prawa się pojawić na mapie.
 
+Każdy narysowany kawałek jest częścią całej podróży od startu do celu.
 Kryterium jest czysto **fizyczna osiągalność** — czy da się tam realnie,
-w czasie, dotrzeć: czymś, co mapa już rysuje, albo **pieszo** (punkt 14) —
-nie to, jak jasna jest ta rzecz, przez którą się dociera. Gałąź, do której
-się dochodzi, wygląda więc na mapie jak zaczynająca się obok reszty rysunku,
-bo przejść pieszo nie rysujemy. To jest świadomy wybór: kreska przy każdym
-przejściu zaśmiecałaby mapę bardziej, niż tłumaczy, a że z jednego
-przystanku da się dojść do drugiego o dwieście metrów dalej, widać na mapie
-samemu. Gałąź kotwiczy więc DOWOLNA zdążalna
-przesiadka z narysowanego segmentu, choćby bardzo blada: bladość dojazdu
-nie znaczy, że dalsza, jasna część jest nieosiągalna. Tak samo jest na
-końcu — jasność kontynuacji nie ma tu nic do rzeczy.
+w czasie, dotrzeć: czymś, co mapa już rysuje, albo **pieszo** (punkt 14).
+Gałąź, do której się dochodzi, wygląda więc na mapie jak zaczynająca się obok
+reszty rysunku, bo przejść pieszo nie rysujemy. To jest świadomy wybór:
+kreska przy każdym przejściu zaśmiecałaby mapę bardziej, niż tłumaczy, a że
+z jednego przystanku da się dojść do drugiego o dwieście metrów dalej, widać
+na mapie samemu.
 
 **Żadnych kikutów.** Ogon kończy się dopiero tam, gdzie stoi coś, co
 naprawdę prowadzi **dalej**. „Dalej" znaczy dwie rzeczy naraz:
@@ -107,14 +110,8 @@ naprawdę prowadzi **dalej**. „Dalej" znaczy dwie rzeczy naraz:
    rozkładzie, nie wystarcza — inaczej dwa ogony podpierają się nawzajem i
    spotykają się tam, skąd nic nie odjeżdża.
 
-To NIE to samo, co minięcie lepszej przesiadki i jazda dalej (punkt 3) —
-tam jedzie się w stronę celu, tylko nie najlepiej, więc odcinek zostaje
-narysowany, po prostu ciemniej.
-
-Kierunek („czy to zawrócenie") czytamy z kolejności przystanków w
-rozkładzie, nie z tego, co akurat mieści się w oknie czasowym — inaczej
-przesunięcie suwaka okna zmieniałoby odpowiedź i kasowało gałęzie widoczne
-przy węższym oknie (patrz punkt 9).
+Ogonka „tam i z powrotem tym samym kursem" nie ma — to ta sama podróż
+tymi samymi numerami, rysowana najkrótszą drogą (punkt 2).
 
 ## 6. Geometria po realnych ulicach i torach
 
@@ -144,31 +141,8 @@ wspólnego korytarza leżą jedna na drugiej. Czytelność robią NUMERY:
   w równych odstępach wzdłuż korytarza i bez nachodzenia na siebie.
 - **Kursor nazywa jedną linię.** Pod kursorem podświetla się WYŁĄCZNIE
   jedna linia — na CAŁEJ swojej narysowanej długości, nie tylko kawałek pod
-  kursorem — a podpowiedź podaje jej numer wprost; domyślnie najjaśniejsza
-  z korytarza. Żeby wskazać inną, najeżdża się na jej numer w grupce.
-
-## 8. Minimalna jasność nigdy nie spada do niewidoczności
-
-Najbledszy koniec skali jasności (punkt 1, q=0) wciąż ma być fizycznie
-widoczny na mapie — nie może wyglądać jak przypadkowa, niedokończona
-kreska donikąd. Dolny próg opacity i grubości linii jest ustawiony na
-tyle wysoko, żeby nawet najbledszy kawałek dało się dostrzec bez
-najeżdżania na niego myszką.
-
-## 9. Pełny zakres jasności zawsze wykorzystany
-
-Próg z punktu 2 reguluje, CO jest w ogóle pokazane, ale skala jasności
-nie jest liczona względem teoretycznego miejsca progu, tylko względem
-najgorszej opcji, która FAKTYCZNIE jest pokazana. Najlepsza trasa zawsze
-świeci pełnym blaskiem (q=1), a najgorsza opcja, która akurat się
-zmieściła, zawsze ląduje na dole skali (patrz punkt 8 w sprawie tego, że
-dół skali nadal jest widoczny na mapie) — niezależnie od tego, gdzie stoi
-próg. Skutek: przesunięcie progu, które nie wprowadza żadnej nowej,
-gorszej opcji, nie zmienia jasności tego, co już jest na mapie; ale jeśli
-wprowadza nową, gorszą opcję, to poprzednio-najgorsze trasy mogą się
-realnie rozjaśnić — dół
-skali przesunął się niżej. To drugie nie jest błędem, to ta sama zasada
-działająca w drugą stronę.
+  kursorem — a podpowiedź podaje jej numer wprost. Żeby wskazać inną,
+  najeżdża się na jej numer w grupce.
 
 ## 10. Mapa mówi, ile to trwa i o której się tam będzie
 
@@ -189,18 +163,18 @@ kontynuacją. Do tego ile to jeszcze zajmie.
 
 **Skąd te godziny.** Z rozkładu tego samego kursu, z którego narysowano ten
 odcinek. Zakaz szacowania dotyczy POJAZDÓW: godziny kursu nie wolno wyliczać
-z prędkości ani z odległości, bo rozkład je zna. Jedyny czas na mapie, który
-nie jest odczytany, to czas przejścia PIESZO (punkt 14) — rozkładu marszu nie
-ma, więc liczy się go z odległości, hojnie i zawsze w tę samą stronę. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
+z prędkości ani z odległości, bo rozkład je zna. Czasy na mapie, które nie
+są odczytane, to wyłącznie te, dla których rozkładu nie ma: przejście PIESZO
+(punkt 14), jazda autem (punkt 15) i przejazd rowerem (punkt 16) — liczone
+z odległości, hojnie i zawsze w tę samą stronę. Między dwoma sąsiednimi przystankami mapa **wolno** interpolować —
 proporcjonalnie do przebytej drogi, nie średnią: bliżej następnego
 przystanku znaczy bliżej jego godziny. Wolno wyłącznie to: interpolacja
 **między dwiema godzinami odczytanymi z rozkładu tego samego kursu**. Nie
 wolno szacować ze średniej prędkości, z odległości w linii prostej ani
 sklejać czasów z dwóch różnych kursów.
 
-**Czego czas nie rusza.** Nie zajmuje żadnego kanału zarezerwowanego dla
-jakości trasy — nie zmienia jasności, grubości ani koloru linii (punkty 1,
-6, 8, 9). Wchodzi wyłącznie jako liczba dopisana obok. Wyłączenie czasu
+**Czego czas nie rusza.** Nie zmienia wyglądu linii — ani grubości, ani
+koloru. Wchodzi wyłącznie jako liczba dopisana obok. Wyłączenie czasu
 zostawia mapę dokładnie taką, jaka była, zanim czas się na niej pojawił.
 
 ## 11. Mapa pokazuje, gdzie się przesiąść — i co się tu z każdą linią dzieje
@@ -226,11 +200,13 @@ i to ma być widać, zanim się przeczyta godzinę:
 Znaki są jedną rodziną, czytaną zawsze tak samo: lewy koniec mówi, skąd ten
 pojazd tu jest, prawy — co z nim dalej.
 
-**Co pokazuje.** Godzinę, linię, kierunek i za ile — wszystko w jednej
-kolejności, po czasie. To nie jest lista samych odjazdów: pojazd, którym się
-tu przyjeżdża, jest częścią odpowiedzi na „gdzie ja jestem", nawet gdy się nim
-dalej nie jedzie — a jego godzina to godzina PRZYJAZDU, nie najbliższego
-odjazdu tej linii.
+**Co pokazuje.** Jeden wiersz na linię i kierunek: numer, kierunek i po kolei
+godziny — nic więcej: bez „za ile", bez „co N min" i bez godziny
+w nagłówku. Rząd godzin mówi o takcie linii to, co trzeba, bez uogólniania.
+Wiersze idą po czasie. To nie jest lista samych
+odjazdów: pojazd, którym się tu przyjeżdża, jest częścią odpowiedzi na „gdzie
+ja jestem", nawet gdy się nim dalej nie jedzie — a jego godzina to godzina
+PRZYJAZDU, nie najbliższego odjazdu tej linii.
 
 **Tylko to, o czym mapa coś wie.** Ani odjazd, którego mapa stąd nie proponuje,
 ani przyjazd, którym mapa tu nie dowozi — wypisane, wyglądają jak część
@@ -243,33 +219,31 @@ nie dojedzie, przestaje być odjazdem — ale jeśli mapa nią tu dowozi, zostaj
 jako przyjazd.
 
 **Powtórzenia to jeden wiersz.** Kolejne kursy tej samej linii nie są kolejnymi
-opcjami, tylko rytmem jednej: najbliższy odjazd i „co X min". Ani wypisywania
-wszystkich, ani gubienia części. Przyjazd nie jest powtórzeniem odjazdu tej
-samej linii — to dwa różne zdarzenia i dwa wiersze.
+opcjami, tylko jedną: jej godziny stoją obok siebie w jednym wierszu, do
+ostatniego kursu, którym jeszcze się dojedzie. Linia, którą mapa tu dowozi
+i wiezie dalej, to też jeden wiersz — ze znakiem „możesz już nim jechać",
+a nie osobny przyjazd i osobny odjazd.
 
 **Godzina, od której liczymy.** Ta z formularza — bo tylko o niej pasażer wie,
 że jest prawdziwa. Godzina „będziesz tu o" jest wyłącznie tym, co mapa
 policzyła z tego, co sama narysowała, i bywa za późna: kto dojdzie tu pieszo,
 dojedzie rowerem albo złapie linię spod progu, stoi tu wcześniej — a tablica
-liczona od tamtej godziny zabierała mu nie kilka wierszy, tylko całą
-odpowiedź. Przy każdym wierszu stoi też „za ile", liczone od tej samej
-godziny.
+liczona od tamtej godziny zabrałaby mu nie kilka wierszy, tylko całą
+odpowiedź.
 
 Odjazdy sprzed chwili, w której mapa stawia tu pasażera, są więc na liście
-celowo. Oddziela je widoczna kreska „tu według mapy jesteś" i zajmują najwyżej
-połowę wierszy, żeby na ruchliwym węźle nie wypchnęły tych, po które się tu
-przyszło. Przy odpowiedzi z kolejnej doby (punkt 13) zostaje godzina mapy:
-pytanie sprzed doby nie mówi już nic o tamtym dniu. Wszystko na osi doby
-rozkładowej, nie zegarowej: przesiadka o 24:40 należy do rozkładu dnia
-poprzedniego.
+celowo — jako szare godziny. Linia, na którą według mapy już się nie zdąży,
+idzie na koniec, żeby na ruchliwym węźle nie wypchnęła tych, po które się tu
+przyszło. Szare godziny da się wyłączyć w ustawieniach (domyślnie są) — wtedy
+tablica zaczyna się od chwili z mapy. Wszystko na osi doby rozkładowej, nie
+zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
 
 **Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
 ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne
 kursy — rozstrzyga jedna, jawna reguła, nie to, który jest bliżej w pikselach.
 
-**Czego kropka nie rusza.** Tak jak czas (punkt 10): nie zajmuje żadnego
-kanału zarezerwowanego dla jakości trasy — nie zmienia jasności, grubości ani
-koloru. Zdjęcie kropek zostawia mapę dokładnie taką, jaka była.
+**Czego kropka nie rusza.** Tak jak czas (punkt 10): nie zmienia wyglądu
+linii. Zdjęcie kropek zostawia mapę dokładnie taką, jaka była.
 
 ## 12. Jeden rodzaj rzeczy: tramwaj, autobus, pociąg
 
@@ -376,19 +350,25 @@ osobówki ani osobówka dostawczaka, bo kto wiezie szafę, nie weźmie Clio, a k
 jedzie sam, nie chce Mastera. Każdy rodzaj dostaje tę samą liczbę z suwaka.
 Który to rodzaj, mówi sam Traficar, a nie zgadywanie po nazwie modelu.
 
-**Auto porównuje się dwiema liczbami: o której się przy nim jest i ile daje
-za nie program „Ogarniam”.** Auto bije inne, jeśli jest co najmniej tak dobre
-w obu naraz i w którymś lepsze. Porównuje się z tą dokładnością, z jaką
-liczby są wypisane — ta sama minuta to remis, a nie wygrana o sekundy.
-Odległość od auta do celu NIE jest kryterium: nagradzałaby auta stojące tuż
-przy celu, a rozstrzygnąć, czy jazda autem się opłaca, mapa nie potrafi —
-czasu jazdy autem nie da się rzetelnie oszacować, bo zależy od korków.
-Czy auto się opłaca, rozstrzyga pasażer.
+**Auto porównuje się trzema liczbami — trzema powodami, dla których się je
+bierze:** o której się przy nim jest (wsiądę od razu), ile daje za nie program
+„Ogarniam” (zarobię) i o której dowiezie do celu (dojadę szybciej). Auto bije
+inne, jeśli jest co najmniej tak dobre we wszystkich trzech naraz i w którejś
+lepsze. Porównuje się z tą dokładnością, z jaką liczby są wypisane — ta sama
+minuta to remis, a nie wygrana o sekundy. Dlatego widać też auto, do którego
+jest się później i które nic nie daje, jeśli dowiezie szybciej: tramwaj od
+razu na Księże Małe, tam auto do Radwanic.
+
+**Sama odległość od auta do celu NIE jest kryterium** — nagradzałaby auta
+stojące tuż przy celu. Przyjazd tej wady nie ma: do auta przy celu dociera się
+wtedy, kiedy i tak prawie jest się na miejscu, a ruszenie i parkowanie zjadają
+resztę, więc takie auto niczego nie wygrywa.
 
 **Zawsze widać każde auto, którego nie bije żadne inne** (zbiór Pareto). Każde z nich jest najlepsze w czymś, a wybór
 między nimi zostaje przy pasażerze — mapa nie waży minut przeciw złotówkom.
 Auto z „Ogarniam” nie ma osobnej reguły: widać je dokładnie wtedy, gdy nie ma
-auta, przy którym jest się nie później i które daje co najmniej tyle samo.
+auta, przy którym jest się nie później, które daje co najmniej tyle samo
+i dowozi nie później.
 
 **Więcej aut to luźniejsza reguła, nie wybrane auta** (k-skyband, którego
 zbiór Pareto jest pierwszym poziomem). Suwak mówi, ile aut mapa ma pokazać.
@@ -405,11 +385,24 @@ gęstość linii.
 **Auto mówi to samo, co przystanek: o której się przy nim jest.** Godzina
 z rozkładu plus marsz, razem z tym, skąd ten marsz prowadzi.
 
-**O jeździe autem mapa nie mówi NIC.** Auto nie ma rozkładu, a routingu
-samochodowego tu nie ma — więc nie ma czasu jazdy, przebiegu ani godziny
-dotarcia do celu. Zostaje odległość celu w linii prostej i decyzja pasażera.
-Auto nie jest kursem: nie ma linii, nie ma jasności, nie wchodzi do wachlarza
-i niczego w nim nie przestawia.
+**O jeździe autem mapa wie jedno: o której mniej więcej dowiezie do celu.**
+Auto nie ma rozkładu, a routingu samochodowego tu nie ma, więc czasu jazdy nie
+ma skąd odczytać — wolno go policzyć, tak jak marsz i rower (punkty 10, 14,
+16). Jedna prędkość w linii prostej do celu, zaokrąglana w górę, plus stały
+narzut na ruszenie i parkowanie; obie liczby pasażer ustawia sobie sam.
+Rozbicia na prędkość i krętość nie ma, bo mapa nie zna przebiegu trasy.
+Przebiegu, długości trasy ani korków mapa nie udaje.
+
+**Szacunek decyduje zawsze, widać go na życzenie.** Wybór aut idzie po nim
+zawsze. W dymku domyślnie stoi odległość celu w linii prostej; szacowaną
+godzinę dopisuje dopiero przełącznik, osobny od rowerowego, i podpisuje ją
+jako przybliżoną. Szacunek bywa bardzo zły — i to jest w porządku: pasażer
+widzi odległość, wie, ile u niego trwa jazda, i taką opcję zignoruje. Lepiej
+pokazać auto, które może się opłacić, niż schować je, bo nie da się tego
+policzyć dokładnie.
+
+**Auto nie jest kursem:** nie ma linii, nie wchodzi do
+wachlarza i niczego w nim nie przestawia.
 
 **Tylko dzisiaj.** Auta stoją tam, gdzie stoją w tej chwili. Przy pytaniu
 o inny dzień nie pokazujemy ich wcale — godzina „będziesz przy nim” byłaby
@@ -418,8 +411,7 @@ wyszukiwania: milczące źródło zabiera znaczniki, nie odpowiedź.
 
 ## 16. Rower miejski to przejście o innym tempie
 
-**Rower nie jest kursem.** Nie ma rozkładu, nie ma numeru, nie ma jasności
-i nie wchodzi do wachlarza. Jest tym, czym pieszo (punkt 14), tylko szybszym:
+**Rower nie jest kursem.** Nie ma rozkładu, nie ma numeru i nie wchodzi do wachlarza. Jest tym, czym pieszo (punkt 14), tylko szybszym:
 sposobem przemieszczenia się między dwoma miejscami, którego rozkład nie zna.
 Zdjęcie roweru zostawia mapę dokładnie taką, jaka była.
 
@@ -443,8 +435,7 @@ kawałek się kończy: tam się wysiada.
 **Rodzaj roweru to osobny wybór.** Elektryczny i zwykły mają własne przyciski
 w pasku warstw, obok siebie — kto chce elektryka, nie weźmie
 zwykłego, i odwrotnie. Miejsce jest kandydatem, gdy stoi w nim choć jeden
-rower włączonego rodzaju; zgaszenie obu znaczy to samo, co dawniej zgaszony
-jeden przycisk „Rowery”.
+rower włączonego rodzaju; zgaszenie obu gasi rowery w całości.
 To odsiew MIEJSC, a nie zmiana wyceny przejazdu: rower ma jedną prędkość
 niezależnie od rodzaju, więc odhaczenie jednego nie przesuwa na mapie żadnej
 godziny. Dotyczy wsiadania — stacja, na której przejazd się kończy, żadnego
@@ -525,8 +516,8 @@ nie ma.
 nimi, a kresek byłyby setki. Kreski pojawiają się pod kursorem, przy kropce,
 o którą się pyta — tylko przejazdów, które stacja pokazuje, a nie do każdej
 stacji, do której z tej kropki dałoby się dojechać. Obok drugiego końca stoi odległość w linii prostej — nie
-godzina: godzina byłaby jedyną liczbą na tej mapie policzoną, a wyglądającą
-na odczytaną.
+godzina: godzina jest policzona, a wyglądałaby na odczytaną. Dopisuje ją
+dopiero przełącznik, osobny od aut (punkt 15).
 
 **Tylko dzisiejszy stan.** Ile rowerów stoi w stojaku, wiadomo z tej chwili
 i tylko z tej chwili. Przy pytaniu o inny dzień kropki zostają — stacja stoi

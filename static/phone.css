@@ -249,6 +249,21 @@ body.dev-open #flow-panel {
     overscroll-behavior: contain;
 }
 
+/* Tablica „godziny w wierszu linii" w doku: pełna szerokość jak reszta doku
+   (na dużym ekranie okienko rośnie do treści, tu nie ma dokąd), a godziny
+   zawijają się pod siebie zamiast wypychać wiersz poza ekran. */
+#flow-panel:has(.tt-lines) { width: 100%; }
+#flow-panel .tt-rows.tt-lines {
+    grid-template-columns: minmax(34px, max-content) minmax(0, 9em) 1fr auto;
+}
+#flow-panel .tt-rows.tt-lines.has-flow {
+    grid-template-columns: 15px minmax(34px, max-content) minmax(0, 9em) 1fr auto;
+}
+#flow-panel .tt-times {
+    flex-wrap: wrap;
+    white-space: normal;
+}
+
 /* Tablica przystanku stoi w doku - ten sam rozkład w dymku nad kropką
    zasłaniałby mapę drugi raz tuż obok. Dymek zostaje tam, gdzie okienka
    akurat nie ma (np. wyłączone w ⚙). */

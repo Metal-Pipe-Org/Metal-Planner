@@ -2252,3 +2252,284 @@ grupowanie aut spod jednego miejsca i dostawczaki, wyjęte z „Co pokazuje
 mapa” (suwak liczby aut tam zostaje). „Eksperymenty” — na razie tylko
 mapa od ostatniej chwili. Pasek „ile do celu zostało” w dymku usunięty
 całkiem, razem z przełącznikiem.
+
+## Mapa z wartości podróży i przyjazd autem (#150, 2026-09-26)
+
+Zgłoszenie #150 zaczęło się od pomysłu „rysować tylko wyjazdy, które prowadzą
+do czegoś własnego". Przykład użytkownika: Pl. Zgody → Klecina 19:33, tramwaj 14
+na Borku. Rusza o 20:09 z przystanku, przez który ta sama siedemnastka
+przejeżdża o 20:12, dowozi dwa przystanki dalej na 20:13 i tam czeka się trzy
+minuty na tę siedemnastkę (20:16). Ten sam wyjazd, ten sam przyjazd (20:23),
+o jedną przesiadkę więcej. Zwykła mapa go rysuje, bo mierzy tylko przyjazd.
+
+### Czego NIE zrobiliśmy (trzy odrzucone podejścia)
+
+1. **Poziomy jak przy autach** (k-skyband: „pobite najwyżej przez jedną,
+   dwie…"). Wpuszcza w końcu wszystko, także czternastkę — ona niczego nie
+   wygrywa, więc nie ma jej być przy żadnej gęstości.
+2. **Reguła „nie przesiadaj się w pojazd, który złapałbyś i bez tego"**.
+   Poprawna, ale to if dołożony na if. Użytkownik: tak jak AI do gier nie
+   pisze się serią ifów, tylko oceną użyteczności — trzeba wyciągnąć
+   prawdziwe powody, dla których człowiek coś wybiera.
+3. **Ryzyko jako „o której w celu, gdy jedna rzecz pójdzie nie tak"**.
+   Odrzucone jako symulowanie scenariuszy. Ryzyko ma być wyliczalną miarą:
+   mniej przesiadek i mniej chodzenia.
+
+### Na czym stanęło
+
+Cztery równe wartości, bez wag: o której w celu, o której trzeba wyjść
+(„posiedzieć pięć minut dłużej, gdy wychodzi na to samo"), ile przesiadek, ile
+chodzenia (metry w linii prostej, porównywane co 100 m). Na mapie jest to, co
+w czymś najlepsze. Gęstość i „pokaż więcej" poszerzają tylko przyjazd
+i wyjście — wybaczają minuty, nigdy przesiadki ani chodzenia. Stąd każda
+podróż ma „próg wejścia" w minutach: nieskończony, gdy coś, co nie jest gorsze
+w niczym, bije ją przesiadką albo chodzeniem, a inaczej większy z dwóch:
+o ile później jest w celu niż najszybsza, i o ile wcześniej trzeba wyjść niż
+na podróż, która poza tym niczym jej nie ustępuje. Czternastka ma próg
+nieskończony — nie ma czego wybaczać.
+
+Odłożone: cena biletu (jej nie znamy, a najkrótsza podróż i tak jest dobra
+w przyjeździe i wyjściu naraz), tramwaj pewniejszy od autobusu — może później.
+Bliźniaki (ta sama podróż, inną linią, o tych samych wartościach) rysują się
+razem: to „wsiądź w to, co przyjedzie pierwsze", a nie zbędna linia.
+
+Jasność w próbie usunięta — na mapie ze zrzutu i tak była zero-jedynkowa
+(najszybsza trasa 1, pozostałe 29 kawałków 0). Wraca, jeśli okaże się
+potrzebna.
+
+Realizacja: jedno wyszukanie wielokryterialne po połączeniach (etykiety jak
+w McRAPTOR), które odrzuca etykietę tylko wtedy, gdy przegrała na zawsze —
+wcześniejszy przyjazd czy późniejsze wyjście niczego po drodze nie odcinają,
+bo tolerancja może je potem wybaczyć. Najpierw szuka do 20 min za najszybszym
+przyjazdem, do godziny dopiero, gdy mapa tyle potrzebuje. Wybrane podróże
+rysuje ta sama maszyneria co zwykłą mapę (kawałki, węzły, auta, rowery).
+
+### Pomiar (26.09, rozkład z tego dnia, bez aut i rowerów)
+
+Kawałki i czas liczenia; S = zwykła mapa, V = próba, cyfra = „pokaż więcej".
+
+| relacja | S0 | S1 | S3 | V0 | V1 | V3 |
+|---|---|---|---|---|---|---|
+| Rynek → Sosnowiecka 21:55 | 14, 1,4 s | 144, 0,7 s | 791, 5,1 s | 6, 1,5 s | 11, 1,5 s | 26, 1,5 s |
+| Rynek → Sosnowiecka 8:10 | 24, 0,1 s | 259, 0,6 s | 871, 5,1 s | 5, 0,1 s | 8, 1,5 s | 16, 1,4 s |
+| Leśnica → Bartoszowice 16:44 | 9, 0,2 s | 51, 0,3 s | 224, 1,0 s | 3, 0,1 s | 17, 3,0 s | 49, 3,1 s |
+| Pl. Grunwaldzki → Wojszyce 13:00 | 48, 0,1 s | 214, 0,5 s | 414, 3,4 s | 8, 0,1 s | 26, 0,1 s | 31, 2,6 s |
+| Sosnowiecka → Wojszyce 15:37 | 6, 0,1 s | 27, 0,6 s | 164, 1,6 s | 2, 0,0 s | 4, 0,4 s | 29, 0,4 s |
+| Dworzec Główny → Kozanów 17:30 | 8, 0,1 s | 22, 0,2 s | 205, 1,3 s | 5, 0,1 s | 11, 0,1 s | 40, 1,6 s |
+| Pl. Zgody → Klecina 19:33 | 2, 0,2 s | 32, 0,5 s | 203, 1,1 s | 4, 0,1 s | 14, 0,1 s | 28, 1,3 s |
+
+Na wszystkich siedmiu oraz na Wrocław Główny → Warszawa Centralna i Kozanów →
+Pl. Grunwaldzki 23:40 najszybsza trasa jest w próbie na mapie od razu (próg 0),
+bez trybu awaryjnego. Pl. Zgody → Klecina, jedno „więcej": 5 → 7 (w celu
+20:15) od razu, 5 → 17 (20:23) od 8 min, warianty z wyjściem 19:49–19:54
+(20:26) od 11 min — każdy najlepszy w czymś (wyjście, przesiadki albo
+chodzenie). Czternastki nie ma.
+
+### Auto: szacowany przyjazd (nie próba)
+
+Decyzja użytkownika: „ile przejechać autem" to zła miara, dobra to „ile auto
+oszczędza" — nawet przy szacunku, który bywa tragicznie zły, bo pasażer to
+widzi i ignoruje, a lepiej pokazać taką opcję niż jej nie pokazać. Przypadek:
+tramwaj od razu na Księże Małe, tam Traficar do Radwanic — auto nie jest
+najwcześniej osiągalne i nie ma „Ogarniam", więc dotąd znikało.
+
+Auto ma teraz trzy wartości: o której jestem przy nim, ile daje „Ogarniam",
+o której dowiezie do celu (szacunek). Model jak przy rowerze: jedna prędkość
+w linii prostej plus stały narzut. Liczby zaproponowane samodzielnie, na
+prośbę użytkownika: 22 km/h (pomiar OSRM z traficar.py to 36 km/h po drodze
+przy krętości 1,30, czyli 27,7 w linii prostej, ale bez korków — o jedną piątą
+mniej) i 8 min narzutu (3 na ruszenie — dojście liczy się osobno — i 5 na
+koniec: szukanie miejsca, zakończenie najmu, dojście spod auta pod drzwi).
+Oba pod zębatką. Auto tuż przy celu, do którego dociera się wtedy, kiedy
+i tak prawie jest się na miejscu, po narzucie niczego nie wygrywa — ta sama
+obawa, dla której kontrakt odrzucał odległość do celu, znika bez osobnej
+reguły. Godzinę pokazuje osobna opcja w sekcji Traficarów (osobno od
+rowerowej — decyzja użytkownika).
+
+Otwarte:
+
+1. Kontrakt przepisany na polecenie użytkownika (28.09): punkt 15 — trzy
+   liczby auta, szacowany przyjazd (liczony zawsze, pokazywany na życzenie),
+   odległość do celu dalej nie jest kryterium, ale z nowym uzasadnieniem;
+   punkt 10 — policzone czasy to marsz, auto i rower; punkt 16 — godzinę
+   roweru dopisuje osobny przełącznik.
+2. Auta i rowery w próbie dalej biorą zasięg z tego, co mapa RYSUJE. Mapa
+   z wartości jest rzadsza, więc dojazd do auta po drodze (autobus o jeden
+   przystanek do Traficara) nie ma tu większych szans niż w zwykłej mapie.
+   Omówiona kolejność: najpierw mapa komunikacji, potem auta i rowery
+   z dojazdem po całej sieci — do decyzji.
+
+### Przesiadki i chodzenie: trzy warianty do porównania (28.09)
+
+Uwaga użytkownika po teście na Księże Małe → Pl. Grunwaldzki 14:02, trzy
+„więcej": wszystkie narysowane trasy mają jedną przesiadkę. Przy „zawsze"
+trasa z dwiema przesiadkami 5 minut później nie wejdzie nigdy, a trasa
+z jedną przesiadką 27 minut później (tramwaj 3 przez Świdnicką, dalej 12 albo
+19) wchodzi — to się użytkownikowi nie podoba. Pomysł: używać przesiadek
+i chodzenia tylko do porównania tras „identycznych", o tych samych minutach.
+
+Pod zębatką suwak z trzema pozycjami, żeby zobaczyć różnicę: „zawsze"
+(dotychczasowa reguła, domyślnie), „tylko przy tych samych godzinach"
+i „wcale". Przy „wcale" czternastka ze scenariusza Borku wraca (te same
+minuty co czekanie na siedemnastkę, więc bliźniak), przy „tylko przy tych
+samych godzinach" dalej odpada.
+
+W „tylko przy tych samych godzinach" i „wcale" przesiadki nie odcinają
+krążenia w czasie czekania, więc szukanie rośnie lawinowo z szerokością:
+Rynek → Sosnowiecka 21:55 — 40 min za najszybszym przyjazdem to 3,7 s,
+godzina to 19 minut. W tych dwóch wariantach szukanie sięga więc najwyżej
+40 minut. Po tym pomiar: Rynek i Leśnica, zero i trzy „więcej", 1–6 s.
+
+### Piąta wartość: numery linii (28.09)
+
+Zgłoszenie z mapy Księże Małe → Pl. Grunwaldzki 15:56, trzy „więcej":
+ogonek 10 i 13 na zachód od Dzielnicy Czterech Wyznań. To bliźniak —
+trójką za przystanek przesiadki i z powrotem tym samym kursem, te same
+cztery wartości, więc rysował się razem z przesiadką od razu. Po drodze
+wyszło szersze: 136 podróży na mapie, większość to ta sama trasa na ten
+sam tramwaj z wcześniejszym wyjściem (trójka o 15:57, 16:03, 16:09…
+wszystkie na szesnastkę dowożącą o 16:47), wpuszczana przez tolerancję.
+
+Reguła użytkownika: numery linii to piąta wartość. Z tymi samymi numerami
+pokazuje się tylko najlepszy wariant — podróż bita przez podróż tymi samymi
+numerami (nie gorszą w żadnej z czterech wartości) nie wchodzi nigdy,
+a z bliźniaków tymi samymi numerami zostaje najkrótszy przejazd (metry
+jazdy między przystankami). Innymi numerami wolno wejść trasie dłuższej,
+a nie szybszej. Bliźniaki z różnymi numerami (1 i 2 na tę samą przesiadkę)
+dalej rysują się razem.
+
+Pomiar na tej relacji: trzy „więcej" 136 → 43 podróży, 2,9 s; zero „więcej"
+2,4 s. Ogonek znika. Nie sprawdzone: czy 124 przez Tarnogaj też się
+skróciła — tam bliźniaki 124 + 16 (przesiadka na pętli albo przystanek
+dalej) mają te same numery, więc powinien zostać krótszy.
+
+Otwarte (użytkownik): może przy tej regule przesiadki i chodzenie przestaną
+być potrzebne jako wartości — do porównania suwakiem „Przesiadki i
+chodzenie". Wolne liczenie wariantów bez przesiadek nie ruszane.
+
+#### Rozszerzenie: numery zawarte w numerach (28.09, tego samego dnia)
+
+„Tylko przy tych samych godzinach" było najbliżej chcianego efektu, ale
+przycinało też dwie zupełnie różne trasy o tych samych minutach (tą
+z przesiadką więcej). Chciany efekt to czternastki z Borku: ta sama trasa
+z dołożonym pojazdem. Reguła numerów rozszerzona: wariant znika, gdy inna
+podróż jedzie częścią jego numerów (albo wszystkimi), nie jest gorsza
+w minutach i w tym, co się liczy (suwak), a przy tych samych numerach jest
+w czymś lepsza. Przy „nie liczą się" czternastka więc nie wraca, a dwie
+różne trasy o tej samej minucie zostają obie. Podgląd pokazuje numerki
+podróży, ukryte warianty (przez co) i ile podróży numerki ukryły.
+
+Pułapka: warianty po numerach mnożą się przez scalone bliźniaki — Rynek
+21:55 przy „nie liczą się" liczył się ponad 2 minuty. Odcina się więc już
+na przystanku wariant, który tylko dokłada numer do innego z tej samej
+etykiety (te same minuty i przesiadki, ta sama dalsza droga — i tak
+przegra w celu). Pomiar po tym (0 / 3 „więcej"):
+
+| relacja | zawsze | te same godziny | nie liczą się |
+|---|---|---|---|
+| Księże Małe → Pl. Grunwaldzki 15:56 | 2,0 / 3,2 s | 0,1 / 0,2 s | 0,2 / 0,2 s |
+| Rynek → Sosnowiecka 21:55 | 1,6 / 1,7 s | 4,1 / 4,3 s | 8,7 / 9,3 s |
+| Leśnica → Pl. Grunwaldzki 16:40 | 0,3 / 8,6 s | 0,7 / 0,8 s | 1,2 / 1,6 s |
+
+#### Chodzenie wypada z wartości, nowy podgląd (28.09)
+
+Decyzja użytkownika: z „przesiadek i chodzenia" zostają same przesiadki —
+chodzenie liczy się tylko w minutach (dłuższy marsz to późniejszy przyjazd
+albo wcześniejsze wyjście), wartością nie jest. Suwak nazywa się teraz
+„Przesiadki". Klucz podróży: (minuta w celu, minuta wyjścia, pojazdy).
+Czasy bez zmian (0,1–9,9 s na tych samych relacjach); pierwsza mapa
+Księże Małe przy „zawsze" ma 14 podróży zamiast 10 — wróciły te, które
+przegrywały tylko o 100 m marszu.
+
+Podgląd „Dlaczego kawałek jest na mapie" przemyślany od nowa (stary był
+nieczytelny): nagłówek z tolerancją mapy i najszybszym przyjazdem, potem
+do trzech podróży tędy — numerki, godziny i słowami, od ilu minut są na
+mapie i czemu (spóźnienie w celu; wcześniejsze wyjście niż NAZWANA podróż,
+która w celu nie jest później) — i do trzech wariantów ukrytych przez
+numerki, z własnymi godzinami i tym, przez co („te same numerki co…" albo
+„to 3 → 4 z dołożonym 5…").
+
+#### Tolerancja jako suma (28.09)
+
+Decyzja użytkownika: tolerancja podróży to SUMA spóźnienia w celu
+i wcześniejszego wyjścia (o tyle dłużej trwa podróż), a nie większa z nich.
+Przy tolerancji 16 min wchodzą podróże najwyżej 16 min dłuższe. Skutek
+uboczny: przy większych tolerancjach mapa częściej sięga po szersze
+szukanie — Leśnica → Pl. Grunwaldzki 16:40, „nie liczą się", trzy „więcej":
+1,8 s → 52 s. Z tego ~30 s to warianty numerków dla podróży, które i tak
+nie zmieszczą się w oknie; liczone teraz tylko w oknie (to, co ukrywa, nie
+jest gorsze w minutach, więc też się mieści) → 19,6 s, z czego 16 s to samo
+szukanie przy „nie liczą się" (nie ruszane, na prośbę użytkownika).
+
+#### Przesiadki na stałe „nie liczą się", próba domyślnie włączona, szybkość (28.09)
+
+Decyzja użytkownika: suwak „Przesiadki" usunięty, przesiadki niczego nie
+rozstrzygają — zbędną przesiadkę wycina reguła numerów. Warianty „zawsze"
+i „tylko przy tych samych godzinach" usunięte też z liczenia (nie tylko
+z panelu). „Mapa z wartości podróży" domyślnie włączona.
+
+Szybkość (te same mapy co do odcinka, przed → po, zero / trzy „więcej"):
+Leśnica → Pl. Grunwaldzki 16:40 0,7 / 14,8 s → 0,3 / 5,8 s; Pl. Zgody →
+Klecina 19:30 1,3 / 10,9 s → 0,2 / 3,0 s; Rynek → Sosnowiecka 21:55
+4,2 / 4,5 s → 0,4 / 3,5 s. Co dało:
+1. tolerancja bez porównywania każdej podróży z każdą — najpóźniejsze
+   wyjście wśród przyjazdów nie późniejszych, jedno przejście;
+2. okno szukania rośnie po 5 minut (20, 25, … 40) zamiast skoku 20 → 40 —
+   koszt rośnie z szerokością lawinowo, a trzecie „więcej" zwykle
+   potrzebuje ~25–32 min; czy jest jeszcze co dołożyć, mówi tylko to, co już
+   przeszukano (inaczej każda mapa płaciłaby za 40 min);
+3. na przystanku bliźniaki po słowniku i skraje wyjść, z których widać, że
+   nikt nikogo nie odetnie — bez przechodzenia całego worka (190 mln
+   porównań → 11 mln); w pojeździe worek to słownik wyjście → etykieta.
+Odrzucone: dolna granica spóźnienia z profilu rozkładu jako dodatkowe
+cięcie — odcinała niewiele, a samo liczenie kosztowało 13 s na Leśnicy.
+
+Tablica odjazdów: bez kreski „tu według mapy jesteś"; takt linii („co N
+min") liczy serwer z całego rozkładu linii na przystanku, więc jest też
+przy linii, która w pobranej liście wypada raz. „Pokaż więcej" pokazuje
+to samo kółko ładowania co „Szukaj".
+
+#### Tablica: godziny w wierszu linii; stare wersje za przełącznikami (28.09)
+
+Decyzja użytkownika: „co N min" myli (takt z trzech kursów pod rząd daje
+„co 2 min", nocą „co 317 min"). Nowa tablica domyślna: wiersz na linię
+i kierunek, w nim godziny odjazdów po kolei — do ostatniego kursu, którym
+jeszcze się dojedzie (to samo sito co dotąd) — bez „za ile", taktu i godziny
+w nagłówku. Godziny sprzed chwili z mapy szare; linia z samymi szarymi
+godzinami idzie na koniec. Ustawienie „Tablica zaczyna się" usunięte —
+zamiast niego przełącznik „Szare godziny w tablicy" (domyślnie włączony;
+wyłączony: tablica od chwili z mapy).
+Najwyżej 6 godzin w wierszu, suwak „Ile odjazdów" liczy teraz linie.
+
+Obie nowe rzeczy są domyślne, a Eksperymenty mają przełączniki POWROTU,
+domyślnie wyłączone: „Stara mapa (z progiem jasności)" i „Stara tablica
+odjazdów". „Pokaż więcej" to zwykły licznik — 3 kliknięcia.
+
+#### Kontrakt przepisany na polecenie (28.09, wieczorem)
+
+Pod PR: punkt 1 (bez jasności; stara mapa tylko jako przełącznik powrotu),
+punkt 2 (tolerancja = o ile dłużej trwa podróż; przesiadki i chodzenie tylko
+w minutach; reguła numerów jako jedyne, czego nie ma przy żadnym progu;
+„Pokaż więcej" — licznik trzech kliknięć), punkt 4 (każdy kawałek to część
+całej podróży; ogonki wycina reguła numerów; bez kotwiczenia i uwagi
+o suwaku okna ze starej mapy), punkt 7 (bez „domyślnie najjaśniejsza"),
+punkt 11 (nowa tablica: wiersz na linię z godzinami, szare godziny).
+
+Na drugie polecenie tego samego wieczoru: kontrakt nie jest dziennikiem —
+wszystko o jasności wycięte, punkty 3 (jasność w każdym punkcie kursu),
+8 (minimalna jasność) i 9 (pełny zakres jasności) usunięte, numeracja
+zostaje z dziurami jak przy punkcie 5. Z kontraktu zeszły też wzmianki
+o przełącznikach powrotu („Stara mapa", „Stara tablica odjazdów") i zdania
+w rodzaju „dawniej…" — to wszystko jest tutaj. Stara mapa z jasnością dalej
+działa za przełącznikiem w Eksperymentach; jej gwarancje (dawne 3, 8, 9)
+i ich testy zostają w kodzie bez zmian.
+
+#### Tablica przy odpowiedzi z kolejnej doby — bez wyjątku (28.09)
+
+Decyzja użytkownika: odpowiedź z kolejnej doby nie jest traktowana inaczej.
+Tablica przy kropce liczy od początku mapy jak zawsze (a mapa kolejnej doby
+zaczyna się o północy tamtego dnia), godziny sprzed chwili z mapy są szare.
+Wyjątek „zostaje godzina mapy" usunięty z kontraktu (punkt 11) i z kodu.
+Przy okazji: tablica pytała o odjazdy z daty formularza, choć godziny kropek
+są na osi dnia odpowiedzi — przy trasie jutrzejszej pokazywała inny dzień.
+Teraz pyta o dzień, którego dotyczy mapa.

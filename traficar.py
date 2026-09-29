@@ -28,11 +28,11 @@ Czasu jazdy autem NIE MA SKĄD odczytać: auto nie ma rozkładu, a routingu
 samochodowego w projekcie nie ma. Jest więc szacowany z odległości w linii
 prostej (patrz DRIVE_*) i wszędzie podpisany jako "ok.".
 
-Mapa przepływów tego szacunku NIE UŻYWA WCALE (patrz map_cars): pokazuje
-auto jako miejsce, do którego da się dojść, z godziną dotarcia z rozkładu
-i z samą odległością celu w linii prostej - a ile trwa jazda, zostawia
-pasażerowi. Rysowane kursy dalej pochodzą wyłącznie z rozkładu (punkt 10
-kontraktu); auto nie jest kursem i nie ma na mapie linii.
+Mapa przepływów ma szacunek WŁASNY i prostszy (patrz MAP_DRIVE_MPS
+i map_cars): jedna prędkość w linii prostej plus stały narzut, tak samo jak
+rower - i używa go do WYBORU aut, a godzinę pokazuje tylko na życzenie, pod
+zębatką (zgłoszenie #150). Rysowane kursy dalej pochodzą wyłącznie
+z rozkładu (punkt 10 kontraktu); auto nie jest kursem i nie ma na mapie linii.
 """
 
 import json
@@ -78,6 +78,26 @@ START_SEC = 300
 DRIVE_SPEED_MPS = 9.4
 DRIVE_DETOUR = 1.30
 DRIVE_MIN_SEC = 120
+
+# Jazda autem NA MAPIE (zgłoszenie #150) - jedna prędkość w linii prostej,
+# z tego samego powodu co przy rowerze (bikes.MAP_RIDE_MPS): znamy tylko
+# odległość w linii prostej, więc para "prędkość x krętość" udawałaby wiedzę,
+# której nie ma. Punkt wyjścia to pomiar wyżej: 36 km/h po drodze przez 1,30
+# krętości daje 27,7 km/h w linii prostej - ale to jazda swobodna, bez korków
+# i świateł. Bierzemy 22 km/h, o jedną piątą mniej: w godzinach szczytu
+# miasto jedzie wolniej niż profil OSRM, a szacunek ma decydować, które auto
+# DOWIEZIE szybciej, więc lepiej, żeby auto przegrało o minutę, niż
+# obiecało wygraną, której nie da. Suwak pod zębatką to zmienia.
+MAP_DRIVE_MPS = 22 * 1000 / 3600
+
+# Stały narzut jazdy autem na mapie, niezależny od jej długości - razem, bo
+# pokazujemy jeden czas, a nie rachunek. Ruszenie: 3 minuty (otwarcie
+# aplikacją, obejście auta, ustawienie fotela i lusterek, wyjazd z miejsca;
+# dojście do auta liczy się osobno, a zarezerwować da się po drodze). Koniec:
+# 5 minut (szukanie miejsca przy celu, zaparkowanie, zakończenie najmu
+# w aplikacji i dojście spod auta pod drzwi - miejsce rzadko jest pod samym
+# celem). Razem 8 minut; suwak pod zębatką to zmienia.
+MAP_OVERHEAD_SEC = 8 * 60
 # Zapas zasięgu ponad sam przejazd. Feed podaje zasięg w km i bywa on niski
 # (auto z 9% paliwa ma ich czterdzieści) - a nasz dystans jest SZACOWANY
 # (linia prosta razy krętość), więc auto, które dojeżdża "na styk", nie jest
@@ -227,7 +247,8 @@ def _in_box(lat, lon, clat, clon, metres):
     return abs(lat - clat) <= dlat and abs(lon - clon) <= dlon
 
 
-def map_cars(day, reach, dest):
+def map_cars(day, reach, dest, drive_mps=MAP_DRIVE_MPS,
+             overhead_sec=MAP_OVERHEAD_SEC):
     """Auta w zasięgu narysowanej mapy: [{lat, lon, plate, ..., at, from}, ...].
 
     `reach` to {słupek: sekunda, o której mapa tu dowozi} - dokładnie to, co
@@ -240,10 +261,13 @@ def map_cars(day, reach, dest):
     (dojazd + marsz), razem z tym, skąd i jak długo się idzie. To wszystko,
     co o aucie wiadomo z rozkładu.
 
-    Dalej nie obiecujemy nic: `to_dest_m` to odległość auta od celu W LINII
-    PROSTEJ i nic więcej - czasu jazdy autem nie ma skąd wziąć (auto nie ma
-    rozkładu, routingu samochodowego w projekcie nie ma), więc mapa go nie
-    zgaduje.
+    `to_dest_m` to odległość auta od celu W LINII PROSTEJ. `arrival` to
+    SZACOWANY przyjazd do celu: przy aucie o `at`, stały narzut na ruszenie
+    i parkowanie, jazda tą odległością z prędkością `drive_mps` (zgłoszenie
+    #150; oba założenia pytający ustawia pod zębatką). Czasu jazdy autem nie
+    ma skąd odczytać - auto nie ma rozkładu, routingu samochodowego tu nie
+    ma - więc to jedyna liczba o aucie, która jest policzona, a nie
+    odczytana: decyduje o wyborze aut, a mapa pokazuje ją tylko na życzenie.
     """
     if not enabled() or not reach:
         return []
@@ -271,6 +295,9 @@ def map_cars(day, reach, dest):
         if best is None:
             continue
         at, walk_sec, walk_m, stop = best
+        to_dest_m = round(gtfs._haversine_m(car["lat"], car["lon"],
+                                            dest_lat, dest_lon))
+        drive_sec = _full_minutes(to_dest_m / drive_mps)
         out.append({
             **car,
             "at": at,
@@ -280,25 +307,30 @@ def map_cars(day, reach, dest):
             "from_place": day.place_of.get(stop, stop),
             "walk_sec": walk_sec,
             "walk_m": walk_m,
-            "to_dest_m": round(gtfs._haversine_m(car["lat"], car["lon"],
-                                                 dest_lat, dest_lon)),
+            "to_dest_m": to_dest_m,
+            "drive_sec": overhead_sec + drive_sec,
+            "arrival": at + overhead_sec + drive_sec,
         })
     out.sort(key=lambda car: (car["at"], car["to_dest_m"]))
     return out
 
 
 def _shown_as(car):
-    """Dwie liczby, którymi auto się porównuje, z dokładnością, z jaką mapa
+    """Trzy liczby, którymi auto się porównuje, z dokładnością, z jaką mapa
     je wypisuje (app.js: fmtClock, ogarniamText) - zwrócone tak, że mniej
     znaczy lepiej. Ta sama wypisana minuta to remis, nie wygrana o sekundy:
     pasażer nie ma jak zobaczyć różnicy, której mapa nie pokazuje.
 
-    Odległości do celu tu nie ma, choć mapa ją wypisuje: nagradzała auta
-    stojące tuż przy celu, a czy jazda autem się opłaca, rozstrzygnąć się nie
-    da - czasu jazdy nie ma skąd wziąć, bo zależy od korków (punkt 15)."""
+    Trzy wartości pasażera: wsiądę od razu (o której przy aucie), zarobię
+    („Ogarniam") i dojadę szybciej (szacowany przyjazd, zgłoszenie #150).
+    Sama odległość do celu nie jest kryterium - nagradzałaby auta tuż przy
+    celu. Przyjazd nie ma tej wady: auto, do którego dociera się wtedy, kiedy
+    i tak prawie jest się na miejscu, po doliczeniu ruszenia i parkowania
+    niczego nie wygrywa."""
     return (
         (car["at"] + 30) // 60,
         -sum(task["ile"] for task in car["ogarniam"]),
+        (car["arrival"] + 30) // 60,
     )
 
 
@@ -306,8 +338,9 @@ def _beats(one, other):
     return one != other and all(o <= m for o, m in zip(one, other))
 
 
-# Nazwy dwóch liczb z _shown_as - do podglądu "dlaczego to auto" (Debug).
-WHY_CRITERIA = ("najwcześniej przy aucie", "najwięcej z Ogarniam")
+# Nazwy trzech liczb z _shown_as - do podglądu "dlaczego to auto" (Debug).
+WHY_CRITERIA = ("najwcześniej przy aucie", "najwięcej z Ogarniam",
+                "najwcześniej w celu (szacunek)")
 
 
 def _why(car, shown, pool, group_size):
@@ -340,7 +373,7 @@ def map_skyband(cars, limit, groups=False, min_level=0):
     polujący na konkretny model straciłby przez nie auto, którego szuka.
 
     Między autami (zwycięzcami grup): auto A bije auto B, gdy jest co najmniej tak dobre
-    w obu liczbach naraz (_shown_as) i w którejś lepsze. Poziom k to auta
+    we wszystkich liczbach naraz (_shown_as) i w którejś lepsze. Poziom k to auta
     pobite przez najwyżej k-1 innych; pierwszy poziom - te, których nie bije
     nic - jest zawsze na mapie, choćby było ich więcej niż `limit`. Kolejne
     poziomy dokłada się, aż uzbiera się `limit`, i każdy wchodzi W CAŁOŚCI:

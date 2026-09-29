@@ -809,13 +809,17 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   nie trafia na listę — nie ma tam przesiadki.
   `cars` to wolne auta car-sharingu w zasięgu TEJ mapy (patrz
   `traficar.map_cars`, punkt 15 kontraktu): `[{lat, lon, plate, model, van, where,
-  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m}, …]` — `van` mówi,
+  fuel, range, ogarniam, at, from, walk_sec, walk_m, to_dest_m, arrival,
+  drive_sec}, …]` — `van` mówi,
   czy to dostawczak (pole `type` listy modeli Traficara), `at` to godzina,
   o której da się być przy aucie (dojazd z narysowanej mapy plus dojście
   liczone tak samo jak każde inne), `from`/`walk_*` mówią skąd i jak daleko
-  się idzie, a `to_dest_m` to odległość auta od celu W LINII PROSTEJ. Czasu
-  jazdy autem tu nie ma i nie będzie — mapa go nie zgaduje (to różnica wobec
-  propozycji z autem niżej, które szacują go z prędkości).
+  się idzie, a `to_dest_m` to odległość auta od celu W LINII PROSTEJ.
+  `arrival` to SZACOWANY przyjazd autem do celu (zgłoszenie #150): `at` plus
+  `drive_sec`, czyli stały narzut na ruszenie i parkowanie i jazda
+  `to_dest_m` z prędkością w linii prostej — oba założenia z `car_kmh`
+  i `car_overhead_sec`. Auta wybiera się nim zawsze; front pokazuje go
+  dopiero na życzenie.
   `ogarniam` to program Traficara, w którym za zajęcie się autem należy się
   zniżka: `[{co: "Sprzątanie", ile: 30}, …]`, pusta lista = przy tym aucie nie
   ma nic do wzięcia (w feedzie to `discounts`, nazwy z zamkniętej listy:
@@ -918,7 +922,8 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   osobówki i dostawczaki wybiera się osobno, każde rodzajem z tym samym `cars`,
   regułą `traficar.map_skyband`: przy `car_groups=1` z aut, do których idzie się
   z tego samego miejsca, zostają niepobite w tej grupie (godzina przy aucie,
-  „Ogarniam"; domyślnie grupowania nie ma i każde auto jest osobno),
+  „Ogarniam", szacowany przyjazd; domyślnie grupowania nie ma i każde auto
+  jest osobno),
   a spośród zwycięzców grup te, których nie bije żadne inne, zawsze, kolejne
   poziomy w całości, aż uzbiera się żądana liczba. `bike_count` — ile
   przejazdów rowerem pokazać (1–30, domyślnie 3, też razy `1 + more`);
@@ -932,6 +937,23 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   założenia czasowe pytającego spod zębatki (zgłoszenie #151): tempo każdego
   przejścia pieszego oraz prędkość roweru w linii prostej i stały narzut jego
   przejazdu, te same dla mapy i dla propozycji; sufity pilnuje planner.
+  `car_kmh` (10–40, domyślnie 22) i `car_overhead_sec` (0–1200, domyślnie
+  480) — to samo dla jazdy Traficarem na mapie: prędkość w linii prostej
+  i stały narzut na ruszenie i parkowanie (zgłoszenie #150).
+  `value_map` — PRÓBA za przełącznikiem (domyślnie zgaszona, poza
+  kontraktem, zgłoszenie #150): mapa z wartości podróży zamiast progu
+  jasności (`planner._value_map`). Każda podróż ma cztery wartości — w celu,
+  wyjście, pojazdy, chodzenie — i na mapie jest to, co w czymś najlepsze;
+  gęstość i `more` wybaczają minuty przyjazdu i wyjścia, nigdy przesiadek
+  ani chodzenia. Wszystkie `w` to wtedy 1, a każdy kawałek ma `why`:
+  `{journeys, of, dep, arr, transfers, walk_m, records, entry, late,
+  early}` — najlepsza podróż przez ten kawałek i od jakiej tolerancji
+  (w minutach) jest na mapie. `map_from` to najwcześniejsze wyjście
+  narysowanej podróży. Z pokładu pojazdu próba nie działa.
+  `value_extras` — jak liczą się w niej przesiadki i chodzenie: `always`
+  (domyślnie; przegrana nimi jest na zawsze), `ties` (rozstrzygają tylko
+  między podróżami o tych samych minutach wyjścia i przyjazdu, a poza tym
+  wybacza się same minuty) albo `off` (nie liczą się wcale).
   `no_dawdling` — PRÓBA za przełącznikiem (domyślnie zgaszona, poza
   kontraktem): mapa wyrusza z najpóźniejszej godziny, z której wciąż osiąga
   najszybszy przyjazd (`planner._latest_departure`), więc znika z niej jazda,
@@ -1048,6 +1070,45 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 | `tests/` | testy pytest (patrz `docs/FLOW_MAP_CONTRACT.md`) |
 
 ## Changelog
+
+- **2026-09-26** — **mapa z wartości podróży i przyjazd autem** (zgłoszenie
+  #150; przebieg dyskusji i pomiary w `FLOW_MAP_NOTES.md`). Nowa próba
+  w Eksperymentach, „Mapa z wartości podróży": każda podróż od startu do celu
+  ma cztery równe wartości — o której w celu, o której trzeba wyjść, ile
+  przesiadek, ile chodzenia — i na mapie jest to, co w czymś najlepsze.
+  „Pokaż więcej" i gęstość wybaczają minuty przyjazdu i wyjścia, nigdy
+  przesiadki ani chodzenia, więc przesiadka w pojazd, który i tak zaraz
+  przyjedzie (tramwaj 14 na Borku w relacji Pl. Zgody → Klecina), nie
+  pojawia się przy żadnej gęstości. Bez jasności. Liczone jednym
+  wyszukaniem wielokryterialnym (`planner._value_journeys`), rysowane tą
+  samą maszynerią co zwykła mapa. Nowa opcja w Debug: „Dlaczego kawałek jest
+  na mapie". Przy wyłączonej próbie mapa jest taka jak była. Auta (NIE
+  próba): mapa szacuje, o której auto dowiezie do celu — 22 km/h w linii
+  prostej plus 8 min na ruszenie i parkowanie, oba pod zębatką w
+  „Założeniach czasowych" — i to jest trzecia wartość wyboru aut obok
+  godziny przy aucie i „Ogarniam". Auto dalej od startu, ale dowożące
+  szybciej, jest teraz na mapie. Godzinę pokazuje osobna opcja „Godzina
+  dojazdu autem" w sekcji Traficarów. Kontrakt przepisany na polecenie
+  (28.09): punkt 15 (trzy liczby auta, szacunek zawsze, godzina na
+  życzenie), punkt 10 (policzone czasy: marsz, auto, rower) i punkt 16.
+  Piąta wartość w próbie (28.09): numery linii — trasa, która jedzie częścią
+  numerów lepszej albo nie gorszej podróży (tymi samymi, albo tymi samymi
+  z dołożonym), nie wchodzi przy żadnym „więcej"; z bliźniaków tymi samymi
+  numerami zostaje najkrótszy przejazd; innymi numerami wolno wejść trasie
+  dłuższej. Chodzenie przestało być wartością (liczy się w minutach), suwak
+  to teraz „Przesiadki". Podgląd „Dlaczego kawałek jest na mapie" od nowa:
+  podróże tędy z powodem słowami i warianty ukryte przez numerki. Tolerancja
+  podróży to suma spóźnienia w celu i wcześniejszego wyjścia. Ustawienie
+  „Szare godziny w tablicy" (domyślnie włączone) w sekcji przystanków.
+  Potem (28.09): suwak „Przesiadki" usunięty — przesiadki na stałe nie liczą
+  się, próba „Mapa z wartości podróży" domyślnie włączona; szukanie mapy
+  kilka razy szybsze (najgorszy zmierzony przypadek 15 s → 6 s); tablica
+  bez kreski „tu według mapy jesteś", takt „co N min" z całego rozkładu
+  linii; kółko ładowania także przy „Pokaż więcej".
+  Potem: mapa z wartości podróży i nowa tablica (godziny w wierszu linii,
+  bez „za ile" i „co N min") są domyślne; w Eksperymentach przełączniki
+  powrotu „Stara mapa" i „Stara tablica odjazdów", domyślnie wyłączone.
+  „Pokaż więcej" — zwykły licznik, 3 kliknięcia.
 
 - **2026-09-26** — **telefon jako osobny układ** (zgłoszenie #117). Reguły
   dla wąskiego ekranu były rozsiane po trzech miejscach `style.css`, a skrypt
