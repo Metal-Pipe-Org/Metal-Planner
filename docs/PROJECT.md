@@ -1028,6 +1028,9 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
   stąd odjeżdża, a nie o peron, przy którym wysiadł. `from_sec` podaje
   godzinę na osi doby rozkładowej; bez niego liczymy od godziny z `time`.
   Ostatni przystanek kursu nie ma odjazdów — `departures` bywa puste.
+  `until_sec` zamiast `limit`: wszystkie odjazdy do tej godziny — tak pyta
+  kropka mapy, do końca mapy. Kurs stający w miejscu przy dwóch słupkach to
+  jeden wiersz.
   Wersji z `lat`/`lon` używa mapa przepływów: kropki stawia z geometrii
   kawałków, więc zna położenie słupka, a nie jego nazwę (`gtfs.stop_at`
   dociąga najbliższy słupek w promieniu 60 m i całe jego miejsce).
@@ -1071,6 +1074,28 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-29** — rowery przy starcie z klikniętego punktu: dojazd do
+  roweru liczy też jeden krok pieszo ze startu, jak reszta wyszukiwarki —
+  wcześniej z punktu nie wsiadało się w nic i na mapie była tylko stacja pod
+  samym startem (Opolska → Wojszyce: 1 stacja zamiast 13). Tablica kropki
+  bierze odjazdy do końca mapy zamiast 40 najbliższych z całego przystanku —
+  na ruchliwym węźle (Śliczna) 40 kończyło się przed godziną, o której się
+  tam stoi, i znikały kursy, na które się zdąży. Kurs stający przy dwóch
+  słupkach jednego miejsca to jeden odjazd (310 na Lutosławskiego). Wiersz
+  tablicy: z szarych godzin zostaje ostatnia, a nadmiar godzin na czas
+  zwija się do „… do [ostatni kurs, którym się zdąży]". Mapa z wartości
+  podróży tnie kawałek na każdej zmianie składu korytarza, także między
+  wyjściami — grupka numerów nie obiecuje już linii, która dawno skręciła
+  (#159, 124 przy Moście Grunwaldzkim). Podpowiedzi „skąd" i „dokąd"
+  stawiają najpierw 10 ostatnio wyszukiwanych miejsc tego pola, osobno dla
+  startu i celu, zapamiętanych w przeglądarce (#142, wersja lekka).
+  Mapa z wartości podróży: z bliźniaków tymi samymi numerami odpada droga,
+  która idzie pieszo tam, dokąd dojechałoby się dalej tym samym kursem
+  (Sosnowiecka → Pl. Grunwaldzki: 10 minut marszu na Krakowską do piątki,
+  która staje 3 minuty od autobusu). Najpierw próba, tego samego dnia
+  domyślna; w Eksperymentach powrót „Stare bliźniaki (sama najkrótsza
+  jazda)". Kontrakt przepisany na polecenie: punkty 2 i 14. Przebieg
+  w `FLOW_MAP_NOTES.md`.
 - **2026-09-26** — **mapa z wartości podróży i przyjazd autem** (zgłoszenie
   #150; przebieg dyskusji i pomiary w `FLOW_MAP_NOTES.md`). Nowa próba
   w Eksperymentach, „Mapa z wartości podróży": każda podróż od startu do celu

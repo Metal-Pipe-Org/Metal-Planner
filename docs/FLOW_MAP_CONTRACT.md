@@ -65,8 +65,11 @@ przesiadka w pojazd, który i tak zaraz przyjedzie (tramwaj 14 na Borku:
 piątka i siedemnastka z dołożoną czternastką, te same godziny). Z dróg tymi
 samymi numerami o tych samych minutach rysuje się najkrótsza — przejechanie
 przystanku przesiadki i powrót tym samym kursem to nie wariant, tylko
-ogonek. Trasa INNYMI numerami wchodzi, nawet gdy jest dłuższa, a nie
-szybsza: to już inna trasa.
+ogonek. Z jednym wyjątkiem: droga, która idzie pieszo tam, dokąd dowiózłby
+ten sam kurs — złapany wcześniej albo opuszczony później — przegrywa z drogą,
+która tym kursem jedzie (punkt 14). Objazd zmienia dwa przejazdy naraz, więc
+tym wyjątkiem nie wraca. Trasa INNYMI numerami wchodzi, nawet gdy jest
+dłuższa, a nie szybsza: to już inna trasa.
 
 **„Pokaż więcej” zawsze coś dokłada.** Przycisk to zwykły licznik: da się go
 kliknąć trzy razy, niezależnie od tego, ile jeszcze zostało do pokazania.
@@ -322,7 +325,10 @@ nas, takim kursem nie jest: po ten sam pojazd nie chodzi się dalej, niż
 trzeba. Ani ze wskazanego przystanku — skoro autobus i tak po nas przyjedzie —
 ani z punktu na mapie: z dwóch jego przystanków wybiera się ten z krótszym
 dojściem, nawet jeśli kurs mija ten dalszy wcześniej. Mapa rysuje taki kurs od
-przystanku, do którego jest bliżej.
+przystanku, do którego jest bliżej. Tak samo w przesiadce: po tramwaj nie idzie
+się dziesięć minut wzdłuż jego trasy, skoro staje trzy minuty od autobusu, i
+z autobusu nie wysiada się przystanek wcześniej, żeby dalej iść tam, dokąd sam
+dowiezie.
 
 **Jeden krok.** Pieszo idzie się raz: ze startu albo po wysiadaniu z pojazdu.
 Nie ma łańcucha dwóch przejść pod rząd — inaczej „dojście" zaczęłoby znaczyć

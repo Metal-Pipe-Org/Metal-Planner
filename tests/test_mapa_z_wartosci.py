@@ -207,3 +207,44 @@ def test_przegrana_z_tymi_samymi_numerami_znika_mimo_tolerancji(install_day):
         times = [t for seg in result["segments"] if seg["num"] == "3"
                  for _, _, t in seg["stops_t"]]
         assert min(times) == 400, more
+
+
+def test_ten_sam_kurs_zamiast_marszu(install_day):
+    """Z Armii Krajowej piątka staje 3 minuty pieszo (P), a ten sam kurs
+    dalej, na Krakowskiej (Q), 10 minut pieszo. Mapa rysuje ją od P, bo marsz
+    do Q to marsz tam, dokąd dojechałoby się tym kursem (punkty 2 i 14);
+    „Stare bliźniaki" (same_vehicle False) wracają do krótszej jazdy - od Q."""
+    install_day(make_day([
+        {"trip_id": "AUTOBUS", "label": "Autobus 134",
+         "stops": [("S", 0, 0), ("A", 300, 300)]},
+        {"trip_id": "PIATKA", "label": "Tramwaj 5",
+         "stops": [("P", 600, 600), ("Q", 900, 900), ("E", 1200, 1200)]},
+    ], siblings={"A": {"P": 180, "Q": 600}, "P": {"A": 180}, "Q": {"A": 600}}))
+
+    def first_tram_stop(same_vehicle):
+        result = planner.plan_flow("S", "E", WHEN, value_map=True,
+                                   same_vehicle=same_vehicle)
+        return min(t for seg in result["segments"] if seg["num"] == "5"
+                   for _, _, t in seg["stops_t"])
+
+    assert first_tram_stop(False) == 900
+    assert first_tram_stop(True) == 600
+
+
+def test_ten_sam_kurs_nie_wpuszcza_objazdu(install_day):
+    """Objazd zmienia DWA przejazdy naraz (trójką za przystanek i dziesiątką
+    z powrotem), żeby nie przejść między peronami A1 i A2 - reguła „tym samym
+    kursem zamiast pieszo" go nie wpuszcza, zostaje krótsza jazda z przejściem."""
+    install_day(make_day([
+        {"trip_id": "TROJKA", "label": "Tramwaj 3",
+         "stops": [("S", 0, 0), ("A1", 300, 300), ("W", 400, 400)]},
+        {"trip_id": "DZIESIATKA", "label": "Tramwaj 10",
+         "stops": [("W", 500, 500), ("A2", 650, 650), ("E", 900, 900)]},
+    ], siblings={"A1": {"A2": 180}, "A2": {"A1": 180}}))
+
+    result = planner.plan_flow("S", "E", WHEN, value_map=True)
+
+    times = {seg["num"]: [t for _, _, t in seg["stops_t"]]
+             for seg in result["segments"]}
+    assert max(times["3"]) <= 300
+    assert min(times["10"]) >= 650

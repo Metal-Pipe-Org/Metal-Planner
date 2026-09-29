@@ -728,6 +728,11 @@ body.start-onboard .hint-onboard { display: block; }
 
 /* Całość pod nagłówkiem, a nie elementy wymienione z nazwy: kartka o rowerze,
    dopisana później między nie, zostawała na wierzchu zwiniętej listy. */
+/* Propozycje tras schowane w panelu ⚙ (sekcja Layout, patrz app.js):
+   znika lista i nagłówek ze strzałką, komunikaty wyszukiwania zostają. */
+body.routes-off .results-head,
+body.routes-off .results-body { display: none; }
+
 #results.collapsed .results-body {
     display: none;
 }
@@ -1673,6 +1678,10 @@ body.start-onboard .hint-onboard { display: block; }
     white-space: nowrap;
 }
 .tt-times .tt-past {
+    color: var(--ink-faint);
+    font-weight: 600;
+}
+.tt-times .tt-until {
     color: var(--ink-faint);
     font-weight: 600;
 }

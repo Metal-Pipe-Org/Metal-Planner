@@ -322,6 +322,46 @@ function staraTablica(fn) {
     }
 }
 
+/* Ostatnie miejsca idą w podpowiedziach pierwsze, od najświeższego (#142);
+   reszta zostaje w swojej kolejności. */
+checks.podpowiedzi_ostatnie_miejsca_pierwsze = (() => {
+    const items = ['PL. LEGIONÓW', 'PL. GRUNWALDZKI', 'PL. JANA PAWŁA II', 'PL. BEMA']
+        .map(name => ({name, at: 0, len: 1}));
+    const order = app.recentFirst(items, ['PL. BEMA', 'KRZYKI', 'PL. GRUNWALDZKI'])
+        .map(item => item.name);
+    return {
+        ok: order.join('|') === 'PL. BEMA|PL. GRUNWALDZKI|PL. LEGIONÓW|PL. JANA PAWŁA II',
+        order,
+    };
+})();
+
+/* Za dużo godzin w wierszu: z szarych zostaje ostatnia, godziny na czas
+   mają pierwszeństwo, a nadmiar zwija się do "… do" ostatniego kursu -
+   z godziną tylko wtedy, gdy lista sięga końca mapy. */
+checks.tablica_zwija_nadmiar_godzin = (() => {
+    const dep = sec => ({time: '00:00', sec, in_min: 0, num: '310',
+                         mode: 'bus', headsign: 'Strachowskiego'});
+    const secs = [55980, 57180, 57720, 58320, 58920, 59520, 60120, 60720, 61320];
+    const data = {stop: 'Lutosławskiego', from_time: '15:33',
+                  departures: secs.map(dep)};
+    const bylo = [app.dotOpts.ttPast, app.dotOpts.ttOld];
+    app.dotOpts.ttPast = true;
+    app.dotOpts.ttOld = false;
+    const bezHoryzontu = app.timetableHtml(data, 58000);       // jesteś 16:06
+    const zHoryzontem = app.timetableHtml({...data, horizon: 61320}, 58000);
+    [app.dotOpts.ttPast, app.dotOpts.ttOld] = bylo;
+    return {
+        ok: (zHoryzontem.match(/tt-past/g) || []).length === 1
+            && zHoryzontem.includes('class="tt-past">16:02')
+            && !zHoryzontem.includes('15:33') && !zHoryzontem.includes('15:53')
+            && zHoryzontem.includes('16:12') && zHoryzontem.includes('16:42')
+            && !zHoryzontem.includes('16:52') && zHoryzontem.includes('… do 17:02')
+            && bezHoryzontu.includes('tt-until">… </span>')
+            && !bezHoryzontu.includes('do 17:02'),
+        zHoryzontem,
+    };
+})();
+
 /* Tablica domyślna: jeden wiersz na linię i kierunek, w nim godziny po kolei;
    bez "za ile", "co N min" i godziny w nagłówku. Godziny sprzed chwili
    z mapy są szare, a linia, na którą się już nie zdąży, idzie na koniec. */
@@ -1622,6 +1662,50 @@ checks.klik_w_mape_nie_kasuje_wpisanego_celu = (() => {
             && poCelu.start === 'Sosnowiecka' && poCelu.end !== ''
             && poCelu.selEnd === punkt,
         poStarcie, poCelu,
+    };
+})();
+
+/* Strefa oddawania Traficara (zgłoszenie #157): pod kursorem przy każdym
+   aucie, a przy aucie z relokacją w „Ogarniam" także strefa, do której trzeba
+   je przestawić. Przycisk 🅿, trzymający strefę na stałe, jest tylko
+   z opcją w ustawieniach - domyślnie go nie ma. */
+checks.strefa_traficara_pod_kursorem = (() => {
+    const kwadrat = [[[[17.0, 51.0], [17.1, 51.0], [17.1, 51.2], [17.0, 51.2],
+                       [17.0, 51.0]]]];
+    app.zoneData = {end: kwadrat, no_end: kwadrat, relocation: kwadrat};
+    const wspolne = {
+        model: 'Renault Clio', fuel: 80, range: 300,
+        at: 56100, walk_sec: 420, walk_m: 300, from: 'Kamienna', to_dest_m: 2744,
+    };
+    const zwykle = {...wspolne, lat: 51.09, lon: 17.02, plate: 'WE1AA11',
+                    ogarniam: []};
+    const doPrzestawienia = {...wspolne, lat: 51.10, lon: 17.03, plate: 'WE2BB22',
+                             ogarniam: [{co: 'Relokacja', ile: 20}]};
+    app.drawFlow({...FLOW_FIXTURE, cars: [zwykle, doPrzestawienia]}, false);
+    const [a, b] = app.flowCarLayer.getLayers();
+    const warstw = () => (app.carZoneLayer ? app.carZoneLayer.getLayers().length : 0);
+
+    a.fire('mouseover');
+    const przyZwyklym = warstw();
+    a.fire('mouseout');
+    const poZjechaniu = warstw();
+    b.fire('mouseover');
+    const przyRelokacji = warstw();
+    b.fire('mouseout');
+
+    const opcja = document.getElementById('zone-button');
+    const przyciskDomyslnie = !app.zoneToggle.hidden;
+    opcja.checked = true;
+    app.refreshZoneLayer();
+    const przyciskZOpcja = !app.zoneToggle.hidden;
+    opcja.checked = false;
+    app.refreshZoneLayer();
+
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: przyZwyklym === 2 && poZjechaniu === 0 && przyRelokacji === 3
+            && !przyciskDomyslnie && przyciskZOpcja,
+        przyZwyklym, poZjechaniu, przyRelokacji, przyciskDomyslnie, przyciskZOpcja,
     };
 })();
 

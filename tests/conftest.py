@@ -66,6 +66,9 @@ def _traficar_disabled_by_default(monkeypatch):
     patrz tests/test_traficar.py.
     """
     monkeypatch.setattr(traficar, "enabled", lambda: False)
+    # Strefa oddawania też przychodzi z feedu, a pytają o nią także testy,
+    # które auta już podstawiły - nieznana strefa to brak ostrzeżenia.
+    monkeypatch.setattr(traficar, "zone", lambda: None)
 
 
 @pytest.fixture(autouse=True)

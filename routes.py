@@ -234,6 +234,15 @@ def init_routes(app):
         except traficar.TraficarDataError as e:
             return jsonify({"error": f"Nie udało się pobrać aut: {e}"}), 503
 
+    @app.route("/api/traficar-zone")
+    def api_traficar_zone():
+        """Strefa, w której da się oddać auto Traficara - warstwa włączana
+        w pasku warstw (zgłoszenie #157, patrz traficar.zone)."""
+        shapes = traficar.zone()
+        if shapes is None:
+            return jsonify({"error": "Nie udało się pobrać strefy Traficara"}), 503
+        return jsonify(shapes)
+
     @app.route("/api/bikes")
     def api_bikes():
         """Wszystkie stacje WRM i rowery stojące luzem - warstwa 🚲 w pasku
@@ -308,6 +317,7 @@ def init_routes(app):
             _float_arg("from_sec"),
             limit=min(int(limit), TIMETABLE_MAX) if limit else TIMETABLE_LIMIT,
             point=_latlon_arg(),
+            until_sec=_float_arg("until_sec"),
         ))
 
     @app.route("/api/flow")
@@ -369,4 +379,7 @@ def init_routes(app):
             # Mapa z wartości podróży zamiast progu jasności - PRÓBA
             # w Eksperymentach pod zębatką (zgłoszenie #150, patrz plan_flow).
             value_map=request.args.get("value_map") == "1",
+            # Bliźniaki: jazda tym samym kursem zamiast marszu - domyślnie
+            # tak; "0" to powrót w Eksperymentach (patrz plan_flow).
+            same_vehicle=request.args.get("same_vehicle", "1") == "1",
         ))

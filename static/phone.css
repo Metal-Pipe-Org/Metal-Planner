@@ -21,8 +21,9 @@
 
 #view-tabs { display: flex; }
 
-/* Zakładka „Trasy" schowana w panelu ⚙ (sekcja Layout, patrz phone.js). */
-body.routes-tab-off #view-tabs [data-view="list"] { display: none; }
+/* Propozycje tras schowane w panelu ⚙ (sekcja Layout, patrz app.js) - na
+   telefonie znika z nimi cała zakładka „Trasy". */
+body.routes-off #view-tabs [data-view="list"] { display: none; }
 
 /* Zakładki zastępują ☰ i ◷ - dwa mechanizmy chowania panelu naraz tylko by
    myliły, a rozkłady mają tu własną zakładkę, równą dwóm pozostałym. */

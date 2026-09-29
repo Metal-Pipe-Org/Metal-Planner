@@ -1030,6 +1030,50 @@ def test_a_piece_never_claims_a_corridor_it_has_already_left(install_day, pin_de
         )
 
 
+def _leaving_line_day():
+    """Autobus 143 i Autobus 124 jadą razem S->A->B; w B 124 skręca do D,
+    gdzie czeka szybszy Tramwaj 9 do celu, a 143 jedzie dalej B->C->E. Obie
+    drogi się bronią (przesiadka za wcześniejszy przyjazd), więc obie są na
+    mapie, a skład korytarza 143 zmienia się w B."""
+    trips = [
+        {"trip_id": "b143", "label": "Autobus 143",
+         "stops": [("S", 0, 0), ("A", 100, 100), ("B", 200, 200),
+                   ("C", 400, 400), ("E", 650, 650)]},
+        {"trip_id": "b124", "label": "Autobus 124",
+         "stops": [("S", 10, 10), ("A", 110, 110), ("B", 210, 210),
+                   ("D", 300, 300)]},
+        {"trip_id": "t9", "label": "Tramwaj 9",
+         "stops": [("D", 420, 420), ("E", 600, 600)]},
+    ]
+    return make_day(trips, names={"S": "Start", "A": "A", "B": "B", "C": "C",
+                                  "D": "D", "E": "Cel"})
+
+
+def test_every_number_in_a_group_is_drawn_along_the_whole_piece(install_day, pin_deadline):
+    """Każda linia ze składu kawałka jest narysowana na KAŻDYM jego odcinku -
+    także na mapie z wartości podróży, która ma mało wyjść. Tam kawałek
+    ciągnął się od wyjścia do wyjścia przez zmianę składu i grupka obiecywała
+    linię, której dalej już nie ma, więc najechanie na jej numer niczego nie
+    wskazywało (#159: 124 przy Moście Grunwaldzkim)."""
+    pin_deadline(800)
+    day = _leaving_line_day()
+    install_day(day)
+
+    for value_map in (False, True):
+        result = planner.plan_flow("Start", "Cel", when=WHEN, value_map=value_map)
+        assert "error" not in result
+
+        hops = {}
+        for seg in result["segments"]:
+            path = [tuple(p) for p in seg["path"]]
+            hops.setdefault((seg["kind"], seg["num"]), set()).update(zip(path, path[1:]))
+        for seg in result["segments"]:
+            path = [tuple(p) for p in seg["path"]]
+            for line in seg.get("corridor") or []:
+                missing = set(zip(path, path[1:])) - hops.get((line["kind"], line["num"]), set())
+                assert not missing, (value_map, seg["num"], line["num"], missing)
+
+
 def test_solo_line_never_gets_a_corridor_list(install_day, pin_deadline):
     """Kontrolne: linia, która NIE dzieli żadnego odcinka z inną linią, nie
     dostaje składu korytarza wcale - front rysuje wtedy jej numer sam, a pod
