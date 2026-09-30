@@ -155,3 +155,25 @@ def test_etap_niesie_sekundy_obu_koncow(install_day):
     przejazd = [leg for leg in wynik["legs"] if leg["kind"] == "ride"][0]
     assert przejazd["dep_sec"] == 1000
     assert przejazd["arr_sec"] == 1600
+
+
+def test_do_godziny_zamiast_limitu(install_day):
+    """Kropka mapy pyta do końca mapy, nie o `limit` sztuk: na ruchliwym węźle
+    limit kończył się, zanim nadeszła godzina, o której pasażer tu staje."""
+    install_day(_dzien_z_wezlem())
+    wynik = planner.stop_timetable("WEZEL", WHEN, from_sec=0, limit=1, until_sec=54000)
+
+    assert _numery(wynik) == ["100", "5", "300"]     # nocna 200 już za oknem
+
+
+def test_kurs_przy_dwoch_slupkach_to_jeden_odjazd(install_day):
+    """310 na Lutosławskiego staje przy 5700 i 5706 w tej samej minucie -
+    to jeden autobus, nie dwa odjazdy."""
+    install_day(make_day(
+        [{"trip_id": "t310", "label": "Autobus 310", "headsign": "KOZANÓW",
+          "stops": [("W1", 1000, 1000), ("W2", 1030, 1030), ("KONIEC", 1600, 1600)]}],
+        names={"W1": "WEZEL", "W2": "WEZEL", "KONIEC": "KONIEC"},
+    ))
+
+    assert _godziny(planner.stop_timetable("WEZEL", WHEN, from_sec=0)) == ["00:16"]
+    assert _godziny(planner.stop_timetable("WEZEL", WHEN, from_sec=0, until_sec=3600)) == ["00:16"]

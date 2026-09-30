@@ -4271,10 +4271,15 @@ function recentFirst(items, recent) {
         .map(({item}) => item);
 }
 
-const suggestRecentFirst = side => query => recentFirst(
-    suggestionsFor(query, STOP_LABELS, undefined, Infinity),
-    loadRecentPlaces()[side] || [],
-).slice(0, MAX_SUGGESTIONS);
+// Ostatnie miejsca szukane osobno w ich krótkiej liście, żeby przy jednej
+// literze nie sortować tysięcy trafień ze wszystkich przystanków.
+const suggestRecentFirst = side => query => {
+    const recent = (loadRecentPlaces()[side] || []).filter(name => STOP_KIND.has(name));
+    const hits = recentFirst(suggestionsFor(query, recent, undefined, Infinity), recent);
+    const rest = suggestionsFor(query, STOP_LABELS, undefined, MAX_SUGGESTIONS + hits.length)
+        .filter(item => !recent.includes(item.name));
+    return [...hits, ...rest].slice(0, MAX_SUGGESTIONS);
+};
 
 /** Klawiatura, ARIA i zamykanie listy są tu raz; co dokładnie się podpowiada
     i jak wygląda wiersz, wołający może podmienić:
