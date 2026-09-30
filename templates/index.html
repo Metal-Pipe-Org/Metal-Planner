@@ -109,6 +109,10 @@
                     title="Wolne auta Traficara"
                     aria-label="Pokaż wolne auta Traficara"
                     aria-pressed="false">🚗</button>
+            <button id="zone-toggle" class="icon-button layer-button"
+                    title="Strefa, w której da się oddać auto Traficara"
+                    aria-label="Pokaż strefę oddawania aut Traficara"
+                    aria-pressed="false" hidden>🅿</button>
             <button id="bikes-toggle" class="icon-button layer-button"
                     title="Rowery miejskie zwykłe, bez wspomagania (WRM)"
                     aria-label="Pokaż zwykłe rowery miejskie"
@@ -648,6 +652,18 @@
         </p>
 
         <label class="dev-check">
+            <input type="checkbox" id="old-twins"> Stare bliźniaki (sama najkrótsza jazda)
+        </label>
+        <p class="field-hint">
+            Powrót do reguły sprzed 29.09. Domyślnie z dwóch dróg tymi samymi
+            liniami i o tych samych godzinach najpierw odpada ta, która idzie
+            pieszo tam, dokąd dojechałoby się dalej tym samym kursem — np.
+            10 minut marszu do dalszego przystanku tramwaju, który staje 3 minuty
+            od autobusu — a z reszty zostaje najkrótsza jazda. Stara reguła
+            patrzy tylko na najkrótszą jazdę.
+        </p>
+
+        <label class="dev-check">
             <input type="checkbox" id="old-map"> Stara mapa (z progiem jasności)
         </label>
         <p class="field-hint">
@@ -720,47 +736,14 @@
             </p>
         </div>
 
+        {# Na mapie z wartości podróży każda linia jest pełna, więc suwaki
+           „najbledsza/najjaśniejsza linia" i otoczka od jasności nic tam nie
+           zmieniały - zostały przy wartościach domyślnych, dla starej mapy. #}
         <div class="field compact">
-            <label for="look-min-op">
-                Najbledsza linia — krycie <output id="look-min-op-value">0.3</output>
+            <label for="look-weight">
+                Grubość linii <output id="look-weight-value">3</output> px
             </label>
-            <input type="range" id="look-min-op" min="0.05" max="1" step="0.05" value="0.3">
-            <p class="field-hint">
-                Dolny próg widoczności z punktu 8 kontraktu: najbledszy kawałek ma
-                być widoczny bez najeżdżania.
-            </p>
-        </div>
-
-        <div class="field compact">
-            <label for="look-min-w">
-                Najbledsza linia — grubość <output id="look-min-w-value">2</output> px
-            </label>
-            <input type="range" id="look-min-w" min="0.5" max="6" step="0.1" value="2">
-        </div>
-
-        <div class="field compact">
-            <label for="look-max-op">
-                Najjaśniejsza linia — krycie <output id="look-max-op-value">1</output>
-            </label>
-            <input type="range" id="look-max-op" min="0.3" max="1" step="0.05" value="1">
-        </div>
-
-        <div class="field compact">
-            <label for="look-max-w">
-                Najjaśniejsza linia — grubość <output id="look-max-w-value">3</output> px
-            </label>
-            <input type="range" id="look-max-w" min="2" max="12" step="0.5" value="3">
-        </div>
-
-        <div class="field compact">
-            <label for="look-casing">
-                Biała otoczka od jasności <output id="look-casing-value">0.45</output>
-            </label>
-            <input type="range" id="look-casing" min="0" max="1.05" step="0.05" value="0.45">
-            <p class="field-hint">
-                Otoczka oddziela jasne korytarze od tła, ale pogrubia sieć:
-                1.05 to nigdy, 0 to zawsze.
-            </p>
+            <input type="range" id="look-weight" min="2" max="12" step="0.5" value="3">
         </div>
 
         <div class="field compact">
@@ -828,16 +811,29 @@
             punktem na mapie.
         </p>
 
-        {# Tylko telefon (patrz phone.js) - na szerokim ekranie zakładek nie ma,
-           więc nie ma też czego chować. #}
-        <div class="phone-only">
-            <label class="dev-check">
-                <input type="checkbox" id="phone-routes-tab" checked> Zakładka „Trasy"
-            </label>
-            <p class="field-hint">
-                Bez niej na dole zostają tylko Mapa i Rozkład.
-            </p>
-        </div>
+        <label class="dev-check">
+            <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
+        </label>
+        <p class="field-hint">
+            Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez
+            niego strefa pokazuje się po najechaniu na auto.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bikes-merged"> Jeden przycisk rowerów
+        </label>
+        <p class="field-hint">
+            Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe
+            i elektryczne naraz.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="routes-hidden"> Ukryj propozycje tras
+        </label>
+        <p class="field-hint">
+            Lista propozycji znika razem ze strzałką, która ją zwija — zostaje
+            sama mapa. Na telefonie znika cała zakładka „Trasy".
+        </p>
 
     </details>
 

@@ -102,7 +102,7 @@ TIMETABLE_MAX = 60
 
 
 def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
-                   point=None):
+                   point=None, until_sec=None):
     """Tablica odjazdów jednego przystanku - to, co widać po najechaniu na
     kropkę przesiadki na mapie.
 
@@ -118,6 +118,11 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
     Przystanek rozumiemy jako MIEJSCE, nie słupek (patrz gtfs.match_stop):
     najeżdżając na węzeł, pasażer pyta o wszystko, co z niego odjeżdża, a nie
     o jeden peron, przy którym akurat wysiadł.
+
+    `until_sec` zamiast `limit`: wszystkie odjazdy do tej godziny. Tak pyta
+    kropka mapy - do końca mapy - bo na ruchliwym węźle `limit` sztuk ze
+    wszystkich linii kończył się, zanim nadeszła godzina, o której pasażer tu
+    staje, i kursy linii z mapy wypadały przed odsiewem.
     """
     when = when or datetime.now()
 
@@ -141,7 +146,16 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
 
     departures = []
     runs = _line_runs(day, stops)
-    for dep_sec, trip, _stop_id in gtfs.stop_departures(day, stops, from_sec, limit):
+    found = (gtfs.stop_departures(day, stops, from_sec, limit) if until_sec is None
+             else gtfs.departures_between(day, stops, from_sec, int(until_sec)))
+    seen = set()
+    for dep_sec, trip, _stop_id in found:
+        # Kurs, który w tym miejscu staje przy dwóch słupkach (310 na
+        # Lutosławskiego: 5700 i 5706 w tej samej minucie), to jeden autobus
+        # - wsiada się w pierwszy postój.
+        if trip in seen:
+            continue
+        seen.add(trip)
         line, headsign = day.trip_info[trip]
         num, mode = _line_parts(line)
         departures.append({
@@ -1354,20 +1368,25 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
     return list(finals.values())
 
 
-def _label_variants(day, label, memo, ride_metres):
+def _label_variants(day, label, memo, ride_metres, pick):
     """Drogi prowadzące do etykiety przystanku (razem z bliźniakami) po
-    numerach linii: {numery: (metry jazdy, przejazdy)}, przejazd to
-    (połączenie wsiadania, połączenie wysiadania).
+    numerach linii: {numery: ((metry jazdy, sekundy chodzenia), przejazdy)},
+    przejazd to (połączenie wsiadania, połączenie wysiadania). Z dróg tymi
+    samymi numerami zostaje ta, którą wybierze `pick` (patrz _value_map).
 
     Z dróg tymi samymi numerami zostaje najkrótsza: dłuższa to ta sama
     podróż z nadłożeniem drogi - np. trójką za przystanek przesiadki
     i z powrotem tym samym kursem dziesiątki, co wsiadając od razu."""
     key = id(label)
     if key not in memo:
-        out = {} if label.parents else {frozenset(): (0.0, frozenset())}
+        found = {} if label.parents else {frozenset(): [((0.0, label.lead), frozenset())]}
         for parent, conn in label.parents:
             if conn is None:
-                options = list(_label_variants(day, parent, memo, ride_metres).items())
+                # Dojście po wysiadce: od przyjazdu pojazdu do chwili tutaj.
+                walk = label.ready - parent.arr
+                options = [(nums, ((metres, walked + walk), rides))
+                           for nums, ((metres, walked), rides)
+                           in _label_variants(day, parent, memo, ride_metres, pick).items()]
             else:
                 options = []
                 line = day.trip_info[day.conns[conn][4]][0]
@@ -1380,13 +1399,13 @@ def _label_variants(day, label, memo, ride_metres):
                         continue
                     ride = (board_conn, conn)
                     length = ride_metres(ride)
-                    for nums, (metres, rides) in _label_variants(
-                            day, board_label, memo, ride_metres).items():
+                    for nums, ((metres, walked), rides) in _label_variants(
+                            day, board_label, memo, ride_metres, pick).items():
                         options.append((nums | {line},
-                                        (metres + length, rides | {ride})))
+                                        ((metres + length, walked), rides | {ride})))
             for nums, value in options:
-                if nums not in out or value[0] < out[nums][0]:
-                    out[nums] = value
+                found.setdefault(nums, []).append(value)
+        out = {nums: pick(values) for nums, values in found.items()}
         # Warianty jednej etykiety mają te same minuty i te same przesiadki,
         # a dalej pojadą tak samo - ten, który tylko dokłada numer do innego,
         # przegra w celu (_same_numbers_best) i tak. Odcięty tu nie mnoży się
@@ -1399,6 +1418,23 @@ def _label_variants(day, label, memo, ride_metres):
                             for nums, value in out.items()
                             if nums not in memo[key]]
     return memo[key]
+
+
+def _rides_instead_of_walking(day, one, other):
+    """Czy wariant `one` to `other`, tylko z dłuższą jazdą TYM SAMYM kursem
+    zamiast chodzenia: różnią się jednym przejazdem, w `one` ten kurs łapie
+    się wcześniej albo wysiada z niego później, i chodzi się mniej."""
+    (_, walk), rides = one
+    (_, other_walk), other_rides = other
+    if walk >= other_walk:
+        return False
+    mine, theirs = rides - other_rides, other_rides - rides
+    if len(mine) != 1 or len(theirs) != 1:
+        return False
+    (board, alight), = mine
+    (other_board, other_alight), = theirs
+    return (day.conns[board][4] == day.conns[other_board][4]
+            and board <= other_board and alight >= other_alight)
 
 
 def _same_numbers_best(classes):
@@ -1560,7 +1596,7 @@ def _value_segments(day, chosen):
 
 
 def _value_map(day, source_stops, target_set, dep_sec, best_arr, frame_km2,
-               density, more):
+               density, more, same_vehicle=True):
     """Mapa z wartości podróży przy docelowej gęstości: najszersza tolerancja
     (w minutach, patrz _value_entries), przy której narysowana sieć nie jest
     gęstsza niż `density`, a przy "pokaż więcej" - kolejne, każda coś
@@ -1583,6 +1619,22 @@ def _value_map(day, source_stops, target_set, dep_sec, best_arr, frame_km2,
             along[trip] = marks
         return along[trip][alight][1] - along[trip][board][0]
 
+    def pick(values):
+        # Z bliźniaków tymi samymi numerami zostaje najkrótsza jazda: dłuższa
+        # to ta sama podróż z nadłożeniem drogi - trójką za przystanek
+        # przesiadki i z powrotem tym samym kursem dziesiątki, co wsiadając
+        # od razu. Ale najpierw odpada wariant, który idzie tam, gdzie
+        # mógłby dalej jechać tym samym kursem (punkty 2 i 14) - 10 minut
+        # marszu z Armii Krajowej na Krakowską (Centrum Handlowe) do piątki,
+        # która staje 3 minuty od autobusu. Objazd zmienia dwa przejazdy
+        # naraz, więc tak nie wraca. `same_vehicle` False to powrót do samej
+        # najkrótszej jazdy (Eksperymenty, „Stare bliźniaki").
+        if same_vehicle:
+            values = [value for value in values
+                      if not any(_rides_instead_of_walking(day, other, value)
+                                 for other in values)]
+        return min(values, key=lambda value: value[0][0])
+
     def search(window_sec):
         if window_sec not in searches:
             classes = _value_journeys(day, source_stops, target_set, dep_sec,
@@ -1600,11 +1652,11 @@ def _value_map(day, source_stops, target_set, dep_sec, best_arr, frame_km2,
                     continue
                 for label in journey["labels"]:
                     for nums, value in _label_variants(day, label, memo,
-                                                       ride_metres).items():
-                        if nums not in variants or value[0] < variants[nums][0]:
-                            variants[nums] = value
+                                                       ride_metres, pick).items():
+                        variants.setdefault(nums, []).append(value)
                     journey["cut"] += memo["cut", id(label)]
-                journey["variants"] = variants
+                journey["variants"] = {nums: pick(values)
+                                       for nums, values in variants.items()}
             _same_numbers_best(classes)
             searches[window_sec] = classes
         return searches[window_sec]
@@ -1933,7 +1985,7 @@ def plan_flow(start_query, end_query, when=None,
               bike_electric=True, bike_regular=True, latest_start=False,
               in_vehicle=None, walk_pace=None, bike_kmh=None,
               bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
-              value_map=False):
+              value_map=False, same_vehicle=True):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -2027,6 +2079,10 @@ def plan_flow(start_query, end_query, when=None,
 
     value_map - PRÓBA pod zębatką, w Eksperymentach (zgłoszenie #150): mapa
     z wartości podróży zamiast progu jasności (patrz _value_map).
+
+    same_vehicle - z bliźniaków mapy z wartości podróży odpada wariant, który
+    idzie tam, gdzie mógłby dalej jechać tym samym kursem (patrz _value_map,
+    pick). False to powrót w Eksperymentach, „Stare bliźniaki".
     """
     when = when or datetime.now()
     journey_limit = (
@@ -2254,7 +2310,8 @@ def plan_flow(start_query, end_query, when=None,
         if value_map and ride is None:
             dep_sec = report_dep_sec
             chosen_map = _value_map(day, source_stops, target_set, dep_sec,
-                                    best_arr, frame_km2, density, more)
+                                    best_arr, frame_km2, density, more,
+                                    same_vehicle)
             deadline, at_ceiling = chosen_map["deadline"], chosen_map["at_ceiling"]
             kept, ranges = chosen_map["kept"], chosen_map["ranges"]
             why_of = chosen_map["why_of"]
@@ -2422,6 +2479,7 @@ def plan_flow(start_query, end_query, when=None,
         # wyżej). Auto przy przystanku, którego nikt nie narysował, mówiłoby
         # o mapie coś, czego na niej nie ma.
         cars, bike_places = [], []
+        cars_dest_in_zone = None
         # Przy "dowolnej stacji w mieście" po którejkolwiek stronie aut
         # i rowerów nie ma wcale - decyzja użytkownika: to podróż koleją między
         # miastami, a auto czy rower przy którejś ze stacji nie jest na nią
@@ -2444,6 +2502,12 @@ def plan_flow(start_query, end_query, when=None,
                                       car_overhead),
                     car_count * (1 + more), car_groups, car_vans,
                     min_level=more)
+                # Czy przy celu da się auto zostawić (zgłoszenie #157). Auta
+                # zostają na mapie tak czy inaczej - to ostrzeżenie w dymku,
+                # nie odsiew: wziąć auto i oddać je na granicy strefy dalej
+                # bywa sensownym wyborem, tylko trzeba o tym wiedzieć.
+                if cars:
+                    cars_dest_in_zone = traficar.can_end_at(*end_point_ll)
 
             # Rower miejski na mapie (punkt 16, patrz bikes.map_places).
             # Inaczej niż auto: z roweru się JEDZIE, więc przejazd ocenia się
@@ -2524,6 +2588,9 @@ def plan_flow(start_query, end_query, when=None,
         "nodes": nodes,
         # Wolne auta car-sharingu w zasięgu tej mapy (patrz traficar.map_cars).
         "cars": cars,
+        # Czy cel leży w strefie oddawania aut; None, gdy aut nie ma albo
+        # strefy nie znamy (patrz traficar.can_end_at).
+        "cars_dest_in_zone": cars_dest_in_zone,
         # Rowery miejskie w zasięgu tej mapy, każdy z listą przejazdów, które
         # jeszcze mieszczą się w oknie (patrz bikes.map_places). Przejazdów
         # mapa NIE rysuje - front pokazuje je po najechaniu.
@@ -3590,10 +3657,16 @@ def _drawn_arrivals(day, runs, source_stops, dep_sec):
     k pojazdami po narysowanych kursach. Wpis przybywa tylko wtedy, gdy więcej
     pojazdów daje wcześniejszą godzinę, więc lista jest krótka i każdy jej
     wiersz to jedna prawdziwa droga. Start to zero pojazdów o godzinie wyjazdu
-    - i wsiada się na nim bez bufora przesiadki."""
+    - i wsiada się na nim bez bufora przesiadki. Ze startu wolno też odejść
+    jeden krok pieszo i wsiąść u sąsiada, tak jak w skanie (_origin_walk):
+    bez tego start z klikniętego punktu, który sam nie ma żadnego odjazdu,
+    nie wsiadał w nic i rower dało się wziąć tylko spod samego startu."""
     best = dict.fromkeys(source_stops, dep_sec)
     out = {stop: [(dep_sec, 0)] for stop in source_stops}
     ready = dict(best)
+    for stop, (_, sec) in _origin_walk(day, source_stops).items():
+        if dep_sec + sec < ready.get(stop, INF):
+            ready[stop] = dep_sec + sec
     for rides in range(1, MAX_BIKE_SIDE_RIDES + 1):
         arrived = {}
         for run in runs:
@@ -3753,6 +3826,15 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
                 # wyłączna górna granica wycinka) - jego WŁASNY indeks w
                 # `stops` to `pending_end - 1`.
                 piece_start = pending_end - 1
+            # Zmiana składu korytarza między dwoma wyjściami: kawałek tnie się
+            # na niej i tak, choć nie ma tam wyjścia. Mapa z wartości podróży
+            # ma wyjścia rzadko, więc bez tego 143 z Księża Małego szła do
+            # Mostu Grunwaldzkiego ze składem "112, 124, ..." z pierwszego
+            # odcinka, a 124 skręca po trzech przystankach (#159). Te same
+            # jasność i godzina w celu - to wciąż jedno wyjście.
+            for k in sorted(k for k in boundary_stops if piece_start < k <= pos - 2):
+                _keep_piece(pieces, seg, piece_start, k + 1, exit_q, reach, reach_ok)
+                piece_start = k
             pending_end, pending_q = pos, exit_q
             pending_reach, pending_ok = reach, reach_ok
         if pending_q is not None:

@@ -46,6 +46,7 @@ ZONE_ID = 3          # Wrocław (GET /api/v1/zones)
 API = "https://fioletowe.live/api/v1"
 CARS_TTL_SEC = 20    # feed sam deklaruje Cache-Control: max-age=12 - nie odpytujemy częściej
 MODELS_TTL_SEC = 6 * 3600   # lista modeli zmienia się w skali miesięcy, nie minut
+ZONE_TTL_SEC = 24 * 3600    # granice strefy zmieniają się jeszcze rzadziej
 
 # Dojście z przystanku do auta liczy się tak samo jak każde inne przejście
 # (gtfs.WALK_M, gtfs.walk_time_sec) - i w propozycjach, i na mapie
@@ -108,6 +109,7 @@ UNKNOWN_MODEL = ("Traficar", False)   # patrz _models
 
 _cars_cache = {"at": 0.0, "cars": [], "generation": 0}
 _models_cache = {"at": 0.0, "models": {}}
+_zone_cache = {"at": 0.0, "zone": None}
 
 
 class TraficarDataError(Exception):
@@ -219,6 +221,63 @@ def car_list():
                     "Nie udało się pobrać danych Traficar z fioletowe.live"
                 ) from e
     return _cars_cache["cars"]
+
+
+def zone():
+    """Gdzie wolno zakończyć najem: {"end": ..., "no_end": ..., "relocation":
+    ...} albo None, gdy feed jeszcze ani razu jej nie oddał (zgłoszenie #157).
+
+    Wszystkie pola to współrzędne GeoJSON MultiPolygon wprost z feedu
+    (kolejność lon, lat). `end` to obszar, w którym najem kończyć wolno
+    (w feedzie typ 1, END_RESERVATION_ENABLE), `no_end` - wycięte z niego
+    miejsca, gdzie nie wolno mimo wszystko, jak Rynek (typ 2,
+    END_RESERVATION_DISABLE). `relocation` to miejsca, do których trzeba
+    przestawić auto, żeby dostać zniżkę za relokację z programu „Ogarniam"
+    (typ 3, RELOCATION TARGET ZONE) - mapa rysuje je tylko przy aucie, które
+    taką relokację ma.
+
+    Wziąć auto można spod każdego miejsca, w którym stoi - strefa mówi tylko,
+    gdzie da się je ZOSTAWIĆ. Stąd pytanie o nią pada o cel, nie o auto.
+    """
+    if time.monotonic() - _zone_cache["at"] >= ZONE_TTL_SEC:
+        try:
+            data = _fetch(f"{API}/zones/{ZONE_ID}/shapes")
+            by_type = {}
+            for shape in data["shapes"]:
+                by_type.setdefault(shape["type"], []).extend(
+                    shape["geo"]["coordinates"])
+            _zone_cache["zone"] = {"end": by_type.get(1, []),
+                                   "no_end": by_type.get(2, []),
+                                   "relocation": by_type.get(3, [])}
+            _zone_cache["at"] = time.monotonic()
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return _zone_cache["zone"]
+
+
+def _in_ring(lat, lon, ring):
+    inside = False
+    for (x1, y1), (x2, y2) in zip(ring, ring[-1:] + ring[:-1]):
+        if (y1 > lat) != (y2 > lat) and lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def _in_multipolygon(lat, lon, polygons):
+    return any(_in_ring(lat, lon, polygon[0])
+               and not any(_in_ring(lat, lon, hole) for hole in polygon[1:])
+               for polygon in polygons)
+
+
+def can_end_at(lat, lon):
+    """Czy w tym miejscu da się zakończyć najem: True/False, None - gdy
+    strefy nie znamy. Nieznana strefa to brak ostrzeżenia, nie ostrzeżenie:
+    to feed zawiódł, a nie cel wypadł poza strefę."""
+    shapes = zone()
+    if shapes is None:
+        return None
+    return (_in_multipolygon(lat, lon, shapes["end"])
+            and not _in_multipolygon(lat, lon, shapes["no_end"]))
 
 
 def _full_minutes(sec):

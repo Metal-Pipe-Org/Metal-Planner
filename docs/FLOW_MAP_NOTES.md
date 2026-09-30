@@ -2533,3 +2533,33 @@ Wyjątek „zostaje godzina mapy" usunięty z kontraktu (punkt 11) i z kodu.
 Przy okazji: tablica pytała o odjazdy z daty formularza, choć godziny kropek
 są na osi dnia odpowiedzi — przy trasie jutrzejszej pokazywała inny dzień.
 Teraz pyta o dzień, którego dotyczy mapa.
+
+
+### Bliźniaki: jazda tym samym kursem zamiast marszu (29.09, próba)
+
+Zgłoszenie: Sosnowiecka → Pl. Grunwaldzki 15:44. 134 przyjeżdża na Armię
+Krajową o 16:00; piątka staje 3 minuty pieszo dalej o 16:08, a ten sam kurs
+na Krakowskiej (Centrum Handlowe) o 16:10, 10 minut pieszo. Te same minuty
+i numery, więc bliźniaki - a reguła „najkrótszy przejazd" (metry jazdy)
+wybierała 10 minut marszu wzdłuż trasy piątki.
+
+Odrzucone po drodze: „najpierw mniej chodzenia" wpuszczało objazd (124
+przystanek za Armię Krajową i 143 z powrotem, żeby nie przejść 3 minut
+między peronami); „mniej chodzenia tylko przy tych samych wysiadkach"
+kończyło 134 na Parku Wschodnim z 9 minutami marszu do 143 i porównywane
+parami nie było przechodnie (wynik zależał od kolejności).
+
+Próba (wybrana przez użytkownika, pod zębatką, domyślnie wyłączona): najpierw
+odpada wariant, dla którego jest inny różniący się JEDNYM przejazdem - tym
+samym kursem, złapanym wcześniej albo opuszczonym później - z krótszym
+chodzeniem; z reszty najkrótsza jazda. Objazd zmienia dwa przejazdy, więc
+jej nie przechodzi. Przy wyłączonej próbie mapy co do kawałka jak dotąd.
+Zmierzone przy trzech „więcej": Księże Małe, Sosnowiecka, Leśnica - ten sam
+zasięg, linie zyskują pojedyncze przystanki; Wojszyce → Dworzec 08:10 -
+dłuższe przejazdy szybciej wyczerpują gęstość, mapa kończy się o 08:56
+zamiast 09:10 (znika gałąź 612 i część 143/146/9/15).
+
+Tego samego dnia (29.09, decyzja użytkownika): reguła domyślna, kontrakt
+przepisany (punkt 2 - wyjątek od „rysuje się najkrótsza", punkt 14 - to samo
+przy wysiadaniu). Stara reguła wraca w Eksperymentach przełącznikiem „Stare
+bliźniaki (sama najkrótsza jazda)", domyślnie wyłączonym.

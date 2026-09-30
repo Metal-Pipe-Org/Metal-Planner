@@ -180,6 +180,11 @@ const L = {
         clearLayers() { this.layers.length = 0; return this; },
     }),
     tileLayer: () => layerBase({kind: 'tiles', options: {}}),
+    // Strefa Traficara (zgłoszenie #157) - rysowana na własnym panelu.
+    canvas: options => ({...(options || {})}),
+    geoJSON: (geojson, options) => layerBase({
+        kind: 'geoJSON', geojson, options: {...(options || {})},
+    }),
     control: {zoom: () => layerBase({kind: 'control', options: {}})},
     DomEvent: {on: () => L.DomEvent, off: () => L.DomEvent, stop: () => {},
                preventDefault: () => {}, disableClickPropagation: () => {}},
@@ -260,6 +265,7 @@ const mapStub = {
     },
     fire(name, event) { (this._handlers[name] || []).forEach(fn => fn(event)); return this; },
     invalidateSize() { return this; },
+    createPane() { return {style: {}}; },
 };
 L.map = () => mapStub;
 
@@ -449,7 +455,7 @@ const INJECTION = `
     legLayers, detailHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
     waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
     summariseRepeats, timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
-    keepWithinHorizon,
+    keepWithinHorizon, recentFirst,
     withArrivals, flowIcon, FLOW_ICONS,
     playPipeDrop, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },
@@ -477,6 +483,10 @@ const INJECTION = `
     get startInput() { return startInput; },
     get endInput() { return endInput; },
     get flowCarLayer() { return flowCarLayer; }, CAR_STYLE,
+    // Strefa Traficara przychodzi fetchem, który tu nie odpowiada - test
+    // podstawia ją sam (zgłoszenie #157).
+    set zoneData(v) { zoneData = v; },
+    get carZoneLayer() { return carZoneLayer; }, zoneToggle, refreshZoneLayer,
     get flowBikeLayer() { return flowBikeLayer; },
     get flowBikeRideLayer() { return flowBikeRideLayer; },
     BIKE_STYLE, BIKE_UNKNOWN_STYLE,

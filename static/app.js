@@ -454,14 +454,13 @@ const bikesElectricToggle = $('bikes-electric-toggle');
 const flowOnScreen = () => !!flowLayer;
 
 function cityCarMarkers(cars) {
-    return cars.map(car => L.circleMarker([car.lat, car.lon], carStyle(car)).bindTooltip(
+    return cars.map(car => carMarker(car,
         `<b>${carName(car)}</b><br>` +
         // Opis miejsca postoju bywa w feedzie pusty - pusta linijka w dymku
         // wyglądałaby jak brakująca treść.
         (car.where ? `${esc(car.where)}<br>` : '') +
         `Paliwo ${car.fuel}%, zasięg ${car.range} km<br>` +
         ogarniamText(car.ogarniam),
-        {direction: 'top', offset: [0, -4], opacity: 1},
     ));
 }
 
@@ -482,6 +481,7 @@ function loadCityCars() {
     fetch('/api/cars').then(r => r.json()).then(data => {
         if (data.error || !carsOn || flowOnScreen()) return;
         if (cityCarLayer) map.removeLayer(cityCarLayer);
+        hideCarZone();
         // Feed miasta oddaje wszystkie auta - dostawczaki odsiewa się tutaj,
         // tym samym przełącznikiem, który przy mapie przepływów idzie do serwera.
         const vans = $('car-vans').checked;
@@ -519,6 +519,8 @@ function refreshCarLayer() {
     carsTimer = null;
     if (cityCarLayer) { map.removeLayer(cityCarLayer); cityCarLayer = null; }
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
+    hideCarZone();
+    refreshZoneLayer();
     // W rozkładach mapa jest o linii albo o przystanku - auta i rowery nie
     // mają tam czego dokładać, choćby włącznik został zapalony.
     if (!carsOn || plannerSuspended) return;
@@ -575,8 +577,7 @@ function setBikeKind(kind, on) {
     }
     bikesOn = bikeRegularOn || bikeElectricOn;
     saveUiState({bikesOn});
-    paintLayerButton(bikesToggle, bikeRegularOn);
-    if (bikesElectricToggle) paintLayerButton(bikesElectricToggle, bikeElectricOn);
+    paintBikeButtons();
     refreshBikeLayer();
     replanForBikes();
 }
@@ -587,8 +588,7 @@ function setBikesOn(on) {
     bikeElectricOn = on;
     saveUiState({bikeRegularOn: on, bikeElectricOn: on, bikesOn: on});
     bikesOn = on;
-    paintLayerButton(bikesToggle, on);
-    if (bikesElectricToggle) paintLayerButton(bikesElectricToggle, on);
+    paintBikeButtons();
     refreshBikeLayer();
     replanForBikes();
 }
@@ -598,16 +598,130 @@ if (carsToggle) {
     paintLayerButton(carsToggle, carsOn);
 }
 
+// Strefa, w której da się oddać auto Traficara (zgłoszenie #157). Na własnym
+// panelu pod kropkami: ma być tłem, a nie zasłaniać aut ani łapać najechania.
+map.createPane('traficarZone').style.zIndex = 350;
+const zoneRenderer = L.canvas({pane: 'traficarZone'});
+const ZONE_STYLE = {renderer: zoneRenderer, interactive: false, weight: 1.5,
+                    color: '#6a1b9a', fillColor: '#ab47bc', fillOpacity: 0.12};
+// Wycięte ze strefy miejsca, gdzie oddać nie wolno (Rynek i podobne).
+const NO_ZONE_STYLE = {...ZONE_STYLE, color: '#c62828', fillColor: '#ef5350',
+                       fillOpacity: 0.3};
+// Dokąd przestawić auto z relokacją w „Ogarniam" - złoto, jak obwódka
+// takiego auta (CAR_OGARNIAM_STYLE).
+const RELOCATION_STYLE = {...ZONE_STYLE, color: '#f9a825', fillColor: '#fdd835',
+                          fillOpacity: 0.35};
+let zoneOn = !!uiState.zoneOn;
+let zoneLayer = null;       // strefa na stałe, z przycisku 🅿
+let carZoneLayer = null;    // strefa pod kursorem, przy jednym aucie
+let hoveredCar = null;
+let zoneData = null;        // granice zmieniają się rzadko - pobrane raz, starczą
+const zoneToggle = $('zone-toggle');
+
+/** Strefa z serwera - za pierwszym razem pobrana, potem z pamięci. */
+function withZone(fn) {
+    if (zoneData) { fn(zoneData); return; }
+    fetch('/api/traficar-zone').then(r => r.json()).then(data => {
+        if (data.error) return;
+        zoneData = data;
+        fn(data);
+    }).catch(() => {});
+}
+
+function zoneShapes(data) {
+    return [
+        L.geoJSON({type: 'MultiPolygon', coordinates: data.end}, ZONE_STYLE),
+        L.geoJSON({type: 'MultiPolygon', coordinates: data.no_end}, NO_ZONE_STYLE),
+    ];
+}
+
+/** Przycisk 🅿 jest tylko wtedy, gdy włączono go w ustawieniach (Layout),
+    a i wtedy - jak sama strefa - tylko przy zapalonych autach i poza
+    rozkładami: strefa bez aut nie ma sensu (patrz refreshCarLayer, który
+    to woła). */
+function refreshZoneLayer() {
+    const available = $('zone-button').checked && carsOn && !plannerSuspended;
+    zoneToggle.hidden = !available;
+    if (!available || !zoneOn) {
+        if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
+        return;
+    }
+    if (zoneLayer) return;
+    withZone(data => {
+        if (!zoneOn || zoneLayer || zoneToggle.hidden) return;
+        zoneLayer = L.layerGroup(zoneShapes(data)).addTo(map);
+    });
+}
+
+function setZoneOn(on) {
+    zoneOn = on;
+    saveUiState({zoneOn: on});
+    paintLayerButton(zoneToggle, on);
+    refreshZoneLayer();
+}
+
+if (zoneToggle) {
+    zoneToggle.addEventListener('click', () => setZoneOn(!zoneOn));
+    paintLayerButton(zoneToggle, zoneOn);
+}
+
+/** Najechanie na auto pokazuje, gdzie da się je zostawić - zawsze, bez
+    przycisku. Auto z relokacją w „Ogarniam" pokazuje dodatkowo, dokąd trzeba
+    je przestawić, żeby zniżka się należała. */
+function showCarZone(car) {
+    hoveredCar = car;
+    withZone(data => {
+        if (hoveredCar !== car) return;
+        hideCarZone();
+        hoveredCar = car;
+        const layers = zoneLayer ? [] : zoneShapes(data);
+        if ((car.ogarniam || []).some(task => task.co === 'Relokacja')) {
+            layers.push(L.geoJSON(
+                {type: 'MultiPolygon', coordinates: data.relocation}, RELOCATION_STYLE));
+        }
+        carZoneLayer = L.layerGroup(layers).addTo(map);
+    });
+}
+
+function hideCarZone() {
+    hoveredCar = null;
+    if (carZoneLayer) { map.removeLayer(carZoneLayer); carZoneLayer = null; }
+}
+
+/** Kropka auta z dymkiem i strefą pod kursorem - wspólne dla warstwy miasta
+    i mapy przepływów. */
+function carMarker(car, tooltipHtml) {
+    return L.circleMarker([car.lat, car.lon], carStyle(car))
+        .bindTooltip(tooltipHtml, {direction: 'top', offset: [0, -4], opacity: 1})
+        .on('mouseover', () => showCarZone(car))
+        .on('mouseout', hideCarZone);
+}
+
+/** Jeden przycisk rowerów zamiast dwóch (opcja w Layout): ⚡ znika, a 🚲
+    włącza i gasi oba rodzaje naraz - i świeci, gdy świeci choć jeden. */
+function bikesMerged() {
+    return $('bikes-merged').checked;
+}
+
+function paintBikeButtons() {
+    const merged = bikesMerged();
+    bikesElectricToggle.hidden = merged;
+    bikesToggle.title = merged ? 'Rowery miejskie (WRM)'
+        : 'Rowery miejskie zwykłe, bez wspomagania (WRM)';
+    bikesToggle.setAttribute('aria-label', merged ? 'Pokaż rowery miejskie'
+        : 'Pokaż zwykłe rowery miejskie');
+    paintLayerButton(bikesToggle, merged ? bikesOn : bikeRegularOn);
+    paintLayerButton(bikesElectricToggle, bikeElectricOn);
+}
+
 if (bikesToggle) {
-    bikesToggle.addEventListener('click',
-                                 () => setBikeKind('regular', !bikeRegularOn));
-    paintLayerButton(bikesToggle, bikeRegularOn);
+    bikesToggle.addEventListener('click', () => (bikesMerged()
+        ? setBikesOn(!bikesOn) : setBikeKind('regular', !bikeRegularOn)));
 }
 
 if (bikesElectricToggle) {
     bikesElectricToggle.addEventListener(
         'click', () => setBikeKind('electric', !bikeElectricOn));
-    paintLayerButton(bikesElectricToggle, bikeElectricOn);
 }
 
 // Kadrowanie wyniku potrzebuje współrzędnych startu i celu, a te znamy
@@ -824,7 +938,14 @@ function loadLookPrefs() {
 // Przy schowanych suwakach zapamiętane wartości są celowo POMIJANE - inaczej
 // czyjeś stare ustawienia z localStorage przykryłyby domyślne na zawsze, bez
 // żadnej kontrolki, którą dałoby się je cofnąć.
-const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING ? loadLookPrefs() : {})};
+//
+// Z pamięci bierze się też tylko to, co ma jeszcze suwak (LOOK_TUNED) - te
+// same obawy dotyczą suwaków skasowanych.
+const LOOK_TUNED = ['maxWeight', 'dimFactor', 'labelStep', 'labelScale',
+                    'labelOpacity'];
+const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING ? Object.fromEntries(
+    Object.entries(loadLookPrefs()).filter(([key]) => LOOK_TUNED.includes(key)))
+    : {})};
 
 const lookOpacity = rel => look.minOpacity + (look.maxOpacity - look.minOpacity) * rel;
 const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * rel;
@@ -2151,22 +2272,35 @@ function timetableLinesHtml(data, mapSec) {
     for (const {d, secs} of groups.values()) {
         const przed = mapSec === undefined ? [] : secs.filter(s => s < mapSec);
         const po = mapSec === undefined ? secs : secs.filter(s => s >= mapSec);
-        const pokazane = [...(dotOpts.ttPast ? przed : []), ...po].slice(0, TT_TIMES_MAX);
+        // Z szarych tylko ostatnia - "uciekło ci o 3 minuty" - bo starsze
+        // zajmowały miejsca godzinom, na które się zdąży, i wypychały je
+        // z wiersza (Lutosławskiego: sześć szarych 310, żadnej na czas).
+        const szare = dotOpts.ttPast ? przed.slice(-1) : [];
+        const miejsce = TT_TIMES_MAX - szare.length;
+        const ciete = po.length > miejsce;
+        const pokazane = [...szare, ...(ciete ? po.slice(0, miejsce - 1) : po)];
         if (!pokazane.length) continue;
-        rows.push({d, pokazane, zdazy: po.length > 0, first: po.length ? po[0] : pokazane[0]});
+        rows.push({d, pokazane, ostatni: ciete ? po[po.length - 1] : null,
+                   zdazy: po.length > 0, first: po.length ? po[0] : pokazane[0]});
     }
     // Linie, na które według mapy już się nie zdąży (same szare godziny), na
     // koniec - przy ciasnym suwaku nie mogą wypchnąć tych, w które się wsiądzie.
     rows.sort((a, b) => (b.zdazy - a.zdazy) || (a.first - b.first));
     const list = rows.slice(0, timetableRows());
     const flows = list.some(r => FLOW_ICONS[r.d.flow]);
-    const html = list.map(({d, pokazane}) =>
+    // Nadmiar zwija się do końca okna: godzina ostatniego kursu, którym się
+    // zdąży, a nie kolejne pozycje. Tylko gdy lista sięga końca mapy
+    // (`horizon`) - kropka wybranej trasy ma listę uciętą po sztukach,
+    // więc jej ostatnia godzina niczego nie znaczy.
+    const doKonca = ostatni => ostatni === null ? ''
+        : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
+    const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
         `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
-            `${esc(fmtClock(s))}</span>`).join('') + '</span>' +
+            `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
         routeButtonHtml(d, 'trasa') + '</li>',
     ).join('');
     return head + `<ul class="tt-rows tt-lines${flows ? ' has-flow' : ''}">${html}</ul>`;
@@ -2277,7 +2411,8 @@ function withArrivals(data, lines, fromSec) {
     z podróżą, o którą pytamy. */
 function keepWithinHorizon(data, deadline) {
     if (!deadline) return data;
-    return {...data, departures: data.departures.filter(d => d.sec <= deadline)};
+    return {...data, horizon: deadline,
+            departures: data.departures.filter(d => d.sec <= deadline)};
 }
 
 /** Zwija powtórzenia tej samej linii w JEDEN wiersz z częstotliwością.
@@ -2420,7 +2555,12 @@ function loadTimetable(dot, where, sec) {
     // węźle część odjazdów odsiewamy, a przy kropce wybranej trasy pytamy
     // o tyle, ile suwak w ogóle pozwala pokazać. Bez tego serwerowa domyślna
     // ósemka byłaby cichym sufitem mocniejszym od suwaka.
-    query.limit = TIMETABLE_FETCH;
+    // Kropka mapy pyta do końca mapy, nie o sztuki: na ruchliwym węźle
+    // czterdzieści odjazdów wszystkich linii kończyło się przed godziną,
+    // o której pasażer tu staje, i kursy z mapy wypadały przed odsiewem
+    // (Śliczna: 113 o 15:59 i 16:14 znikały za 15:55).
+    if (where.deadline) query.until_sec = where.deadline;
+    else query.limit = TIMETABLE_FETCH;
     emitTimetable(dot, TIP_LOADING);
     fetch('/api/timetable?' + new URLSearchParams(query))
         .then(r => r.json())
@@ -2513,7 +2653,7 @@ const FLOW_DOT_STYLE = {radius: 4, weight: 2, color: '#263238',
 
 // Kropka waży tyle, co to, co przy niej leży: jej krycie idzie z jasności
 // węzła (backend, patrz planner._transfer_nodes) przez tę samą skalę, co
-// krycie kawałków - więc suwak „najbledsza linia" rusza jedno i drugie razem.
+// krycie kawałków - więc blade kropki są tam, gdzie blade linie.
 // Bez tego blada okolica dostawała kropki tak samo mocne, jak najszybsza
 // trasa, i to one niosły ciężar obrazka zamiast linii.
 const flowDotStyle = (w = 1) => {
@@ -2588,10 +2728,7 @@ function carName(car) {
     się przy nim jest - plus to, czego o nim nie wiemy: ile stąd do celu
     w linii prostej i ani słowa o czasie jazdy. */
 function flowCarMarkers(cars) {
-    return (cars || []).map(car => L.circleMarker([car.lat, car.lon], carStyle(car))
-        .bindTooltip(carTooltipHtml(car), {
-        direction: 'top', offset: [0, -4], opacity: 1,
-    }));
+    return (cars || []).map(car => carMarker(car, carTooltipHtml(car)));
 }
 
 function carTooltipHtml(car) {
@@ -2600,6 +2737,11 @@ function carTooltipHtml(car) {
         `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
         `pieszo z „${esc(car.from)}”`,
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
+        // Auta i tak zostają na mapie - oddać je na granicy strefy bywa
+        // sensowne, byle wiedzieć przed wyruszeniem (zgłoszenie #157).
+        ...(lastFlow.cars_dest_in_zone === false ? [
+            '<b>⚠ Cel poza strefą Traficara — tam auta nie oddasz</b>',
+        ] : []),
         ...(dotOpts.carTimes ? [
             `W celu ok. ${fmtClock(car.arrival)} — ${fmtMins(car.drive_sec)} ` +
             'jazdy z ruszeniem i parkowaniem',
@@ -3710,6 +3852,9 @@ function queryParams() {
         car_overhead_sec: (Number($('car-overhead').value) * 60).toFixed(0),
         // Mapa z wartości podróży jest domyślna; stara wraca przełącznikiem.
         value_map: $('old-map').checked ? '0' : '1',
+        // Jazda tym samym kursem zamiast marszu jest domyślna; stara reguła
+        // bliźniaków wraca przełącznikiem.
+        same_vehicle: $('old-twins').checked ? '0' : '1',
     });
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
     // wynika z samej gęstości z suwaka.
@@ -3977,6 +4122,8 @@ function search() {
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
     saveLastSearch();
+    if (!onboardOn) rememberPlace('start', startInput.value);
+    rememberPlace('end', endInput.value);
     // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
     // zakładce „Trasy".
@@ -4081,6 +4228,58 @@ function suggestionHtml(item) {
          + `<mark>${esc(item.name.slice(item.at, item.at + item.len))}</mark>`
          + esc(item.name.slice(item.at + item.len)) + tag;
 }
+
+// Ostatnie miejsca, OSOBNO dla "skąd" i "dokąd" (#142): wpisując "p" w starcie
+// ma wyjść najpierw pl. Grunwaldzki, z którego się zawsze jeździ, a nie
+// pl. Legionów, który jest wyżej alfabetycznie. Same nazwy, bez całych relacji
+// - wersja lekka. Tylko w tej przeglądarce, więc telefon ma swoją listę.
+const RECENT_PLACES_KEY = 'metal-planner:recent-places';
+const RECENT_PLACES_MAX = 10;
+
+function loadRecentPlaces() {
+    try {
+        return JSON.parse(localStorage.getItem(RECENT_PLACES_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+/** Kliknięty punkt ("(51.0720, 17.0921)") nie jest nazwą, którą dałoby się
+    wpisać, więc go nie zapamiętujemy - zapamiętujemy tylko etykiety z listy
+    przystanków. */
+function rememberPlace(side, label) {
+    if (!STOP_KIND.has(label)) return;
+    const recent = loadRecentPlaces();
+    recent[side] = [label, ...(recent[side] || []).filter(name => name !== label)]
+        .slice(0, RECENT_PLACES_MAX);
+    try {
+        localStorage.setItem(RECENT_PLACES_KEY, JSON.stringify(recent));
+    } catch {
+        // localStorage niedostępny - podpowiedzi działają dalej, tylko bez historii
+    }
+}
+
+/** Trafienia z ostatnich miejsc na początek, od najświeższego; reszta
+    w swojej dotychczasowej kolejności. */
+function recentFirst(items, recent) {
+    const rank = name => {
+        const i = recent.indexOf(name);
+        return i < 0 ? recent.length : i;
+    };
+    return items.map((item, i) => ({item, i}))
+        .sort((a, b) => rank(a.item.name) - rank(b.item.name) || a.i - b.i)
+        .map(({item}) => item);
+}
+
+// Ostatnie miejsca szukane osobno w ich krótkiej liście, żeby przy jednej
+// literze nie sortować tysięcy trafień ze wszystkich przystanków.
+const suggestRecentFirst = side => query => {
+    const recent = (loadRecentPlaces()[side] || []).filter(name => STOP_KIND.has(name));
+    const hits = recentFirst(suggestionsFor(query, recent, undefined, Infinity), recent);
+    const rest = suggestionsFor(query, STOP_LABELS, undefined, MAX_SUGGESTIONS + hits.length)
+        .filter(item => !recent.includes(item.name));
+    return [...hits, ...rest].slice(0, MAX_SUGGESTIONS);
+};
 
 /** Klawiatura, ARIA i zamykanie listy są tu raz; co dokładnie się podpowiada
     i jak wygląda wiersz, wołający może podmienić:
@@ -4191,11 +4390,11 @@ function attachAutocomplete(input, onPick, options = {}) {
 attachAutocomplete(startInput, () => {
     if (isPoint(sel.start)) { sel.start = null; updatePointMarker('start', null); }
     if (endInput.value) search();
-});
+}, {suggest: suggestRecentFirst('start')});
 attachAutocomplete(endInput, () => {
     if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
     if (startInput.value) search();
-});
+}, {suggest: suggestRecentFirst('end')});
 
 $('swap').addEventListener('click', () => {
     const previous = [sel.start, sel.end];
@@ -4319,7 +4518,8 @@ showWalkPace();
 // Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
 // wygląda tak, jak wyglądała przed zgłoszeniem #147.
 for (const [id, domyslnie] of [['car-groups', false], ['car-vans', false],
-                               ['latest-start', false], ['old-map', false]]) {
+                               ['latest-start', false], ['old-map', false],
+                               ['old-twins', false]]) {
     const input = $(id);
     const zapisane = loadDevPrefs()[id];
     input.checked = zapisane === undefined ? domyslnie : zapisane === true;
@@ -4343,6 +4543,48 @@ function showStartMode(on) {
     if (!on && onboardOn) setStartMode(false);
 }
 
+const bikesMergedInput = $('bikes-merged');
+bikesMergedInput.checked = loadDevPrefs()['bikes-merged'] === true;
+paintBikeButtons();
+bikesMergedInput.addEventListener('change', () => {
+    saveDevPref('bikes-merged', bikesMergedInput.checked);
+    paintBikeButtons();
+});
+
+// Propozycje tras da się schować w całości (opcja w Layout) - zostaje sama
+// mapa. Znika lista i jej nagłówek ze strzałką, ale nie komunikaty w tym
+// samym miejscu („Szukam połączeń…", błędy): te mówią o wyszukiwaniu, nie
+// o propozycjach. Na telefonie znika też zakładka „Trasy".
+const routesHidden = $('routes-hidden');
+
+function showRoutes(on) {
+    document.body.classList.toggle('routes-off', !on);
+    // Ustawienia samej listy bez listy nic nie zmieniają.
+    $('fold-transfer').hidden = !on;
+    const onRoutes = document.body.classList.contains('view-list')
+        && !document.body.classList.contains('mode-timetable');
+    if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
+}
+
+routesHidden.checked = loadDevPrefs()['routes-hidden'] === true;
+showRoutes(!routesHidden.checked);
+// Widok telefonu wraca na ostatnią zakładkę dopiero pod koniec wczytywania -
+// wtedy okazuje się, czy nie stoi się na schowanej „Trasy".
+document.addEventListener('DOMContentLoaded', () => showRoutes(!routesHidden.checked));
+routesHidden.addEventListener('change', () => {
+    saveDevPref('routes-hidden', routesHidden.checked);
+    showRoutes(!routesHidden.checked);
+});
+
+// Przycisk strefy Traficara (🅿) - domyślnie go nie ma, strefa pokazuje się
+// wtedy tylko pod kursorem (patrz refreshZoneLayer).
+const zoneButton = $('zone-button');
+zoneButton.checked = loadDevPrefs()['zone-button'] === true;
+zoneButton.addEventListener('change', () => {
+    saveDevPref('zone-button', zoneButton.checked);
+    refreshZoneLayer();
+});
+
 startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
 showStartMode(startModeSwitch.checked);
 startModeSwitch.addEventListener('change', () => {
@@ -4357,12 +4599,10 @@ startModeSwitch.addEventListener('change', () => {
 // bez ponownego zapytania. Wartości są już dobrane (siedzą w LOOK_DEFAULTS),
 // więc cała sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca
 // ją, gdyby trzeba było stroić od nowa.
+// Grubość linii to grubość najjaśniejszej: na mapie z wartości podróży
+// każda linia jest najjaśniejsza (patrz look-weight w index.html).
 const LOOK_KNOBS = {
-    'look-min-op': 'minOpacity',
-    'look-max-op': 'maxOpacity',
-    'look-min-w': 'minWeight',
-    'look-max-w': 'maxWeight',
-    'look-casing': 'casingFrom',
+    'look-weight': 'maxWeight',
     'look-dim': 'dimFactor',
     'look-label-step': 'labelStep',
     'look-label-size': 'labelScale',

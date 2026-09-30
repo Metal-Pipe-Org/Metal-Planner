@@ -197,6 +197,18 @@ def test_the_board_lists_departure_times_per_line(front):
     _check(front, "tablica_godziny_w_wierszu_linii")
 
 
+def test_recent_places_come_first_in_suggestions(front):
+    """Ostatnio wyszukiwane miejsca stoją w podpowiedziach na początku, od
+    najświeższego, a reszta trafień zostaje w swojej kolejności (#142)."""
+    _check(front, "podpowiedzi_ostatnie_miejsca_pierwsze")
+
+
+def test_a_full_board_row_keeps_the_times_you_can_still_catch(front):
+    """Za dużo godzin w wierszu: z szarych zostaje ostatnia, a nadmiar godzin
+    na czas zwija się do "… do" ostatniego kursu, którym się zdąży."""
+    _check(front, "tablica_zwija_nadmiar_godzin")
+
+
 def test_timetable_bubble_names_line_direction_and_wait(front):
     """Dymek odpowiada na "czym stąd pojadę": godzina, numer w kolorze
     środka transportu, kierunek i za ile - a kolejny kurs tej samej linii
@@ -515,6 +527,14 @@ def test_the_car_says_what_is_there_to_earn(front):
     najeżdżać po kolei na wszystkie. Auto bez nagrody mówi to wprost, bo
     milczenie znaczyłoby naraz „nic tu nie ma" i „nie wiadomo"."""
     _check(front, "ogarniam_widac_na_aucie")
+
+
+def test_the_drop_off_zone_shows_under_the_cursor(front):
+    """Zgłoszenie #157: najechanie na auto pokazuje strefę, w której da się je
+    oddać, a przy aucie z relokacją w „Ogarniam" także strefę, do której
+    trzeba je przestawić. Przycisk trzymający strefę na stałe pojawia się
+    dopiero po włączeniu go w ustawieniach."""
+    _check(front, "strefa_traficara_pod_kursorem")
 
 
 # ------------------------------------------------------ rower na mapie -

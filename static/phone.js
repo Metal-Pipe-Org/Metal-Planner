@@ -98,46 +98,10 @@ const phoneLayout = (() => {
         document.getElementById('clear').addEventListener('click', () => collapse(false));
     }
 
-    // Ustawienia tylko dla telefonu w panelu ⚙ (sekcja Layout).
-    // Zapamiętane pod własnym kluczem - to ustawienia układu, nie mapy.
+    // Klucz dawnych ustawień tylko dla telefonu (zakładka „Trasy" - dziś
+    // wspólna opcja „Ukryj propozycje tras", patrz app.js). Zostaje, żeby
+    // reset ustawień sprzątał to, co mogło zostać w przeglądarce.
     const PREFS_KEY = 'metal-planner:phone-prefs';
-    let prefs = {};
-    try {
-        prefs = JSON.parse(localStorage.getItem(PREFS_KEY)) || {};
-    } catch {
-        // localStorage niedostępny - zostają ustawienia domyślne
-    }
-
-    const PHONE_SWITCHES = {
-        'phone-routes-tab': {
-            key: 'routesTab',
-            show(on) {
-                document.body.classList.toggle('routes-tab-off', !on);
-                // Schowana zakładka nie może zostać tą, na którą się patrzy.
-                const onRoutes = document.body.classList.contains('view-list')
-                    && !document.body.classList.contains('mode-timetable');
-                if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
-            },
-        },
-    };
-
-    for (const [id, {key, show}] of Object.entries(PHONE_SWITCHES)) {
-        const input = document.getElementById(id);
-        if (!input) continue;
-        input.checked = prefs[key] ?? input.defaultChecked;
-        // Po app.js, nie od razu: tryb „w pojeździe" i widok przywraca dopiero
-        // on, a wcześniej nie byłoby czego poprawiać.
-        document.addEventListener('DOMContentLoaded', () => show(input.checked));
-        input.addEventListener('change', () => {
-            prefs[key] = input.checked;
-            try {
-                localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-            } catch {
-                // localStorage niedostępny - działa do odświeżenia strony
-            }
-            show(input.checked);
-        });
-    }
 
     /** Ile mapy od góry i od dołu zasłaniają nakładki - kadr trasy ma się
         zmieścić między nimi. Kadrujemy zawsze pod widok mapy, także wtedy,
