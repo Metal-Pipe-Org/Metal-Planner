@@ -1,7 +1,7 @@
 name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 
-# Zasada: 14 dni bez niczyjego wpisu → pytamy autora, czy temat jest aktualny,
-# i dajemy etykietę "stale". Kolejne 7 dni ciszy → zamykamy jako „not
+# Zasada: 14 dni bez niczyjego wpisu → pytamy autora i przypisanych, czy temat
+# jest aktualny, i dajemy etykietę "stale". Kolejne 7 dni ciszy → zamykamy jako „not
 # planned" i etykieta "stale" zostaje. Zamknięte nie znika: po etykiecie da
 # się je odnaleźć, a otwiera się je jednym kliknięciem.
 #
@@ -36,6 +36,8 @@ on:
 
 permissions:
   issues: write
+  # Tylko na skrypt wysyłki na Discorda z `main`.
+  contents: read
 
 env:
   LABEL_STALE: "stale"
@@ -55,9 +57,23 @@ jobs:
       REPO: ${{ github.repository }}
 
     steps:
+      - name: Pobierz skrypt wysyłki na Discorda
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Przypomnij albo zamknij
+        # Przypomnienie i zamknięcie robimy naszym tokenem, a takich zdarzeń
+        # GitHub nie przekazuje do discord.yml — na Discorda wysyłamy stąd.
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
         run: |
           set -euo pipefail
+          source .discord/.github/scripts/discord.sh
 
           # Gdy etykieta już jest (np. założona ręcznie), zostaje jak jest.
           gh label create "$LABEL_STALE" --repo "$REPO" --color EDEDED \
@@ -113,13 +129,20 @@ jobs:
                   elif $ping != null and $labeled then "unlabel"
                   else "none" end')
 
+            # Autor najlepiej wie, czy temat jest nadal potrzebny, a przypisani
+            # powinni wiedzieć, że to, co mają na sobie, stoi. Autor przypisany
+            # sam do siebie dostaje jeden ping, nie dwa.
+            who=$(jq -r '[.user.login] + [.assignees[].login] | unique | map("@" + .) | join(" ")' \
+              "$RUNNER_TEMP/issue.json")
+
             case "$action" in
               ping)
-                author=$(jq -r .user.login "$RUNNER_TEMP/issue.json")
                 gh issue comment "$n" --repo "$REPO" --body "$MARKER
-          @$author od ${DAYS_QUIET} dni nic się tu nie dzieje. Jeśli to zgłoszenie ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni komentarz z uzasadnieniem, dlaczego jest nadal potrzebne. Bez takiego komentarza zostanie zamknięte jako „not planned”. Nic nie ginie: da się je odnaleźć po etykiecie \"$LABEL_STALE\" i otworzyć ponownie jednym kliknięciem."
+          $who od ${DAYS_QUIET} dni nic się tu nie dzieje. Jeśli to zgłoszenie ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni komentarz z uzasadnieniem, dlaczego jest nadal potrzebne. Bez takiego komentarza zostanie zamknięte jako „not planned”. Nic nie ginie: da się je odnaleźć po etykiecie \"$LABEL_STALE\" i otworzyć ponownie jednym kliknięciem."
                 gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
-                echo "#$n: przypomnienie do @$author" | tee -a "$GITHUB_STEP_SUMMARY"
+                echo "#$n: przypomnienie do $who" | tee -a "$GITHUB_STEP_SUMMARY"
+                discord_send "⏳ $who, od ${DAYS_QUIET} dni cisza w **#$n $(jq -r .title "$RUNNER_TEMP/issue.json")** — jeśli ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni, dlaczego jest nadal potrzebne" \
+                  "" "$(jq -r .html_url "$RUNNER_TEMP/issue.json")"
                 ;;
               close)
                 gh issue comment "$n" --repo "$REPO" --body \
@@ -128,6 +151,8 @@ jobs:
                 gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
                 gh issue close "$n" --repo "$REPO" --reason "not planned"
                 echo "#$n: zamknięte po ciszy" | tee -a "$GITHUB_STEP_SUMMARY"
+                discord_send "🚫 **#$n $(jq -r .title "$RUNNER_TEMP/issue.json")** zamknięte po ciszy — nie robimy · $who" \
+                  "" "$(jq -r .html_url "$RUNNER_TEMP/issue.json")"
                 ;;
               unlabel)
                 gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL_STALE"

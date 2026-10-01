@@ -4,10 +4,10 @@ description: Oceń pull requesta i opisz ocenę w komentarzu pod nim
 
 Oceń pull requesta podanego w argumentach: $ARGUMENTS
 
-Argumenty niosą `REPO`, `PR_NUMBER` (numer PR-a) i `COMMENT_ID` — identyfikator
-komentarza „Claude czyta ten PR…", który workflow wstawił pod PR-em przed
-Twoim startem. Twoim wyjściem jest **podmiana treści tego komentarza** na gotową
-ocenę. Nie zakładaj nowego komentarza, nie wystawiaj recenzji (`gh pr review`),
+Argumenty niosą `REPO`, `PR_NUMBER` (numer PR-a) i `REVIEW_FILE` — ścieżkę
+pliku, do którego zapisujesz gotową ocenę. Twoim jedynym wyjściem jest **ten
+plik**: pod PR-em wstawia go workflow, nowym komentarzem z wzmianką autora.
+Nie pisz żadnych komentarzy, nie wystawiaj recenzji (`gh pr review`),
 nie zatwierdzaj ani nie blokuj PR-a i **nie zmieniaj kodu** — to tylko ocena
 do przeczytania przez człowieka.
 
@@ -78,15 +78,14 @@ Zasady oceniania:
 - Nie wymyślaj zastrzeżeń na siłę. Czysty PR opisuje się krótko i zielono.
 - Nie komentuj stylu formatowania, który i tak wyrównuje narzędzie.
 
-## 4. Wstaw ocenę
+## 4. Zapisz ocenę
 
-Zbuduj treść komentarza w pliku i podmień nią komentarz założony przez workflow:
+Zapisz całą treść oceny jednym poleceniem do pliku z `REVIEW_FILE`:
 
 ```bash
-cat > "$RUNNER_TEMP/review.md" <<'MD'
+cat > "<REVIEW_FILE>" <<'MD'
 ...treść oceny...
 MD
-gh api --method PATCH "repos/<REPO>/issues/comments/<COMMENT_ID>" -F body=@"$RUNNER_TEMP/review.md"
 ```
 
 Szablon treści — trzymaj się dokładnie tych sekcji i tej kolejności:
@@ -139,8 +138,8 @@ Zasady dla samej treści:
 - Przy „Wielkości PR-a" podaj liczby (pliki, `+`/`−`) i jedno zdanie oceny.
 - Sekcja „Do przemyślenia" może być pusta — wtedy napisz w niej jedno zdanie,
   że nic takiego nie widzisz. Nie wypełniaj jej watą.
-- Nie zostawiaj w treści znacznika `<!-- claude-review:pending -->`
-  z komentarza-zaczepki; po Twojej podmianie ma go nie być.
+- Nie dopisuj wzmianek (`@ktoś`) ani pozdrowień — wzmiankę autora dokłada
+  workflow pod oceną.
 
-Gdy podmiana komentarza się nie uda (np. `gh` zwróci błąd), spróbuj jeszcze raz,
-a potem zakończ z komunikatem o błędzie — nie zakładaj komentarza zastępczego.
+Plik zapisujesz dopiero z gotową oceną: workflow traktuje każdy niepusty plik
+jako skończoną ocenę, a jego brak jako nieudany bieg.

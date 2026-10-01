@@ -7,8 +7,9 @@ name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 #     albo opisie PR-a; tak samo liczy się nazwa gałęzi solvera
 #     (`claude/issue-78-20260903-2030`). Autor deklaruje: ten PR to załatwia.
 #       • PR otwarty  → zgłoszenie dostaje "waiting for PR review"
-#       • merge do `main` → etykieta znika, zgłoszenie dostaje notkę, że na
-#         `stable` zmiana trafi przy wydaniu, i zostaje zamknięte
+#       • merge do `main` → etykieta znika, a zgłoszenie zostaje zamknięte
+#     Komentarza o zamknięciu nie dopisujemy: oś czasu zgłoszenia i kanał na
+#     Discordzie i tak pokazują, który PR je zamknął.
 #
 #     Zamyka je zwykle sam GitHub: jego słowa kluczowe działają przy merge do
 #     gałęzi domyślnej, a tą jest `main` — czyli baza wszystkich zwykłych
@@ -16,8 +17,7 @@ name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 #     słowo kluczowe w samym TYTULE PR-a (GitHub czyta tylko opis i treść
 #     commitów), numer wzięty z nazwy gałęzi solvera (`claude/issue-78-...`)
 #     i luźniejsze zapisy, które nasz regexp przepuszcza, a GitHub nie. Gdy
-#     zgłoszenie jest już zamknięte, krok schodzi z drogi — ale notka
-#     o wydaniu leci zawsze, bez względu na to, kto zamknął.
+#     zgłoszenie jest już zamknięte, krok schodzi z drogi.
 #
 #  B. Samym numerem — `#78` gdzieś w tytule albo opisie, bez słowa
 #     kluczowego. To luźniejszy związek: PR dotyka tematu, ale nikt nie
@@ -42,9 +42,9 @@ name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 # z gałęzi domyślnej repozytorium (GITHUB_REF wskazuje default branch),
 # niezależnie od tego, do której gałęzi celuje PR. Za odsianie PR-ów
 # odpowiada filtr `branches`, działający na gałęzi bazowej: etykiety
-# obsługujemy dla PR-ów do `main` i do `stable`, a notkę o wydaniu razem
-# z zamknięciem tylko dla PR-ów do `main` — przy wydaniu `main` -> `stable`
-# te zgłoszenia są już dawno zamknięte.
+# obsługujemy dla PR-ów do `main` i do `stable`, a zamykanie tylko dla PR-ów
+# do `main` — przy wydaniu `main` -> `stable` te zgłoszenia są już dawno
+# zamknięte.
 on:
   pull_request_target:
     types: [opened, reopened, edited, ready_for_review, converted_to_draft, closed]
@@ -55,6 +55,8 @@ on:
 # nigdy przez podstawienie ${{ }} w środku basha.
 permissions:
   issues: write
+  # Tylko na skrypt wysyłki na Discorda z `main`.
+  contents: read
 
 env:
   LABEL_WAITING: "waiting for PR review"
@@ -267,30 +269,19 @@ jobs:
             echo "#$n: etykieta \"$LABEL_MERGED\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
           done
 
-      - name: Dopisz notkę o wydaniu
-        # Bez wartownika na stan: notkę ma dostać każde zgłoszenie ze słowem
-        # kluczowym, także to, które GitHub zdążył już zamknąć sam. Inaczej
-        # informację o tym, że na produkcji zmiana będzie dopiero po wydaniu
-        # `main` -> `stable`, dostawałaby losowa połowa zgłoszeń — zależnie od
-        # tego, czy zadziałało zamykanie GitHuba, czy nasz zapas niżej.
-        #
-        # Notka leci przed zamknięciem, żeby w osi czasu zgłoszenia stała nad
-        # nim, a nie pod.
+      - name: Pobierz skrypt wysyłki na Discorda
+        # Kod z `main`, nie z PR-a — przy `pull_request_target` to bezpieczne.
         if: >-
           steps.refs.outputs.keyword != ''
           && github.event.action == 'closed'
           && github.event.pull_request.merged == true
           && github.event.pull_request.base.ref == 'main'
-        env:
-          KEYWORD: ${{ steps.refs.outputs.keyword }}
-        run: |
-          set -euo pipefail
-
-          for n in $KEYWORD; do
-            gh issue comment "$n" --repo "$REPO" --body \
-              "Rozwiązane w #$PR. Zmiana jest na gałęzi \`main\`; na \`stable\` trafi przy najbliższym wydaniu."
-            echo "#$n: notka o wydaniu (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
-          done
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
 
       - name: Zamknij zgłoszenia, których GitHub nie zamknął sam
         # Zapas, nie główna droga. Przy `Closes #78` w opisie PR-a zamknięcie
@@ -302,6 +293,10 @@ jobs:
         # Wartownik na stan odsiewa oba przypadki naraz: zgłoszenie zamknięte
         # przed chwilą przez GitHuba i zamknięte dawniej ręcznie (duplikat,
         # „nie robimy"). Żadnego z nich nie chcemy domykać drugi raz.
+        #
+        # Zamknięcie naszym tokenem GitHub nie przekazuje innym workflow, więc
+        # discord.yml go nie zobaczy — wiadomość o zamknięciu, w tym samym
+        # kształcie co tam, wysyłamy stąd.
         if: >-
           steps.refs.outputs.keyword != ''
           && github.event.action == 'closed'
@@ -309,11 +304,17 @@ jobs:
           && github.event.pull_request.base.ref == 'main'
         env:
           KEYWORD: ${{ steps.refs.outputs.keyword }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MERGER: ${{ github.event.pull_request.merged_by.login }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
         run: |
           set -euo pipefail
+          source .discord/.github/scripts/discord.sh
 
           for n in $KEYWORD; do
-            state=$(gh api "repos/$REPO/issues/$n" --jq .state)
+            json=$(gh api "repos/$REPO/issues/$n")
+            state=$(printf '%s' "$json" | jq -r .state)
             if [ "$state" != open ]; then
               echo "#$n zamknął już GitHub (stan: $state) — nie ruszam."
               continue
@@ -322,4 +323,14 @@ jobs:
             gh issue close "$n" --repo "$REPO" --reason completed
             echo "Zamknięto #$n (PR #$PR) — GitHub tego nie zrobił" \
               | tee -a "$GITHUB_STEP_SUMMARY"
+
+            # Autora pingujemy, chyba że to on zmergował.
+            author=$(printf '%s' "$json" | jq -r .user.login)
+            if [ "$author" = "$MERGER" ]; then
+              author="**$author**"
+            else
+              author="@$author"
+            fi
+            discord_send "✅ **#$n $(printf '%s' "$json" | jq -r .title)** zamknięte przez PR **#$PR $PR_TITLE** · autor zgłoszenia: $author" \
+              "" "$(printf '%s' "$json" | jq -r .html_url)"
           done
