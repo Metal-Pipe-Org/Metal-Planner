@@ -491,7 +491,14 @@ def merge_into(db_path, stops, days, log=print):
         rows = to_gtfs_rows(days, stops, stop_id_map)
         db.executemany("INSERT OR REPLACE INTO stops VALUES (?, ?, ?, ?)", rows["stops"])
         db.executemany("INSERT OR REPLACE INTO routes VALUES (?, ?, ?, ?)", rows["routes"])
-        db.executemany("INSERT OR REPLACE INTO trips VALUES (?, ?, ?, ?, ?)", rows["trips"])
+        # Kolumny po nazwie, nie po kolejności: ten rozkład nie ma brygad
+        # (to cudze API, nie paczka GTFS - patrz to_gtfs_rows), więc kolumna
+        # `brigade_id` zostaje pusta i doklejenie nie może się wysypać o to,
+        # ile kolumn ma akurat tabela.
+        db.executemany(
+            "INSERT OR REPLACE INTO trips "
+            "(trip_id, route_id, service_id, trip_headsign, shape_id) "
+            "VALUES (?, ?, ?, ?, ?)", rows["trips"])
         db.executemany("INSERT INTO stop_times VALUES (?, ?, ?, ?, ?)", rows["stop_times"])
         db.executemany("INSERT INTO calendar_dates VALUES (?, ?, ?)", rows["calendar_dates"])
         db.commit()

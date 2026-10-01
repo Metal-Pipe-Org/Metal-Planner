@@ -888,7 +888,18 @@ WAIT_CAP_SEC = 1200     # przesiadka "łączy" segmenty, gdy czekanie <= 20 min
 
 DEFAULT_JOURNEY_LIMIT = 6     # domyślnie tyle propozycji tras szukamy/pokazujemy
 MIN_JOURNEY_LIMIT = 1
-MAX_JOURNEY_LIMIT = 20        # (suwak w UI go nadpisuje) - "na siłę" więcej wariantów
+# Sufit tego, o ile propozycji wolno poprosić. Sama mapa nie prosi o nic
+# (patrz /api/flow) i zostaje przy DEFAULT_JOURNEY_LIMIT, więc ta liczba
+# dotyczy wyłącznie tego, kto podaje `journey_limit` wprost - dziś asystenta
+# (assist.py). Podniesione z 20 do 60 właśnie dla niego: u niego z propozycji
+# powstają OPCJE, czyli pierwsze ruchy, a kilkanaście propozycji potrafi mieć
+# ten sam pierwszy ruch. Przy dwudziestu wariantach poszerzenie progu z 20 na
+# 30 minut potrafiło więc ZABRAĆ opcję (KRZYKI -> Rynek, znikało „127
+# z Wyścigowej"), bo dodatkowe warianty już pokazanych korytarzy wypychały
+# z limitu korytarz pokazany dotąd. Przy sześćdziesięciu ten sam przemiat
+# jest już niemalejący, a kosztuje tyle samo: cenę zapytania robi mapa, nie
+# wypisywanie ścieżek z gotowego grafu (zmierzone 2026-09-20).
+MAX_JOURNEY_LIMIT = 60
 MAX_JOURNEY_CHAIN_LEGS = 4    # maks. liczba etapów przejazdu w jednej propozycji
 MAX_JOURNEY_CANDIDATES = 18   # tyle łańcuchów zbieramy przed sortowaniem/ucięciem PRZY
                               # DOMYŚLNYM limicie (patrz CANDIDATES_PER_JOURNEY niżej)
@@ -1166,7 +1177,7 @@ def plan_flow(start_query, end_query, when=None,
               start_point=None, end_point=None, density=None, more=None,
               car_count=None, journey_limit=None, transfer_gain_sec=None,
               use_bikes=False, bike_count=None, car_groups=False, car_vans=False,
-              in_vehicle=None):
+              in_vehicle=None, window_sec=None, fastest_journey=False):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -1261,7 +1272,8 @@ def plan_flow(start_query, end_query, when=None,
     if in_vehicle:
         ride = onboard.find_ride(day, in_vehicle.get("num"),
                                  in_vehicle.get("mode"), in_vehicle.get("stop"),
-                                 asked_sec, in_vehicle.get("headsign"))
+                                 asked_sec, in_vehicle.get("headsign"),
+                                 in_vehicle.get("trip"))
         if "error" in ride:
             return ride
 
@@ -1373,6 +1385,25 @@ def plan_flow(start_query, end_query, when=None,
         best_legs = _reconstruct(day, best_journey, best_stop, geo_db)
         fastest = _fastest_summary(best_legs, best_arr, dep_sec)
 
+        # Najszybsza trasa jako PEŁNA propozycja, na życzenie. Lista propozycji
+        # czyta się z narysowanego grafu i czasem nie umie złożyć z niego
+        # akurat tej trasy (patrz _enumerate_journeys) - mapie to nie szkodzi,
+        # bo najszybszą trasę i tak rysuje i pokazuje paskiem nad sobą. Komu
+        # szkodzi, to asystentowi (assist.py): u niego propozycje są jedynym
+        # źródłem opcji, więc brak tej jednej znaczy, że człowiek nie zobaczy
+        # ruchu, który dowozi najwcześniej ze wszystkich.
+        #
+        # Osobne pole i osobna prośba, a nie dopisanie do `journeys`: lista
+        # propozycji mapy ma zostać dokładnie taka, jaka jest, a geometria
+        # trasy waży tyle, że mapa nie ma powodu wozić jej dwa razy.
+        fastest_item = None
+        if fastest_journey:
+            legs = [dict(leg) for leg in best_legs]
+            rides = [leg for leg in legs if leg["kind"] == "ride"]
+            if rides:
+                fastest_item = _summarize_journey(
+                    _drop_private(legs), rides, best_arr, dep_sec)
+
         # Próg mapy (punkt 2): tyle, ile mieści docelowa gęstość, a "pokaż
         # więcej" dokłada jej po jednej wyjściowej porcji. Mapy policzone po
         # drodze zostają w `networks` - ta przy wybranym progu jest tą
@@ -1394,8 +1425,19 @@ def plan_flow(start_query, end_query, when=None,
                     origin_latest, start_reach, frame_km2)
             return networks[deadline]
 
-        deadline, at_ceiling = _choose_deadline(network_at, best_arr,
-                                                density * (1 + more))
+        # Próg mapy albo próg PODANY WPROST. Mapa przepływów dobiera go tak,
+        # żeby sieć miała zadaną gęstość - bo tam miarą jest rysunek. Asystent
+        # (patrz assist.py) mierzy co innego i nazywa to wprost: "ile minut
+        # później niż najszybciej jestem w celu", więc podaje okno gotowe,
+        # zamiast szukać go po gęstości. Sufit jest wspólny i pilnowany tutaj,
+        # nie po stronie wołającego.
+        if window_sec is None:
+            deadline, at_ceiling = _choose_deadline(network_at, best_arr,
+                                                    density * (1 + more))
+        else:
+            window_sec = max(0, min(MAX_THRESHOLD_SEC, int(window_sec)))
+            deadline = best_arr + window_sec
+            at_ceiling = window_sec >= MAX_THRESHOLD_SEC
         network = network_at(deadline)
         earliest, profile = network["earliest"], network["profile"]
         kept, ranges = network["kept"], network["ranges"]
@@ -1581,6 +1623,10 @@ def plan_flow(start_query, end_query, when=None,
         # od najszybszego możliwego dojazdu do najpóźniejszego, jaki mapa
         # jeszcze rysuje (deadline). "Najszybciej X, pokazane do Y".
         "best_sec": best_arr - dep_sec,
+        # Najszybszy przyjazd na osi doby - punkt odniesienia miary "o ile
+        # później niż najszybciej" (patrz assist.py). Ta sama liczba co
+        # `best_arrival`, tylko nieprzepisana na zegar.
+        "best_arrival_sec": best_arr,
         "limit_sec": deadline - dep_sec,
         # Horyzont mapy na osi doby. Odjazd późniejszy nie należy do ŻADNEGO
         # rysowanego wariantu - to warunek konieczny, liczony z best_arr
@@ -1593,6 +1639,9 @@ def plan_flow(start_query, end_query, when=None,
         "more": more,
         "at_ceiling": at_ceiling,
         "fastest": fastest,
+        # Ta sama trasa co wyżej, ale opisana jak pozycja listy - tylko gdy
+        # o nią poproszono (patrz `fastest_journey`).
+        **({"fastest_journey": fastest_item} if fastest_item else {}),
         # Kiedy ta trasa RUSZA i za ile dni - czekanie ma być widoczne, nie
         # schowane (punkt 13). `day_offset` 0 to dzień z pytania.
         "starts": _fmt_time(best_dep),

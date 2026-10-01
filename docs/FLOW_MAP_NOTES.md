@@ -1972,3 +1972,41 @@ Zgłoszenia #114 i #130. Kontrakt punktu 15 przepisany na polecenie użytkownika
     żeby nie proponować kilkuset metrów jazdy ani całej podróży autem poza
     miasto — teraz takie opcje wchodzą, jeśli auto ma zasięg, i konkurują
     godziną przyjazdu.
+
+## Sufit liczby propozycji podniesiony dla asystenta (2026-09-20)
+
+Asystent podróży (`assist.py`, trzeci widok) czyta opcje wprost z listy
+propozycji mapy: każdą sprowadza do PIERWSZEGO RUCHU („dojdź na tę krawędź
+i wsiądź w tę linię"), a kilkanaście propozycji potrafi mieć ten sam pierwszy
+ruch. Przy `MAX_JOURNEY_LIMIT = 20` znaczyło to, że **poszerzenie progu
+potrafiło ZABRAĆ opcję**: na relacji KRZYKI → Rynek przejście z 20 na 30 minut
+gubiło „127 z Wyścigowej", bo dodatkowe warianty korytarzy już pokazanych
+wypychały z limitu korytarz pokazany dotąd. To łamie trzeci warunek zasady 1
+z [PRINCIPLES.md](PRINCIPLES.md) — próg ma działać przewidywalnie w obie
+strony.
+
+Sufit podniesiony do 60. Mapa nie prosi o nic (`/api/flow` nie podaje
+`journey_limit`) i zostaje przy `DEFAULT_JOURNEY_LIMIT = 6`, więc ta zmiana
+nie dotyka ani jednego istniejącego widoku. Zmierzone na tej samej relacji
+(2026-09-20): przemiat progów 10/15/20/30/45 min daje przy 20 liczby
+3/5/6/5/5 pierwszych ruchów (niemonotoniczne), a przy 60 — 3/5/8/9/13
+(niemalejące). Koszt bez zmian: cenę zapytania robi liczenie mapy, nie
+wypisywanie ścieżek z gotowego już grafu.
+
+**Co z tego ZOSTAJE otwarte.** Przy dowolnym suficie lista propozycji wciąż
+nie jest tym samym co komplet pierwszych ruchów — jest tylko na tyle szeroka,
+że na przemiecie pięciu relacji nic już nie znikało. Asystent dokłada sobie
+osobno najszybszą trasę (`plan_flow`, `fastest_journey`), bo tej akurat lista
+potrafi nie zawierać wcale — i wtedy nagłówek obiecywałby godzinę, której nie
+osiąga ani jedna pokazana opcja.
+
+## Asystent mierzy od tego, co pokazał (2026-09-20)
+
+`best_arr` ze skanu liczy się z SAMYCH przystanków startowych, a propozycja
+wolno zacząć się dojściem na sąsiedni przystanek — i wtedy potrafi dowieźć
+**wcześniej** niż „najszybciej". Zmierzone: Świeradowska → pl. Grunwaldzki,
+16:22 wobec 16:24, przez co pierwsza opcja dostawała etykietę „+-2 min".
+Asystent bierze więc za punkt odniesienia najwcześniejszy przyjazd spośród
+opcji, które faktycznie pokazuje, i tnie na `min(deadline, ten przyjazd +
+okno)` — nigdy szerzej niż planner, bo dalej mapa przestaje być kompletna.
+Mapy przepływów to nie dotyka: tam `best_arr` dalej wyznacza skalę.

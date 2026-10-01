@@ -2680,3 +2680,258 @@ ul.tt-legend {
         bottom: calc(64px + env(safe-area-inset-bottom, 0px));
     }
 }
+
+/* ---------------------------------------------------- asystent podróży --- */
+
+/* Trzeci tryb panelu. Ta sama zasada, co przy rozkładach: karty wykluczają
+   się nawzajem i zajmują to samo miejsce, a klasa na <body> podmienia jedną
+   na drugą. Asystent zabiera z ekranu także pasek "ile trwa podróż" - opisuje
+   wynik wyszukiwania, którego w tym trybie nie ma. */
+#assist-card,
+#as-results { display: none; }
+
+body.mode-assist .search-card,
+body.mode-assist #results,
+body.mode-assist #timetable-card,
+body.mode-assist #tt-results { display: none; }
+
+body.mode-assist #assist-card { display: block; }
+body.mode-assist #as-results { display: block; }
+body.mode-assist .time-headline { display: none; }
+
+/* Trzeci pływający przycisk - o jeden odstęp dalej niż ◷. */
+.icon-button.floating.third { left: calc(var(--sidebar-w) + 190px); }
+body.panel-hidden .icon-button.floating.third { left: 178px; }
+
+#assist-toggle {
+    width: auto;
+    gap: 7px;
+    padding: 0 14px 0 12px;
+}
+
+#assist-toggle span {
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.assist-card { display: flex; flex-direction: column; gap: 10px; }
+
+.as-fields { display: flex; flex-direction: column; gap: 8px; }
+
+/* `display: flex` bije atrybut `hidden` z HTML-a, a na nim stoi cały
+   przełącznik „stoję / jadę" i zejście do trzech pól. Bez tego karta
+   pokazywała naraz oba pytania - i pole „gdzie jestem", i numer boczny. */
+.as-fields[hidden],
+.as-fallback[hidden] { display: none; }
+
+.as-fallback {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--line);
+}
+
+/* Zdanie potwierdzające rozpoznanie pojazdu. Wyróżnione ramką, bo to jedyne
+   miejsce, w którym widać pomyłkę rozpoznania - a pomyłka tutaj psuje całą
+   dalszą odpowiedź. */
+.as-recognised {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: var(--surface-alt);
+    border-left: 3px solid var(--accent);
+    font-size: 13.5px;
+    line-height: 1.4;
+}
+
+.as-recognised .badge { margin-right: 4px; }
+.as-learned { color: var(--ink-faint); }
+
+/* Karta pracuje - pasek u góry zamiast kręciołka przy każdym polu: pytanie
+   przeliczają tu trzy różne rzeczy (pola, pokrętło, zegar). */
+.assist-card.busy { position: relative; overflow: hidden; }
+
+.assist-card.busy::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    height: 2px;
+    background: var(--accent);
+    animation: as-busy 1s linear infinite;
+}
+
+@keyframes as-busy {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+}
+
+/* --- to, co pod kartą --------------------------------------------------- */
+
+.as-note, .as-summary, .as-detail { margin-bottom: 10px; }
+
+.as-note.error { border-left: 3px solid #c62828; }
+
+.as-summary-line { margin: 0; font-size: 14.5px; }
+
+.as-summary-note {
+    margin: 6px 0 0;
+    color: var(--ink-soft);
+    font-size: 12.5px;
+}
+
+.as-detail { border-left: 4px solid var(--line, var(--accent)); }
+
+.as-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.as-detail-dir { font-weight: 600; flex: 1; }
+
+.as-later {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.as-later.best { background: #e7f3ea; color: #1b5e20; }
+
+.as-detail-line { margin: 0 0 4px; font-size: 13.5px; }
+
+.as-legs {
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.as-leg {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.as-leg.walk { color: var(--ink-soft); }
+.as-leg-icon { color: var(--walk); font-weight: 700; }
+.as-leg-dir { color: var(--ink-faint); }
+
+/* --- grupki numerów na mapie -------------------------------------------- */
+
+/* Numer stoi PRZY SWOJEJ KRAWĘDZI, a grupka jest jedna na krawędź (punkt 7
+   kontraktu - numerów wspólnego miejsca się nie rozsuwa). Kotwica w lewym
+   górnym rogu i przesunięcie w CSS zamiast iconAnchor: grupka rośnie wraz
+   z liczbą linii, a jej wysokości nie znamy w chwili tworzenia ikony. */
+.as-cluster {
+    /* Leaflet daje divIcon domyślne tło i ramkę - tu ma być sam napis. */
+    background: none;
+    border: none;
+    width: auto !important;
+    height: auto !important;
+    white-space: nowrap;
+    transform-origin: 0 0;
+}
+
+/* Przesuwamy CAŁĄ grupkę, nie każdy numer z osobna: przy dwóch liniach
+   z jednej krawędzi osobne przesunięcia rozjechałyby je względem słupka. */
+.as-cluster-inner {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    /* --lift podnosi grupkę, gdy inna zajmuje jej miejsce (patrz declutter
+       w assist.js); 9px to stały odstęp od samej krawędzi. */
+    transform: translate(-50%, calc(-100% - 9px - var(--lift, 0px)));
+}
+
+/* Kreska od podniesionej grupki do jej krawędzi - bez niej numer stałby
+   nad cudzym słupkiem. Przy grupce nieprzesuniętej ma wysokość samego
+   odstępu i po prostu dotyka kropki. */
+.as-leader {
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    width: 2px;
+    height: calc(9px + var(--lift, 0px));
+    margin-left: -1px;
+    background: rgba(22, 32, 43, 0.55);
+}
+
+.as-chip {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    margin: 0 2px;
+    padding: 3px 7px 4px;
+    border: 2px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(16, 32, 48, 0.28);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.as-chip-num {
+    color: var(--line);
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+}
+
+/* Ile minut pieszo na tę krawędź - tylko gdy w ogóle trzeba iść. */
+.as-chip-walk {
+    color: var(--walk);
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.as-chip-time {
+    color: var(--ink-soft);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.as-chip:hover { transform: translateY(-1px); }
+
+/* Przygaszone, nie schowane (punkt 8): opcja, której się w tej chwili nie
+   ogląda, ma dalej być widoczna bez najeżdżania. */
+.as-chip.dim { opacity: 0.45; }
+
+.as-chip.on {
+    background: var(--line);
+    border-color: var(--line);
+    box-shadow: 0 3px 12px rgba(16, 32, 48, 0.4);
+}
+
+.as-chip.on .as-chip-num,
+.as-chip.on .as-chip-time { color: #fff; }
+
+/* Grot na końcu kreski - obracany azymutem ostatniego odcinka (patrz
+   drawArrow w assist.js). Trójkąt z obramowań, żeby nie ciągnąć obrazka:
+   wierzchołek wskazuje w górę, a obrót ustawia go wzdłuż linii. */
+.as-arrow { background: none; border: none; }
+
+.as-arrow > span {
+    display: block;
+    width: 0;
+    height: 0;
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+    border-bottom: 15px solid var(--line);
+    opacity: var(--op, 1);
+    transform: translate(-50%, -50%) rotate(var(--turn, 0deg));
+    filter: drop-shadow(0 1px 2px rgba(16, 32, 48, 0.45));
+}

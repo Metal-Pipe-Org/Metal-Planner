@@ -42,6 +42,16 @@
         title="Rozkłady jazdy — linie i przystanki"
         aria-label="Przełącz: wyszukiwanie trasy albo rozkłady jazdy"
         aria-pressed="false">&#9719;<span>Rozkłady</span></button>
+{#
+  Asystent podróży - trzeci widok tej samej aplikacji (patrz static/assist.js).
+  Nie osobny adres i nie osobna instalacja: ta sama mapa, ta sama zgoda na
+  lokalizację, tylko przybliżona do człowieka i odpowiadająca na węższe
+  pytanie - "co mam teraz zrobić".
+#}
+<button id="assist-toggle" class="icon-button floating third"
+        title="Asystent podróży — co zrobić teraz"
+        aria-label="Przełącz: asystent podróży"
+        aria-pressed="false">&#10148;<span>Asystent</span></button>
 {% endif %}
 
 <aside id="sidebar">
@@ -311,6 +321,109 @@
 
     <div id="tt-results" class="results" aria-live="polite"></div>
 
+    {#
+      Trzeci tryb panelu - asystent. Tak samo jak rozkłady: ta sama półka co
+      karta wyszukiwania, klasa `mode-assist` na <body> podmienia jedno na
+      drugie.
+
+      W tej karcie jest WYŁĄCZNIE pytanie: gdzie jestem i dokąd chcę. Cała
+      ODPOWIEDŹ leży na mapie - to jest sens tego trybu i dlatego pod kartą
+      nie stoi lista wierszy „145 · za 3 min", tylko jedno zdanie o tym, co
+      widać, i - po wskazaniu opcji - jej dalszy przebieg.
+    #}
+    <div class="card assist-card" id="assist-card">
+
+        <div class="start-mode" id="as-where" role="group"
+             aria-label="Gdzie teraz jestem">
+            <button type="button" id="as-mode-place" class="seg active"
+                    aria-pressed="true">Stoję tutaj</button>
+            <button type="button" id="as-mode-ride" class="seg"
+                    aria-pressed="false">Już czymś jadę</button>
+        </div>
+
+        {# Stoję: przystanek, punkt na mapie albo moja lokalizacja. #}
+        <div class="as-fields" id="as-place-fields">
+            <div class="ac-field">
+                <input type="text" id="as-here" class="with-action" autocomplete="off"
+                       role="combobox" aria-label="Gdzie teraz jestem"
+                       aria-autocomplete="list" aria-expanded="false"
+                       aria-controls="as-here-list"
+                       placeholder="Gdzie jestem? np. Świeradowska">
+                <button id="as-locate" class="icon-button in-field"
+                        title="Użyj mojej lokalizacji"
+                        aria-label="Ustaw moje miejsce na lokalizacji">◎</button>
+                <ul class="ac-list" id="as-here-list" role="listbox" hidden
+                    aria-label="Podpowiedzi przystanków"></ul>
+            </div>
+        </div>
+
+        {#
+          Jadę: JEDNO pole zamiast trzech. Czterocyfrowa liczba z burty
+          pojazdu mówi o konkretnym wozie, a nie o linii - więc nie trzeba
+          pytać ani o kierunek, ani o najbliższy przystanek (patrz
+          sidenum.py i onboard.find_by_side).
+        #}
+        <div class="as-fields" id="as-ride-fields" hidden>
+            <div class="ob-field ob-field-line">
+                <label class="ob-field-label" for="as-side">Numer boczny z burty</label>
+                <input type="text" id="as-side" inputmode="numeric"
+                       maxlength="5" autocomplete="off" placeholder="np. 2704">
+            </div>
+
+            {#
+              Zejście, gdy numer nic nie mówi - i ma być natychmiastowe, bez
+              poczucia porażki: co piąty wóz nie podaje dniówki, a wóz, który
+              wyjechał przed chwilą, jest niewidoczny do dwudziestu minut.
+              To ta sama trójka, z której wyszukiwarka rozpoznaje kurs
+              (patrz onboard.py) - tylko zapytana tutaj.
+            #}
+            <div class="as-fallback" id="as-fallback" hidden>
+                <div class="ob-field ob-field-line">
+                    <label class="ob-field-label" for="as-line">Linia</label>
+                    <div class="ac-field">
+                        <input type="text" id="as-line" autocomplete="off" role="combobox"
+                               aria-autocomplete="list" aria-expanded="false"
+                               aria-controls="as-line-list" placeholder="np. 145">
+                        <ul class="ac-list" id="as-line-list" role="listbox" hidden
+                            aria-label="Podpowiedzi linii"></ul>
+                    </div>
+                </div>
+                <div class="ob-field">
+                    <label class="ob-field-label" for="as-dir">Kierunek z czoła pojazdu</label>
+                    <select id="as-dir" disabled><option value="">Kierunek</option></select>
+                </div>
+                <div class="ob-field">
+                    <label class="ob-field-label" for="as-stop">Najbliższy przystanek</label>
+                    <select id="as-stop" disabled><option value="">Przystanek</option></select>
+                </div>
+            </div>
+        </div>
+
+        {#
+          Zdanie potwierdzające rozpoznanie - JEDYNE miejsce, w którym widać
+          pomyłkę, zanim stanie się pomyłką całej podróży. Stoi więc nad
+          celem, a nie pod wynikiem.
+        #}
+        <p class="as-recognised" id="as-recognised" role="status" hidden></p>
+
+        <div class="ac-field as-dest">
+            <input type="text" id="as-dest" autocomplete="off" role="combobox"
+                   aria-label="Dokąd chcę dojechać" aria-autocomplete="list"
+                   aria-expanded="false" aria-controls="as-dest-list"
+                   placeholder="Dokąd? np. pl. Grunwaldzki">
+            <ul class="ac-list" id="as-dest-list" role="listbox" hidden
+                aria-label="Podpowiedzi przystanków"></ul>
+        </div>
+
+        <p class="hint" id="as-hint">
+            Powiedz, dokąd chcesz — opcje staną na mapie wokół ciebie.
+            Dotknij numeru, żeby zobaczyć, dokąd ta linia jedzie dalej.
+        </p>
+
+    </div>
+
+    <div id="as-results" class="results" aria-live="polite"></div>
+
     {% endif %}
 
 </aside>
@@ -532,6 +645,27 @@
     </details>
 
     {#
+      Jedyna miara asystenta i jej próg (zasada 1 z docs/PRINCIPLES.md).
+      Osobna sekcja, bo dotyczy osobnego widoku - i jedyne pokrętło, które
+      w ogóle rozstrzyga, co asystent pokazuje.
+    #}
+    <details class="dev-fold" id="fold-assist">
+    <summary>Asystent podróży</summary>
+
+    <div class="field">
+        <label for="assist-window">
+            O ile później niż najszybciej <output id="assist-window-value">15</output> min
+        </label>
+        <input type="range" id="assist-window" min="1" max="60" step="1" value="15">
+        <p class="field-hint">
+            Asystent pokazuje każdą opcję, którą jest się w celu nie później niż
+            tyle minut za najszybszą z nich — wszystkie, bez wyjątków i bez dziur.
+        </p>
+    </div>
+
+    </details>
+
+    {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
       Sekcja jest WIDOCZNA (LOOK_TUNING = true w app.js) — strojenie trwa.
       Atrybut `hidden` niżej to tylko stan startowy: app.js zdejmuje go albo
@@ -694,6 +828,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script src="{{ url_for('static', filename='timetable.js') }}"></script>
+<script src="{{ url_for('static', filename='assist.js') }}"></script>
 <script src="{{ url_for('static', filename='pwa.js') }}"></script>
 
 </body>

@@ -84,7 +84,7 @@ def feed(tmp_path, monkeypatch):
         ],
     )
     for trip_id, route_id, service_id, headsign, stops in TRIPS:
-        db.execute("INSERT INTO trips VALUES (?,?,?,?,NULL)",
+        db.execute("INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, shape_id) VALUES (?,?,?,?,NULL)",
                    (trip_id, route_id, service_id, headsign))
         db.executemany(
             "INSERT INTO stop_times VALUES (?,?,?,?,?)",

@@ -75,7 +75,11 @@ CREATE TABLE trips (
     route_id      TEXT NOT NULL,
     service_id    TEXT NOT NULL,
     trip_headsign TEXT,
-    shape_id      TEXT
+    shape_id      TEXT,
+    -- Dniówka wozu: łańcuch kursów, które tego dnia jedzie jeden pojazd.
+    -- To jedyny most między numerem bocznym z miejskiego kanału a rozkładem
+    -- (patrz sidenum.py) - pojazd podaje brygadę, rozkład mówi, jaki to kurs.
+    brigade_id    TEXT
 );
 CREATE TABLE shapes (
     shape_id TEXT NOT NULL,
@@ -209,11 +213,12 @@ def build_database(zip_path, db_path):
 
         n = batched_insert(
             db,
-            "INSERT OR REPLACE INTO trips VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO trips VALUES (?, ?, ?, ?, ?, ?)",
             (
                 (
                     r["trip_id"], r["route_id"], r["service_id"],
                     r.get("trip_headsign", ""), r.get("shape_id", ""),
+                    r.get("brigade_id", ""),
                 )
                 for r in read_csv(zf, "trips.txt")
             ),
@@ -283,6 +288,7 @@ def build_database(zip_path, db_path):
         """
         CREATE INDEX idx_stop_times_trip ON stop_times (trip_id, stop_sequence);
         CREATE INDEX idx_trips_service ON trips (service_id);
+        CREATE INDEX idx_trips_brigade ON trips (route_id, brigade_id);
         CREATE INDEX idx_shapes ON shapes (shape_id, seq);
         """
     )

@@ -1025,6 +1025,34 @@ Koszt: dwa liniowe skany fragmentu tablicy + jedno przejście po oknie —
 
 ## Changelog
 
+- **2026-09-20** — **asystent podróży: trzeci widok**. Odpowiada na węższe
+  pytanie niż wyszukiwarka — „co mam TERAZ zrobić" — i odpowiada na nie
+  mapą przybliżoną do człowieka, a nie listą wierszy. Wokół mojego miejsca
+  stoją kreski idące w prawdziwych kierunkach (geometria z rozkładu, punkt 6
+  kontraktu), przy każdej krawędzi numer linii z godziną odjazdu i liczbą
+  minut marszu, jeśli trzeba dojść; dotknięcie numeru dorysowuje dalszy
+  przebieg tej opcji i podaje godzinę w celu, a reszta przygasa, ale nie
+  znika. Widok przelicza się sam co minutę i po każdej zmianie mojego stanu,
+  a wskazana opcja to przeżywa. Cały widok jest projektowany pod duży ekran —
+  telefon czeka osobna przeróbka i nie ma tu dla niego półśrodków.
+  **Jedna miara i jeden próg** (zasada 1): o ile minut później niż
+  najszybciej jest się w celu; pokrętło pod zębatką (domyślnie 15 min) idzie
+  wprost do `plan_flow` jako okno, więc cała odpowiedź powstaje pod tą jedną
+  miarą, a nie jest z czegoś wybierana. Propozycje sprowadzamy do PIERWSZYCH
+  RUCHÓW — dwie trasy zaczynające się tym samym wsiadaniem to dla stojącego
+  na chodniku jedna decyzja. **Start z pokładu jednym polem**: czterocyfrowy
+  numer boczny z burty. Miejski kanał (zestaw 14) daje przy wozie brygadę,
+  paczka GTFS ma ją teraz przy kursach (`brigade_id`, nowa kolumna w `trips`),
+  więc numer boczny prowadzi do konkretnego kursu, kierunku i najbliższego
+  przystanku — na żywych danych rozpoznaje się tak cztery wozy na pięć
+  (239 z 289, 2026-09-20). Gdy numer nic nie mówi, pytanie schodzi od razu na
+  linię, kierunek i przystanek — tę samą trójkę, z której rozpoznaje kurs
+  wyszukiwarka — a z czyjegoś ręcznego wyboru zapamiętujemy na dziś parę
+  „ten wóz jedzie tę dniówkę", więc następny pytający ma odpowiedź od ręki.
+  Rozpoznanie zawsze potwierdza widoczne zdanie: to jedyne miejsce, w którym
+  widać pomyłkę, zanim stanie się pomyłką całej podróży. Nowe: `assist.py`,
+  `sidenum.py`, `static/assist.js`, `/api/assist`, `/api/side`. Mapa
+  przepływów, jej kontrakt i panel wyników nietknięte. Testy: 380.
 - **2026-09-18** — **„jestem w pojeździe" jako punkt startowy**. Przełącznik
   nad polami zamienia „skąd" na linię, kierunek z czoła pojazdu i najbliższy
   przystanek; z tej trójki serwer rozpoznaje konkretny kurs rozkładu

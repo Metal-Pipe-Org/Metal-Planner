@@ -4,11 +4,13 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request
 
+import assist
 import bikes
 import gtfs
 import naming
 import onboard
 import pkp
+import sidenum
 import timetables
 import traficar
 import vehicles
@@ -309,6 +311,48 @@ def init_routes(app):
             limit=min(int(limit), TIMETABLE_MAX) if limit else TIMETABLE_LIMIT,
             point=_latlon_arg(),
         ))
+
+    @app.route("/api/assist")
+    def api_assist():
+        """Asystent podróży - opcje wokół pytającego (patrz assist.py).
+
+        Skąd się jest, mówi jeden z trzech parametrów, a nie trzy naraz:
+        `side` (numer boczny pojazdu), `onboard_*` (trzy pola z pokładu) albo
+        zwykły start - nazwą przystanku (`start`) lub punktem (`lat`/`lon`).
+        Numer boczny bije trzy pola, bo jest ich skrótem, a nie ich odmianą.
+        """
+        return jsonify(assist.plan(
+            request.args.get("end", ""),
+            _parse_when(request.args.get("time"), request.args.get("date")),
+            start_query=request.args.get("start", ""),
+            start_point=_latlon_arg(),
+            end_point=_point_arg("end"),
+            side=(request.args.get("side") or "").strip() or None,
+            in_vehicle=_onboard_arg(),
+            window_min=_float_arg("window"),
+            transfer_gain_sec=_float_arg("transfer_gain_sec"),
+        ))
+
+    @app.route("/api/side")
+    def api_side():
+        """Czym jedzie wóz o tym numerze bocznym - samo rozpoznanie, bez
+        szukania trasy. Front pyta o to w chwili wpisania numeru, żeby
+        zdanie potwierdzające („145 w stronę Bartoszowic, najbliższy
+        przystanek Świeradowska o 13:29") stanęło na ekranie ZANIM padnie
+        pytanie o cel - i żeby zejście do trzech pól nastąpiło od razu,
+        a nie po wyszukiwaniu, które i tak nie miało z czego wyjść.
+        """
+        when = _parse_when(request.args.get("time"), request.args.get("date"))
+        try:
+            day = gtfs.load_day(when.date())
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+        found = onboard.find_by_side(
+            day, when.date(), request.args.get("side", ""),
+            when.hour * 3600 + when.minute * 60 + when.second)
+        if "error" in found:
+            return jsonify(found)
+        return jsonify({**found, "stop_name": day.stop_names[found["stop"]]})
 
     @app.route("/api/flow")
     def api_flow():

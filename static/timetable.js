@@ -184,6 +184,12 @@ const active = () => document.body.classList.contains('mode-timetable');
     co wyszukiwarka miała na ekranie - z pamięci, bez zapytania. */
 function setMode(on) {
     if (on === active()) return;
+    // Trzy tryby panelu wykluczają się nawzajem i zajmują to samo miejsce,
+    // więc wejście w rozkłady zamyka asystenta - tak samo, jak wejście
+    // w asystenta zamyka rozkłady (patrz static/assist.js). Wyjście z niego
+    // samo odtwarza wachlarz, a my zaraz potem znów go chowamy: to kosztuje
+    // jedno przerysowanie z pamięci, a nie zapytanie.
+    if (on && window.assistMode) window.assistMode.setMode(false);
     document.body.classList.toggle('mode-timetable', on);
     for (const button of modeButtons) {
         button.classList.toggle('active', on);

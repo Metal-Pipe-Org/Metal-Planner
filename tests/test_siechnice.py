@@ -268,7 +268,7 @@ def test_merge_into_nie_rusza_danych_wroclawskich(tmp_path):
     db.executescript(update_gtfs.SCHEMA)
     db.execute("INSERT INTO stops VALUES ('1', 'Rynek', 51.11, 17.03)")
     db.execute("INSERT INTO routes VALUES ('r1', '33', 'tramwaj', 0)")
-    db.execute("INSERT INTO trips VALUES ('t1', 'r1', 's1', 'Rynek', '')")
+    db.execute("INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, shape_id) VALUES ('t1', 'r1', 's1', 'Rynek', '')")
     db.execute("INSERT INTO stop_times VALUES ('t1', 0, '1', 100, 100)")
     db.execute("INSERT INTO calendar_dates VALUES ('s1', '20260828', 1)")
     db.commit()

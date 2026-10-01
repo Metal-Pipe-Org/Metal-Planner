@@ -355,6 +355,10 @@ const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();
 function vehiclesFilter() {
     const fromTimetable = window.timetableMode && window.timetableMode.vehicleLines();
     if (fromTimetable) return fromTimetable;
+    // Asystent rządzi się tym samym prawem, co rozkłady: gdy to on stoi na
+    // ekranie, warstwa mówi o JEGO opcjach, a nie o mapie, której nie ma.
+    const fromAssist = window.assistMode && window.assistMode.vehicleLines();
+    if (fromAssist) return fromAssist;
     if (!flowHits.length) return null;
     const lines = new Set();
     for (const hit of flowHits) {
@@ -571,7 +575,9 @@ const stopsReady = fetch('/api/stops')
                 L.DomEvent.stop(e);
                 // W trybie rozkładów klik w słupek nie wybiera końca relacji,
                 // tylko pokazuje jego tablicę odjazdów (static/timetable.js).
-                if (!timetableTook(s.name)) pickEndpoint(s.name);
+                if (!timetableTook(s.name) && !assistTook(s.name)) {
+                    pickEndpoint(s.name);
+                }
             });
             m.addTo(stopsLayer);
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
@@ -614,9 +620,19 @@ function timetableTook(stopName) {
         && !!(window.timetableMode && window.timetableMode.pickStop(stopName));
 }
 
+/** Czy asystent przejął ten klik. Tam klik w mapę znaczy „TU jestem" -
+    i dotyczy tak samo słupka, jak pustego punktu: stoi się na przystanku
+    albo pod adresem, a jedno i drugie jest miejscem (patrz assist.js). */
+function assistTook(value) {
+    return document.body.classList.contains('mode-assist')
+        && !!(window.assistMode && window.assistMode.pickHere(value));
+}
+
 map.on('click', e => {
     if (document.body.classList.contains('mode-timetable')) return;
-    pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
+    const point = {lat: e.latlng.lat, lon: e.latlng.lng};
+    if (assistTook(point)) return;
+    pickEndpoint(point);
 });
 
 // ------------------------------------------- moja lokalizacja jako start ----
@@ -3973,7 +3989,12 @@ $('clear').addEventListener('click', () => {
 // przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
 // preferencji od nowa za każdym razem.
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain'];
+// `assist-window` jest tu po to, żeby przeżyć odświeżenie i wrócić z
+// "Przywróć domyślne" jak każde inne ustawienie - ale NIE dostaje
+// liveSlider(): ruszenie nim ma przeliczyć asystenta, a nie mapę (patrz
+// static/assist.js).
+const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
+                        'assist-window'];
 
 function loadDevPrefs() {
     try {
@@ -4458,6 +4479,9 @@ window.plannerBridge = {
     LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
     prettyStopName, rawStopName,
     suspendPlanner, resumePlanner,
+    // Ustawienia panelu ⚙ mają jedno miejsce zapisu na całą aplikację -
+    // inaczej "Przywróć domyślne" kasowałoby tylko połowę.
+    loadDevPrefs, saveDevPref,
 };
 
 }

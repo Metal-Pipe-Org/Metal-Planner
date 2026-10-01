@@ -63,7 +63,7 @@ def feed(tmp_path, monkeypatch):
     db.execute("INSERT INTO calendar VALUES "
                "('CODZIENNIE',1,1,1,1,1,1,1,'20260901','20261031')")
     for trip_id, stops in TRIPS:
-        db.execute("INSERT INTO trips VALUES (?,'R8','CODZIENNIE','',NULL)",
+        db.execute("INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, shape_id) VALUES (?,'R8','CODZIENNIE','',NULL)",
                    (trip_id,))
         db.executemany(
             "INSERT INTO stop_times VALUES (?,?,?,?,?)",
