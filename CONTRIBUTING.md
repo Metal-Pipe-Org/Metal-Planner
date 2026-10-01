@@ -18,9 +18,11 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
 
 4. Gotowe zmiany idą pull requestem do `main`.
 5. `Closes #12` (albo `Fixes`, `Resolves`) w opisie PR-a znaczy „ten PR
-   załatwia zgłoszenie": po merge'u zgłoszenie zamyka się samo. Sam numer
-   `#12` to luźniejszy związek — zgłoszenie dostaje etykietę, ale zamyka je
-   człowiek.
+   załatwia zgłoszenie": po merge'u zgłoszenie zamyka się samo.
+   `Refs #12` (albo `Ref`, `Related to`, `Part of`, `Dotyczy`) to
+   luźniejszy związek — zgłoszenie dostaje etykietę, ale zamyka je człowiek.
+   Gołe `#12` niczego nie oznacza, więc można pisać o innych zgłoszeniach
+   bez obaw.
 6. PR, który nie jest jeszcze gotowy, otwieraj jako wersję roboczą. Ocena
    przychodzi dopiero po „Ready for review".
 7. Zaraz po otwarciu pod PR-em pojawia się zapowiedź, że Claude go czyta,
@@ -55,7 +57,7 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
     zajmował, dostaje etykietę `claude` — to sam znacznik, niczego nie
     uruchamia.
 16. Etykiety stanu nadają się same: `waiting for PR review` przy PR-ze
-    z `Closes`, `PR created` przy samym numerze, `merged - is it ok?` po
+    z `Closes`, `PR created` przy `Refs`, `merged - is it ok?` po
     merge'u takiego PR-a. Tę ostatnią zdejmuje ten, kto zgłoszenie zamyka.
 17. „Zgłoś problem” w aplikacji (klik w ikonę → „O aplikacji”) otwiera nowe
     zgłoszenie z wpisaną wersją, urządzeniem i adresem strony; po założeniu

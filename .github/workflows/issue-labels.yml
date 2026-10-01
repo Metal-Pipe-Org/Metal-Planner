@@ -19,16 +19,19 @@ name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 #     i luźniejsze zapisy, które nasz regexp przepuszcza, a GitHub nie. Gdy
 #     zgłoszenie jest już zamknięte, krok schodzi z drogi.
 #
-#  B. Samym numerem — `#78` gdzieś w tytule albo opisie, bez słowa
-#     kluczowego. To luźniejszy związek: PR dotyka tematu, ale nikt nie
-#     obiecuje, że go zamyka.
+#  B. Słowem „dotyczy" — `Refs #78`, `Ref #78`, `Related to #78`,
+#     `Relates to #78`, `Part of #78` albo po polsku `Dotyczy #78`. To
+#     słowa z konwencji (Conventional Commits, GitLab); `See` i `For`
+#     pomijamy, bo padają też w zwykłych odsyłaczach. To luźniejszy związek: PR
+#     dotyka tematu, ale nikt nie obiecuje, że go zamyka. Gołe `#78` nie
+#     znaczy nic: padało też w zdaniach w rodzaju „to zostaje na #175" i
+#     oznaczało jako rozpoczęte zgłoszenie, którego PR wprost nie robi.
 #       • PR otwarty → zgłoszenie dostaje "PR created"
 #       • merge      → "PR created" znika, wchodzi "merged - is it ok?"
 #     Zgłoszenia NIE zamykamy — ostatnie słowo ma człowiek, a etykieta jest
 #     właśnie prośbą o sprawdzenie. Zdejmuje ją ten, kto zgłoszenie zamknie.
 #
-# Numer, który padł ze słowem kluczowym, nie liczy się drugi raz jako samo
-# wspomnienie — ścieżka A wygrywa.
+# Numer, który padł w obu ścieżkach, liczy się raz — ścieżka A wygrywa.
 #
 # PR zamknięty bez merge'a i PR cofnięty do wersji roboczej tylko zdejmują
 # etykiety oczekiwania: zgłoszenie zostaje otwarte i znów czeka na kogoś.
@@ -95,12 +98,11 @@ jobs:
             } | sort -u
           )
 
-          # Ścieżka B: każde `#123`, z którego odejmujemy potem numery ze
-          # ścieżki A i numer samego PR-a. `[^[:alnum:]/]` przed hashem odsiewa
-          # odwołania do obcych repozytoriów (`org/repo#12`) i ogony URL-i.
+          # Ścieżka B: `#123` po słowie „dotyczy" (patrz nagłówek), z którego
+          # odejmujemy potem numery ze ścieżki A i numer samego PR-a.
           mention_all=$(
             printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
-              | grep -oE '(^|[^[:alnum:]/])#[0-9]+' \
+              | grep -oiE '(^|[^[:alnum:]])(refs?|relate[sd][[:space:]]+to|part[[:space:]]+of|dotyczy)[[:space:]:]*#[0-9]+' \
               | grep -oE '[0-9]+' | sort -u || true
           )
           mention_raw=""
