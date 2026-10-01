@@ -25,9 +25,10 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
    bez obaw.
 6. PR, który nie jest jeszcze gotowy, otwieraj jako wersję roboczą. Ocena
    przychodzi dopiero po „Ready for review".
-7. Zaraz po otwarciu pod PR-em pojawia się zapowiedź, że Claude go czyta,
-   a po kilku minutach ocena: werdykt, podsumowanie, uwagi do kodu. Dostajesz
-   ping na GitHubie i na Discordzie.
+7. Zaraz po otwarciu pod PR-em pojawia się jednolinijkowa zapowiedź, że Claude
+   go czyta, a po kilku minutach ocena: werdykt, podsumowanie, uwagi do kodu.
+   Zapowiedź zwija się, gdy ocena już stoi. Dostajesz ping na GitHubie
+   i na Discordzie.
 8. Ocena leci raz na PR. Po większych poprawkach albo gdy się nie udała,
    napisz `@claude` w komentarzu pod PR-em.
 9. Przeczytaj ocenę, popraw, co trzeba, i dopiero wtedy poproś o recenzję
@@ -47,21 +48,21 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
 
 13. `@claude` w treści nowego zgłoszenia albo w komentarzu pod nim wysyła
     Claude'a do pracy: czyta wątek, robi poprawkę, uruchamia testy i wypycha
-    ją na gałąź `claude/issue-<numer>`. Pod zgłoszeniem zostawia link, który
-    otwiera PR do `main` z gotowym `Closes`. Kolejne `@claude` w tym samym
+    ją na gałąź `claude/issue-<numer>`. Na starcie wstawia jednolinijkową
+    zapowiedź, a na końcu nowy komentarz z odpowiedzią i linkiem, który
+    otwiera PR do `main` z gotowym `Closes` (zapowiedź wtedy się zwija). Kolejne `@claude` w tym samym
     wątku dokładają się do tej samej gałęzi i tego samego PR-a.
 14. Claude bierze się tylko za zadania jasne i niewielkie. Przy niejasnym
     zgłoszeniu zamiast poprawki zadaje pytanie. Nie zmienia automatów,
     sekretów ani uprawnień — to zawsze robi człowiek.
-15. Koniec pracy Claude'a ogłasza ping na Discordzie. Zgłoszenie, którym się
+15. Koniec pracy Claude'a ogłasza ping na Discordzie, który prowadzi do komentarza z odpowiedzią. Zgłoszenie, którym się
     zajmował, dostaje etykietę `claude` — to sam znacznik, niczego nie
     uruchamia.
 16. Etykiety stanu nadają się same: `waiting for PR review` przy PR-ze
     z `Closes`, `PR created` przy `Refs`, `merged - is it ok?` po
     merge'u takiego PR-a. Tę ostatnią zdejmuje ten, kto zgłoszenie zamyka.
 17. „Zgłoś problem” w aplikacji (klik w ikonę → „O aplikacji”) otwiera nowe
-    zgłoszenie z wpisaną wersją, urządzeniem i adresem strony; po założeniu
-    dostaje ono typ Bug. Zgłoszenia od osób spoza zespołu dostają etykietę
+    zgłoszenie z wpisaną wersją, urządzeniem i adresem strony. Zgłoszenia od osób spoza zespołu dostają etykietę
     `external`. Żeby zgłosić, trzeba mieć konto na GitHubie.
 18. Zgłoszenie bez niczyjego wpisu przez 14 dni dostaje pytanie, czy temat
     jest aktualny, i etykietę `stale`. Po kolejnych 7 dniach ciszy zamyka się

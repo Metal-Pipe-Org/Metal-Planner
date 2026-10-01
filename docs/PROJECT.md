@@ -1246,8 +1246,8 @@ dało się dojechać.
   z przewoźnikami, skąd są dane, kto ją tworzy (MetalPipeOrg), wszelkie prawa
   zastrzeżone (repo bez licencji) i „Zgłoś problem", które otwiera nowe
   zgłoszenie na GitHubie z wpisaną wersją, urządzeniem i adresem strony.
-  Zgłoszenie z przycisku dostaje typ Bug, a od osoby spoza zespołu etykietę
-  `external` (`issue-triage.yml`). Nowy tryb deweloperski: `DEV_MODE=1`
+  Zgłoszenie od osoby spoza zespołu dostaje etykietę `external`
+  (`issue-triage.yml`). Nowy tryb deweloperski: `DEV_MODE=1`
   w `data/.env` dokłada w karcie linki zespołu (issues, wersja testowa
   i produkcja). Bez wpisu tryb jest wyłączony, jak na produkcji. Ukrywanie
   sekcji ⚙ na produkcji (#175) jeszcze nie jest z nim związane.

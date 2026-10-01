@@ -7,7 +7,8 @@ name: Claude - oceń PR
 # edytujemy po fakcie: edycja nie wysyła nikomu powiadomienia, więc autor PR-a
 # nie miał jak się dowiedzieć, że ocena już jest, i trzeba go było szturchać
 # ręcznie. Nowy komentarz z @wzmianką autora powiadamia go na GitHubie, a ta
-# sama wiadomość leci na Discorda, gdzie zespół faktycznie śledzi repo.
+# sama wiadomość leci na Discorda, gdzie zespół faktycznie śledzi repo. Gdy
+# ocena już stoi, zapowiedź zwijamy (nie kasujemy), żeby nie zalegała.
 #
 # Recenzentów ten workflow nie woła. Autor czyta ocenę i dopiero gdy uzna PR za
 # gotowy, prosi o recenzję w panelu bocznym („Reviewers"); ping na Discordzie
@@ -340,14 +341,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Zapowiedź zostaje taka, jaka jest — ocena przyjdzie obok, nowym
-          # komentarzem, więc ta linijka nie musi niczego obiecywać ani
-          # niczego nie trzeba w niej potem poprawiać. Jej początek jest
-          # znakiem „ocena już była" dla pushy (krok „Ustal PR do oceny").
-          url=$(gh pr comment "$N" --repo "$REPO" --body \
-            "🤔 Claude czyta ten PR — ocena przyjdzie osobnym komentarzem ([podgląd biegu](${RUN}))."
-          )
-          echo "Zapowiedź: $url"
+          # Jedna krótka linijka. Jej początek jest znakiem „ocena już była"
+          # dla pushy (krok „Ustal PR do oceny"), a zwinięty komentarz API
+          # dalej zwraca, więc znak działa także po zwinięciu.
+          res=$(gh api "repos/$REPO/issues/$N/comments" \
+            -f body="🤔 Claude czyta ten PR ([podgląd biegu](${RUN}))." \
+            --jq '[.html_url, .node_id] | @tsv')
+          echo "Zapowiedź: ${res%%$'\t'*}"
+          echo "node=${res##*$'\t'}" >> "$GITHUB_OUTPUT"
 
       - name: Claude
         id: claude
@@ -483,6 +484,22 @@ jobs:
             echo "title=$title"
             echo "verdict=$verdict"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Zwiń zapowiedź
+        # Zapowiedź spełniła swoje, gdy pod PR-em stoi ocena albo informacja
+        # o porażce. Zwijamy, nie kasujemy — da się ją odwinąć. Porażka tego
+        # kroku nie może zaczerwienić oceny, która już stoi.
+        if: ${{ !cancelled() && steps.post.outputs.url != '' }}
+        continue-on-error: true
+        env:
+          NODE: ${{ steps.hello.outputs.node }}
+        run: |
+          gh api graphql -f id="$NODE" -f query='
+            mutation($id: ID!) {
+              minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
+                minimizedComment { isMinimized }
+              }
+            }' >/dev/null
 
       - name: Pobierz skrypt wysyłki na Discorda z main
         # Z `main`, nie z drzewa PR-a: skrypt dostaje w env sekret webhooka,

@@ -12,7 +12,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `claude-review-pr.yml` | Ocena każdego nowego PR-a przez Claude'a; wynik nowym komentarzem i pingiem autora. Kształt oceny: `.claude/commands/review-pr.md`. |
 | `claude-issue.yml` | Solver: `@claude` pod zgłoszeniem, praca na gałęzi `claude/issue-<numer>`. |
 | `issue-labels.yml` | Etykiety stanu na zgłoszeniach wskazanych przez PR i zapasowe zamykanie po merge'u. |
-| `issue-triage.yml` | Typ Bug dla zgłoszeń z przycisku „Zgłoś problem” w aplikacji i etykieta `external` dla autorów spoza zespołu. |
+| `issue-triage.yml` | Etykieta `external` dla autorów spoza zespołu. |
 | `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. |
 | `discord.yml` | Kanał repo na Discordzie z prawdziwymi pingami. |
 | `tests.yml` | Testy, odpalane wyłącznie ręcznie. |

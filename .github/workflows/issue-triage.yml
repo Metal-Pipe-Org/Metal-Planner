@@ -1,15 +1,9 @@
 name: "Zgłoszenia: z przycisku i z zewnątrz"
 
-# Dwie rzeczy przy każdym nowym zgłoszeniu:
-#
-#  • zgłoszenie z przycisku „Zgłoś problem” w aplikacji (karta „O aplikacji”)
-#    dostaje typ Bug. Rozpoznajemy je po znaczniku `<!-- zgłoś-problem -->`,
-#    który przycisk wstawia do treści. Typu nie da się podać w samym linku:
-#    parametry w adresie nowego zgłoszenia GitHub bierze pod uwagę tylko od
-#    osób z dostępem do repo, a przycisk jest dla wszystkich.
-#  • zgłoszenie od kogoś spoza zespołu dostaje etykietę "external". Autor
-#    bez prawa zapisu nie może jej zdjąć — etykiety i typy zmienia tylko
-#    zespół.
+# Zgłoszenie od kogoś spoza zespołu dostaje etykietę "external". Autor bez
+# prawa zapisu nie może jej zdjąć — etykiety i typy zmienia tylko zespół.
+# Typu Bug przy zgłoszeniu z przycisku „Zgłoś problem” nie nadajemy: przycisk
+# jest dla wszystkich i nie wiadomo, co zgłaszający ma na myśli.
 #
 # „Spoza zespołu” rozstrzyga pytanie o uprawnienia wprost, nie
 # `author_association`: przy prywatnym członkostwie w organizacji kłamie
@@ -32,18 +26,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       N: ${{ github.event.issue.number }}
-      BODY: ${{ github.event.issue.body }}
       WHO: ${{ github.event.issue.user.login }}
 
     steps:
-      - name: Typ Bug dla zgłoszenia z przycisku
-        run: |
-          set -euo pipefail
-          if printf '%s' "$BODY" | grep -qF '<!-- zgłoś-problem -->'; then
-            gh api -X PATCH "repos/$REPO/issues/$N" -f type=Bug --silent
-            echo "Z przycisku „Zgłoś problem” — typ Bug." | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Etykieta "external" dla autora spoza zespołu
         run: |
           set -euo pipefail
