@@ -30,7 +30,10 @@ discord_send() {
   # `parse: []` wyłącza wszystkie wzmianki z treści, także @everyone i role
   # wpisane przez kogokolwiek w komentarzu; `users` wpuszcza z powrotem tylko
   # osoby z mapy, które naprawdę padły w wiadomości.
-  payload=$(jq -n --arg text "$1" --arg excerpt "${2:-}" --arg url "${3:-}" \
+  #
+  # Zepsuty JSON w DISCORD_IDS wywraca samo `jq`; pod `set -e` u wołającego
+  # przerwałoby to cały krok, np. pętlę zamykającą zgłoszenia, stąd `if !`.
+  if ! payload=$(jq -n --arg text "$1" --arg excerpt "${2:-}" --arg url "${3:-}" \
       --argjson ids "${DISCORD_IDS:-"{}"}" --argjson max 300 '
     ($excerpt
       | gsub("<!--[\\s\\S]*?-->"; "")
@@ -47,7 +50,10 @@ discord_send() {
         | if (.content | test($re; "i"))
           then .content |= gsub($re; "<@" + $p.value + ">"; "i") | .users += [$p.value]
           else . end)
-    | {content, allowed_mentions: {parse: [], users}}')
+    | {content, allowed_mentions: {parse: [], users}}'); then
+    echo "::warning::Nie udało się złożyć wiadomości na Discorda (zły DISCORD_IDS?): $1"
+    return 0
+  fi
 
   # Discord to dodatek: jego awaria ma być widać w logu, ale nie może
   # przerwać tego, co workflow robi naprawdę (zamykanie, ocena, przypomnienia).

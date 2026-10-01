@@ -325,12 +325,14 @@ jobs:
 
       - name: Wstaw ocenę albo informację o porażce
         id: post
-        # Autor ma dostać odpowiedź bez względu na wynik biegu. Bieg mógł paść,
-        # wyczerpać limit tur albo zostać ubity przez nowszy — wtedy zamiast
-        # oceny idzie uczciwa informacja z linkiem do logu, inaczej zostałaby
-        # sama zapowiedź i autor czekałby na próżno. Oba warianty to nowy
-        # komentarz z @wzmianką autora, bo tylko nowy komentarz powiadamia.
-        if: always() && steps.hello.outcome == 'success'
+        # Autor ma dostać odpowiedź bez względu na wynik biegu. Bieg mógł paść
+        # albo wyczerpać limit tur — wtedy zamiast oceny idzie uczciwa
+        # informacja z linkiem do logu, inaczej zostałaby sama zapowiedź i autor
+        # czekałby na próżno. Oba warianty to nowy komentarz z @wzmianką
+        # autora, bo tylko nowy komentarz powiadamia. Bieg ubity przez nowszy
+        # milczy, jak w claude-issue.yml: zaraz odezwie się tamten, a fałszywa
+        # porażka z pingiem tuż przed prawdziwą oceną tylko by myliła.
+        if: ${{ !cancelled() && steps.hello.outcome == 'success' }}
         env:
           N: ${{ steps.pr.outputs.number }}
           REVIEW: ${{ runner.temp }}/claude-review.md
