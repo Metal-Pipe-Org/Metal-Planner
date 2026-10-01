@@ -290,6 +290,12 @@ jobs:
       - name: Claude
         id: claude
         if: steps.pr.outputs.go == 'true'
+        # Własny limit, niższy niż 25 minut całego joba. Przekroczenie limitu
+        # joba GitHub traktuje jak ubicie biegu, a ubity bieg celowo milczy —
+        # autor zostałby z samą zapowiedzią. Przekroczenie limitu kroku to
+        # zwykła porażka, więc niżej idzie informacja o niej z pingiem, a zapas
+        # do 25 minut wystarcza na jej wstawienie.
+        timeout-minutes: 20
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -316,7 +322,7 @@ jobs:
           # linii, więc każdy z nich to kilka odczytów. Przy trzydziestu turach
           # ocena PR-a na dwanaście plików padła na `error_max_turns`, zanim
           # zdążyła cokolwiek napisać. Prawdziwym bezpiecznikiem jest
-          # `timeout-minutes` powyżej; tura trwa tu kilka sekund, więc sto tur
+          # `timeout-minutes` tego kroku; tura trwa tu kilka sekund, więc sto tur
           # spokojnie się w nim mieści.
           claude_args: |
             --model claude-sonnet-5
