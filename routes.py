@@ -1,4 +1,5 @@
 import hashlib
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -38,10 +39,19 @@ def _frontend_digest(app):
     return digest.hexdigest()[:12]
 
 
+def _finite(text):
+    """float() bez "nan" i "inf" - Python przyjmuje je jako liczby, a dalej
+    każde int() albo porównanie z nimi kończy się błędem 500."""
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(text)
+    return value
+
+
 def _float_arg(name):
     """Liczba z query stringa albo None (planner podstawi wtedy domyślną)."""
     try:
-        return float(request.args.get(name, ""))
+        return _finite(request.args.get(name, ""))
     except ValueError:
         return None
 
@@ -50,8 +60,8 @@ def _point_arg(prefix):
     """Para (lat, lon) z `<prefix>_lat`/`<prefix>_lon` - klik w dowolny punkt mapy."""
     try:
         return (
-            float(request.args[f"{prefix}_lat"]),
-            float(request.args[f"{prefix}_lon"]),
+            _finite(request.args[f"{prefix}_lat"]),
+            _finite(request.args[f"{prefix}_lon"]),
         )
     except (KeyError, ValueError):
         return None
@@ -60,7 +70,7 @@ def _point_arg(prefix):
 def _latlon_arg():
     """Para (lat, lon) z `lat`/`lon` - punkt wskazany wprost, bez prefiksu."""
     try:
-        return float(request.args["lat"]), float(request.args["lon"])
+        return _finite(request.args["lat"]), _finite(request.args["lon"])
     except (KeyError, ValueError):
         return None
 

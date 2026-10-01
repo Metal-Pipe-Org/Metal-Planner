@@ -4,13 +4,9 @@
 # Ten sam skrypt robi pierwszą instalację i każdą kolejną aktualizację -
 # jest idempotentny, można go puszczać dowolnie często.
 #
-# Pisany pod wywołanie po SSH z GitHub Actions; samego workflow wdrożeniowego
-# w repo już nie ma, więc na co dzień odpala się go ręcznie:
+# Odpala się go ręcznie, na serwerze (automatycznego wdrożenia z GitHuba
+# nie ma):
 #     curl -fsSL https://raw.githubusercontent.com/Metal-Pipe-Org/Metal-Planner/main/docker/deploy.sh | bash
-#
-# Cała ciężka robota - klonowanie repo i budowa obrazu - dzieje się tutaj,
-# po stronie serwera. Runner GitHuba tylko nawiązuje SSH i czeka, więc zużywa
-# kilkanaście sekund zamiast minut na budowanie.
 
 set -euo pipefail
 
@@ -42,9 +38,8 @@ docker info >/dev/null 2>&1 \
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
-# Wynik zapisujemy do pliku, bo przy wdrożeniu z GitHub Actions ten skrypt
-# leci w tle i nie ma komu odebrać jego kodu wyjścia - zielony przebieg
-# w Actions znaczy tylko tyle, że wdrożenie wystartowało.
+# Wynik zapisujemy do pliku deploy.status - skrypt puszczony w tle albo po
+# zerwanym SSH nie ma komu oddać kodu wyjścia, a plik zostaje.
 finish() {
     local code=$?
     if [ "$code" -eq 0 ]; then
@@ -88,7 +83,7 @@ fi
 mv docker-compose.yml.new docker-compose.yml
 
 # --- 3. budowa i start ------------------------------------------------------
-# Budowa klonuje repo z GitHuba; folder ./data z bazą i tokenem zostaje
+# Budowa klonuje repo z GitHuba; folder ./data z bazami i sekretami zostaje
 # nietknięty. Domyślnie z cache'em: BuildKit i tak sprawdza przy każdym
 # przebiegu, na którym commicie stoi gałąź, więc nowy kod zawsze się przebuduje.
 #
@@ -129,9 +124,3 @@ done
 
 log "Gotowe - aplikacja działa"
 docker compose ps
-
-# Token celowo NIE trafia tutaj do wypisania: log tego skryptu ląduje
-# w GitHub Actions, a tam sekretów się nie zostawia.
-if [ -f data/dev_token.txt ]; then
-    echo "Token menu deweloperskiego: $APP_DIR/data/dev_token.txt (odczyt: sudo cat ...)"
-fi

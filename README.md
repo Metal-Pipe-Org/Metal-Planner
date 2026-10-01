@@ -24,7 +24,8 @@ gwarancje zachowania mapy, które to sprawdzają: **[docs/FLOW_MAP_CONTRACT.md](
 
 ## Szybki start
 
-Wymagany Python ≥ 3.9 (Flask 3.x nie działa na 3.8).
+Python 3.11 — na nim chodzą testy w CI i lokalne środowisko; obraz Dockera
+używa 3.12. Starszych wersji nikt nie sprawdzał (a Flask 3.x nie działa na 3.8).
 
 ```bash
 python3.11 -m venv .venv

@@ -11,7 +11,7 @@ import re
 import sqlite3
 import sys
 from bisect import bisect_left
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import naming
@@ -570,6 +570,22 @@ def active_service_ids(db, day):
         else:
             active.discard(service_id)
     return active
+
+
+def last_service_date():
+    """Ostatni dzień, na który paczka GTFS ma jakiekolwiek kursy, albo None
+    bez bazy. Paczka sięga zwykle ok. dwóch tygodni naprzód - dalej pytanie
+    nie ma odpowiedzi nie dlatego, że nic nie jedzie, tylko dlatego, że
+    rozkładu jeszcze nie opublikowano."""
+    if not DB_PATH.exists():
+        return None
+    db = _connect()
+    last = db.execute(
+        "SELECT MAX(d) FROM (SELECT MAX(end_date) AS d FROM calendar UNION ALL "
+        "SELECT MAX(date) FROM calendar_dates WHERE exception_type = 1)"
+    ).fetchone()[0]
+    db.close()
+    return datetime.strptime(last, "%Y%m%d").date() if last else None
 
 
 def load_day(day):

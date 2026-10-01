@@ -1,7 +1,6 @@
 #!/bin/sh
-# Wszystko, co trwałe - bazy rozkładów (MPK i PKP) i token menu
-# deweloperskiego - leży w /app/data, czyli w folderze ./data obok
-# docker-compose.yml na serwerze.
+# Wszystko, co trwałe - bazy rozkładów (MPK i PKP) i sekrety (.env) - leży
+# w /app/data, czyli w folderze ./data obok docker-compose.yml na serwerze.
 set -e
 
 APP_USER=app
@@ -20,7 +19,8 @@ fi
 if [ ! -f "$DATA_DIR/gtfs.sqlite" ]; then
     echo "Brak bazy rozkładów - pobieram paczkę GTFS (pierwsze uruchomienie, ~1 min)..."
     # Niepowodzenie nie blokuje startu: aplikacja wstanie z komunikatem o braku
-    # danych, a rozkład da się dociągnąć przyciskiem w menu deweloperskim.
+    # danych, a rozkład dociągnie restart kontenera albo nocna aktualizacja
+    # (GTFS_AUTO_UPDATE_HOUR).
     python -u /app/update_gtfs.py || echo "OSTRZEŻENIE: nie udało się pobrać rozkładu."
 elif [ "$GTFS_UPDATE_ON_START" != "off" ]; then
     # Restart = odświeżenie rozkładu, żeby po wdrożeniu nie jechać na paczce

@@ -33,8 +33,10 @@ name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 # PR zamknięty bez merge'a i PR cofnięty do wersji roboczej tylko zdejmują
 # etykiety oczekiwania: zgłoszenie zostaje otwarte i znów czeka na kogoś.
 # Etykiety są czystymi znacznikami stanu — żadna niczego nie uruchamia — i
-# zgłoszenie nosi najwyżej jedną: nadanie etykiety zdejmuje wszystkie
-# pozostałe, jakiekolwiek by nie były.
+# zgłoszenie nosi najwyżej jedną z naszych trzech: nadanie etykiety zdejmuje
+# dwie pozostałe. Cudzych etykiet nie ruszamy — inaczej każda etykieta
+# nadana ręcznie znikałaby po cichu przy pierwszym PR-ze, który wspomni
+# zgłoszenie (#144).
 #
 # Plik żyje na `main`: przy `pull_request_target` GitHub bierze workflow
 # z gałęzi domyślnej repozytorium (GITHUB_REF wskazuje default branch),
@@ -177,8 +179,8 @@ jobs:
                 continue
               fi
 
-              # Nadawana etykieta zostaje jedyną — resztę zdejmujemy bez
-              # patrzenia, co to jest. Listę bierzemy z samego zgłoszenia, bo
+              # Nadawana etykieta zostaje jedyną z naszych — dwie pozostałe
+              # zdejmujemy. Listę bierzemy z samego zgłoszenia, bo
               # `--remove-label` na etykiecie, której ono nie ma, wywraca całe
               # wywołanie, a razem z nim nadanie nowej.
               args=(--add-label "$label")
@@ -186,8 +188,8 @@ jobs:
                 [ -n "$other" ] || continue
                 args+=(--remove-label "$other")
                 echo "#$n: zdejmuję \"$other\"" | tee -a "$GITHUB_STEP_SUMMARY"
-              done < <(printf '%s' "$json" | jq -r \
-                --arg keep "$label" '.labels[].name | select(. != $keep)')
+              done < <(printf '%s' "$json" | jq -r --arg keep "$label" \
+                '.labels[].name | select(. != $keep and IN($ENV.LABEL_WAITING, $ENV.LABEL_MENTION, $ENV.LABEL_MERGED))')
 
               gh issue edit "$n" --repo "$REPO" "${args[@]}"
               echo "#$n: etykieta \"$label\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -230,8 +232,9 @@ jobs:
 
       - name: Oznacz wspomniane zgłoszenia jako zmergowane
         # Ścieżka B kończy się pytaniem do człowieka, nie zamknięciem: etykieta
-        # mówi „PR wszedł, sprawdź, czy to załatwia sprawę". Poprzednie etykiety
-        # stanu — także te nadane przez inne PR-y — schodzą razem z nadaniem tej.
+        # mówi „PR wszedł, sprawdź, czy to załatwia sprawę". Nasze poprzednie
+        # etykiety stanu — także te nadane przez inne PR-y — schodzą razem
+        # z nadaniem tej.
         if: >-
           steps.refs.outputs.mention != ''
           && github.event.action == 'closed'
@@ -257,8 +260,8 @@ jobs:
               [ -n "$other" ] || continue
               args+=(--remove-label "$other")
               echo "#$n: zdejmuję \"$other\"" | tee -a "$GITHUB_STEP_SUMMARY"
-            done < <(printf '%s' "$json" | jq -r \
-              --arg keep "$LABEL_MERGED" '.labels[].name | select(. != $keep)')
+            done < <(printf '%s' "$json" | jq -r --arg keep "$LABEL_MERGED" \
+              '.labels[].name | select(. != $keep and IN($ENV.LABEL_WAITING, $ENV.LABEL_MENTION, $ENV.LABEL_MERGED))')
 
             gh issue edit "$n" --repo "$REPO" "${args[@]}"
             echo "#$n: etykieta \"$LABEL_MERGED\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
