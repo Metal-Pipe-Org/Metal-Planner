@@ -65,12 +65,3 @@ się z odległości i hojnie (kontrakt, punkt 14), a godziny samego przejazdu
 rowerem są domyślnie zgaszone — to jedyne liczby na tej mapie, których nie ma
 w żadnym rozkładzie, a stojąca obok odległość mówi to samo, nie udając
 odczytanej.
-
-## 3. Zawsze jest odpowiedź
-
-„Nie znaleziono połączenia" nie jest odpowiedzią na pytanie „jak tam dojadę".
-Gdy dziś już nic nie jedzie, szukamy w kolejnych dobach i mówimy wprost, że
-to jutro (kontrakt, punkt 13). Gdy pytanie było niespójne — na przykład
-podana linia nie przejeżdża już dziś przez podany przystanek — wraca
-komunikat mówiący, co się nie zgadza, a nie pusta lista: pomyłka ma wyglądać
-jak pomyłka, nie jak brak połączeń.

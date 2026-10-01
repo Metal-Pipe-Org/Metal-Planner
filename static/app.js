@@ -3379,6 +3379,31 @@ if (obLineInput) {
     if (uiState.startOnboard) setStartMode(true, false);
 }
 
+// Cały ten tryb da się u siebie zgasić (Ustawienia Developerskie, "Panel
+// wyszukiwania"): przełącznik znika z panelu, a start wraca do stojącego
+// miejsca. Chowanie, nie usuwanie - kod zostaje, a przełącznik jest tam, gdzie
+// reszta ustawień, więc przeżywa odświeżenie i wraca z "Przywróć domyślne".
+// Stoi po odtworzeniu zapamiętanego trybu wyżej, żeby zgaszony przełącznik
+// wygrywał z zapamiętanym "jestem w pojeździe".
+const START_MODE_PREF = 'start-mode-switch';
+
+function applyStartModeSwitch(on) {
+    const group = $('start-mode');
+    if (group) group.hidden = !on;
+    if (!on && onboardOn) setStartMode(false, false);
+}
+
+function bindStartModeSwitch() {
+    const input = $(START_MODE_PREF);
+    if (!input) return;
+    input.checked = loadDevPrefs()[START_MODE_PREF] !== false;
+    applyStartModeSwitch(input.checked);
+    input.addEventListener('change', () => {
+        saveDevPref(START_MODE_PREF, input.checked);
+        applyStartModeSwitch(input.checked);
+    });
+}
+
 // ------------------------------------------------------------ wyszukiwanie ----
 
 function resetResults() {
@@ -4296,6 +4321,10 @@ function bindDotOpts() {
     }
 }
 bindDotOpts();
+
+// Tutaj, a nie przy samym trybie: czyta zapamiętane ustawienia panelu, a te
+// są zdefiniowane dopiero wyżej w tej sekcji.
+bindStartModeSwitch();
 
 // --- rozwijane sekcje panelu -----------------------------------------------
 //

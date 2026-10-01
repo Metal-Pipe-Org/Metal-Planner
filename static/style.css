@@ -284,6 +284,10 @@ body.panel-hidden #sidebar {
 /* Przełącznik dwóch PYTAŃ, nie ustawień - stąd wygląd segmentowanego
    przycisku (jedna z dwóch odpowiedzi jest zawsze wybrana), a nie checkboxa.
    Stoi nad polami, bo to od niego zależy, o co te pola pytają. */
+/* `display: flex` bije domyślne [hidden] przeglądarki, tak samo jak przy
+   polach niżej - a przełącznik da się zgasić pod zębatką. */
+.start-mode[hidden] { display: none; }
+
 .start-mode {
     display: flex;
     gap: 4px;

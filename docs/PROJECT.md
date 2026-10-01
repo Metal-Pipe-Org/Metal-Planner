@@ -142,6 +142,13 @@ słupka (ten sam, co przy przystankach na liście podpowiedzi) i słowa
 z powrotem sama. Wybór pojazdu nie przeżywa odświeżenia strony — sam
 przełącznik owszem.
 
+Cały ten przełącznik da się u siebie **zgasić** — Ustawienia Developerskie,
+sekcja „Panel wyszukiwania". Znika wtedy z panelu razem z trzema polami,
+a podróż zaczyna się zawsze ze stojącego miejsca; zgaszenie wygrywa
+z zapamiętanym trybem „jestem w pojeździe". To ukrycie, nie usunięcie: tryb
+zostaje w aplikacji, a wybór siedzi w `localStorage` jak reszta ustawień
+panelu, więc wraca po „Przywróć domyślne".
+
 W polu „skąd" siedzi przycisk **◎ — moja lokalizacja** (Geolocation API
 przeglądarki). Pozycja z GPS-a wchodzi tam jako zwykły punkt mapy, nie nazwa
 przystanku, więc backend sam znajdzie wokół niej słupki (ten sam zasięg

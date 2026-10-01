@@ -99,7 +99,8 @@
           Przełącznik stoi NAD polami, bo zmienia to, o co te pola pytają —
           a nie pod nimi, jak ustawienia, które tylko stroją wynik.
         #}
-        <div class="start-mode" role="group" aria-label="Skąd zaczyna się podróż">
+        <div class="start-mode" id="start-mode" role="group"
+             aria-label="Skąd zaczyna się podróż">
             <button type="button" id="mode-place" class="seg active"
                     aria-pressed="true">Stoję tutaj</button>
             <button type="button" id="mode-vehicle" class="seg"
@@ -506,6 +507,26 @@
         <p class="field-hint">
             Kreski wybranych przejazdów i ich stacje końcowe stoją na mapie cały
             czas, a nie tylko pod kursorem.
+        </p>
+
+    </details>
+
+    {#
+      Chowanie, nie usuwanie: przełącznik startu z pokładu zostaje w aplikacji
+      dla wszystkich, a kto go u siebie nie chce, gasi go tutaj - wybór siedzi
+      w localStorage jak każde inne ustawienie panelu.
+    #}
+    <details class="dev-fold" id="fold-start">
+    <summary>Panel wyszukiwania</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="start-mode-switch" checked>
+            Przełącznik „Jestem w pojeździe”
+        </label>
+        <p class="field-hint">
+            Zgaszony zostawia samo „skąd”: pytanie o linię, kierunek z czoła
+            pojazdu i najbliższy przystanek znika z panelu, a podróż zaczyna się
+            zawsze ze stojącego miejsca.
         </p>
 
     </details>
