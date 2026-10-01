@@ -86,8 +86,10 @@ aboutDialog.addEventListener('click', e => {
 // Zgłoszenie od razu z wersją, urządzeniem i adresem: przy każdym błędzie
 // pierwsze pytanie brzmiało „na której wersji i na czym?”. Treść składana
 // w chwili kliknięcia, bo wersję service worker podaje dopiero po starcie.
-// Typ i etykiety nadaje dopiero workflow po znaczniku w treści - parametry
-// w adresie GitHub bierze pod uwagę tylko od osób z dostępem do repo.
+// `type=Bug` w adresie ustawia GitHub sam i od razu, ale tylko zgłaszającym
+// z dostępem do repo - reszcie ten parametr po prostu zignoruje. Dla nich
+// (i tak jedynych bez możliwości ustawienia typu samemu) typ dogrywa po
+// fakcie workflow po znaczniku w treści.
 $('about-report').addEventListener('click', e => {
     const version = $('sw-version') ? $('sw-version').textContent.trim() : '';
     const body = [
@@ -98,7 +100,7 @@ $('about-report').addEventListener('click', e => {
         `Urządzenie: ${phoneLayout.active() ? 'telefon' : 'komputer'} (${navigator.userAgent})`,
         `Adres: ${location.href}`,
     ].join('\n');
-    e.currentTarget.href = 'https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new?body='
+    e.currentTarget.href = 'https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new?type=Bug&body='
         + encodeURIComponent(body);
 });
 
