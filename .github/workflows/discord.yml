@@ -129,21 +129,21 @@ jobs:
 
           case "$EVENT/$ACTION" in
             issues/opened)
-              discord_send "🆕 Nowe zgłoszenie **#$ISSUE_N $ISSUE_TITLE** od **$SENDER**" \
-                "$ISSUE_BODY" "$ISSUE_URL"
+              discord_send open "$SENDER" "Nowe zgłoszenie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                "" "$ISSUE_BODY"
               ;;
 
             issues/reopened)
-              discord_send "🔄 **#$ISSUE_N $ISSUE_TITLE** otwarte ponownie przez **$SENDER**" \
-                "" "$ISSUE_URL"
+              discord_send open "$SENDER" "Zgłoszenie otwarte ponownie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               ;;
 
             issues/assigned)
               if [ "$ASSIGNEE" = "$SENDER" ]; then
-                discord_send "📌 **$ASSIGNEE** bierze **#$ISSUE_N $ISSUE_TITLE**" "" "$ISSUE_URL"
+                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "**$ASSIGNEE** bierze to na siebie"
               else
-                discord_send "📌 @$ASSIGNEE, przypisano Ci **#$ISSUE_N $ISSUE_TITLE** (przez **$SENDER**)" \
-                  "" "$ISSUE_URL"
+                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "@$ASSIGNEE, przypisano Ci to zgłoszenie"
               fi
               ;;
 
@@ -173,47 +173,52 @@ jobs:
                 *)
                   why="przez **$SENDER**" ;;
               esac
+              # Jak na GitHubie: zrobione na fioletowo, odpuszczone na szaro.
               case "$STATE_REASON" in
-                not_planned) icon="🚫"; why+=" — nie robimy" ;;
-                duplicate)   icon="♻️"; why+=" — duplikat" ;;
-                *)           icon="✅" ;;
+                not_planned) color=grey; why+=" — nie robimy" ;;
+                duplicate)   color=grey; why+=" — duplikat" ;;
+                *)           color=merged ;;
               esac
 
-              discord_send "$icon **#$ISSUE_N $ISSUE_TITLE** zamknięte $why · autor zgłoszenia: $(autor "$ISSUE_AUTHOR")" \
-                "" "$ISSUE_URL"
+              discord_send "$color" "$SENDER" "Zgłoszenie zamknięte: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                "Zamknięte $why · autor zgłoszenia: $(autor "$ISSUE_AUTHOR")"
               ;;
 
             issue_comment/created)
-              discord_send "💬 **$SENDER** w **#$ISSUE_N $ISSUE_TITLE**" "$COMMENT_BODY" "$COMMENT_URL"
+              discord_send comment "$SENDER" "Komentarz: #$ISSUE_N $ISSUE_TITLE" "$COMMENT_URL" \
+                "" "$COMMENT_BODY"
               ;;
 
             pull_request_target/opened)
+              color=open
               draft=""
               if [ "$PR_DRAFT" = true ]; then
+                color=grey
                 draft=" · wersja robocza"
               fi
-              discord_send "🆕 PR **#$PR_N $PR_TITLE** od **$SENDER** (\`$PR_HEAD\` → \`$PR_BASE\`)$draft" \
-                "$PR_BODY" "$PR_URL"
+              discord_send "$color" "$SENDER" "Nowy PR: #$PR_N $PR_TITLE" "$PR_URL" \
+                "\`$PR_HEAD\` → \`$PR_BASE\`$draft" "$PR_BODY"
               ;;
 
             pull_request_target/ready_for_review)
-              discord_send "📣 PR **#$PR_N $PR_TITLE** wychodzi z wersji roboczej" "" "$PR_URL"
+              discord_send open "$SENDER" "PR wychodzi z wersji roboczej: #$PR_N $PR_TITLE" "$PR_URL"
               ;;
 
             pull_request_target/reopened)
-              discord_send "🔄 PR **#$PR_N $PR_TITLE** otwarty ponownie przez **$SENDER**" "" "$PR_URL"
+              discord_send open "$SENDER" "PR otwarty ponownie: #$PR_N $PR_TITLE" "$PR_URL"
               ;;
 
             pull_request_target/closed)
               if [ "$PR_MERGED" = true ]; then
-                discord_send "🟣 PR **#$PR_N $PR_TITLE** zmergowany przez **$SENDER**" "" "$PR_URL"
+                discord_send merged "$SENDER" "PR zmergowany: #$PR_N $PR_TITLE" "$PR_URL"
               else
-                discord_send "⛔ PR **#$PR_N $PR_TITLE** zamknięty bez merge'a przez **$SENDER**" "" "$PR_URL"
+                discord_send closed "$SENDER" "PR zamknięty bez merge'a: #$PR_N $PR_TITLE" "$PR_URL"
               fi
               ;;
 
             pull_request_target/review_requested)
-              discord_send "👀 @$REVIEWER, **$SENDER** prosi Cię o recenzję PR-a **#$PR_N $PR_TITLE**" "" "$PR_URL"
+              discord_send info "$SENDER" "Prośba o recenzję: #$PR_N $PR_TITLE" "$PR_URL" \
+                "@$REVIEWER, **$SENDER** prosi Cię o recenzję"
               ;;
 
             pull_request_review/submitted)
@@ -225,9 +230,9 @@ jobs:
               count=$(gh api "repos/$REPO/pulls/$PR_N/reviews/$REVIEW_ID/comments" --paginate --jq 'length' \
                 | jq -s add)
               case "$REVIEW_STATE" in
-                approved)          what="✅ **$SENDER** zatwierdza" ;;
-                changes_requested) what="🛑 **$SENDER** prosi o zmiany w" ;;
-                *)                 what="💬 **$SENDER** komentuje" ;;
+                approved)          color=open;    what="PR zatwierdzony" ;;
+                changes_requested) color=closed;  what="Prośba o zmiany" ;;
+                *)                 color=comment; what="Recenzja" ;;
               esac
               extra=""
               if [ "${count:-0}" -gt 0 ]; then
@@ -237,7 +242,7 @@ jobs:
               if [ -z "$excerpt" ] && [ "${count:-0}" -gt 0 ]; then
                 excerpt=$(gh api "repos/$REPO/pulls/$PR_N/reviews/$REVIEW_ID/comments" --jq '.[0].body')
               fi
-              discord_send "$what PR **#$PR_N $PR_TITLE**$extra · autor PR-a: $(autor "$PR_AUTHOR")" \
-                "$excerpt" "$REVIEW_URL"
+              discord_send "$color" "$SENDER" "$what: #$PR_N $PR_TITLE" "$REVIEW_URL" \
+                "Autor PR-a: $(autor "$PR_AUTHOR")$extra" "$excerpt"
               ;;
           esac
