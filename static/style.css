@@ -47,8 +47,8 @@ body {
     touch-action: pan-x pan-y;
 }
 
-/* Gest „pociągnij w dół, żeby odświeżyć" w PWA - opcja w Ustawieniach
-   Developerskich (Layout, patrz app.js: no-pull-refresh). Na <html>, bo to on
+/* Gest „pociągnij w dół, żeby odświeżyć" w PWA - opcja w Ustawieniach (☰,
+   patrz app.js: no-pull-refresh). Na <html>, bo to on
    jest elementem przewijanym w większości przeglądarek - reguła gasi odbicie
    całej strony, nie ruszając przewijania wewnątrz list (mają już własne
    „contain" niżej). */
@@ -311,7 +311,8 @@ body.panel-hidden #sidebar {
 
 /* ---------------------------------------------------------- O aplikacji --- */
 
-#about {
+#about,
+#settings {
     width: min(520px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
     overflow-y: auto;
@@ -321,9 +322,11 @@ body.panel-hidden #sidebar {
     line-height: 1.45;
 }
 
-#about::backdrop { background: rgba(16, 32, 48, 0.35); }
+#about::backdrop,
+#settings::backdrop { background: rgba(16, 32, 48, 0.35); }
 
-#about .dev-head form { margin: 0; }
+#about .dev-head form,
+#settings .dev-head form { margin: 0; }
 #about p { margin: 8px 0; }
 
 #about h3 {
@@ -1906,7 +1909,8 @@ body.dev-open #flow-panel { right: 322px; }
 
 .dev-fold[open] > summary::before { transform: none; }
 
-#dev-panel .dev-check {
+#dev-panel .dev-check,
+#settings .dev-check {
     display: flex;
     align-items: center;
     gap: 7px;
@@ -1917,7 +1921,8 @@ body.dev-open #flow-panel { right: 322px; }
     cursor: pointer;
 }
 
-#dev-panel .dev-check input { margin: 0; flex: none; }
+#dev-panel .dev-check input,
+#settings .dev-check input { margin: 0; flex: none; }
 
 /* Podpodział wewnątrz rozwiniętej sekcji - lżejszy niż <summary>, bo to wciąż
    ta sama sekcja, tylko druga jej połowa. */

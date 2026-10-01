@@ -257,6 +257,9 @@ Gdy rower jest włączony, a propozycji z rowerem nie ma, pod listą staje
 kartka mówiąca dlaczego (`bikeNoteHtml`) — brak wyniku i zepsuta funkcja
 wyglądają inaczej tylko wtedy, gdy ktoś to powie.
 
+Ustawienia dla zwykłego użytkownika są osobno, pod ☰ (karta `#settings`,
+klucz `metal-planner:user-prefs`) — panel ⚙ zostaje dla zespołu.
+
 Ustawienia Developerskie są schowane za przyciskiem ⚙. Czysty JS bez
 frameworka, cała logika w `static/app.js`. Sekcje po kolei: „Co pokazuje
 mapa" (gęstość, liczba aut i przejazdów rowerem), „Czas na mapie",
@@ -1219,6 +1222,14 @@ dało się dojechać.
 
 ## Changelog
 
+- **2026-10-01** — **Ustawienia dla każdego** (zgłoszenie #170). Nowy
+  przycisk ☰ obok ⚙ otwiera kartę „Ustawienia" — pierwsze opcje dla zwykłego
+  użytkownika, a nie dla zespołu. Na start jedna: „Wyłącz odświeżanie
+  przeciągnięciem w dół" (domyślnie wyłączona), która przez
+  `overscroll-behavior-y: contain` na `<html>` gasi gest odświeżania
+  w zainstalowanej aplikacji, nie ruszając przewijania. Wybory leżą pod
+  osobnym kluczem (`metal-planner:user-prefs`), więc „Przywróć domyślne"
+  w ⚙ ich nie kasuje.
 - **2026-10-01** — **szybsze wyszukiwanie** (zgłoszenie #171). Te same
   wyniki co do bajtu, tylko szybciej — sprawdzone na 11 relacjach (dzień,
   wieczór, gęstość na maks z „pokaż więcej") porównaniem całych odpowiedzi.

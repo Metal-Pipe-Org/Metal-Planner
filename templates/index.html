@@ -84,6 +84,9 @@
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
                     aria-label="Zainstaluj aplikację" hidden>⤓</button>
+            <button id="settings-toggle" class="icon-button" type="button"
+                    title="Ustawienia" aria-label="Ustawienia"
+                    aria-haspopup="dialog">&#9776;</button>
             <button id="dev-toggle" class="icon-button" title="Ustawienia Developerskie"
                     aria-label="Ustawienia Developerskie" aria-expanded="false">⚙</button>
         </div>
@@ -437,6 +440,31 @@
         <a href="https://github.com/Metal-Pipe-Org/Metal-Planner" target="_blank"
         rel="noopener">kod na GitHubie</a><br>
         © 2026 MetalPipeOrg. Wszelkie prawa zastrzeżone.
+    </p>
+
+</dialog>
+
+{#
+  Ustawienia dla każdego - w przeciwieństwie do panelu ⚙, który stroi
+  algorytm i wygląd mapy pod zespół. Zapisują się osobno (USER_PREFS_KEY
+  w app.js), więc „Przywróć domyślne" w ⚙ ich nie kasuje.
+#}
+<dialog id="settings" class="card" aria-labelledby="settings-title">
+
+    <header class="dev-head">
+        <h2 id="settings-title">Ustawienia</h2>
+        <form method="dialog">
+            <button class="icon-button" title="Zamknij" aria-label="Zamknij">✕</button>
+        </form>
+    </header>
+
+    <label class="dev-check">
+        <input type="checkbox" id="no-pull-refresh"> Wyłącz odświeżanie przeciągnięciem w dół
+    </label>
+    <p class="field-hint">
+        Gest „pociągnij w dół, żeby odświeżyć" w aplikacji zainstalowanej
+        na telefonie łatwo wywołać przypadkiem, np. przewijając listę do samej
+        góry. Ta opcja go gasi, zostawiając zwykłe przewijanie bez zmian.
     </p>
 
 </dialog>
@@ -883,15 +911,6 @@
         <p class="field-hint">
             Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe
             i elektryczne naraz.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="no-pull-refresh"> Wyłącz odświeżanie przeciągnięciem w dół
-        </label>
-        <p class="field-hint">
-            Gest „pociągnij w dół, żeby odświeżyć" w aplikacji zainstalowanej
-            jako PWA łatwo wywołać przypadkiem, np. przewijając listę do samej
-            góry. Ta opcja go gasi, zostawiając zwykłe przewijanie bez zmian.
         </p>
 
     </details>

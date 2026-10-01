@@ -102,6 +102,44 @@ $('about-report').addEventListener('click', e => {
         + encodeURIComponent(body);
 });
 
+// Ustawienia dla każdego (☰) - osobny klucz niż Ustawienia Developerskie,
+// żeby „Przywróć domyślne" w ⚙ nie kasowało wyborów zwykłego użytkownika.
+const USER_PREFS_KEY = 'metal-planner:user-prefs';
+
+function loadUserPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(USER_PREFS_KEY)) || {};
+    } catch {
+        return {};
+    }
+}
+
+function saveUserPref(id, value) {
+    const prefs = loadUserPrefs();
+    prefs[id] = value;
+    try {
+        localStorage.setItem(USER_PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+        // localStorage niedostępny - opcja działa do odświeżenia strony
+    }
+}
+
+const settingsDialog = $('settings');
+$('settings-toggle').addEventListener('click', () => settingsDialog.showModal());
+settingsDialog.addEventListener('click', e => {
+    if (e.target === settingsDialog) settingsDialog.close();
+});
+
+// Gest „pociągnij w dół, żeby odświeżyć" - overscroll-behavior na <html>
+// (patrz style.css) gasi go bez ruszania zwykłego przewijania.
+const noPullRefresh = $('no-pull-refresh');
+noPullRefresh.checked = loadUserPrefs()['no-pull-refresh'] === true;
+document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
+noPullRefresh.addEventListener('change', () => {
+    saveUserPref('no-pull-refresh', noPullRefresh.checked);
+    document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
+});
+
 // Panel wyboru dnia
 const dayPanel = $('day-panel');
 const dayToggle = $('day-toggle');
@@ -4610,16 +4648,6 @@ routesOn.addEventListener('change', () => {
     // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
     // tak jak propozycje z rowerem (patrz replanForBikes).
     if (routesOn.checked) replanForBikes();
-});
-
-// Gest „pociągnij w dół, żeby odświeżyć" (opcja w Layout) - overscroll-behavior
-// na <html> (patrz style.css) gasi go bez ruszania zwykłego przewijania.
-const noPullRefresh = $('no-pull-refresh');
-noPullRefresh.checked = loadDevPrefs()['no-pull-refresh'] === true;
-document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
-noPullRefresh.addEventListener('change', () => {
-    saveDevPref('no-pull-refresh', noPullRefresh.checked);
-    document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
 });
 
 // Przycisk strefy Traficara (🅿) - domyślnie go nie ma, strefa pokazuje się
