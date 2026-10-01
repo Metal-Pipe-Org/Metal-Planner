@@ -12,8 +12,8 @@
 #     docker compose build --no-cache --pull
 #     docker compose up -d
 #
-# Opcjonalnie to samo da sie zautomatyzowac: docker/deploy.sh w repozytorium
-# stawia calosc jedna komenda (wdrozenie po zmergowaniu do main).
+# Opcjonalnie: docker/deploy.sh w repozytorium robi to samo jedna komenda,
+# odpalana recznie na serwerze (produkcja: BRANCH=stable).
 # To dodatek - ten plik i powyzsza komenda wystarczaja same z siebie.
 
 services:
@@ -119,9 +119,9 @@ services:
 
 networks:
   # Wspolna siec z kontenerem nginxa - to po niej idzie ruch z internetu
-  # (patrz docker/nginx.conf.example). external znaczy "ta siec juz istnieje,
-  # nie tworz jej"; gdy jej nie ma, `up` konczy sie bledem. Jesli nie masz
-  # jeszcze takiej sieci:
+  # (konfiguracja nginxa zyje na serwerze, nie w repo). external znaczy
+  # "ta siec juz istnieje, nie tworz jej"; gdy jej nie ma, `up` konczy sie
+  # bledem. Jesli nie masz jeszcze takiej sieci:
   #     docker network create reverse_proxy
   reverse_proxy:
     external: true

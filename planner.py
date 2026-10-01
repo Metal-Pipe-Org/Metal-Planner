@@ -67,10 +67,7 @@ def plan_route(start_query, end_query, when=None, transfer_gain_sec=None):
     best_stop, best_arr, journey = _scan(day, source_stops, target_stops, dep_sec)
 
     if best_stop is None:
-        return {
-            "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
-                     f"po {_fmt_time(dep_sec)} tego dnia."
-        }
+        return _no_connection(start_name, end_name, dep_sec, when)
 
     # /api/plan oddaje JEDNĄ trasę, więc bierzemy wariant proponowany jako
     # najlepszy przy obecnym progu (pełen wachlarz jest w /api/flow).
@@ -1944,7 +1941,13 @@ def _choose_start(network_from, asked_sec, from_sec, target, prev_kept):
     return start(minutes)
 
 
-def _no_connection(start_name, end_name, dep_sec):
+def _no_connection(start_name, end_name, dep_sec, when):
+    last = gtfs.last_service_date()
+    if last and when.date() > last:
+        return {
+            "error": f"Rozkładu na {when:%d.%m} jeszcze nie opublikowano — "
+                     f"obecny sięga do {last:%d.%m}."
+        }
     return {
         "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
                  f"po {_fmt_time(dep_sec)} tego dnia."
@@ -2171,7 +2174,7 @@ def plan_flow(start_query, end_query, when=None,
             day, source_stops, target_stops, dep_sec)
 
     if best_stop is None:
-        return _no_connection(start_name, end_name, dep_sec)
+        return _no_connection(start_name, end_name, asked_sec, when)
 
     # Godzina, którą odpowiedź RAPORTUJE - z pytania. Odsiew krążenia niżej
     # przesuwa `dep_sec`, od którego mapa się RYSUJE, ale "za ile tam będziesz"
