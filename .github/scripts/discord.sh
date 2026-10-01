@@ -21,7 +21,7 @@
 #   AKTOR     login GitHuba, który to zrobił; pusty, gdy zrobił to automat
 #   TYTUŁ     np. „Nowe zgłoszenie #12 Tytuł” — link do LINK
 #   OPIS      linijka od nas z tym, czego nie ma w tytule; tu padają pingi
-#   FRAGMENT  tekst od ludzi (opis, komentarz) — skracany i wstawiany jako cytat
+#   FRAGMENT  tekst od ludzi (opis, komentarz) — skracany i wstawiany pod opisem
 discord_send() {
   if [ -z "${DISCORD_WEBHOOK:-}" ]; then
     echo "Brak sekretu DISCORD_WEBHOOK — pomijam Discorda."
@@ -59,7 +59,7 @@ discord_send() {
     | (if ($e | length) > $max then $e[:$max] + "…" else $e end) as $e
     | (if ($title | length) > 250 then $title[:250] + "…" else $title end) as $title
     | ([$text | select(. != "")]
-        + (if $e != "" then [$e | split("\n") | map("> " + .) | join("\n")] else [] end)
+        + (if $e != "" then [$e] else [] end)
       | join("\n")) as $desc
     | reduce ($ids | to_entries[]) as $p ({desc: $desc, users: []};
         ("(?<![A-Za-z0-9-])@" + $p.key + "(?![A-Za-z0-9-])") as $re
