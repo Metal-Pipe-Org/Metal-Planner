@@ -86,21 +86,20 @@ aboutDialog.addEventListener('click', e => {
 // Zgłoszenie od razu z wersją, urządzeniem i adresem: przy każdym błędzie
 // pierwsze pytanie brzmiało „na której wersji i na czym?”. Treść składana
 // w chwili kliknięcia, bo wersję service worker podaje dopiero po starcie.
-// `type=Bug` w adresie ustawia GitHub sam i od razu, ale tylko zgłaszającym
-// z dostępem do repo - reszcie ten parametr po prostu zignoruje. Dla nich
-// (i tak jedynych bez możliwości ustawienia typu samemu) typ dogrywa po
-// fakcie workflow po znaczniku w treści.
+// Typu zgłoszenia celowo nie narzucamy - przycisk jest dla wszystkich, nie
+// tylko dla zespołu, więc nie wiadomo z góry, co to za zgłoszenie. Jedyne
+// automatyczne rozróżnienie to etykieta "external" (workflow issue-triage.yml,
+// po uprawnieniach autora, nie po treści zgłoszenia).
 $('about-report').addEventListener('click', e => {
     const version = $('sw-version') ? $('sw-version').textContent.trim() : '';
     const body = [
         '**Co się stało:**', '', '', '**Czego się spodziewałem:**', '', '',
         '---',
-        '<!-- zgłoś-problem -->',
         `Wersja: ${version && version !== '—' ? version : 'nieznana'}`,
         `Urządzenie: ${phoneLayout.active() ? 'telefon' : 'komputer'} (${navigator.userAgent})`,
         `Adres: ${location.href}`,
     ].join('\n');
-    e.currentTarget.href = 'https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new?type=Bug&body='
+    e.currentTarget.href = 'https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new?body='
         + encodeURIComponent(body);
 });
 
