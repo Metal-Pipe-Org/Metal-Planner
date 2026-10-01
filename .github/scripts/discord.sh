@@ -27,6 +27,10 @@ discord_send() {
   # `<@ID>` w pół. Komentarze HTML (znaczniki botów) wycinamy, bo na Discordzie
   # wyszłyby jako tekst.
   #
+  # Treść też skracamy: niesie tytuły od ludzi i nagłówek oceny od modelu,
+  # a wiadomość dłuższą niż 2000 znaków Discord odrzuca w całości. 1500
+  # zostawia zapas na fragment, link i rozwinięte wzmianki.
+  #
   # `parse: []` wyłącza wszystkie wzmianki z treści, także @everyone i role
   # wpisane przez kogokolwiek w komentarzu; `users` wpuszcza z powrotem tylko
   # osoby z mapy, które naprawdę padły w wiadomości.
@@ -41,6 +45,7 @@ discord_send() {
       | gsub("\n{3,}"; "\n\n")
       | gsub("^\\s+|\\s+$"; "")) as $e
     | (if ($e | length) > $max then $e[:$max] + "…" else $e end) as $e
+    | (if ($text | length) > 1500 then $text[:1500] + "…" else $text end) as $text
     | ([$text]
         + (if $e != "" then [$e | split("\n") | map("> " + .) | join("\n")] else [] end)
         + (if $url != "" then ["<" + $url + ">"] else [] end)
