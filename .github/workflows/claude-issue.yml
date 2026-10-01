@@ -35,11 +35,20 @@ jobs:
       && contains(github.event.comment.body || github.event.issue.body || '', '@claude')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       go: ${{ steps.check.outputs.go }}
     steps:
-      - name: Odsiej wołania z cytatu
+      # Skrypt z `main` — tak samo w claude-review-pr.yml i issue-triage.yml.
+      - name: Pobierz sprawdzenia z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Sprawdź wołanie i uprawnienia
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -47,27 +56,8 @@ jobs:
           WHO: ${{ github.event.sender.login }}
           BODY: ${{ github.event.comment.body || github.event.issue.body }}
         run: |
-          # Odpowiedź cytująca poprzedni wpis Claude'a przepisuje razem z nim
-          # każde @claude, które w nim padło — łącznie z tym z tego pliku.
-          # Liczy się więc tylko @claude poza liniami cytatu.
-          if ! printf '%s\n' "$BODY" | grep -v '^[[:space:]]*>' | grep -q '@claude'; then
-            echo "go=false" >> "$GITHUB_OUTPUT"
-            echo "Wszystkie @claude w tym wpisie są w cytacie — pomijam." \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          # Błąd API ma wywrócić bramkę na czerwono, a nie udawać „brak
-          # uprawnień" (tak samo w claude-review-pr.yml).
-          perm=$(gh api "repos/$REPO/collaborators/$WHO/permission" --jq .permission)
-          case "$perm" in
-            admin|write) echo "go=true" >> "$GITHUB_OUTPUT" ;;
-            *)
-              echo "go=false" >> "$GITHUB_OUTPUT"
-              echo "@$WHO nie ma prawa zapisu (uprawnienia: $perm) — pomijam." \
-                >> "$GITHUB_STEP_SUMMARY"
-              ;;
-          esac
+          source .github/scripts/guard.sh
+          gate_claude_call "$BODY" "$WHO"
 
   solve-issue:
     needs: gate
@@ -160,26 +150,20 @@ jobs:
       - name: Zależności (żeby Claude mógł odpalić pytest)
         run: pip install -r requirements-dev.txt
 
-      - name: Ustal link do PR-a dla odpowiedzi
-        id: link
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_BRANCH: ${{ steps.base.outputs.issue_branch }}
-        run: |
-          # Link dokleja do odpowiedzi workflow, bo to on zna gałąź docelową;
-          # `body` z `Closes #N` jest tu pewne, nie zależy od tego, czy model
-          # pamiętał o słowie kluczowym. Gdy PR już jest, nowy link byłby
-          # mylący.
-          PR=$(gh pr list --repo "$REPO" --head "$ISSUE_BRANCH" --state open \
-                 --json number -q '.[0].number')
-          if [ -n "$PR" ]; then
-            echo "pr=$PR" >> "$GITHUB_OUTPUT"
-          else
-            echo "url=https://github.com/${REPO}/compare/main...${ISSUE_BRANCH}?expand=1&body=Closes+%23${N}" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Pobierz skrypty pomocnicze z main
+        # Z `main`, nie z drzewa roboczego: tam leży praca Claude'a, a skrypt
+        # wysyłki dostaje w env sekret webhooka.
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
 
-      - name: Wyłącz plik z odpowiedzią z commitów
-        run: echo ".claude-answer.md" >> .git/info/exclude
+      - name: Wyłącz pliki pomocnicze z commitów
+        run: |
+          echo ".claude-answer.md" >> .git/info/exclude
+          echo ".discord/" >> .git/info/exclude
 
       - name: Zapowiedz pracę w komentarzu
         id: hello
@@ -249,6 +233,29 @@ jobs:
           git push origin "refs/remotes/origin/${TMP}:refs/heads/${ISSUE_BRANCH}"
           echo "moved=true" >> "$GITHUB_OUTPUT"
 
+      - name: Ustal link do PR-a dla odpowiedzi
+        id: link
+        # Tylko gdy ten bieg coś wypchnął: bez zmian gałąź zgłoszenia może
+        # jeszcze nie istnieć, a link do porównania z nią byłby martwy. Błąd
+        # `gh` nie może zabić odpowiedzi, która i tak ma wyjść — bez linku.
+        if: ${{ !cancelled() && steps.ff.outputs.moved == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_BRANCH: ${{ steps.base.outputs.issue_branch }}
+        run: |
+          # Link dokleja do odpowiedzi workflow, bo to on zna gałąź docelową;
+          # `body` z `Closes #N` jest tu pewne, nie zależy od tego, czy model
+          # pamiętał o słowie kluczowym. Gdy PR już jest, nowy link byłby
+          # mylący.
+          PR=$(gh pr list --repo "$REPO" --head "$ISSUE_BRANCH" --state open \
+                 --json number -q '.[0].number')
+          if [ -n "$PR" ]; then
+            echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=https://github.com/${REPO}/compare/main...${ISSUE_BRANCH}?expand=1&body=Closes+%23${N}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Wstaw odpowiedź i zwiń zapowiedź
         id: answer
         # Odpowiedź idzie nowym komentarzem, bo tylko nowy powiadamia, i
@@ -276,10 +283,11 @@ jobs:
               echo
               if [ -n "$PR" ]; then
                 echo "PR #$PR już istnieje i sam się zaktualizuje."
-              else
+                echo
+              elif [ -n "$PR_URL" ]; then
                 echo "[Otwórz PR do \`main\`]($PR_URL)"
+                echo
               fi
-              echo
               echo "@$WHO"
             } > "$RUNNER_TEMP/answer.md"
           else
@@ -291,13 +299,21 @@ jobs:
           url=$(gh issue comment "$N" --repo "$REPO" --body-file "$RUNNER_TEMP/answer.md")
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-          gh api graphql -f id="$NODE" -f query='
-            mutation($id: ID!) {
-              minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
-                minimizedComment { isMinimized }
-              }
-            }' >/dev/null \
+          source .discord/.github/scripts/guard.sh
+          minimize_comment "$NODE" \
             || echo "::warning::Nie udało się zwinąć zapowiedzi."
+
+      - name: Zwiń zapowiedź ubitego biegu
+        # Nowsze wołanie ubiło ten bieg, więc odpowiedzi nie będzie — zapowiedź
+        # „Claude pracuje" nie może zostać wisieć. Odpowie tamten bieg.
+        if: ${{ cancelled() && steps.hello.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE: ${{ steps.hello.outputs.node }}
+        run: |
+          source .discord/.github/scripts/guard.sh
+          minimize_comment "$NODE"
 
       - name: Oznacz zgłoszenie etykietą "claude"
         # Sam znacznik „Claude się tym zajmował" — nic nie uruchamia.
@@ -312,18 +328,6 @@ jobs:
           gh label create claude --repo "$REPO" \
             --color BFD4F2 --description "Obsługiwane przez Claude" || true
           gh issue edit "$N" --repo "$REPO" --add-label claude
-
-      - name: Pobierz skrypt wysyłki na Discorda z main
-        # Z `main`, nie z drzewa roboczego: tam leży praca Claude'a, a skrypt
-        # dostaje w env sekret webhooka.
-        if: ${{ !cancelled() && (steps.claude.outcome == 'success' || steps.claude.outcome == 'failure') }}
-        continue-on-error: true
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: .discord
-          sparse-checkout: .github/scripts
-          persist-credentials: false
 
       - name: Daj znać wołającemu na Discordzie
         # Claude pisze pod zgłoszeniem jako bot, a wpisy botów discord.yml

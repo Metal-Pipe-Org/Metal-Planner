@@ -7,7 +7,7 @@ name: "Zgłoszenia: z przycisku i z zewnątrz"
 #
 # „Spoza zespołu” rozstrzyga pytanie o uprawnienia wprost, nie
 # `author_association`: przy prywatnym członkostwie w organizacji kłamie
-# (patrz claude-issue.yml). Błąd API ma wywrócić bieg na czerwono, a nie
+# (patrz .github/scripts/guard.sh). Błąd API ma wywrócić bieg na czerwono, a nie
 # udawać obcego.
 on:
   issues:
@@ -15,6 +15,7 @@ on:
 
 permissions:
   issues: write
+  contents: read
 
 jobs:
   triage:
@@ -29,13 +30,21 @@ jobs:
       WHO: ${{ github.event.issue.user.login }}
 
     steps:
+      - name: Pobierz sprawdzenia z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Etykieta "external" dla autora spoza zespołu
         run: |
           set -euo pipefail
-          perm=$(gh api "repos/$REPO/collaborators/$WHO/permission" --jq .permission)
-          case "$perm" in
-            admin|maintain|write) exit 0 ;;
-          esac
+          source .github/scripts/guard.sh
+          perm=$(caller_permission "$WHO")
+          if is_team_permission "$perm"; then
+            exit 0
+          fi
           gh label create external --repo "$REPO" \
             --color FBCA04 --description "Zgłoszone przez kogoś spoza zespołu" || true
           gh issue edit "$N" --repo "$REPO" --add-label external
