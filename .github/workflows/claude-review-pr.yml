@@ -11,8 +11,7 @@ name: Claude - oceń PR
 #
 # Recenzentów ten workflow nie woła. Autor czyta ocenę i dopiero gdy uzna PR za
 # gotowy, prosi o recenzję w panelu bocznym („Reviewers"); ping na Discordzie
-# wysyła wtedy `discord.yml` — i tylko pod warunkiem, że ocena już tu jest.
-# Do tego służy niewidoczny znacznik `claude-review:done` w komentarzu z oceną.
+# wysyła wtedy `discord.yml`.
 #
 # Ocena jest do przeczytania przez człowieka. Claude nie wystawia recenzji
 # GitHuba, nie zatwierdza, nie blokuje i nie merguje — i nie dostaje tu narzędzi
@@ -352,12 +351,7 @@ jobs:
           title=$(printf '%s' "$json" | jq -r .title)
 
           if [ -s "$REVIEW" ]; then
-            # Znacznik czyta discord.yml: recenzent dostaje ping na Discordzie
-            # tylko wtedy, gdy pod PR-em jest już ocena. Informacja o porażce
-            # go nie nosi — nieudany bieg to nie ocena.
             {
-              echo '<!-- claude-review:done -->'
-              echo
               cat "$REVIEW"
               echo
               echo '---'

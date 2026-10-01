@@ -19,11 +19,9 @@ name: Discord - powiadomienia
 #  PR-y
 #   • otwarcie (z fragmentem opisu), wyjście z wersji roboczej, ponowne
 #     otwarcie, merge albo zamknięcie bez merge'a,
-#   • prośba o recenzję z panelu bocznego — ping recenzenta, ale tylko gdy pod
-#     PR-em stoi już ocena Claude'a. Recenzent ma usłyszeć o PR-ze dopiero
-#     wtedy, gdy autor przeczytał ocenę i uznał PR za gotowy. Prośba wysłana
-#     wcześniej — także ta z CODEOWNERS przy otwarciu — przechodzi bez pingu;
-#     po ocenie wystarczy ją ponowić (🔄 przy nazwisku recenzenta),
+#   • prośba o recenzję z panelu bocznego — ping recenzenta. Kiedy o nią
+#     prosić, to umowa w zespole, nie automat: dopiero gdy autor przeczytał
+#     ocenę Claude'a i uznał PR za gotowy,
 #   • wystawiona recenzja (zatwierdzenie, prośba o zmiany, komentarze
 #     w kodzie) — ping autora PR-a, bo to do niego.
 #
@@ -215,18 +213,6 @@ jobs:
               ;;
 
             pull_request_target/review_requested)
-              # Ocenę rozpoznajemy po niewidocznym znaczniku, który
-              # claude-review-pr.yml wstawia tylko do udanej oceny.
-              # `--paginate` z `--jq` daje liczbę na stronę, stąd suma.
-              ocen=$(gh api "repos/$REPO/issues/$PR_N/comments" --paginate \
-                  --jq '[.[] | select(.user.login == "github-actions[bot]"
-                                      and (.body | contains("<!-- claude-review:done -->")))] | length' \
-                | jq -s add)
-              if [ "${ocen:-0}" -eq 0 ]; then
-                echo "PR #$PR_N nie ma jeszcze oceny Claude'a — @$REVIEWER dostanie ping, gdy autor ponowi prośbę po ocenie." \
-                  | tee -a "$GITHUB_STEP_SUMMARY"
-                exit 0
-              fi
               discord_send "👀 @$REVIEWER, **$SENDER** prosi Cię o recenzję PR-a **#$PR_N $PR_TITLE**" "" "$PR_URL"
               ;;
 
