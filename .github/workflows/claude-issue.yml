@@ -274,20 +274,30 @@ jobs:
           set -euo pipefail
           ANSWER=.claude-answer.md
 
+          # Także przy porażce: Claude mógł zdążyć wypchnąć użyteczne commity,
+          # a bez linku wołający musiałby sam szukać gałęzi zgłoszenia.
+          pr_line() {
+            if [ -n "$PR" ]; then
+              echo "PR #$PR już istnieje i sam się zaktualizuje."
+              echo
+            elif [ -n "$PR_URL" ]; then
+              echo "[Otwórz PR do \`main\`]($PR_URL)"
+              echo
+            fi
+          }
+
           if [ "$OUTCOME" != success ]; then
-            printf '⚪ Claude nie dokończył — [log biegu](%s).\n\n@%s\n' "$RUN" "$WHO" \
-              > "$RUNNER_TEMP/answer.md"
+            {
+              echo "⚪ Claude nie dokończył — [log biegu]($RUN)."
+              echo
+              pr_line
+              echo "@$WHO"
+            } > "$RUNNER_TEMP/answer.md"
           elif [ -s "$ANSWER" ]; then
             {
               cat "$ANSWER"
               echo
-              if [ -n "$PR" ]; then
-                echo "PR #$PR już istnieje i sam się zaktualizuje."
-                echo
-              elif [ -n "$PR_URL" ]; then
-                echo "[Otwórz PR do \`main\`]($PR_URL)"
-                echo
-              fi
+              pr_line
               echo "@$WHO"
             } > "$RUNNER_TEMP/answer.md"
           else
