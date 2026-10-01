@@ -14,8 +14,9 @@ name: Claude - oceń PR
 # wysyła wtedy `discord.yml`.
 #
 # Ocena jest do przeczytania przez człowieka. Claude nie wystawia recenzji
-# GitHuba, nie zatwierdza, nie blokuje i nie merguje — i nie dostaje tu narzędzi
-# do pisania po plikach, więc nie zmieni kodu ocenianego PR-a.
+# GitHuba, nie zatwierdza, nie blokuje i nie merguje. `Write` dostaje wyłącznie
+# po to, żeby zapisać ocenę do `.claude-review.md` — zapis ląduje w drzewie na
+# maszynie biegu i ginie razem z nią, do ocenianego PR-a nie trafia.
 #
 # Testów nie uruchamiamy: zestaw nie jest jeszcze właściwie skonfigurowany
 # (stąd `tests.yml` odpalany wyłącznie ręcznie), więc jego wynik niczego by nie
@@ -30,12 +31,17 @@ name: Claude - oceń PR
 # za to, KIEDY ocena leci i gdzie ląduje; żeby zmienić JEJ KSZTAŁT, nie ruszaj
 # workflow, tylko tamten plik.
 #
-# Wyzwalacze celowo nie obejmują `synchronize`: ocena leci raz, przy otwarciu
-# (albo przy wyjściu z wersji roboczej), żeby dosyłanie commitów nie sypało
-# kolejnymi ocenami pod ten sam PR. Po większych poprawkach albo gdy ocena się
-# nie udała, wystarczy napisać `@claude` w komentarzu pod PR-em — workflow sam
-# weźmie numer z wątku. Awaryjnie zostaje też ręczny bieg: Actions -> „Claude -
-# oceń PR" -> Run workflow -> numer PR-a (tylko tam jest przełącznik debug).
+# Ocena leci raz, przy otwarciu (albo przy wyjściu z wersji roboczej), żeby
+# dosyłanie commitów nie sypało kolejnymi ocenami pod ten sam PR. Push do PR-a
+# (`synchronize`) też tu wpada, ale ocenia tylko PR, pod którym nie ma jeszcze
+# żadnej zapowiedzi. To łata na konflikt: PR otwarty w konflikcie z bazą nie ma
+# commitu scalenia, więc GitHub w ogóle nie tworzy biegu `pull_request` — ani
+# udanego, ani pominiętego — i ocena przepadała po cichu. Teraz przychodzi
+# z pierwszym pushem, który konflikt usuwa. Po większych poprawkach albo gdy
+# ocena się nie udała, wystarczy napisać `@claude` w komentarzu pod PR-em —
+# workflow sam weźmie numer z wątku. Awaryjnie zostaje też ręczny bieg:
+# Actions -> „Claude - oceń PR" -> Run workflow -> numer PR-a (tylko tam jest
+# przełącznik debug).
 #
 # Do zwykłych PR-ów wystarcza kopia na `main` i oba wyzwalacze biorą ją
 # stamtąd: `pull_request` czyta workflow z commitu scalenia PR-a z gałęzią
@@ -53,7 +59,7 @@ name: Claude - oceń PR
 # także przy PR-ach wydaniowych do `stable`.
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
     # Bazy, których ocena dotyczy: zwykłe PR-y do `main` i PR-y wydaniowe
     # `main` -> `stable`. PR-y o innej bazie zostawiamy bez komentarza.
     branches: [main, stable]
@@ -156,9 +162,13 @@ jobs:
     # każdy komentarz pod PR-em tworzy bieg, a grupa na poziomie workflow
     # sprawiłaby, że zwykłe „dzięki" ubija trwającą ocenę, zanim bramka
     # zdąży je odsiać.
+    #
+    # Push do PR-a niczego nie ubija, tylko czeka w kolejce. Inaczej push
+    # zaraz po otwarciu przerwałby pierwszą ocenę, a sam, widząc już jej
+    # zapowiedź, zszedłby z drogi — i PR zostałby bez oceny.
     concurrency:
       group: claude-review-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event.action != 'synchronize' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -175,6 +185,7 @@ jobs:
         id: pr
         env:
           N: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
+          ACTION: ${{ github.event.action }}
         run: |
           set -euo pipefail
 
@@ -210,6 +221,22 @@ jobs:
             fi
             echo "go=false" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          # Push ocenia tylko PR, który oceny jeszcze nie dostał (patrz
+          # nagłówek). Znakiem jest zapowiedź z kroku niżej — leży pod PR-em
+          # także wtedy, gdy sama ocena się nie udała, a wtedy ponowienie to
+          # już sprawa `@claude`, nie każdego kolejnego pusha.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] \
+              && [ "$ACTION" = synchronize ]; then
+            hello=$(gh api --paginate "repos/$REPO/issues/$N/comments" \
+              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("🤔 Claude czyta ten PR"))) | .id')
+            if [ -n "$hello" ]; then
+              echo "PR #$N ma już ocenę — push jej nie powtarza." \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "go=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
 
           {
@@ -282,7 +309,8 @@ jobs:
 
           # Zapowiedź zostaje taka, jaka jest — ocena przyjdzie obok, nowym
           # komentarzem, więc ta linijka nie musi niczego obiecywać ani
-          # niczego nie trzeba w niej potem poprawiać.
+          # niczego nie trzeba w niej potem poprawiać. Jej początek jest
+          # znakiem „ocena już była" dla pushy (krok „Ustal PR do oceny").
           url=$(gh pr comment "$N" --repo "$REPO" --body \
             "🤔 Claude czyta ten PR — ocena przyjdzie osobnym komentarzem ([podgląd biegu](${RUN}))."
           )

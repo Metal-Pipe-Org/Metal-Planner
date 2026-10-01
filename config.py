@@ -35,3 +35,13 @@ def pkp_api_key():
     musiałby sprawdzać i None, i pusty napis.
     """
     return os.environ.get("PKP_API_KEY", "").strip() or None
+
+
+def dev_mode():
+    """Tryb deweloperski: `DEV_MODE=1` w data/.env.
+
+    Domyślnie wyłączony: brak wpisu ma znaczyć produkcję, żeby zapomniane
+    ustawienie nie wystawiało zwykłym użytkownikom rzeczy zespołu. Włącza się
+    go świadomie - lokalnie i na serwerze testowym.
+    """
+    return os.environ.get("DEV_MODE", "").strip() == "1"

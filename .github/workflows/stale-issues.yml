@@ -27,8 +27,9 @@ name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 # Etykietę "stale" zdejmujemy tylko wtedy, gdy jest nasze przypomnienie
 # i ktoś po nim odpisał. Nadaną ręcznie bez przypomnienia zostawiamy.
 #
-# Bieg raz dziennie. Cron chodzi w UTC; nierówna minuta z tego samego powodu co w
-# cleanup-skipped.yml. Jak każdy workflow na `schedule`, działa z `main`.
+# Bieg raz dziennie. Cron chodzi w UTC. Nierówna minuta z rozmysłem — biegi
+# planowane na pełne godziny czekają w kolejce GitHuba najdłużej. Jak każdy
+# workflow na `schedule`, działa z `main`.
 on:
   schedule:
     - cron: "41 6 * * *"

@@ -284,6 +284,60 @@ body.panel-hidden #sidebar {
     font-size: 12px;
 }
 
+/* Ikona z nazwą otwiera „O aplikacji” - wygląda dalej jak nazwa, nie jak
+   przycisk, bo na pasku nie ma na niego miejsca. */
+.brand-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.brand-button:hover { color: var(--accent); }
+
+/* ---------------------------------------------------------- O aplikacji --- */
+
+#about {
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    border: none;
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+#about::backdrop { background: rgba(16, 32, 48, 0.35); }
+
+#about .dev-head form { margin: 0; }
+#about p { margin: 8px 0; }
+
+#about h3 {
+    margin: 16px 0 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+#about a:not(.button) { color: var(--accent); }
+#about-report { margin-top: 4px; text-decoration: none; }
+
+.about-list { margin: 0; padding-left: 18px; }
+.about-list li { margin: 3px 0; }
+
+#about .about-foot {
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--ink-faint);
+}
+
 .search-card { flex: 0 0 auto; }
 
 /* --- skąd zaczyna się podróż: stoję czy jadę (patrz onboard.py) --- */

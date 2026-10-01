@@ -6,6 +6,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import bikes
+import config
 import gtfs
 import naming
 import onboard
@@ -181,6 +182,7 @@ def init_routes(app):
             # formacie dziennym pole zostawało puste i data nie docierała
             # do serwera wcale.
             form_date=datetime.now().strftime("%Y-%m-%d"),
+            dev_mode=config.dev_mode(),
         )
 
     @app.route("/sw.js")
