@@ -102,6 +102,13 @@ _LAT_DEG_M = 111_320   # metrów na stopień szerokości (siatka w _nearby_bridg
 # nie ma tego pytania w ogóle: żyje i umiera razem ze swoim rozkładem.
 _REACH_CACHE_MAX = 16
 
+# Pamięć podręczna wyszukiwań mapy z wartości (planner._value_map), z tego
+# samego powodu NA DNIU (DayData._searches). Jeden wpis to jedno okno jednej
+# relacji, a relacja ma ich najwyżej pięć - starcza na dwie, trzy relacje
+# naraz. Po co: „pokaż więcej", suwaki i przełączniki pytają o tę samą
+# relację jeszcze raz i liczyły wszystkie okna od zera (zgłoszenie #171).
+_SEARCHES_CACHE_MAX = 16
+
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
 # polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
 # unicodedata.normalize, więc jawna tabela zamiast NFKD.
@@ -487,6 +494,7 @@ class DayData:
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
         "pkp_stations", "deps_by_stop", "_reach", "walk_mps", "_paced",
+        "_searches",
     )
 
     def __init__(self):
@@ -517,6 +525,7 @@ class DayData:
         self.conns_by_trip = None    # kurs -> indeksy w conns (leniwie, patrz trip_conns)
         self.deps_by_stop = None     # słupek -> odjazdy (leniwie, patrz stop_departures)
         self._reach = {}             # pamięć podręczna walk_reach (patrz wyżej)
+        self._searches = {}          # pamięć wyszukiwań mapy (patrz wyżej)
         # Tempo marszu, którym policzono `siblings` - domyślne; inne tempa to
         # osobne kopie dnia (patrz with_pace), trzymane w `_paced`.
         self.walk_mps = WALK_SPEED_MPS
@@ -769,6 +778,7 @@ def with_point(day, lat, lon, side):
     data.stop_names = dict(day.stop_names)
     data.siblings = dict(day.siblings)
     data._reach = {}          # inny zestaw słupków, więc cache dojść nie pasuje
+    data._searches = {}       # jw. - inne przejścia, inne wyszukiwania
     data._paced = {}          # jw. - tempa liczy się z dnia bazowego (patrz with_pace)
 
     stop_id = f"__punkt__{side}"
@@ -814,6 +824,7 @@ def with_pace(day, pace):
     paced = copy.copy(day)
     paced.walk_mps = mps
     paced._reach = {}
+    paced._searches = {}
     paced._paced = {}
     paced.siblings = {
         stop: {

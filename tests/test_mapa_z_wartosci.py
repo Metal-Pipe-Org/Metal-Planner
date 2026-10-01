@@ -1,4 +1,4 @@
-"""Mapa z wartości podróży (zgłoszenie #150) - PRÓBA pod zębatką.
+"""Mapa z wartości podróży (zgłoszenie #150) - domyślna mapa od 28.09.
 
 Podróż opisują minuty: o której w celu i o której trzeba wyjść (chodzenie
 i przesiadki liczą się tylko w nich). Na mapie jest to, co jest w czymś

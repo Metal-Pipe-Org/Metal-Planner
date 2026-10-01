@@ -187,6 +187,7 @@ jobs:
           echo "moved=true" >> "$GITHUB_OUTPUT"
 
       - name: Podaj link do PR-a (tylko gdy jeszcze go nie ma)
+        id: link
         if: steps.ff.outputs.moved == 'true'
         continue-on-error: true
         env:
@@ -205,6 +206,7 @@ jobs:
           LINK="https://github.com/${REPO}/compare/main...${ISSUE_BRANCH}?expand=1&body=Closes+%23${N}"
           gh issue comment "$N" --repo "$REPO" --body \
             "Praca czeka na gałęzi \`${ISSUE_BRANCH}\`. [Otwórz PR do \`main\`](${LINK}) — kolejne poprawki z tego wątku będą się dokładać do niego automatycznie."
+          echo "url=$LINK" >> "$GITHUB_OUTPUT"
 
       - name: Oznacz zgłoszenie etykietą "claude"
         # Sam znacznik „Claude się tym zajmował" — nic nie uruchamia.
@@ -219,3 +221,47 @@ jobs:
           gh label create claude --repo "$REPO" \
             --color BFD4F2 --description "Obsługiwane przez Claude" || true
           gh issue edit "$N" --repo "$REPO" --add-label claude
+
+      - name: Pobierz skrypt wysyłki na Discorda z main
+        # Z `main`, nie z drzewa roboczego: tam leży praca Claude'a, a skrypt
+        # dostaje w env sekret webhooka.
+        if: ${{ !cancelled() && (steps.claude.outcome == 'success' || steps.claude.outcome == 'failure') }}
+        continue-on-error: true
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Daj znać wołającemu na Discordzie
+        # Claude pisze pod zgłoszeniem jako bot, a wpisy botów discord.yml
+        # pomija (jego komentarz postępu i tak dojrzewa edycjami, które nikogo
+        # nie powiadamiają). To jedyna wiadomość o końcu pracy — bez niej
+        # wołający musiałby sam zaglądać, czy Claude już skończył. Bieg ubity
+        # przez nowsze wołanie milczy: zaraz odezwie się tamten.
+        if: ${{ !cancelled() && (steps.claude.outcome == 'success' || steps.claude.outcome == 'failure') }}
+        continue-on-error: true
+        env:
+          WHO: ${{ github.event.sender.login }}
+          TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          OUTCOME: ${{ steps.claude.outcome }}
+          PR_LINK: ${{ steps.link.outputs.url }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/discord.sh
+
+          if [ "$OUTCOME" != success ]; then
+            discord_send grey "" "Claude nie dokończył: #$N $TITLE" "$RUN" \
+              "@$WHO, link prowadzi do logu biegu"
+          elif [ -n "$PR_LINK" ]; then
+            discord_send info "" "Claude skończył: #$N $TITLE" "$PR_LINK" \
+              "@$WHO, praca czeka na gałęzi — link otwiera PR"
+          else
+            discord_send info "" "Claude skończył: #$N $TITLE" "$ISSUE_URL" \
+              "@$WHO, odpowiedź czeka pod zgłoszeniem"
+          fi

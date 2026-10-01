@@ -1,0 +1,248 @@
+name: Discord - powiadomienia
+
+# Kanał repo na Discordzie w całości stąd — zastępuje wbudowaną integrację
+# GitHuba. Tamta gubiła przypisania, nie dawała wybrać zdarzeń, a @wzmianka
+# z GitHuba nikogo na Discordzie nie budziła. Tu każde `@login` z mapy kont
+# (w naszej treści i w cytowanych komentarzach) staje się prawdziwym pingiem;
+# szczegóły wysyłki w `.github/scripts/discord.sh`.
+#
+# Co trafia na kanał:
+#
+#  Zgłoszenia
+#   • nowe (z fragmentem opisu) i otwarte ponownie,
+#   • przypisanie — ping przypisanego; kto bierze zgłoszenie sam, nie dostaje
+#     pingu o tym, co przed chwilą zrobił. Zdjęcie przypisania nie jest
+#     ogłaszane, nikt nie musi wtedy nic robić,
+#   • zamknięcie — od razu czym: PR-em, commitem, czy ręcznie (zrobione /
+#     „nie robimy" / duplikat). Ping autora zgłoszenia, chyba że sam zamknął.
+#
+#  PR-y
+#   • otwarcie (z fragmentem opisu), wyjście z wersji roboczej, ponowne
+#     otwarcie, merge albo zamknięcie bez merge'a,
+#   • prośba o recenzję z panelu bocznego — ping recenzenta. Kiedy o nią
+#     prosić, to umowa w zespole, nie automat: dopiero gdy autor przeczytał
+#     ocenę Claude'a i uznał PR za gotowy,
+#   • wystawiona recenzja (zatwierdzenie, prośba o zmiany, komentarze
+#     w kodzie) — ping autora PR-a, bo to do niego.
+#
+#  Komentarze ludzi pod zgłoszeniami i PR-ami — skrócone, z pingami osób,
+#  które w nich padły.
+#
+# Komentarzy botów nie przekazujemy. To, co naprawdę ważne z naszych
+# automatów, wysyłają one same, z pingiem właściwej osoby: gotowa ocena
+# Claude'a (claude-review-pr.yml), koniec pracy solvera (claude-issue.yml),
+# przypomnienie i zamknięcie po ciszy (stale-issues.yml), zamknięcie przez
+# zapasowy krok (issue-labels.yml). Zresztą wszystkiego, co robią naszym
+# tokenem, GitHub tutaj nie przekaże.
+#
+# Konfiguracja poza repo:
+#  - sekret `DISCORD_WEBHOOK` — URL webhooka kanału. Bez niego nic nie wychodzi.
+#  - zmienna `DISCORD_IDS` (Settings -> Secrets and variables -> Actions ->
+#    Variables) — JSON z kontami GitHuba na ID z Discorda, np.
+#    `{"EgorexW": "123456789012345678"}`. ID z Discorda nie są tajne, więc
+#    wystarcza zwykła zmienna, którą da się podejrzeć i poprawić w miejscu.
+on:
+  issues:
+    types: [opened, reopened, closed, assigned]
+  issue_comment:
+    types: [created]
+  # Kodu z PR-a nie pobieramy, więc `pull_request_target` jest tu bezpieczny,
+  # a w odróżnieniu od `pull_request` daje sekret także przy PR-ach z forków.
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, closed, review_requested]
+  # Recenzja nie ma wariantu `_target`. Przy PR-ach z forków GitHub nie da tu
+  # sekretu i wiadomość po prostu nie wyjdzie — u nas PR-y idą z gałęzi repo.
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  notify:
+    # Prośba o recenzję zespołu (zamiast osoby) nie ma kogo pingować.
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && github.event.sender.type != 'Bot'
+      && (github.event.action != 'review_requested'
+          || github.event.requested_reviewer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Pobierz skrypt wysyłki z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Wyślij na Discorda
+        # Wszystko, co piszą ludzie (tytuły, opisy, komentarze), wchodzi przez
+        # env, nigdy przez ${{ }} w środku basha.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          SENDER: ${{ github.event.sender.login }}
+          ISSUE_N: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          STATE_REASON: ${{ github.event.issue.state_reason }}
+          ASSIGNEE: ${{ github.event.assignee.login }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          PR_N: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          REVIEWER: ${{ github.event.requested_reviewer.login }}
+          REVIEW_ID: ${{ github.event.review.id }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          REVIEW_BODY: ${{ github.event.review.body }}
+          REVIEW_URL: ${{ github.event.review.html_url }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/discord.sh
+
+          # Pingujemy autora, chyba że to on sam wywołał zdarzenie.
+          autor() {
+            if [ "$1" = "$SENDER" ]; then
+              printf '**%s**' "$1"
+            else
+              printf '@%s' "$1"
+            fi
+          }
+
+          case "$EVENT/$ACTION" in
+            issues/opened)
+              discord_send open "$SENDER" "Nowe zgłoszenie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                "" "$ISSUE_BODY"
+              ;;
+
+            issues/reopened)
+              discord_send open "$SENDER" "Zgłoszenie otwarte ponownie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
+              ;;
+
+            issues/assigned)
+              if [ "$ASSIGNEE" = "$SENDER" ]; then
+                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "**$ASSIGNEE** bierze to na siebie"
+              else
+                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "@$ASSIGNEE, przypisano Ci to zgłoszenie"
+              fi
+              ;;
+
+            issues/closed)
+              # Payload mówi tylko, że zgłoszenie zamknięto i z jakim powodem;
+              # czym je zamknięto (PR, commit), wie dopiero oś czasu.
+              closer=$(gh api graphql -F n="$ISSUE_N" -F owner="${REPO%/*}" -F name="${REPO#*/}" -f query='
+                query($owner: String!, $name: String!, $n: Int!) {
+                  repository(owner: $owner, name: $name) {
+                    issue(number: $n) {
+                      timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) {
+                        nodes { ... on ClosedEvent { closer {
+                          __typename
+                          ... on PullRequest { number title }
+                          ... on Commit { abbreviatedOid }
+                        } } }
+                      }
+                    }
+                  }
+                }' --jq '.data.repository.issue.timelineItems.nodes[0].closer // {}')
+
+              case "$(jq -r '.__typename // ""' <<<"$closer")" in
+                PullRequest)
+                  why="przez PR **#$(jq -r .number <<<"$closer") $(jq -r .title <<<"$closer")**" ;;
+                Commit)
+                  why="commitem \`$(jq -r .abbreviatedOid <<<"$closer")\`" ;;
+                *)
+                  why="przez **$SENDER**" ;;
+              esac
+              # Jak na GitHubie: zrobione na fioletowo, odpuszczone na szaro.
+              case "$STATE_REASON" in
+                not_planned) color=grey; why+=" — nie robimy" ;;
+                duplicate)   color=grey; why+=" — duplikat" ;;
+                *)           color=merged ;;
+              esac
+
+              discord_send "$color" "$SENDER" "Zgłoszenie zamknięte: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                "Zamknięte $why · autor zgłoszenia: $(autor "$ISSUE_AUTHOR")"
+              ;;
+
+            issue_comment/created)
+              discord_send comment "$SENDER" "Komentarz: #$ISSUE_N $ISSUE_TITLE" "$COMMENT_URL" \
+                "" "$COMMENT_BODY"
+              ;;
+
+            pull_request_target/opened)
+              color=open
+              draft=""
+              if [ "$PR_DRAFT" = true ]; then
+                color=grey
+                draft=" · wersja robocza"
+              fi
+              discord_send "$color" "$SENDER" "Nowy PR: #$PR_N $PR_TITLE" "$PR_URL" \
+                "\`$PR_HEAD\` → \`$PR_BASE\`$draft" "$PR_BODY"
+              ;;
+
+            pull_request_target/ready_for_review)
+              discord_send open "$SENDER" "PR wychodzi z wersji roboczej: #$PR_N $PR_TITLE" "$PR_URL"
+              ;;
+
+            pull_request_target/reopened)
+              discord_send open "$SENDER" "PR otwarty ponownie: #$PR_N $PR_TITLE" "$PR_URL"
+              ;;
+
+            pull_request_target/closed)
+              if [ "$PR_MERGED" = true ]; then
+                discord_send merged "$SENDER" "PR zmergowany: #$PR_N $PR_TITLE" "$PR_URL"
+              else
+                discord_send closed "$SENDER" "PR zamknięty bez merge'a: #$PR_N $PR_TITLE" "$PR_URL"
+              fi
+              ;;
+
+            pull_request_target/review_requested)
+              discord_send info "$SENDER" "Prośba o recenzję: #$PR_N $PR_TITLE" "$PR_URL" \
+                "@$REVIEWER, **$SENDER** prosi Cię o recenzję"
+              ;;
+
+            pull_request_review/submitted)
+              # Pojedynczy komentarz w kodzie też przychodzi jako recenzja,
+              # zwykle bez własnej treści — wtedy cytujemy pierwszy z komentarzy
+              # w kodzie, a ich liczbę dopisujemy. Osobnych wiadomości na każdy
+              # komentarz w kodzie nie wysyłamy: recenzja z dziesięcioma
+              # uwagami zasypałaby kanał.
+              count=$(gh api "repos/$REPO/pulls/$PR_N/reviews/$REVIEW_ID/comments" --paginate --jq 'length' \
+                | jq -s add)
+              case "$REVIEW_STATE" in
+                approved)          color=open;    what="PR zatwierdzony" ;;
+                changes_requested) color=closed;  what="Prośba o zmiany" ;;
+                *)                 color=comment; what="Recenzja" ;;
+              esac
+              extra=""
+              if [ "${count:-0}" -gt 0 ]; then
+                extra=" · komentarze w kodzie: $count"
+              fi
+              excerpt=$REVIEW_BODY
+              if [ -z "$excerpt" ] && [ "${count:-0}" -gt 0 ]; then
+                excerpt=$(gh api "repos/$REPO/pulls/$PR_N/reviews/$REVIEW_ID/comments" --jq '.[0].body')
+              fi
+              discord_send "$color" "$SENDER" "$what: #$PR_N $PR_TITLE" "$REVIEW_URL" \
+                "Autor PR-a: $(autor "$PR_AUTHOR")$extra" "$excerpt"
+              ;;
+          esac

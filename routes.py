@@ -6,6 +6,7 @@ from pathlib import Path
 from flask import jsonify, render_template, request
 
 import bikes
+import config
 import gtfs
 import naming
 import onboard
@@ -181,6 +182,7 @@ def init_routes(app):
             # formacie dziennym pole zostawało puste i data nie docierała
             # do serwera wcale.
             form_date=datetime.now().strftime("%Y-%m-%d"),
+            dev_mode=config.dev_mode(),
         )
 
     @app.route("/sw.js")
@@ -386,10 +388,14 @@ def init_routes(app):
             # szacuje, o której auto dowiezie do celu.
             car_kmh=_float_arg("car_kmh"),
             car_overhead_sec=_float_arg("car_overhead_sec"),
-            # Mapa z wartości podróży zamiast progu jasności - PRÓBA
-            # w Eksperymentach pod zębatką (zgłoszenie #150, patrz plan_flow).
+            # Mapa z wartości podróży zamiast progu jasności (zgłoszenie #150,
+            # patrz plan_flow). Front wysyła ją zawsze, chyba że w
+            # Eksperymentach włączono powrót do starej mapy.
             value_map=request.args.get("value_map") == "1",
             # Bliźniaki: jazda tym samym kursem zamiast marszu - domyślnie
             # tak; "0" to powrót w Eksperymentach (patrz plan_flow).
             same_vehicle=request.args.get("same_vehicle", "1") == "1",
+            # Propozycje tras wyłączone pod zębatką - "0" i serwer ich nie
+            # składa wcale. Brak parametru znaczy, że są.
+            with_journeys=request.args.get("routes", "1") == "1",
         ))

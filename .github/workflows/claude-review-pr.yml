@@ -1,14 +1,22 @@
 name: Claude - oceń PR
 
-# Każdy nowo otwarty pull request dostaje jeden komentarz z oceną: werdykt,
-# podsumowanie zmian, analiza kodu i rzeczy do przemyślenia. Komentarz pojawia
-# się od razu po otwarciu PR-a z informacją, że Claude właśnie go czyta, a po
-# skończonej analizie workflow podmienia go na gotową ocenę — zamiast dwóch
-# wpisów pod PR-em jest jeden, który dojrzewa w miejscu.
+# Każdy nowo otwarty pull request dostaje ocenę: werdykt, podsumowanie zmian,
+# analiza kodu i rzeczy do przemyślenia. Zaraz po otwarciu PR-a pod nim ląduje
+# krótka zapowiedź, że Claude go czyta, a gotowa ocena — albo informacja, że
+# się nie udała — przychodzi osobnym, nowym komentarzem. Żadnego komentarza nie
+# edytujemy po fakcie: edycja nie wysyła nikomu powiadomienia, więc autor PR-a
+# nie miał jak się dowiedzieć, że ocena już jest, i trzeba go było szturchać
+# ręcznie. Nowy komentarz z @wzmianką autora powiadamia go na GitHubie, a ta
+# sama wiadomość leci na Discorda, gdzie zespół faktycznie śledzi repo.
+#
+# Recenzentów ten workflow nie woła. Autor czyta ocenę i dopiero gdy uzna PR za
+# gotowy, prosi o recenzję w panelu bocznym („Reviewers"); ping na Discordzie
+# wysyła wtedy `discord.yml`.
 #
 # Ocena jest do przeczytania przez człowieka. Claude nie wystawia recenzji
-# GitHuba, nie zatwierdza, nie blokuje i nie merguje — i nie dostaje tu narzędzi
-# do pisania po plikach, więc nie zmieni kodu ocenianego PR-a.
+# GitHuba, nie zatwierdza, nie blokuje i nie merguje. `Write` dostaje wyłącznie
+# po to, żeby zapisać ocenę do `.claude-review.md` — zapis ląduje w drzewie na
+# maszynie biegu i ginie razem z nią, do ocenianego PR-a nie trafia.
 #
 # Testów nie uruchamiamy: zestaw nie jest jeszcze właściwie skonfigurowany
 # (stąd `tests.yml` odpalany wyłącznie ręcznie), więc jego wynik niczego by nie
@@ -19,16 +27,21 @@ name: Claude - oceń PR
 #
 # Czego Claude ma szukać i jak ma wyglądać sam komentarz — sekcje, skala
 # emotikonów werdyktu, długość — siedzi w `.claude/commands/review-pr.md`
-# (sekcja „4. Wstaw ocenę" to gotowy szablon treści). Ten plik odpowiada tylko
+# (sekcja „4. Zapisz ocenę" to gotowy szablon treści). Ten plik odpowiada tylko
 # za to, KIEDY ocena leci i gdzie ląduje; żeby zmienić JEJ KSZTAŁT, nie ruszaj
 # workflow, tylko tamten plik.
 #
-# Wyzwalacze celowo nie obejmują `synchronize`: ocena leci raz, przy otwarciu
-# (albo przy wyjściu z wersji roboczej), żeby dosyłanie commitów nie sypało
-# kolejnymi ocenami pod ten sam PR. Po większych poprawkach albo gdy ocena się
-# nie udała, wystarczy napisać `@claude` w komentarzu pod PR-em — workflow sam
-# weźmie numer z wątku. Awaryjnie zostaje też ręczny bieg: Actions -> „Claude -
-# oceń PR" -> Run workflow -> numer PR-a (tylko tam jest przełącznik debug).
+# Ocena leci raz, przy otwarciu (albo przy wyjściu z wersji roboczej), żeby
+# dosyłanie commitów nie sypało kolejnymi ocenami pod ten sam PR. Push do PR-a
+# (`synchronize`) też tu wpada, ale ocenia tylko PR, pod którym nie ma jeszcze
+# żadnej zapowiedzi. To łata na konflikt: PR otwarty w konflikcie z bazą nie ma
+# commitu scalenia, więc GitHub w ogóle nie tworzy biegu `pull_request` — ani
+# udanego, ani pominiętego — i ocena przepadała po cichu. Teraz przychodzi
+# z pierwszym pushem, który konflikt usuwa. Po większych poprawkach albo gdy
+# ocena się nie udała, wystarczy napisać `@claude` w komentarzu pod PR-em —
+# workflow sam weźmie numer z wątku. Awaryjnie zostaje też ręczny bieg:
+# Actions -> „Claude - oceń PR" -> Run workflow -> numer PR-a (tylko tam jest
+# przełącznik debug).
 #
 # Do zwykłych PR-ów wystarcza kopia na `main` i oba wyzwalacze biorą ją
 # stamtąd: `pull_request` czyta workflow z commitu scalenia PR-a z gałęzią
@@ -46,7 +59,7 @@ name: Claude - oceń PR
 # także przy PR-ach wydaniowych do `stable`.
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
     # Bazy, których ocena dotyczy: zwykłe PR-y do `main` i PR-y wydaniowe
     # `main` -> `stable`. PR-y o innej bazie zostawiamy bez komentarza.
     branches: [main, stable]
@@ -144,14 +157,18 @@ jobs:
           || (github.event_name == 'pull_request'
               && github.event.pull_request.draft == false
               && github.event.pull_request.head.repo.full_name == github.repository))
-    # Jedna ocena na PR. Nowsze wołanie ubija starsze, żeby dwa biegi nie
-    # podmieniały sobie nawzajem komentarza. Na poziomie joba, nie workflow:
+    # Jedna ocena na PR. Nowsze wołanie ubija starsze, żeby pod PR-em nie
+    # wylądowały dwie oceny naraz. Na poziomie joba, nie workflow:
     # każdy komentarz pod PR-em tworzy bieg, a grupa na poziomie workflow
     # sprawiłaby, że zwykłe „dzięki" ubija trwającą ocenę, zanim bramka
     # zdąży je odsiać.
+    #
+    # Push do PR-a niczego nie ubija, tylko czeka w kolejce. Inaczej push
+    # zaraz po otwarciu przerwałby pierwszą ocenę, a sam, widząc już jej
+    # zapowiedź, zszedłby z drogi — i PR zostałby bez oceny.
     concurrency:
       group: claude-review-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event.action != 'synchronize' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -168,6 +185,7 @@ jobs:
         id: pr
         env:
           N: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
+          ACTION: ${{ github.event.action }}
         run: |
           set -euo pipefail
 
@@ -205,6 +223,55 @@ jobs:
             exit 0
           fi
 
+          # Push ocenia tylko PR, który oceny jeszcze nie dostał (patrz
+          # nagłówek). Znakiem jest zapowiedź z kroku niżej albo informacja
+          # o zmienionym workflow spod tego kroku — obie leżą pod PR-em także
+          # wtedy, gdy oceny nie było, a ponowienie to już sprawa `@claude`,
+          # nie każdego kolejnego pusha.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] \
+              && [ "$ACTION" = synchronize ]; then
+            hello=$(gh api --paginate "repos/$REPO/issues/$N/comments" \
+              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("🤔 Claude czyta ten PR") or startswith("⚪ Ten PR zmienia workflow oceny"))) | .id')
+            if [ -n "$hello" ]; then
+              echo "PR #$N ma już ocenę — push jej nie powtarza." \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "go=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # Akcja Claude'a działa tylko z workflow identycznym jak na gałęzi
+          # domyślnej (zabezpieczenie: PR nie podmieni workflow, żeby dobrać
+          # się do jej tokenów). Przy `pull_request` workflow pochodzi z PR-a,
+          # więc PR, który zmienia ten plik, akcja pomija — i kończy się na
+          # zielono, z samym ostrzeżeniem w logu. Zamiast pustej „porażki”
+          # mówimy od razu, co się dzieje: `@claude` bierze workflow z `main`
+          # i działa.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            wf=${GITHUB_WORKFLOW_REF#*/*/}
+            wf=${wf%@*}
+            if gh api --paginate "repos/$REPO/pulls/$N/files" --jq '.[].filename' \
+                | grep -qxF "$wf"; then
+              author=$(printf '%s' "$json" | jq -r .user.login)
+              url=$(gh pr comment "$N" --repo "$REPO" --body \
+                "⚪ Ten PR zmienia workflow oceny, więc Claude nie oceni go przy otwarciu — akcja Claude'a działa tylko z workflow takim jak na \`main\`. Napisz w komentarzu \`@claude\`: wołanie bierze workflow z \`main\` i ocena ruszy.
+
+          @$author")
+              echo "PR #$N zmienia $wf — zamiast oceny informacja: $url" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              # Dane dla pingu na Discordzie, jak przy zwykłej ocenie.
+              {
+                echo "go=false"
+                echo "number=$N"
+                echo "kind=workflow"
+                echo "url=$url"
+                echo "author=$author"
+                echo "title=$(printf '%s' "$json" | jq -r .title)"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
           {
             echo "go=true"
             echo "number=$N"
@@ -239,7 +306,9 @@ jobs:
           CMD=.claude/commands/review-pr.md
           cp "$CMD" "$RUNNER_TEMP/review-pr.md" 2>/dev/null || true
 
-          rm -rf .claude CLAUDE.md
+          # Ocena czytana po biegu ma pochodzić od Claude'a, a nie leżeć
+          # w PR-ze gotowa, zanim Claude w ogóle zacznie.
+          rm -rf .claude CLAUDE.md .claude-review.md
           for path in .claude CLAUDE.md; do
             if git cat-file -e "origin/$BASE:$path" 2>/dev/null; then
               git checkout "origin/$BASE" -- "$path"
@@ -271,26 +340,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Znacznik w komentarzu HTML jest niewidoczny w treści i służy za ślad,
-          # że ocena jeszcze nie doszła: Claude podmienia całą treść razem z nim,
-          # więc jego obecność po biegu znaczy „nie udało się".
-          cat > "$RUNNER_TEMP/hello.md" <<MD
-          <!-- claude-review:pending -->
-
-          🤔 **Claude czyta ten PR…**
-
-          Za chwilę podmienię ten komentarz na ocenę: werdykt, podsumowanie zmian, analizę kodu i rzeczy do przemyślenia. Zwykle zajmuje to kilka minut — [podgląd biegu](${RUN}).
-          MD
-
-          # `gh pr comment` wypisuje URL komentarza z kotwicą #issuecomment-<id>.
-          url=$(gh pr comment "$N" --repo "$REPO" --body-file "$RUNNER_TEMP/hello.md")
-          id=${url##*issuecomment-}
-          echo "Komentarz-zaczepka: $url"
-          echo "id=$id" >> "$GITHUB_OUTPUT"
+          # Zapowiedź zostaje taka, jaka jest — ocena przyjdzie obok, nowym
+          # komentarzem, więc ta linijka nie musi niczego obiecywać ani
+          # niczego nie trzeba w niej potem poprawiać. Jej początek jest
+          # znakiem „ocena już była" dla pushy (krok „Ustal PR do oceny").
+          url=$(gh pr comment "$N" --repo "$REPO" --body \
+            "🤔 Claude czyta ten PR — ocena przyjdzie osobnym komentarzem ([podgląd biegu](${RUN}))."
+          )
+          echo "Zapowiedź: $url"
 
       - name: Claude
         id: claude
         if: steps.pr.outputs.go == 'true'
+        # Własny limit, niższy niż 25 minut całego joba. Przekroczenie limitu
+        # joba GitHub traktuje jak ubicie biegu, a ubity bieg celowo milczy —
+        # autor zostałby z samą zapowiedzią. Przekroczenie limitu kroku to
+        # zwykła porażka, więc niżej idzie informacja o niej z pingiem, a zapas
+        # do 25 minut wystarcza na jej wstawienie.
+        timeout-minutes: 20
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -301,85 +368,161 @@ jobs:
           # i które wywołania odbiła lista `--allowedTools`.
           show_full_output: ${{ github.event.inputs.debug == 'true' }}
           prompt: |
-            /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} COMMENT_ID: ${{ steps.hello.outputs.id }}
+            /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} REVIEW_FILE: ${{ github.workspace }}/.claude-review.md
 
             PR celuje w gałąź `${{ steps.pr.outputs.base_ref }}`; w drzewie masz
             jego czubek (${{ steps.pr.outputs.head_sha }}), więc zmianę zobaczysz
             przez `git diff origin/${{ steps.pr.outputs.base_ref }}...HEAD`.
 
-            Twoje jedyne wyjście to podmiana treści komentarza
-            ${{ steps.hello.outputs.id }} na gotową ocenę. Nie zakładaj nowych
-            komentarzy, nie wystawiaj recenzji GitHuba i nie ruszaj kodu.
+            Twoje jedyne wyjście to gotowa ocena zapisana do pliku
+            ${{ github.workspace }}/.claude-review.md — pod PR-em wstawi ją workflow.
+            Nie pisz żadnych komentarzy, nie wystawiaj recenzji GitHuba i nie
+            ruszaj kodu.
           # Limit tur musi mieć zapas na to, czego instrukcja wymaga: opis PR-a,
           # diff, komentarze, `README.md`, `docs/` i CAŁE pliki wokół zmienionych
           # linii — a `planner.py` czy `static/app.js` mają po kilka tysięcy
           # linii, więc każdy z nich to kilka odczytów. Przy trzydziestu turach
           # ocena PR-a na dwanaście plików padła na `error_max_turns`, zanim
           # zdążyła cokolwiek napisać. Prawdziwym bezpiecznikiem jest
-          # `timeout-minutes` powyżej; tura trwa tu kilka sekund, więc sto tur
+          # `timeout-minutes` tego kroku; tura trwa tu kilka sekund, więc sto tur
           # spokojnie się w nim mieści.
+          #
+          # Plik z oceną leży w drzewie roboczym, bo poza nim Claude Code nie
+          # pisze, a zapisu przez `cat >` nie przepuszcza lista narzędzi — przy
+          # samym odczycie ocena szła donikąd i każdy bieg kończył się
+          # „Ocena się nie udała". `Write` nie daje dostępu do repo: drzewo
+          # ginie razem z maszyną, a token ma do kodu tylko odczyt.
           claude_args: |
             --model claude-sonnet-5
             --max-turns 100
-            --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(cat:*),Bash(ls:*)'
+            --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(cat:*),Bash(ls:*),Write'
 
-      - name: Domknij komentarz, gdy ocena nie doszła
-        # Bieg mógł paść, wyczerpać limit tur albo zostać ubity przez nowszy.
-        # Zostawianie pod PR-em wiecznego „Claude czyta ten PR…" byłoby mylące,
-        # więc zamieniamy zaczepkę na uczciwą informację z linkiem do logu.
-        if: always() && steps.hello.outputs.id != ''
-        continue-on-error: true
+      - name: Wstaw ocenę albo informację o porażce
+        id: post
+        # Autor ma dostać odpowiedź bez względu na wynik biegu. Bieg mógł paść
+        # albo wyczerpać limit tur — wtedy zamiast oceny idzie uczciwa
+        # informacja z linkiem do logu, inaczej zostałaby sama zapowiedź i autor
+        # czekałby na próżno. Oba warianty to nowy komentarz z @wzmianką
+        # autora, bo tylko nowy komentarz powiadamia. Bieg ubity przez nowszy
+        # milczy, jak w claude-issue.yml: zaraz odezwie się tamten, a fałszywa
+        # porażka z pingiem tuż przed prawdziwą oceną tylko by myliła.
+        if: ${{ !cancelled() && steps.hello.outcome == 'success' }}
         env:
-          ID: ${{ steps.hello.outputs.id }}
+          N: ${{ steps.pr.outputs.number }}
+          REVIEW: ${{ github.workspace }}/.claude-review.md
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EXEC: ${{ steps.claude.outputs.execution_file }}
         run: |
           set -euo pipefail
 
-          body=$(gh api "repos/$REPO/issues/comments/$ID" --jq .body)
-          case "$body" in
-            *"claude-review:pending"*) ;;
-            *) echo "Ocena doszła — nie ruszam komentarza."; exit 0 ;;
-          esac
+          json=$(gh api "repos/$REPO/pulls/$N")
+          author=$(printf '%s' "$json" | jq -r .user.login)
+          title=$(printf '%s' "$json" | jq -r .title)
 
-          # Przyczynę bierzemy z zapisu rozmowy, który action zostawia na
-          # runnerze także przy porażce. Patrzymy wyłącznie na końcowy wynik
-          # i na błędy API, nie na całą rozmowę — w przeczytanym kodzie też
-          # może paść „rate limit", a to nie znaczy, że limit się skończył.
-          exec_file=${EXEC:-$RUNNER_TEMP/claude-execution-output.json}
-          reason=""
-          if [ -f "$exec_file" ]; then
-            reason=$(jq -r '
-                .[]? | select(.type == "result" and .is_error == true) | .result // empty,
-                .[]? | select(.type == "assistant" and .error != null) | .error
-              ' "$exec_file" 2>/dev/null | head -c 300 || true)
-          fi
-          echo "Przyczyna z zapisu rozmowy: ${reason:-brak}"
-
-          if printf '%s' "$reason" | grep -qiE 'limit reached|hit your limit|usage limit|rate.?limit|\b429\b'; then
-            # Starszy format to „Claude AI usage limit reached|<epoch>" —
-            # wtedy zamieniamy znacznik czasu na godzinę po polsku.
-            when=""
-            epoch=$(printf '%s' "$reason" | grep -oE '\|[0-9]{10}' | tr -d '|' || true)
-            if [ -n "$epoch" ]; then
-              when=" Limit odnowi się około $(TZ=Europe/Warsaw date -d "@$epoch" '+%H:%M (%d.%m)')."
-            elif printf '%s' "$reason" | grep -qi 'reset'; then
-              when=" Komunikat: „${reason//$'\n'/ }”."
+          if [ -s "$REVIEW" ]; then
+            {
+              cat "$REVIEW"
+              echo
+              echo '---'
+              echo
+              echo "@$author — ocena gotowa. Gdy uznasz, że PR nadaje się do recenzji, poproś o nią w panelu bocznym (Reviewers); recenzent dostanie wtedy ping także na Discordzie."
+            } > "$RUNNER_TEMP/post.md"
+            kind=review
+            verdict=$(grep -m1 '^## ' "$REVIEW" | sed 's/^## *//' || true)
+          else
+            # Przyczynę bierzemy z zapisu rozmowy, który action zostawia na
+            # runnerze także przy porażce. Patrzymy wyłącznie na końcowy wynik
+            # i na błędy API, nie na całą rozmowę — w przeczytanym kodzie też
+            # może paść „rate limit", a to nie znaczy, że limit się skończył.
+            exec_file=${EXEC:-$RUNNER_TEMP/claude-execution-output.json}
+            reason=""
+            if [ -f "$exec_file" ]; then
+              reason=$(jq -r '
+                  (.[]? | select(.type == "result" and .is_error == true) | .result // empty),
+                  (.[]? | select(.type == "assistant" and .error != null) | .error)
+                ' "$exec_file" 2>/dev/null | head -c 300 || true)
             fi
-            cat > "$RUNNER_TEMP/failed.md" <<MD
+            echo "Przyczyna z zapisu rozmowy: ${reason:-brak}"
+
+            if printf '%s' "$reason" | grep -qiE 'limit reached|hit your limit|usage limit|rate.?limit|\b429\b'; then
+              # Starszy format to „Claude AI usage limit reached|<epoch>" —
+              # wtedy zamieniamy znacznik czasu na godzinę po polsku.
+              when=""
+              epoch=$(printf '%s' "$reason" | grep -oE '\|[0-9]{10}' | tr -d '|' || true)
+              if [ -n "$epoch" ]; then
+                when=" Limit odnowi się około $(TZ=Europe/Warsaw date -d "@$epoch" '+%H:%M (%d.%m)')."
+              elif printf '%s' "$reason" | grep -qi 'reset'; then
+                when=" Komunikat: „${reason//$'\n'/ }”."
+              fi
+              cat > "$RUNNER_TEMP/post.md" <<MD
           ⏳ **Ocena się nie udała — skończył się limit Claude'a**
 
           Konto, na którym działa ocena, wyczerpało limit użycia.${when} To nie ma nic wspólnego z samym PR-em — [log biegu](${RUN}). Po odnowieniu limitu napisz w komentarzu pod tym PR-em \`@claude\`, żeby spróbować jeszcze raz.
           MD
-          else
-            cat > "$RUNNER_TEMP/failed.md" <<MD
+            else
+              cat > "$RUNNER_TEMP/post.md" <<MD
           ⚪ **Ocena się nie udała**
 
           Claude nie dokończył analizy tego PR-a — [log biegu](${RUN}). Żeby spróbować jeszcze raz, napisz w komentarzu pod tym PR-em \`@claude\`.
           MD
+            fi
+            {
+              echo
+              echo "@$author — tym razem bez oceny."
+            } >> "$RUNNER_TEMP/post.md"
+            kind=failed
+            verdict=""
           fi
-          gh api --method PATCH "repos/$REPO/issues/comments/$ID" \
-            -F body=@"$RUNNER_TEMP/failed.md"
 
-          echo "Komentarz $ID zamieniony na informację o nieudanym biegu." \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+          url=$(gh pr comment "$N" --repo "$REPO" --body-file "$RUNNER_TEMP/post.md")
+          echo "Komentarz ($kind): $url" | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo "kind=$kind"
+            echo "url=$url"
+            echo "author=$author"
+            echo "title=$title"
+            echo "verdict=$verdict"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Pobierz skrypt wysyłki na Discorda z main
+        # Z `main`, nie z drzewa PR-a: skrypt dostaje w env sekret webhooka,
+        # a ocenianemu kodowi go nie dajemy.
+        if: always() && (steps.post.outputs.url != '' || steps.pr.outputs.url != '')
+        continue-on-error: true
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Daj znać autorowi na Discordzie
+        # Zespół śledzi repo na Discordzie, a @wzmianka z GitHuba tam nikogo
+        # nie budzi — stąd osobna wiadomość z prawdziwym pingiem. Discord to
+        # dodatek: jego awaria nie może zaczerwienić oceny, która już stoi.
+        # Informację o zmienionym workflow wstawia już krok „Ustal PR do
+        # oceny” i to on podaje jej dane.
+        if: always() && (steps.post.outputs.url != '' || steps.pr.outputs.url != '')
+        continue-on-error: true
+        env:
+          N: ${{ steps.pr.outputs.number }}
+          KIND: ${{ steps.post.outputs.kind || steps.pr.outputs.kind }}
+          URL: ${{ steps.post.outputs.url || steps.pr.outputs.url }}
+          AUTHOR: ${{ steps.post.outputs.author || steps.pr.outputs.author }}
+          TITLE: ${{ steps.post.outputs.title || steps.pr.outputs.title }}
+          VERDICT: ${{ steps.post.outputs.verdict }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/discord.sh
+
+          if [ "$KIND" = review ]; then
+            discord_send info "" "Ocena Claude'a: #$N $TITLE" "$URL" "@$AUTHOR, $VERDICT"
+          elif [ "$KIND" = workflow ]; then
+            discord_send grey "" "Claude nie oceni przy otwarciu: #$N $TITLE" "$URL" \
+              "@$AUTHOR, PR zmienia workflow oceny — napisz pod nim @claude"
+          else
+            discord_send grey "" "Ocena Claude'a się nie udała: #$N $TITLE" "$URL" \
+              "@$AUTHOR, szczegóły pod PR-em"
+          fi
