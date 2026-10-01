@@ -91,14 +91,17 @@ zachowanie albo ograniczenie GitHuba, a nie awaria.
     uruchamia automatów PR-a, więc w Actions nie ma nawet śladu biegu.
 25. **PR z forka nie dostaje oceny.** Kod spoza repo nie trafia do Claude'a
     razem z sekretami.
-26. **`@claude` działa tylko we własnym tekście i tylko od osoby z prawem
+26. **PR, który zmienia sam workflow oceny, nie dostaje oceny przy otwarciu.**
+    Akcja Claude'a działa tylko z workflow takim jak na `main`. Pod PR-em
+    pojawia się o tym informacja — napisz `@claude`, a ocena ruszy.
+27. **`@claude` działa tylko we własnym tekście i tylko od osoby z prawem
     zapisu.** Wołanie przepisane w cytacie albo od kogoś bez zapisu jest
     pomijane bez komentarza.
-27. **Zmiana workflow na gałęzi nie działa dla `@claude` ani ręcznego biegu, aż
+28. **Zmiana workflow na gałęzi nie działa dla `@claude` ani ręcznego biegu, aż
     trafi na `main`.** Te wyzwalacze zawsze czytają wersję z `main`.
-28. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie
+29. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie
     tylko wtedy, gdy automat wysyła ją sam — dziś robią to ocena Claude'a,
     koniec pracy Claude'a nad zgłoszeniem, przypomnienie i zamknięcie po
     ciszy.
-29. **Ręczny ratunek:** Actions → „Claude - oceń PR” → Run workflow → numer
+30. **Ręczny ratunek:** Actions → „Claude - oceń PR” → Run workflow → numer
     PR-a ocenia go od nowa w każdym z powyższych przypadków poza forkiem.

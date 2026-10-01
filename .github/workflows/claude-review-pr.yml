@@ -224,17 +224,50 @@ jobs:
           fi
 
           # Push ocenia tylko PR, który oceny jeszcze nie dostał (patrz
-          # nagłówek). Znakiem jest zapowiedź z kroku niżej — leży pod PR-em
-          # także wtedy, gdy sama ocena się nie udała, a wtedy ponowienie to
-          # już sprawa `@claude`, nie każdego kolejnego pusha.
+          # nagłówek). Znakiem jest zapowiedź z kroku niżej albo informacja
+          # o zmienionym workflow spod tego kroku — obie leżą pod PR-em także
+          # wtedy, gdy oceny nie było, a ponowienie to już sprawa `@claude`,
+          # nie każdego kolejnego pusha.
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
               && [ "$ACTION" = synchronize ]; then
             hello=$(gh api --paginate "repos/$REPO/issues/$N/comments" \
-              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("🤔 Claude czyta ten PR"))) | .id')
+              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("🤔 Claude czyta ten PR") or startswith("⚪ Ten PR zmienia workflow oceny"))) | .id')
             if [ -n "$hello" ]; then
               echo "PR #$N ma już ocenę — push jej nie powtarza." \
                 | tee -a "$GITHUB_STEP_SUMMARY"
               echo "go=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # Akcja Claude'a działa tylko z workflow identycznym jak na gałęzi
+          # domyślnej (zabezpieczenie: PR nie podmieni workflow, żeby dobrać
+          # się do jej tokenów). Przy `pull_request` workflow pochodzi z PR-a,
+          # więc PR, który zmienia ten plik, akcja pomija — i kończy się na
+          # zielono, z samym ostrzeżeniem w logu. Zamiast pustej „porażki”
+          # mówimy od razu, co się dzieje: `@claude` bierze workflow z `main`
+          # i działa.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            wf=${GITHUB_WORKFLOW_REF#*/*/}
+            wf=${wf%@*}
+            if gh api --paginate "repos/$REPO/pulls/$N/files" --jq '.[].filename' \
+                | grep -qxF "$wf"; then
+              author=$(printf '%s' "$json" | jq -r .user.login)
+              url=$(gh pr comment "$N" --repo "$REPO" --body \
+                "⚪ Ten PR zmienia workflow oceny, więc Claude nie oceni go przy otwarciu — akcja Claude'a działa tylko z workflow takim jak na \`main\`. Napisz w komentarzu \`@claude\`: wołanie bierze workflow z \`main\` i ocena ruszy.
+
+          @$author")
+              echo "PR #$N zmienia $wf — zamiast oceny informacja: $url" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              # Dane dla pingu na Discordzie, jak przy zwykłej ocenie.
+              {
+                echo "go=false"
+                echo "number=$N"
+                echo "kind=workflow"
+                echo "url=$url"
+                echo "author=$author"
+                echo "title=$(printf '%s' "$json" | jq -r .title)"
+              } >> "$GITHUB_OUTPUT"
               exit 0
             fi
           fi
@@ -454,7 +487,7 @@ jobs:
       - name: Pobierz skrypt wysyłki na Discorda z main
         # Z `main`, nie z drzewa PR-a: skrypt dostaje w env sekret webhooka,
         # a ocenianemu kodowi go nie dajemy.
-        if: always() && steps.post.outputs.url != ''
+        if: always() && (steps.post.outputs.url != '' || steps.pr.outputs.url != '')
         continue-on-error: true
         uses: actions/checkout@v6
         with:
@@ -467,14 +500,16 @@ jobs:
         # Zespół śledzi repo na Discordzie, a @wzmianka z GitHuba tam nikogo
         # nie budzi — stąd osobna wiadomość z prawdziwym pingiem. Discord to
         # dodatek: jego awaria nie może zaczerwienić oceny, która już stoi.
-        if: always() && steps.post.outputs.url != ''
+        # Informację o zmienionym workflow wstawia już krok „Ustal PR do
+        # oceny” i to on podaje jej dane.
+        if: always() && (steps.post.outputs.url != '' || steps.pr.outputs.url != '')
         continue-on-error: true
         env:
           N: ${{ steps.pr.outputs.number }}
-          KIND: ${{ steps.post.outputs.kind }}
-          URL: ${{ steps.post.outputs.url }}
-          AUTHOR: ${{ steps.post.outputs.author }}
-          TITLE: ${{ steps.post.outputs.title }}
+          KIND: ${{ steps.post.outputs.kind || steps.pr.outputs.kind }}
+          URL: ${{ steps.post.outputs.url || steps.pr.outputs.url }}
+          AUTHOR: ${{ steps.post.outputs.author || steps.pr.outputs.author }}
+          TITLE: ${{ steps.post.outputs.title || steps.pr.outputs.title }}
           VERDICT: ${{ steps.post.outputs.verdict }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
@@ -484,6 +519,9 @@ jobs:
 
           if [ "$KIND" = review ]; then
             discord_send info "" "Ocena Claude'a: #$N $TITLE" "$URL" "@$AUTHOR, $VERDICT"
+          elif [ "$KIND" = workflow ]; then
+            discord_send grey "" "Claude nie oceni przy otwarciu: #$N $TITLE" "$URL" \
+              "@$AUTHOR, PR zmienia workflow oceny — napisz pod nim @claude"
           else
             discord_send grey "" "Ocena Claude'a się nie udała: #$N $TITLE" "$URL" \
               "@$AUTHOR, szczegóły pod PR-em"

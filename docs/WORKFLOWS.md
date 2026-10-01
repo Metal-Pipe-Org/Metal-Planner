@@ -45,3 +45,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 8. `pull_request_target` tylko bez checkoutu kodu z PR-a.
 9. `claude-review-pr.yml` ma kopię na `stable`, która wjeżdża tam z każdym
    wydaniem — nie edytuj jej osobno.
+10. Akcja Claude'a uruchamia się tylko z workflow identycznym jak na `main`.
+    PR, który zmienia `claude-review-pr.yml`, nie dostaje więc oceny przy
+    otwarciu (zamiast niej idzie informacja); ocenia go `@claude`, a samą
+    zmianę workflow widać w działaniu dopiero po merge'u.
