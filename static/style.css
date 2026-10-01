@@ -47,6 +47,15 @@ body {
     touch-action: pan-x pan-y;
 }
 
+/* Gest „pociągnij w dół, żeby odświeżyć" w PWA - opcja w Ustawieniach
+   Developerskich (Layout, patrz app.js: no-pull-refresh). Na <html>, bo to on
+   jest elementem przewijanym w większości przeglądarek - reguła gasi odbicie
+   całej strony, nie ruszając przewijania wewnątrz list (mają już własne
+   „contain" niżej). */
+html.no-pull-refresh {
+    overscroll-behavior-y: contain;
+}
+
 /* --------------------------------------------------- elementy wspólne --- */
 
 .card {
