@@ -4576,6 +4576,16 @@ routesHidden.addEventListener('change', () => {
     showRoutes(!routesHidden.checked);
 });
 
+// Gest „pociągnij w dół, żeby odświeżyć" (opcja w Layout) - overscroll-behavior
+// na <html> (patrz style.css) gasi go bez ruszania zwykłego przewijania.
+const noPullRefresh = $('no-pull-refresh');
+noPullRefresh.checked = loadDevPrefs()['no-pull-refresh'] === true;
+document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
+noPullRefresh.addEventListener('change', () => {
+    saveDevPref('no-pull-refresh', noPullRefresh.checked);
+    document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
+});
+
 // Przycisk strefy Traficara (🅿) - domyślnie go nie ma, strefa pokazuje się
 // wtedy tylko pod kursorem (patrz refreshZoneLayer).
 const zoneButton = $('zone-button');
