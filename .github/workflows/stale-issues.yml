@@ -141,8 +141,9 @@ jobs:
           $who od ${DAYS_QUIET} dni nic się tu nie dzieje. Jeśli to zgłoszenie ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni komentarz z uzasadnieniem, dlaczego jest nadal potrzebne. Bez takiego komentarza zostanie zamknięte jako „not planned”. Nic nie ginie: da się je odnaleźć po etykiecie \"$LABEL_STALE\" i otworzyć ponownie jednym kliknięciem."
                 gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
                 echo "#$n: przypomnienie do $who" | tee -a "$GITHUB_STEP_SUMMARY"
-                discord_send "⏳ $who, od ${DAYS_QUIET} dni cisza w **#$n $(jq -r .title "$RUNNER_TEMP/issue.json")** — jeśli ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni, dlaczego jest nadal potrzebne" \
-                  "" "$(jq -r .html_url "$RUNNER_TEMP/issue.json")"
+                discord_send warn "" "Cisza od ${DAYS_QUIET} dni: #$n $(jq -r .title "$RUNNER_TEMP/issue.json")" \
+                  "$(jq -r .html_url "$RUNNER_TEMP/issue.json")" \
+                  "$who, jeśli ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni, dlaczego jest nadal potrzebne"
                 ;;
               close)
                 gh issue comment "$n" --repo "$REPO" --body \
@@ -151,8 +152,8 @@ jobs:
                 gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
                 gh issue close "$n" --repo "$REPO" --reason "not planned"
                 echo "#$n: zamknięte po ciszy" | tee -a "$GITHUB_STEP_SUMMARY"
-                discord_send "🚫 **#$n $(jq -r .title "$RUNNER_TEMP/issue.json")** zamknięte po ciszy — nie robimy · $who" \
-                  "" "$(jq -r .html_url "$RUNNER_TEMP/issue.json")"
+                discord_send grey "" "Zamknięte po ciszy: #$n $(jq -r .title "$RUNNER_TEMP/issue.json")" \
+                  "$(jq -r .html_url "$RUNNER_TEMP/issue.json")" "Nie robimy · $who"
                 ;;
               unlabel)
                 gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL_STALE"

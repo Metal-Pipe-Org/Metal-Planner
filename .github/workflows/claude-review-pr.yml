@@ -246,7 +246,9 @@ jobs:
           CMD=.claude/commands/review-pr.md
           cp "$CMD" "$RUNNER_TEMP/review-pr.md" 2>/dev/null || true
 
-          rm -rf .claude CLAUDE.md
+          # Ocena czytana po biegu ma pochodzić od Claude'a, a nie leżeć
+          # w PR-ze gotowa, zanim Claude w ogóle zacznie.
+          rm -rf .claude CLAUDE.md .claude-review.md
           for path in .claude CLAUDE.md; do
             if git cat-file -e "origin/$BASE:$path" 2>/dev/null; then
               git checkout "origin/$BASE" -- "$path"
@@ -305,14 +307,14 @@ jobs:
           # i które wywołania odbiła lista `--allowedTools`.
           show_full_output: ${{ github.event.inputs.debug == 'true' }}
           prompt: |
-            /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} REVIEW_FILE: ${{ runner.temp }}/claude-review.md
+            /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} REVIEW_FILE: ${{ github.workspace }}/.claude-review.md
 
             PR celuje w gałąź `${{ steps.pr.outputs.base_ref }}`; w drzewie masz
             jego czubek (${{ steps.pr.outputs.head_sha }}), więc zmianę zobaczysz
             przez `git diff origin/${{ steps.pr.outputs.base_ref }}...HEAD`.
 
             Twoje jedyne wyjście to gotowa ocena zapisana do pliku
-            ${{ runner.temp }}/claude-review.md — pod PR-em wstawi ją workflow.
+            ${{ github.workspace }}/.claude-review.md — pod PR-em wstawi ją workflow.
             Nie pisz żadnych komentarzy, nie wystawiaj recenzji GitHuba i nie
             ruszaj kodu.
           # Limit tur musi mieć zapas na to, czego instrukcja wymaga: opis PR-a,
@@ -323,10 +325,16 @@ jobs:
           # zdążyła cokolwiek napisać. Prawdziwym bezpiecznikiem jest
           # `timeout-minutes` tego kroku; tura trwa tu kilka sekund, więc sto tur
           # spokojnie się w nim mieści.
+          #
+          # Plik z oceną leży w drzewie roboczym, bo poza nim Claude Code nie
+          # pisze, a zapisu przez `cat >` nie przepuszcza lista narzędzi — przy
+          # samym odczycie ocena szła donikąd i każdy bieg kończył się
+          # „Ocena się nie udała". `Write` nie daje dostępu do repo: drzewo
+          # ginie razem z maszyną, a token ma do kodu tylko odczyt.
           claude_args: |
             --model claude-sonnet-5
             --max-turns 100
-            --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(cat:*),Bash(ls:*)'
+            --allowedTools 'Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(cat:*),Bash(ls:*),Write'
 
       - name: Wstaw ocenę albo informację o porażce
         id: post
@@ -340,7 +348,7 @@ jobs:
         if: ${{ !cancelled() && steps.hello.outcome == 'success' }}
         env:
           N: ${{ steps.pr.outputs.number }}
-          REVIEW: ${{ runner.temp }}/claude-review.md
+          REVIEW: ${{ github.workspace }}/.claude-review.md
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EXEC: ${{ steps.claude.outputs.execution_file }}
         run: |
@@ -447,7 +455,8 @@ jobs:
           source .discord/.github/scripts/discord.sh
 
           if [ "$KIND" = review ]; then
-            discord_send "📝 @$AUTHOR, Claude ocenił Twój PR **#$N $TITLE**: $VERDICT" "" "$URL"
+            discord_send info "" "Ocena Claude'a: #$N $TITLE" "$URL" "@$AUTHOR, $VERDICT"
           else
-            discord_send "⚪ @$AUTHOR, ocena Twojego PR-a **#$N $TITLE** się nie udała" "" "$URL"
+            discord_send grey "" "Ocena Claude'a się nie udała: #$N $TITLE" "$URL" \
+              "@$AUTHOR, szczegóły pod PR-em"
           fi

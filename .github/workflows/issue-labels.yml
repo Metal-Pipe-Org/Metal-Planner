@@ -331,6 +331,7 @@ jobs:
             else
               author="@$author"
             fi
-            discord_send "✅ **#$n $(printf '%s' "$json" | jq -r .title)** zamknięte przez PR **#$PR $PR_TITLE** · autor zgłoszenia: $author" \
-              "" "$(printf '%s' "$json" | jq -r .html_url)"
+            discord_send merged "$MERGER" "Zgłoszenie zamknięte: #$n $(printf '%s' "$json" | jq -r .title)" \
+              "$(printf '%s' "$json" | jq -r .html_url)" \
+              "Zamknięte przez PR **#$PR $PR_TITLE** · autor zgłoszenia: $author"
           done

@@ -80,13 +80,9 @@ Zasady oceniania:
 
 ## 4. Zapisz ocenę
 
-Zapisz całą treść oceny jednym poleceniem do pliku z `REVIEW_FILE`:
-
-```bash
-cat > "<REVIEW_FILE>" <<'MD'
-...treść oceny...
-MD
-```
+Zapisz całą treść oceny narzędziem `Write` do pliku z `REVIEW_FILE`, za
+jednym razem. Nie przez `cat >` ani inne przekierowanie w Bashu — to zostanie
+odrzucone i ocena przepadnie.
 
 Szablon treści — trzymaj się dokładnie tych sekcji i tej kolejności:
 

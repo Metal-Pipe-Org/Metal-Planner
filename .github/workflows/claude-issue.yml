@@ -256,9 +256,12 @@ jobs:
           source .discord/.github/scripts/discord.sh
 
           if [ "$OUTCOME" != success ]; then
-            discord_send "⚪ @$WHO, Claude nie dokończył pracy nad **#$N $TITLE**" "" "$RUN"
+            discord_send grey "" "Claude nie dokończył: #$N $TITLE" "$RUN" \
+              "@$WHO, link prowadzi do logu biegu"
           elif [ -n "$PR_LINK" ]; then
-            discord_send "🤖 @$WHO, Claude skończył **#$N $TITLE** — praca czeka na gałęzi, otwórz PR" "" "$PR_LINK"
+            discord_send info "" "Claude skończył: #$N $TITLE" "$PR_LINK" \
+              "@$WHO, praca czeka na gałęzi — link otwiera PR"
           else
-            discord_send "🤖 @$WHO, Claude skończył **#$N $TITLE**" "" "$ISSUE_URL"
+            discord_send info "" "Claude skończył: #$N $TITLE" "$ISSUE_URL" \
+              "@$WHO, odpowiedź czeka pod zgłoszeniem"
           fi
