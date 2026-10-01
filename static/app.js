@@ -74,6 +74,34 @@ if (devPanel) {
     devToggle.addEventListener('click', () => setDev(devPanel.classList.contains('hidden')));
     $('dev-close').addEventListener('click', () => setDev(false));
 }
+
+// „O aplikacji” pod ikoną (zgłoszenie #173).
+const aboutDialog = $('about');
+$('about-toggle').addEventListener('click', () => aboutDialog.showModal());
+// Klik w przyciemnione tło obok karty zamyka ją jak ✕ - samo <dialog> umie
+// tylko Esc, a na telefonie Esc nie ma.
+aboutDialog.addEventListener('click', e => {
+    if (e.target === aboutDialog) aboutDialog.close();
+});
+// Zgłoszenie od razu z wersją, urządzeniem i adresem: przy każdym błędzie
+// pierwsze pytanie brzmiało „na której wersji i na czym?”. Treść składana
+// w chwili kliknięcia, bo wersję service worker podaje dopiero po starcie.
+// Typ i etykiety nadaje dopiero workflow po znaczniku w treści - parametry
+// w adresie GitHub bierze pod uwagę tylko od osób z dostępem do repo.
+$('about-report').addEventListener('click', e => {
+    const version = $('sw-version') ? $('sw-version').textContent.trim() : '';
+    const body = [
+        '**Co się stało:**', '', '', '**Czego się spodziewałem:**', '', '',
+        '---',
+        '<!-- zgłoś-problem -->',
+        `Wersja: ${version && version !== '—' ? version : 'nieznana'}`,
+        `Urządzenie: ${phoneLayout.active() ? 'telefon' : 'komputer'} (${navigator.userAgent})`,
+        `Adres: ${location.href}`,
+    ].join('\n');
+    e.currentTarget.href = 'https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new?body='
+        + encodeURIComponent(body);
+});
+
 // Panel wyboru dnia
 const dayPanel = $('day-panel');
 const dayToggle = $('day-toggle');

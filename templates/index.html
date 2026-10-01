@@ -72,9 +72,14 @@
     <header class="app-bar">
         <div class="app-bar-row">
             <div class="brand">
-                <img class="brand-icon" src="{{ url_for('static', filename='icons/icon.svg') }}"
-                     alt="" width="22" height="22">
-                <h1>Metal Planner</h1>
+                <h1>
+                    <button id="about-toggle" class="brand-button" type="button"
+                            title="O aplikacji" aria-haspopup="dialog">
+                        <img class="brand-icon" src="{{ url_for('static', filename='icons/icon.svg') }}"
+                             alt="" width="22" height="22">
+                        Metal Planner
+                    </button>
+                </h1>
                 <p>Wrocław</p>
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
@@ -374,6 +379,66 @@
     <button class="tab" data-view="timetable" aria-pressed="false"
             title="Rozkłady jazdy — linie i przystanki">Rozkład</button>
 </nav>
+
+{#
+  Pod ikoną, a nie na pasku: to rzeczy o samej aplikacji, do których zagląda
+  się raz - kto szuka, ten znajdzie, a pasek zostaje dla mapy (zgłoszenie #173).
+#}
+<dialog id="about" class="card" aria-labelledby="about-title">
+
+    <header class="dev-head">
+        <h2 id="about-title">O aplikacji</h2>
+        <form method="dialog">
+            <button class="icon-button" title="Zamknij" aria-label="Zamknij">✕</button>
+        </form>
+    </header>
+
+    <p>
+        Metal Planner to <strong>nieoficjalna</strong> wyszukiwarka połączeń
+        komunikacji miejskiej Wrocławia. Nie jest związana z MPK Wrocław,
+        PKP PLK, Traficarem ani nextbike. Godziny pochodzą z rozkładów
+        i mogą różnić się od rzeczywistych.
+    </p>
+
+    <a id="about-report" class="button primary" target="_blank" rel="noopener"
+       href="https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new">Zgłoś problem</a>
+
+    <h3>Skąd dane</h3>
+    <ul class="about-list">
+        <li>Rozkład MPK — <a href="https://open-data.cui.wroclaw.pl/hdb/metadane/13/"
+            target="_blank" rel="noopener">Otwarte Dane Wrocławia</a> (CC0)</li>
+        <li>Kolej — <a href="https://pdp-api.plk-sa.pl/" target="_blank"
+            rel="noopener">Otwarte Dane Kolejowe PKP PLK</a></li>
+        <li>Rower miejski — kanał Wrocławskiego Roweru Miejskiego od nextbike (CC0)</li>
+        <li>Traficar — przez nieoficjalny serwis <a href="https://fioletowe.live/"
+            target="_blank" rel="noopener">fioletowe.live</a></li>
+        <li>Pojazdy na żywo — <a href="https://mpk.wroc.pl/" target="_blank"
+            rel="noopener">mpk.wroc.pl</a></li>
+        <li>Mapa — © <a href="https://www.openstreetmap.org/copyright"
+            target="_blank" rel="noopener">autorzy OpenStreetMap</a> (ODbL)</li>
+    </ul>
+
+    {% if dev_mode %}
+    <h3>Tryb deweloperski</h3>
+    <ul class="about-list">
+        <li><a href="https://github.com/Metal-Pipe-Org/Metal-Planner/issues"
+               target="_blank" rel="noopener">Issues</a></li>
+        <li><a href="https://metal-testing.sze.one/" target="_blank"
+               rel="noopener">Wersja testowa</a> ·
+            <a href="https://metal.sze.one/" target="_blank"
+               rel="noopener">produkcja</a></li>
+    </ul>
+    {% endif %}
+
+    <p class="about-foot">
+        Tworzy <a href="https://github.com/Metal-Pipe-Org" target="_blank"
+        rel="noopener">MetalPipeOrg</a> ·
+        <a href="https://github.com/Metal-Pipe-Org/Metal-Planner" target="_blank"
+        rel="noopener">kod na GitHubie</a><br>
+        © 2026 MetalPipeOrg. Wszelkie prawa zastrzeżone.
+    </p>
+
+</dialog>
 
 <div id="dev-panel" class="card hidden">
 

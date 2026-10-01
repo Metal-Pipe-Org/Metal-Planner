@@ -1216,6 +1216,16 @@ dało się dojechać.
 
 ## Changelog
 
+- **2026-10-01** — **„O aplikacji” pod ikoną** (zgłoszenie #173). Klik
+  w ikonę lub nazwę otwiera kartę: aplikacja jest nieoficjalna i niezwiązana
+  z przewoźnikami, skąd są dane, kto ją tworzy (MetalPipeOrg), wszelkie prawa
+  zastrzeżone (repo bez licencji) i „Zgłoś problem", które otwiera nowe
+  zgłoszenie na GitHubie z wpisaną wersją, urządzeniem i adresem strony.
+  Zgłoszenie z przycisku dostaje typ Bug, a od osoby spoza zespołu etykietę
+  `external` (`issue-triage.yml`). Nowy tryb deweloperski: `DEV_MODE=1`
+  w `data/.env` dokłada w karcie linki zespołu (issues, wersja testowa
+  i produkcja). Bez wpisu tryb jest wyłączony, jak na produkcji. Ukrywanie
+  sekcji ⚙ na produkcji (#175) jeszcze nie jest z nim związane.
 - **2026-09-29** — rowery przy starcie z klikniętego punktu: dojazd do
   roweru liczy też jeden krok pieszo ze startu, jak reszta wyszukiwarki —
   wcześniej z punktu nie wsiadało się w nic i na mapie była tylko stacja pod

@@ -5,6 +5,9 @@ wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz**,
 a obok, w panelu, listę gotowych propozycji z godzinami, liniami
 i przesiadkami.
 
+Jak pracujemy w zespole — gałęzie, pull requesty, ocena Claude'a, zgłoszenia
+i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
+
 | Gałąź | Adres |
 |---|---|
 | `main` | https://metal-testing.sze.one/ |
@@ -110,6 +113,7 @@ albo z `data/.env` (zmienne ze środowiska przebijają plik). Najważniejsze:
 | `SIECHNICE_ENABLED` | `off` | autobusy gminy Siechnice (niżej) |
 | `WRM_ENABLED` | `on` | rower miejski |
 | `TRAFICAR` | `1` | auta Traficara; `0` wyłącza |
+| `DEV_MODE` | wyłączony | `1` dokłada w „O aplikacji” linki zespołu; lokalnie i na serwerze testowym |
 
 Pozostałe (rozkład PKP, procesy i wątki serwera, strefa czasowa) opisują
 komentarze w `docker-compose.yml`.
@@ -155,25 +159,20 @@ Który test pilnuje którego punktu kontraktu mapy, opisuje
 
 ## Gałęzie i pull requesty
 
-25. Każda funkcja dostaje własną gałąź w konwencji `username/feature`.
-26. Gotowe zmiany idą pull requestem do `main`.
-27. Gdy zmiany na `main` są zebrane, przetestowane i gotowe do wydania,
-    pull request z `main` do `stable` tworzy nowe wydanie.
-28. Każdy nowy PR dostaje automatyczną ocenę Claude'a w komentarzu; o recenzję
-    prosi się dopiero potem. PR merguje jego autor.
+Cały sposób pracy opisuje [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Dokumentacja
 
-29. [docs/PROJECT.md](docs/PROJECT.md) — architektura, algorytmy, API,
+25. [docs/PROJECT.md](docs/PROJECT.md) — architektura, algorytmy, API,
     struktura plików i changelog.
-30. [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md) — gwarancje
+26. [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md) — gwarancje
     zachowania mapy przepływów; zmienia się wyłącznie na wyraźne polecenie.
-31. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad
+27. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad
     pojedynczymi funkcjami; też tylko na wyraźne polecenie.
-32. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu,
+28. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu,
     otwarte pytania i dziennik zmian mapy z pomiarami i decyzjami.
-33. [docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md) — jak mapa jest
+29. [docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md) — jak mapa jest
     liczona, krok po kroku na przykładzie (po angielsku).
-34. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład
+30. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład
     gminy Siechnice.
-35. [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — automaty GitHuba i Discord.
+31. [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — automaty GitHuba i Discord.

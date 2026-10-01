@@ -1,0 +1,58 @@
+name: "Zgłoszenia: z przycisku i z zewnątrz"
+
+# Dwie rzeczy przy każdym nowym zgłoszeniu:
+#
+#  • zgłoszenie z przycisku „Zgłoś problem” w aplikacji (karta „O aplikacji”)
+#    dostaje typ Bug. Rozpoznajemy je po znaczniku `<!-- zgłoś-problem -->`,
+#    który przycisk wstawia do treści. Typu nie da się podać w samym linku:
+#    parametry w adresie nowego zgłoszenia GitHub bierze pod uwagę tylko od
+#    osób z dostępem do repo, a przycisk jest dla wszystkich.
+#  • zgłoszenie od kogoś spoza zespołu dostaje etykietę "external". Autor
+#    bez prawa zapisu nie może jej zdjąć — etykiety i typy zmienia tylko
+#    zespół.
+#
+# „Spoza zespołu” rozstrzyga pytanie o uprawnienia wprost, nie
+# `author_association`: przy prywatnym członkostwie w organizacji kłamie
+# (patrz claude-issue.yml). Błąd API ma wywrócić bieg na czerwono, a nie
+# udawać obcego.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    if: github.repository == 'Metal-Pipe-Org/Metal-Planner'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      N: ${{ github.event.issue.number }}
+      BODY: ${{ github.event.issue.body }}
+      WHO: ${{ github.event.issue.user.login }}
+
+    steps:
+      - name: Typ Bug dla zgłoszenia z przycisku
+        run: |
+          set -euo pipefail
+          if printf '%s' "$BODY" | grep -qF '<!-- zgłoś-problem -->'; then
+            gh api -X PATCH "repos/$REPO/issues/$N" -f type=Bug --silent
+            echo "Z przycisku „Zgłoś problem” — typ Bug." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Etykieta "external" dla autora spoza zespołu
+        run: |
+          set -euo pipefail
+          perm=$(gh api "repos/$REPO/collaborators/$WHO/permission" --jq .permission)
+          case "$perm" in
+            admin|maintain|write) exit 0 ;;
+          esac
+          gh label create external --repo "$REPO" \
+            --color FBCA04 --description "Zgłoszone przez kogoś spoza zespołu" || true
+          gh issue edit "$N" --repo "$REPO" --add-label external
+          echo "@$WHO spoza zespołu (uprawnienia: $perm) — etykieta \"external\"." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
