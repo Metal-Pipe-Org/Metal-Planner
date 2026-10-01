@@ -1242,6 +1242,7 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
 
     at_stop = {}     # słupek -> etykiety, z których da się tu wsiąść
     on_trip = {}     # kurs -> etykiety jadące nim
+    edges_of = {}    # kurs -> [najpóźniejsze, najwcześniejsze] wyjście w nim
     finals = {}      # key -> klasa podróży
     # Na przystanku, po pojeździe: (ready, arr, dep) -> etykieta, żeby
     # bliźniaka znaleźć od razu, oraz [najpóźniejsze wyjście, najwcześniejsze
@@ -1252,38 +1253,33 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
     spread_at = {}
     limit = forgive_sec + 60
 
-    def settle(stop, label):
-        """Etykieta na przystanku: "merged", gdy jest bliźniakiem już
-        zapisanej, "beaten", gdy coś ją tu bije na zawsze, "kept" - inaczej."""
+    def settle(stop, twins, label):
+        """Etykieta po pojeździe na przystanku, gdy nie jest bliźniakiem już
+        zapisanej - bliźniaka sprawdza wołający, bo to najczęstszy przypadek,
+        a wtedy etykieta nie musi nawet powstać. Do worka nie trafia
+        etykieta, którą coś tu bije na zawsze."""
+        dep = label.dep
         bag = at_stop.setdefault(stop, [])
-        if label.rides:
-            twins = twins_at.setdefault(stop, {})
-            key = (label.ready, label.arr, label.dep)
-            twin = twins.get(key)
-            if twin is not None:
-                twin.parents.extend(label.parents)
-                return "merged"
-            spread = spread_at.get(stop)
-            if spread is None:
-                spread_at[stop] = [label.dep, label.dep]
-            else:
-                if spread[0] - label.dep > limit:
-                    for other in bag:
-                        if other.rides and beats(other, label):
-                            return "beaten"
-                if label.dep - spread[1] > limit:
-                    beaten = [other for other in bag
-                              if other.rides and beats(label, other)]
-                    if beaten:
-                        gone = set(map(id, beaten))
-                        bag[:] = [other for other in bag if id(other) not in gone]
-                        for other in beaten:
-                            del twins[other.ready, other.arr, other.dep]
-                spread[0] = max(spread[0], label.dep)
-                spread[1] = min(spread[1], label.dep)
-            twins[key] = label
+        spread = spread_at.get(stop)
+        if spread is None:
+            spread_at[stop] = [dep, dep]
+        else:
+            if spread[0] - dep > limit:
+                for other in bag:
+                    if other.rides and beats(other, label):
+                        return
+            if dep - spread[1] > limit:
+                beaten = [other for other in bag
+                          if other.rides and beats(label, other)]
+                if beaten:
+                    gone = set(map(id, beaten))
+                    bag[:] = [other for other in bag if id(other) not in gone]
+                    for other in beaten:
+                        del twins[other.ready, other.arr, other.dep]
+            spread[0] = max(spread[0], dep)
+            spread[1] = min(spread[1], dep)
+        twins[label.ready, label.arr, dep] = label
         bag.append(label)
-        return "kept"
 
     def beats(one, other):
         """Czy `one` odcina `other` (na przystanku - stojąc tu nie później;
@@ -1293,21 +1289,26 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
             return False
         return one.dep - other.dep > limit
 
-    def board(trip, label):
-        """W pojeździe liczy się samo wyjście: bliźniak to to samo wyjście,
-        a odcina wyjście późniejsze o więcej niż `limit` - więc worek to
-        słownik wyjście -> etykieta i wystarczy patrzeć na jego skraje."""
-        bag = on_trip.setdefault(trip, {})
-        twin = bag.get(label.dep)
-        if twin is not None:
-            twin.parents.extend(label.parents)
-            return
-        if bag and max(bag) - label.dep > limit:
-            return
-        if bag and label.dep - min(bag) > limit:
-            for dep in [dep for dep in bag if label.dep - dep > limit]:
-                del bag[dep]
-        bag[label.dep] = label
+    def board(trip, bag, dep, rides, parent):
+        """W pojeździe liczy się samo wyjście: bliźniak (to samo wyjście,
+        sprawdza go wołający) już tu jest, a odcina wyjście późniejsze
+        o więcej niż `limit` - więc worek to słownik wyjście -> etykieta
+        i wystarczy patrzeć na jego skraje. Skraje leżą obok w `edges_of`:
+        najpóźniejsze wyjście nigdy nie wypada (wypadają tylko wcześniejsze
+        od nowego), więc przelicza się je dopiero po wyrzuceniu."""
+        edges = edges_of.get(trip)
+        if edges is None:
+            edges_of[trip] = [dep, dep]
+        else:
+            if edges[0] - dep > limit:
+                return
+            if dep - edges[1] > limit:
+                for old in [old for old in bag if dep - old > limit]:
+                    del bag[old]
+                edges[1] = min(bag, default=dep)
+            edges[0] = max(edges[0], dep)
+            edges[1] = min(edges[1], dep)
+        bag[dep] = _Label(None, None, dep, rides, 0, [parent])
 
     def finish(arrival, label):
         if arrival > deadline:
@@ -1321,47 +1322,90 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
             entry["labels"].append(label)
             entry["arr"] = min(entry["arr"], arrival)
 
+    # Przed pierwszym pojazdem nikt nikogo nie odcina ani nie jest niczyim
+    # bliźniakiem - etykiety idą prosto do worka.
     for stop in source_stops:
-        settle(stop, _Label(dep_sec, dep_sec, None, 0, 0, []))
+        at_stop.setdefault(stop, []).append(
+            _Label(dep_sec, dep_sec, None, 0, 0, []))
     for stop, (_, sec) in _origin_walk(day, source_stops).items():
         if stop in target_set:
             continue           # samo przejście nie jest trasą (patrz _scan)
-        settle(stop, _Label(dep_sec + sec, dep_sec + sec, None, 0, sec, []))
+        at_stop.setdefault(stop, []).append(
+            _Label(dep_sec + sec, dep_sec + sec, None, 0, sec, []))
 
-    for i in range(bisect_left(day.dep_times, dep_sec),
-                   bisect_right(day.dep_times, deadline)):
+    lo = bisect_left(day.dep_times, dep_sec)
+    hi = bisect_right(day.dep_times, deadline)
+    # Wsiadanie do kursu, który od tego połączenia dalej nie wysadzi nikogo
+    # w miejscu, skąd jeszcze się zdąży, niczego nie zmieni - etykieta w nim
+    # nigdy nie wysiądzie. A to większość wsiadań: każda etykieta na
+    # przystanku wsiada w każdy kurs, który stąd odjeżdża.
+    onward = bytearray(hi - lo)
+    alights = set()
+    for i in range(hi - 1, lo - 1, -1):
+        _, arr_t, _, arr_s, trip = conns[i]
+        if arr_t <= deadline and arr_t <= latest.get(arr_s, -1):
+            alights.add(trip)
+        if trip in alights:
+            onward[i - lo] = 1
+
+    for i in range(lo, hi):
+        if not onward[i - lo]:
+            continue
         dep_t, arr_t, dep_s, arr_s, trip = conns[i]
         if arr_t > deadline:
             continue
-        for label in at_stop.get(dep_s, ()):
-            if label.ready > dep_t or label.rides >= VALUE_MAX_RIDES:
-                continue
-            dep = label.dep if label.rides else dep_t - label.lead
-            board(trip, _Label(None, None, dep, label.rides + 1, 0,
-                               [(label, i)]))
+        boarding = at_stop.get(dep_s)
+        if boarding:
+            bag = on_trip.setdefault(trip, {})
+            for label in boarding:
+                if label.ready > dep_t or label.rides >= VALUE_MAX_RIDES:
+                    continue
+                dep = label.dep if label.rides else dep_t - label.lead
+                twin = bag.get(dep)
+                if twin is not None:
+                    twin.parents.append((label, i))
+                else:
+                    board(trip, bag, dep, label.rides + 1, (label, i))
         riding = on_trip.get(trip)
         if not riding or arr_t > latest.get(arr_s, -1):
             continue
+        # Dojście z tego wysiadania jest takie samo dla każdego, kto tu
+        # wysiada - liczone raz, nie dla każdej etykiety osobno.
+        reach = near_target.get(arr_s)
+        walks = []
+        for sibling, sec in day.siblings.get(arr_s, {}).items():
+            when = arr_t + sec
+            if when <= latest.get(sibling, -1):
+                walks.append((sibling, when, sibling in target_set,
+                              twins_at.setdefault(sibling, {})))
+        twins = twins_at.setdefault(arr_s, {})
+        ready = arr_t + TRANSFER_SEC
         for label in list(riding.values()):
-            here = _Label(arr_t + TRANSFER_SEC, arr_t, label.dep, label.rides,
-                          0, [(label, i)])
-            if settle(arr_s, here) == "merged":
-                continue       # bliźniak dojdzie dalej razem z tamtą etykietą
+            twin = twins.get((ready, arr_t, label.dep))
+            if twin is not None:
+                # Bliźniak dojdzie dalej razem z tamtą etykietą.
+                twin.parents.append((label, i))
+                continue
+            here = _Label(ready, arr_t, label.dep, label.rides, 0, [(label, i)])
+            settle(arr_s, twins, here)
             # Dalej pieszo - także z etykiety, która tu przegrała: przegrała
             # jako miejsce WSIADANIA (tamta zdąży na wszystko, na co ona), ale
             # jej własne dojście może dawać coś, czego tamtej brak.
-            reach = near_target.get(arr_s)
             if reach is not None:
                 finish(arr_t + reach[0], here)
-            for sibling in day.siblings.get(arr_s, ()):
-                when = arr_t + gtfs.walk_seconds(day, arr_s, sibling)
-                if when > latest.get(sibling, -1):
-                    continue
-                walked = _Label(when, when, here.dep, here.rides, 0,
-                                [(here, None)])
-                if sibling in target_set:
+            for sibling, when, at_target, there in walks:
+                twin = there.get((when, when, here.dep))
+                if at_target or twin is None:
+                    walked = _Label(when, when, here.dep, here.rides, 0,
+                                    [(here, None)])
+                # Do celu idzie ta etykieta, nawet jeśli na przystanku okaże
+                # się bliźniakiem - z tą jedną drogą, nie z cudzymi.
+                if at_target:
                     finish(when, walked)
-                settle(sibling, walked)
+                if twin is not None:
+                    twin.parents.append((here, None))
+                else:
+                    settle(sibling, there, walked)
     return list(finals.values())
 
 
@@ -1634,6 +1678,18 @@ def _value_map(day, source_stops, target_set, dep_sec, best_arr, frame_km2,
 
     def search(window_sec):
         if window_sec not in searches:
+            searches[window_sec] = searched(window_sec)
+        return searches[window_sec]
+
+    def searched(window_sec):
+        """Klasy podróży jednego okna - z pamięci dnia, jeśli ta sama relacja
+        o tej samej godzinie była już tak szukana (patrz
+        gtfs._SEARCHES_CACHE_MAX). Klucz to wszystko, od czego wynik zależy;
+        start i cel w tej samej kolejności, bo kolejność rozstrzyga remisy."""
+        key = (tuple(source_stops), tuple(target_set), dep_sec, best_arr,
+               window_sec, same_vehicle)
+        classes = day._searches.get(key)
+        if classes is None:
             classes = _value_journeys(day, source_stops, target_set, dep_sec,
                                       best_arr, window_sec)
             _value_entries(classes, best_arr)
@@ -1655,8 +1711,14 @@ def _value_map(day, source_stops, target_set, dep_sec, best_arr, frame_km2,
                 journey["variants"] = {nums: pick(values)
                                        for nums, values in variants.items()}
             _same_numbers_best(classes)
-            searches[window_sec] = classes
-        return searches[window_sec]
+            # Drogi do etykiet są już złożone w warianty - dalej nikt ich nie
+            # czyta, a w pamięci zajmowałyby najwięcej.
+            for journey in classes:
+                del journey["labels"]
+            if len(day._searches) >= gtfs._SEARCHES_CACHE_MAX:
+                day._searches.clear()
+            day._searches[key] = classes
+        return classes
 
     def tolerances():
         below = -1
@@ -1988,7 +2050,7 @@ def plan_flow(start_query, end_query, when=None,
               bike_electric=True, bike_regular=True, latest_start=False,
               in_vehicle=None, walk_pace=None, bike_kmh=None,
               bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
-              value_map=False, same_vehicle=True):
+              value_map=False, same_vehicle=True, with_journeys=True):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Jednostką ODKRYWANIA jest KURS, nie pojedynczy przeskok: dla każdego
@@ -2087,6 +2149,12 @@ def plan_flow(start_query, end_query, when=None,
     same_vehicle - z bliźniaków mapy z wartości podróży odpada wariant, który
     idzie tam, gdzie mógłby dalej jechać tym samym kursem (patrz _value_map,
     pick). False to powrót w Eksperymentach, „Stare bliźniaki".
+
+    with_journeys False - propozycji tras nie ma wcale (opcja pod zębatką):
+    ani z mapy, ani z rowerem, ani z Traficarem, a `journeys` jest puste.
+    Reszta odpowiedzi zostaje co do bajtu ta sama - lista z niczego na mapie
+    nie korzysta (zgłoszenie #171). Czasu to prawie nie oszczędza (setne
+    sekundy), za to odpowiedź jest o 40-50% mniejsza.
     """
     when = when or datetime.now()
     journey_limit = (
@@ -2350,11 +2418,13 @@ def plan_flow(start_query, end_query, when=None,
             seg_list, nodes = _finalize_segments(
                 day, kept, ranges, geo_db, earliest, profile[2], deadline,
                 source_stops, why_of)
-            graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
-                                            target_set, start_reach)
-            journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
-                                           limit=journey_limit, gain_sec=gain_sec,
-                                           ride=ride)
+            journeys = []
+            if with_journeys:
+                graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
+                                                target_set, start_reach)
+                journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
+                                               limit=journey_limit,
+                                               gain_sec=gain_sec, ride=ride)
         else:
             # Zabezpieczenie: _scan już udowodnił, że połączenie istnieje
             # (best_stop nie jest None), więc jeśli kotwiczenie i tak
@@ -2394,8 +2464,9 @@ def plan_flow(start_query, end_query, when=None,
                 # Przyjazd bierzemy z samej trasy; best_arr zostaje
                 # najwcześniejszym możliwym i dalej wyznacza okno mapy.
                 arrival = _arrival_of(wariant) or best_arr
-                journeys.append(_summarize_journey(
-                    wariant, rides, arrival, dep_sec))
+                if with_journeys:
+                    journeys.append(_summarize_journey(
+                        wariant, rides, arrival, dep_sec))
                 # Jaśniej rysujemy wariant proponowany - tak jak wszędzie
                 # indziej na tej mapie jasność znaczy "lepsza opcja".
                 waga = 1.0 if rank == 0 else 0.6
@@ -2435,7 +2506,8 @@ def plan_flow(start_query, end_query, when=None,
         # żeby zero propozycji z tego powodu nie wyglądało jak zero z powodu
         # milczącego kanału operatora.
         bike_shown, bike_stations = 0, 0
-        bikes_live = use_bikes and day_offset == 0 and when.date() == date.today()
+        bikes_live = (use_bikes and with_journeys and day_offset == 0
+                      and when.date() == date.today())
         if bikes_live:
             # Rower spod startu liczy się od godziny z pytania, nie od
             # początku mapy: czekanie na późniejszy wyjazd opłaca się tylko
@@ -2453,8 +2525,9 @@ def plan_flow(start_query, end_query, when=None,
         # poza mapą przepływów - w trybie awaryjnym po prostu na końcu listy,
         # żeby nie przestawić dwóch wariantów, których kolejność jest tam
         # świadoma (pierwszy = proponowany).
-        with_car = _traficar_journeys(day, best_journey, dep_sec, deadline,
-                                      end_point_ll, end_name, geo_db)
+        with_car = (_traficar_journeys(day, best_journey, dep_sec, deadline,
+                                       end_point_ll, end_name, geo_db)
+                    if with_journeys else [])
         if ride:
             onboard.count_exit(with_car, ride)
         if with_car:
@@ -2611,13 +2684,14 @@ def plan_flow(start_query, end_query, when=None,
         **({"onboard": {k: ride[k] for k in
                         ("num", "mode", "line", "headsign", "stop_name", "at")}}
            if ride else {}),
-        # Stan warstwy rowerowej - tylko gdy o nią pytano. Front ma po czym
+        # Stan warstwy rowerowej - tylko gdy o nią pytano (i jest lista, do
+        # której rower dokłada propozycje). Front ma po czym
         # odróżnić "policzone, rower nic tu nie daje" od "kanał operatora nie
         # odpowiedział" (patrz bikes.stations_quiet): w obu przypadkach lista
         # wygląda tak samo, a to zupełnie różne odpowiedzi.
         **({"bikes": {"journeys": bike_shown, "stations": bike_stations,
                       "live": bikes_live}}
-           if use_bikes else {}),
+           if use_bikes and with_journeys else {}),
         # True tylko w trybie awaryjnym (patrz gałąź else wyżej): mapa jest
         # wtedy jedną trasą z jasnościami wpisanymi na sztywno, a nie
         # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
@@ -3078,15 +3152,6 @@ def _target_profile(day, target_set, dep_sec, deadline):
     board_value = {}       # (kurs, słupek) -> przyjazd do celu, wsiadając tu w ten kurs
     trip_arr = {}          # kurs -> przyjazd do celu, jadąc nim dalej stąd
 
-    def value_at(stop, t):
-        times = neg_deps.get(stop)
-        if times is None:
-            return INF
-        # Wpisy z odjazdem >= t to prefiks listy, a przyjazdy wzdłuż niej
-        # maleją - więc najlepszy z nich stoi na jego końcu.
-        i = bisect_right(times, -t) - 1
-        return arrs[stop][i] if i >= 0 else INF
-
     near_target = _target_reach(day, target_set)
     # Malejąco po odjeździe: zanim dojdziemy do połączenia, wszystko, na co da
     # się z niego przesiąść, jest już policzone (tak samo jak w _backward).
@@ -3101,9 +3166,15 @@ def _target_profile(day, target_set, dep_sec, deadline):
         if stay < best:
             best = stay
         for stop2, buffer in _reach_from(day, arr_s):
-            value = value_at(stop2, arr_t + buffer)
-            if value < best:
-                best = value
+            times = neg_deps.get(stop2)
+            if times is None:
+                continue
+            # Wpisy z odjazdem >= t to prefiks listy, a przyjazdy wzdłuż niej
+            # maleją - więc najlepszy z nich stoi na jego końcu. W pętli, nie
+            # w osobnej funkcji: to setki tysięcy pytań na jedno wyszukiwanie.
+            j = bisect_right(times, -(arr_t + buffer)) - 1
+            if j >= 0 and arrs[stop2][j] < best:
+                best = arrs[stop2][j]
         if best == INF:
             continue
         trip_arr[trip] = best

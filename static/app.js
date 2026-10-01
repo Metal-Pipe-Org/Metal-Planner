@@ -3884,6 +3884,8 @@ function queryParams() {
         // bliźniaków wraca przełącznikiem.
         same_vehicle: $('old-twins').checked ? '0' : '1',
     });
+    // Wyłączonych propozycji serwer nie składa wcale - patrz routes.api_flow.
+    if (!$('routes-on').checked) params.set('routes', '0');
     // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
     // wynika z samej gęstości z suwaka.
     if (mapMore) params.set('more', mapMore);
@@ -4036,8 +4038,10 @@ function renderPlan(data, refit) {
         // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
         // przeczyć (zdarza się przy szerokim oknie, gdy graf urośnie
-        // ponad budżet szukania w _enumerate_journeys).
-        if (data.segments.length) showWideWindowNotice();
+        // ponad budżet szukania w _enumerate_journeys). Przy wyłączonych
+        // propozycjach listy nie ma z wyboru, więc nie ma czego tłumaczyć.
+        if (data.segments.length && !$('routes-on').checked) resultsBox.innerHTML = '';
+        else if (data.segments.length) showWideWindowNotice();
         else showError('Nie znaleziono żadnego połączenia w tym oknie czasowym.');
     } else {
         renderJourneys();
@@ -4579,11 +4583,12 @@ bikesMergedInput.addEventListener('change', () => {
     paintBikeButtons();
 });
 
-// Propozycje tras da się schować w całości (opcja w Layout) - zostaje sama
-// mapa. Znika lista i jej nagłówek ze strzałką, ale nie komunikaty w tym
-// samym miejscu („Szukam połączeń…", błędy): te mówią o wyszukiwaniu, nie
+// Propozycje tras da się wyłączyć w całości (sekcja „Funkcje") -
+// zostaje sama mapa, a serwer listy w ogóle nie składa (patrz queryParams).
+// Znika lista i jej nagłówek ze strzałką, ale nie komunikaty w tym samym
+// miejscu („Szukam połączeń…", błędy): te mówią o wyszukiwaniu, nie
 // o propozycjach. Na telefonie znika też zakładka „Trasy".
-const routesHidden = $('routes-hidden');
+const routesOn = $('routes-on');
 
 function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
@@ -4594,14 +4599,17 @@ function showRoutes(on) {
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
 }
 
-routesHidden.checked = loadDevPrefs()['routes-hidden'] === true;
-showRoutes(!routesHidden.checked);
+routesOn.checked = loadDevPrefs()['routes-on'] !== false;
+showRoutes(routesOn.checked);
 // Widok telefonu wraca na ostatnią zakładkę dopiero pod koniec wczytywania -
 // wtedy okazuje się, czy nie stoi się na schowanej „Trasy".
-document.addEventListener('DOMContentLoaded', () => showRoutes(!routesHidden.checked));
-routesHidden.addEventListener('change', () => {
-    saveDevPref('routes-hidden', routesHidden.checked);
-    showRoutes(!routesHidden.checked);
+document.addEventListener('DOMContentLoaded', () => showRoutes(routesOn.checked));
+routesOn.addEventListener('change', () => {
+    saveDevPref('routes-on', routesOn.checked);
+    showRoutes(routesOn.checked);
+    // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
+    // tak jak propozycje z rowerem (patrz replanForBikes).
+    if (routesOn.checked) replanForBikes();
 });
 
 // Przycisk strefy Traficara (🅿) - domyślnie go nie ma, strefa pokazuje się
@@ -4710,8 +4718,14 @@ const PIPE_SOURCES = [
 ];
 
 // Nagranie jest głośne (szczyt ponad 0 dBFS), a to ma być żart w tle,
-// nie alarm.
-const PIPE_VOLUME = 0.35;
+// nie alarm. 0.35 wciąż było za głośno - połowa tego.
+//
+// Głośność idzie przez mikser przeglądarki (Web Audio), nie przez
+// `volume` elementu audio: iOS tego pola nie słucha i gra zawsze głośnością
+// systemu. Wzmocnienie miksera słucha wszędzie, więc każdy efekt może mieć
+// swoją głośność. Cena na iPhonie: dźwięk z miksera milknie przy włączonym
+// wyciszeniu telefonu - dla żartu w tle to raczej zaleta.
+const PIPE_VOLUME = 0.175;
 
 const SOUND_DEFAULTS = {
     pipe: true,
@@ -4741,6 +4755,29 @@ function saveSoundPrefs() {
 }
 
 let pipeAudio = null;
+let soundMixer = null;
+
+/** Mikser przeglądarki - jeden na stronę, null bez Web Audio. */
+function mixer() {
+    if (soundMixer) return soundMixer;
+    const Mixer = window.AudioContext || window.webkitAudioContext;
+    if (!Mixer) return null;
+    soundMixer = new Mixer();
+    return soundMixer;
+}
+
+// Safari wpuszcza dźwięk z miksera tylko wtedy, gdy obudzi się go W TRAKCIE
+// gestu, a rura gra dopiero po odpowiedzi serwera - już po geście. Budzimy
+// go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
+// z powrotem, gdy strona zejdzie w tło.
+function wakeMixer() {
+    if (!soundOpts.pipe) return;
+    const ctx = mixer();
+    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+}
+for (const type of ['pointerdown', 'keydown']) {
+    document.addEventListener(type, wakeMixer, {capture: true});
+}
 
 /** Element audio powstaje przy pierwszym użyciu i zostaje - jeden na stronę.
     Zwraca null, gdy przeglądarka nie umie żadnego z naszych formatów. */
@@ -4752,7 +4789,15 @@ function pipeElement() {
     if (!pick) return null;
     element.src = pick[1];
     element.preload = 'auto';
-    element.volume = PIPE_VOLUME;
+    const ctx = mixer();
+    if (ctx) {
+        const gain = ctx.createGain();
+        gain.gain.value = PIPE_VOLUME;
+        ctx.createMediaElementSource(element).connect(gain);
+        gain.connect(ctx.destination);
+    } else {
+        element.volume = PIPE_VOLUME;
+    }
     pipeAudio = element;
     return pipeAudio;
 }
@@ -4931,7 +4976,7 @@ const DEV_FOLD_IDS = [
     'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-places', 'fold-assumptions',
     'fold-experiments', 'fold-debug', 'look-section',
-    'fold-layout', 'fold-version',
+    'fold-layout', 'fold-features', 'fold-version',
 ];
 
 function bindDevFolds() {

@@ -99,7 +99,7 @@ const phoneLayout = (() => {
     }
 
     // Klucz dawnych ustawień tylko dla telefonu (zakładka „Trasy" - dziś
-    // wspólna opcja „Ukryj propozycje tras", patrz app.js). Zostaje, żeby
+    // wspólna opcja „Wyłącz propozycje tras", patrz app.js). Zostaje, żeby
     // reset ustawień sprzątał to, co mogło zostać w przeglądarce.
     const PREFS_KEY = 'metal-planner:phone-prefs';
 

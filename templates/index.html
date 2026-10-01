@@ -407,8 +407,9 @@
     <ul class="about-list">
         <li>Rozkład MPK — <a href="https://open-data.cui.wroclaw.pl/hdb/metadane/13/"
             target="_blank" rel="noopener">Otwarte Dane Wrocławia</a> (CC0)</li>
-        <li>Kolej — <a href="https://pdp-api.plk-sa.pl/" target="_blank"
-            rel="noopener">Otwarte Dane Kolejowe PKP PLK</a></li>
+        {# Pełna nazwa spółki to wymóg regulaminu API (pkt 3.3), nie styl. #}
+        <li>Kolej — PKP Polskie Linie Kolejowe S.A., <a href="https://pdp-api.plk-sa.pl/"
+            target="_blank" rel="noopener">API Open Data PLK</a></li>
         <li>Rower miejski — kanał Wrocławskiego Roweru Miejskiego od nextbike (CC0)</li>
         <li>Traficar — przez nieoficjalny serwis <a href="https://fioletowe.live/"
             target="_blank" rel="noopener">fioletowe.live</a></li>
@@ -869,14 +870,6 @@
     <summary>Layout</summary>
 
         <label class="dev-check">
-            <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
-        </label>
-        <p class="field-hint">
-            Bez niego start jest zawsze stojącym miejscem — przystankiem albo
-            punktem na mapie.
-        </p>
-
-        <label class="dev-check">
             <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
         </label>
         <p class="field-hint">
@@ -890,14 +883,6 @@
         <p class="field-hint">
             Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe
             i elektryczne naraz.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="routes-hidden"> Ukryj propozycje tras
-        </label>
-        <p class="field-hint">
-            Lista propozycji znika razem ze strzałką, która ją zwija — zostaje
-            sama mapa. Na telefonie znika cała zakładka „Trasy".
         </p>
 
     </details>
@@ -920,9 +905,35 @@
 
     </details>
 
+    {#
+      Całe funkcje aplikacji, włączane i wyłączane. Osobno od Layoutu:
+      wyłączona lista propozycji nie tylko znika z ekranu - serwer w ogóle
+      jej nie składa (zgłoszenie #171).
+    #}
+    <details class="dev-fold" id="fold-features">
+    <summary>Funkcje</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
+        </label>
+        <p class="field-hint">
+            Bez niego start jest zawsze stojącym miejscem — przystankiem albo
+            punktem na mapie.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="routes-on" checked> Propozycje tras
+        </label>
+        <p class="field-hint">
+            Bez nich zostaje sama mapa — lista tras nie jest wtedy w ogóle
+            liczona. Na telefonie znika cała zakładka „Trasy".
+        </p>
+
+    </details>
+
     {# Na samym dole i zwinięte: jako jedyny nie zmienia niczego na mapie. #}
     <details class="dev-fold" id="fold-transfer">
-    <summary>Tylko lista propozycji tras</summary>
+    <summary>Propozycje tras</summary>
 
     <div class="field">
         <label for="transfer-gain">
