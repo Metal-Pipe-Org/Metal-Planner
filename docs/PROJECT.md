@@ -266,8 +266,10 @@ czasowe" (tempo marszu, prędkość i narzut roweru oraz auta), „Eksperymenty"
 (przełączniki powrotu: „Stara mapa (z progiem jasności)", „Stara tablica
 odjazdów", „Stare bliźniaki", oraz próby: grupowanie aut, mapa od ostatniej
 chwili), „Debug" (podglądy „dlaczego kawałek / rower / auto jest na mapie"),
-schowane „Wygląd mapy", „Dźwięk" i „Layout", „Wersja aplikacji", a na samym
-dole, zwinięte, „Tylko lista propozycji tras" z **progiem opłacalności
+schowane „Wygląd mapy", „Dźwięk" i „Layout", „Wersja aplikacji", „Funkcje"
+z przełącznikami „Stoję tutaj / Jestem w pojeździe" i „Propozycje tras" (zgaszone to `routes=0` w `/api/flow` —
+serwer listy wtedy w ogóle nie składa), a na samym
+dole, zwinięte, „Propozycje tras" z **progiem opłacalności
 przesiadki** (`transfer_gain_sec`, domyślnie 10 min — patrz opis skanu
 wyżej). Wartości lądują w `localStorage`, a te, od których zależy odpowiedź
 serwera, w query stringu `/api/flow`.
@@ -916,7 +918,8 @@ dało się dojechać.
   `start_lon`, `end_lat`/`end_lon` zamiast nazw — punkt wchodzi jako słupek
   z dojściem pieszo, patrz `gtfs.with_point`) — JEDNA
   odpowiedź niesie i mapę, i listę propozycji (dawniej dwa osobne
-  zapytania/endpointy — `/api/journeys` zniknął, patrz wyżej dlaczego):
+  zapytania/endpointy — `/api/journeys` zniknął, patrz wyżej dlaczego;
+  z `routes=0` listy nie ma, `journeys` jest puste, a reszta odpowiedzi ta sama):
   `{start, end, departure, best_arrival, deadline, segments: [{path:
   [[lat,lon], …], num: "10", kind: "tram"|"bus"|"other", w: 0..1}, …],
   journeys: [{departure, arrival, duration_min, wait_min, transfers,
@@ -1216,6 +1219,28 @@ dało się dojechać.
 
 ## Changelog
 
+- **2026-10-01** — **szybsze wyszukiwanie** (zgłoszenie #171). Te same
+  wyniki co do bajtu, tylko szybciej — sprawdzone na 11 relacjach (dzień,
+  wieczór, gęstość na maks z „pokaż więcej") porównaniem całych odpowiedzi.
+  Wyszukiwanie mapy z wartości podróży nie wsiada już w kurs, z którego
+  dalej nie wysiądzie się nigdzie, skąd jeszcze się zdąży (większość
+  wsiadań), dojścia z wysiadki liczy raz na połączenie, a bliźniaka sprawdza,
+  zanim powstanie nowa etykieta. Wyniki okien wyszukiwania zostają w pamięci
+  dnia (16 wpisów, kilka MB): „pokaż więcej", suwaki i przełączniki pytają
+  o tę samą relację jeszcze raz i nie liczą jej od zera. Pomiar lokalny,
+  zimne zapytania łącznie 16,9 s → 8,5 s; Oporów → Psie Pole 22:00 z gęstością
+  na maks i trzema „pokaż więcej" 48,9 s → 4,8 s (kolejne kliknięcia po
+  ok. 0,3 s zamiast 13 s). „Ukryj propozycje tras" z Layoutu to teraz
+  przełącznik „Propozycje tras" w nowej sekcji ⚙ „Funkcje”: zgaszonej listy nie liczy serwer
+  (`routes=0`), odpowiedź jest o 40–50% mniejsza; czasu liczenia to prawie
+  nie zmienia — lista kosztowała setne sekundy. W „Funkcjach" stoi też
+  przeniesiony z Layoutu przełącznik „Stoję tutaj / Jestem w pojeździe";
+  „Tylko lista propozycji tras" nazywa się teraz „Propozycje tras".
+  Metalowa rura gra o połowę ciszej (0.175) i przez mikser przeglądarki
+  (Web Audio) — iOS ignoruje głośność elementu audio i grał pełną głośnością
+  systemu; za to przy wyciszonym iPhonie rura milczy. Karta „O aplikacji"
+  podaje źródło kolei jako „PKP Polskie Linie Kolejowe S.A." — tego wymaga
+  regulamin API Open Data PLK (pkt 3.3, #173).
 - **2026-10-01** — **„O aplikacji” pod ikoną** (zgłoszenie #173). Klik
   w ikonę lub nazwę otwiera kartę: aplikacja jest nieoficjalna i niezwiązana
   z przewoźnikami, skąd są dane, kto ją tworzy (MetalPipeOrg), wszelkie prawa

@@ -40,6 +40,8 @@ def test_karta_dla_wszystkich_bez_linkow_zespolu():
     assert 'id="about"' in html
     assert "Zgłoś problem" in html
     assert "nieoficjalna" in html
+    # Regulamin API Open Data PLK (pkt 3.3) wymaga tej nazwy przy publikacji danych.
+    assert "PKP Polskie Linie Kolejowe S.A." in html
     assert "Tryb deweloperski</h3>" not in html
 
 

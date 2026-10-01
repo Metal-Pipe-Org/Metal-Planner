@@ -782,7 +782,7 @@ body.start-onboard .hint-onboard { display: block; }
 
 /* Całość pod nagłówkiem, a nie elementy wymienione z nazwy: kartka o rowerze,
    dopisana później między nie, zostawała na wierzchu zwiniętej listy. */
-/* Propozycje tras schowane w panelu ⚙ (sekcja Layout, patrz app.js):
+/* Propozycje tras wyłączone w panelu ⚙ (sekcja Funkcje, patrz app.js):
    znika lista i nagłówek ze strzałką, komunikaty wyszukiwania zostają. */
 body.routes-off .results-head,
 body.routes-off .results-body { display: none; }
