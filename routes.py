@@ -386,8 +386,9 @@ def init_routes(app):
             # szacuje, o której auto dowiezie do celu.
             car_kmh=_float_arg("car_kmh"),
             car_overhead_sec=_float_arg("car_overhead_sec"),
-            # Mapa z wartości podróży zamiast progu jasności - PRÓBA
-            # w Eksperymentach pod zębatką (zgłoszenie #150, patrz plan_flow).
+            # Mapa z wartości podróży zamiast progu jasności (zgłoszenie #150,
+            # patrz plan_flow). Front wysyła ją zawsze, chyba że w
+            # Eksperymentach włączono powrót do starej mapy.
             value_map=request.args.get("value_map") == "1",
             # Bliźniaki: jazda tym samym kursem zamiast marszu - domyślnie
             # tak; "0" to powrót w Eksperymentach (patrz plan_flow).

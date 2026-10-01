@@ -958,8 +958,7 @@ MAX_CAR_OVERHEAD_SEC = 20 * 60
 # pojazdami po jednej stronie roweru nie jest tym, po co ktoś bierze rower.
 MAX_BIKE_SIDE_RIDES = 4
 
-# Mapa z wartości podróży (zgłoszenie #150, PRÓBA pod zębatką - patrz
-# _value_journeys).
+# Mapa z wartości podróży (zgłoszenie #150, patrz _value_journeys).
 # Ile pojazdów najwyżej w jednej podróży - więcej to już nie wybór, tylko
 # objazd miasta, a każdy kolejny mnoży koszt szukania.
 VALUE_MAX_RIDES = 5
@@ -1162,7 +1161,8 @@ def _map_density(corridor_km, frame_km2):
 
 # ------------------------------------ mapa z wartości podróży (#150) ----
 #
-# PRÓBA pod zębatką, w Eksperymentach. Zamiast progu jasności i kotwic mapa
+# Domyślna od 28.09; stara mapa wraca przełącznikiem w Eksperymentach i przy
+# starcie z pokładu pojazdu. Zamiast progu jasności i kotwic mapa
 # rysuje PODRÓŻE od startu do celu, każdą opisaną trzema równymi
 # wartościami: o której w celu, o której trzeba wyjść i iloma pojazdami.
 # Chodzenie wartością nie jest - liczy się tylko w minutach - a przesiadki
@@ -2080,8 +2080,9 @@ def plan_flow(start_query, end_query, when=None,
     #150): prędkość w linii prostej i stały narzut na ruszenie i parkowanie,
     z których mapa szacuje, o której auto dowiezie do celu.
 
-    value_map - PRÓBA pod zębatką, w Eksperymentach (zgłoszenie #150): mapa
-    z wartości podróży zamiast progu jasności (patrz _value_map).
+    value_map - mapa z wartości podróży zamiast progu jasności (zgłoszenie
+    #150, patrz _value_map). Front wysyła ją zawsze, chyba że w
+    Eksperymentach włączono powrót do starej mapy.
 
     same_vehicle - z bliźniaków mapy z wartości podróży odpada wariant, który
     idzie tam, gdzie mógłby dalej jechać tym samym kursem (patrz _value_map,
@@ -2305,8 +2306,8 @@ def plan_flow(start_query, end_query, when=None,
         # najpierw cofają jej POCZĄTEK w stronę pytania (_choose_start),
         # a dopiero potem przesuwają koniec dalej.
         #
-        # Mapa z wartości podróży (zgłoszenie #150) - PRÓBA za przełącznikiem:
-        # próg jasności i kotwice zastępuje wybór podróży (patrz _value_map).
+        # Mapa z wartości podróży (zgłoszenie #150): próg jasności i kotwice
+        # zastępuje wybór podróży (patrz _value_map).
         # Liczy się od godziny z pytania, bo późniejsze wyjście jest już jedną
         # z jej wartości. Z pokładu pojazdu nie działa, jak odsiew krążenia.
         why_of = None
