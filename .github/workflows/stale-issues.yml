@@ -19,6 +19,8 @@ name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 # Nie ruszamy:
 #  • zgłoszeń z kamieniem milowym — są zaplanowane do wydania, cisza nie
 #    znaczy tam porzucenia,
+#  • zgłoszeń z etykietą "blocked" — czekają na coś poza nami, więc cisza
+#    jest tam spodziewana,
 #  • rodziców z otwartymi pod-zgłoszeniami — praca toczy się w dzieciach,
 #    a do rodzica nikt nie pisze. Gdy ostatnie dziecko się zamknie, rodzic
 #    wraca pod zwykłą zasadę od razu: jeśli sam milczy od 14 dni, dostaje
@@ -84,6 +86,7 @@ jobs:
             --jq '.[]
                   | select(.pull_request | not)
                   | select(.milestone == null)
+                  | select(any(.labels[]; .name == "blocked") | not)
                   | "\(.number) \(.sub_issues_summary.total // 0)"' > "$RUNNER_TEMP/open.txt"
 
           # Pętla czyta z fd 3, żeby żadne `gh` w środku nie zjadło jej wejścia.
@@ -139,12 +142,20 @@ jobs:
             case "$action" in
               ping)
                 gh issue comment "$n" --repo "$REPO" --body "$MARKER
-          $who od ${DAYS_QUIET} dni nic się tu nie dzieje. Jeśli to zgłoszenie ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni komentarz z uzasadnieniem, dlaczego jest nadal potrzebne. Bez takiego komentarza zostanie zamknięte jako „not planned”. Nic nie ginie: da się je odnaleźć po etykiecie \"$LABEL_STALE\" i otworzyć ponownie jednym kliknięciem."
+          $who od ${DAYS_QUIET} dni nic się tu nie dzieje. Czy to zgłoszenie jest nadal potrzebne?
+
+          1. **Tak** — napisz komentarz, dlaczego. Etykieta \"$LABEL_STALE\" zniknie, a licznik ruszy od nowa.
+          2. **Nie** — zamknij je od razu: strzałka obok „Close issue” → „Close as not planned”. Przypomnienia ustaną.
+
+          Bez odpowiedzi zamknę je sam za ${DAYS_GRACE} dni jako „not planned”. Nic nie ginie: da się je odnaleźć po etykiecie \"$LABEL_STALE\" i otworzyć ponownie jednym kliknięciem."
                 gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
                 echo "#$n: przypomnienie do $who" | tee -a "$GITHUB_STEP_SUMMARY"
                 discord_send warn "" "Cisza od ${DAYS_QUIET} dni: #$n $(jq -r .title "$RUNNER_TEMP/issue.json")" \
                   "$(jq -r .html_url "$RUNNER_TEMP/issue.json")" \
-                  "$who, jeśli ma zostać otwarte, napisz w ciągu ${DAYS_GRACE} dni, dlaczego jest nadal potrzebne"
+                  "$who, czy to zgłoszenie jest nadal potrzebne?
+          1. **Tak** — napisz pod nim komentarz, dlaczego.
+          2. **Nie** — zamknij je jako „not planned”, a przypomnienia ustaną.
+          Bez odpowiedzi zamknie się samo za ${DAYS_GRACE} dni."
                 ;;
               close)
                 gh issue comment "$n" --repo "$REPO" --body \

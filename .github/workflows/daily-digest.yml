@@ -1,0 +1,177 @@
+name: "Discord - podsumowanie dnia"
+
+# Raz dziennie, rano, podsumowanie wczoraj w dwóch częściach: najpierw co kto
+# zrobił, potem jedna karta z tym, co jest do zrobienia. Pojedyncze zdarzenia
+# lecą na bieżąco z discord.yml i giną w przewijaniu; tu widać całość. Raz
+# dziennie można pozwolić sobie na długość, więc list nie skracamy.
+#
+#  Karty osób — sam postęp z wczoraj, według dat z GitHuba, doba czasu
+#  warszawskiego, bez pingów
+#   • zmergowane PR-y do `main` — u autora PR-a,
+#   • zgłoszenia zamknięte jako zrobione — u autora PR-a, który je zamknął,
+#     a przy zamknięciu ręcznym lub commitem u zamykającego. „Nie robimy"
+#     i duplikaty pomijamy, to nie postęp,
+#   • założone zgłoszenia — u zakładającego.
+#   Zespół to konta z mapy DISCORD_IDS — i tak trzeba tam dopisać każdego, kogo
+#   chcemy pingować. Postęp innych (zgłoszenie z zewnątrz, bot) trafia na
+#   kartę „Pozostali”, z nazwą przy pozycji.
+#
+#  Karta „Ogólnie” — stan na teraz, wszystko do zrobienia
+#   • otwarte PR-y, każdy z tym, na co czeka: na recenzję wskazanych osób
+#     (ping ich) albo na samą prośbę o recenzję (ping autora). Wersje robocze
+#     są na liście bez pingu — nikt poza autorem nie ma przy nich ruchu,
+#   • "merged - is it ok?" — ping autora zgłoszenia, bo to on potwierdza
+#     i zamyka (issue-labels.yml),
+#   • zgłoszenia z etykietą "stale" (stale-issues.yml) — ping przypisanych,
+#     a bez przypisania autora,
+#   • na samym końcu liczby: wczoraj założone i zamknięte zgłoszenia oraz
+#     zmergowane PR-y, a pod nimi obecnie otwarte zgłoszenia i PR-y.
+#
+# Osoby z mapy kont wstawiamy jako wzmianki z Discorda — karta zaznacza konto,
+# ale nikogo nie budzi. Pingujemy (`@login`, discord.sh) tylko tam, gdzie na
+# kogoś czeka konkretny ruch — inaczej codzienne karty budziłyby wszystkich
+# i szybko przestałyby być czytane.
+#
+# Cron w UTC, nierówna minuta jak w stale-issues.yml; 6:23 UTC to rano
+# w Warszawie, już po północy w obu czasach. Działa z `main`.
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  digest:
+    if: github.repository == 'Metal-Pipe-Org/Metal-Planner'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Pobierz skrypt wysyłki z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Złóż i wyślij podsumowanie
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/discord.sh
+
+          start=$(TZ=Europe/Warsaw date -d 'yesterday 00:00' +%FT%T%:z)
+          end=$(TZ=Europe/Warsaw date -d 'today 00:00' +%FT%T%:z)
+          day=$(TZ=Europe/Warsaw date -d yesterday +%-d.%m)
+
+          search() {
+            gh api graphql -f q="repo:$REPO $1" -f query="
+              query(\$q: String!) { search(query: \$q, type: ISSUE, first: 100) { issueCount nodes { $2 } } }" \
+              --jq ".data.search | $3"
+          }
+
+          # Postęp: każda pozycja to {who, kind, number, title, url}.
+          merged=$(search "is:pr is:merged base:main merged:$start..$end" \
+            '... on PullRequest { number title url author { login } }' \
+            '.nodes | map({who: .author.login, kind: "merged", number, title, url})')
+
+          fixed=$(search "is:issue is:closed reason:completed closed:$start..$end" \
+            '... on Issue { number title url
+               timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent {
+                 actor { login } closer { ... on PullRequest { author { login } } } } } } }' \
+            '.nodes | map((.timelineItems.nodes[0] // {}) as $c
+                          | {who: ($c.closer.author.login // $c.actor.login), kind: "fixed", number, title, url})')
+
+          created=$(search "is:issue created:$start..$end" \
+            '... on Issue { number title url author { login } }' \
+            '.nodes | map({who: .author.login, kind: "created", number, title, url})')
+
+          # Do zrobienia — stan na teraz.
+          prs=$(gh pr list --repo "$REPO" --state open --limit 100 \
+            --json number,title,url,author,isDraft,reviewRequests \
+            --jq 'map({number, title, url, isDraft, author: .author.login,
+                       reviewers: [.reviewRequests[] | .login // .name | select(. != null)]})')
+
+          check=$(gh issue list --repo "$REPO" --state open --limit 100 --label "merged - is it ok?" \
+            --json number,title,url,author --jq 'map({number, title, url, author: .author.login})')
+
+          stale=$(gh issue list --repo "$REPO" --state open --limit 100 --label stale \
+            --json number,title,url,author,assignees \
+            --jq 'map({number, title, url,
+                       people: (if (.assignees | length) > 0 then [.assignees[].login] else [.author.login] end)})')
+
+          new_count=$(jq length <<<"$created")
+          closed_count=$(search "is:issue is:closed closed:$start..$end" '__typename' '.issueCount')
+          open_issues=$(gh issue list --repo "$REPO" --state open --limit 1000 --json number --jq length)
+          open_prs=$(jq length <<<"$prs")
+
+          # Jedna linia na kartę: {card, desc}. Osoby z zespołu od najaktywniejszej,
+          # potem „Pozostali”, na końcu „Ogólnie”, która jest zawsze. Nawiasy
+          # kwadratowe z tytułu rozbiłyby link w markdownie Discorda.
+          jq -n -c --argjson ids "$DISCORD_IDS" \
+            --argjson items "$(jq -s add <<<"$merged $fixed $created")" \
+            --argjson prs "$prs" --argjson check "$check" --argjson stale "$stale" \
+            --arg stats "**Wczoraj:** założone zgłoszenia **$new_count** · zamknięte zgłoszenia **$closed_count** · zmergowane PR-y **$(jq length <<<"$merged")**" \
+            --arg totals "**Obecnie otwarte:** zgłoszenia **$open_issues** · PR-y **$open_prs**" '
+            def name: . as $l | if $ids | has($l) then "<@\($ids[$l])>" else "**\($l)**" end;
+            def ping: . as $l | if $ids | has($l) then "@\($l)" else "**\($l)**" end;
+            def link: "• [#\(.number) \(.title | gsub("[\\[\\]]"; ""))](\(.url))";
+            def section($head; $lines): if ($lines | length) > 0 then ["**\($head)**"] + $lines + [""] else [] end;
+            {merged: "Zmergowane PR-y", fixed: "Naprawione", created: "Założone zgłoszenia"} as $heads
+
+            | ($items
+               | map(.who as $who | .card = (if $ids | has($who) then $who else "pozostali" end))
+               | group_by(.card)
+               | sort_by([.[0].card == "pozostali", -length])
+               | .[] | . as $g | $g[0].card as $card
+               | {card: $card,
+                  desc: ([$heads | keys_unsorted[] as $k
+                          | section($heads[$k];
+                              [$g[] | select(.kind == $k)
+                               | link + (if $card == "pozostali" then " · " + (.who | name) else "" end)])[]]
+                         | join("\n") | rtrimstr("\n"))}),
+
+              {card: "ogólnie",
+               desc: (section("Otwarte PR-y";
+                        [$prs[] | link + " · "
+                          + if .isDraft then (.author | name) + " · wersja robocza"
+                            elif (.reviewers | length) > 0
+                            then (.author | name) + " · czeka na recenzję: " + (.reviewers | map(ping) | join(", "))
+                            else "czeka, aż " + (.author | ping) + " poprosi o recenzję" end])
+                      + section("Do potwierdzenia";
+                          [$check[] | link + " · " + (.author | ping) + ", sprawdź i zamknij"])
+                      + section("Stale";
+                          [$stale[] | link + " · " + (.people | map(ping) | join(", "))])
+                      + [$stats, $totals]
+                      | join("\n"))}' > "$RUNNER_TEMP/cards.jsonl"
+
+          while read -r card <&3; do
+            name=$(jq -r .card <<<"$card")
+            desc=$(jq -r .desc <<<"$card")
+            # Opis karty Discorda mieści 4096 znaków; tyle jedna karta za dzień
+            # raczej nie uzbiera, ale za długa przepadłaby w całości.
+            if [ "${#desc}" -gt 4000 ]; then
+              desc=${desc:0:4000}
+              desc="${desc%$'\n'*}"$'\n'"…"
+            fi
+            case "$name" in
+              ogólnie)
+                discord_send info "" "Ogólnie — do zrobienia" "https://github.com/$REPO/pulls" "$desc" ;;
+              pozostali)
+                discord_send grey "" "Pozostali — $day" "https://github.com/$REPO/issues" "$desc" ;;
+              *)
+                discord_send info "$name" "Podsumowanie dnia — $day" \
+                  "https://github.com/$REPO/issues?q=involves:$name" "$desc" ;;
+            esac
+            # Webhook Discorda przyjmuje kilka wiadomości na parę sekund.
+            sleep 1
+          done 3< "$RUNNER_TEMP/cards.jsonl"
