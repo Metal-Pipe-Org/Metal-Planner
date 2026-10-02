@@ -406,8 +406,8 @@ def test_the_node_dot_stands_where_the_switch_says(front):
 
 def test_the_start_dot_is_known_even_when_not_marked(front):
     """Rozpoznanie przystanku startowego nie może zależeć od tego, czy jest
-    on wyróżniony zielenią: okienko w rogu musi wiedzieć, od czyjego rozkładu
-    zacząć, także przy wyłączonym wyróżnieniu."""
+    on zielony: okienko w rogu musi wiedzieć, od czyjego rozkładu zacząć,
+    także w starym wyglądzie startu (eksperyment, #175)."""
     _check(front, "kropka_startowa_rozpoznana")
 
 

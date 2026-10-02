@@ -53,8 +53,22 @@ $('sidebar-toggle').addEventListener('click', () => {
     saveUiState({sidebarHidden: hidden});
 });
 
-// Ustawienia Developerskie są schowane za przyciskiem - normalny użytkownik
-// nie ma po co go widzieć, a strojenie algorytmu musi zostać pod ręką.
+// Poza trybem deweloperskim (DEV_MODE, patrz config.dev_mode) sekcje DEV
+// panelu ⚙ są schowane, więc z pamięci bierze się tylko to, co użytkownik
+// w nim widzi - schowanej opcji nie miałby czym cofnąć, wraca więc do
+// domyślnej (zgłoszenie #175). Schowana wartość jest tylko pomijana, nie
+// kasowana: zapis dokłada się do tego, co już leży w pamięci, więc po
+// ponownym włączeniu DEV_MODE wraca.
+const devMode = document.body.classList.contains('dev-mode');
+
+function visiblePrefs(prefs, userKeys) {
+    if (devMode) return prefs;
+    return Object.fromEntries(Object.entries(prefs).filter(([key]) =>
+        userKeys.includes(key) || key.startsWith('fold:')));
+}
+
+// Ustawienia są schowane za przyciskiem, a strojenie algorytmu siedzi
+// w nich, w sekcjach DEV.
 const devPanel = $('dev-panel');
 const devToggle = $('dev-toggle');
 if (devPanel) {
@@ -278,12 +292,18 @@ let baseDimmed = false;
 // którego na ekranie nie ma (patrz suspendPlanner).
 let plannerSuspended = false;
 
+const ENDPOINT_STYLE = {
+    start: {radius: 8, weight: 2, color: '#1b5e20', fillColor: '#4caf50', fillOpacity: 1},
+    end: {radius: 8, weight: 2, color: '#b71c1c', fillColor: '#ef5350', fillOpacity: 1},
+};
+
 function styleFor(name) {
-    if (!plannerSuspended) {
-        if (name === sel.start) return {radius: 8, weight: 2, color: '#1b5e20',
-                                        fillColor: '#4caf50', fillOpacity: 1};
-        if (name === sel.end) return {radius: 8, weight: 2, color: '#b71c1c',
-                                      fillColor: '#ef5350', fillOpacity: 1};
+    // Przy narysowanej mapie start i cel mają po jednej własnej kropce
+    // (stopDot, flowEndDot) - słupki powtarzałyby to samo kilka razy obok,
+    // więc gasną jak wszystkie inne.
+    if (!plannerSuspended && !(baseDimmed && !dotOpts.oldEnds)) {
+        if (name === sel.start) return ENDPOINT_STYLE.start;
+        if (name === sel.end) return ENDPOINT_STYLE.end;
     }
     if (baseDimmed) return DIM_STYLE;
     return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
@@ -664,7 +684,7 @@ function zoneShapes(data) {
     ];
 }
 
-/** Przycisk 🅿 jest tylko wtedy, gdy włączono go w ustawieniach (Layout),
+/** Przycisk 🅿 jest tylko wtedy, gdy włączono go w ustawieniach (DEV, „Rowery i Traficary”),
     a i wtedy - jak sama strefa - tylko przy zapalonych autach i poza
     rozkładami: strefa bez aut nie ma sensu (patrz refreshCarLayer, który
     to woła). */
@@ -726,7 +746,7 @@ function carMarker(car, tooltipHtml) {
         .on('mouseout', hideCarZone);
 }
 
-/** Jeden przycisk rowerów zamiast dwóch (opcja w Layout): ⚡ znika, a 🚲
+/** Jeden przycisk rowerów zamiast dwóch (opcja w „Wyglądzie aplikacji”): ⚡ znika, a 🚲
     włącza i gasi oba rodzaje naraz - i świeci, gdy świeci choć jeden. */
 function bikesMerged() {
     return $('bikes-merged').checked;
@@ -972,7 +992,7 @@ function loadLookPrefs() {
 // same obawy dotyczą suwaków skasowanych.
 const LOOK_TUNED = ['maxWeight', 'dimFactor', 'labelStep', 'labelScale',
                     'labelOpacity'];
-const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING ? Object.fromEntries(
+const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING && devMode ? Object.fromEntries(
     Object.entries(loadLookPrefs()).filter(([key]) => LOOK_TUNED.includes(key)))
     : {})};
 
@@ -1014,7 +1034,8 @@ function loadTimePrefs() {
     }
 }
 
-const timeOpts = {...TIME_DEFAULTS, ...loadTimePrefs()};
+const TIME_PREFS_USER = ['headline'];
+const timeOpts = {...TIME_DEFAULTS, ...visiblePrefs(loadTimePrefs(), TIME_PREFS_USER)};
 
 // Kropki przystanków i to, gdzie ląduje ich rozkład. Osobny klucz od
 // TIME_PREFS_KEY, bo tamto jest eksperymentem na czas strojenia, a to nie.
@@ -1025,7 +1046,7 @@ const DOT_DEFAULTS = {
     ttPast: true,      // szare godziny sprzed chwili z mapy (timetableLinesHtml)
     ttOld: false,      // powrót do starej tablicy (bez timetableLinesHtml)
     center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
-    start: false,      // wyróżnienie przystanku startowego
+    oldEnds: false,    // powrót do zielonych/czerwonych słupków i białej kropki startu
     tipCursor: true,   // dymek przy kursorze
     tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
     // Godziny SAMEGO przejazdu rowerem - domyślnie zgaszone. Godzina "jesteś
@@ -1057,11 +1078,13 @@ function loadDotPrefs() {
     }
 }
 
-const dotOpts = {...DOT_DEFAULTS, ...loadDotPrefs()};
+const DOT_PREFS_USER = ['ttPast'];
+const dotOpts = {...DOT_DEFAULTS, ...visiblePrefs(loadDotPrefs(), DOT_PREFS_USER)};
 
 function saveDotPrefs() {
     try {
-        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(dotOpts));
+        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(
+            {...loadDotPrefs(), ...visiblePrefs(dotOpts, DOT_PREFS_USER)}));
     } catch {
         // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
     }
@@ -1069,7 +1092,8 @@ function saveDotPrefs() {
 
 function saveTimePrefs() {
     try {
-        localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(timeOpts));
+        localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(
+            {...loadTimePrefs(), ...visiblePrefs(timeOpts, TIME_PREFS_USER)}));
     } catch {
         // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
     }
@@ -1199,6 +1223,7 @@ let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania be
 let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
 let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
 let flowDotLayer = null;    // węzły przesiadkowe wachlarza (patrz flowStopDots)
+let flowEndDot = null;      // kropka celu (patrz endDot)
 let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
 let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
 let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
@@ -1207,6 +1232,7 @@ function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
+    if (flowEndDot) { map.removeLayer(flowEndDot); flowEndDot = null; }
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
     clearBikeRides();
@@ -1289,6 +1315,9 @@ function drawFlow(flow, refit) {
     if (flowDotLayer) map.removeLayer(flowDotLayer);
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
+    if (flowEndDot) map.removeLayer(flowEndDot);
+    flowEndDot = endDot();
+    if (flowEndDot) flowEndDot.addTo(map);
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
@@ -2528,9 +2557,8 @@ function medianGapMin(list) {
     Bez tego warunku odpowiedź, która przyszła po zejściu kursora na inną
     kropkę, nadpisywałaby w okienku świeższą treść. */
 function emitTimetable(dot, html) {
-    const out = dot.isStart && dotOpts.start ? `<div class="tt-start">${html}</div>` : html;
-    if (dot.getTooltip()) dot.setTooltipContent(out);
-    if (timetableTarget === dot) showSidePanel(out);
+    if (dot.getTooltip()) dot.setTooltipContent(html);
+    if (timetableTarget === dot) showSidePanel(html);
 }
 
 // Kropka, której tablicę pokazujemy teraz - patrz emitTimetable.
@@ -2634,7 +2662,7 @@ function stopDot(point, where, sec, style) {
     const isStart = !!where.start;
     const dot = L.circleMarker(point, {
         ...(style || STOP_DOT_STYLE),
-        ...(isStart && dotOpts.start ? START_DOT_STYLE : {}),
+        ...(isStart && !dotOpts.oldEnds ? ENDPOINT_STYLE.start : {}),
     });
     dot.isStart = isStart;
     // Czym ta kropka jest - żeby dało się ją "najechać" bez kursora.
@@ -2669,10 +2697,6 @@ function stopDot(point, where, sec, style) {
     return dot;
 }
 
-
-// Przystanek startowy - ta sama zieleń, co marker startu i szyna w formularzu,
-// żeby to była oczywiście ta sama rzecz, a nie kolejny kolor do nauczenia.
-const START_DOT_STYLE = {color: '#1b5e20', weight: 4, fillColor: '#c8f0cd'};
 
 // Kropki wachlarza są mniejsze od tych na wybranej trasie: jest ich kilkanaście
 // naraz i mają nie przykryć samej mapy - a trasa, gdy się ją wybierze, ma być
@@ -2709,6 +2733,17 @@ function flowStopDots(nodes, deadline) {
         // Start nigdy nie blednie: to nie jest jedna z opcji, tylko miejsce,
         // w którym stoisz.
         n.sec, flowDotStyle(n.start ? 1 : n.w)));
+}
+
+/** Kropka celu - jedna w środku jego słupków, w miejsce ich wszystkich
+    (patrz styleFor). Start ma ją z węzła wachlarza, ale cel węzłem nie jest:
+    tu się tylko wysiada. Osobno od flowDotLayer, bo wybrana trasa chowa
+    tamte kropki, a cel ma zostać widać. */
+function endDot() {
+    const poles = !dotOpts.oldEnds && !isPoint(sel.end) && markersByName.get(sel.end);
+    if (!poles) return null;
+    const center = L.latLngBounds(poles.map(m => m.getLatLng())).getCenter();
+    return L.circleMarker(center, {...ENDPOINT_STYLE.end, interactive: false});
 }
 
 /** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
@@ -4480,7 +4515,12 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
                         'walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead'];
 
-function loadDevPrefs() {
+// To, co z tego klucza widać w ⚙ także bez DEV_MODE (patrz visiblePrefs).
+const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
+                        'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
+                        'no-pull-refresh', 'start-mode-switch', 'routes-on'];
+
+function storedDevPrefs() {
     try {
         return JSON.parse(localStorage.getItem(DEV_PREFS_KEY)) || {};
     } catch {
@@ -4488,8 +4528,12 @@ function loadDevPrefs() {
     }
 }
 
+function loadDevPrefs() {
+    return visiblePrefs(storedDevPrefs(), DEV_PREFS_USER);
+}
+
 function saveDevPref(id, value) {
-    const prefs = loadDevPrefs();
+    const prefs = storedDevPrefs();
     prefs[id] = value;
     try {
         localStorage.setItem(DEV_PREFS_KEY, JSON.stringify(prefs));
@@ -4584,7 +4628,7 @@ bikesMergedInput.addEventListener('change', () => {
     paintBikeButtons();
 });
 
-// Propozycje tras da się wyłączyć w całości (sekcja „Funkcje") -
+// Propozycje tras da się wyłączyć w całości (sekcja „Wygląd aplikacji") -
 // zostaje sama mapa, a serwer listy w ogóle nie składa (patrz queryParams).
 // Znika lista i jej nagłówek ze strzałką, ale nie komunikaty w tym samym
 // miejscu („Szukam połączeń…", błędy): te mówią o wyszukiwaniu, nie
@@ -4613,7 +4657,7 @@ routesOn.addEventListener('change', () => {
     if (routesOn.checked) replanForBikes();
 });
 
-// Gest „pociągnij w dół, żeby odświeżyć" (opcja w Layout) - overscroll-behavior
+// Gest „pociągnij w dół, żeby odświeżyć" (opcja w „Wyglądzie aplikacji”) - overscroll-behavior
 // na <html> (patrz style.css) gasi go bez ruszania zwykłego przewijania.
 const noPullRefresh = $('no-pull-refresh');
 noPullRefresh.checked = loadDevPrefs()['no-pull-refresh'] === true;
@@ -4658,7 +4702,8 @@ const LOOK_KNOBS = {
 
 function saveLookPrefs() {
     try {
-        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(look));
+        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(
+            {...loadLookPrefs(), ...visiblePrefs(look, [])}));
     } catch {
         // localStorage niedostępny - suwaki działają dalej, po prostu się nie zapamiętają
     }
@@ -4889,7 +4934,6 @@ bindTimeToggles();
 // wybraną trasę w miejscu (keepView - kadr ma się nie ruszyć).
 const DOT_TOGGLES = {
     'dot-center': 'center',
-    'dot-start': 'start',
     'tip-cursor': 'tipCursor',
     'tip-panel': 'tipPanel',
     'bike-times': 'bikeTimes',
@@ -4897,9 +4941,11 @@ const DOT_TOGGLES = {
     'car-times': 'carTimes',
     'debug-why': 'why',
     'debug-why-seg': 'whySeg',
+    'old-ends': 'oldEnds',
 };
 
 function applyDotOpts() {
+    restyle(sel.start, sel.end);
     if (lastFlow) drawFlow(lastFlow, false);
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
     if (!dotOpts.tipPanel) hideSidePanel();
@@ -4984,10 +5030,10 @@ bindDotOpts();
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
-    'fold-time', 'fold-window', 'fold-transfer',
-    'fold-sound', 'fold-places', 'fold-assumptions',
+    'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
+    'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-experiments', 'fold-debug', 'look-section',
-    'fold-layout', 'fold-features', 'fold-version',
+    'fold-layout', 'fold-version',
 ];
 
 function bindDevFolds() {
@@ -5058,6 +5104,7 @@ function suspendPlanner() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
+    if (flowEndDot) { map.removeLayer(flowEndDot); flowEndDot = null; }
     // Punkty i wyróżnione słupki relacji schodzą razem z wachlarzem: same,
     // bez linii między nimi, mówiłyby o wyszukiwaniu, którego nie widać.
     updatePointMarker('start', null);
