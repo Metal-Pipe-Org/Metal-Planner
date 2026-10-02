@@ -86,14 +86,15 @@ aboutDialog.addEventListener('click', e => {
 // Zgłoszenie od razu z wersją, urządzeniem i adresem: przy każdym błędzie
 // pierwsze pytanie brzmiało „na której wersji i na czym?”. Treść składana
 // w chwili kliknięcia, bo wersję service worker podaje dopiero po starcie.
-// Typ i etykiety nadaje dopiero workflow po znaczniku w treści - parametry
-// w adresie GitHub bierze pod uwagę tylko od osób z dostępem do repo.
+// Typu zgłoszenia celowo nie narzucamy - przycisk jest dla wszystkich, nie
+// tylko dla zespołu, więc nie wiadomo z góry, co to za zgłoszenie. Jedyne
+// automatyczne rozróżnienie to etykieta "external" (workflow issue-triage.yml,
+// po uprawnieniach autora, nie po treści zgłoszenia).
 $('about-report').addEventListener('click', e => {
     const version = $('sw-version') ? $('sw-version').textContent.trim() : '';
     const body = [
         '**Co się stało:**', '', '', '**Czego się spodziewałem:**', '', '',
         '---',
-        '<!-- zgłoś-problem -->',
         `Wersja: ${version && version !== '—' ? version : 'nieznana'}`,
         `Urządzenie: ${phoneLayout.active() ? 'telefon' : 'komputer'} (${navigator.userAgent})`,
         `Adres: ${location.href}`,
