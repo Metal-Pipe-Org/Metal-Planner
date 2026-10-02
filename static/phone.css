@@ -21,7 +21,7 @@
 
 #view-tabs { display: flex; }
 
-/* Propozycje tras schowane w panelu ⚙ (sekcja Layout, patrz app.js) - na
+/* Propozycje tras schowane w panelu ⚙ (sekcja „Wygląd aplikacji”, patrz app.js) - na
    telefonie znika z nimi cała zakładka „Trasy". */
 body.routes-off #view-tabs [data-view="list"] { display: none; }
 

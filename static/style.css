@@ -48,7 +48,7 @@ body {
 }
 
 /* Gest „pociągnij w dół, żeby odświeżyć" w PWA - opcja w Ustawieniach
-   Developerskich (Layout, patrz app.js: no-pull-refresh). Na <html>, bo to on
+   („Wygląd aplikacji”, patrz app.js: no-pull-refresh). Na <html>, bo to on
    jest elementem przewijanym w większości przeglądarek - reguła gasi odbicie
    całej strony, nie ruszając przewijania wewnątrz list (mają już własne
    „contain" niżej). */
@@ -363,7 +363,7 @@ body.panel-hidden #sidebar {
     background: var(--surface-alt);
 }
 
-/* Schowany w ⚙ → Layout (patrz start-mode-switch w app.js). */
+/* Schowany w ⚙ → „Wygląd aplikacji” (patrz start-mode-switch w app.js). */
 body.start-mode-off .start-mode { display: none; }
 
 .start-mode .seg {
@@ -791,7 +791,7 @@ body.start-onboard .hint-onboard { display: block; }
 
 /* Całość pod nagłówkiem, a nie elementy wymienione z nazwy: kartka o rowerze,
    dopisana później między nie, zostawała na wierzchu zwiniętej listy. */
-/* Propozycje tras wyłączone w panelu ⚙ (sekcja Funkcje, patrz app.js):
+/* Propozycje tras wyłączone w panelu ⚙ (sekcja „Wygląd aplikacji”, patrz app.js):
    znika lista i nagłówek ze strzałką, komunikaty wyszukiwania zostają. */
 body.routes-off .results-head,
 body.routes-off .results-body { display: none; }
@@ -1550,27 +1550,6 @@ body.routes-off .results-body { display: none; }
     grid-template-columns: 15px 38px minmax(34px, max-content) 1fr auto;
 }
 
-/* Tablica przystanku, z którego wyruszamy. Zielony pasek u góry i ta sama
-   zieleń w nazwie, co na kropce i markerze startu - to ma być rozpoznane
-   jednym spojrzeniem, bez czytania nazwy. */
-.tt-start {
-    border-top: 3px solid #1b5e20;
-    margin: -8px -10px 0;
-    padding: 7px 10px 0;
-    border-radius: 10px 10px 0 0;
-}
-
-.tt-start .tip-stop { color: #1b5e20; }
-
-.tt-start .tip-stop::before {
-    content: "start · ";
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    font-size: 10px;
-    opacity: 0.75;
-}
-
 /* Prefiks `tip-`, nie `tt-`: dymek i rozkłady to dwie różne tablice, a obie
    miały ochotę na te same trzy nazwy (`tt-head`, `tt-stop`, `tt-dir`). Przy
    równej specyficzności wygrywała ta reguła, która stoi w pliku niżej - czyli
@@ -1905,6 +1884,23 @@ body.dev-open #flow-panel { right: 322px; }
 }
 
 .dev-fold[open] > summary::before { transform: none; }
+
+/* Sekcja tylko dla dewelopera: poza DEV_MODE nie istnieje, a w nim nosi
+   znaczek, żeby było widać, czego zwykły użytkownik nie zobaczy. */
+body:not(.dev-mode) .dev-only { display: none; }
+
+.dev-badge {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--sheet);
+    color: var(--ink-soft);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+}
+
+/* Liczba zmienionych opcji staje wtedy za znaczkiem, a nie pośrodku nagłówka. */
+.dev-fold.dev-only > summary[data-changed]::after { margin-left: 0; }
 
 #dev-panel .dev-check {
     display: flex;

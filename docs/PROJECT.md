@@ -1219,6 +1219,21 @@ dało się dojechać.
 
 ## Changelog
 
+- **2026-10-02** — **ustawienia ⚙ dla użytkownika i dla dewelopera**
+  (zgłoszenie #175). Panel nazywa się „Ustawienia”. Każdy widzi trzy sekcje:
+  Mapa (pasek nad mapą, szare godziny w tablicy, dostawczaki), Założenia
+  czasowe i Wygląd aplikacji (jeden przycisk rowerów, odświeżanie
+  przeciągnięciem, przełącznik „Stoję tutaj / Jestem w pojeździe”,
+  propozycje tras). Reszta siedzi w sekcjach ze znaczkiem DEV (Zagęszczenie,
+  Czas na mapie, Przystanki i rozkład, Rowery i Traficary, Eksperymenty,
+  Debug, Wygląd mapy, Wersja aplikacji, Propozycje tras), które widać tylko
+  przy `DEV_MODE=1`; bez niego ich ustawienia wracają do domyślnych, nawet
+  jeśli przeglądarka coś zapamiętała. Start i cel przy narysowanej mapie to
+  po jednej kropce — zielonej i czerwonej — zamiast białej kropki startu
+  i kilku podświetlonych słupków; słupki gasną jak wszystkie inne. Opcja
+  „Wyróżnij przystanek startowy” znika, a eksperyment „Stary wygląd startu
+  i celu” wraca do poprzedniego obrazka.
+
 - **2026-10-01** — **szybsze wyszukiwanie** (zgłoszenie #171). Te same
   wyniki co do bajtu, tylko szybciej — sprawdzone na 11 relacjach (dzień,
   wieczór, gęstość na maks z „pokaż więcej") porównaniem całych odpowiedzi.

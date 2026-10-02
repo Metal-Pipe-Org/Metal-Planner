@@ -89,16 +89,10 @@ services:
       # Szczegoly w gunicorn.conf.py. Podnos swiadomie.
       WEB_CONCURRENCY: "1"
 
-      # Menu deweloperskie (ikona zebatki w lewym dolnym rogu) chroni token
-      # losowany przy pierwszym starcie. Podejrzysz go na serwerze:
-      #     cat data/dev_token.txt
-      #
-      # Nic nie musisz tu ustawiac. Odkomentuj tylko, jesli chcesz narzucic
-      # wlasny token zamiast losowanego:
-      # DEV_TOKEN: "moj-wlasny-sekret"
-      #
-      # ...albo wylaczyc menu deweloperskie w calosci:
-      # DEV_MENU: "off"
+      # Sekcje DEV w ustawieniach (zebatka) i linki zespolu w "O aplikacji"
+      # wlacza DEV_MODE=1 w data/.env - lokalnie i na serwerze testowym.
+      # Bez tego wpisu, jak na produkcji, ich nie ma, a schowane ustawienia
+      # wracaja do domyslnych.
 
     volumes:
       # Zwykly folder obok tego pliku, tworzony przy pierwszym starcie.
@@ -108,7 +102,6 @@ services:
       #                                   PKP_API_KEY (kilkadziesiat MB)
       #   ./data/pkp_station_coords.json - wspolrzedne stacji PKP
       #                                   (dogadywane osobno, patrz update_pkp.py)
-      #   ./data/dev_token.txt    - token menu deweloperskiego
       #   ./data/.env             - sekrety, m.in. PKP_API_KEY
       #                             (wzor: data/.env.example z repo)
       # Kopia zapasowa = skopiowanie tego folderu.

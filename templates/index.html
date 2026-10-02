@@ -48,7 +48,7 @@
           media="(max-width: 760px), (pointer: coarse) and (max-height: 500px)"
           href="{{ url_for('static', filename='phone.css') }}">
 </head>
-<body>
+<body{% if dev_mode %} class="dev-mode"{% endif %}>
 
 <div id="map"></div>
 
@@ -84,8 +84,8 @@
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
                     aria-label="Zainstaluj aplikację" hidden>⤓</button>
-            <button id="dev-toggle" class="icon-button" title="Ustawienia Developerskie"
-                    aria-label="Ustawienia Developerskie" aria-expanded="false">⚙</button>
+            <button id="dev-toggle" class="icon-button" title="Ustawienia"
+                    aria-label="Ustawienia" aria-expanded="false">⚙</button>
         </div>
 
         {#
@@ -444,124 +444,32 @@
 <div id="dev-panel" class="card hidden">
 
     <header class="dev-head">
-        <h2>Ustawienia Developerskie</h2>
+        <h2>Ustawienia</h2>
         <button id="dev-close" class="icon-button" title="Zamknij"
-                aria-label="Zamknij Ustawienia Developerskie">✕</button>
+                aria-label="Zamknij Ustawienia">✕</button>
     </header>
 
     {#
-      Kolejność: najpierw to, co zmienia samą mapę, potem to, jak wygląda, na
-      końcu sprawy techniczne i suwak, który mapy nie dotyczy wcale.
+      Kolejność: najpierw sekcje dla każdego, potem sekcje `dev-only` ze
+      znaczkiem DEV - bez DEV_MODE ich nie widać (style.css), a ich ustawienia
+      wracają do domyślnych (visiblePrefs w app.js). Deweloper widzi więc od
+      razu, co z tego zobaczy zwykły użytkownik, bez przełączania trybu.
 
       `value` i `checked` w tym pliku to wartości DOMYŚLNE: z nimi porównuje
       podświetlenie zmienionych opcji (markChangedSettings w app.js), więc
       muszą się zgadzać z *_DEFAULTS w app.js i z domyślnymi w plannerze.
     #}
-    <details class="dev-fold" id="fold-window">
-    <summary>Co pokazuje mapa</summary>
+    <details class="dev-fold" id="fold-map">
+    <summary>Mapa</summary>
 
-    <div class="field">
-        <label for="density">
-            Gęstość mapy <output id="density-value">2.5</output>
-        </label>
-        <input type="range" id="density" min="0.5" max="15" step="0.5" value="2.5">
-        <p class="field-hint">
-            Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru,
-            a godzina „mapa pokazuje do” jest tego skutkiem.
-        </p>
-    </div>
-
-    <div class="field">
-        <label for="car-count">
-            Ile aut Traficara <output id="car-count-value">3</output>
-        </label>
-        <input type="range" id="car-count" min="1" max="30" step="1" value="3">
-        <p class="field-hint">
-            Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”,
-            są zawsze, a suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.
-        </p>
-    </div>
-
-    <div class="field">
-        <label for="bike-count">
-            Ile stacji z rowerem <output id="bike-count-value">3</output>
-        </label>
-        <input type="range" id="bike-count" min="1" max="30" step="1" value="3">
-        <p class="field-hint">
-            Stacje, których żadna inna nie bije godziną przy rowerze, godziną
-            w celu ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
-            Przejazdy z każdej stacji widać pod kursorem.
-        </p>
-    </div>
-
-    </details>
-
-    <details class="dev-fold" id="fold-time">
-        <summary>Czas na mapie</summary>
-
-        <label class="dev-check">
-            <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
-        </label>
-        <label class="dev-check">
-            <input type="checkbox" id="time-ends"> …z kropką dokładnie w tym punkcie
-        </label>
-        <p class="field-hint">
-            Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu,
-            jeśli jedzie się dalej stąd.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
-        </label>
         <label class="dev-check">
             <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
-        </label>
-        <label class="dev-check">
-            <input type="checkbox" id="time-ride"> …i w nim sam czas jazdy
         </label>
         <p class="field-hint">
             Pasek podaje, o której wyjechać i dojechać najszybszą trasą, oraz
             zakres godzin mapy, a jego „Pokaż więcej” zagęszcza mapę dwa, trzy,
-            cztery razy. Czas jazdy liczy się od wejścia do pierwszego pojazdu,
-            bez czekania na niego.
+            cztery razy.
         </p>
-    </details>
-
-    {#
-      To, co stoi na mapie poza samymi liniami: przystanki z rozkładem, rowery
-      miejskie i Traficary. Przystanki i rowery nie ruszają serwera (wszystko
-      jest już w odpowiedziach, przełącznik tylko przemalowuje); dostawczaki
-      tak - zmieniają to, co serwer wybiera.
-    #}
-    <details class="dev-fold" id="fold-places">
-    <summary>Przystanki, rowery i Traficary</summary>
-
-        <label class="dev-check">
-            <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
-        </label>
-        <p class="field-hint">
-            Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie,
-            z którego wzięta jest godzina.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="dot-start"> Wyróżnij przystanek startowy
-        </label>
-        <p class="field-hint">
-            Kropka przystanku, z którego się wyrusza, i nagłówek jej tablicy
-            dostają zielony kolor.
-        </p>
-
-        <div class="field compact">
-            <label for="dot-rows">
-                Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
-            </label>
-            <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
-            <p class="field-hint">
-                Powyżej dwudziestu odjazdów tablica spod kropki zasłania mapę,
-                o którą się właśnie pyta.
-            </p>
-        </div>
 
         <label class="dev-check">
             <input type="checkbox" id="tt-past" checked> Szare godziny w tablicy
@@ -572,54 +480,12 @@
             chwili.
         </p>
 
-        <div class="dev-section-head">Gdzie pokazać rozkład</div>
-
-        <label class="dev-check">
-            <input type="checkbox" id="tip-cursor" checked> Dymek przy kursorze
-        </label>
-        <label class="dev-check">
-            <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
-        </label>
-        <p class="field-hint">
-            Tablica odjazdów i podpowiedź o linii pokazują się w dymku, w okienku,
-            które zostaje do zamknięcia, w obu albo w żadnym.
-        </p>
-
-        <div class="dev-section-head">Rower miejski</div>
-
-        <label class="dev-check">
-            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
-        </label>
-        <p class="field-hint">
-            Obok drugiego końca przejazdu staje godzina policzona z odległości,
-            a nie sama odległość.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
-        </label>
-        <p class="field-hint">
-            Kreski wybranych przejazdów i ich stacje końcowe stoją na mapie cały
-            czas, a nie tylko pod kursorem.
-        </p>
-
-        <div class="dev-section-head">Traficary</div>
-
         <label class="dev-check">
             <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
         </label>
         <p class="field-hint">
             Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
             i stoją na mapie jako puste pierścienie.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="car-times"> Godzina dojazdu autem
-        </label>
-        <p class="field-hint">
-            Dymek auta mówi też, o której mniej więcej dowiezie do celu — godzina
-            policzona z odległości w linii prostej i założeń czasowych, nie
-            odczytana. Auta wybierane są nią zawsze, przełącznik tylko ją pokazuje.
         </p>
 
     </details>
@@ -693,11 +559,202 @@
     </details>
 
     {#
+      Co widać na ekranie aplikacji, poza samą mapą, i całe funkcje do
+      schowania. Wyłączona lista propozycji nie tylko znika z ekranu - serwer
+      w ogóle jej nie składa (zgłoszenie #171).
+    #}
+    <details class="dev-fold" id="fold-layout">
+    <summary>Wygląd aplikacji</summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bikes-merged"> Jeden przycisk rowerów
+        </label>
+        <p class="field-hint">
+            Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe
+            i elektryczne naraz.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="no-pull-refresh"> Wyłącz odświeżanie przeciągnięciem w dół
+        </label>
+        <p class="field-hint">
+            Gest „pociągnij w dół, żeby odświeżyć" w aplikacji zainstalowanej
+            jako PWA łatwo wywołać przypadkiem, np. przewijając listę do samej
+            góry. Ta opcja go gasi, zostawiając zwykłe przewijanie bez zmian.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
+        </label>
+        <p class="field-hint">
+            Bez niego start jest zawsze stojącym miejscem — przystankiem albo
+            punktem na mapie.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="routes-on" checked> Propozycje tras
+        </label>
+        <p class="field-hint">
+            Bez nich zostaje sama mapa — lista tras nie jest wtedy w ogóle
+            liczona. Na telefonie znika cała zakładka „Trasy".
+        </p>
+
+    </details>
+
+    <details class="dev-fold dev-only" id="fold-window">
+    <summary>Zagęszczenie <span class="dev-badge">DEV</span></summary>
+
+    <div class="field">
+        <label for="density">
+            Gęstość mapy <output id="density-value">2.5</output>
+        </label>
+        <input type="range" id="density" min="0.5" max="15" step="0.5" value="2.5">
+        <p class="field-hint">
+            Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru,
+            a godzina „mapa pokazuje do” jest tego skutkiem.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="car-count">
+            Ile aut Traficara <output id="car-count-value">3</output>
+        </label>
+        <input type="range" id="car-count" min="1" max="30" step="1" value="3">
+        <p class="field-hint">
+            Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”,
+            są zawsze, a suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="bike-count">
+            Ile stacji z rowerem <output id="bike-count-value">3</output>
+        </label>
+        <input type="range" id="bike-count" min="1" max="30" step="1" value="3">
+        <p class="field-hint">
+            Stacje, których żadna inna nie bije godziną przy rowerze, godziną
+            w celu ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
+            Przejazdy z każdej stacji widać pod kursorem.
+        </p>
+    </div>
+
+    </details>
+
+    <details class="dev-fold dev-only" id="fold-time">
+    <summary>Czas na mapie <span class="dev-badge">DEV</span></summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-ends"> …z kropką dokładnie w tym punkcie
+        </label>
+        <p class="field-hint">
+            Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu,
+            jeśli jedzie się dalej stąd.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="time-ride"> Sam czas jazdy w pasku nad mapą
+        </label>
+        <p class="field-hint">
+            Czas jazdy liczy się od wejścia do pierwszego pojazdu, bez czekania
+            na niego.
+        </p>
+    </details>
+
+    {#
+      Przystanki i rozkład spod kropki - nic tu nie rusza serwera (wszystko
+      jest już w odpowiedziach, przełącznik tylko przemalowuje).
+    #}
+    <details class="dev-fold dev-only" id="fold-places">
+    <summary>Przystanki i rozkład <span class="dev-badge">DEV</span></summary>
+
+        <label class="dev-check">
+            <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
+        </label>
+        <p class="field-hint">
+            Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie,
+            z którego wzięta jest godzina.
+        </p>
+
+        <div class="field compact">
+            <label for="dot-rows">
+                Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
+            </label>
+            <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
+            <p class="field-hint">
+                Powyżej dwudziestu odjazdów tablica spod kropki zasłania mapę,
+                o którą się właśnie pyta.
+            </p>
+        </div>
+
+        <div class="dev-section-head">Gdzie pokazać rozkład</div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="tip-cursor" checked> Dymek przy kursorze
+        </label>
+        <label class="dev-check">
+            <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
+        </label>
+        <p class="field-hint">
+            Tablica odjazdów i podpowiedź o linii pokazują się w dymku, w okienku,
+            które zostaje do zamknięcia, w obu albo w żadnym.
+        </p>
+
+    </details>
+
+    <details class="dev-fold dev-only" id="fold-vehicles">
+    <summary>Rowery i Traficary <span class="dev-badge">DEV</span></summary>
+
+        <div class="dev-section-head">Rower miejski</div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
+        </label>
+        <p class="field-hint">
+            Obok drugiego końca przejazdu staje godzina policzona z odległości,
+            a nie sama odległość.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
+        </label>
+        <p class="field-hint">
+            Kreski wybranych przejazdów i ich stacje końcowe stoją na mapie cały
+            czas, a nie tylko pod kursorem.
+        </p>
+
+        <div class="dev-section-head">Traficary</div>
+
+        <label class="dev-check">
+            <input type="checkbox" id="car-times"> Godzina dojazdu autem
+        </label>
+        <p class="field-hint">
+            Dymek auta mówi też, o której mniej więcej dowiezie do celu — godzina
+            policzona z odległości w linii prostej i założeń czasowych, nie
+            odczytana. Auta wybierane są nią zawsze, przełącznik tylko ją pokazuje.
+        </p>
+
+        <label class="dev-check">
+            <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
+        </label>
+        <p class="field-hint">
+            Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez
+            niego strefa pokazuje się po najechaniu na auto.
+        </p>
+
+    </details>
+
+    {#
       Próby: domyślnie zgaszone i jeszcze nie obietnica kontraktu — do
       włączania i wyłączania, żeby zobaczyć różnicę na żywej relacji.
     #}
-    <details class="dev-fold" id="fold-experiments">
-    <summary>Eksperymenty</summary>
+    <details class="dev-fold dev-only" id="fold-experiments">
+    <summary>Eksperymenty <span class="dev-badge">DEV</span></summary>
 
         <label class="dev-check">
             <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
@@ -752,14 +809,24 @@
             jesteś.
         </p>
 
+        <label class="dev-check">
+            <input type="checkbox" id="old-ends"> Stary wygląd startu i celu
+        </label>
+        <p class="field-hint">
+            Powrót do zielonych i czerwonych słupków startu i celu przy
+            narysowanej mapie oraz białej kropki startu. Domyślnie start i cel
+            to po jednej kropce, zielonej i czerwonej, a ich słupki gasną jak
+            wszystkie inne.
+        </p>
+
     </details>
 
     {#
       Podgląd do oceniania reguł wyboru - nic tu nie rusza serwera, dane
       przychodzą zawsze, przełącznik tylko je pokazuje.
     #}
-    <details class="dev-fold" id="fold-debug">
-    <summary>Debug</summary>
+    <details class="dev-fold dev-only" id="fold-debug">
+    <summary>Debug <span class="dev-badge">DEV</span></summary>
 
         <label class="dev-check">
             <input type="checkbox" id="debug-why"> Dlaczego rower i auto są na mapie
@@ -788,8 +855,8 @@
       LOOK_DEFAULTS w app.js i to one są domyślne, gdy sekcja jest schowana.
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
-    <details class="dev-fold" id="look-section" hidden>
-        <summary>Wygląd mapy</summary>
+    <details class="dev-fold dev-only" id="look-section" hidden>
+        <summary>Wygląd mapy <span class="dev-badge">DEV</span></summary>
 
         <div class="field compact">
             <label for="dot-size">
@@ -865,39 +932,8 @@
 
     </details>
 
-    {# Co widać na ekranie aplikacji, poza samą mapą. #}
-    <details class="dev-fold" id="fold-layout">
-    <summary>Layout</summary>
-
-        <label class="dev-check">
-            <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
-        </label>
-        <p class="field-hint">
-            Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez
-            niego strefa pokazuje się po najechaniu na auto.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="bikes-merged"> Jeden przycisk rowerów
-        </label>
-        <p class="field-hint">
-            Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe
-            i elektryczne naraz.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="no-pull-refresh"> Wyłącz odświeżanie przeciągnięciem w dół
-        </label>
-        <p class="field-hint">
-            Gest „pociągnij w dół, żeby odświeżyć" w aplikacji zainstalowanej
-            jako PWA łatwo wywołać przypadkiem, np. przewijając listę do samej
-            góry. Ta opcja go gasi, zostawiając zwykłe przewijanie bez zmian.
-        </p>
-
-    </details>
-
-    <details class="dev-fold" id="fold-version">
-    <summary>Wersja aplikacji</summary>
+    <details class="dev-fold dev-only" id="fold-version">
+    <summary>Wersja aplikacji <span class="dev-badge">DEV</span></summary>
 
     <div class="field" id="sw-field">
         <div class="sw-row">
@@ -914,35 +950,9 @@
 
     </details>
 
-    {#
-      Całe funkcje aplikacji, włączane i wyłączane. Osobno od Layoutu:
-      wyłączona lista propozycji nie tylko znika z ekranu - serwer w ogóle
-      jej nie składa (zgłoszenie #171).
-    #}
-    <details class="dev-fold" id="fold-features">
-    <summary>Funkcje</summary>
-
-        <label class="dev-check">
-            <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
-        </label>
-        <p class="field-hint">
-            Bez niego start jest zawsze stojącym miejscem — przystankiem albo
-            punktem na mapie.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="routes-on" checked> Propozycje tras
-        </label>
-        <p class="field-hint">
-            Bez nich zostaje sama mapa — lista tras nie jest wtedy w ogóle
-            liczona. Na telefonie znika cała zakładka „Trasy".
-        </p>
-
-    </details>
-
     {# Na samym dole i zwinięte: jako jedyny nie zmienia niczego na mapie. #}
-    <details class="dev-fold" id="fold-transfer">
-    <summary>Propozycje tras</summary>
+    <details class="dev-fold dev-only" id="fold-transfer">
+    <summary>Propozycje tras <span class="dev-badge">DEV</span></summary>
 
     <div class="field">
         <label for="transfer-gain">

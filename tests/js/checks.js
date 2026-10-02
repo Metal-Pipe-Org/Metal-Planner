@@ -801,21 +801,26 @@ checks.kropka_peron_albo_srodek = (() => {
 })();
 
 /* Kropka przystanku, z którego wyruszamy, jest rozpoznawana ZAWSZE - także
-   przy wyłączonym wyróżnieniu, bo okienko w rogu musi wiedzieć, od czyjego
-   rozkładu zacząć. */
+   w starym wyglądzie, bez zieleni, bo okienko w rogu musi wiedzieć, od czyjego
+   rozkładu zacząć. W nowym jest zielona jak słupki startu, które zastępuje. */
 checks.kropka_startowa_rozpoznana = (() => {
-    const bylo = app.dotOpts.start;
-    app.dotOpts.start = false;            // wyróżnienie wyłączone...
-    const dots = app.flowStopDots([
+    const bylo = app.dotOpts.oldEnds;
+    const nodes = [
         {name: 'PILCZYCE', lat: 51.13, lon: 16.95, sec: 48720, lines: [], start: true},
         {name: 'Rondo', lat: 51.11, lon: 17.01, sec: 49000, lines: []},
-    ]);
-    const zielona = dots[0].options.color === '#1b5e20';
-    app.dotOpts.start = bylo;
+    ];
+    app.dotOpts.oldEnds = true;           // stary wygląd...
+    const stare = app.flowStopDots(nodes);
+    app.dotOpts.oldEnds = false;
+    const nowe = app.flowStopDots(nodes);
+    app.dotOpts.oldEnds = bylo;
+    const zielona = dots => dots[0].options.color === '#1b5e20';
     return {
         // ...ale kropka i tak wie, że jest startowa - tylko nie jest zielona.
-        ok: dots[0].isStart === true && dots[1].isStart === false && !zielona,
-        start: dots[0].isStart, drugi: dots[1].isStart, zielona,
+        ok: stare[0].isStart === true && stare[1].isStart === false
+            && !zielona(stare) && zielona(nowe) && nowe[1].options.color !== '#1b5e20',
+        start: stare[0].isStart, drugi: stare[1].isStart,
+        zielona_stara: zielona(stare), zielona_nowa: zielona(nowe),
     };
 })();
 

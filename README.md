@@ -113,7 +113,7 @@ albo z `data/.env` (zmienne ze środowiska przebijają plik). Najważniejsze:
 | `SIECHNICE_ENABLED` | `off` | autobusy gminy Siechnice (niżej) |
 | `WRM_ENABLED` | `on` | rower miejski |
 | `TRAFICAR` | `1` | auta Traficara; `0` wyłącza |
-| `DEV_MODE` | wyłączony | `1` dokłada w „O aplikacji” linki zespołu; lokalnie i na serwerze testowym |
+| `DEV_MODE` | wyłączony | `1` pokazuje sekcje DEV w ⚙ i dokłada w „O aplikacji” linki zespołu; lokalnie i na serwerze testowym |
 
 Pozostałe (rozkład PKP, procesy i wątki serwera, strefa czasowa) opisują
 komentarze w `docker-compose.yml`.

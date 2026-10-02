@@ -1,6 +1,6 @@
 """Opcja „Wyłącz odświeżanie przeciągnięciem w dół" (zgłoszenie #170).
 
-Stoi w sekcji Layout panelu ⚙, a ta sekcja ma być na każdej instancji -
+Stoi w sekcji „Wygląd aplikacji” panelu ⚙, a ta sekcja ma być na każdej instancji -
 także bez `DEV_MODE`, czyli na produkcji.
 """
 
