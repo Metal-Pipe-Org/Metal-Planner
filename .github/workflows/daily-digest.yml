@@ -112,11 +112,9 @@ jobs:
           check=$(gh issue list --repo "$REPO" --state open --limit 100 --label "merged - is it ok?" \
             --json number,title,url,author --jq 'map({number, title, url, author: .author.login})')
 
-          # „stale” mogło zostać sprzed „blocked”, a stale-issues.yml takich już
-          # nie rusza — bez filtra karta pingowałaby je bez końca.
           stale=$(gh issue list --repo "$REPO" --state open --limit 100 --label stale \
-            --json number,title,url,author,assignees,labels \
-            --jq 'map(select(any(.labels[]; .name == "blocked") | not) | {number, title, url,
+            --json number,title,url,author,assignees \
+            --jq 'map({number, title, url,
                        people: (if (.assignees | length) > 0 then [.assignees[].login] else [.author.login] end)})')
 
           new_count=$(jq length <<<"$created")
