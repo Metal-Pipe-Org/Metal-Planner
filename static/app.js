@@ -56,7 +56,9 @@ $('sidebar-toggle').addEventListener('click', () => {
 // Poza trybem deweloperskim (DEV_MODE, patrz config.dev_mode) sekcje DEV
 // panelu ⚙ są schowane, więc z pamięci bierze się tylko to, co użytkownik
 // w nim widzi - schowanej opcji nie miałby czym cofnąć, wraca więc do
-// domyślnej (zgłoszenie #175).
+// domyślnej (zgłoszenie #175). Schowana wartość jest tylko pomijana, nie
+// kasowana: zapis dokłada się do tego, co już leży w pamięci, więc po
+// ponownym włączeniu DEV_MODE wraca.
 const devMode = document.body.classList.contains('dev-mode');
 
 function visiblePrefs(prefs, userKeys) {
@@ -1032,7 +1034,8 @@ function loadTimePrefs() {
     }
 }
 
-const timeOpts = {...TIME_DEFAULTS, ...visiblePrefs(loadTimePrefs(), ['headline'])};
+const TIME_PREFS_USER = ['headline'];
+const timeOpts = {...TIME_DEFAULTS, ...visiblePrefs(loadTimePrefs(), TIME_PREFS_USER)};
 
 // Kropki przystanków i to, gdzie ląduje ich rozkład. Osobny klucz od
 // TIME_PREFS_KEY, bo tamto jest eksperymentem na czas strojenia, a to nie.
@@ -1075,11 +1078,13 @@ function loadDotPrefs() {
     }
 }
 
-const dotOpts = {...DOT_DEFAULTS, ...visiblePrefs(loadDotPrefs(), ['ttPast'])};
+const DOT_PREFS_USER = ['ttPast'];
+const dotOpts = {...DOT_DEFAULTS, ...visiblePrefs(loadDotPrefs(), DOT_PREFS_USER)};
 
 function saveDotPrefs() {
     try {
-        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(dotOpts));
+        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(
+            {...loadDotPrefs(), ...visiblePrefs(dotOpts, DOT_PREFS_USER)}));
     } catch {
         // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
     }
@@ -1087,7 +1092,8 @@ function saveDotPrefs() {
 
 function saveTimePrefs() {
     try {
-        localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(timeOpts));
+        localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(
+            {...loadTimePrefs(), ...visiblePrefs(timeOpts, TIME_PREFS_USER)}));
     } catch {
         // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
     }
@@ -4514,17 +4520,20 @@ const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on'];
 
-function loadDevPrefs() {
+function storedDevPrefs() {
     try {
-        return visiblePrefs(JSON.parse(localStorage.getItem(DEV_PREFS_KEY)) || {},
-                            DEV_PREFS_USER);
+        return JSON.parse(localStorage.getItem(DEV_PREFS_KEY)) || {};
     } catch {
         return {};       // localStorage niedostępny (tryb prywatny) albo zepsuty JSON
     }
 }
 
+function loadDevPrefs() {
+    return visiblePrefs(storedDevPrefs(), DEV_PREFS_USER);
+}
+
 function saveDevPref(id, value) {
-    const prefs = loadDevPrefs();
+    const prefs = storedDevPrefs();
     prefs[id] = value;
     try {
         localStorage.setItem(DEV_PREFS_KEY, JSON.stringify(prefs));
@@ -4693,7 +4702,8 @@ const LOOK_KNOBS = {
 
 function saveLookPrefs() {
     try {
-        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(look));
+        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(
+            {...loadLookPrefs(), ...visiblePrefs(look, [])}));
     } catch {
         // localStorage niedostępny - suwaki działają dalej, po prostu się nie zapamiętają
     }
