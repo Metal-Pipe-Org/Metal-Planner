@@ -41,6 +41,8 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
    wymienienie bez pingu.
 6. Konfiguracja: sekret `DISCORD_WEBHOOK`, zmienna repo `DISCORD_IDS` (JSON
    login GitHuba → ID z Discorda). Nowa osoba w zespole = nowy wpis w zmiennej.
+   Podsumowanie dnia idzie osobnym sekretem `DISCORD_WEBHOOK_DIGEST` na kanał
+   #metal-statystyki, żeby nie przykrywało zdarzeń, na które ktoś czeka.
 
 ## Zasady przy pisaniu workflow
 

@@ -63,7 +63,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          # Osobny kanał: codzienne karty nie spychają zdarzeń, na które ktoś czeka.
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DIGEST }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
         run: |
           set -euo pipefail
@@ -73,10 +74,17 @@ jobs:
           end=$(TZ=Europe/Warsaw date -d 'today 00:00' +%FT%T%:z)
           day=$(TZ=Europe/Warsaw date -d yesterday +%-d.%m)
 
+          # Bez paginacji: przy naszej skali 100 to zapas, ale ucięcie ma być
+          # widać w logu, a nie po cichu skrócić kartę.
           search() {
-            gh api graphql -f q="repo:$REPO $1" -f query="
+            local out
+            out=$(gh api graphql -f q="repo:$REPO $1" -f query="
               query(\$q: String!) { search(query: \$q, type: ISSUE, first: 100) { issueCount nodes { $2 } } }" \
-              --jq ".data.search | $3"
+              --jq .data.search)
+            if [ "$(jq '.issueCount > (.nodes | length)' <<<"$out")" = true ]; then
+              echo "::warning::„$1” ma $(jq .issueCount <<<"$out") wyników, pobieramy 100 — lista na karcie może być niepełna."
+            fi
+            jq "$3" <<<"$out"
           }
 
           # Postęp: każda pozycja to {who, kind, number, title, url}.
@@ -116,7 +124,9 @@ jobs:
 
           # Jedna linia na kartę: {card, desc}. Osoby z zespołu od najaktywniejszej,
           # potem „Pozostali”, na końcu „Ogólnie”, która jest zawsze. Nawiasy
-          # kwadratowe z tytułu rozbiłyby link w markdownie Discorda.
+          # kwadratowe z tytułu rozbiłyby link w markdownie Discorda. `@login`
+          # z tytułu wstawiamy od razu jako wzmiankę w karcie — gołe discord.sh
+          # zamieniłby w ping, a tytuł pisze ktokolwiek.
           jq -n -c --argjson ids "$DISCORD_IDS" \
             --argjson items "$(jq -s add <<<"$merged $fixed $created")" \
             --argjson prs "$prs" --argjson check "$check" --argjson stale "$stale" \
@@ -124,7 +134,9 @@ jobs:
             --arg totals "**Obecnie otwarte:** zgłoszenia **$open_issues** · PR-y **$open_prs**" '
             def name: . as $l | if $ids | has($l) then "<@\($ids[$l])>" else "**\($l)**" end;
             def ping: . as $l | if $ids | has($l) then "@\($l)" else "**\($l)**" end;
-            def link: "• [#\(.number) \(.title | gsub("[\\[\\]]"; ""))](\(.url))";
+            def mentions: reduce ($ids | to_entries[]) as $p (.;
+              gsub("(?<![A-Za-z0-9-])@" + $p.key + "(?![A-Za-z0-9-])"; "<@" + $p.value + ">"; "i"));
+            def link: "• [#\(.number) \(.title | gsub("[\\[\\]]"; "") | mentions)](\(.url))";
             def section($head; $lines): if ($lines | length) > 0 then ["**\($head)**"] + $lines + [""] else [] end;
             {merged: "Zmergowane PR-y", fixed: "Naprawione", created: "Założone zgłoszenia"} as $heads
 
