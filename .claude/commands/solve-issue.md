@@ -65,10 +65,11 @@ issue, co się nie udało, i zakończ.
 - Commit **po angielsku**, w trybie rozkazującym, np. `Fix transfer time after midnight`
   (sam kod, komentarze i opisy pozostają po polsku — po angielsku są tylko commity).
 - Wypchnij gałąź, na której pracujesz.
-- Nie zakładaj PR-a (`gh pr create`) i nie podawaj linku do jego utworzenia —
-  robi to workflow, który jako jedyny zna gałąź docelową. Gdy PR już istnieje,
-  Twoje commity trafią do niego same.
-- Na koniec napisz w komentarzu do zgłoszenia jednym–dwoma zdaniami, co było źle
-  i co zmieniłeś.
+- Nie zakładaj PR-a (`gh pr create`) — workflow jako jedyny zna gałąź docelową.
+  Gdy PR już istnieje, Twoje commity trafią do niego same.
+- Na koniec zapisz do pliku wskazanego w poleceniu od workflow (`.claude-answer.md`)
+  jedno–dwa zdania: co było źle i co zmieniłeś. Nie pisz własnych komentarzy pod
+  zgłoszeniem i nie commituj tego pliku — odpowiedź wstawi workflow, razem z
+  linkiem do PR-a.
 
 PR zostaje do przejrzenia przez człowieka — nie merguj go samodzielnie.

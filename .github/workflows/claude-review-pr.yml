@@ -7,7 +7,8 @@ name: Claude - oceń PR
 # edytujemy po fakcie: edycja nie wysyła nikomu powiadomienia, więc autor PR-a
 # nie miał jak się dowiedzieć, że ocena już jest, i trzeba go było szturchać
 # ręcznie. Nowy komentarz z @wzmianką autora powiadamia go na GitHubie, a ta
-# sama wiadomość leci na Discorda, gdzie zespół faktycznie śledzi repo.
+# sama wiadomość leci na Discorda, gdzie zespół faktycznie śledzi repo. Gdy
+# ocena już stoi, zapowiedź zwijamy (nie kasujemy), żeby nie zalegała.
 #
 # Recenzentów ten workflow nie woła. Autor czyta ocenę i dopiero gdy uzna PR za
 # gotowy, prosi o recenzję w panelu bocznym („Reviewers"); ping na Discordzie
@@ -91,10 +92,21 @@ jobs:
       && contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       go: ${{ steps.check.outputs.go }}
     steps:
+      # Skrypt z `main` — tak samo w claude-issue.yml i issue-triage.yml.
+      - name: Pobierz sprawdzenia z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      # Ocena idzie na sekretach i pobiera kod PR-a, więc wołać może tylko
+      # ktoś z prawem zapisu — tak jak ręczny bieg, który też wymaga zapisu.
       - name: Sprawdź wołanie i uprawnienia
         id: check
         env:
@@ -103,36 +115,8 @@ jobs:
           BODY: ${{ github.event.comment.body }}
           WHO: ${{ github.event.sender.login }}
         run: |
-          set -euo pipefail
-
-          # Jak w claude-issue.yml: odpowiedź cytująca wcześniejszy wpis
-          # przepisuje razem z nim jego @claude — liczy się tylko to spoza
-          # linii cytatu.
-          if ! printf '%s\n' "$BODY" | grep -v '^[[:space:]]*>' | grep -q '@claude'; then
-            echo "go=false" >> "$GITHUB_OUTPUT"
-            echo "Wszystkie @claude w tym wpisie są w cytacie — pomijam." \
-              | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          # Ocena idzie na sekretach i pobiera kod PR-a, więc wołać może
-          # tylko ktoś z prawem zapisu — tak jak ręczny bieg, który
-          # też wymaga zapisu. `author_association` się nie nadaje: przy
-          # prywatnym członkostwie w organizacji kłamie (patrz claude-issue.yml),
-          # stąd pytanie wprost o uprawnienia. Endpointowi wystarcza
-          # `metadata: read`, które token ma zawsze, stąd `permissions: {}`.
-          # Błąd API ma wywrócić bramkę na czerwono, a nie udawać „brak
-          # uprawnień" — inaczej zepsute sprawdzanie po cichu wyłączyłoby
-          # wołanie `@claude` dla wszystkich.
-          perm=$(gh api "repos/$REPO/collaborators/$WHO/permission" --jq .permission)
-          case "$perm" in
-            admin|write) echo "go=true" >> "$GITHUB_OUTPUT" ;;
-            *)
-              echo "go=false" >> "$GITHUB_OUTPUT"
-              echo "@$WHO nie ma prawa zapisu (uprawnienia: $perm) — pomijam." \
-                | tee -a "$GITHUB_STEP_SUMMARY"
-              ;;
-          esac
+          source .github/scripts/guard.sh
+          gate_claude_call "$BODY" "$WHO"
 
   review:
     needs: gate
@@ -289,6 +273,17 @@ jobs:
           ref: ${{ steps.pr.outputs.head_sha }}
           fetch-depth: 0
 
+      - name: Pobierz skrypty pomocnicze z main
+        # Z `main`, nie z drzewa PR-a: skrypt wysyłki dostaje w env sekret
+        # webhooka, a ocenianemu kodowi go nie dajemy.
+        if: steps.pr.outputs.go == 'true' || steps.pr.outputs.url != ''
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Weź instrukcję oceny z gałęzi bazowej
         if: steps.pr.outputs.go == 'true'
         env:
@@ -340,14 +335,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Zapowiedź zostaje taka, jaka jest — ocena przyjdzie obok, nowym
-          # komentarzem, więc ta linijka nie musi niczego obiecywać ani
-          # niczego nie trzeba w niej potem poprawiać. Jej początek jest
-          # znakiem „ocena już była" dla pushy (krok „Ustal PR do oceny").
-          url=$(gh pr comment "$N" --repo "$REPO" --body \
-            "🤔 Claude czyta ten PR — ocena przyjdzie osobnym komentarzem ([podgląd biegu](${RUN}))."
-          )
-          echo "Zapowiedź: $url"
+          # Jedna krótka linijka. Jej początek jest znakiem „ocena już była"
+          # dla pushy (krok „Ustal PR do oceny"), a zwinięty komentarz API
+          # dalej zwraca, więc znak działa także po zwinięciu.
+          res=$(gh api "repos/$REPO/issues/$N/comments" \
+            -f body="🤔 Claude czyta ten PR ([podgląd biegu](${RUN}))." \
+            --jq '[.html_url, .node_id] | @tsv')
+          echo "Zapowiedź: ${res%%$'\t'*}"
+          echo "node=${res##*$'\t'}" >> "$GITHUB_OUTPUT"
 
       - name: Claude
         id: claude
@@ -484,17 +479,19 @@ jobs:
             echo "verdict=$verdict"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Pobierz skrypt wysyłki na Discorda z main
-        # Z `main`, nie z drzewa PR-a: skrypt dostaje w env sekret webhooka,
-        # a ocenianemu kodowi go nie dajemy.
-        if: always() && (steps.post.outputs.url != '' || steps.pr.outputs.url != '')
+      - name: Zwiń zapowiedź
+        # Zapowiedź spełniła swoje, gdy pod PR-em stoi ocena albo informacja
+        # o porażce. Zwijamy, nie kasujemy — da się ją odwinąć. Ubity bieg
+        # zwija swoją zapowiedź też, bo odpowie dopiero następny, a ten jej
+        # nie zna. Porażka tego kroku nie może zaczerwienić oceny, która już
+        # stoi.
+        if: ${{ (!cancelled() && steps.post.outputs.url != '') || (cancelled() && steps.hello.outcome == 'success') }}
         continue-on-error: true
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: .discord
-          sparse-checkout: .github/scripts
-          persist-credentials: false
+        env:
+          NODE: ${{ steps.hello.outputs.node }}
+        run: |
+          source .discord/.github/scripts/guard.sh
+          minimize_comment "$NODE"
 
       - name: Daj znać autorowi na Discordzie
         # Zespół śledzi repo na Discordzie, a @wzmianka z GitHuba tam nikogo
