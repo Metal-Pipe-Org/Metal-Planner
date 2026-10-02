@@ -13,8 +13,9 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `claude-issue.yml` | Solver: `@claude` pod zgłoszeniem, praca na gałęzi `claude/issue-<numer>`. |
 | `issue-labels.yml` | Etykiety stanu na zgłoszeniach wskazanych przez PR i zapasowe zamykanie po merge'u. |
 | `issue-triage.yml` | Etykieta `external` dla autorów spoza zespołu. |
-| `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. |
+| `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. Zablokowanych nie rusza. |
 | `discord.yml` | Kanał repo na Discordzie z prawdziwymi pingami. |
+| `daily-digest.yml` | Co rano na Discordzie: postęp z wczoraj po karcie na osobę, potem karta „Ogólnie” z tym, co do zrobienia, i liczbami. |
 | `tests.yml` | Testy, odpalane wyłącznie ręcznie. |
 
 ## Discord
@@ -40,6 +41,8 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
    wymienienie bez pingu.
 6. Konfiguracja: sekret `DISCORD_WEBHOOK`, zmienna repo `DISCORD_IDS` (JSON
    login GitHuba → ID z Discorda). Nowa osoba w zespole = nowy wpis w zmiennej.
+   Podsumowanie dnia idzie osobnym sekretem `DISCORD_WEBHOOK_DIGEST` na kanał
+   #metal-statystyki, żeby nie przykrywało zdarzeń, na które ktoś czeka.
 
 ## Zasady przy pisaniu workflow
 
