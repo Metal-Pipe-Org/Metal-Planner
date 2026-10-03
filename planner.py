@@ -2421,7 +2421,7 @@ def plan_flow(start_query, end_query, when=None,
             journeys = []
             if with_journeys:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
-                                                target_set, start_reach)
+                                                target_set, dep_sec, start_reach)
                 journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                limit=journey_limit,
                                                gain_sec=gain_sec, ride=ride)
@@ -3487,7 +3487,7 @@ def _select_and_anchor(day, segs, source_stops, target_set, walk_stops=()):
 
 
 def _extract_transfer_graph(day, kept, ranges, source_stops, target_set,
-                            start_reach=None):
+                            dep_sec, start_reach=None):
     """Krok 5 (propozycje tras): zamienia narysowane, przycięte segmenty
     w mały graf przesiadkowy - węzły to segmenty, krawędzie to miejsca,
     gdzie da się realnie wskoczyć/wysiąść między nimi. To ten sam graf,
@@ -3517,6 +3517,9 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set,
       inaczej karta każe wsiąść w pociąg na stacji, o której nie powiedziała,
       że trzeba do niej podejść.
 
+    `dep_sec` to godzina, od której pasażer stoi na starcie - dojście
+    musi z niej zdążyć na odjazd (patrz origin_ids niżej).
+
     Przeszukiwanie idzie tylko w przód, wyłącznie po exit_edges: to jedyna
     z dwóch reguł kotwiczenia _select_and_anchor (początek/koniec), która
     sama sprawdza porównywalną jasność - reguła kotwicy początku jest
@@ -3531,11 +3534,27 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set,
         for seg in kept
     }
 
-    origin_ids = {
-        id(seg): ranges[id(seg)][0]
-        for seg in kept
-        if seg["stops"][ranges[id(seg)][0]] in source_stops
-    }
+    start_reach = start_reach or {}
+    origin_ids = {}
+    for seg in kept:
+        start_pos = ranges[id(seg)][0]
+        board = seg["stops"][start_pos]
+        if board not in source_stops:
+            continue
+        # Słupek w zasięgu dojścia jest punktem startowym tylko wtedy, gdy
+        # wychodząc o dep_sec zdąży się na TEN kurs - to samo pytanie, które
+        # przesiadce zadaje _can_board. Kurs bywa narysowany od takiego słupka
+        # z innego powodu: dowozi do niego inny pojazd. Zgłoszenie #168
+        # (DWORZEC GŁÓWNY -> PL. GRUNWALDZKI, 08:31): szesnastka z Kościuszki
+        # o 08:37 była na mapie dzięki przesiadce, a lista złożyła z niej
+        # "idź 14 minut i wsiądź", z wyjściem o 08:23 - przed godziną
+        # z pytania. Ta fikcyjna trasa bez przesiadki wypierała na dodatek
+        # prawdziwą (tramwaj na Kościuszki i tam szesnastka) jako
+        # zdominowaną.
+        walk = start_reach.get(board)
+        if walk is not None and dep_sec + walk[1] > seg["best_deps"][board]:
+            continue
+        origin_ids[id(seg)] = start_pos
 
     # Krawędź: ("target", pos, arr_t, stop, None, None, None) albo
     # ("transfer", pos, arr_t, stop, id(other), other_start, other_board) -
@@ -3586,7 +3605,7 @@ def _extract_transfer_graph(day, kept, ranges, source_stops, target_set,
         "origin_ids": origin_ids,
         "exit_edges": exit_edges,
         "seg_by_id": {id(seg): seg for seg in kept},
-        "origin_walk": start_reach or {},
+        "origin_walk": start_reach,
     }
 
 
