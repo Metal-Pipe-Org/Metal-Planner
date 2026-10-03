@@ -11,8 +11,9 @@ name: Discord - powiadomienia
 #  Zgłoszenia
 #   • nowe (z fragmentem opisu) i otwarte ponownie,
 #   • przypisanie — ping przypisanego; kto bierze zgłoszenie sam, nie dostaje
-#     pingu o tym, co przed chwilą zrobił. Zdjęcie przypisania nie jest
-#     ogłaszane, nikt nie musi wtedy nic robić,
+#     pingu o tym, co przed chwilą zrobił,
+#   • zdjęcie przypisania — bez pingu, nikt nie musi wtedy nic robić;
+#     wiadomość mówi zespołowi, że zgłoszenie jest wolne,
 #   • zamknięcie — od razu czym: PR-em, commitem, czy ręcznie (zrobione /
 #     „nie robimy" / duplikat). Ping autora zgłoszenia, chyba że sam zamknął.
 #
@@ -43,7 +44,7 @@ name: Discord - powiadomienia
 #    wystarcza zwykła zmienna, którą da się podejrzeć i poprawić w miejscu.
 on:
   issues:
-    types: [opened, reopened, closed, assigned]
+    types: [opened, reopened, closed, assigned, unassigned]
   issue_comment:
     types: [created]
   # Kodu z PR-a nie pobieramy, więc `pull_request_target` jest tu bezpieczny,
@@ -143,7 +144,17 @@ jobs:
                   "**$ASSIGNEE** bierze to na siebie"
               else
                 discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "@$ASSIGNEE, przypisano Ci to zgłoszenie"
+                  "@$ASSIGNEE, **$SENDER** przypisuje Ci to zgłoszenie"
+              fi
+              ;;
+
+            issues/unassigned)
+              if [ "$ASSIGNEE" = "$SENDER" ]; then
+                discord_send grey "$SENDER" "Zdjęte przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "**$ASSIGNEE** rezygnuje z tego zgłoszenia"
+              else
+                discord_send grey "$SENDER" "Zdjęte przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "**$SENDER** zdejmuje z tego zgłoszenia **$ASSIGNEE**"
               fi
               ;;
 

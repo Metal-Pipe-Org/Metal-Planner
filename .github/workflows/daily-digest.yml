@@ -24,6 +24,7 @@ name: "Discord - podsumowanie dnia"
 #     i zamyka (issue-labels.yml),
 #   • zgłoszenia z etykietą "stale" (stale-issues.yml) — ping przypisanych,
 #     a bez przypisania autora,
+#   • linki do dwóch wspólnych widoków zgłoszeń: Todo i Open for taking,
 #   • na samym końcu liczby: wczoraj założone i zamknięte zgłoszenia oraz
 #     zmergowane PR-y, a pod nimi obecnie otwarte zgłoszenia i PR-y.
 #
@@ -124,19 +125,22 @@ jobs:
 
           # Jedna linia na kartę: {card, desc}. Osoby z zespołu od najaktywniejszej,
           # potem „Pozostali”, na końcu „Ogólnie”, która jest zawsze. Nawiasy
-          # kwadratowe z tytułu rozbiłyby link w markdownie Discorda. `@login`
+          # kwadratowe z tytułu rozbiłyby link w markdownie Discorda, a adresu
+          # z `https://` w treści linku Discord nie przyjmuje i pokazuje całość
+          # surowo — dlatego zostawiamy z adresu samą domenę. `@login`
           # z tytułu wstawiamy od razu jako wzmiankę w karcie — gołe discord.sh
           # zamieniłby w ping, a tytuł pisze ktokolwiek.
           jq -n -c --argjson ids "$DISCORD_IDS" \
             --argjson items "$(jq -s add <<<"$merged $fixed $created")" \
             --argjson prs "$prs" --argjson check "$check" --argjson stale "$stale" \
+            --arg views "[Todo](https://github.com/$REPO/issues/views/MDI0OlJlcG9zaXRvcnlTZWFyY2hTaG9ydGN1dDIzMDk1) — co czeka na Ciebie"$'\n'"[Open for taking](https://github.com/$REPO/issues/views/MDI0OlJlcG9zaXRvcnlTZWFyY2hTaG9ydGN1dDIzMjgz) — co jest wolne do wzięcia"$'\n' \
             --arg stats "**Wczoraj:** założone zgłoszenia **$new_count** · zamknięte zgłoszenia **$closed_count** · zmergowane PR-y **$(jq length <<<"$merged")**" \
             --arg totals "**Obecnie otwarte:** zgłoszenia **$open_issues** · PR-y **$open_prs**" '
             def name: . as $l | if $ids | has($l) then "<@\($ids[$l])>" else "**\($l)**" end;
             def ping: . as $l | if $ids | has($l) then "@\($l)" else "**\($l)**" end;
             def mentions: reduce ($ids | to_entries[]) as $p (.;
               gsub("(?<![A-Za-z0-9-])@" + $p.key + "(?![A-Za-z0-9-])"; "<@" + $p.value + ">"; "i"));
-            def link: "• [#\(.number) \(.title | gsub("[\\[\\]]"; "") | mentions)](\(.url))";
+            def link: "• [#\(.number) \(.title | gsub("[\\[\\]]"; "") | gsub("https?://"; ""; "i") | mentions)](\(.url))";
             def section($head; $lines): if ($lines | length) > 0 then ["**\($head)**"] + $lines + [""] else [] end;
             {merged: "Zmergowane PR-y", fixed: "Naprawione", created: "Założone zgłoszenia"} as $heads
 
@@ -163,7 +167,7 @@ jobs:
                           [$check[] | link + " · " + (.author | ping) + ", sprawdź i zamknij"])
                       + section("Stale";
                           [$stale[] | link + " · " + (.people | map(ping) | join(", "))])
-                      + [$stats, $totals]
+                      + [$views, $stats, $totals]
                       | join("\n"))}' > "$RUNNER_TEMP/cards.jsonl"
 
           while read -r card <&3; do
