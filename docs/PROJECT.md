@@ -174,6 +174,15 @@ Wynik ma **dwie warstwy tej samej odpowiedzi**:
   trasy — wraca do całego wachlarza. Najechanie na propozycję pokazuje ją
   na mapie w podglądzie.
 
+  **Przystanki po drodze** (zgłoszenie #169): liczba przystanków przy
+  przejeździe („7 przystanków · 12 min”) rozwija w osi mijane przystanki
+  z godzinami — domyślnie zwinięte, a opcja „Zawsze pokazuj przystanki po
+  drodze” w Wyglądzie aplikacji rozwija je od razu. Rozwinięcie przełącza
+  schowane wiersze w miejscu (`toggleVia`), bez przerysowania listy, które
+  przewinęłoby ją do początku karty. Na mapie wybrana trasa ma na każdym
+  z nich obwódkę w kolorze linii (`viaDot`) z nazwą i godziną w dymku —
+  zawsze, niezależnie od opcji; podgląd spod kursora ich nie ma.
+
 Działa to też w drugą stronę: **kliknięcie linii na mapie otwiera
 propozycję**, która nią jedzie (spośród kilku — tę najbliższą klikniętemu
 miejscu, przy remisie najlepszą z listy). Karta rozwija się i przewija do
@@ -975,7 +984,10 @@ dało się dojechać.
   to napisać zamiast podać dzisiejszą liczbę jako jutrzejszą.
   `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
-  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, path}`; etap
+  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, via, path}` —
+  `via` to mijane przystanki bez wsiadania i wysiadania, `{name, t, lat,
+  lon}` z godziną odjazdu (`lat`/`lon` tylko tam, gdzie są znane; stacji
+  PKP bywa bez nich); etap
   pieszy: `{kind: "walk", text, minutes, same_place, from, to, path}` —
   `minutes` liczone z odległości (patrz wyżej), a `same_place` odróżnia zmianę
   stanowiska w obrębie jednego przystanku od marszu na przystanek o innej
@@ -1218,6 +1230,15 @@ dało się dojechać.
 | `.claude/commands/` | polecenia Claude'a używane przez workflow: ocena PR-a, rozwiązanie zgłoszenia |
 
 ## Changelog
+
+- **2026-10-03** — **przystanki po drodze** (zgłoszenie #169). Rozwinięta
+  propozycja mówiła o przejeździe tylko „7 przystanków · 12 min”. Ta liczba
+  rozwija teraz w osi mijane przystanki z godzinami odjazdu, między
+  wsiadaniem a wysiadaniem; domyślnie zwinięte, a opcja „Zawsze pokazuj
+  przystanki po drodze” w Wyglądzie aplikacji rozwija je od razu. Na mapie
+  wybrana trasa ma na każdym z nich obwódkę w kolorze linii, z nazwą
+  i godziną pod kursorem — zawsze, niezależnie od opcji. Etap przejazdu
+  w `/api/flow` niesie je w nowym polu `via`.
 
 - **2026-10-02** — **ustawienia ⚙ dla użytkownika i dla dewelopera**
   (zgłoszenie #175). Panel nazywa się „Ustawienia”. Każdy widzi trzy sekcje:
