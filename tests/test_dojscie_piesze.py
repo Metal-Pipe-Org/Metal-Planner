@@ -10,6 +10,8 @@ przejścia, i że pasażer dowiaduje się, DOKĄD ma pójść.
 
 from datetime import datetime
 
+import pytest
+
 import gtfs
 import planner
 from gtfs_builder import make_day
@@ -411,6 +413,53 @@ def test_the_map_anchors_such_a_course_at_the_nearer_stop(install_day):
     blisko = planner._round_path([day.stop_coords["BLISKI"]])[0]
     assert all(seg["path"][0] == blisko for seg in flow["segments"])
     assert [n["name"] for n in flow["nodes"]] == ["Skrajna"]
+
+
+# ---- dojście musi ZDĄŻYĆ ------------------------------------------------
+
+ODJAZD_168 = 8 * 3600 + 31 * 60     # 08:31 - godzina ze zgłoszenia #168
+
+
+def _day_z_dojsciem_za_dlugim():
+    """Układ ze zgłoszenia #168 (DWORZEC GŁÓWNY -> PL. GRUNWALDZKI, 08:31).
+    Szesnastka rusza z Kościuszki o 08:37, a pieszo idzie się tam ze startu
+    14 minut - zdąży na nią tylko ten, kto podjedzie dwójką (08:32 -> 08:35).
+    Szesnastka jest więc na mapie, i to od Kościuszki, choć dojściem nie da
+    się jej złapać."""
+    day = make_day([
+        {"trip_id": "T2", "label": "Tramwaj 2",
+         "stops": [("START", ODJAZD_168 + 60, ODJAZD_168 + 60),
+                   ("KOSCIUSZKI", ODJAZD_168 + 240, ODJAZD_168 + 240)]},
+        {"trip_id": "T16", "label": "Tramwaj 16",
+         "stops": [("KOSCIUSZKI", ODJAZD_168 + 360, ODJAZD_168 + 360),
+                   ("CEL", ODJAZD_168 + 960, ODJAZD_168 + 960)]},
+    ], names={"START": "DWORZEC GŁÓWNY", "KOSCIUSZKI": "Kościuszki",
+              "CEL": "PL. GRUNWALDZKI"})
+    day.stop_coords["KOSCIUSZKI"] = _o_metrow(day.stop_coords["START"], 560)
+    return day
+
+
+@pytest.mark.parametrize("value_map", [False, True])
+def test_no_journey_leaves_before_the_asked_time(install_day, value_map):
+    """Lista brała za punkt startowy każdy kurs narysowany od słupka
+    w zasięgu dojścia, nie pytając, czy da się tam dojść przed odjazdem.
+    Karta mówiła "08:23 - wyjdź na Kościuszki" przy pytaniu o 08:31,
+    a prawdziwa trasa - dwójką i przesiadka na szesnastkę - znikała z listy
+    jako rzekomo zdominowana przez tę bez przesiadki."""
+    day = _day_z_dojsciem_za_dlugim()
+    assert planner._origin_walk(day, ["START"])["KOSCIUSZKI"][1] > 360, \
+        "scenariusz: dojście ma NIE zdążyć na szesnastkę"
+    install_day(day)
+    flow = planner.plan_flow("DWORZEC GŁÓWNY", "PL. GRUNWALDZKI",
+                             when=datetime(2026, 1, 5, 8, 31),
+                             value_map=value_map)
+    assert flow["journeys"], "lista pusta"
+    for journey in flow["journeys"]:
+        assert journey["departure_sec"] >= ODJAZD_168, \
+            f"wyjście o {journey['departure']}, przed godziną z pytania"
+        assert journey["wait_min"] >= 0
+    assert [[leg["num"] for leg in j["legs"] if leg["kind"] == "ride"]
+            for j in flow["journeys"]] == [["2", "16"]]
 
 
 def test_a_point_too_far_from_everything_is_an_honest_error():
