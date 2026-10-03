@@ -865,6 +865,53 @@ function showLocateMsg(text) {
     locateMsg.hidden = !text;
 }
 
+// Pozycja tuż przy słupku (#200). Punkt z mapy płaci za dojście jak każde
+// inne przejście, minimum trzy minuty - słusznie, bo GPS myli się o
+// kilkadziesiąt metrów i nie wie, po której stronie ulicy stoimy. Pasażer to
+// wie, więc pytamy jego: "tak" zamienia punkt na sam przystanek, a ten liczy
+// wszystkie swoje słupki bez dojścia. Sama reguła dojścia zostaje jedna.
+const STANDING_M = 50;
+const locateOffer = $('locate-offer');
+const locateOfferName = $('locate-offer-name');
+let offeredStop = null;   // {name, point} - na który punkt padło pytanie
+
+function hideLocateOffer() {
+    offeredStop = null;
+    locateOffer.hidden = true;
+}
+
+function offerNearestStop(point) {
+    const here = L.latLng(point.lat, point.lon);
+    let best = null;
+    let bestM = STANDING_M;
+    for (const [name, markers] of markersByName) {
+        for (const m of markers) {
+            const d = here.distanceTo(m.getLatLng());
+            if (d <= bestM) { best = name; bestM = d; }
+        }
+    }
+    if (!best) return;
+    offeredStop = {name: best, point};
+    locateOfferName.textContent = prettyStopName(best);
+    locateOffer.hidden = false;
+}
+
+$('locate-offer-yes').addEventListener('click', () => {
+    const {name, point} = offeredStop;
+    hideLocateOffer();
+    // Start mógł się w międzyczasie zmienić (zamiana, wpisanie) - wtedy
+    // odpowiedź dotyczy już nieaktualnego pytania.
+    if (!samePlace(sel.start, point)) return;
+    sel.start = name;
+    startInput.value = displayValue(name);
+    updatePointMarker('start', null);
+    restyle(name);
+    if (endInput.value) search();
+});
+
+$('locate-offer-no').addEventListener('click', hideLocateOffer);
+startInput.addEventListener('input', hideLocateOffer);
+
 /** Przycisk ◎ - w przeciwieństwie do kliknięcia w mapę nadpisuje start, który
     już był (o to się prosi, klikając go), ale celu nie rusza. */
 function useMyLocation(point) {
@@ -873,6 +920,7 @@ function useMyLocation(point) {
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
+    offerNearestStop(point);
     if (endInput.value) search();
     else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
 }
@@ -884,6 +932,7 @@ if (!navigator.geolocation) {
 } else {
     locateButton.addEventListener('click', () => {
         showLocateMsg('');
+        hideLocateOffer();
         locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
         const finish = () => { locateButton.disabled = false; };
         navigator.geolocation.getCurrentPosition(
@@ -4495,6 +4544,7 @@ $('clear').addEventListener('click', () => {
     updatePointMarker('start', null);
     updatePointMarker('end', null);
     showLocateMsg('');
+    hideLocateOffer();
     resetResults();
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
