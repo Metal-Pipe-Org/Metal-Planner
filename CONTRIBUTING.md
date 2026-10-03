@@ -66,10 +66,10 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
     `external`. Żeby zgłosić, trzeba mieć konto na GitHubie.
 18. Zgłoszenie bez niczyjego wpisu przez 14 dni dostaje pytanie, czy temat
     jest aktualny, i etykietę `stale`. Po kolejnych 7 dniach ciszy zamyka się
-    jako „not planned". Wystarczy odpisać. Nie dotyczy zgłoszeń z kamieniem
-    milowym, z etykietą `blocked` ani takich, które mają otwarte
-    pod-zgłoszenia. Dając `blocked`, zdejmij `stale` — te dwie etykiety nie
-    powinny stać razem, a automat sam tego nie posprząta.
+    jako „not planned". Wystarczy odpisać. Nie dotyczy zgłoszeń z etykietą
+    `blocked` ani takich, które mają otwarte pod-zgłoszenia. Dając
+    `blocked`, zdejmij `stale` — te dwie etykiety nie powinny stać razem,
+    a automat sam tego nie posprząta.
 
 ## Discord
 

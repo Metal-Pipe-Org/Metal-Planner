@@ -17,8 +17,6 @@ name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 # i daje autorowi pełne 14 dni od nowa.
 #
 # Nie ruszamy:
-#  • zgłoszeń z kamieniem milowym — są zaplanowane do wydania, cisza nie
-#    znaczy tam porzucenia,
 #  • zgłoszeń z etykietą "blocked" — czekają na coś poza nami, więc cisza
 #    jest tam spodziewana,
 #  • rodziców z otwartymi pod-zgłoszeniami — praca toczy się w dzieciach,
@@ -85,7 +83,6 @@ jobs:
           gh api --paginate "repos/$REPO/issues?state=open&per_page=100" \
             --jq '.[]
                   | select(.pull_request | not)
-                  | select(.milestone == null)
                   | select(any(.labels[]; .name == "blocked") | not)
                   | "\(.number) \(.sub_issues_summary.total // 0)"' > "$RUNNER_TEMP/open.txt"
 
