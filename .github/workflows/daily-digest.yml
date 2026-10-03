@@ -127,7 +127,7 @@ jobs:
           # potem „Pozostali”, na końcu „Ogólnie”, która jest zawsze. Nawiasy
           # kwadratowe z tytułu rozbiłyby link w markdownie Discorda, a adresu
           # z `https://` w treści linku Discord nie przyjmuje i pokazuje całość
-          # surowo — dlatego zostawiamy z adresu samą domenę. `@login`
+          # surowo — dlatego z adresu wycinamy sam `https://`. `@login`
           # z tytułu wstawiamy od razu jako wzmiankę w karcie — gołe discord.sh
           # zamieniłby w ping, a tytuł pisze ktokolwiek.
           jq -n -c --argjson ids "$DISCORD_IDS" \
