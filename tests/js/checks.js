@@ -1714,4 +1714,73 @@ checks.strefa_traficara_pod_kursorem = (() => {
     };
 })();
 
+
+/* Przystanki po drodze (zgłoszenie #169). Pierwszy przejazd mija dwa
+   przystanki, w tym jeden bez współrzędnych (stacja PKP bywa bez nich) -
+   na liście ma swoje miejsce, na mapie nie ma gdzie stanąć. Drugi przejazd
+   jedzie o jeden przystanek i nie ma czego rozwijać. */
+const VIA_LEGS = [
+    {...LEGS[0], line: 'Autobus 134', headsign: 'BARDZKA', from_time: '15:53',
+     to_time: '16:06', minutes: 13, stops_count: 3,
+     via: [{name: 'Pierwszy', t: '15:57', lat: 51.085, lon: 17.055},
+           {name: 'Bez współrzędnych', t: '16:01'}]},
+    LEGS[1],
+    {...LEGS[2], line: 'Tramwaj 5', headsign: 'KRZYKI', from_time: '16:08',
+     to_time: '16:16', minutes: 8, stops_count: 1, via: []},
+];
+const VIA_JOURNEY = {departure: '15:53', arrival: '16:16', legs: VIA_LEGS};
+
+checks.przystanki_po_drodze_w_osi = (() => {
+    const opcja = document.getElementById('via-open');
+    const bylo = opcja.checked;
+    opcja.checked = false;
+    const zwiniete = app.detailHtml(VIA_JOURNEY);
+    opcja.checked = true;
+    const rozwiniete = app.detailHtml(VIA_JOURNEY);
+    opcja.checked = bylo;
+
+    const wiersze = html => html.match(/<li class="tl-via [^"]*"[^>]*>/g) || [];
+    const ukryte = html => wiersze(html).filter(w => / hidden>$/.test(w)).length;
+    const przelaczniki = html => html.match(/class="tl-info tl-via-toggle"[^>]*>/g) || [];
+    const kolejnosc = ['15:53', 'Pierwszy', 'Bez współrzędnych', '16:06']
+        .map(t => zwiniete.indexOf(t));
+    return {
+        // Domyślnie zwinięte: wiersze są w osi, ale schowane, a liczba
+        // przystanków jest przyciskiem, który je rozwija.
+        ok: wiersze(zwiniete).length === 2 && ukryte(zwiniete) === 2
+            && przelaczniki(zwiniete).length === 1
+            && przelaczniki(zwiniete)[0].includes('aria-expanded="false"')
+            && przelaczniki(zwiniete)[0].includes('data-leg="0"')
+            // Opcja z ⚙ rozwija je od razu.
+            && ukryte(rozwiniete) === 0
+            && przelaczniki(rozwiniete)[0].includes('aria-expanded="true"')
+            // Między wsiadaniem a wysiadaniem, po kolei, z godzinami.
+            && kolejnosc.every((pos, i) => pos >= 0 && (i === 0 || pos > kolejnosc[i - 1]))
+            && zwiniete.includes('>15:57<') && zwiniete.includes('data-via-of="0"')
+            // Przejazd o jeden przystanek zostaje zwykłym napisem.
+            && zwiniete.includes('<span class="tl-info">1 przystanek · 8 min</span>'),
+        wiersze: wiersze(zwiniete), przelaczniki: przelaczniki(zwiniete), kolejnosc,
+    };
+})();
+
+checks.przystanki_po_drodze_na_mapie = (() => {
+    const kropki = dotsOf(app.legLayers(VIA_LEGS, {preview: false}));
+    const podglad = dotsOf(app.legLayers(VIA_LEGS, {preview: true}));
+    const poDrodze = kropki.filter(d => d._tooltip
+        && String(d._tooltip.content).includes('Pierwszy'));
+    const dot = poDrodze[0];
+    return {
+        // Cztery kropki wsiadania i wysiadania plus jedna obwódka - przystanek
+        // bez współrzędnych nie staje nigdzie, a podgląd spod kursora kropek
+        // nie ma wcale.
+        ok: kropki.length === 5 && poDrodze.length === 1 && podglad.length === 0
+            && dot._tooltip.content === '15:57 · Pierwszy'
+            && dot._latlng.lat === 51.085 && dot._latlng.lng === 17.055
+            // Pod kropkami przesiadek, nie na nich.
+            && kropki.indexOf(dot) === 0,
+        kropki: kropki.length, poDrodze: poDrodze.length, podglad: podglad.length,
+        dymek: dot && dot._tooltip.content,
+    };
+})();
+
 JSON.stringify(checks);
