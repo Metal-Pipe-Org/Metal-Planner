@@ -42,11 +42,11 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
    każde, którego nie bije inne naraz w godzinie dojścia, zniżce z programu
    „Ogarniam" i szacowanym przyjeździe do celu. Najechanie na auto pokazuje
    strefę, w której da się je oddać. Na liście propozycji może też stanąć
-   trasa kończąca się autem.
+   trasa kończąca się autem — póki przycisk świeci.
 8. **Rower miejski (WRM).** Przyciski 🚲 (zwykłe) i ⚡ (elektryczne) dokładają
    na mapę stacje i rowery luzem, z których przejazd prowadzi do czegoś, co
    mapa rysuje; przejazdy widać pod kursorem. Te same przyciski dokładają
-   propozycje z rowerem do listy.
+   propozycje z rowerem do listy, każdy tylko ze swoim rodzajem roweru.
 9. **Pojazdy na żywo.** Przycisk ◉ pokazuje autobusy i tramwaje w ruchu —
    przy narysowanej mapie tylko linie z tej mapy.
 10. **Kolej.** Z kluczem `PKP_API_KEY` w wynikach pojawiają się pociągi PKP,

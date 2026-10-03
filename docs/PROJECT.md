@@ -249,7 +249,9 @@ narysowanej mapie zawężają się do niej — pojazdy do linii z tej mapy, auta
 i rowery do tych, do których mapa dowozi (punkty 15 i 16 kontraktu). Rower to
 wybór PASAŻERA („mam konto w WRM" albo nie), a nie strojenie algorytmu,
 dlatego stoi tu, a nie pod ⚙: włączony 🚲 albo ⚡ dokłada też do listy
-propozycje z rowerem (`bikes=1` w `/api/flow`). Stan przycisków przeżywa
+propozycje z rowerem (`bikes=1` w `/api/flow`), każdy tylko ze swoim
+rodzajem roweru. Zgaszony 🚗 tak samo zdejmuje z listy propozycje kończące
+się Traficarem (`traficar=0`, zgłoszenie #163). Stan przycisków przeżywa
 odświeżenie strony (`localStorage`), a ich zmiana przelicza gotowy wynik bez
 ruszania kadru — relacja się nie zmieniła.
 
@@ -518,7 +520,8 @@ Skąd auta: `fioletowe.live` (open source, GPLv3, `divadsn/traficar-map`)
 republikuje wewnętrzne API Traficara jako REST/JSON bez klucza; Wrocław to
 `zoneId=3`. To **strona trzecia**, nie sam operator, więc feed może zniknąć
 bez ostrzeżenia — stąd wyłącznik `TRAFICAR=0` i zasada, że każdy błąd tego
-źródła jest brakiem propozycji z autem, nigdy błędem wyszukiwania.
+źródła jest brakiem propozycji z autem, nigdy błędem wyszukiwania. Pasażer
+zabiera je sobie sam przyciskiem 🚗 w pasku warstw (`traficar=0`).
 
 Skąd kandydaci: NIE z grafu segmentów mapy (ten prowadzi do celu, a tu trzeba
 czegoś innego — dojazdu w okolicę auta), tylko wprost ze śladu skanu CSA,
@@ -647,6 +650,9 @@ odsiew miejsc, nie zmiana wyceny.
 
 Włączany przyciskami 🚲 i ⚡ w pasku warstw (`bikes=1` w `/api/flow`); bez
 nich odpowiedź jest co do pola taka sama jak przed dodaniem tej warstwy.
+Rodzaj roweru odsiewa stacje wsiadania tak samo jak kropki na mapie
+(`bikes.ma_rodzaj`): przy zgaszonym ⚡ nie wsiada się tam, gdzie stoją same
+elektryki, i odwrotnie.
 Rower jest wyborem pasażera, nie ustawieniem serwera — bez konta w WRM
 propozycja z rowerem jest bezużyteczna.
 
@@ -996,8 +1002,9 @@ dało się dojechać.
   true, path}`. `estimated` mówi wprost, że godziny są policzone z prędkości,
   a nie odczytane z rozkładu — `path` to odcinek prosty auto → cel, nie
   przebieg ulicami. `transfers` liczy wsiadanie do auta jak każdą inną zmianę
-  pojazdu. Gdy feed Traficara nie odpowiada albo `TRAFICAR=0`, takich pozycji
-  po prostu nie ma — reszta odpowiedzi jest bez zmian. `km` jest w PEŁNYCH
+  pojazdu. Gdy feed Traficara nie odpowiada, `TRAFICAR=0` albo w zapytaniu
+  jest `traficar=0` (zgaszony 🚗), takich pozycji po prostu nie ma — reszta
+  odpowiedzi jest bez zmian, łącznie z autami przy mapie (`cars`). `km` jest w PEŁNYCH
   kilometrach, a `minutes` w pełnych minutach (w górę): przy zmierzonym
   rozrzucie tego szacunku drobniejsza podziałka udawałaby dokładność.
 
@@ -1058,7 +1065,8 @@ dało się dojechać.
   `bikes.map_places`). Miejsce jest kandydatem, gdy stoi
   w nim choć jeden rower włączonego rodzaju — odsiew idzie przed wyborem
   przejazdów, dotyczy wsiadania, a przy nieznanym stanie stojaków nie odsiewa
-  nic. `walk_pace` (`wolno`/`zwykle`/`szybko`, nieznane = `zwykle`),
+  nic. Te same dwa parametry odsiewają stacje wsiadania w propozycjach
+  z rowerem. `walk_pace` (`wolno`/`zwykle`/`szybko`, nieznane = `zwykle`),
   `bike_kmh` (5–20, domyślnie 10) i `bike_overhead_sec` (0–600, domyślnie 120) —
   założenia czasowe pytającego spod zębatki (zgłoszenie #151): tempo każdego
   przejścia pieszego oraz prędkość roweru w linii prostej i stały narzut jego
@@ -1218,6 +1226,14 @@ dało się dojechać.
 | `.claude/commands/` | polecenia Claude'a używane przez workflow: ocena PR-a, rozwiązanie zgłoszenia |
 
 ## Changelog
+
+- **2026-10-03** — **przyciski warstw rządzą też listą propozycji**
+  (zgłoszenie #163). Zgaszony 🚗 zdejmuje z listy trasy kończące się
+  Traficarem (`traficar=0` w `/api/flow`), a przełączenie przelicza wynik
+  bez ruszania kadru, jak przy rowerze. Zgaszony 🚲 albo ⚡ odsiewa stacje
+  wsiadania w propozycjach z rowerem tak samo jak kropki na mapie — dotąd
+  rodzaj roweru zmieniał tylko mapę. Auta i rowery na mapie liczą się jak
+  wcześniej.
 
 - **2026-10-02** — **ustawienia ⚙ dla użytkownika i dla dewelopera**
   (zgłoszenie #175). Panel nazywa się „Ustawienia”. Każdy widzi trzy sekcje:

@@ -467,8 +467,10 @@ if (vehiclesToggle) {
 // odpowiedzi na zadane pytanie. Bez mapy nie ma pytania, więc zostaje samo
 // „co gdzie stoi" i warstwa bierze cały miejski feed (/api/cars, /api/bikes).
 //
-// Włącznik NIGDY nie rusza propozycji tras ani samego wachlarza - dokłada
-// i zdejmuje wyłącznie kropki na mapie.
+// Włącznik NIGDY nie rusza samego wachlarza - na mapie dokłada i zdejmuje
+// wyłącznie kropki. Rusza za to listę propozycji: zgaszony 🚗 zabiera z niej
+// trasy kończące się autem, a 🚲 i ⚡ - trasy z rowerem swojego rodzaju
+// (zgłoszenie #163). Lista ma mówić o tym samym, co widać na mapie.
 
 const CARS_REFRESH_MS = 20000;    // tyle deklaruje feed Traficara (CARS_TTL_SEC)
 const BIKES_REFRESH_MS = 60000;   // tyle deklaruje kanał WRM (`ttl`)
@@ -608,6 +610,7 @@ function setCarsOn(on) {
     saveUiState({carsOn: on});
     paintLayerButton(carsToggle, on);
     refreshCarLayer();
+    replanInPlace();
 }
 
 /** Jeden rodzaj roweru. Warstwa świeci, gdy świeci choć jeden - więc
@@ -615,7 +618,7 @@ function setCarsOn(on) {
 
     Zmienia nie tylko mapę, ale i sam wynik z serwera: ten włącznik mówi też
     „mam konto w WRM", a rodzaj rozstrzyga, które miejsca w ogóle są
-    kandydatami (patrz bikes.map_places). */
+    kandydatami - na mapie i w propozycjach z rowerem (patrz bikes.ma_rodzaj). */
 function setBikeKind(kind, on) {
     if (kind === 'electric') {
         bikeElectricOn = on;
@@ -628,7 +631,7 @@ function setBikeKind(kind, on) {
     saveUiState({bikesOn});
     paintBikeButtons();
     refreshBikeLayer();
-    replanForBikes();
+    replanInPlace();
 }
 
 /** Rower w całości - oba rodzaje naraz. */
@@ -639,7 +642,7 @@ function setBikesOn(on) {
     bikesOn = on;
     paintBikeButtons();
     refreshBikeLayer();
-    replanForBikes();
+    replanInPlace();
 }
 
 if (carsToggle) {
@@ -3929,6 +3932,10 @@ function queryParams() {
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
     if (bikesOn) params.set('bikes', '1');
+    // Auto odwrotnie: propozycje z Traficarem są domyślnie, a zgaszony 🚗
+    // zdejmuje je z listy (zgłoszenie #163) - jak `routes`, prosi się tylko
+    // o ich brak.
+    if (!carsOn) params.set('traficar', '0');
     const poklad = onboardOn ? onboardPick() : null;
     if (poklad) {
         // Start z pokładu pojazdu (patrz onboard.py): zamiast miejsca jedzie
@@ -4102,12 +4109,13 @@ function loadPlan(token, refit) {
         });
 }
 
-/** Rower zmienia ODPOWIEDŹ, nie tylko wygląd mapy: rowerowych propozycji nie
-    ma w ostatniej odpowiedzi serwera, więc po przełączeniu warstwy trzeba je
-    doliczyć. Tą samą drogą co suwaki w ⚙ (bez kadrowania), a nie przez nowe
-    wyszukiwanie - relacja się nie zmieniła, więc kadr ma zostać na miejscu
-    i nie ma po co znowu odgrywać dźwięku znalezienia trasy. */
-function replanForBikes() {
+/** Rower i auto zmieniają ODPOWIEDŹ, nie tylko wygląd mapy: propozycje
+    z rowerem i z Traficarem składa serwer (patrz queryParams), więc po
+    przełączeniu warstwy trzeba je doliczyć albo zdjąć. Tą samą drogą co
+    suwaki w ⚙ (bez kadrowania), a nie przez nowe wyszukiwanie - relacja się
+    nie zmieniła, więc kadr ma zostać na miejscu i nie ma po co znowu
+    odgrywać dźwięku znalezienia trasy. */
+function replanInPlace() {
     if (!lastFlow || !startInput.value || !endInput.value) return;
     loadPlan(requestToken, false)
         .catch(() => showError('Nie udało się połączyć z serwerem.'));
@@ -4653,8 +4661,8 @@ routesOn.addEventListener('change', () => {
     saveDevPref('routes-on', routesOn.checked);
     showRoutes(routesOn.checked);
     // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
-    // tak jak propozycje z rowerem (patrz replanForBikes).
-    if (routesOn.checked) replanForBikes();
+    // tak jak propozycje z rowerem (patrz replanInPlace).
+    if (routesOn.checked) replanInPlace();
 });
 
 // Gest „pociągnij w dół, żeby odświeżyć" (opcja w „Wyglądzie aplikacji”) - overscroll-behavior

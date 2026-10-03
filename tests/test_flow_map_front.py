@@ -597,6 +597,12 @@ def test_bike_kinds_are_switches_sent_to_the_server(front):
     _check(front, "rower_rodzaj_leci_do_serwera")
 
 
+def test_cars_off_is_sent_to_the_server(front):
+    """Zgłoszenie #163: zgaszony 🚗 to lista bez propozycji z Traficarem -
+    składa je serwer, więc zgaszenie idzie w zapytaniu."""
+    _check(front, "auto_gaszone_leci_do_serwera")
+
+
 def test_the_dawdling_filter_is_a_switch_sent_to_the_server(front):
     """Zgłoszenie #141: odsiew jazdy na zabicie czasu to przełącznik pod
     zębatką, domyślnie zgaszony - do włączania i wyłączania, żeby zobaczyć

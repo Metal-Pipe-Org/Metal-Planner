@@ -1590,6 +1590,22 @@ checks.rower_rodzaj_leci_do_serwera = (() => {
 })();
 
 
+/* Zgaszony 🚗 zdejmuje z listy propozycje z Traficarem (zgłoszenie #163) -
+   składa je serwer, więc zgaszenie idzie w zapytaniu. Zapalony nie dokłada
+   nic: odpowiedź jest taka jak dotąd. */
+checks.auto_gaszone_leci_do_serwera = (() => {
+    app.setCarsOn(true);
+    const zapalone = app.queryParams().toString();
+    app.setCarsOn(false);
+    const zgaszone = app.queryParams().toString();
+    app.setCarsOn(true);
+    return {
+        ok: !zapalone.includes('traficar=') && zgaszone.includes('traficar=0'),
+        zapalone, zgaszone,
+    };
+})();
+
+
 /* Początek mapy od najpóźniejszego wyjazdu - próba w Eksperymentach, domyślnie
    zgaszona; jej stan idzie w zapytaniu, bo mapę liczy serwer. */
 checks.odsiew_krazenia_leci_do_serwera = (() => {

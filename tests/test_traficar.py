@@ -219,6 +219,20 @@ def test_bez_auta_lista_jest_dokladnie_taka_jak_byla(install_day, monkeypatch):
     assert [j for j in z_autem if not j.get("traficar")] == bez
 
 
+def test_zgaszony_przycisk_zdejmuje_propozycje_z_autem(install_day, monkeypatch):
+    """Zgłoszenie #163: zgaszony 🚗 w pasku warstw to lista bez Traficara -
+    reszta listy i auta przy mapie zostają takie same jak przy zapalonym."""
+    install_day(_day())
+    _cars(monkeypatch, [CAR])
+    z_autem = planner.plan_flow("S", "E", WHEN)
+    bez = planner.plan_flow("S", "E", WHEN, use_cars=False)
+
+    assert any(j.get("traficar") for j in z_autem["journeys"])
+    assert not any(j.get("traficar") for j in bez["journeys"])
+    assert bez["journeys"] == [j for j in z_autem["journeys"] if not j.get("traficar")]
+    assert {**bez, "journeys": None} == {**z_autem, "journeys": None}
+
+
 def test_prywatne_pola_etapow_nie_wyciekaja(install_day, monkeypatch):
     """Etapy z _reconstruct niosą pola robocze (_trip, _stops_t...), które do
     odpowiedzi nie trafiają - tak samo jak wszędzie indziej."""

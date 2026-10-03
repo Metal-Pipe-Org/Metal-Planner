@@ -374,6 +374,10 @@ def init_routes(app):
             # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi
             # (przełącznik 🚲 w karcie wyszukiwania).
             use_bikes=request.args.get("bikes") == "1",
+            # Propozycje kończące się Traficarem - zgaszony przycisk 🚗 w pasku
+            # warstw wysyła "0" i znikają z listy (zgłoszenie #163). Brak
+            # parametru znaczy, że są, tak jak dotąd.
+            use_cars=request.args.get("traficar", "1") == "1",
             # Start z pokładu pojazdu (patrz onboard.py): zamiast "skąd" jedzie
             # linia, kierunek i NASTĘPNY przystanek. Bez numeru linii nie ma
             # o czym mówić, więc reszta parametrów jest wtedy ignorowana -
