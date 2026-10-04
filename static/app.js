@@ -2746,6 +2746,21 @@ function stopDot(point, where, sec, style) {
     return dot;
 }
 
+/** Przystanek po drodze na wybranej trasie: obwódka z nazwą i godziną
+    w dymku - tak samo jak przystanki linii w rozkładach (timetable.js).
+    Tablicy odjazdów nie ma: tu się nie wsiada ani nie wysiada. */
+function viaDot(stop, color) {
+    const dot = L.circleMarker([stop.lat, stop.lon], {
+        radius: 5, weight: 2, color, fillColor: '#fff', fillOpacity: 1,
+    });
+    dot.bindTooltip(stop.t ? `${esc(stop.t)} · ${esc(stop.name)}` : esc(stop.name));
+    // Pierwszeństwo przed dymkiem przepływów, jak przy kropkach przesiadek
+    // (patrz handleFlowHover) - leży na tej samej linii.
+    dot.on('mouseover', () => { hoveredStopDot = dot; clearFlowHover(); });
+    dot.on('mouseout', () => { if (hoveredStopDot === dot) hoveredStopDot = null; });
+    return dot;
+}
+
 
 // Kropki wachlarza są mniejsze od tych na wybranej trasie: jest ich kilkanaście
 // naraz i mają nie przykryć samej mapy - a trasa, gdy się ją wybierze, ma być
@@ -3143,6 +3158,17 @@ function legLayers(legs, {preview}) {
     }
 
     if (!preview) {
+        // Przystanki po drodze (zgłoszenie #169) - mniejsze obwódki w kolorze
+        // linii, jak przebieg linii w rozkładach, żeby nie udawały przesiadek.
+        // Idą przed kropki wsiadania i wysiadania, czyli pod nie.
+        for (const leg of legs) {
+            if (leg.kind !== 'ride' || !leg.path || leg.path.length < 2) continue;
+            const color = LINE_COLORS[leg.mode] || LINE_COLORS.other;
+            for (const stop of leg.via || []) {
+                if (stop.lat == null || stop.lon == null) continue;
+                marks.push(viaDot(stop, color));
+            }
+        }
         // Kropki na wsiadaniu i wysiadaniu każdego etapu - widać, gdzie się
         // przesiadamy, bez czytania listy. Każda jest do najechania: dymek
         // pokazuje tablicę odjazdów tego przystanku (patrz stopDot).
@@ -3373,6 +3399,30 @@ function plural(n, one, few, many) {
     return rest >= 2 && rest <= 4 && (hundreds < 12 || hundreds > 14) ? few : many;
 }
 
+// Rozwinięcia przystanków po drodze przełączone kliknięciem. Kluczem jest sam
+// etap: przy przerysowaniu listy to ten sam obiekt, a nowa odpowiedź serwera
+// przynosi nowe - i te zaczynają od ustawienia z ⚙.
+let viaShown = new WeakMap();
+
+/** Czy przystanki po drodze tego przejazdu są rozwinięte: wybór z kliknięcia,
+    a bez niego - opcja „Zawsze pokazuj przystanki po drodze" z ⚙. */
+function viaOpen(leg) {
+    if (viaShown.has(leg)) return viaShown.get(leg);
+    const always = $('via-open');
+    return !!(always && always.checked);
+}
+
+function toggleVia(button) {
+    const card = button.closest('.journey');
+    const journey = card && journeys[Number(card.dataset.index)];
+    if (!journey) return;
+    const legIndex = button.dataset.leg;
+    const open = button.getAttribute('aria-expanded') !== 'true';
+    viaShown.set(journey.legs[Number(legIndex)], open);
+    button.setAttribute('aria-expanded', String(open));
+    for (const row of card.querySelectorAll(`[data-via-of="${legIndex}"]`)) row.hidden = !open;
+}
+
 function detailHtml(journey) {
     const rows = [];
     const stopRow = (time, name, cls) =>
@@ -3482,6 +3532,12 @@ function detailHtml(journey) {
         const stopWord = leg.mode === 'train'
             ? plural(leg.stops_count, 'stacja', 'stacje', 'stacji')
             : plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków');
+        const ile = `${leg.stops_count} ${stopWord} · ${leg.minutes} min`;
+        // Przystanki po drodze (zgłoszenie #169): liczba przystanków rozwija
+        // je w osi, między wsiadaniem a wysiadaniem. Przejazd o jeden
+        // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
+        const via = leg.via || [];
+        const viaOn = via.length > 0 && viaOpen(leg);
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
@@ -3496,9 +3552,22 @@ function detailHtml(journey) {
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
             (leg.onboard ? '<span class="tl-tag">jedziesz tym pojazdem</span>' : '') +
             routeButtonHtml(leg, 'trasa') +
-            `<span class="tl-info">${leg.stops_count} ${stopWord} · ` +
-            `${leg.minutes} min</span></span></li>`,
+            (via.length
+                ? `<button type="button" class="tl-info tl-via-toggle" data-leg="${i}"` +
+                  ` aria-expanded="${viaOn}">${ile}</button>`
+                : `<span class="tl-info">${ile}</span>`) +
+            `</span></li>`,
         );
+        // Wiersze są zawsze w osi, a zwinięte tylko schowane: rozwinięcie
+        // przełącza je w miejscu (toggleVia), bez przerysowania całej listy,
+        // które przewijałoby ją do początku karty.
+        for (const stop of via) {
+            rows.push(
+                `<li class="tl-via ${esc(leg.mode)}" data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
+                `<span class="tl-time">${esc(stop.t)}</span><span class="tl-dot"></span>` +
+                `<span class="tl-name">${esc(stop.name)}</span></li>`,
+            );
+        }
         // Wysiadanie wypisujemy tylko wtedy, gdy nie zaraz po nim następuje
         // wsiadanie do kolejnej linii - inaczej ten sam przystanek byłby
         // w osi dwa razy pod rząd.
@@ -3650,6 +3719,11 @@ function scrollToSelected() {
 resultsBox.addEventListener('click', event => {
     if (routeClick(event)) return;
 
+    // Rozwinięcie przystanków po drodze to nie klik w kartę - ta by się
+    // przy okazji zwinęła (patrz selectJourney).
+    const viaToggle = event.target.closest('.tl-via-toggle');
+    if (viaToggle) { toggleVia(viaToggle); return; }
+
     if (event.target.closest('#results-toggle')) {
         resultsCollapsed = !resultsCollapsed;
         saveUiState({resultsCollapsed});
@@ -3680,7 +3754,7 @@ resultsBox.addEventListener('click', event => {
 });
 
 resultsBox.addEventListener('keydown', event => {
-    if (event.target.closest('[data-route-num]')) return;
+    if (event.target.closest('[data-route-num], .tl-via-toggle')) return;
     const card = event.target.closest('.journey');
     if (card && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault();
@@ -4568,7 +4642,8 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 // To, co z tego klucza widać w ⚙ także bez DEV_MODE (patrz visiblePrefs).
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
-                        'no-pull-refresh', 'start-mode-switch', 'routes-on'];
+                        'no-pull-refresh', 'start-mode-switch', 'routes-on',
+                        'via-open'];
 
 function storedDevPrefs() {
     try {
@@ -4715,6 +4790,17 @@ document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.check
 noPullRefresh.addEventListener('change', () => {
     saveDevPref('no-pull-refresh', noPullRefresh.checked);
     document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
+});
+
+// Przystanki po drodze rozwinięte od razu (opcja w „Wyglądzie aplikacji",
+// zgłoszenie #169). Zmiana zaczyna od nowa - także tam, gdzie listę
+// przełączono kliknięciem - i od razu przerysowuje otwartą propozycję.
+const viaOpenInput = $('via-open');
+viaOpenInput.checked = loadDevPrefs()['via-open'] === true;
+viaOpenInput.addEventListener('change', () => {
+    saveDevPref('via-open', viaOpenInput.checked);
+    viaShown = new WeakMap();
+    if (selectedJourney !== null) renderJourneys();
 });
 
 // Przycisk strefy Traficara (🅿) - domyślnie go nie ma, strefa pokazuje się

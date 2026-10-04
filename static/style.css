@@ -1122,6 +1122,65 @@ body.routes-off .results-body { display: none; }
     color: var(--ink-faint);
 }
 
+/* Liczba przystanków, która rozwija przystanki po drodze (zgłoszenie #169).
+   Wygląda jak sam napis obok - strzałka mówi, że da się w nią kliknąć. */
+.tl-via-toggle {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.tl-via-toggle::before {
+    content: "▸";
+    display: inline-block;
+    width: 1em;
+}
+
+.tl-via-toggle[aria-expanded="true"]::before { content: "▾"; }
+
+.tl-via-toggle:hover,
+.tl-via-toggle:focus-visible { color: var(--accent); }
+
+/* Przystanek po drodze: godzina i nazwa cichsze od wsiadania i wysiadania,
+   na osi obwódka w kolorze linii - jak na mapie. */
+.timeline li.tl-via[hidden] { display: none; }
+
+.tl-via .tl-time {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ink-faint);
+}
+
+.tl-via .tl-name {
+    font-size: 12.5px;
+    font-weight: 400;
+    color: var(--ink-soft);
+    padding-bottom: 4px;
+}
+
+/* `color` dla obwódki niżej (currentColor) - ten sam kolor, co kreska. */
+.tl-via .tl-dot { background: var(--other); color: var(--other); }
+.tl-via.tram .tl-dot { background: var(--tram); color: var(--tram); }
+.tl-via.bus .tl-dot { background: var(--bus); color: var(--bus); }
+.tl-via.train .tl-dot { background: var(--train); color: var(--train); }
+
+.tl-via .tl-dot::before {
+    content: "";
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    width: 6px;
+    height: 6px;
+    transform: translateX(-50%);
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    background: #fff;
+}
+
 /* Nota "skąd te liczby" pod etapem jazdy autem - cichsza od samych liczb,
    bo jest o nich, a nie obok nich. */
 .tl-info.est {

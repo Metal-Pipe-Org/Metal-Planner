@@ -622,6 +622,27 @@ def _drop_private(legs):
     return legs
 
 
+def _via_stops(day, rows):
+    """Przystanki MIJANE w czasie przejazdu (zgłoszenie #169) - bez wsiadania
+    i wysiadania, które etap ma już w `from`/`to`. Front wypisuje je w osi
+    rozwiniętej propozycji i stawia na mapie wybranej trasy.
+
+    `rows` to pary (przystanek, odjazd z niego). Godzina to odjazd, tak jak
+    w kursie z rozkładu (timetables.trip) - na mijanym przystanku pojazd stoi
+    chwilę, a liczy się, kiedy z niego rusza. Współrzędne tylko tam, gdzie są
+    znane: stacja PKP bywa bez nich, a na liście i tak ma swoje miejsce.
+    """
+    via = []
+    for stop, sec in rows:
+        item = {"name": day.stop_names[stop],
+                "t": _fmt_time(sec) if sec is not None else ""}
+        coords = day.stop_coords.get(stop)
+        if coords:
+            item["lat"], item["lon"] = _round_path([coords])[0]
+        via.append(item)
+    return via
+
+
 def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
     """Etap przejazdu jednym kursem, od wsiadania do wysiadania.
 
@@ -651,6 +672,7 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "minutes": round((exit_arr - board_dep) / 60),
         "stops": [day.stop_names[s] for s, _, _ in path_rows],
         "stops_count": max(len(path_rows) - 1, 1),
+        "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
         "_trip": trip,
         "_from_id": board_stop,
@@ -4320,6 +4342,8 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
         "minutes": round((arr_t - dep_t) / 60),
         "stops": [day.stop_names[s] for s in stops],
         "stops_count": len(stops) - 1,
+        "via": _via_stops(day, [(s, seg["best_deps"].get(s, seg["arr_times"].get(s)))
+                                for s in stops[1:-1]]),
         "path": _round_path(path),
     }
 

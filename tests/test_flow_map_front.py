@@ -611,3 +611,19 @@ def test_map_click_keeps_a_typed_destination(front):
     `sel` - klik w mapę, który wybiera start, brał go więc za pusty i
     kasował. Klik uzupełnia brakujący koniec, a drugiego pola nie rusza."""
     _check(front, "klik_w_mape_nie_kasuje_wpisanego_celu")
+
+
+# ------------------------------------------------ przystanki po drodze -
+
+def test_stops_along_the_way_unfold_in_the_timeline(front):
+    """#169: rozwinięta propozycja mówiła tylko „3 przystanki" - bez nich
+    samych. Liczba przystanków rozwija je teraz w osi, między wsiadaniem
+    a wysiadaniem, z godzinami; domyślnie zwinięte, a opcja „Zawsze pokazuj
+    przystanki po drodze" z ⚙ rozwija je od razu."""
+    _check(front, "przystanki_po_drodze_w_osi")
+
+
+def test_stops_along_the_way_stand_on_the_map(front):
+    """#169: wybrana trasa ma na mapie obwódkę na każdym mijanym przystanku,
+    z nazwą i godziną pod kursorem - zawsze, niezależnie od opcji listy."""
+    _check(front, "przystanki_po_drodze_na_mapie")
