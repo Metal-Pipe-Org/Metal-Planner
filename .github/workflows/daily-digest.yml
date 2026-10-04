@@ -28,10 +28,11 @@ name: "Discord - podsumowanie dnia"
 #   • na samym końcu liczby: wczoraj założone i zamknięte zgłoszenia oraz
 #     zmergowane PR-y, a pod nimi obecnie otwarte zgłoszenia i PR-y.
 #
-# Osoby z mapy kont wstawiamy jako wzmianki z Discorda — karta zaznacza konto,
-# ale nikogo nie budzi. Pingujemy (`@login`, discord.sh) tylko tam, gdzie na
-# kogoś czeka konkretny ruch — inaczej codzienne karty budziłyby wszystkich
-# i szybko przestałyby być czytane.
+# Pingujemy (`@login`, discord.sh) tylko tam, gdzie na kogoś czeka konkretny
+# ruch — inaczej codzienne karty budziłyby wszystkich i szybko przestałyby być
+# czytane. Pozostałe osoby piszemy zwykłym `**login**`, nie wzmianką z Discorda:
+# ta też świeci się na karcie jak ping, więc nie byłoby widać, kogo naprawdę
+# wołamy.
 #
 # Cron w UTC, nierówna minuta jak w stale-issues.yml; 6:23 UTC to rano
 # w Warszawie, już po północy w obu czasach. Działa z `main`.
@@ -128,19 +129,19 @@ jobs:
           # kwadratowe z tytułu rozbiłyby link w markdownie Discorda, a adresu
           # z `https://` w treści linku Discord nie przyjmuje i pokazuje całość
           # surowo — dlatego z adresu wycinamy sam `https://`. `@login`
-          # z tytułu wstawiamy od razu jako wzmiankę w karcie — gołe discord.sh
-          # zamieniłby w ping, a tytuł pisze ktokolwiek.
+          # z tytułu zamieniamy na `**login**` — gołe discord.sh zamieniłby
+          # je w ping, a tytuł pisze ktokolwiek.
           jq -n -c --argjson ids "$DISCORD_IDS" \
             --argjson items "$(jq -s add <<<"$merged $fixed $created")" \
             --argjson prs "$prs" --argjson check "$check" --argjson stale "$stale" \
             --arg views "[Todo](https://github.com/$REPO/issues/views/MDI0OlJlcG9zaXRvcnlTZWFyY2hTaG9ydGN1dDIzMDk1) — co czeka na Ciebie"$'\n'"[Open for taking](https://github.com/$REPO/issues/views/MDI0OlJlcG9zaXRvcnlTZWFyY2hTaG9ydGN1dDIzMjgz) — co jest wolne do wzięcia"$'\n' \
             --arg stats "**Wczoraj:** założone zgłoszenia **$new_count** · zamknięte zgłoszenia **$closed_count** · zmergowane PR-y **$(jq length <<<"$merged")**" \
             --arg totals "**Obecnie otwarte:** zgłoszenia **$open_issues** · PR-y **$open_prs**" '
-            def name: . as $l | if $ids | has($l) then "<@\($ids[$l])>" else "**\($l)**" end;
-            def ping: . as $l | if $ids | has($l) then "@\($l)" else "**\($l)**" end;
-            def mentions: reduce ($ids | to_entries[]) as $p (.;
-              gsub("(?<![A-Za-z0-9-])@" + $p.key + "(?![A-Za-z0-9-])"; "<@" + $p.value + ">"; "i"));
-            def link: "• [#\(.number) \(.title | gsub("[\\[\\]]"; "") | gsub("https?://"; ""; "i") | mentions)](\(.url))";
+            def name: "**\(.)**";
+            def ping: . as $l | if $ids | has($l) then "@\($l)" else name end;
+            def unping: reduce ($ids | to_entries[]) as $p (.;
+              gsub("(?<![A-Za-z0-9-])@(?<l>" + $p.key + ")(?![A-Za-z0-9-])"; "**\(.l)**"; "i"));
+            def link: "• [#\(.number) \(.title | gsub("[\\[\\]]"; "") | gsub("https?://"; ""; "i") | unping)](\(.url))";
             def section($head; $lines): if ($lines | length) > 0 then ["**\($head)**"] + $lines + [""] else [] end;
             {merged: "Zmergowane PR-y", fixed: "Naprawione", created: "Założone zgłoszenia"} as $heads
 
