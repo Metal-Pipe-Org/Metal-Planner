@@ -121,6 +121,12 @@ body.mode-timetable.view-list .layer-bar { display: none; }
    Stuknięcie rozwija formularz z powrotem. */
 body.search-collapsed .search-card { padding: 0; }
 body.search-collapsed .search-card > :not(.search-summary) { display: none; }
+/* Pytanie o przystanek (#200) przychodzi razem z wyszukaniem, które zwija
+   kartę - w zwiniętej zniknęłoby, zanim ktoś je przeczyta. */
+body.search-collapsed .search-card > .locate-offer:not([hidden]) {
+    display: flex;
+    margin: 0 8px 8px;
+}
 
 body.search-collapsed .search-summary {
     display: flex;

@@ -626,6 +626,34 @@ body.start-onboard .hint-onboard { display: block; }
     font-size: 12.5px;
 }
 
+/* Pytanie spod pola startu, czy pozycja z GPS to przystanek (#200) - z tego
+   samego powodu co .locate-msg nie jest zwykłym .hint. */
+.locate-offer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0 0;
+    padding: 8px 8px 8px 12px;
+    border-radius: 10px;
+    background: #eaf1fe;
+    font-size: 13.5px;
+}
+
+.locate-offer-text { flex: 1; min-width: 0; }
+
+.locate-offer .button {
+    height: 32px;
+    padding: 0 14px;
+}
+
+#locate-offer-no {
+    border: 1px solid var(--accent);
+    background: var(--surface);
+    color: var(--accent);
+}
+
+.locate-offer[hidden] { display: none; }
+
 .ac-list {
     position: absolute;
     z-index: 30;

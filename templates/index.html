@@ -241,6 +241,11 @@
         </div>
 
         <p class="locate-msg" id="locate-msg" role="status" hidden></p>
+        <div class="locate-offer" id="locate-offer" role="status" hidden>
+            <span class="locate-offer-text">Stoisz na przystanku <b id="locate-offer-name"></b>?</span>
+            <button type="button" class="button primary" id="locate-offer-yes">Tak</button>
+            <button type="button" class="button" id="locate-offer-no">Nie</button>
+        </div>
 
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
         {# Tabela skrótów jedzie z serwera, a nie jest przepisana w app.js:
