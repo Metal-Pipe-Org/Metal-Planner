@@ -34,11 +34,13 @@ name: "Discord - podsumowanie dnia"
 # ta też świeci się na karcie jak ping, więc nie byłoby widać, kogo naprawdę
 # wołamy.
 #
-# Cron w UTC, nierówna minuta jak w stale-issues.yml; 6:23 UTC to rano
-# w Warszawie, już po północy w obu czasach. Działa z `main`.
+# Cron w UTC, nierówna minuta jak w stale-issues.yml. 23:23 UTC to w Warszawie
+# 0:23 zimą i 1:23 latem — zawsze po północy, więc wczoraj jest już zamknięte.
+# Tak wcześnie, bo GitHub odpala `schedule` nawet kilka godzin po czasie,
+# a podsumowanie ma być rano. Działa z `main`.
 on:
   schedule:
-    - cron: "23 6 * * *"
+    - cron: "23 23 * * *"
   workflow_dispatch:
 
 permissions:

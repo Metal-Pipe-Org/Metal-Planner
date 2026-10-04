@@ -154,7 +154,7 @@ jobs:
                   "**$ASSIGNEE** rezygnuje z tego zgłoszenia"
               else
                 discord_send grey "$SENDER" "Zdjęte przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "**$SENDER** zdejmuje z tego zgłoszenia **$ASSIGNEE**"
+                  "**$ASSIGNEE**, wypisano Cię z tego zgłoszenia"
               fi
               ;;
 
