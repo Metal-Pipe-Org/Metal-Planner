@@ -257,6 +257,7 @@ def test_kurs_pokazuje_przebieg_od_wskazanego_slupka(feed):
 
     assert kurs["num"] == "17" and kurs["mode"] == "tram"
     assert [s["t"] for s in kurs["stops"]] == ["06:00", "06:10", "06:20"]
+    assert [s["id"] for s in kurs["stops"]] == ["R1", "B", "C"]
     assert kurs["board_index"] == 0
     assert len(kurs["tail"]) == len(kurs["path"]) == 3
 

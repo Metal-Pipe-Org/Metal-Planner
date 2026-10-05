@@ -448,6 +448,9 @@ def trip_detail(trip, day, board_stop=None, board_dep=None):
         "board_index": board_index,
         "stops": [
             {
+                # Słupek, a nie sama nazwa: po nim front skleja przystanek
+                # leżący na kilku zaznaczonych trasach w jedną kropkę (#155).
+                "id": stop_id,
                 "name": data.stop_names.get(stop_id, ""),
                 "lat": round(data.stop_coords[stop_id][0], 5),
                 "lon": round(data.stop_coords[stop_id][1], 5),

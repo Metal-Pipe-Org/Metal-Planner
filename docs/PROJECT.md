@@ -1150,7 +1150,7 @@ dało się dojechać.
   nich parę; trasy dociąga front przez `/api/trip`, dla linii faktycznie
   zaznaczonych.
 - `GET /api/trip?trip=&date=&stop=&dep=` — jeden kurs: `{trip, num, mode,
-  line, headsign, board_index, stops: [{name, lat, lon, t, sec}, …],
+  line, headsign, board_index, stops: [{id, name, lat, lon, t, sec}, …],
   path: [[lat,lon], …], tail: [[lat,lon], …]}`. `tail` to przebieg od
   słupka podanego w `stop`/`dep` do końca kursu — front rysuje go
   jaskrawo, a resztę `path` blado.
