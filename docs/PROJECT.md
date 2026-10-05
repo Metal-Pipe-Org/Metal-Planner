@@ -1231,6 +1231,17 @@ dało się dojechać.
 
 ## Changelog
 
+- **2026-10-05** — **ciemny motyw** (zgłoszenie #206). Wygląd aplikacji
+  ma wybór motywu: jak w systemie (domyślnie), jasny albo ciemny. Ciemny
+  przyciemnia cały interfejs i kafelki mapy (odwrócenie jasności z obrotem
+  barwy, bo ciemnych kafelków OSM nie ma). Znaczniki leżące na mapie —
+  plakietki i grupki numerów linii, linie, kropki — zostają jasne, a kolory
+  linii te same, co w jasnym. Motyw stawia skrypt w nagłówku strony przed
+  pierwszym rysowaniem, więc nic nie błyska na biało. Przy okazji wszystkie
+  kolory arkuszy stylów przeszły do zmiennych na górze `style.css` —
+  ciemny motyw nadpisuje wyłącznie je, a test pilnuje, żeby żaden kolor
+  nie wrócił wpisany wprost w regułę.
+
 - **2026-10-03** — **przystanki po drodze** (zgłoszenie #169). Rozwinięta
   propozycja mówiła o przejeździe tylko „7 przystanków · 12 min”. Ta liczba
   rozwija teraz w osi mijane przystanki z godzinami odjazdu, między
