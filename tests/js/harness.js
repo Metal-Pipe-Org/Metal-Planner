@@ -454,7 +454,7 @@ const INJECTION = `
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
     legLayers, detailHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
     waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
-    summariseRepeats, timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
+    timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
     keepWithinHorizon, recentFirst,
     withArrivals, flowIcon, FLOW_ICONS,
     playPipeDrop, soundOpts, PIPE_SOURCES, PIPE_VOLUME,

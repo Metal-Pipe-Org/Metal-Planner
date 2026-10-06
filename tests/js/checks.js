@@ -310,18 +310,6 @@ checks.stop_dots_only_when_drawn = (() => {
     return {ok: dots.length === 0, dots: dots.length};
 })();
 
-/* Stara tablica (z "za ile" i "co N min") wraca przełącznikiem w
-   Eksperymentach - te sprawdzenia pilnują jej, a nie tablicy domyślnej. */
-function staraTablica(fn) {
-    const bylo = app.dotOpts.ttOld;
-    app.dotOpts.ttOld = true;
-    try {
-        return fn();
-    } finally {
-        app.dotOpts.ttOld = bylo;
-    }
-}
-
 /* Ostatnie miejsca idą w podpowiedziach pierwsze, od najświeższego (#142);
    reszta zostaje w swojej kolejności. */
 checks.podpowiedzi_ostatnie_miejsca_pierwsze = (() => {
@@ -339,17 +327,16 @@ checks.podpowiedzi_ostatnie_miejsca_pierwsze = (() => {
    mają pierwszeństwo, a nadmiar zwija się do "… do" ostatniego kursu -
    z godziną tylko wtedy, gdy lista sięga końca mapy. */
 checks.tablica_zwija_nadmiar_godzin = (() => {
-    const dep = sec => ({time: '00:00', sec, in_min: 0, num: '310',
+    const dep = sec => ({time: '00:00', sec, num: '310',
                          mode: 'bus', headsign: 'Strachowskiego'});
     const secs = [55980, 57180, 57720, 58320, 58920, 59520, 60120, 60720, 61320];
     const data = {stop: 'Lutosławskiego', from_time: '15:33',
                   departures: secs.map(dep)};
-    const bylo = [app.dotOpts.ttPast, app.dotOpts.ttOld];
+    const bylo = app.dotOpts.ttPast;
     app.dotOpts.ttPast = true;
-    app.dotOpts.ttOld = false;
     const bezHoryzontu = app.timetableHtml(data, 58000);       // jesteś 16:06
     const zHoryzontem = app.timetableHtml({...data, horizon: 61320}, 58000);
-    [app.dotOpts.ttPast, app.dotOpts.ttOld] = bylo;
+    app.dotOpts.ttPast = bylo;
     return {
         ok: (zHoryzontem.match(/tt-past/g) || []).length === 1
             && zHoryzontem.includes('class="tt-past">16:02')
@@ -366,7 +353,7 @@ checks.tablica_zwija_nadmiar_godzin = (() => {
    bez "za ile", "co N min" i godziny w nagłówku. Godziny sprzed chwili
    z mapy są szare, a linia, na którą się już nie zdąży, idzie na koniec. */
 checks.tablica_godziny_w_wierszu_linii = (() => {
-    const dep = (sec, num, headsign) => ({time: '00:00', sec, in_min: 0, num,
+    const dep = (sec, num, headsign) => ({time: '00:00', sec, num,
                                           mode: 'bus', headsign});
     const data = {stop: 'Park Wschodni', from_time: '22:27', departures: [
         dep(80820, '134', 'KSIĘŻE WIELKIE'),     // 22:27 - przed chwilą z mapy
@@ -397,38 +384,6 @@ checks.tablica_godziny_w_wierszu_linii = (() => {
         wiersze,
     };
 })();
-
-checks.timetable_html = staraTablica(() => {
-    const html = app.timetableHtml({
-        stop: 'Bardzka',
-        from_time: '16:06',
-        departures: [
-            {time: '16:06', sec: 57960, in_min: 0, num: '134', mode: 'bus',
-             headsign: 'LEŚNICA'},
-            {time: '16:08', sec: 58080, in_min: 2, num: '5', mode: 'tram',
-             headsign: 'BISKUPIN'},
-            // drugi kurs 134 - ma się ZWINĄĆ w notkę przy pierwszym,
-            // a nie stanąć jako trzeci wiersz
-            {time: '16:16', sec: 58560, in_min: 10, num: '134', mode: 'bus',
-             headsign: 'LEŚNICA'},
-        ],
-    });
-    const wierszy = (html.match(/<li>/g) || []).length;
-    return {
-        ok: html.includes('Bardzka') && html.includes('16:06')
-            && html.includes('badge bus') && html.includes('badge tram')
-            && html.includes('LEŚNICA')
-            && html.includes('2 min')
-            && wierszy === 2                     // 3 odjazdy -> 2 wiersze
-            // Rytm w TEJ SAMEJ linii co "za ile" (nie osobnym wierszem),
-            // a najbliższy odjazd to "0 min", nie "teraz" - nagłówek mówi
-            // "od 16:06" i to nie jest godzina zegarowa.
-            && html.includes('0 min<small> · co 10 min</small>')
-            && !html.includes('teraz'),
-        wierszy,
-        html: html.slice(0, 200),
-    };
-});
 
 checks.timetable_html_empty = (() => {
     const html = app.timetableHtml({stop: 'Pętla', from_time: '23:59', departures: []});
@@ -553,7 +508,7 @@ checks.kropka_bierze_jasnosc_z_otoczenia = (() => {
    bo ta sama linia mija węzeł w obie strony (zgłoszone 2026-08-29:
    dymek na Pilczycach wypisywał tramwaj jadący tam, skąd się przyjechało). */
 checks.tablica_tylko_to_co_mapa_oferuje = (() => {
-    const dep = (num, mode, headsign) => ({time: '13:32', in_min: 0, num, mode, headsign});
+    const dep = (num, mode, headsign) => ({time: '13:32', num, mode, headsign});
     const data = {stop: 'PILCZYCE', from_time: '13:32', departures: [
         dep('3', 'tram', 'KSIĘŻE MAŁE'),
         dep('3', 'tram', 'LEŚNICA'),      // ta sama trójka, druga strona
@@ -578,8 +533,7 @@ checks.tablica_tylko_to_co_mapa_oferuje = (() => {
    dojedzie" - serwer podaje przy linii ostatni taki odjazd (depart_by,
    patrz planner._line_deadlines). */
 checks.odjazd_ktorym_sie_nie_zdazy_wypada = (() => {
-    const dep = (sec, num, headsign) => ({time: '00:00', sec, in_min: 0,
-                                          num, mode: 'tram', headsign});
+    const dep = (sec, num, headsign) => ({time: '00:00', sec, num, mode: 'tram', headsign});
     const data = {stop: 'PILCZYCE', from_time: '17:00', departures: [
         dep(61200, '3', 'KSIĘŻE MAŁE'),   // 17:00 - zdąży
         dep(61800, '3', 'KSIĘŻE MAŁE'),   // 17:10 - ostatni, który zdąży
@@ -599,74 +553,6 @@ checks.odjazd_ktorym_sie_nie_zdazy_wypada = (() => {
         ok: zostalo.length === 3 && !zostalo.some(d => d.num === '3' && d.sec === 62400)
             && bezTerminu.length === 4,
         zostalo: zostalo.map(d => d.num + '@' + d.sec),
-    };
-})();
-
-/* Osiem odjazdów jednej linii to nie osiem opcji, tylko jedna opcja i jej
-   rytm. Zostaje jeden wiersz: najbliższy odjazd + "co X min". */
-checks.powtorzenia_zwijaja_sie_w_notke = (() => {
-    const dep = (min, num, headsign) => ({time: '00:00', sec: min * 60, in_min: min,
-                                          num, mode: 'tram', headsign});
-    const wynik = app.summariseRepeats([
-        dep(4, '3', 'LEŚNICA'), dep(12, '20', 'OPORÓW'), dep(19, '3', 'LEŚNICA'),
-        dep(34, '3', 'LEŚNICA'), dep(49, '3', 'LEŚNICA'),
-    ]);
-    const trojka = wynik.find(d => d.num === '3');
-    const dwudziestka = wynik.find(d => d.num === '20');
-    return {
-        ok: wynik.length === 2                      // jeden wiersz na linię
-            && trojka.in_min === 4                  // najbliższy, nie któryś dalszy
-            && trojka.every_min === 15              // ...i rytm w notce
-            && dwudziestka.every_min === undefined  // pojedynczy kurs bez notki
-            && wynik[0].num === '3',                // kolejność po najbliższym
-        wiersze: wynik.map(d => `${d.num} za ${d.in_min}` +
-                                (d.every_min ? ` co ${d.every_min}` : '')),
-    };
-})();
-
-/* Odstęp to MEDIANA - jeden nocny przeskok nie ma prawa opisać taktu. */
-checks.rytm_z_mediany_nie_ze_sredniej = (() => {
-    const dep = min => ({time: '00:00', sec: min * 60, in_min: min,
-                         num: '5', mode: 'tram', headsign: 'KRZYKI'});
-    // przerwy: 10, 10, 10, 120 -> mediana 10, średnia 37,5
-    const wynik = app.summariseRepeats([dep(0), dep(10), dep(20), dep(30), dep(150)]);
-    return {ok: wynik[0].every_min === 10, every_min: wynik[0].every_min};
-})();
-
-/* Takt pisze się także wtedy, gdy kolejny kurs wypada już POZA zakresem mapy:
-   "co 20 min" to informacja o linii, nie o oknie. Sprawdzane przez cały dymek,
-   bo chodzi też o to, czy pełna tablica w ogóle dochodzi tam, gdzie liczy się
-   rytm. */
-checks.rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem = staraTablica(() => {
-    const dep = (min, num) => ({time: '00:00', sec: min * 60, in_min: min,
-                               num, mode: 'bus', headsign: 'KRZYKI'});
-    const kursy = [dep(3, '112'), dep(23, '112'), dep(43, '112'), dep(63, '112')];
-    const pelna = {stop: 'Sosnowiecka', from_time: '12:00',
-                   departures: kursy, all_departures: kursy};
-    // Przez PRAWDZIWE sito, nie obok niego: pełna tablica ma przez nie
-    // przejść nietknięta. W oknie zostaje tylko pierwszy kurs.
-    const poOdsiewie = app.keepWithinHorizon(pelna, 10 * 60);
-    const html = app.timetableHtml(poOdsiewie);
-    // ...a bez pełnej tablicy nie ma z czego policzyć rytmu i notki nie ma.
-    const bezPelnej = app.timetableHtml({
-        stop: 'Sosnowiecka', from_time: '12:00', departures: [kursy[0]],
-    });
-    return {
-        ok: poOdsiewie.departures.length === 1
-            && html.includes('co 20 min') && !bezPelnej.includes('co '),
-        html: html.slice(-160), bezPelnej: bezPelnej.slice(-160),
-    };
-});
-
-/* Kierunek to osobna opcja - i osobny wiersz z własnym rytmem. */
-checks.notka_rozroznia_kierunki = (() => {
-    const dep = (min, headsign) => ({time: '00:00', sec: min * 60, in_min: min,
-                                     num: '3', mode: 'tram', headsign});
-    const wynik = app.summariseRepeats([dep(0, 'LEŚNICA'), dep(2, 'KSIĘŻE MAŁE'),
-                                        dep(20, 'LEŚNICA'), dep(22, 'KSIĘŻE MAŁE')]);
-    return {
-        ok: wynik.length === 2 && wynik.every(d => d.every_min === 20),
-        wiersze: wynik.map(d => d.headsign + ' co ' + d.every_min),
     };
 })();
 
@@ -691,8 +577,8 @@ checks.liczba_wierszy_to_ustawienie = (() => {
 
 /* Suwak naprawdę przycina tablicę - nie tylko zmienia liczbę w ustawieniach. */
 checks.suwak_przycina_tablice = (() => {
-    const dep = min => ({time: '00:0' + min, sec: min * 60, in_min: min,
-                         num: String(min), mode: 'bus', headsign: 'PRACZE'});
+    const dep = min => ({time: '00:0' + min, sec: min * 60, num: String(min),
+                         mode: 'bus', headsign: 'PRACZE'});
     const data = {stop: 'Halicka', from_time: '14:21',
                   departures: [1, 2, 3, 4, 5].map(dep)};
     const bylo = app.dotOpts.rows;
@@ -708,7 +594,7 @@ checks.suwak_przycina_tablice = (() => {
    Warunek konieczny, nie wystarczający - mocniejszy odsiew wymagałby godzin
    przyjazdu kawałków, a te bywają niemożliwe (patrz punkt 11 kontraktu). */
 checks.odjazdy_za_horyzontem_wypadaja = (() => {
-    const dep = sec => ({time: '00:00', sec, in_min: 0, num: '107',
+    const dep = sec => ({time: '00:00', sec, num: '107',
                          mode: 'bus', headsign: 'PRACZE'});
     const data = {stop: 'Halicka', from_time: '14:21',
                   departures: [dep(51660), dep(52860), dep(53460), dep(55260)]};
@@ -800,27 +686,20 @@ checks.kropka_peron_albo_srodek = (() => {
     };
 })();
 
-/* Kropka przystanku, z którego wyruszamy, jest rozpoznawana ZAWSZE - także
-   w starym wyglądzie, bez zieleni, bo okienko w rogu musi wiedzieć, od czyjego
-   rozkładu zacząć. W nowym jest zielona jak słupki startu, które zastępuje. */
+/* Kropka przystanku, z którego wyruszamy, jest rozpoznawana i zielona jak
+   słupki startu, które zastępuje - okienko w rogu musi wiedzieć, od czyjego
+   rozkładu zacząć. */
 checks.kropka_startowa_rozpoznana = (() => {
-    const bylo = app.dotOpts.oldEnds;
     const nodes = [
         {name: 'PILCZYCE', lat: 51.13, lon: 16.95, sec: 48720, lines: [], start: true},
         {name: 'Rondo', lat: 51.11, lon: 17.01, sec: 49000, lines: []},
     ];
-    app.dotOpts.oldEnds = true;           // stary wygląd...
-    const stare = app.flowStopDots(nodes);
-    app.dotOpts.oldEnds = false;
-    const nowe = app.flowStopDots(nodes);
-    app.dotOpts.oldEnds = bylo;
-    const zielona = dots => dots[0].options.color === '#1b5e20';
+    const dots = app.flowStopDots(nodes);
+    const zielona = dot => dot.options.color === '#1b5e20';
     return {
-        // ...ale kropka i tak wie, że jest startowa - tylko nie jest zielona.
-        ok: stare[0].isStart === true && stare[1].isStart === false
-            && !zielona(stare) && zielona(nowe) && nowe[1].options.color !== '#1b5e20',
-        start: stare[0].isStart, drugi: stare[1].isStart,
-        zielona_stara: zielona(stare), zielona_nowa: zielona(nowe),
+        ok: dots[0].isStart === true && dots[1].isStart === false
+            && zielona(dots[0]) && !zielona(dots[1]),
+        start: dots[0].isStart, drugi: dots[1].isStart,
     };
 })();
 
@@ -899,7 +778,7 @@ checks.trzy_znaki_przeplywu = (() => {
    przyjazdu z węzła, bo w tablicy odjazdów przystanku jej nie ma. */
 checks.przyjazdy_dokladaja_wiersze = (() => {
     const data = {stop: 'Bardzka', from_time: '16:00', departures: [
-        {time: '16:04', sec: 57840, in_min: 4, num: '3', mode: 'tram',
+        {time: '16:04', sec: 57840, num: '3', mode: 'tram',
          headsign: 'LEŚNICA', flow: 'start'},
     ]};
     const lines = [
@@ -908,13 +787,13 @@ checks.przyjazdy_dokladaja_wiersze = (() => {
         // "end" bez godziny przyjazdu nie ma czego pokazać - nie zmyślamy jej
         {num: '9', kind: 'tram', headsign: 'PARK', flow: 'end'},
     ];
-    const wiersze = app.withArrivals(data, lines, 57600).departures;
+    const wiersze = app.withArrivals(data, lines).departures;
     const przyjazd = wiersze.find(d => d.num === '107');
-    const bezLinii = app.withArrivals(data, null, 57600).departures;
+    const bezLinii = app.withArrivals(data, null).departures;
     return {
         ok: wiersze.length === 2 && bezLinii.length === 1
             && przyjazd.flow === 'end' && przyjazd.time === '16:00'
-            && przyjazd.in_min === 0 && przyjazd.mode === 'bus',
+            && przyjazd.mode === 'bus',
         wiersze: wiersze.map(d => `${d.num}/${d.flow}@${d.time}`),
     };
 })();
@@ -923,8 +802,7 @@ checks.przyjazdy_dokladaja_wiersze = (() => {
    zostać, bo wypisana z najbliższym odjazdem udaje opcję, której mapa nie
    proponuje. Jej wiersz dokłada withArrivals, i to z innej godziny. */
 checks.przyjazd_nie_udaje_odjazdu = (() => {
-    const dep = (sec, num, mode, headsign) => ({time: '00:00', sec, in_min: 0,
-                                                num, mode, headsign});
+    const dep = (sec, num, mode, headsign) => ({time: '00:00', sec, num, mode, headsign});
     const data = {stop: 'Bardzka', from_time: '16:00', departures: [
         dep(57840, '3', 'tram', 'LEŚNICA'),
         dep(58000, '107', 'bus', 'PRACZE'),   // ta linia tu tylko PRZYWOZI
@@ -934,7 +812,7 @@ checks.przyjazd_nie_udaje_odjazdu = (() => {
         {num: '107', kind: 'bus', headsign: 'PRACZE', flow: 'end', arrive: 57600},
     ];
     const po = app.keepOfferedLines(data, lines);
-    const pelne = app.withArrivals(po, lines, 57600).departures;
+    const pelne = app.withArrivals(po, lines).departures;
     return {
         ok: po.departures.length === 1
             && po.departures[0].num === '3' && po.departures[0].flow === 'through'
@@ -944,37 +822,24 @@ checks.przyjazd_nie_udaje_odjazdu = (() => {
     };
 })();
 
-/* Przyjazd i odjazd tej samej linii to dwa różne zdarzenia na tym przystanku -
-   zwinięte w jeden wiersz udawałyby rytm kursowania, którego nie ma. */
-checks.przyjazd_nie_zwija_sie_z_odjazdem = (() => {
-    const wiersz = (sec, flow) => ({time: '00:00', sec, in_min: 0, num: '3',
-                                    mode: 'tram', headsign: 'LEŚNICA', flow});
-    const wynik = app.summariseRepeats([wiersz(57600, 'end'), wiersz(58200, 'start')]);
-    return {
-        ok: wynik.length === 2 && wynik[0].flow === 'end'
-            && wynik.every(d => d.every_min === undefined),
-        wiersze: wynik.map(d => d.flow + '@' + d.sec),
-    };
-})();
-
 /* Kolumna ze znakiem pojawia się tylko tam, gdzie jest czym ją wypełnić:
    tablica pod kropką WYBRANEJ trasy pyta o cały przystanek i nie wie, co się
    tu z którą linią dzieje - pusta kolumna przesuwałaby jej wiersze bez powodu.
    Przyjazd stoi w kolejności czasowej, nie na końcu listy. */
-checks.tablica_miesza_przyjazdy_z_odjazdami = staraTablica(() => {
+checks.tablica_miesza_przyjazdy_z_odjazdami = (() => {
     const html = app.timetableHtml({stop: 'Bardzka', from_time: '16:00', departures: [
-        {time: '16:04', sec: 57840, in_min: 4, num: '3', mode: 'tram',
+        {time: '16:04', sec: 57840, num: '3', mode: 'tram',
          headsign: 'LEŚNICA', flow: 'start'},
-        {time: '16:00', sec: 57600, in_min: 0, num: '107', mode: 'bus',
+        {time: '16:00', sec: 57600, num: '107', mode: 'bus',
          headsign: 'PRACZE', flow: 'end'},
-        {time: '16:09', sec: 58140, in_min: 9, num: '20', mode: 'tram',
+        {time: '16:09', sec: 58140, num: '20', mode: 'tram',
          headsign: 'OPORÓW', flow: 'through'},
     ]});
     const bezPrzeplywu = app.timetableHtml({stop: 'Bardzka', from_time: '16:00',
-        departures: [{time: '16:04', sec: 57840, in_min: 4, num: '3',
+        departures: [{time: '16:04', sec: 57840, num: '3',
                       mode: 'tram', headsign: 'LEŚNICA'}]});
     return {
-        ok: html.includes('tt-rows has-flow')
+        ok: html.includes('has-flow')
             && html.includes('tt-flow-end') && html.includes('tt-flow-start')
             && html.includes('tt-flow-through')
             // przyjazd o 16:00 przed odjazdem o 16:04
@@ -983,7 +848,7 @@ checks.tablica_miesza_przyjazdy_z_odjazdami = staraTablica(() => {
             && !bezPrzeplywu.includes('<svg'),
         html: html.slice(0, 160),
     };
-});
+})();
 
 /* Czekanie jest widoczne, nie schowane (punkt 13 kontraktu). Komunikat
    staje przy zmianie doby i przy czekaniu dłuższym niż 20 minut tego samego
@@ -1481,6 +1346,9 @@ checks.pasek_czasu_stoi_na_srodku_okna = (function () {
     app.drawFlow(FLOW_FIXTURE, false);
     const el = document.getElementById('time-headline');
     el.hidden = false;
+    // Okienko w rogu otwiera się samo przy kropce startowej, a w emulatorze
+    // stoi na tej samej ramce co pasek - tu chodzi o przeszkody z lewej.
+    app.flowPanel.hidden = true;
 
     // Emulator daje każdemu elementowi tę samą ramkę: 320 px szerokości,
     // prawa krawędź na 320 - czyli przeszkody kończą się na 320, a pasek ma
@@ -1502,20 +1370,6 @@ checks.pasek_czasu_stoi_na_srodku_okna = (function () {
     };
 })();
 
-checks.auta_grupowanie_leci_do_serwera = (() => {
-    const przelacznik = document.getElementById('car-groups');
-    const bylo = przelacznik.checked;
-    przelacznik.checked = false;
-    const zgaszone = app.queryParams().toString();
-    przelacznik.checked = true;
-    const zapalone = app.queryParams().toString();
-    przelacznik.checked = bylo;
-    return {
-        ok: zgaszone.includes('car_groups=0') && zapalone.includes('car_groups=1'),
-        zgaszone, zapalone,
-    };
-})();
-
 checks.auta_dostawczaki_leca_do_serwera = (() => {
     const przelacznik = document.getElementById('car-vans');
     const bylo = przelacznik.checked;
@@ -1530,42 +1384,6 @@ checks.auta_dostawczaki_leca_do_serwera = (() => {
     };
 })();
 
-
-/* Dymek liczy od godziny z FORMULARZA, nie od tej, o której mapa stawia tu
-   pasażera (zgłoszenie #143). Odjazdy sprzed przyjazdu mapy są więc na
-   liście celowo - oddziela je widoczna kreska i nigdy nie wypychają tych,
-   po które się tu przyszło. */
-checks.tablica_liczy_od_godziny_z_formularza = staraTablica(() => {
-    const dep = sec => ({time: '00:00', sec, in_min: 0, num: String(sec / 100),
-                         mode: 'bus', headsign: 'PRACZE'});
-    const data = {stop: 'Halicka', from_time: '21:55',
-                  departures: [100, 200, 300, 400, 500].map(dep)};
-    const bylo = app.dotOpts.rows;
-    app.dotOpts.rows = 5;
-    const pelna = app.timetableHtml(data, 300);
-    app.dotOpts.rows = 2;
-    const ciasna = app.timetableHtml(data, 300);
-    app.dotOpts.rows = 1;
-    const jedna = app.timetableHtml(data, 300);
-    app.dotOpts.rows = bylo;
-    const bezMapy = app.timetableHtml(data);
-
-    // Kreski "tu według mapy jesteś" nie ma (decyzja z 28.09); odjazdy sprzed
-    // przyjazdu mapy stoją przed tymi od niego.
-    const wMiejscu = !pelna.includes('tt-here')
-        && pelna.indexOf('>2<') < pelna.indexOf('>3<');
-    // Suwak na dwa wiersze: odjazd od przyjazdu mapy MUSI się zmieścić.
-    const wierszy = (ciasna.match(/<li>/g) || []).length;
-    // Jeden wiersz: tylko odjazd, na który się zdąży - odjazd sprzed
-    // przyjazdu mapy nie może zająć jedynego miejsca (recenzja #141/#143/#147).
-    const jedenWiersz = (jedna.match(/<li>/g) || []).length;
-    return {
-        ok: wMiejscu && bezMapy.includes('>1<')
-            && ciasna.includes('>3<') && wierszy === 2
-            && jedna.includes('>3<') && jedenWiersz === 1,
-        wMiejscu, wierszy, ciasna, jedenWiersz, jedna,
-    };
-});
 
 /* Rodzaj roweru to dwa PRZYCISKI W PASKU warstw (zgłoszenie #147) - ich stan
    idzie w zapytaniu, bo odsiew miejsc robi serwer. Zgaszenie obu gasi rower
@@ -1590,27 +1408,11 @@ checks.rower_rodzaj_leci_do_serwera = (() => {
 })();
 
 
-/* Początek mapy od najpóźniejszego wyjazdu - próba w Eksperymentach, domyślnie
-   zgaszona; jej stan idzie w zapytaniu, bo mapę liczy serwer. */
-checks.odsiew_krazenia_leci_do_serwera = (() => {
-    const przelacznik = document.getElementById('latest-start');
-    const bylo = przelacznik.checked;
-    przelacznik.checked = false;
-    const zgaszone = app.queryParams().toString();
-    przelacznik.checked = true;
-    const zapalone = app.queryParams().toString();
-    przelacznik.checked = bylo;
-    return {
-        ok: zgaszone.includes('latest_start=0') && zapalone.includes('latest_start=1'),
-        zgaszone, zapalone,
-    };
-})();
-
 /* Debug pod zębatką: dymek roweru i auta mówi, dlaczego przeszły wybór -
    ale tylko z zapalonym przełącznikiem. Bez niego dymek jest taki jak był. */
 checks.debug_mowi_dlaczego = (() => {
     const why = {records: ['najwcześniej przy aucie'], beaten: 0,
-                 beaten_by: [], of: 4, group: 3};
+                 beaten_by: [], of: 4};
     const car = {model: 'Clio', plate: 'WE1', at: 600, walk_sec: 180, from: 'Rynek',
                  to_dest_m: 900, fuel: 80, range: 400, ogarniam: [], why};
     const place = {name: 'Stacja A', at: 600, walk_sec: 180, from: 'Rynek',
@@ -1629,7 +1431,7 @@ checks.debug_mowi_dlaczego = (() => {
     app.dotOpts.why = bylo;
     return {
         ok: !autoBez.includes('nic go nie bije') && !rowerBez.includes('bije go')
-            && auto.includes('nic go nie bije') && auto.includes('z 3 aut')
+            && auto.includes('nic go nie bije')
             && rower.includes('bije go 2 z 9') && rower.includes('Stacja X')
             && rower.includes('Stacja B'),
         auto, rower,

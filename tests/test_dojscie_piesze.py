@@ -164,23 +164,6 @@ def test_a_platform_change_still_reads_as_a_platform_change():
     assert "stanowisk" in leg["text"]
 
 
-# ---- "byłem tu" to co innego niż "dojdę tu" -------------------------------
-
-def test_having_been_somewhere_is_measured_by_place_not_by_walking_range():
-    """Reguła zawracania (planner._leads_onward) pyta, czy kurs wraca na
-    przystanek JUŻ MINIĘTY. Rozwijana zasięgiem marszu uznawała za minięte
-    wszystko w promieniu od trasy i kasowała z mapy dobre kontynuacje -
-    stąd osobne _same_place_stops obok _sibling_places."""
-    day = make_day([
-        {"trip_id": "T1", "label": "Tramwaj 1",
-         "stops": [("PERON_A", 0, 0), ("OBOK", 60, 60)]},
-    ], names={"PERON_A": "Rynek", "OBOK": "Kwiska"})
-    day.siblings = {"PERON_A": {"OBOK": 180}, "OBOK": {"PERON_A": 180}}
-
-    assert "OBOK" in planner._sibling_places(day, "PERON_A")
-    assert "OBOK" not in planner._same_place_stops(day, "PERON_A")
-
-
 # ---- wyjście pieszo ze STARTU -------------------------------------------
 
 def _day_z_dojsciem_ze_startu(odjazd=600):
@@ -439,8 +422,7 @@ def _day_z_dojsciem_za_dlugim():
     return day
 
 
-@pytest.mark.parametrize("value_map", [False, True])
-def test_no_journey_leaves_before_the_asked_time(install_day, value_map):
+def test_no_journey_leaves_before_the_asked_time(install_day):
     """Lista brała za punkt startowy każdy kurs narysowany od słupka
     w zasięgu dojścia, nie pytając, czy da się tam dojść przed odjazdem.
     Karta mówiła "08:23 - wyjdź na Kościuszki" przy pytaniu o 08:31,
@@ -451,8 +433,7 @@ def test_no_journey_leaves_before_the_asked_time(install_day, value_map):
         "scenariusz: dojście ma NIE zdążyć na szesnastkę"
     install_day(day)
     flow = planner.plan_flow("DWORZEC GŁÓWNY", "PL. GRUNWALDZKI",
-                             when=datetime(2026, 1, 5, 8, 31),
-                             value_map=value_map)
+                             when=datetime(2026, 1, 5, 8, 31))
     assert flow["journeys"], "lista pusta"
     for journey in flow["journeys"]:
         assert journey["departure_sec"] >= ODJAZD_168, \

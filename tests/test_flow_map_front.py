@@ -24,14 +24,18 @@ javascriptowej ani kroku budowania, a na maszynie nie ma node. Cena: te testy
 są macOS-owe i gdzie indziej się pominą (patrz pytest.skip niżej); gdyby
 kiedyś doszło CI na Linuksie, trzeba będzie tu dołożyć drugi silnik.
 
-Odświeżenie fixture'a po zmianie w plannerze:
+Odświeżenie fixture'a po zmianie w plannerze (data - dzień powszedni
+z bieżącego rozkładu; źródła na żywo wyłączone, żeby plik nie zależał od
+sieci):
 
     .venv/bin/python -c "
-    from datetime import datetime; import planner, json
-    r = planner.plan_flow('Sosnowiecka','Wojszyce', datetime(2026,8,27,15,37),
-                          extra_pct=125, extra_floor_sec=300, extra_cap_sec=900)
-    json.dump(r, open('tests/js/flow_fixture.json','w'),
-              ensure_ascii=False, separators=(',',':'))"
+    from datetime import datetime; import planner, json, pkp, traficar, bikes
+    pkp.enabled = traficar.enabled = lambda: False
+    traficar.zone = lambda: None
+    bikes._fetch = lambda url: (_ for _ in ()).throw(OSError(url))
+    r = planner.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 10, 6, 15, 37))
+    json.dump(r, open('tests/js/flow_fixture.json', 'w'),
+              ensure_ascii=False, separators=(',', ':'))"
 """
 
 import json
@@ -209,13 +213,6 @@ def test_a_full_board_row_keeps_the_times_you_can_still_catch(front):
     _check(front, "tablica_zwija_nadmiar_godzin")
 
 
-def test_timetable_bubble_names_line_direction_and_wait(front):
-    """Dymek odpowiada na "czym stąd pojadę": godzina, numer w kolorze
-    środka transportu, kierunek i za ile - a kolejny kurs tej samej linii
-    zwija się w notkę "co X min", zamiast zajmować własny wiersz."""
-    _check(front, "timetable_html")
-
-
 def test_timetable_bubble_says_when_nothing_departs(front):
     """Pusta tablica ma to powiedzieć wprost - pusty dymek czyta się jak
     zepsuty, a nie jak "to już ostatni z tego przystanku"."""
@@ -262,33 +259,6 @@ def test_the_bubble_lists_only_what_the_map_offers_here(front):
     tylko to, w co mapa pozwala tu wsiąść, a kierunek jest częścią tożsamości
     linii."""
     _check(front, "tablica_tylko_to_co_mapa_oferuje")
-
-
-def test_repeated_departures_collapse_into_a_cadence_note(front):
-    """Osiem odjazdów jednej linii to nie osiem opcji, tylko jedna opcja i jej
-    rytm. Zostaje jeden wiersz - najbliższy odjazd plus „co X min" - zamiast
-    wypisywania wszystkich albo gubienia części."""
-    _check(front, "powtorzenia_zwijaja_sie_w_notke")
-
-
-def test_the_cadence_is_a_median_not_a_mean(front):
-    """Jeden nocny przeskok o godzinę nie ma prawa przesunąć liczby opisującej
-    normalny takt."""
-    _check(front, "rytm_z_mediany_nie_ze_sredniej")
-
-
-def test_the_cadence_shows_even_past_the_map_range(front):
-    """„co 20 min" mówi o LINII, nie o oknie mapy: notka zostaje także wtedy,
-    gdy kolejny kurs wypada już poza zakresem. Takt liczy się z pełnej tablicy
-    przystanku, sprzed odsiewu - inaczej znikał dokładnie tam, gdzie był
-    najpotrzebniejszy: na rzadkim węźle blisko granicy okna."""
-    _check(front, "rytm_zostaje_gdy_kolejny_kurs_jest_poza_zakresem")
-
-
-def test_the_cadence_keeps_directions_apart(front):
-    """Ta sama linia w drugą stronę to osobna opcja - osobny wiersz i osobny
-    rytm."""
-    _check(front, "notka_rozroznia_kierunki")
 
 
 def test_row_count_is_a_panel_setting(front):
@@ -383,12 +353,6 @@ def test_an_arrival_never_masquerades_as_a_departure(front):
     _check(front, "przyjazd_nie_udaje_odjazdu")
 
 
-def test_an_arrival_and_a_departure_are_not_one_cadence(front):
-    """Przyjazd i odjazd tej samej linii to dwa różne zdarzenia na tym
-    przystanku - zwinięte w jeden wiersz udawałyby takt kursowania."""
-    _check(front, "przyjazd_nie_zwija_sie_z_odjazdem")
-
-
 def test_the_board_mixes_arrivals_into_the_departures_by_time(front):
     """Tablica przestała być listą samych odjazdów: przyjazd stoi w niej tam,
     gdzie wypada na osi czasu. Kolumna ze znakiem pojawia się tylko tam, gdzie
@@ -405,9 +369,8 @@ def test_the_node_dot_stands_where_the_switch_says(front):
 
 
 def test_the_start_dot_is_known_even_when_not_marked(front):
-    """Rozpoznanie przystanku startowego nie może zależeć od tego, czy jest
-    on zielony: okienko w rogu musi wiedzieć, od czyjego rozkładu zacząć,
-    także w starym wyglądzie startu (eksperyment, #175)."""
+    """Kropka przystanku startowego jest rozpoznana i zielona: okienko w rogu
+    musi wiedzieć, od czyjego rozkładu zacząć."""
     _check(front, "kropka_startowa_rozpoznana")
 
 
@@ -563,24 +526,10 @@ def test_bike_rides_can_stay_on_the_map(front):
     _check(front, "rower_przejazdy_na_stale_po_zapaleniu")
 
 
-def test_car_grouping_is_a_switch_sent_to_the_server(front):
-    """Grupowanie aut spod tego samego miejsca to przełącznik pod zębatką -
-    jego stan idzie w zapytaniu, bo wybór aut robi serwer."""
-    _check(front, "auta_grupowanie_leci_do_serwera")
-
-
 def test_vans_are_a_switch_sent_to_the_server(front):
     """Dostawczaki to przełącznik pod zębatką, domyślnie zgaszony - jego stan
     idzie w zapytaniu, bo osobny wybór dostawczaków robi serwer."""
     _check(front, "auta_dostawczaki_leca_do_serwera")
-
-
-def test_the_dot_timetable_counts_from_the_asked_hour(front):
-    """Zgłoszenie #143: tablica w dymku liczy od godziny z formularza, a nie
-    od tej, o której mapa sądzi, że pasażer tu stanie - bo to założenie bywa
-    za późne i zabierało całą odpowiedź. Odjazdy sprzed przyjazdu mapy nie
-    wypychają z listy tych, po które się tu przyszło."""
-    _check(front, "tablica_liczy_od_godziny_z_formularza")
 
 
 def test_debug_says_why_a_bike_or_car_is_on_the_map(front):
@@ -595,13 +544,6 @@ def test_bike_kinds_are_switches_sent_to_the_server(front):
     zębatką, oba domyślnie włączone - ich stan idzie w zapytaniu, bo odsiew
     miejsc robi serwer."""
     _check(front, "rower_rodzaj_leci_do_serwera")
-
-
-def test_the_dawdling_filter_is_a_switch_sent_to_the_server(front):
-    """Zgłoszenie #141: odsiew jazdy na zabicie czasu to przełącznik pod
-    zębatką, domyślnie zgaszony - do włączania i wyłączania, żeby zobaczyć
-    różnicę. Jego stan idzie w zapytaniu, bo mapę liczy serwer."""
-    _check(front, "odsiew_krazenia_leci_do_serwera")
 
 
 # ------------------------------------------------- wybór końców relacji -
