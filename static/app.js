@@ -3870,6 +3870,25 @@ function obNote(text) {
     obMsg.hidden = !text;
 }
 
+// Rozpoznany kurs według rozkładu nie wyjechał jeszcze nawet z poprzedniego
+// przystanku (pole `not_yet`, patrz onboard.find_ride), więc nie da się nim
+// teraz jechać - a mapa i tak liczy od niego. Najczęściej to pomyłka
+// w linii, kierunku albo przystanku, której nic poza tym pytaniem nie
+// zdradza (#231). Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej
+// (pojazd mocno przed rozkładem, ustawiona późniejsza godzina).
+const obOffer = $('ob-offer');
+
+function hideObOffer() {
+    obOffer.hidden = true;
+}
+
+function offerOnboardCheck(kurs) {
+    if (!kurs || !kurs.not_yet) { hideObOffer(); return; }
+    $('ob-offer-text').textContent = `Najbliższa ${kurs.num} będzie na przystanku `
+        + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at}.`;
+    obOffer.hidden = false;
+}
+
 /** Przełącznik "Stoję tutaj" / "Jestem w pojeździe". Zmienia PYTANIE, więc
     zabiera poprzednią odpowiedź na nie: start z drugiego trybu przestaje
     obowiązywać (nie da się naraz stać na przystanku i jechać autobusem).
@@ -3888,6 +3907,7 @@ function setStartMode(vehicle, focus = true) {
     updatePointMarker('start', null);
     restyle(previous);
     showLocateMsg('');
+    hideObOffer();
     saveUiState({startOnboard: vehicle});
     // Kursor w polu linii tylko wtedy, gdy ktoś sam kliknął przełącznik.
     // Przy wracaniu do zapamiętanego trybu (odświeżenie strony) klawiatura
@@ -3939,6 +3959,7 @@ function fillStops() {
         + stops.map(stop =>
             `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
     obStopSelect.disabled = !stops.length;
+    hideObOffer();
     syncOnboardView();
 }
 
@@ -3967,6 +3988,7 @@ if (obLineInput) {
     // samą kartę: komplet mówi jedno zdanie, a zajmuje trzy rzędy panelu.
     obStopSelect.addEventListener('change', () => {
         obCollapsed = true;
+        hideObOffer();
         syncOnboardView();
         if (onboardReady() && endInput.value) search();
     });
@@ -3977,6 +3999,16 @@ if (obLineInput) {
     obSummary.addEventListener('click', () => {
         obCollapsed = false;
         syncOnboardView();
+    });
+
+    $('ob-offer-yes').addEventListener('click', hideObOffer);
+    // "Nie" to "pomyliłem się" - pola wyboru mają stanąć otworem do
+    // poprawki, także w karcie zwiniętej na telefonie (patrz phone.js).
+    $('ob-offer-no').addEventListener('click', () => {
+        hideObOffer();
+        obCollapsed = false;
+        syncOnboardView();
+        document.dispatchEvent(new Event('planner:edit'));
     });
 
     // Tryb przeżywa odświeżenie strony (patrz saveUiState) - ale sam wybór
@@ -3996,6 +4028,7 @@ function resetResults() {
     clearJourney();
     clearPreview();
     clearFlow();
+    hideObOffer();
     renderVehicles();
     resultsBox.innerHTML = '';
     setTabCount(0);
@@ -4206,6 +4239,7 @@ function renderPlan(data, refit) {
         renderJourneys();
     }
     showWaitNotice(data);
+    offerOnboardCheck(data.onboard);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
@@ -4217,6 +4251,7 @@ function loadPlan(token, refit) {
             if (token !== requestToken) return false;
             if (data.error) {
                 clearFlow();
+                hideObOffer();
                 showError(data.error, data.suggestions);
                 return false;
             }

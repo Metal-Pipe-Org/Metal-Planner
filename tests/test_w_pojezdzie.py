@@ -100,6 +100,39 @@ def test_kierunek_zaweza_wybor():
                              headsign="cel")["trip"] == "nasz"
 
 
+def test_kurs_w_drodze_nie_budzi_watpliwosci():
+    """O 00:00 „nasz" rusza z POCZATEK, więc jedzie już w stronę WSIADAM -
+    pytający może w nim siedzieć."""
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", 0)["not_yet"] is False
+
+
+def test_kurs_ktory_jeszcze_nie_wyjechal_budzi_watpliwosc():
+    """Zgłoszenie #231: o 00:15 najbliższy 146 wyjeżdża z POCZATEK dopiero
+    o 00:30, więc teraz nie da się nim jechać w stronę WSIADAM. Kurs zostaje
+    rozpoznany (liczymy od niego), ale z flagą, po której front zapyta,
+    czy na pewno."""
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 900)
+
+    assert kurs["trip"] == "nastepny"
+    assert kurs["not_yet"] is True
+
+
+def test_pojazd_przed_rozkladem_miesci_sie_w_zapasie():
+    """Pojazd, który według rozkładu rusza z poprzedniego przystanku za
+    kilka minut, może już stać na nim albo jechać przed czasem - to nie
+    jest jeszcze pomyłka."""
+    przed = 1800 - onboard.NOT_YET_SLACK_SEC
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", przed)["not_yet"] is False
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", przed - 1)["not_yet"] is True
+
+
+def test_pierwszy_przystanek_kursu_liczy_wlasny_odjazd():
+    """Przed pierwszym przystankiem kursu nie ma poprzedniego - pojazd stoi
+    tam do odjazdu, więc wątpliwość budzi dopiero odjazd daleko od pytania."""
+    assert onboard.find_ride(_day(), "146", "bus", "POCZATEK", 0)["not_yet"] is False
+    assert onboard.find_ride(_day(), "146", "bus", "POCZATEK", 600)["not_yet"] is True
+
+
 # ------------------------------------------------------- start z pokładu
 
 
@@ -114,6 +147,7 @@ def test_wyszukiwanie_rusza_spod_nastepnego_przystanku(install_day, pin_deadline
     assert wynik["onboard"]["line"] == "Autobus 146"
     assert wynik["onboard"]["headsign"] == "CEL"
     assert wynik["onboard"]["stop_name"] == "WSIADAM"
+    assert wynik["onboard"]["not_yet"] is False
 
 
 def test_kazda_propozycja_mowi_gdzie_wysiasc(install_day, pin_deadline):

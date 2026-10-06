@@ -94,6 +94,8 @@ const phoneLayout = (() => {
             collapse(true);
         });
         summary.addEventListener('click', () => collapse(false));
+        // „Nie” w pytaniu o kurs (#231) - poprawia się go w rozwiniętym formularzu.
+        document.addEventListener('planner:edit', () => collapse(false));
         // ✕ zaczyna nową relację, a tę wpisuje się w rozwiniętym formularzu.
         document.getElementById('clear').addEventListener('click', () => collapse(false));
     }

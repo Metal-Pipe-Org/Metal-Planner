@@ -204,6 +204,14 @@
         <button type="button" id="ob-summary" class="onboard-summary" hidden
                 aria-controls="onboard-fields" aria-expanded="true"></button>
 
+        {# Rozpoznany kurs nie może jeszcze być przy tym przystanku (#231) -
+           pytanie wygląda i zachowuje się jak to o przystanek przy GPS. #}
+        <div class="locate-offer" id="ob-offer" role="status" hidden>
+            <span class="locate-offer-text">Czy na pewno? <span id="ob-offer-text"></span></span>
+            <button type="button" class="button primary" id="ob-offer-yes">Tak</button>
+            <button type="button" class="button" id="ob-offer-no">Nie</button>
+        </div>
+
         <div class="endpoints">
             <div class="rail" aria-hidden="true">
                 <span class="rail-dot start"></span>

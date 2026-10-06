@@ -46,6 +46,11 @@ SEARCH_WINDOW_SEC = 3 * 3600
 # przyjeżdżające o T wyjechało najwyżej tyle wcześniej.
 LONGEST_HOP_SEC = 40 * 60
 
+# Ile pojazd może jeszcze stać na poprzednim przystanku albo wyprzedzać
+# rozkład, zanim rozpoznany kurs przestaje pasować do "jadę nim teraz"
+# (zgłoszenie #231).
+NOT_YET_SLACK_SEC = 5 * 60
+
 
 def _hhmm(sec):
     """Sekundy na osi doby -> 'GG:MM' (ten sam zapis, co planner._fmt_time:
@@ -114,6 +119,21 @@ def _by_arrival(day, num, mode, stop_id, from_sec, headsign):
     return best
 
 
+def _leaves_previous(day, trip, stop_id, at_sec):
+    """Kiedy kurs rusza z przystanku PRZED `stop_id` - od tej chwili jedzie
+    w stronę wskazanego przystanku. Na pierwszym przystanku kursu poprzedniego
+    nie ma, a pojazd stoi tam do własnego odjazdu, więc to on jest tą chwilą.
+
+    Kurs mijający słupek dwa razy (pętla w środku trasy) dojeżdża do niego
+    ostatnim połączeniem przed `at_sec`."""
+    leaves = at_sec
+    for i in gtfs.trip_conns(day, trip):
+        dep_t, arr_t, _from_s, to_s, _trip = day.conns[i]
+        if to_s == stop_id and arr_t <= at_sec:
+            leaves = dep_t
+    return leaves
+
+
 def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
     """Którym kursem jedzie pasażer - {"error"} albo opis startu z pokładu.
 
@@ -153,6 +173,12 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
         # Sekunda na osi doby rozkładowej - stąd rusza całe wyszukiwanie.
         "sec": dep_sec,
         "at": _hhmm(at_sec),
+        # Najbliższy pasujący kurs według rozkładu nie wyjechał jeszcze nawet
+        # z poprzedniego przystanku, więc pytający nie może nim teraz jechać
+        # - najpewniej pomylił linię, kierunek albo przystanek. Liczymy dalej
+        # od tego kursu, ale front ma zapytać, czy na pewno (zgłoszenie #231).
+        "not_yet": (_leaves_previous(day, trip, stop_id, at_sec)
+                    > from_sec + NOT_YET_SLACK_SEC),
     }
 
 

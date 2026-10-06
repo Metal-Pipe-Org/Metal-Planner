@@ -785,7 +785,13 @@ Zostają więc dwie rzeczy do zrobienia:
    ma wcale, więc „jadę na pętlę, co dalej" znajduje się osobną, wolniejszą
    drogą — po przyjeździe, w oknie połączeń. Nierozpoznany kurs to komunikat
    („linia X nie przejeżdża już dziś przez Y"), a nie pusta lista: pomyłka
-   w którymś z trzech pól ma wyglądać jak pomyłka.
+   w którymś z trzech pól ma wyglądać jak pomyłka. Kurs rozpoznany, ale
+   według rozkładu jeszcze nie w drodze — nie wyjechał nawet z poprzedniego
+   przystanku, z zapasem 5 min (`NOT_YET_SLACK_SEC`) na postój tam albo
+   jazdę przed czasem — dostaje `not_yet` (zgłoszenie #231). Mapa liczy się
+   od niego jak zawsze, ale nad polem celu staje pytanie „Czy na pewno?
+   Najbliższa 134 będzie na przystanku … dopiero o 16:28" z „Tak" (zostaw)
+   i „Nie" (rozwiń wybór pojazdu do poprawki).
 2. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
    samym słupku, więc przypadki są dokładnie dwa: pierwszy etap jedzie NASZYM
    kursem (siedzimy dalej, wysiadka `stops` przystanków dalej) albo czymkolwiek
@@ -1017,8 +1023,9 @@ dało się dojechać.
   Z POKŁADU pojazdu (patrz `onboard.py`) — zamiast `start`/`start_lat`.
   `onboard_stop` to identyfikator SŁUPKA z `/api/onboard`, nie nazwa: pasażer
   jedzie jedną krawędzią przystanku i tylko na niej otworzą się drzwi.
-  Odpowiedź niesie wtedy `onboard: {num, mode, line, headsign, stop_name, at}`
-  (rozpoznany kurs — front pisze z tego nagłówek listy), a KAŻDA propozycja
+  Odpowiedź niesie wtedy `onboard: {num, mode, line, headsign, stop_name, at,
+  not_yet}` (rozpoznany kurs — front pisze z tego nagłówek listy; `not_yet`
+  to kurs, którym według rozkładu nie da się jeszcze jechać), a KAŻDA propozycja
   dostaje `onboard: {stop, stops, time, transfer}`: gdzie wysiąść, za ile to
   przystanków, o której i czy po wysiadce jedzie się jeszcze dalej
   (`stops: 0` = wysiadka na najbliższym przystanku, `transfer: false` = ten
@@ -1230,6 +1237,15 @@ dało się dojechać.
 | `.claude/commands/` | polecenia Claude'a używane przez workflow: ocena PR-a, rozwiązanie zgłoszenia |
 
 ## Changelog
+
+- **2026-10-06** — **„Jestem w pojeździe” pyta, gdy kurs jeszcze nie jedzie**
+  (zgłoszenie #231). Gdy najbliższy kurs wybranej linii według rozkładu nie
+  wyjechał jeszcze nawet z poprzedniego przystanku (z zapasem 5 min), nie da
+  się nim teraz jechać — najpewniej pomylona linia, kierunek albo przystanek.
+  Mapa liczy się jak dotąd, ale pod wyborem pojazdu pojawia się pytanie
+  „Czy na pewno? Najbliższa 134 będzie na przystanku … dopiero o 16:28”.
+  „Tak” je chowa, „Nie” rozwija wybór pojazdu do poprawki (na telefonie
+  także zwiniętą kartę wyszukiwania). Nowe pole `onboard.not_yet` w `/api/flow`.
 
 - **2026-10-03** — **przystanki po drodze** (zgłoszenie #169). Rozwinięta
   propozycja mówiła o przejeździe tylko „7 przystanków · 12 min”. Ta liczba
