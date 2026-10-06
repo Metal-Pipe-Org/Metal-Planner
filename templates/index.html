@@ -279,16 +279,6 @@
         {# Rower miejski ma JEDEN włącznik - ten w pasku warstw wyżej. Osobny
            checkbox „dojazd rowerem" znaczył dokładnie to samo co on, tyle że
            w drugim miejscu i tylko dla wyszukiwania. #}
-        <p class="hint hint-place">
-            Wskaż na mapie przystanek albo dowolny punkt — najpierw start,
-            potem cel. Inną relację zacznij od ✕.
-        </p>
-        {# Ta sama linijka, ale dla jadącego: startu nie wybiera się klikaniem,
-           bo startem jest pojazd. Klik w mapę ustawia wtedy sam cel. #}
-        <p class="hint hint-onboard">
-            Wpisz linię, wybierz kierunek z czoła pojazdu i przystanek, który
-            masz przed sobą. Cel wskaż na mapie albo wpisz obok.
-        </p>
 
     </div>
 
@@ -342,11 +332,6 @@
             </span>
             <span class="spinner tt-spinner" aria-hidden="true"></span>
         </div>
-
-        <p class="hint" id="tt-hint">
-            Wpisz numer linii albo nazwę przystanku — możesz też wskazać
-            słupek na mapie.
-        </p>
 
         {#
           Wyjście z rozkładów BEZ opuszczania mapy - tylko tam, gdzie nic
@@ -470,28 +455,18 @@
         <label class="dev-check">
             <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
         </label>
-        <p class="field-hint">
-            Pasek podaje, o której wyjechać i dojechać najszybszą trasą, oraz
-            zakres godzin mapy, a jego „Pokaż więcej” zagęszcza mapę dwa, trzy,
-            cztery razy.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="tt-past" checked> Szare godziny w tablicy
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Odjazdy, na które już nie zdążysz, zostają w tablicy na szaro. Wyłączone — tablica zaczyna się od chwili, w której według mapy tu jesteś.">i</span>
         </label>
-        <p class="field-hint">
-            Odjazdy od godziny wyszukania, wcześniejsze niż chwila, w której
-            według mapy tu jesteś - szare. Wyłączone: tablica zaczyna się od tej
-            chwili.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka, i stoją na mapie jako puste pierścienie.">i</span>
         </label>
-        <p class="field-hint">
-            Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka,
-            i stoją na mapie jako puste pierścienie.
-        </p>
 
     </details>
 
@@ -507,25 +482,19 @@
     <div class="field">
         <label for="walk-pace">
             Tempo marszu <output id="walk-pace-value">zwykłe</output>
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Dotyczy wszystkich przejść. Zwykłe to ok. 42 m na minutę w linii prostej, wolne ok. 33, szybkie ok. 54; krótsze przejście i tak trwa co najmniej 3 minuty.">i</span>
         </label>
         <input type="range" id="walk-pace" min="0" max="2" step="1" value="1">
-        <p class="field-hint">
-            Wszystkie przejścia: między przystankami, ze startu, do celu, do auta
-            i do roweru. Zwykłe to ok. 42 m na minutę w linii prostej, wolne
-            ok. 33, szybkie ok. 54; krótsze przejście i tak trwa co najmniej
-            3 minuty.
-        </p>
     </div>
 
     <div class="field">
         <label for="bike-kmh">
             Prędkość roweru <output id="bike-kmh-value">10</output> km/h
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Liczona w linii prostej między stacjami, więc objazdy ulicami już w niej siedzą — 10 km/h to ok. 14 km/h realnej jazdy.">i</span>
         </label>
         <input type="range" id="bike-kmh" min="5" max="20" step="1" value="10">
-        <p class="field-hint">
-            Liczona w linii prostej między stacjami, więc objazdy ulicami już
-            w niej siedzą — 10 km/h to ok. 14 km/h realnej jazdy.
-        </p>
     </div>
 
     <div class="field">
@@ -533,32 +502,24 @@
             Wypożyczenie i zwrot roweru <output id="bike-overhead-value">2</output> min
         </label>
         <input type="range" id="bike-overhead" min="0" max="10" step="1" value="2">
-        <p class="field-hint">
-            Stały czas każdego przejazdu, niezależny od jego długości.
-        </p>
     </div>
 
     <div class="field">
         <label for="car-kmh">
             Prędkość Traficara <output id="car-kmh-value">22</output> km/h
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Liczona w linii prostej do celu, więc objazdy i światła już w niej siedzą — 22 km/h to ok. 29 km/h realnej jazdy.">i</span>
         </label>
         <input type="range" id="car-kmh" min="10" max="40" step="1" value="22">
-        <p class="field-hint">
-            Liczona w linii prostej do celu, więc objazdy ulicami i światła już
-            w niej siedzą — 22 km/h to ok. 29 km/h realnej jazdy, trochę wolniej
-            niż miasto bez korków.
-        </p>
     </div>
 
     <div class="field">
         <label for="car-overhead">
             Ruszenie i parkowanie Traficara <output id="car-overhead-value">8</output> min
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Otwarcie i wyjazd z miejsca, a na końcu szukanie miejsca, zakończenie najmu i dojście pod cel.">i</span>
         </label>
         <input type="range" id="car-overhead" min="0" max="20" step="1" value="8">
-        <p class="field-hint">
-            Stały czas każdej jazdy: otwarcie i wyjazd z miejsca, a na końcu
-            szukanie miejsca, zakończenie najmu i dojście pod cel.
-        </p>
     </div>
 
     </details>
@@ -573,45 +534,25 @@
 
         <label class="dev-check">
             <input type="checkbox" id="bikes-merged"> Jeden przycisk rowerów
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe i elektryczne naraz.">i</span>
         </label>
-        <p class="field-hint">
-            Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe
-            i elektryczne naraz.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="no-pull-refresh"> Wyłącz odświeżanie przeciągnięciem w dół
         </label>
-        <p class="field-hint">
-            Gest „pociągnij w dół, żeby odświeżyć" w aplikacji zainstalowanej
-            jako PWA łatwo wywołać przypadkiem, np. przewijając listę do samej
-            góry. Ta opcja go gasi, zostawiając zwykłe przewijanie bez zmian.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
         </label>
-        <p class="field-hint">
-            Bez niego start jest zawsze stojącym miejscem — przystankiem albo
-            punktem na mapie.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="routes-on" checked> Propozycje tras
         </label>
-        <p class="field-hint">
-            Bez nich zostaje sama mapa — lista tras nie jest wtedy w ogóle
-            liczona. Na telefonie znika cała zakładka „Trasy".
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="via-open"> Zawsze pokazuj przystanki po drodze
         </label>
-        <p class="field-hint">
-            W rozwiniętej propozycji trasy każdy przejazd od razu wypisuje
-            mijane przystanki z godzinami. Bez tego rozwija je kliknięcie
-            w liczbę przystanków.
-        </p>
 
     </details>
 
@@ -621,35 +562,28 @@
     <div class="field">
         <label for="density">
             Gęstość mapy <output id="density-value">2.5</output>
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru. Godzina „mapa pokazuje do” jest tego skutkiem.">i</span>
         </label>
         <input type="range" id="density" min="0.5" max="15" step="0.5" value="2.5">
-        <p class="field-hint">
-            Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru,
-            a godzina „mapa pokazuje do” jest tego skutkiem.
-        </p>
     </div>
 
     <div class="field">
         <label for="car-count">
             Ile aut Traficara <output id="car-count-value">3</output>
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”, są zawsze. Suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.">i</span>
         </label>
         <input type="range" id="car-count" min="1" max="30" step="1" value="3">
-        <p class="field-hint">
-            Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”,
-            są zawsze, a suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.
-        </p>
     </div>
 
     <div class="field">
         <label for="bike-count">
             Ile stacji z rowerem <output id="bike-count-value">3</output>
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Stacje, których żadna inna nie bije godziną przy rowerze, godziną w celu ani liczbą pojazdów, są zawsze. Suwak dokłada kolejne.">i</span>
         </label>
         <input type="range" id="bike-count" min="1" max="30" step="1" value="3">
-        <p class="field-hint">
-            Stacje, których żadna inna nie bije godziną przy rowerze, godziną
-            w celu ani liczbą pojazdów, są zawsze, a suwak dokłada kolejne.
-            Przejazdy z każdej stacji widać pod kursorem.
-        </p>
     </div>
 
     </details>
@@ -659,25 +593,21 @@
 
         <label class="dev-check">
             <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu, jeśli jedzie się dalej stąd.">i</span>
         </label>
         <label class="dev-check">
             <input type="checkbox" id="time-ends"> …z kropką dokładnie w tym punkcie
         </label>
-        <p class="field-hint">
-            Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu,
-            jeśli jedzie się dalej stąd.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
         </label>
         <label class="dev-check">
             <input type="checkbox" id="time-ride"> Sam czas jazdy w pasku nad mapą
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Czas jazdy liczy się od wejścia do pierwszego pojazdu, bez czekania na niego.">i</span>
         </label>
-        <p class="field-hint">
-            Czas jazdy liczy się od wejścia do pierwszego pojazdu, bez czekania
-            na niego.
-        </p>
     </details>
 
     {#
@@ -689,21 +619,15 @@
 
         <label class="dev-check">
             <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie, z którego wzięta jest godzina.">i</span>
         </label>
-        <p class="field-hint">
-            Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie,
-            z którego wzięta jest godzina.
-        </p>
 
         <div class="field compact">
             <label for="dot-rows">
                 Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
             </label>
             <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
-            <p class="field-hint">
-                Powyżej dwudziestu odjazdów tablica spod kropki zasłania mapę,
-                o którą się właśnie pyta.
-            </p>
         </div>
 
         <div class="dev-section-head">Gdzie pokazać rozkład</div>
@@ -713,11 +637,9 @@
         </label>
         <label class="dev-check">
             <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Okienko zostaje do zamknięcia. Można włączyć dymek, okienko, oba albo żadne.">i</span>
         </label>
-        <p class="field-hint">
-            Tablica odjazdów i podpowiedź o linii pokazują się w dymku, w okienku,
-            które zostaje do zamknięcia, w obu albo w żadnym.
-        </p>
 
     </details>
 
@@ -728,38 +650,27 @@
 
         <label class="dev-check">
             <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Obok drugiego końca przejazdu staje godzina policzona z odległości, a nie sama odległość.">i</span>
         </label>
-        <p class="field-hint">
-            Obok drugiego końca przejazdu staje godzina policzona z odległości,
-            a nie sama odległość.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
         </label>
-        <p class="field-hint">
-            Kreski wybranych przejazdów i ich stacje końcowe stoją na mapie cały
-            czas, a nie tylko pod kursorem.
-        </p>
 
         <div class="dev-section-head">Traficary</div>
 
         <label class="dev-check">
             <input type="checkbox" id="car-times"> Godzina dojazdu autem
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Godzina szacowana z odległości w linii prostej i założeń czasowych. Auta wybierane są nią zawsze — przełącznik tylko ją pokazuje.">i</span>
         </label>
-        <p class="field-hint">
-            Dymek auta mówi też, o której mniej więcej dowiezie do celu — godzina
-            policzona z odległości w linii prostej i założeń czasowych, nie
-            odczytana. Auta wybierane są nią zawsze, przełącznik tylko ją pokazuje.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez niego strefa pokazuje się po najechaniu na auto.">i</span>
         </label>
-        <p class="field-hint">
-            Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez
-            niego strefa pokazuje się po najechaniu na auto.
-        </p>
 
     </details>
 
@@ -844,20 +755,15 @@
 
         <label class="dev-check">
             <input type="checkbox" id="debug-why"> Dlaczego rower i auto są na mapie
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych je bije i które.">i</span>
         </label>
-        <p class="field-hint">
-            Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych
-            je bije i które — przy rowerze dla całej stacji, z listą jej podróży.
-        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="debug-why-seg"> Dlaczego kawałek jest na mapie
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Tylko przy „Mapie z wartości podróży”: dymek linii wymienia podróże, które tędy jadą, i od jakiej tolerancji każda jest na mapie.">i</span>
         </label>
-        <p class="field-hint">
-            Tylko przy „Mapie z wartości podróży”: dymek linii wymienia podróże,
-            które tędy jadą, i przy każdej mówi, od jakiej tolerancji jest na
-            mapie i czemu, a pod spodem — co ukryły numerki.
-        </p>
 
     </details>
 
@@ -877,10 +783,6 @@
                 Wielkość kropek <output id="dot-size-value">8</output> px
             </label>
             <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
-            <p class="field-hint">
-                Kropki na wybranej trasie i, o piksel mniejsze, na węzłach
-                wachlarza — najechanie pokazuje tablicę odjazdów.
-            </p>
         </div>
 
         {# Na mapie z wartości podróży każda linia jest pełna, więc suwaki
@@ -938,11 +840,6 @@
         <label class="dev-check">
             <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
         </label>
-        <p class="field-hint">
-            Spadająca rura milczy, gdy system prosi o ograniczenie animacji
-            (<code>prefers-reduced-motion</code>) albo przeglądarka nie pozwala
-            jeszcze grać.
-        </p>
 
     </details>
 
@@ -956,10 +853,7 @@
                 Sprawdź
             </button>
         </div>
-        <p class="field-hint" id="sw-status" role="status">
-            Porównuje wersję działającą w przeglądarce z tą, którą serwer
-            wydaje w tej chwili.
-        </p>
+        <p class="field-hint" id="sw-status" role="status"></p>
     </div>
 
     </details>
@@ -971,12 +865,10 @@
     <div class="field">
         <label for="transfer-gain">
             Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Lista proponuje przesiadkę jako pierwszą dopiero, gdy oszczędza co najmniej tyle minut względem jazdy tym samym pojazdem.">i</span>
         </label>
         <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
-        <p class="field-hint">
-            Lista proponuje przesiadkę jako pierwszą dopiero wtedy, gdy oszczędza
-            co najmniej tyle minut względem jazdy tym samym pojazdem.
-        </p>
     </div>
 
     </details>
