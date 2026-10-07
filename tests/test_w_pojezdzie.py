@@ -63,14 +63,43 @@ def test_rozpoznaje_najblizszy_kurs_linii():
     assert kurs["headsign"] == "CEL"
 
 
-def test_kurs_ktory_juz_odjechal_sie_nie_liczy():
-    """Pytanie pada z pokładu, więc następny przystanek jest z definicji
-    przed pojazdem: kurs, który minął WSIADAM o 00:10, o 00:15 już nie jest
-    naszym kursem."""
+def test_najblizszy_jest_kurs_przeszly_gdy_blizej():
+    """Zgłoszenie #231: o 00:15 „nasz" minął WSIADAM według rozkładu pięć
+    minut temu, a „nastepny" będzie tam dopiero o 00:40. Bliżej jest ten
+    przeszły - najpewniej spóźniony pojazd, w którym pasażer siedzi. Mapa
+    liczy się od jego rozkładu, a flaga `late` każe frontowi to powiedzieć."""
     kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 900)
+
+    assert kurs["trip"] == "nasz"
+    assert kurs["sec"] == 600
+    assert kurs["late"] is True
+    assert kurs["not_yet"] is False
+
+
+def test_najblizszy_jest_kurs_przyszly_gdy_blizej():
+    """O 00:27 „nasz" minął WSIADAM 17 minut temu, a „nastepny" będzie tam
+    za 13 - wygrywa przyszły i nie jest spóźniony."""
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 1620)
 
     assert kurs["trip"] == "nastepny"
     assert kurs["sec"] == 2400
+    assert kurs["late"] is False
+
+
+def test_lekkie_spoznienie_nie_jest_ostrzezeniem():
+    """Kurs złapany przed przystankiem jest według rozkładu zawsze trochę
+    spóźniony - o tym nie ma co mówić, dopóki mieści się w zapasie."""
+    w_zapasie = 600 + onboard.OFF_SCHEDULE_SLACK_SEC
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie)
+    assert kurs["trip"] == "nasz" and kurs["late"] is False
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie + 1)["late"] is True
+
+
+def test_pierwszy_kurs_dnia_nie_ma_przeszlego():
+    """Bez kursu wcześniejszego bierzemy przyszły, choćby był daleko."""
+    kurs = onboard.find_ride(_rzadki_day(), "146", "bus", "WSIADAM", 0)
+
+    assert kurs["trip"] == "rzadki" and kurs["late"] is False
 
 
 def test_petla_koncowa_tez_jest_przystankiem():
@@ -100,37 +129,33 @@ def test_kierunek_zaweza_wybor():
                              headsign="cel")["trip"] == "nasz"
 
 
-def test_kurs_w_drodze_nie_budzi_watpliwosci():
-    """O 00:00 „nasz" rusza z POCZATEK, więc jedzie już w stronę WSIADAM -
-    pytający może w nim siedzieć."""
-    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", 0)["not_yet"] is False
+def _rzadki_day():
+    """Jedyny 146 dnia rusza z POCZATEK o 01:00 - wcześniejszego nie ma, więc
+    najbliższym jest on, choćby pytanie padło dużo wcześniej."""
+    return make_day([
+        {"trip_id": "rzadki", "label": "Autobus 146", "headsign": "CEL",
+         "stops": [("POCZATEK", 3600, 3600), ("WSIADAM", 4200, 4200),
+                   ("CEL", 6000, 6000)]},
+    ])
 
 
-def test_kurs_ktory_jeszcze_nie_wyjechal_budzi_watpliwosc():
-    """Zgłoszenie #231: o 00:15 najbliższy 146 wyjeżdża z POCZATEK dopiero
-    o 00:30, więc teraz nie da się nim jechać w stronę WSIADAM. Kurs zostaje
-    rozpoznany (liczymy od niego), ale z flagą, po której front zapyta,
-    czy na pewno."""
-    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 900)
+def test_kurs_ktory_dopiero_przyjedzie_budzi_watpliwosc():
+    """Zgłoszenie #231: o 00:00 najbliższy 146 będzie przy WSIADAM dopiero
+    o 01:10. Kurs zostaje rozpoznany (liczymy od niego), ale z flagą, po
+    której front ostrzega, że godziny na mapie liczą się od 01:10."""
+    kurs = onboard.find_ride(_rzadki_day(), "146", "bus", "WSIADAM", 0)
 
-    assert kurs["trip"] == "nastepny"
+    assert kurs["trip"] == "rzadki"
     assert kurs["not_yet"] is True
 
 
-def test_pojazd_przed_rozkladem_miesci_sie_w_zapasie():
-    """Pojazd, który według rozkładu rusza z poprzedniego przystanku za
-    kilka minut, może już stać na nim albo jechać przed czasem - to nie
-    jest jeszcze pomyłka."""
-    przed = 1800 - onboard.NOT_YET_SLACK_SEC
-    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", przed)["not_yet"] is False
-    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", przed - 1)["not_yet"] is True
-
-
-def test_pierwszy_przystanek_kursu_liczy_wlasny_odjazd():
-    """Przed pierwszym przystankiem kursu nie ma poprzedniego - pojazd stoi
-    tam do odjazdu, więc wątpliwość budzi dopiero odjazd daleko od pytania."""
-    assert onboard.find_ride(_day(), "146", "bus", "POCZATEK", 0)["not_yet"] is False
-    assert onboard.find_ride(_day(), "146", "bus", "POCZATEK", 600)["not_yet"] is True
+def test_zapas_jest_ten_sam_w_przod_co_wstecz():
+    """„Będzie" ostrzega od tego samego zapasu co „była": liczonego od
+    rozkładowej godziny przy wskazanym przystanku."""
+    w_zapasie = 600 - onboard.OFF_SCHEDULE_SLACK_SEC
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie)
+    assert kurs["trip"] == "nasz" and kurs["not_yet"] is False
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie - 1)["not_yet"] is True
 
 
 # ------------------------------------------------------- start z pokładu
@@ -147,7 +172,21 @@ def test_wyszukiwanie_rusza_spod_nastepnego_przystanku(install_day, pin_deadline
     assert wynik["onboard"]["line"] == "Autobus 146"
     assert wynik["onboard"]["headsign"] == "CEL"
     assert wynik["onboard"]["stop_name"] == "WSIADAM"
-    assert wynik["onboard"]["not_yet"] is False
+    assert wynik["onboard"]["late"] is False
+
+
+def test_spozniony_kurs_liczy_mape_od_rozkladu(install_day, pin_deadline):
+    """O 00:15 najbliższy jest „nasz", który według rozkładu ruszył spod
+    WSIADAM o 00:10. Mapa liczy się od tej rozkładowej sekundy - tak, jakby
+    jechał o czasie - a odpowiedź mówi, że jest spóźniony."""
+    install_day(_day())
+    pin_deadline(3000)
+    wynik = planner.plan_flow("", "CEL", WHEN.replace(minute=15),
+                              in_vehicle=_w_pojezdzie())
+
+    assert wynik["departure"] == "00:10"
+    assert wynik["onboard"]["late"] is True
+    assert wynik["onboard"]["at"] == "00:10"
 
 
 def test_kazda_propozycja_mowi_gdzie_wysiasc(install_day, pin_deadline):

@@ -2705,7 +2705,7 @@ def plan_flow(start_query, end_query, when=None,
         # liście zaczyna się wysiadką, a nie wsiadaniem.
         **({"onboard": {k: ride[k] for k in
                         ("num", "mode", "line", "headsign", "stop_name", "at",
-                         "not_yet")}}
+                         "not_yet", "late")}}
            if ride else {}),
         # Stan warstwy rowerowej - tylko gdy o nią pytano (i jest lista, do
         # której rower dokłada propozycje). Front ma po czym

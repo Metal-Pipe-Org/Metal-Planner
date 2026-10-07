@@ -646,14 +646,29 @@ body.start-onboard .hint-onboard { display: block; }
     padding: 0 14px;
 }
 
-#locate-offer-no,
-#ob-offer-no {
+#locate-offer-no {
     border: 1px solid var(--accent);
     background: var(--surface);
     color: var(--accent);
 }
 
 .locate-offer[hidden] { display: none; }
+
+/* Blok z „×” opływanym przez tekst, a nie flex: w flexie przycisk zabiera
+   całą kolumnę po prawej i pod nim zostaje pusty pas. Dlatego w HTML stoi
+   PRZED tekstem - float działa tylko na to, co idzie po nim. */
+#ob-warn { display: block; padding: 8px 12px; }
+#ob-warn[hidden] { display: none; }
+#ob-warn-text { white-space: pre-line; }
+
+#ob-warn-close {
+    float: right;
+    width: 24px;
+    height: 24px;
+    margin: -2px -6px 0 6px;
+    font-size: 14px;
+    background: transparent;
+}
 
 .ac-list {
     position: absolute;

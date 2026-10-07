@@ -29,15 +29,16 @@ przystanku (zapowiedź albo tablica). Z tego wychodzi jeden konkretny kurs
 rozkładu: ten, który z tego słupka rusza najbliżej godziny pytania.
 """
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 
 import gtfs
 import timetables
 
-# Jak daleko w przód szukamy kursu. Pasażer siedzi w pojeździe, więc następny
-# przystanek jest o minuty, nie o godziny - ale linia nocna potrafi mieć
-# godzinny takt i wtedy "najbliższy kurs" wypada naprawdę daleko. Okno jest
-# tylko sufitem pomyłki (zła linia, zły przystanek), nie miarą czegokolwiek.
+# Jak daleko w przód i wstecz szukamy kursu. Pasażer siedzi w pojeździe, więc
+# następny przystanek jest o minuty, nie o godziny - ale linia nocna potrafi
+# mieć godzinny takt i wtedy "najbliższy kurs" wypada naprawdę daleko. Okno
+# jest tylko sufitem pomyłki (zła linia, zły przystanek), nie miarą
+# czegokolwiek.
 SEARCH_WINDOW_SEC = 3 * 3600
 
 # Pętla końcowa nie ma odjazdów (patrz gtfs.stop_departures), więc kurs, który
@@ -46,10 +47,11 @@ SEARCH_WINDOW_SEC = 3 * 3600
 # przyjeżdżające o T wyjechało najwyżej tyle wcześniej.
 LONGEST_HOP_SEC = 40 * 60
 
-# Ile pojazd może jeszcze stać na poprzednim przystanku albo wyprzedzać
-# rozkład, zanim rozpoznany kurs przestaje pasować do "jadę nim teraz"
-# (zgłoszenie #231).
-NOT_YET_SLACK_SEC = 5 * 60
+# Rozjazd z rozkładem, o którym nie ma co mówić - w obie strony tak samo
+# (zgłoszenie #231). Do 3 minut kurs uchodzi w komunikacji miejskiej za
+# punktualny, a pojazd, w którym się siedzi, i tak jest przy następnym
+# przystanku za chwilę albo przed chwilą według rozkładu.
+OFF_SCHEDULE_SLACK_SEC = 3 * 60
 
 
 def _hhmm(sec):
@@ -84,22 +86,24 @@ def _matches(day, trip, num, mode, headsign):
     return True
 
 
-def _by_departure(day, num, mode, stop_id, from_sec, headsign):
-    """Kurs rozpoznany po ODJEŹDZIE z podanego słupka - zwykły przypadek.
+def _by_departure(day, num, mode, stop_id, lo, hi, headsign, latest=False):
+    """Kurs rozpoznany po ODJEŹDZIE z podanego słupka w oknie [lo, hi] -
+    zwykły przypadek. Pierwszy w oknie, a z `latest` ostatni.
 
     Indeks słupek -> odjazdy jest i tak w dniu (gtfs.stop_departures), więc
     pytanie kosztuje jedno przeszukanie binarne, a nie przemiatanie doby.
     """
-    for dep, trip, _ in gtfs.departures_between(
-            day, [stop_id], from_sec, from_sec + SEARCH_WINDOW_SEC):
+    deps = gtfs.departures_between(day, [stop_id], lo, hi)
+    for dep, trip, _ in (reversed(deps) if latest else deps):
         if _matches(day, trip, num, mode, headsign):
             return trip, dep, dep
     return None
 
 
-def _by_arrival(day, num, mode, stop_id, from_sec, headsign):
+def _by_arrival(day, num, mode, stop_id, lo, hi, headsign, latest=False):
     """Kurs, który na podanym słupku KOŃCZY bieg - nie ma z niego odjazdu, więc
-    nie ma go w indeksie odjazdów i trzeba go znaleźć po przyjeździe.
+    nie ma go w indeksie odjazdów i trzeba go znaleźć po przyjeździe w oknie
+    [lo, hi]. Najwcześniejszy, a z `latest` najpóźniejszy.
 
     Osobna, wolniejsza ścieżka, bo dotyczy osobnego, rzadszego pytania
     ("jadę na pętlę, co dalej"). Przeglądamy okno połączeń, nie całą dobę:
@@ -107,31 +111,16 @@ def _by_arrival(day, num, mode, stop_id, from_sec, headsign):
     najwyżej o LONGEST_HOP_SEC.
     """
     best = None
-    start = bisect_left(day.dep_times, from_sec - LONGEST_HOP_SEC)
-    stop = bisect_left(day.dep_times, from_sec + SEARCH_WINDOW_SEC)
+    start = bisect_left(day.dep_times, lo - LONGEST_HOP_SEC)
+    stop = bisect_right(day.dep_times, hi)
     for _dep_t, arr_t, _from_s, to_s, trip in day.conns[start:stop]:
-        if to_s != stop_id or arr_t < from_sec:
+        if to_s != stop_id or not lo <= arr_t <= hi:
             continue
-        if best is not None and arr_t >= best[1]:
+        if best is not None and (arr_t <= best[1] if latest else arr_t >= best[1]):
             continue
         if _matches(day, trip, num, mode, headsign):
             best = (trip, arr_t, arr_t)
     return best
-
-
-def _leaves_previous(day, trip, stop_id, at_sec):
-    """Kiedy kurs rusza z przystanku PRZED `stop_id` - od tej chwili jedzie
-    w stronę wskazanego przystanku. Na pierwszym przystanku kursu poprzedniego
-    nie ma, a pojazd stoi tam do własnego odjazdu, więc to on jest tą chwilą.
-
-    Kurs mijający słupek dwa razy (pętla w środku trasy) dojeżdża do niego
-    ostatnim połączeniem przed `at_sec`."""
-    leaves = at_sec
-    for i in gtfs.trip_conns(day, trip):
-        dep_t, arr_t, _from_s, to_s, _trip = day.conns[i]
-        if to_s == stop_id and arr_t <= at_sec:
-            leaves = dep_t
-    return leaves
 
 
 def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
@@ -146,6 +135,13 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
     albo pasażer zostaje na przystanku - i dopiero od niej cokolwiek się
     liczy. Postoju to zresztą w tych danych prawie nie dotyczy: we wrocławskim
     GTFS przyjazd różni się od odjazdu w 1636 z 1,16 mln wierszy stop_times.
+
+    Kursem jest ten NAJBLIŻSZY godziny pytania - w przód albo wstecz
+    (zgłoszenie #231). Kurs, który według rozkładu minął przystanek pięć minut
+    temu, a następny jest za pół godziny, to najpewniej spóźniony pojazd,
+    w którym pasażer siedzi. Spóźnienia nie znamy (dane na żywo są poza
+    rozkładem), więc mapa liczy się od tego kursu według rozkładu, a front
+    mówi, że godziny na niej są przesunięte.
     """
     num = " ".join((num or "").split())
     if not num:
@@ -153,8 +149,15 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
     if stop_id not in day.stop_names:
         return {"error": "Nie znam takiego przystanku — wybierz go z listy."}
 
-    found = (_by_departure(day, num, mode, stop_id, from_sec, headsign)
-             or _by_arrival(day, num, mode, stop_id, from_sec, headsign))
+    hi = from_sec + SEARCH_WINDOW_SEC
+    ahead = (_by_departure(day, num, mode, stop_id, from_sec, hi, headsign)
+             or _by_arrival(day, num, mode, stop_id, from_sec, hi, headsign))
+    lo = from_sec - SEARCH_WINDOW_SEC
+    behind = (_by_departure(day, num, mode, stop_id, lo, from_sec - 1, headsign, True)
+              or _by_arrival(day, num, mode, stop_id, lo, from_sec - 1, headsign, True))
+    past = behind is not None and (ahead is None
+                                   or from_sec - behind[1] < ahead[1] - from_sec)
+    found = behind if past else ahead
     if found is None:
         nazwa = day.stop_names[stop_id]
         return {"error": f"Linia {num} nie przejeżdża już dziś przez przystanek "
@@ -173,12 +176,12 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
         # Sekunda na osi doby rozkładowej - stąd rusza całe wyszukiwanie.
         "sec": dep_sec,
         "at": _hhmm(at_sec),
-        # Najbliższy pasujący kurs według rozkładu nie wyjechał jeszcze nawet
-        # z poprzedniego przystanku, więc pytający nie może nim teraz jechać
-        # - najpewniej pomylił linię, kierunek albo przystanek. Liczymy dalej
-        # od tego kursu, ale front ma zapytać, czy na pewno (zgłoszenie #231).
-        "not_yet": (_leaves_previous(day, trip, stop_id, at_sec)
-                    > from_sec + NOT_YET_SLACK_SEC),
+        # Mapa liczy się od rozkładowej godziny kursu przy przystanku, nie od
+        # teraz. Gdy ta godzina odjeżdża od teraz o więcej niż zapas - w przód
+        # (`not_yet`) albo wstecz (`late`) - front ma to powiedzieć, bo godziny
+        # na mapie są przez to przesunięte (zgłoszenie #231).
+        "not_yet": not past and at_sec - from_sec > OFF_SCHEDULE_SLACK_SEC,
+        "late": past and from_sec - at_sec > OFF_SCHEDULE_SLACK_SEC,
     }
 
 
