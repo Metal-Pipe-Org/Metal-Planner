@@ -15,18 +15,17 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 ## Praca w tle
 
 7. Wszystko, co zajmie dłużej niż ok. 30 s, robi agent. W tym czasie użytkownik dostaje następną sprawę.
-8. W toku jest od 2 do 5 zadań naraz. Zadanie jest w toku, dopóki użytkownik nie rozpatrzy jego wyniku: liczy się i agent przy pracy, i wynik czekający w kolejce.
-9. Gdy w toku zostaje ostatnie zadanie, pytam, co przygotowujemy dalej. Nie pytam tylko dlatego, że agenci skończyli, skoro ich wyniki czekają w kolejce.
-10. Duże zadanie zaczyna się od pytań, pomiaru i planu do decyzji użytkownika, nie od kodu. Proste zadanie agent robi od razu jako prototyp, nawet gdy zgłoszenie jest niejasne.
-11. Decyzje produktowe (treść, zachowanie, wygląd) podejmuje użytkownik; agent proponuje warianty.
-12. Kod zmieniają tylko agenci, każdy w swoim worktree. Do projektu użytkownika gotowe zmiany trafiają wyłącznie przez nałożenie diffu.
+8. W toku jest od 2 do 5 zadań naraz. Zadanie jest w toku, dopóki użytkownik nie rozpatrzy jego wyniku: liczy się i agent przy pracy, i wynik czekający w kolejce. Gdy zostaje ostatnie, pytam, co przygotowujemy dalej.
+9. Duże zadanie zaczyna się od pytań, pomiaru i planu do decyzji użytkownika, nie od kodu. Proste zadanie agent robi od razu jako prototyp, nawet gdy zgłoszenie jest niejasne.
+10. Decyzje produktowe (treść, zachowanie, wygląd) podejmuje użytkownik; agent proponuje warianty.
+11. Kod zmieniają tylko agenci, każdy w swoim worktree. Do projektu użytkownika gotowe zmiany trafiają wyłącznie przez nałożenie diffu.
 
 ## Projekt użytkownika i git
 
-13. Gdy bierzemy się za zadanie, sam przełączam projekt użytkownika na gałąź tego zadania i nakładam zmiany. Nie robię tego, gdy rozmawiamy o czymś innym.
-14. Zanim użytkownik dostanie paczkę do Ridera, może kliknąć zmianę w aplikacji; uwagi wracają do agenta przed commitem.
-15. Commit, push i PR robi użytkownik w Riderze. Dostaje gałąź (już przełączoną) oraz tytuł i opis PR-a; komunikatu commita nie przygotowuję.
-16. Teksty dla ludzi (komentarze, odpowiedzi na recenzje) dostaje zwykle jako gotowy tekst do wklejenia; gdy chce napisać sam, daję uwagi do jego wersji.
-17. Zanim agent weźmie się za issue, sprawdzam, czy użytkownik jest do niego przypisany.
-18. Gdy PR jest scalony, usuwam lokalnie jego gałąź i worktree agenta.
-19. Po zamknięciu większej partii spraw proponuję użytkownikowi /compact, zanim rozmowa zrobi się za długa (automatyczne kompaktowanie przychodzi za późno).
+12. Gdy bierzemy się za zadanie, sam przełączam projekt użytkownika na gałąź tego zadania i nakładam zmiany. Nie robię tego, gdy rozmawiamy o czymś innym.
+13. Zanim użytkownik dostanie paczkę do Ridera, może kliknąć zmianę w aplikacji; uwagi wracają do agenta przed commitem.
+14. Commit, push i PR robi użytkownik w Riderze. Dostaje gałąź (już przełączoną) oraz tytuł i opis PR-a; komunikatu commita nie przygotowuję.
+15. Teksty dla ludzi (komentarze, odpowiedzi na recenzje) dostaje zwykle jako gotowy tekst do wklejenia; gdy chce napisać sam, daję uwagi do jego wersji.
+16. Zanim agent weźmie się za issue, sprawdzam, czy użytkownik jest do niego przypisany.
+17. Gdy PR jest scalony, usuwam lokalnie jego gałąź i worktree agenta.
+18. Po zamknięciu większej partii spraw proponuję użytkownikowi /compact, zanim rozmowa zrobi się za długa (automatyczne kompaktowanie przychodzi za późno).
