@@ -818,6 +818,7 @@ function pickEndpoint(value) {
     const hasEnd = endInput.value.trim() !== '';
     if (hasEnd && (hasStart || onboardOn)) return;
     const previous = [sel.start, sel.end];
+    hideRecallOffer();     // pasażer zaczął wskazywać nową relację
     // Z pokładu pojazdu startu się nie klika - startem jest pojazd - więc
     // każdy klik w mapę wskazuje cel.
     if (onboardOn || hasStart) {
@@ -916,6 +917,7 @@ startInput.addEventListener('input', hideLocateOffer);
     już był (o to się prosi, klikając go), ale celu nie rusza. */
 function useMyLocation(point) {
     const previous = sel.start;
+    hideRecallOffer();
     sel.start = point;
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
@@ -4261,10 +4263,20 @@ function forgetLastSearch() {
     }
 }
 
-/** Ostatnie wyszukiwanie (skąd/dokąd) wraca po odświeżeniu strony - tylko
+// Ostatnie wyszukiwanie nie wraca samo, tylko pyta (#237): po otwarciu
+// strony to często już nie ta podróż, a na telefonie samo wyszukanie zwija
+// formularz, który trzeba by rozwinąć, żeby zacząć od nowa.
+const recallOffer = $('recall-offer');
+let recalled = null;      // {start, end} - o którą trasę padło pytanie
+
+function hideRecallOffer() {
+    recalled = null;
+    recallOffer.hidden = true;
+}
+
+/** Po odświeżeniu strony pyta o ostatnie wyszukiwanie (skąd/dokąd) - tylko
     gdy pola są jeszcze puste (nie nadpisujemy tego, co user już zdążył
-    wpisać, zanim ten kod się uruchomił). Godzina wraca sama z siebie do
-    "teraz", bo tak ustawia ją serwer przy każdym renderowaniu strony. */
+    wpisać, zanim ten kod się uruchomił). */
 function restoreLastSearch() {
     if (onboardOn || startInput.value || endInput.value) return;
     let saved;
@@ -4274,6 +4286,21 @@ function restoreLastSearch() {
         return;
     }
     if (!saved || !saved.start || !saved.end) return;
+    recalled = saved;
+    // Każdy koniec w osobnym kawałku, który się nie łamie - linia może pęknąć
+    // tylko przed strzałką, a nie w środku nazwy ("Iwiny -" / "nr" / "127").
+    const end = text => {
+        const span = document.createElement('span');
+        span.className = 'recall-offer-end';
+        span.textContent = span.title = text;
+        return span;
+    };
+    $('recall-offer-name').replaceChildren(
+        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)));
+    recallOffer.hidden = false;
+}
+
+function applyLastSearch(saved) {
     sel.start = saved.start;
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
@@ -4285,6 +4312,22 @@ function restoreLastSearch() {
     restyle(sel.start, sel.end);
     search();
 }
+
+$('recall-offer-yes').addEventListener('click', () => {
+    const saved = recalled;
+    hideRecallOffer();
+    // Pasażer mógł już zacząć nową relację - pytanie dotyczy wtedy pustego
+    // formularza, którego już nie ma.
+    if (onboardOn || startInput.value || endInput.value) return;
+    applyLastSearch(saved);
+});
+// "Nie" zapomina trasę jak ✕ - inaczej pytanie wracałoby przy każdym otwarciu.
+$('recall-offer-no').addEventListener('click', () => {
+    hideRecallOffer();
+    forgetLastSearch();
+});
+startInput.addEventListener('input', hideRecallOffer);
+endInput.addEventListener('input', hideRecallOffer);
 
 /** Kółko ładowania w dwóch miejscach naraz, bo w każdym widoku widać co
     innego: w komunikacie pod kartą (szeroki ekran, zakładka „Trasy") i na
@@ -4304,6 +4347,7 @@ function search() {
     // Dla układu na telefonie: formularz zwija się wtedy do jednej linijki
     // (patrz phone.js).
     document.dispatchEvent(new Event('planner:search'));
+    hideRecallOffer();
     const token = ++requestToken;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     clearJourney();
@@ -4619,6 +4663,7 @@ $('clear').addEventListener('click', () => {
     updatePointMarker('end', null);
     showLocateMsg('');
     hideLocateOffer();
+    hideRecallOffer();
     resetResults();
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
