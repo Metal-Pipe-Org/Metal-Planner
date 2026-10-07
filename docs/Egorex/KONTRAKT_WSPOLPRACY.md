@@ -15,8 +15,8 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 ## Praca w tle
 
 7. Wszystko, co zajmie dłużej niż ok. 30 s, robi agent. W tym czasie użytkownik dostaje następną sprawę.
-8. W tle trwa od 2 do 5 zadań naraz.
-9. Gdy w tle zostaje ostatnie zadanie, pytam, co przygotowujemy dalej.
+8. W toku jest od 2 do 5 zadań naraz. Zadanie jest w toku, dopóki użytkownik nie rozpatrzy jego wyniku: liczy się i agent przy pracy, i wynik czekający w kolejce.
+9. Gdy w toku zostaje ostatnie zadanie, pytam, co przygotowujemy dalej. Nie pytam tylko dlatego, że agenci skończyli, skoro ich wyniki czekają w kolejce.
 10. Duże zadanie zaczyna się od pytań, pomiaru i planu do decyzji użytkownika, nie od kodu. Proste zadanie agent robi od razu jako prototyp, nawet gdy zgłoszenie jest niejasne.
 11. Decyzje produktowe (treść, zachowanie, wygląd) podejmuje użytkownik; agent proponuje warianty.
 12. Kod zmieniają tylko agenci, każdy w swoim worktree. Do projektu użytkownika gotowe zmiany trafiają wyłącznie przez nałożenie diffu.
