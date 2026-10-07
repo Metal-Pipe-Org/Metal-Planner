@@ -159,7 +159,8 @@ przesuwa mapę na lokalizację, żeby wybrać cel z okolicy. Odmowa zgody, brak
 sygnału i timeout (10 s) mówią, co się stało, w linijce pod polami — świadomie
 nie w panelu wyników, bo te komunikaty nie mogą kasować gotowej listy tras,
 i nie jako `.hint`, bo te na telefonie znikają w widoku mapy, a to właśnie tam
-pyta się o lokalizację. Przeglądarki dają pozycję **tylko po HTTPS** (wyjątek:
+pyta się o lokalizację. Każde kliknięcie prosi o **świeżą** pozycję, nie
+o zapamiętaną przez przeglądarkę (#236). Przeglądarki dają pozycję **tylko po HTTPS** (wyjątek:
 `localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
 chowa.
 
@@ -1237,6 +1238,13 @@ dało się dojechać.
   rozwijać i kasować ✕. Teraz nigdy nie wraca sama: pod pustymi polami
   czeka pytanie „Wrócić do trasy A → B?”. „Tak” ją wyszukuje, „Nie”
   zapomina (jak ✕), a wpisanie lub wskazanie nowej relacji chowa pytanie.
+
+- **2026-10-07** — **◎ zawsze pobiera aktualną pozycję** (zgłoszenie #236).
+  W drodze ponowne kliknięcie „moja lokalizacja" potrafiło wstawić tę samą,
+  starą pozycję — przeglądarka mogła oddać zapamiętaną sprzed minuty
+  (iPhone robił to chętnie), a dopiero ✕ i ponowne kliknięcie trafiało na
+  świeżą. Teraz każde kliknięcie czeka na nowy odczyt z GPS-a; może to
+  potrwać o sekundę–dwie dłużej, przycisk jest w tym czasie wyszarzony.
 
 - **2026-10-03** — **przystanki po drodze** (zgłoszenie #169). Rozwinięta
   propozycja mówiła o przejeździe tylko „7 przystanków · 12 min”. Ta liczba

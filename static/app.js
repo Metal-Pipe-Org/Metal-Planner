@@ -947,7 +947,10 @@ if (!navigator.geolocation) {
                 finish();
                 showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
             },
-            {enableHighAccuracy: true, timeout: 10000, maximumAge: 60000},
+            // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
+            // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
+            // pozycję sprzed kilkuset metrów.
+            {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
         );
     });
 }
