@@ -140,18 +140,10 @@ credentials/
 
 CLAUDE.md
 # =========================
-# Claude Code - stan lokalny
-# (settings.json i launch.json sa wersjonowane, reszta jest per-maszyna)
+# Claude Code
+# (w repo tylko polecenia, z ktorych korzystaja workflow; ustawienia i stan
+# sa per-osoba, a .claude/ z repo wykonuje tez Claude w CI)
 # =========================
-.claude/settings.local.json
-.claude/scheduled_tasks.json
-.claude/scheduled_tasks.lock
-.claude/worktrees/
-.claude/checkpoints/
-.claude/mailbox/
-.claude/routines/.state/
-.claude/agent-registry.json
-.claude/agent-memory-local/
-.claude/first-run
-.claude/assistant-daemon-state.json
+.claude/*
+!.claude/commands/
 /.mcp.json
