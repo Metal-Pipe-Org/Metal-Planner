@@ -57,13 +57,12 @@ def test_pojedyncza_stacja_dalej_obejmuje_przystanki_pod_dworcem():
 
 
 def test_mapa_nie_rysuje_przejazdu_miedzy_stacjami_tego_samego_miasta(
-        install_day, pin_deadline):
+        install_day):
     """Na Alfie Głównej stoi się od początku, więc pociąg rysuje się od niej,
     a nie od Alfy Zachód, przez którą wcześniej przejeżdża - a pociąg, który
     na Alfę Główną tylko dowozi, nie rysuje się wcale."""
     day = _day()
     install_day(day)
-    pin_deadline(3600)
 
     result = planner.plan_flow("ALFA -", "BETA -", WHEN)
 
@@ -128,13 +127,12 @@ def test_z_grupy_i_do_grupy_nie_idzie_sie_pieszo():
                                                   "PKP:2": (0, "PKP:2")}
 
 
-def test_przy_grupie_nie_ma_aut_ani_rowerow(install_day, pin_deadline, monkeypatch):
+def test_przy_grupie_nie_ma_aut_ani_rowerow(install_day, monkeypatch):
     """Decyzja użytkownika: przy dowolnej stacji w mieście aut i rowerów nie ma
     wcale - ani przy Alfie Zachód, ani przy Becie Głównej, do której mapa
     dowozi."""
     day = _day()
     install_day(day)
-    pin_deadline(3600)
     zachod, beta = day.stop_coords["PKP:1"], day.stop_coords["PKP:3"]
     auto = {"lat": zachod[0] + 0.0003, "lon": zachod[1], "plate": "PRZY_ZACHODZIE",
             "model": "RENAULT Clio V", "van": False, "where": "", "fuel": 80,
