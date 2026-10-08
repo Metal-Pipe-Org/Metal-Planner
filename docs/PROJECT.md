@@ -159,7 +159,8 @@ przesuwa mapę na lokalizację, żeby wybrać cel z okolicy. Odmowa zgody, brak
 sygnału i timeout (10 s) mówią, co się stało, w linijce pod polami — świadomie
 nie w panelu wyników, bo te komunikaty nie mogą kasować gotowej listy tras,
 i nie jako `.hint`, bo te na telefonie znikają w widoku mapy, a to właśnie tam
-pyta się o lokalizację. Przeglądarki dają pozycję **tylko po HTTPS** (wyjątek:
+pyta się o lokalizację. Każde kliknięcie prosi o **świeżą** pozycję, nie
+o zapamiętaną przez przeglądarkę (#236). Przeglądarki dają pozycję **tylko po HTTPS** (wyjątek:
 `localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
 chowa.
 
@@ -1247,6 +1248,25 @@ dało się dojechać.
 | `.claude/commands/` | polecenia Claude'a używane przez workflow: ocena PR-a, rozwiązanie zgłoszenia |
 
 ## Changelog
+
+- **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
+  iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie
+  wracała sama. Dwie przyczyny naraz: strona dostawała domyślną sesję
+  dźwięku iOS (ta zachowuje się jak odtwarzacz i zabiera głośnik), a samo
+  nagranie grał element audio, który iOS i tak traktuje jak odtwarzacz.
+  Teraz sesja ma typ „ambient" (`navigator.audioSession`, Safari 16.4+),
+  a nagranie gra z bufora miksera Web Audio, pobranego przy pierwszym
+  dotknięciu strony. Rura gra NA muzyce, bez ściszania jej — ściszanie
+  („transient") Safari mapuje na to samo i potrafi przy nim zgubić dźwięk.
+  Element audio został tylko dla przeglądarek bez Web Audio. Jak dotąd,
+  przy wyciszonym telefonie rura milczy.
+
+- **2026-10-07** — **◎ zawsze pobiera aktualną pozycję** (zgłoszenie #236).
+  W drodze ponowne kliknięcie „moja lokalizacja" potrafiło wstawić tę samą,
+  starą pozycję — przeglądarka mogła oddać zapamiętaną sprzed minuty
+  (iPhone robił to chętnie), a dopiero ✕ i ponowne kliknięcie trafiało na
+  świeżą. Teraz każde kliknięcie czeka na nowy odczyt z GPS-a; może to
+  potrwać o sekundę–dwie dłużej, przycisk jest w tym czasie wyszarzony.
 
 - **2026-10-06** — **„Jestem w pojeździe” ostrzega, gdy kurs jeszcze nie jedzie**
   (zgłoszenie #231). Gdy najbliższy kurs wybranej linii według rozkładu

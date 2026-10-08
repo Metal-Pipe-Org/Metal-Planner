@@ -346,6 +346,36 @@ def test_the_pipe_obeys_its_switch(front):
     _check(front, "dzwiek_milczy_gdy_wylaczony")
 
 
+def test_the_pipe_does_not_stop_the_passengers_music(front):
+    """Na iPhonie rura zatrzymywała Spotify. Sesja dźwięku "ambient" miesza
+    się z muzyką innych aplikacji, zamiast ją przerywać (#243)."""
+    _check(front, "dzwiek_nie_zatrzymuje_muzyki")
+
+
+def test_with_web_audio_the_pipe_plays_from_the_mixer(front):
+    """Przy mikserze rura gra z bufora, nie przez element audio - ten dla
+    iOS jest odtwarzaczem i zatrzymuje muzykę pasażera (#243)."""
+    _check(front, "mikser_gra_z_bufora_nie_z_elementu")
+
+
+def test_with_web_audio_a_search_before_the_download_plays_after_it(front):
+    """Wynik wyszukiwania przyszedł, zanim nagranie się pobrało - rura gra,
+    gdy tylko nagranie dojdzie."""
+    _check(front, "mikser_wyszukiwanie_przed_nagraniem_gra_po_pobraniu")
+
+
+def test_with_web_audio_a_second_search_restarts_the_pipe(front):
+    """Drugie wyszukiwanie w trakcie dźwięku zatrzymuje poprzedni i gra od
+    nowa."""
+    _check(front, "mikser_drugie_wyszukiwanie_gra_od_nowa")
+
+
+def test_with_web_audio_a_failed_download_leaves_no_pipe_for_later(front):
+    """Nieudane pobranie nie zostawia rury, która zagrałaby przy kolejnym
+    zwykłym dotknięciu, bez żadnego wyszukiwania."""
+    _check(front, "mikser_nieudane_pobranie_nie_gra_pozniej")
+
+
 def test_the_recording_is_attenuated(front):
     """Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm."""
     _check(front, "nagranie_nie_gra_na_pelnej_glosnosci")
