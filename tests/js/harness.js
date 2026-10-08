@@ -456,7 +456,7 @@ const INJECTION = `
     waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
     summariseRepeats, timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
     keepWithinHorizon, recentFirst,
-    withArrivals, flowIcon, FLOW_ICONS,
+    withArrivals, withLate, flowIcon, FLOW_ICONS,
     playPipeDrop, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },
     get flowLabelLayer() { return flowLabelLayer; },

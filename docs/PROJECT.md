@@ -1231,6 +1231,25 @@ dało się dojechać.
 
 ## Changelog
 
+- **2026-10-08** — **spóźnione kursy na tablicach przystanków**
+  (zgłoszenie #238). Wyszukiwanie o 8:11 z pl. Wróblewskiego nie znało
+  czwórki z 8:10, choć spóźniona stała na przystanku. Teraz tablica każdego
+  przystanku mapy — startu, dojścia pieszego, przesiadki — ma przy każdej
+  linii, także tej, której mapa tam nie rysuje, jej ostatni odjazd sprzed
+  chwili, w której można tu być (na starcie godzina z formularza, po dojściu
+  chwila dojścia, na przesiadce przyjazd), na szaro — jeśli spóźniony do tej
+  chwili dowiózłby do celu WCZEŚNIEJ niż najszybsza trasa. Remis odpada:
+  taki kurs prowadzi tylko do tego samego pojazdu co najszybsza trasa (przy
+  „nie później” na pl. Grunwaldzkim przechodziło 35 linii, z czego 32 na
+  remis). Kurs, który według rozkładu skończył już bieg, się nie liczy.
+  Spóźniony kurs to też szara godzina: z niej i ze zwykłych szarych linia
+  pokazuje tylko najpóźniejszą (ten sam kurs raz). Podlega ustawieniu „Szare godziny w tablicy”; stara tablica
+  z Eksperymentów zostaje bez niego. Mapa, pasek „Najszybciej”, jasność
+  i propozycje tras bez zmian. Przykłady: pl. Wróblewskiego 8:11 — 16 z 8:04
+  i 4 z 8:10; punkt pod pl. Grunwaldzkim → Wojszyce o 17:51 i 17:52 — 146
+  z 17:51, 145 z 17:44 i D z 17:49. Nowe pole `late` przy węźle
+  w `/api/flow`.
+
 - **2026-10-03** — **przystanki po drodze** (zgłoszenie #169). Rozwinięta
   propozycja mówiła o przejeździe tylko „7 przystanków · 12 min”. Ta liczba
   rozwija teraz w osi mijane przystanki z godzinami odjazdu, między

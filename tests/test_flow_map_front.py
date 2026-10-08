@@ -197,6 +197,14 @@ def test_the_board_lists_departure_times_per_line(front):
     _check(front, "tablica_godziny_w_wierszu_linii")
 
 
+def test_board_shows_late_courses_beside_grey_hours(front):
+    """Zgłoszenie #238: spóźniony kurs to też szara godzina - z obu rodzajów
+    linia pokazuje tylko najpóźniejszą, ten sam kurs raz, także na linii
+    spoza mapy; bez szarych godzin w ustawieniach i w starej tablicy go nie
+    ma."""
+    _check(front, "tablica_spoznione_kursy_obok_szarych")
+
+
 def test_recent_places_come_first_in_suggestions(front):
     """Ostatnio wyszukiwane miejsca stoją w podpowiedziach na początku, od
     najświeższego, a reszta trafień zostaje w swojej kolejności (#142)."""
