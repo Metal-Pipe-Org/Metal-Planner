@@ -167,8 +167,8 @@ body.search-collapsed .search-summary {
     vertical-align: 1px;
 }
 
-.search-summary-from::before { background: #43a047; }
-.search-summary-to::before { background: #e53935; }
+.search-summary-from::before { background: var(--start); }
+.search-summary-to::before { background: var(--end); }
 
 .search-summary-arrow { flex: none; color: var(--ink-faint); }
 
@@ -196,7 +196,7 @@ body.mode-timetable.view-map .tt-close {
     color: var(--ink-soft);
 }
 
-body.mode-timetable.view-map .tt-close:hover { background: #e8edf3; }
+body.mode-timetable.view-map .tt-close:hover { background: var(--hover); }
 
 /* ----------------------------------------------------------------- dok --- */
 

@@ -4551,7 +4551,7 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open'];
+                        'via-open', 'theme'];
 
 function storedDevPrefs() {
     try {
@@ -4696,6 +4696,15 @@ document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.check
 noPullRefresh.addEventListener('change', () => {
     saveDevPref('no-pull-refresh', noPullRefresh.checked);
     document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
+});
+
+// Motyw (opcja w „Wyglądzie aplikacji”, zgłoszenie #206). Pierwszy raz stawia
+// go skrypt w <head> index.html, zanim strona się narysuje - tu tylko zmiana.
+const themeSelect = $('theme');
+themeSelect.value = loadDevPrefs().theme || 'auto';
+themeSelect.addEventListener('change', () => {
+    saveDevPref('theme', themeSelect.value);
+    applyTheme(themeSelect.value);
 });
 
 // Przystanki po drodze rozwinięte od razu (opcja w „Wyglądzie aplikacji",

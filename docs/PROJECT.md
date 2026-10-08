@@ -1199,6 +1199,17 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   świeżą. Teraz każde kliknięcie czeka na nowy odczyt z GPS-a; może to
   potrwać o sekundę–dwie dłużej, przycisk jest w tym czasie wyszarzony.
 
+- **2026-10-05** — **ciemny motyw** (zgłoszenie #206). Wygląd aplikacji
+  ma wybór motywu: jak w systemie (domyślnie), jasny albo ciemny. Ciemny
+  przyciemnia cały interfejs i kafelki mapy (odwrócenie jasności z obrotem
+  barwy, bo ciemnych kafelków OSM nie ma). Znaczniki leżące na mapie —
+  plakietki i grupki numerów linii, linie, kropki — zostają jasne, a kolory
+  linii te same, co w jasnym. Motyw stawia skrypt w nagłówku strony przed
+  pierwszym rysowaniem, więc nic nie błyska na biało. Przy okazji wszystkie
+  kolory arkuszy stylów przeszły do zmiennych na górze `style.css` —
+  ciemny motyw nadpisuje wyłącznie je, a test pilnuje, żeby żaden kolor
+  nie wrócił wpisany wprost w regułę.
+
 - **2026-10-05** — **jedna mapa, bez Eksperymentów** (zgłoszenie #187).
   Serwer bez parametru liczył jeszcze starą mapę z progiem jasności, więc
   testy kontraktu sprawdzały mapę, której nikt już nie ogląda. Stara mapa

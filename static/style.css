@@ -20,9 +20,81 @@
     --surface: #fff;
     --surface-alt: #f5f7fa;
     --sheet: #e9edf2;                /* tło listy tras na telefonie */
+    --accent-hover: #1d4fd7;
+    --on-color: #fff;                /* napis na akcencie i na kolorze linii */
+    --hover: #e8edf3;
+    --border-hover: #c9d6e4;
+    --tint: #eef5ff;                 /* podświetlenie w kolorze akcentu */
+    --focus-ring: rgba(37, 99, 235, 0.15);
+    --error: #8c2b23;
+    --error-bg: #fdecea;
+    --ok: #2e7d32;
+    --warn: #a15c07;
+    --start: #43a047;
+    --end: #e53935;
+    --dash: #c5cfda;                 /* kreskowane dojście w panelu */
+    --glass: rgba(255, 255, 255, 0.94);   /* paski leżące nad mapą */
+    --halo: rgba(255, 255, 255, 0.9);     /* poświata napisu wprost na mapie */
+    --backdrop: rgba(16, 32, 48, 0.35);
+    --inverse: #16202b;              /* toast i odwrócone przyciski */
+    --on-inverse: #fff;
     --radius: 14px;
     --shadow: 0 6px 24px rgba(16, 32, 48, 0.14), 0 1px 3px rgba(16, 32, 48, 0.10);
+    --shadow-xs: 0 1px 2px rgba(16, 32, 48, 0.12);
     --sidebar-w: 380px;
+
+    /* Znaczniki rysowane NA mapie zostają jasne w obu motywach - kolorowe
+       numery linii czyta się tylko na białym, a ciemna mapa i tak je
+       odcina od tła. */
+    --map-bg: #ddd;                  /* zanim doczytają się kafelki */
+    --map-tiles: none;
+    --map-label: #fff;
+    --map-label-glass: rgba(255, 255, 255, 0.82);
+    --map-label-edge: rgba(0, 0, 0, 0.25);
+    --map-badge-edge: #444;
+    --map-shade: rgba(0, 0, 0, 0.4);
+    --map-tip-chip: rgba(0, 0, 0, 0.07);
+    --map-tip-rule: rgba(0, 0, 0, 0.1);
+    --pin: #ffd54f;
+    --pin-edge: #263238;
+}
+
+/* Ciemny motyw (zgłoszenie #206) - wybór w „Wyglądzie aplikacji”. Atrybut
+   stawia skrypt w <head> index.html jeszcze przed pierwszym rysowaniem, także
+   dla „Jak w systemie”, więc reguła jest jedna i strona nie błyska na biało.
+   Kolory linii zostają - to te same kolory, co na mapie i na pojazdach. */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --walk: #90a4ae;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --ink: #e6edf5;
+    --ink-soft: #a9b6c4;
+    --ink-faint: #7d8b9a;
+    --line: #2c3744;
+    --surface: #18202a;
+    --surface-alt: #212b36;
+    --sheet: #10161d;
+    --hover: #2a3542;
+    --border-hover: #3a4a5c;
+    --tint: #1c2c45;
+    --focus-ring: rgba(59, 130, 246, 0.3);
+    --error: #ff9b8f;
+    --error-bg: #3a1d1b;
+    --ok: #6fcf73;
+    --warn: #f0b45a;
+    --dash: #4a5866;
+    --glass: rgba(24, 32, 42, 0.94);
+    --halo: rgba(16, 22, 29, 0.9);
+    --backdrop: rgba(0, 0, 0, 0.55);
+    --inverse: #e6edf5;
+    --on-inverse: #16202b;
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --map-bg: #1b2028;
+    /* Ciemnych kafelków OSM nie ma - odwrócenie jasności z obrotem barwy
+       zostawia wodę niebieską, a zieleń zieloną. */
+    --map-tiles: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
 }
 
 * { box-sizing: border-box; }
@@ -38,7 +110,19 @@ body {
 #map {
     position: fixed;
     inset: 0;
+    background: var(--map-bg);
 }
+
+.leaflet-tile-pane { filter: var(--map-tiles); }
+
+:root[data-theme="dark"] .leaflet-bar a,
+:root[data-theme="dark"] .leaflet-control-attribution {
+    background: var(--surface);
+    color: var(--ink-soft);
+}
+
+:root[data-theme="dark"] .leaflet-bar a { border-bottom-color: var(--line); }
+:root[data-theme="dark"] .leaflet-control-attribution a { color: var(--accent); }
 
 /* Strona się nie przybliża (patrz viewport w templates/index.html) - palcem
    można ją tylko przewijać. Mapa dostaje touch-action: none już z leaflet.css
@@ -82,10 +166,10 @@ html.no-pull-refresh {
 
 .button.primary {
     background: var(--accent);
-    color: #fff;
+    color: var(--on-color);
 }
 
-.button.primary:hover { background: #1d4fd7; }
+.button.primary:hover { background: var(--accent-hover); }
 
 .icon-button {
     display: inline-flex;
@@ -104,12 +188,12 @@ html.no-pull-refresh {
     transition: background 0.15s ease, color 0.15s ease;
 }
 
-.icon-button:hover { background: #e8edf3; color: var(--ink); }
+.icon-button:hover { background: var(--hover); color: var(--ink); }
 
 .icon-button.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--on-color);
 }
 
 .icon-button.floating {
@@ -151,7 +235,7 @@ body.panel-hidden .icon-button.floating.second { left: 64px; }
 .icon-button.floating.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--on-color);
 }
 
 /* Kółko ładowania - pierścień z wyciętym fragmentem, w kolorze tekstu, więc
@@ -203,14 +287,14 @@ body.searching #search { cursor: progress; }
 }
 
 .notice.error {
-    background: #fdecea;
+    background: var(--error-bg);
     box-shadow: none;
-    color: #8c2b23;
+    color: var(--error);
 }
 
 .notice.error p { margin: 0 0 6px; }
 .notice.error ul { margin: 4px 0 0; padding-left: 18px; }
-.notice.error a { color: #8c2b23; }
+.notice.error a { color: var(--error); }
 
 /* ------------------------------------------------------ panel z lewej --- */
 
@@ -321,7 +405,7 @@ body.panel-hidden #sidebar {
     line-height: 1.45;
 }
 
-#about::backdrop { background: rgba(16, 32, 48, 0.35); }
+#about::backdrop { background: var(--backdrop); }
 
 #about .dev-head form { margin: 0; }
 #about p { margin: 8px 0; }
@@ -385,7 +469,7 @@ body.start-mode-off .start-mode { display: none; }
 .start-mode .seg.active {
     background: var(--surface);
     color: var(--accent);
-    box-shadow: 0 1px 2px rgba(16, 32, 48, 0.12);
+    box-shadow: var(--shadow-xs);
 }
 
 /* Trzy pola zamiast "skąd": linia (wąska - to dwa, trzy znaki) i dwie listy
@@ -436,7 +520,7 @@ body.start-mode-off .start-mode { display: none; }
     outline: none;
     border-color: var(--accent);
     background: var(--surface);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .onboard-fields select:disabled {
@@ -471,7 +555,7 @@ body.start-mode-off .start-mode { display: none; }
 .onboard-summary:focus-visible {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Nazwa przystanku jest tu najważniejsza, ale to kierunek bywa długi -
@@ -544,8 +628,8 @@ body.start-onboard .hint-onboard { display: block; }
     border-radius: 50%;
 }
 
-.rail-dot.start { background: #43a047; }
-.rail-dot.end { background: #e53935; }
+.rail-dot.start { background: var(--start); }
+.rail-dot.end { background: var(--end); }
 
 .rail-line {
     flex: 1;
@@ -580,7 +664,7 @@ body.start-onboard .hint-onboard { display: block; }
     outline: none;
     border-color: var(--accent);
     background: var(--surface);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Miejsce na przycisk w polu (◎ „moja lokalizacja"), żeby wpisana nazwa
@@ -602,7 +686,7 @@ body.start-onboard .hint-onboard { display: block; }
     font-size: 15px;
 }
 
-.icon-button.in-field:hover { background: #e8edf3; }
+.icon-button.in-field:hover { background: var(--hover); }
 
 /* Czekanie na GPS: przycisk pulsuje i nie przyjmuje kolejnych kliknięć. */
 .icon-button.in-field:disabled {
@@ -624,7 +708,7 @@ body.start-onboard .hint-onboard { display: block; }
    pyta się o lokalizację. */
 .locate-msg {
     margin: 8px 0 0;
-    color: #8c2b23;
+    color: var(--error);
     font-size: 12.5px;
 }
 
@@ -637,7 +721,7 @@ body.start-onboard .hint-onboard { display: block; }
     margin: 10px 0 0;
     padding: 8px 8px 8px 12px;
     border-radius: 10px;
-    background: #eaf1fe;
+    background: var(--tint);
     font-size: 13.5px;
 }
 
@@ -804,7 +888,7 @@ body.start-onboard .hint-onboard { display: block; }
     transition: background 0.15s ease, color 0.15s ease;
 }
 
-.time-now-button:hover { background: #e8edf3; color: var(--ink); }
+.time-now-button:hover { background: var(--hover); color: var(--ink); }
 
 .search-row .button.primary { flex: 1; }
 
@@ -832,7 +916,7 @@ body.start-onboard .hint-onboard { display: block; }
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--ink-soft);
-    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 3px var(--halo);
 }
 
 .results-count {
@@ -885,12 +969,12 @@ body.routes-off .results-body { display: none; }
     transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
-.journey:hover { border-color: #c9d6e4; }
+.journey:hover { border-color: var(--border-hover); }
 .journey:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .journey.selected {
     border-color: var(--accent);
-    box-shadow: var(--shadow), 0 0 0 3px rgba(37, 99, 235, 0.14);
+    box-shadow: var(--shadow), 0 0 0 3px var(--focus-ring);
 }
 
 .j-head {
@@ -932,7 +1016,7 @@ body.routes-off .results-body { display: none; }
     margin-top: 8px;
     padding: 6px 9px;
     border-radius: 9px;
-    background: #eef5ff;
+    background: var(--tint);
     font-size: 13px;
 }
 
@@ -985,7 +1069,7 @@ body.routes-off .results-body { display: none; }
     padding: 0 7px;
     border-radius: 6px;
     background: var(--other);
-    color: #fff;
+    color: var(--on-color);
     font-size: 13px;
     font-weight: 700;
     line-height: 1;
@@ -1037,13 +1121,13 @@ body.routes-off .results-body { display: none; }
     width: 14px;
     height: 2px;
     margin: 0 3px;
-    background: #c5cfda;
+    background: var(--dash);
     border-radius: 2px;
 }
 
 .hop.walk {
     background: repeating-linear-gradient(
-        to right, #c5cfda 0 3px, transparent 3px 6px);
+        to right, var(--dash) 0 3px, transparent 3px 6px);
 }
 
 /* Rozwinięcie wybranej propozycji: oś czasu etapów. */
@@ -1087,13 +1171,13 @@ body.routes-off .results-body { display: none; }
     transform: translateX(-50%);
     border: 2px solid var(--ink-soft);
     border-radius: 50%;
-    background: #fff;
+    background: var(--surface);
 }
 
 .tl-stop.first .tl-dot { background: linear-gradient(to bottom, transparent 9px, var(--line) 9px); }
 .tl-stop.last .tl-dot { background: linear-gradient(to bottom, var(--line) 9px, transparent 9px); }
-.tl-stop.first .tl-dot::before { border-color: #43a047; }
-.tl-stop.last .tl-dot::before { border-color: #e53935; }
+.tl-stop.first .tl-dot::before { border-color: var(--start); }
+.tl-stop.last .tl-dot::before { border-color: var(--end); }
 
 .tl-name {
     font-size: 13.5px;
@@ -1138,7 +1222,7 @@ body.routes-off .results-body { display: none; }
 .tl-tag {
     padding: 1px 6px;
     border-radius: 999px;
-    background: #eef5ff;
+    background: var(--tint);
     color: var(--accent);
     font-size: 11.5px;
     font-weight: 600;
@@ -1151,7 +1235,7 @@ body.routes-off .results-body { display: none; }
 
 .tl-stop.exit .tl-dot::before {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .tl-info {
@@ -1216,7 +1300,7 @@ body.routes-off .results-body { display: none; }
     transform: translateX(-50%);
     border: 2px solid currentColor;
     border-radius: 50%;
-    background: #fff;
+    background: var(--surface);
 }
 
 /* Nota "skąd te liczby" pod etapem jazdy autem - cichsza od samych liczb,
@@ -1230,7 +1314,7 @@ body.routes-off .results-body { display: none; }
 
 .tl-walk .tl-dot {
     background: repeating-linear-gradient(
-        to bottom, #b7c2ce 0 3px, transparent 3px 6px);
+        to bottom, var(--dash) 0 3px, transparent 3px 6px);
 }
 
 .tl-walk .tl-body {
@@ -1251,7 +1335,7 @@ body.routes-off .results-body { display: none; }
     margin: 10px 4px 0;
     color: var(--ink-faint);
     font-size: 12px;
-    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 3px var(--halo);
 }
 
 /* -------------------------------------------------------------- mapa --- */
@@ -1259,8 +1343,8 @@ body.routes-off .results-body { display: none; }
 /* Plakietka numeru linii rysowana na mapie: obrys dla przepływów (żeby nie
    zasłaniać wiązki), wypełnienie dla wybranej trasy. */
 .line-badge {
-    background: #fff;
-    border: 1.5px solid #444;
+    background: var(--map-label);
+    border: 1.5px solid var(--map-badge-edge);
     border-radius: 8px;
     padding: 0 4px;
     font-size: 10px;
@@ -1270,7 +1354,7 @@ body.routes-off .results-body { display: none; }
     height: auto !important;
     white-space: nowrap;
     text-align: center;
-    box-shadow: 0 0 3px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 0 3px var(--map-shade);
 }
 
 .line-badge.car { color: var(--car); border-color: var(--car); }
@@ -1281,12 +1365,12 @@ body.routes-off .results-body { display: none; }
 .line-badge.bike { color: var(--bike); border-color: var(--bike); }
 
 .line-badge.solid {
-    color: #fff;
+    color: var(--on-color);
     font-size: 11px;
     line-height: 16px;
     padding: 0 6px;
-    border-color: #fff;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    border-color: var(--map-label);
+    box-shadow: 0 1px 4px var(--map-shade);
 }
 
 .line-badge.solid.tram { background: var(--tram); }
@@ -1304,9 +1388,9 @@ body.routes-off .results-body { display: none; }
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    border: 2px solid #fff;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-    color: #fff;
+    border: 2px solid var(--map-label);
+    box-shadow: 0 1px 4px var(--map-shade);
+    color: var(--on-color);
     font-size: 9px;
     font-weight: bold;
     letter-spacing: -0.3px;
@@ -1340,10 +1424,10 @@ body.routes-off .results-body { display: none; }
     align-items: center;
     gap: 2px;
     padding: 2px 4px;
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.25);
+    background: var(--map-label);
+    border: 1px solid var(--map-label-edge);
     border-radius: 9px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 1px 3px var(--map-shade);
     pointer-events: auto;
     cursor: pointer;
 }
@@ -1397,7 +1481,7 @@ body.routes-off .results-body { display: none; }
     margin: 0 3px;
     vertical-align: middle;
     background: repeating-linear-gradient(
-        to right, #c5cfda 0 3px, transparent 3px 6px);
+        to right, var(--dash) 0 3px, transparent 3px 6px);
 }
 
 .line-chip.tram { color: var(--tram); }
@@ -1407,7 +1491,7 @@ body.routes-off .results-body { display: none; }
 .line-chip.bike { color: var(--bike); }
 
 .line-chip.picked,
-.line-cluster .line-chip:hover { color: #fff; }
+.line-cluster .line-chip:hover { color: var(--on-color); }
 .line-chip.picked.tram,
 .line-cluster .line-chip.tram:hover { background: var(--tram); }
 .line-chip.picked.bus,
@@ -1439,7 +1523,7 @@ body.routes-off .results-body { display: none; }
     --chip-scale: 1;      /* podpowiedź ma swoją wielkość, nie skaluje się z mapą */
 }
 
-.flow-tip-row .line-chip { background: rgba(0, 0, 0, 0.07); }
+.flow-tip-row .line-chip { background: var(--map-tip-chip); }
 
 /* Debug "dlaczego tu jest": wiersz na podróż, powód pod nim mniejszym
    drukiem - dymek ma się dać przeczytać, a nie rozszyfrować. */
@@ -1448,7 +1532,7 @@ body.routes-off .results-body { display: none; }
     max-width: 330px;
     margin-top: 6px;
     padding-top: 5px;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    border-top: 1px solid var(--map-tip-rule);
     font-size: 11.5px;
     line-height: 1.35;
     white-space: normal;
@@ -1521,7 +1605,7 @@ body.routes-off .results-body { display: none; }
     font-variant-numeric: tabular-nums;
 }
 
-.line-cluster .line-chip-slot:hover .line-chip { color: #fff; }
+.line-cluster .line-chip-slot:hover .line-chip { color: var(--on-color); }
 .line-cluster .line-chip-slot:hover .line-chip.tram { background: var(--tram); }
 .line-cluster .line-chip-slot:hover .line-chip.bus { background: var(--bus); }
 .line-cluster .line-chip-slot:hover .line-chip.train { background: var(--train); }
@@ -1556,7 +1640,7 @@ body.routes-off .results-body { display: none; }
     gap: 7px;
     padding: 6px 12px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.94);
+    background: var(--glass);
     backdrop-filter: blur(10px);
     box-shadow: var(--shadow);
     font-size: 12.5px;
@@ -1611,7 +1695,7 @@ body.routes-off .results-body { display: none; }
     cursor: pointer;
 }
 
-.headline-more:hover { background: var(--ink); color: #fff; }
+.headline-more:hover { background: var(--inverse); color: var(--on-inverse); }
 .headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
 /* Ustawienia, które dotyczą tylko układu na telefonie - tu ich nie widać
@@ -1654,7 +1738,7 @@ body.routes-off .results-body { display: none; }
     padding: 0 3px;
     border: 0;
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.82);
+    background: var(--map-label-glass);
     box-shadow: none;
     color: var(--bike);
     font-size: 11px;
@@ -2059,7 +2143,7 @@ body:not(.dev-mode) .dev-only { display: none; }
     font-size: 12px;
     border: 1px solid var(--line);
     border-radius: 6px;
-    background: #fff;
+    background: var(--surface);
     color: var(--ink);
 }
 
@@ -2097,7 +2181,7 @@ body:not(.dev-mode) .dev-only { display: none; }
     padding: 1px 5px;
     border-radius: 8px;
     background: var(--accent);
-    color: var(--surface);
+    color: var(--on-color);
     font-size: 10px;
     letter-spacing: 0;
     text-align: center;
@@ -2122,7 +2206,7 @@ body:not(.dev-mode) .dev-only { display: none; }
     bottom: 0;
     gap: 4px;
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
-    background: rgba(255, 255, 255, 0.94);
+    background: var(--glass);
     backdrop-filter: blur(10px);
     border-top: 1px solid var(--line);
 }
@@ -2155,7 +2239,7 @@ body:not(.dev-mode) .dev-only { display: none; }
     padding: 0 6px;
     border-radius: 999px;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-color);
     font-size: 11px;
     font-weight: 700;
     line-height: 18px;
@@ -2190,13 +2274,13 @@ body:not(.dev-mode) .dev-only { display: none; }
 }
 
 .sw-row .button { flex: 0 0 auto; background: var(--surface-alt); }
-.sw-row .button:hover { background: #e8edf3; }
+.sw-row .button:hover { background: var(--hover); }
 .sw-row .button:disabled { opacity: 0.6; cursor: default; }
 
 /* Wynik sprawdzenia: zwykła podpowiedź, ostrzeżenie albo realny błąd. */
-.field-hint.ok { color: #2e7d32; }
-.field-hint.warn { color: #a15c07; }
-.field-hint.bad { color: #8c2b23; font-weight: 600; }
+.field-hint.ok { color: var(--ok); }
+.field-hint.warn { color: var(--warn); }
+.field-hint.bad { color: var(--error); font-weight: 600; }
 
 /* Pasek komunikatów PWA (utrata sieci) - nad wszystkim, bo dotyczy całej
    aplikacji, a nie konkretnego panelu. */
@@ -2212,8 +2296,8 @@ body:not(.dev-mode) .dev-only { display: none; }
     padding: 10px 10px 10px 16px;
     transform: translateX(-50%);
     border-radius: var(--radius);
-    background: var(--ink);
-    color: #fff;
+    background: var(--inverse);
+    color: var(--on-inverse);
     box-shadow: var(--shadow);
 }
 
@@ -2221,11 +2305,14 @@ body:not(.dev-mode) .dev-only { display: none; }
     width: 32px;
     height: 32px;
     background: transparent;
-    color: #fff;
+    color: var(--on-inverse);
     opacity: 0.7;
 }
 
-.toast .toast-close:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.toast .toast-close:hover {
+    background: color-mix(in srgb, var(--on-inverse) 14%, transparent);
+    color: var(--on-inverse);
+}
 
 /* ------------------------------------------------------- rozkłady jazdy --- */
 
@@ -2267,7 +2354,7 @@ body.mode-timetable .time-headline { display: none; }
     outline: none;
     border-color: var(--accent);
     background: var(--surface);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .tt-field .icon-button.in-field { top: 6px; }
@@ -2317,8 +2404,8 @@ body.mode-timetable .time-headline { display: none; }
     height: 14px;
     margin: 0;
     border-width: 3px;
-    background: #ffd54f;
-    border-color: #263238;
+    background: var(--pin);
+    border-color: var(--pin-edge);
 }
 
 /* Dzień i godzina - ta sama ramka, co pole czasu wyszukiwarki (.time-field):
@@ -2383,7 +2470,7 @@ body.tt-searching .tt-spinner { display: inline-block; }
     /* Prawy margines na pasek przewijania listy - bez niego dzień wyjeżdża
        poza kadr i urywa się w połowie słowa. */
     padding-right: 8px;
-    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 3px var(--halo);
 }
 
 .tt-title-main {
@@ -2470,7 +2557,7 @@ body.tt-searching .tt-spinner { display: inline-block; }
 
 .tt-dir.active {
     border-color: var(--accent);
-    background: #eef3ff;
+    background: var(--tint);
     box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -2566,7 +2653,7 @@ body.tt-searching .tt-spinner { display: inline-block; }
 .tt-mini.active {
     border-color: var(--accent);
     background: var(--accent);
-    color: #fff;
+    color: var(--on-color);
 }
 
 /* Pełny rozkład - ten sam zapis, co na słupku: wiersz na godzinę, w wierszu
@@ -2811,4 +2898,4 @@ ul.tt-legend {
 .tt-trip-foot .tt-route { margin-left: auto; }
 
 .tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
-.tt-more:hover { background: #e8edf3; }
+.tt-more:hover { background: var(--hover); }

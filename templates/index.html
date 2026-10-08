@@ -47,6 +47,30 @@
     <link rel="stylesheet" id="phone-css"
           media="(max-width: 760px), (pointer: coarse) and (max-height: 500px)"
           href="{{ url_for('static', filename='phone.css') }}">
+    {#
+      Motyw (zgłoszenie #206) stawiany przed pierwszym rysowaniem - z app.js
+      na końcu strony ciemny motyw najpierw błyskałby na biało. „Jak
+      w systemie” też kończy się atrybutem, więc style.css ma jedną regułę
+      ciemnego motywu, a nie dwie. Wybór zapisuje app.js (opcja „theme”).
+    #}
+    <script>
+        (function () {
+            const system = matchMedia('(prefers-color-scheme: dark)');
+            let choice = 'auto';
+            try {
+                choice = JSON.parse(localStorage.getItem('metal-planner:dev-prefs'))?.theme || 'auto';
+            } catch {
+                // localStorage niedostępny - zostaje motyw systemu
+            }
+            window.applyTheme = c => {
+                choice = c;
+                const dark = c === 'dark' || (c === 'auto' && system.matches);
+                document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+            };
+            system.addEventListener('change', () => applyTheme(choice));
+            applyTheme(choice);
+        })();
+    </script>
 </head>
 <body{% if dev_mode %} class="dev-mode"{% endif %}>
 
@@ -582,6 +606,17 @@
     #}
     <details class="dev-fold" id="fold-layout">
     <summary>Wygląd aplikacji</summary>
+
+        <label for="theme">Motyw</label>
+        <select id="theme">
+            <option value="auto">Jak w systemie</option>
+            <option value="light">Jasny</option>
+            <option value="dark">Ciemny</option>
+        </select>
+        <p class="field-hint">
+            Ciemny przyciemnia też samą mapę. Numery linii na mapie zostają
+            na jasnych plakietkach, żeby kolory linii dało się odróżnić.
+        </p>
 
         <label class="dev-check">
             <input type="checkbox" id="bikes-merged"> Jeden przycisk rowerów
