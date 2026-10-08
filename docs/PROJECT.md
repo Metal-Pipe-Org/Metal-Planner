@@ -1185,6 +1185,13 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   Element audio został tylko dla przeglądarek bez Web Audio. Jak dotąd,
   przy wyciszonym telefonie rura milczy.
 
+- **2026-10-07** — **przedawnienie ostatniego wyszukiwania** (zgłoszenie
+  #237). Ostatnia trasa wracała po otwarciu strony zawsze sama, a na
+  telefonie od razu zwijała formularz — po trasę z wczoraj trzeba było go
+  rozwijać i kasować ✕. Teraz nigdy nie wraca sama: pod pustymi polami
+  czeka pytanie „Wrócić do trasy A → B?”. „Tak” ją wyszukuje, „Nie”
+  zapomina (jak ✕), a wpisanie lub wskazanie nowej relacji chowa pytanie.
+
 - **2026-10-07** — **◎ zawsze pobiera aktualną pozycję** (zgłoszenie #236).
   W drodze ponowne kliknięcie „moja lokalizacja" potrafiło wstawić tę samą,
   starą pozycję — przeglądarka mogła oddać zapamiętaną sprzed minuty

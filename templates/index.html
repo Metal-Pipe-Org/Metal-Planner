@@ -246,6 +246,18 @@
             <button type="button" class="button primary" id="locate-offer-yes">Tak</button>
             <button type="button" class="button" id="locate-offer-no">Nie</button>
         </div>
+        {# Ostatnie wyszukiwanie nie wraca samo (#237) - na telefonie zwinęłoby
+           formularz, a po otwarciu strony to często nie jest już ta podróż. #}
+        <div class="locate-offer recall-offer" id="recall-offer" role="status" hidden>
+            <span class="locate-offer-text">
+                Wrócić do ostatniej trasy?
+                <b class="recall-offer-route" id="recall-offer-name"></b>
+            </span>
+            <span class="recall-offer-actions">
+                <button type="button" class="button primary" id="recall-offer-yes">Tak</button>
+                <button type="button" class="button" id="recall-offer-no">Nie</button>
+            </span>
+        </div>
 
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
         {# Tabela skrótów jedzie z serwera, a nie jest przepisana w app.js:
