@@ -358,14 +358,89 @@ const localStorage = {
     removeItem(k) { this._data.delete(k); },
 };
 
+// audioSession to Safari 16.4+: app.js ustawia mu typ przy starcie (#243).
 const navigator = {geolocation: {getCurrentPosition() {}, watchPosition() {}},
-                   serviceWorker: {register() { return {then: thenable}; }}};
+                   serviceWorker: {register() { return {then: thenable}; }},
+                   audioSession: {type: 'auto'}};
 
 /* fetch, który NIGDY nie woła swoich callbacków: emulator ma być
    deterministyczny i synchroniczny, a app.js i tak nie potrzebuje listy
    przystanków do rysowania przepływu. */
 function thenable() { return {then: thenable, catch: thenable, finally: thenable}; }
-const fetch = () => thenable();
+const fetch = url => (/\/static\/sounds\//.test(url) ? fetchRecording(url) : thenable());
+
+/* Obietnica, która rozstrzyga się SYNCHRONICZNIE, gdy test każe: prawdziwy
+   Promise oddałby callbacki dopiero po zakończeniu skryptu, czyli po tym,
+   jak emulator wypisał już wyniki. Tyle, ile używa ładowanie nagrania. */
+function syncLater() {
+    const subs = [];
+    let settled = null;
+    const promise = {
+        then(ok, bad) { return chain(ok, bad); },
+        catch(bad) { return chain(null, bad); },
+    };
+    function chain(ok, bad) {
+        const next = syncLater();
+        subs.push({ok, bad, next});
+        if (settled) run(subs.pop());
+        return next.promise;
+    }
+    function run({ok, bad, next}) {
+        const [kind, value] = settled;
+        const fn = kind === 'ok' ? ok : bad;
+        if (!fn) return kind === 'ok' ? next.resolve(value) : next.reject(value);
+        try {
+            const out = fn(value);
+            if (out && out.then) out.then(next.resolve, next.reject);
+            else next.resolve(out);
+        } catch (e) {
+            next.reject(e);
+        }
+    }
+    function settle(result) {
+        if (settled) return;
+        settled = result;
+        subs.splice(0).forEach(run);
+    }
+    return {promise, resolve: v => settle(['ok', v]), reject: e => settle(['fail', e])};
+}
+
+/* Pobrania nagrania czekają, aż test je wypuści (`pobrane` / `nieudane`) -
+   tak da się sprawdzić wyszukiwanie, które przyszło przed nagraniem. */
+const recordingFetches = [];
+
+function fetchRecording(url) {
+    const pending = syncLater();
+    recordingFetches.push({
+        url,
+        pobrane() {
+            const body = syncLater();
+            body.resolve({nagranie: url});
+            pending.resolve({arrayBuffer: () => body.promise});
+        },
+        nieudane() { pending.reject(new Error('offline')); },
+    });
+    return pending.promise;
+}
+
+/* Mikser przeglądarki zamiast karty dźwiękowej: notuje, co i ile razy
+   zagrano z bufora. Podstawiany dopiero drugiemu uruchomieniu app.js
+   (patrz koniec checks.js) - pierwsze sprawdza przeglądarkę bez Web Audio. */
+const mixerLog = {zagrane: 0, zatrzymane: 0, ostatni: null};
+
+class FakeMixer {
+    constructor() { this.state = 'suspended'; this.destination = {}; }
+    resume() { this.state = 'running'; return {catch() {}}; }
+    createGain() { return {gain: {value: 1}, connect() {}}; }
+    createBufferSource() {
+        return {
+            buffer: null, onended: null, connect() {},
+            start() { mixerLog.zagrane++; mixerLog.ostatni = this.buffer; },
+            stop() { mixerLog.zatrzymane++; },
+        };
+    }
+    decodeAudioData(data, ok) { ok({zdekodowane: data.nagranie}); }
+}
 
 /* JavaScriptCore z osascript nie zna URLSearchParams, a app.js składa nim
    każdy query string (queryParams, tablica odjazdów). Tyle, ile jest w
@@ -454,10 +529,10 @@ const INJECTION = `
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
     legLayers, detailHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
     waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
-    summariseRepeats, timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
+    timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
     keepWithinHorizon, recentFirst,
     withArrivals, withLate, flowIcon, FLOW_ICONS,
-    playPipeDrop, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
+    playPipeDrop, wakeMixer, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },
     get flowLabelLayer() { return flowLabelLayer; },
     get flowPick() { return flowPick; },

@@ -88,36 +88,17 @@ def test_przesiadka_po_polnocy_nie_wypisuje_calego_dnia(install_day):
     assert _numery(zegarowo) == ["300", "200"]
 
 
-def test_za_ile_liczone_od_pytanej_godziny(install_day):
+def test_wiersz_odjazdu(install_day):
     install_day(_dzien_z_wezlem())
     wynik = planner.stop_timetable("WEZEL", WHEN, from_sec=1000)
 
     assert wynik["departures"][0] == {
-        "time": "00:16", "sec": 1000, "in_min": 0, "line": "Autobus 100",
-        "num": "100", "mode": "bus", "headsign": "PÓŁNOC", "every_min": None,
+        "time": "00:16", "sec": 1000, "line": "Autobus 100",
+        "num": "100", "mode": "bus", "headsign": "PÓŁNOC",
     }
     # `sec` jest po to, żeby dało się porównać odjazd z horyzontem mapy -
     # "00:16" po północy zawija się i do porównań się nie nadaje.
-    assert wynik["departures"][1]["in_min"] == 3    # 1200 s, 200 s później
-
-
-def test_takt_linii_z_calego_rozkladu_a_nie_z_listy(install_day):
-    """Na ruchliwym węźle lista mieści pół godziny, a rzadsza linia trafia do
-    niej raz - takt i tak ma być: liczony z całego rozkładu linii na tym
-    przystanku, mediana najbliższych przerw."""
-    install_day(make_day(
-        [{"trip_id": f"r{i}", "label": "Autobus 143", "headsign": "BARTOSZOWICE",
-          "stops": [("W1", 1800 * i, 1800 * i), ("KONIEC", 1800 * i + 600, 1800 * i + 600)]}
-         for i in range(1, 5)]
-        + [{"trip_id": "gesta", "label": "Tramwaj 10", "headsign": "LEŚNICA",
-            "stops": [("W1", 1790, 1790), ("KONIEC", 2400, 2400)]}],
-        names={"W1": "WEZEL", "KONIEC": "KONIEC"},
-    ))
-
-    wynik = planner.stop_timetable("WEZEL", WHEN, from_sec=1700, limit=2)
-
-    takt = {d["num"]: d["every_min"] for d in wynik["departures"]}
-    assert takt == {"10": None, "143": 30}
+    assert wynik["departures"][1]["sec"] == 1200
 
 
 def test_petla_nie_ma_odjazdow(install_day):
