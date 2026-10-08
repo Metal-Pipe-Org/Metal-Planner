@@ -35,7 +35,7 @@ def test_etap_wypisuje_mijane_przystanki(install_day):
     day = make_day([CZWORKA], names=NAZWY)
     install_day(day)
 
-    [etap] = _przejazdy(planner.plan_flow("Start", "Koniec", WHEN, value_map=True))
+    [etap] = _przejazdy(planner.plan_flow("Start", "Koniec", WHEN))
 
     assert [s["name"] for s in etap["via"]] == ["Alfa", "Beta"]
     # Odjazd z przystanku, nie przyjazd - jak w kursie z rozkładu.
@@ -49,7 +49,7 @@ def test_przejazd_o_jeden_przystanek_nie_ma_czego_wypisac(install_day):
     install_day(make_day([{"trip_id": "JEDYNKA", "label": "Autobus 1",
                            "stops": [("S", 0, 0), ("E", 300, 300)]}]))
 
-    [etap] = _przejazdy(planner.plan_flow("S", "E", WHEN, value_map=True))
+    [etap] = _przejazdy(planner.plan_flow("S", "E", WHEN))
 
     assert etap["via"] == []
 

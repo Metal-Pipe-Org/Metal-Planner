@@ -352,9 +352,6 @@ def init_routes(app):
             # Ile aut Traficara przy mapie (suwak pod zębatką) - "pokaż
             # więcej" mnoży ją w plannerze tak samo jak gęstość.
             car_count=_float_arg("cars"),
-            # Czy auta spod tego samego miejsca to jeden wybór (przełącznik
-            # pod zębatką, domyślnie zgaszony).
-            car_groups=request.args.get("car_groups") == "1",
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",
             # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
@@ -364,10 +361,6 @@ def init_routes(app):
             # dostawczakach, których domyślnie nie ma).
             bike_electric=request.args.get("bike_electric", "1") == "1",
             bike_regular=request.args.get("bike_regular", "1") == "1",
-            # Początek mapy od najpóźniejszego wyjazdu na najszybszy dojazd -
-            # PRÓBA w Eksperymentach pod zębatką, domyślnie zgaszona i jeszcze
-            # nie w kontrakcie (patrz plan_flow).
-            latest_start=request.args.get("latest_start") == "1",
             transfer_gain_sec=_float_arg("transfer_gain_sec"),
             # Rower miejski jest wyborem pasażera, nie ustawieniem serwera:
             # bez konta w WRM propozycja z rowerem jest bezużyteczna, więc
@@ -388,13 +381,6 @@ def init_routes(app):
             # szacuje, o której auto dowiezie do celu.
             car_kmh=_float_arg("car_kmh"),
             car_overhead_sec=_float_arg("car_overhead_sec"),
-            # Mapa z wartości podróży zamiast progu jasności (zgłoszenie #150,
-            # patrz plan_flow). Front wysyła ją zawsze, chyba że w
-            # Eksperymentach włączono powrót do starej mapy.
-            value_map=request.args.get("value_map") == "1",
-            # Bliźniaki: jazda tym samym kursem zamiast marszu - domyślnie
-            # tak; "0" to powrót w Eksperymentach (patrz plan_flow).
-            same_vehicle=request.args.get("same_vehicle", "1") == "1",
             # Propozycje tras wyłączone pod zębatką - "0" i serwer ich nie
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",

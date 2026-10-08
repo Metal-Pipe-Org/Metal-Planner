@@ -212,11 +212,10 @@ def test_ogarniam_czytamy_z_feedu_takie_jakie_jest(monkeypatch):
 
 # ------------------------------------------------- które auta pokazać ----
 
-def _auto(tablica, at, skad, ogarniam=0, do_celu=3000, w_celu=None):
+def _auto(tablica, at, ogarniam=0, do_celu=3000, w_celu=None):
     # Szacowany przyjazd domyślnie rośnie z godziną przy aucie - wtedy nie
     # rozstrzyga niczego ponad nią i test mówi o tym, o czym mówi jego nazwa.
-    return {**CAR, "plate": tablica, "at": at, "from_place": skad,
-            "to_dest_m": do_celu,
+    return {**CAR, "plate": tablica, "at": at, "to_dest_m": do_celu,
             "arrival": at + 3000 if w_celu is None else w_celu,
             "ogarniam": [{"co": "Tankowanie", "ile": ogarniam}] if ogarniam else []}
 
@@ -229,9 +228,9 @@ def test_zawsze_widac_auta_ktorych_nic_nie_bije():
     """Każde auto najlepsze w czymś zostaje, nawet ponad suwak - wybór między
     minutami a złotówkami należy do pasażera. Auto z „Ogarniam" nie ma osobnej
     reguły: wygrywa kwotą i tyle."""
-    wczesne = _auto("A", 600, "S")
-    platne = _auto("C", 1800, "X", ogarniam=20)
-    pobite = _auto("D", 1800, "Y")           # później niż A i bez nagrody
+    wczesne = _auto("A", 600)
+    platne = _auto("C", 1800, ogarniam=20)
+    pobite = _auto("D", 1800)           # później niż A i bez nagrody
 
     pokazane = traficar.map_skyband([wczesne, platne, pobite], 1)
 
@@ -240,30 +239,28 @@ def test_zawsze_widac_auta_ktorych_nic_nie_bije():
 
 def test_podglad_mowi_dlaczego_auto_jest_na_mapie():
     """Podgląd pod zębatką (Debug): w czym auto jest najlepsze, ile aut je
-    bije i które, oraz z ilu aut spod tego samego miejsca wygrało."""
-    wczesne = _auto("A", 600, "S")
-    platne = _auto("C", 1800, "X", ogarniam=20)
-    pobite = _auto("D", 1800, "Y")
-    obok = _auto("E", 700, "S")              # przegrywa w grupie z A
+    bije i które."""
+    wczesne = _auto("A", 600)
+    platne = _auto("C", 1800, ogarniam=20)
+    pobite = _auto("D", 1800)
 
     pokazane = {car["plate"]: car["why"] for car in traficar.map_skyband(
-        [wczesne, platne, pobite, obok], 30, groups=True)}
+        [wczesne, platne, pobite], 30)}
 
     assert pokazane["A"]["records"] == ["najwcześniej przy aucie",
                                         "najwcześniej w celu (szacunek)"]
-    assert pokazane["A"]["beaten"] == 0 and pokazane["A"]["group"] == 2
+    assert pokazane["A"]["beaten"] == 0
     assert pokazane["C"]["records"] == ["najwięcej z Ogarniam"]
     # D bije i A (wcześniej), i C (ta sama godzina, ale z nagrodą).
     assert pokazane["D"]["beaten"] == 2
     assert sorted(pokazane["D"]["beaten_by"]) == ["A", "C"]
-    assert "E" not in pokazane
 
 
 def test_odleglosc_do_celu_nie_jest_kryterium():
     """Auto tuż przy celu nie wygrywa samym położeniem - liczy się, o której
     dowiezie. Tu auto przy celu, choć bliżej, dowozi później."""
-    wczesne_daleko = _auto("A", 600, "S", do_celu=9000, w_celu=2400)
-    pozne_przy_celu = _auto("B", 1200, "M", do_celu=300, w_celu=2700)
+    wczesne_daleko = _auto("A", 600, do_celu=9000, w_celu=2400)
+    pozne_przy_celu = _auto("B", 1200, do_celu=300, w_celu=2700)
 
     pokazane = traficar.map_skyband([wczesne_daleko, pozne_przy_celu], 1)
 
@@ -274,34 +271,19 @@ def test_auto_dalej_od_startu_ktore_dowozi_szybciej_jest_na_mapie():
     """Tramwaj od razu na Księże Małe, tam Traficar do Radwanic: przy aucie
     jest się później niż przy tym pod startem i bez „Ogarniam" - ale dowozi
     wcześniej. Najlepsze w czymś, więc zostaje (zgłoszenie #150)."""
-    pod_startem = _auto("A", 600, "S", w_celu=3600)
-    dalej_ale_szybciej = _auto("B", 1500, "M", w_celu=2700)
+    pod_startem = _auto("A", 600, w_celu=3600)
+    dalej_ale_szybciej = _auto("B", 1500, w_celu=2700)
 
     pokazane = traficar.map_skyband([pod_startem, dalej_ale_szybciej], 1)
 
     assert _tablice(pokazane) == ["A", "B"]
 
 
-def test_auta_spod_tego_samego_miejsca_to_jeden_wybor():
-    """Przy włączonym grupowaniu trzy auta, do których idzie się z tego
-    samego miejsca, to jeden wybór: zostaje najwcześniejsze - i to z nagrodą,
-    bo w nagrodzie jest lepsze. Suwak nie dokłada pozostałych, choć miejsca
-    na nie jest dosyć."""
-    pierwsze = _auto("A", 600, "M")
-    drugie = _auto("B", 700, "M")
-    trzecie = _auto("C", 800, "M")
-    z_nagroda = _auto("D", 900, "M", ogarniam=15)
-
-    pokazane = traficar.map_skyband([pierwsze, drugie, trzecie, z_nagroda], 30,
-                                    groups=True)
-
-    assert _tablice(pokazane) == ["A", "D"]
-
-
-def test_bez_grupowania_auta_obok_siebie_konkuruja_jak_kazde_inne():
-    """Domyślnie grupowania nie ma: ktoś może polować na konkretny model, więc
-    auto stojące obok innego wraca z suwakiem jak każde inne."""
-    auta = [_auto("A", 600, "M"), _auto("B", 700, "M"), _auto("C", 800, "M")]
+def test_auta_obok_siebie_konkuruja_jak_kazde_inne():
+    """Auta spod jednego miejsca nie są jednym wyborem: ktoś może polować na
+    konkretny model, więc auto stojące obok innego wraca z suwakiem jak każde
+    inne."""
+    auta = [_auto("A", 600), _auto("B", 700), _auto("C", 800)]
 
     assert _tablice(traficar.map_skyband(auta, 1)) == ["A"]
     assert _tablice(traficar.map_skyband(auta, 3)) == ["A", "B", "C"]
@@ -310,8 +292,8 @@ def test_bez_grupowania_auta_obok_siebie_konkuruja_jak_kazde_inne():
 def test_ta_sama_wypisana_minuta_to_remis():
     """Porównuje się z dokładnością, z jaką mapa liczby wypisuje: ta sama
     minuta to remis, nie wygrana o sekundy."""
-    o_sekundy_pozniej = _auto("A", 625, "S")
-    wczesniej = _auto("B", 600, "M")         # ta sama wypisana minuta
+    o_sekundy_pozniej = _auto("A", 625)
+    wczesniej = _auto("B", 600)         # ta sama wypisana minuta
 
     assert _tablice(traficar.map_skyband([o_sekundy_pozniej, wczesniej], 1)) \
         == ["A", "B"]
@@ -321,11 +303,11 @@ def test_poziom_wchodzi_w_calosci_choc_przekracza_suwak():
     """Suwak na 2: jedno auto nie jest pobite przez nic, trzy - przez dokładnie
     jedno. Wchodzą wszystkie cztery, bo wybranie jednego z trzech wymagałoby
     zważenia minut przeciw złotówkom. Auto pobite przez dwa zostaje schowane."""
-    najlepsze = _auto("A", 600, "S", ogarniam=40)
-    wczesne = _auto("B", 1200, "M", ogarniam=30)
-    srodkowe = _auto("C", 1800, "X", ogarniam=35)
-    pozne = _auto("D", 2400, "Y", ogarniam=38)
-    slabsze = _auto("E", 1300, "Z", ogarniam=5)     # bite przez A i przez B
+    najlepsze = _auto("A", 600, ogarniam=40)
+    wczesne = _auto("B", 1200, ogarniam=30)
+    srodkowe = _auto("C", 1800, ogarniam=35)
+    pozne = _auto("D", 2400, ogarniam=38)
+    slabsze = _auto("E", 1300, ogarniam=5)     # bite przez A i przez B
 
     pokazane = traficar.map_skyband(
         [najlepsze, wczesne, srodkowe, pozne, slabsze], 2)
@@ -333,50 +315,25 @@ def test_poziom_wchodzi_w_calosci_choc_przekracza_suwak():
     assert _tablice(pokazane) == ["A", "B", "C", "D"]
 
 
-def test_poszerzanie_nie_dokłada_auta_z_tej_samej_grupy():
-    """„Pokaż więcej" poszerza wybór MIĘDZY grupami. Kolejne auto spod tego
-    samego przystanku nie wraca nigdy - inaczej już pierwsze „więcej"
-    przywracałoby auta stojące obok siebie."""
-    auta = [_auto(f"M{i}", 600 + 60 * i, "M") for i in range(5)]
-    auta += [_auto("S", 1200, "S")]
-
-    for suwak in range(1, 31):
-        pokazane = _tablice(traficar.map_skyband(auta, suwak, groups=True))
-        assert set(pokazane) <= {"M0", "S"}, suwak
-    assert _tablice(traficar.map_skyband(auta, 1, groups=True)) == ["M0"]
-    assert _tablice(traficar.map_skyband(auta, 30, groups=True)) == ["M0", "S"]
-
-
 def test_schowane_auto_nigdy_nie_zostawia_nic_lepszego_w_ukryciu():
     """Gwarancja z punktu 15, sprawdzona na losowym mieście i każdym
-    położeniu suwaka. Schowany zwycięzca grupy nie bije żadnego pokazanego
-    auta. Schowane auto spoza zwycięzców może bić pokazane, ale wtedy w jego
-    grupie stoi pokazane auto, które bije je samo - pasażer i tak widzi coś
-    lepszego z tego samego miejsca."""
+    położeniu suwaka: schowane auto nie bije żadnego pokazanego."""
     los = random.Random(15)
-    auta = [_auto(str(i), los.randrange(0, 3600), los.choice("ABCDE"),
-                  los.choice([0, 0, 0, 15, 20, 30]))
+    auta = [_auto(str(i), los.randrange(0, 3600), los.choice([0, 0, 0, 15, 20, 30]))
             for i in range(30)]
 
     def bije(a, b):
         return traficar._beats(traficar._shown_as(a), traficar._shown_as(b))
 
     for suwak in range(1, 31):
-        pokazane = traficar.map_skyband(auta, suwak, groups=True)
-        schowane = [a for a in auta if a not in pokazane]
-        for s in schowane:
-            if any(bije(s, p) for p in pokazane):
-                assert any(p["from_place"] == s["from_place"] and bije(p, s)
-                           for p in pokazane), suwak
-        bez_grup = traficar.map_skyband(auta, suwak)
-        assert not any(bije(s, p) for s in auta if s not in bez_grup
-                       for p in bez_grup), suwak
+        pokazane = traficar.map_skyband(auta, suwak)
+        assert not any(bije(s, p) for s in auta if s not in pokazane
+                       for p in pokazane), suwak
 
 
 def test_suwak_i_pokaz_wiecej_mnoza_liczbe_aut(install_day, monkeypatch):
-    """Auto przy starcie i auto przy M - do każdego idzie się skądinąd, więc
-    to dwie grupy. Przy starcie jest się wcześniej, więc bije tamto: suwak na
-    1 pokazuje jedno, „pokaż więcej" dokłada drugie."""
+    """Auto przy starcie i auto przy M. Przy starcie jest się wcześniej, więc
+    bije tamto: suwak na 1 pokazuje jedno, „pokaż więcej" dokłada drugie."""
     install_day(_day())
     _cars(monkeypatch, [{**CAR, "plate": "PRZY_M"},
                         {**CAR, "plate": "PRZY_STARCIE", "lat": 51.1003}])
@@ -412,24 +369,6 @@ def test_pokaz_wiecej_luzuje_regule_nawet_gdy_suwak_jest_juz_przekroczony():
         "NIEPOBITE_A", "NIEPOBITE_B", "NIEPOBITE_C", "POBITE_RAZ"]
 
 
-def test_trzy_auta_przy_jednym_przystanku_to_jedno_auto_na_mapie(install_day,
-                                                               monkeypatch):
-    """Trzy auta obok siebie przy M, grupowanie włączone: nawet „pokaż więcej"
-    trzy razy pokazuje jedno - to, do którego dochodzi się najszybciej. Bez
-    grupowania (domyślnie) wracają wszystkie trzy."""
-    install_day(_day())
-    _cars(monkeypatch, [{**CAR, "plate": "BLISKO"},
-                        {**CAR, "plate": "DALEJ", "lat": 51.1170},
-                        {**CAR, "plate": "NAJDALEJ", "lat": 51.1150}])
-
-    wynik = planner.plan_flow("Start", "Cel", WHEN, car_count=1, more=3,
-                              car_groups=True)
-    domyslnie = planner.plan_flow("Start", "Cel", WHEN, car_count=1, more=3)
-
-    assert _tablice(wynik["cars"]) == ["BLISKO"]
-    assert _tablice(domyslnie["cars"]) == ["BLISKO", "DALEJ", "NAJDALEJ"]
-
-
 def test_rodzaj_auta_czytamy_z_listy_modeli(monkeypatch):
     """Dostawczak to `type` 2 w liście modeli, nie zgadywanie po nazwie. Auto
     o nieznanym modelu liczy się jako osobowe."""
@@ -453,7 +392,7 @@ def test_rodzaj_auta_czytamy_z_listy_modeli(monkeypatch):
 
 
 def test_dostawczakow_domyslnie_nie_ma_wcale():
-    auta = [_auto("A", 600, "S"), {**_auto("V", 300, "M"), "van": True}]
+    auta = [_auto("A", 600), {**_auto("V", 300), "van": True}]
 
     assert _tablice(traficar.map_choice(auta, 30)) == ["A"]
 
@@ -462,10 +401,10 @@ def test_dostawczak_nie_konkuruje_z_osobowka():
     """Po włączeniu dostawczaki wybiera się tylko między sobą: dostawczak
     wcześniej i z nagrodą nie chowa osobówki, a osobówka nie chowa
     dostawczaka. Każdy rodzaj dostaje tę samą liczbę z suwaka."""
-    osobowka = _auto("A", 900, "S")
-    pobita_osobowka = _auto("B", 1200, "X")
-    dostawczak = {**_auto("V", 300, "M", ogarniam=20), "van": True}
-    pobity_dostawczak = {**_auto("W", 1500, "Y"), "van": True}
+    osobowka = _auto("A", 900)
+    pobita_osobowka = _auto("B", 1200)
+    dostawczak = {**_auto("V", 300, ogarniam=20), "van": True}
+    pobity_dostawczak = {**_auto("W", 1500), "van": True}
 
     pokazane = traficar.map_choice(
         [osobowka, pobita_osobowka, dostawczak, pobity_dostawczak], 1, vans=True)
