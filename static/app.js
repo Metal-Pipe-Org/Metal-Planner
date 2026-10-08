@@ -4952,7 +4952,8 @@ function saveSoundPrefs() {
 let pipeAudio = null;
 let soundMixer = null;
 let pipeBuffer = null;       // zdekodowane nagranie, gdy gra mikser
-let pipeLoading = null;
+let pipeLoading = false;
+let pipeUrl;                 // undefined, dopóki nie zapytaliśmy przeglądarki
 let pipePending = false;     // rura miała zagrać, zanim nagranie doszło
 let pipeVoice = null;        // aktualnie grająca rura z miksera
 
@@ -4972,12 +4973,16 @@ function mixer() {
     return soundMixer;
 }
 
-/** Plik w formacie, który przeglądarka umie odtworzyć; null, gdy żaden. */
+/** Plik w formacie, który przeglądarka umie odtworzyć; null, gdy żaden.
+    Pytamy raz: odpowiedź się nie zmienia, a bez zapamiętania przeglądarka
+    bez naszych formatów sondowałaby je przy każdym dotknięciu i klawiszu. */
 function pipeSourceUrl() {
+    if (pipeUrl !== undefined) return pipeUrl;
     const probe = document.createElement('audio');
-    if (!probe.canPlayType) return null;
-    const pick = PIPE_SOURCES.find(([type]) => probe.canPlayType(type));
-    return pick ? pick[1] : null;
+    const pick = probe.canPlayType
+        && PIPE_SOURCES.find(([type]) => probe.canPlayType(type));
+    pipeUrl = pick ? pick[1] : null;
+    return pipeUrl;
 }
 
 // Nagranie gra z bufora miksera, a nie z elementu audio: element to dla
@@ -4990,15 +4995,18 @@ function loadPipe() {
     const ctx = mixer();
     const url = ctx && pipeSourceUrl();
     if (!url) return;
-    pipeLoading = fetch(url)
+    pipeLoading = true;
+    // Nieudane pobranie zapomina też o czekającej rurze - inaczej
+    // kolejna próba przy zwykłym dotknięciu zagrałaby ją bez wyszukiwania.
+    const fail = () => { pipeLoading = false; pipePending = false; };
+    fetch(url)
         .then(response => response.arrayBuffer())
-        // Wersja z callbackami, bo starsze Safari nie zwracają obietnicy.
-        .then(data => new Promise((ok, fail) => ctx.decodeAudioData(data, ok, fail)))
-        .then(buffer => {
+        // Dekodowanie na callbackach, bo starsze Safari nie zwracają obietnicy.
+        .then(data => ctx.decodeAudioData(data, buffer => {
             pipeBuffer = buffer;
             if (pipePending) playPipeBuffer();
-        })
-        .catch(() => { pipeLoading = null; });
+        }, fail))
+        .catch(fail);
 }
 
 function playPipeBuffer() {

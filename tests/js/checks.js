@@ -1790,4 +1790,66 @@ checks.przystanki_po_drodze_na_mapie = (() => {
     };
 })();
 
+// --- rura z miksera przeglądarki --------------------------------------------
+// Drugie uruchomienie app.js, tym razem z Web Audio - jak na każdym
+// współczesnym telefonie. Musi być na końcu: pierwsza kopia też zobaczy
+// odtąd mikser, a wszystkie jej sprawdzenia dźwięku są już za nami.
+
+window.AudioContext = FakeMixer;
+const mikser = runApp(APP_SOURCE);
+
+function nagrajMikser(fn) {
+    const przed = {zagrane: mixerLog.zagrane, zatrzymane: mixerLog.zatrzymane,
+                   elementy: audioLog.zagrane};
+    fn();
+    return {
+        zagrane: mixerLog.zagrane - przed.zagrane,
+        zatrzymane: mixerLog.zatrzymane - przed.zatrzymane,
+        zElementu: audioLog.zagrane - przed.elementy,
+    };
+}
+
+checks.mikser_nieudane_pobranie_nie_gra_pozniej = (() => {
+    // Wyszukiwanie przy zerwanej sieci: nagranie nie doszło, rura milczy.
+    // Kolejne dotknięcie ponawia pobranie - i to już NIE może zagrać rury,
+    // bo nikt w tej chwili niczego nie szukał.
+    const w = nagrajMikser(() => {
+        mikser.playPipeDrop();
+        recordingFetches[recordingFetches.length - 1].nieudane();
+        mikser.wakeMixer();
+        recordingFetches[recordingFetches.length - 1].pobrane();
+    });
+    return {ok: recordingFetches.length === 2 && w.zagrane === 0 && w.zElementu === 0,
+            pobran: recordingFetches.length, ...w};
+})();
+
+checks.mikser_gra_z_bufora_nie_z_elementu = (() => {
+    // Element audio to dla iOS odtwarzacz, który zatrzymuje muzykę (#243).
+    const w = nagrajMikser(() => mikser.playPipeDrop());
+    return {ok: w.zagrane === 1 && w.zElementu === 0
+                && /metal-pipe\.m4a$/.test((mixerLog.ostatni || {}).zdekodowane || ''),
+            bufor: mixerLog.ostatni, ...w};
+})();
+
+checks.mikser_drugie_wyszukiwanie_gra_od_nowa = (() => {
+    // Poprzednia rura milknie, nowa gra od początku - bez nakładania się.
+    mikser.playPipeDrop();
+    const w = nagrajMikser(() => mikser.playPipeDrop());
+    return {ok: w.zagrane === 1 && w.zatrzymane === 1, ...w};
+})();
+
+checks.mikser_wyszukiwanie_przed_nagraniem_gra_po_pobraniu = (() => {
+    // Świeża kopia app.js: nagranie jeszcze się nie pobrało, a wynik
+    // wyszukiwania już jest. Rura ma zagrać, gdy tylko nagranie dojdzie.
+    const swieza = runApp(APP_SOURCE);
+    const start = {zagrane: mixerLog.zagrane, elementy: audioLog.zagrane};
+    swieza.playPipeDrop();
+    const przedPobraniem = mixerLog.zagrane - start.zagrane;
+    recordingFetches[recordingFetches.length - 1].pobrane();
+    const poPobraniu = mixerLog.zagrane - start.zagrane;
+    return {ok: przedPobraniem === 0 && poPobraniu === 1
+                && audioLog.zagrane === start.elementy,
+            przedPobraniem, poPobraniu};
+})();
+
 JSON.stringify(checks);
