@@ -26,8 +26,8 @@ def _dzien():
 def test_bez_propozycji_lista_jest_pusta_a_mapa_ta_sama(install_day):
     install_day(_dzien())
 
-    z_lista = planner.plan_flow("S", "E", WHEN, value_map=True)
-    bez = planner.plan_flow("S", "E", WHEN, value_map=True, with_journeys=False)
+    z_lista = planner.plan_flow("S", "E", WHEN)
+    bez = planner.plan_flow("S", "E", WHEN, with_journeys=False)
 
     assert z_lista["journeys"]
     assert bez["journeys"] == []
@@ -39,7 +39,7 @@ def test_rower_nie_mowi_o_liscie_ktorej_nie_ma(install_day):
     front nie pisał, że rower nic tu nie daje."""
     install_day(_dzien())
 
-    bez = planner.plan_flow("S", "E", WHEN, value_map=True, use_bikes=True,
+    bez = planner.plan_flow("S", "E", WHEN, use_bikes=True,
                             with_journeys=False)
 
     assert "bikes" not in bez

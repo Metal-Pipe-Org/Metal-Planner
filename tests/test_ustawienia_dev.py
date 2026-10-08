@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 USER_FOLDS = {"fold-map", "fold-assumptions", "fold-layout"}
 DEV_FOLDS = {"fold-window", "fold-time", "fold-places", "fold-vehicles",
-             "fold-experiments", "fold-debug", "look-section", "fold-version",
+             "fold-debug", "look-section", "fold-version",
              "fold-transfer"}
 
 
@@ -63,10 +63,3 @@ def test_ustawienia_uzytkownika(fold, inputs):
     for input_id in inputs:
         assert f'id="{input_id}"' in body
 
-
-def test_wyglad_startu_to_eksperyment():
-    html = _index(dev_mode=True)
-    assert 'id="dot-start"' not in html
-    _, body = _folds(html)["fold-experiments"]
-    tag = re.search(r'<input[^>]*id="old-ends"[^>]*>', body).group(0)
-    assert "checked" not in tag
