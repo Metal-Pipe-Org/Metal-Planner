@@ -49,41 +49,39 @@ def test_profil_czyta_realny_przyjazd_a_nie_przesuwa_gotowej_wartosci(install_da
     profile = planner._target_profile(day, {"E"}, 0, 10_000)
 
     # Z M o 600 zdąża się na B o 800, a z niego na C o 1200.
-    assert planner._profile_value(day, profile, "M", 600) == 1500
+    assert planner._profile_best(day, profile, "M", 600)[0] == 1500
     # Z M o 900 już nie: zostaje B o 1100, N o 1300 i dopiero C o 2400.
     # Sprężysta zgadywanka dawała tu 1800.
-    assert planner._profile_value(day, profile, "M", 900) == 2700
+    assert planner._profile_best(day, profile, "M", 900)[0] == 2700
     # Bufor przesiadki jest respektowany co do sekundy: o 1040 na B o 1100
     # jeszcze się zdąży (1040 + 60 == 1100), o 1041 już nie - a wtedy z M nie
     # odjeżdża już nic, co dowozi do celu.
     ostatnia = 1100 - planner.TRANSFER_SEC
-    assert planner._profile_value(day, profile, "M", ostatnia) == 2700
-    assert planner._profile_value(day, profile, "M", ostatnia + 1) is planner.INF
+    assert planner._profile_best(day, profile, "M", ostatnia)[0] == 2700
+    assert planner._profile_best(day, profile, "M", ostatnia + 1)[0] is planner.INF
 
 
 def test_profil_jest_niemalejacy_wzgledem_godziny(install_day):
     """Im później się tu stoi, tym mniej kursów zostaje - przyjazd do celu
-    może więc tylko się pogorszyć albo zostać. To własność, na której opiera
-    się cała reszta (i całe cięcie kursu na kawałki, punkt 3 kontraktu)."""
+    może więc tylko się pogorszyć albo zostać."""
     day = _zgubiona_przesiadka_day()
     install_day(day)
     profile = planner._target_profile(day, {"E"}, 0, 10_000)
     poprzedni = 0
     for t in range(0, 2600, 10):
-        wartosc = planner._profile_value(day, profile, "M", t)
+        wartosc = planner._profile_best(day, profile, "M", t)[0]
         if wartosc is planner.INF:
             continue
         assert wartosc >= poprzedni, f"o {t} przyjazd {wartosc} < {poprzedni}"
         poprzedni = wartosc
 
 
-def test_mapa_podaje_odczytana_godzine_gorszego_wariantu(install_day, pin_deadline):
+def test_mapa_podaje_odczytana_godzine_gorszego_wariantu(install_day):
     """Ten sam scenariusz na całej mapie: gorszy dojazd do węzła ma dostać
     swoją PRAWDZIWĄ godzinę przyjazdu (2700), nie tę przesuniętą (1800)."""
-    pin_deadline(3000)   # dawne okno 200%
     day = _zgubiona_przesiadka_day()
     install_day(day)
-    wynik = planner.plan_flow("S", "E", when=WHEN)
+    wynik = planner.plan_flow("S", "E", when=WHEN, density=planner.MAX_MAP_DENSITY)
 
     assert "error" not in wynik
     gorszy = [s for s in wynik["segments"] if s["num"] == "2"]
@@ -93,36 +91,4 @@ def test_mapa_podaje_odczytana_godzine_gorszego_wariantu(install_day, pin_deadli
 
     lepszy = [s for s in wynik["segments"] if s["num"] == "1"]
     assert all(s["arrive"] == 1500 for s in lepszy)
-    # ...i to ma być widać w jasności, nie tylko w liczbie.
-    assert max(s["w"] for s in lepszy) > max(s["w"] for s in gorszy)
 
-
-def test_zadna_odczytana_wartosc_nie_pobija_optimum(install_day):
-    """Wartość wyjścia znaczy "o której jestem w celu, jadąc dalej stąd", a do
-    tego wyjścia dojechało się ze STARTU - więc nie ma prawa wypaść przed
-    optimum policzonym przez skan CSA dla całej relacji. Wcześniej łamało to
-    29% kawałków (relacja LEŚNICA -> BARTOSZOWICE, 2026-08-29): wartość poniżej
-    optimum jest obcinana do q=1.0, więc kawałek z niemożliwym przyjazdem
-    świecił dokładnie tak jak najszybsza trasa.
-
-    Progu na to nie ma i mieć nie może - to niezmiennik do sprawdzania, nie
-    do maskowania."""
-    day = _zgubiona_przesiadka_day()
-    install_day(day)
-    dep_sec = 0
-    _, best_arr, _ = planner._scan(day, {"S"}, {"E"}, dep_sec)
-    deadline = 2 * best_arr - dep_sec    # szeroko: drugie tyle, co najszybsza trasa
-    earliest, arrived_by, trip_board = planner._forward(day, {"S"}, dep_sec, deadline)
-    latest = planner._backward(day, {"E"}, dep_sec, deadline)
-    origin_latest = max(latest[s] for s in {"S"} if s in latest)
-    segs = planner._discover_segments(
-        day, dep_sec, deadline, earliest, arrived_by, trip_board,
-        latest, origin_latest, {"E"},
-    )
-    profile = planner._target_profile(day, {"E"}, dep_sec, deadline)
-    planner._refine_brightness(day, segs, {"E"}, deadline, best_arr, profile)
-
-    for seg in segs:
-        for wartosc, odczytana in zip(seg["exit_vals"], seg["exit_exact"]):
-            if odczytana:
-                assert wartosc >= best_arr, f"{seg['label']}: {wartosc} < {best_arr}"

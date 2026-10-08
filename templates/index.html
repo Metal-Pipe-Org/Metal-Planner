@@ -246,6 +246,18 @@
             <button type="button" class="button primary" id="locate-offer-yes">Tak</button>
             <button type="button" class="button" id="locate-offer-no">Nie</button>
         </div>
+        {# Ostatnie wyszukiwanie nie wraca samo (#237) - na telefonie zwinęłoby
+           formularz, a po otwarciu strony to często nie jest już ta podróż. #}
+        <div class="locate-offer recall-offer" id="recall-offer" role="status" hidden>
+            <span class="locate-offer-text">
+                Wrócić do ostatniej trasy?
+                <b class="recall-offer-route" id="recall-offer-name"></b>
+            </span>
+            <span class="recall-offer-actions">
+                <button type="button" class="button primary" id="recall-offer-yes">Tak</button>
+                <button type="button" class="button" id="recall-offer-no">Nie</button>
+            </span>
+        </div>
 
         <script id="stop-names" type="application/json">{{ stops|tojson }}</script>
         {# Tabela skrótów jedzie z serwera, a nie jest przepisana w app.js:
@@ -764,78 +776,6 @@
     </details>
 
     {#
-      Próby: domyślnie zgaszone i jeszcze nie obietnica kontraktu — do
-      włączania i wyłączania, żeby zobaczyć różnicę na żywej relacji.
-    #}
-    <details class="dev-fold dev-only" id="fold-experiments">
-    <summary>Eksperymenty <span class="dev-badge">DEV</span></summary>
-
-        <label class="dev-check">
-            <input type="checkbox" id="car-groups"> Auta spod tego samego miejsca to jeden wybór
-        </label>
-        <p class="field-hint">
-            Z aut, do których idzie się z tego samego miejsca, zostaje tylko to,
-            przy którym jest się najwcześniej, albo to, które daje więcej z „Ogarniam”.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="latest-start"> Mapa od ostatniej chwili na najszybszy dojazd
-        </label>
-        <p class="field-hint">
-            Mapa zaczyna się od najpóźniejszej chwili, z której wciąż dojeżdża się
-            najszybciej, a wcześniejsze wyjazdy dokłada dopiero „Pokaż więcej”,
-            cofając początek mapy do godziny z pytania. Na razie chowa też
-            wcześniejsze dojazdy do aut i rowerów.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="old-twins"> Stare bliźniaki (sama najkrótsza jazda)
-        </label>
-        <p class="field-hint">
-            Powrót do reguły sprzed 29.09. Domyślnie z dwóch dróg tymi samymi
-            liniami i o tych samych godzinach najpierw odpada ta, która idzie
-            pieszo tam, dokąd dojechałoby się dalej tym samym kursem — np.
-            10 minut marszu do dalszego przystanku tramwaju, który staje 3 minuty
-            od autobusu — a z reszty zostaje najkrótsza jazda. Stara reguła
-            patrzy tylko na najkrótszą jazdę.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="old-map"> Stara mapa (z progiem jasności)
-        </label>
-        <p class="field-hint">
-            Powrót do mapy sprzed „Mapy z wartości podróży”. Domyślnie mapa
-            rysuje podróże, które są w czymś najlepsze: najwcześniej w celu
-            albo najpóźniejsze wyjście; chodzenie i przesiadki liczą się tylko
-            w minutach, „Pokaż więcej” wybacza podróże o tyle minut dłuższe,
-            a trasa jadąca tymi samymi numerkami co lepsza — albo tymi samymi
-            z dołożonymi innymi — nie pokazuje się. Stara mapa ma jasność i progi.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="tt-old"> Stara tablica odjazdów
-        </label>
-        <p class="field-hint">
-            Powrót do tablicy z „za ile” i „co N min”. Domyślnie tablica ma
-            jeden wiersz na linię i kierunek, a w nim po kolei godziny odjazdów —
-            do ostatniego, którym jeszcze się dojedzie, bez godziny w rogu.
-            Szare godziny są wcześniejsze niż chwila, w której według mapy tu
-            jesteś.
-        </p>
-
-        <label class="dev-check">
-            <input type="checkbox" id="old-ends"> Stary wygląd startu i celu
-        </label>
-        <p class="field-hint">
-            Powrót do zielonych i czerwonych słupków startu i celu przy
-            narysowanej mapie oraz białej kropki startu. Domyślnie start i cel
-            to po jednej kropce, zielonej i czerwonej, a ich słupki gasną jak
-            wszystkie inne.
-        </p>
-
-    </details>
-
-    {#
       Podgląd do oceniania reguł wyboru - nic tu nie rusza serwera, dane
       przychodzą zawsze, przełącznik tylko je pokazuje.
     #}
@@ -854,8 +794,7 @@
             <input type="checkbox" id="debug-why-seg"> Dlaczego kawałek jest na mapie
         </label>
         <p class="field-hint">
-            Tylko przy „Mapie z wartości podróży”: dymek linii wymienia podróże,
-            które tędy jadą, i przy każdej mówi, od jakiej tolerancji jest na
+            Dymek linii wymienia podróże, które tędy jadą, i przy każdej mówi, od jakiej tolerancji jest na
             mapie i czemu, a pod spodem — co ukryły numerki.
         </p>
 
@@ -883,9 +822,8 @@
             </p>
         </div>
 
-        {# Na mapie z wartości podróży każda linia jest pełna, więc suwaki
-           „najbledsza/najjaśniejsza linia" i otoczka od jasności nic tam nie
-           zmieniały - zostały przy wartościach domyślnych, dla starej mapy. #}
+        {# Każda linia jest pełna, więc suwaków „najbledsza/najjaśniejsza
+           linia" i otoczki od jasności tu nie ma - nic by nie zmieniały. #}
         <div class="field compact">
             <label for="look-weight">
                 Grubość linii <output id="look-weight-value">3</output> px
