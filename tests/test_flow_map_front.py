@@ -346,6 +346,12 @@ def test_the_pipe_obeys_its_switch(front):
     _check(front, "dzwiek_milczy_gdy_wylaczony")
 
 
+def test_the_pipe_does_not_stop_the_passengers_music(front):
+    """Na iPhonie rura zatrzymywała Spotify. Sesja dźwięku "ambient" miesza
+    się z muzyką innych aplikacji, zamiast ją przerywać (#243)."""
+    _check(front, "dzwiek_nie_zatrzymuje_muzyki")
+
+
 def test_the_recording_is_attenuated(front):
     """Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm."""
     _check(front, "nagranie_nie_gra_na_pelnej_glosnosci")

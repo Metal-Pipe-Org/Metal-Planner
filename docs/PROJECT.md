@@ -1232,6 +1232,18 @@ dało się dojechać.
 
 ## Changelog
 
+- **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
+  iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie
+  wracała sama. Dwie przyczyny naraz: strona dostawała domyślną sesję
+  dźwięku iOS (ta zachowuje się jak odtwarzacz i zabiera głośnik), a samo
+  nagranie grał element audio, który iOS i tak traktuje jak odtwarzacz.
+  Teraz sesja ma typ „ambient" (`navigator.audioSession`, Safari 16.4+),
+  a nagranie gra z bufora miksera Web Audio, pobranego przy pierwszym
+  dotknięciu strony. Rura gra NA muzyce, bez ściszania jej — ściszanie
+  („transient") Safari mapuje na to samo i potrafi przy nim zgubić dźwięk.
+  Element audio został tylko dla przeglądarek bez Web Audio. Jak dotąd,
+  przy wyciszonym telefonie rura milczy.
+
 - **2026-10-07** — **◎ zawsze pobiera aktualną pozycję** (zgłoszenie #236).
   W drodze ponowne kliknięcie „moja lokalizacja" potrafiło wstawić tę samą,
   starą pozycję — przeglądarka mogła oddać zapamiętaną sprzed minuty

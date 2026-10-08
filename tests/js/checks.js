@@ -769,6 +769,13 @@ checks.dzwiek_milczy_gdy_wylaczony = (() => {
     return {ok: w.zagrane === 0, ...w};
 })();
 
+checks.dzwiek_nie_zatrzymuje_muzyki = (() => {
+    // Domyślna sesja dźwięku na iPhonie zatrzymuje Spotify i podcasty.
+    // "ambient" gra na muzyce, a muzyka leci dalej (#243).
+    return {ok: navigator.audioSession.type === 'ambient',
+            typ: navigator.audioSession.type};
+})();
+
 checks.nagranie_nie_gra_na_pelnej_glosnosci = (() => {
     // Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm, nie żart.
     return {ok: app.PIPE_VOLUME > 0 && app.PIPE_VOLUME < 0.6, glosnosc: app.PIPE_VOLUME};

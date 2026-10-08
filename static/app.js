@@ -4951,6 +4951,17 @@ function saveSoundPrefs() {
 
 let pipeAudio = null;
 let soundMixer = null;
+let pipeBuffer = null;       // zdekodowane nagranie, gdy gra mikser
+let pipeLoading = null;
+let pipePending = false;     // rura miała zagrać, zanim nagranie doszło
+let pipeVoice = null;        // aktualnie grająca rura z miksera
+
+// iPhone domyślnie traktuje dźwięk ze strony jak odtwarzacz: przejmuje
+// głośnik i zatrzymuje Spotify czy podcast, którego pasażer słucha (#243).
+// "ambient" to kategoria efektów w tle - miesza się z muzyką, a muzyka gra
+// dalej. Nie "transient": ta miała ściszać muzykę na chwilę, ale Safari
+// mapuje ją na to samo, a na części wersji gubi przy niej dźwięk.
+if (navigator.audioSession) navigator.audioSession.type = 'ambient';
 
 /** Mikser przeglądarki - jeden na stronę, null bez Web Audio. */
 function mixer() {
@@ -4961,6 +4972,52 @@ function mixer() {
     return soundMixer;
 }
 
+/** Plik w formacie, który przeglądarka umie odtworzyć; null, gdy żaden. */
+function pipeSourceUrl() {
+    const probe = document.createElement('audio');
+    if (!probe.canPlayType) return null;
+    const pick = PIPE_SOURCES.find(([type]) => probe.canPlayType(type));
+    return pick ? pick[1] : null;
+}
+
+// Nagranie gra z bufora miksera, a nie z elementu audio: element to dla
+// iOS "odtwarzacz multimediów", a ten zatrzymuje muzykę innych aplikacji
+// bez względu na typ sesji dźwięku. Czysty mikser zostaje efektem w tle.
+// Pobieramy przy pierwszym dotknięciu, żeby nagranie było gotowe, zanim
+// serwer odpowie na wyszukiwanie.
+function loadPipe() {
+    if (pipeLoading) return;
+    const ctx = mixer();
+    const url = ctx && pipeSourceUrl();
+    if (!url) return;
+    pipeLoading = fetch(url)
+        .then(response => response.arrayBuffer())
+        // Wersja z callbackami, bo starsze Safari nie zwracają obietnicy.
+        .then(data => new Promise((ok, fail) => ctx.decodeAudioData(data, ok, fail)))
+        .then(buffer => {
+            pipeBuffer = buffer;
+            if (pipePending) playPipeBuffer();
+        })
+        .catch(() => { pipeLoading = null; });
+}
+
+function playPipeBuffer() {
+    pipePending = false;
+    const ctx = mixer();
+    // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,
+    // a nie nałożyć się na poprzednie.
+    if (pipeVoice) pipeVoice.stop();
+    const gain = ctx.createGain();
+    gain.gain.value = PIPE_VOLUME;
+    gain.connect(ctx.destination);
+    const voice = ctx.createBufferSource();
+    voice.buffer = pipeBuffer;
+    voice.connect(gain);
+    voice.onended = () => { if (pipeVoice === voice) pipeVoice = null; };
+    voice.start(0);
+    pipeVoice = voice;
+}
+
 // Safari wpuszcza dźwięk z miksera tylko wtedy, gdy obudzi się go W TRAKCIE
 // gestu, a rura gra dopiero po odpowiedzi serwera - już po geście. Budzimy
 // go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
@@ -4968,31 +5025,25 @@ function mixer() {
 function wakeMixer() {
     if (!soundOpts.pipe) return;
     const ctx = mixer();
-    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+    if (!ctx) return;
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    loadPipe();
 }
 for (const type of ['pointerdown', 'keydown']) {
     document.addEventListener(type, wakeMixer, {capture: true});
 }
 
-/** Element audio powstaje przy pierwszym użyciu i zostaje - jeden na stronę.
-    Zwraca null, gdy przeglądarka nie umie żadnego z naszych formatów. */
+/** Element audio tylko dla przeglądarek bez Web Audio. Powstaje przy
+    pierwszym użyciu i zostaje - jeden na stronę. Zwraca null, gdy
+    przeglądarka nie umie żadnego z naszych formatów. */
 function pipeElement() {
     if (pipeAudio) return pipeAudio;
+    const url = pipeSourceUrl();
+    if (!url) return null;
     const element = document.createElement('audio');
-    if (!element.canPlayType) return null;
-    const pick = PIPE_SOURCES.find(([type]) => element.canPlayType(type));
-    if (!pick) return null;
-    element.src = pick[1];
+    element.src = url;
     element.preload = 'auto';
-    const ctx = mixer();
-    if (ctx) {
-        const gain = ctx.createGain();
-        gain.gain.value = PIPE_VOLUME;
-        ctx.createMediaElementSource(element).connect(gain);
-        gain.connect(ctx.destination);
-    } else {
-        element.volume = PIPE_VOLUME;
-    }
+    element.volume = PIPE_VOLUME;
     pipeAudio = element;
     return pipeAudio;
 }
@@ -5006,6 +5057,11 @@ function prefersLessMotion() {
     animacji albo gdy przeglądarka nie umie żadnego z formatów. */
 function playPipeDrop() {
     if (!soundOpts.pipe || prefersLessMotion()) return;
+    if (mixer()) {
+        if (pipeBuffer) playPipeBuffer();
+        else { pipePending = true; loadPipe(); }
+        return;
+    }
     const audio = pipeElement();
     if (!audio) return;
     // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,

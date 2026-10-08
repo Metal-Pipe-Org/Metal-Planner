@@ -358,8 +358,10 @@ const localStorage = {
     removeItem(k) { this._data.delete(k); },
 };
 
+// audioSession to Safari 16.4+: app.js ustawia mu typ przy starcie (#243).
 const navigator = {geolocation: {getCurrentPosition() {}, watchPosition() {}},
-                   serviceWorker: {register() { return {then: thenable}; }}};
+                   serviceWorker: {register() { return {then: thenable}; }},
+                   audioSession: {type: 'auto'}};
 
 /* fetch, który NIGDY nie woła swoich callbacków: emulator ma być
    deterministyczny i synchroniczny, a app.js i tak nie potrzebuje listy
