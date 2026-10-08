@@ -164,7 +164,8 @@ Cały sposób pracy opisuje [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Dokumentacja
 
 25. [docs/PROJECT.md](docs/PROJECT.md) — architektura, algorytmy, API,
-    struktura plików i changelog.
+    struktura plików i changelog do 2026-10-08 (zamknięty).
+    Nowsze wpisy: po pliku na PR w [docs/changelog/](docs/changelog/).
 26. [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md) — gwarancje
     zachowania mapy przepływów; zmienia się wyłącznie na wyraźne polecenie.
 27. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad

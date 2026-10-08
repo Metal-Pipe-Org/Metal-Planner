@@ -1,8 +1,9 @@
 # Metal-Planner — dokumentacja projektu
 
 Mini-wiki: co to jest, jak jest zbudowane, jak działają algorytmy i co się
-zmieniało. Instrukcja uruchomienia, konfiguracja i wdrożenie są w
-[README.md](../README.md); gwarancje zachowania mapy przepływów —
+zmieniało do 2026-10-08; nowsze zmiany mają po pliku na PR
+w [changelog/](changelog/). Instrukcja uruchomienia, konfiguracja
+i wdrożenie są w [README.md](../README.md); gwarancje zachowania mapy przepływów —
 w [FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md), a testy, które ich pilnują,
 i dziennik zmian mapy — w [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md).
 
@@ -1231,6 +1232,13 @@ dało się dojechać.
 | `.claude/commands/` | polecenia Claude'a używane przez workflow: ocena PR-a, rozwiązanie zgłoszenia |
 
 ## Changelog
+
+**Nowe wpisy nie trafiają już tutaj.** Każdy PR dodaje własny plik
+w [changelog/](changelog/), nazwany `RRRR-MM-DD-<numer zgłoszenia>-<krótki-opis>.md`
+(np. `2026-10-08-246-changelog-z-plikow.md`), z wpisem w tym samym stylu co
+poniższe. Wspólna sekcja kłóciła się przy merge'u w niemal każdym
+równoległym PR-ze (zgłoszenie #246). Poniżej zostaje historia do
+2026-10-08: zamknięta, do czytania, bez dopisywania i bez poprawiania.
 
 - **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
   iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie
