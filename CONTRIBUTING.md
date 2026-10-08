@@ -39,12 +39,7 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
     @EgorexW.
 12. Wpis do changelogu to osobny plik w [docs/changelog/](docs/changelog/),
     jeden na PR, nazwany `RRRR-MM-DD-<numer zgłoszenia>-<krótki-opis>.md`,
-    np. `2026-10-08-246-changelog-z-plikow.md`. W środku wpis w tym samym
-    stylu co dotychczasowe w changelogu `docs/PROJECT.md`. Kolejne poprawki
-    w tym samym PR-ze zmieniają ten sam plik. Changelog w `docs/PROJECT.md`
-    to zamknięta historia sprzed tej zmiany: czyta się ją dalej, ale nic się
-    do niej nie dopisuje. Osobne pliki nie kłócą się przy merge'u, a wspólny
-    plik robił konflikt w niemal każdym równoległym PR-ze.
+    np. `2026-10-08-246-changelog-z-plikow.md`.
 
 ## Wydanie
 
