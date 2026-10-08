@@ -120,17 +120,28 @@ const ROUTE_LOOK = {
     ghost: {casing: [6, 0.5], line: [3, 0.4]},
 };
 
-function routeLines(path, mode, level = 'full') {
+/** `interactive` - trasa przyjmuje klik. Łapie go sama otoczka: jest szersza
+    od kolorowej nitki, a nitka, nieinteraktywna, przepuszcza klik pod spód. */
+function routeLines(path, mode, level = 'full', interactive = false) {
     const look = ROUTE_LOOK[level];
     const latlngs = path.map(p => L.latLng(p));
-    const stroke = (color, [weight, opacity]) => L.polyline(latlngs, {
+    const stroke = (color, [weight, opacity], clickable) => L.polyline(latlngs, {
         color, weight, opacity,
-        lineCap: 'round', lineJoin: 'round', interactive: false,
+        lineCap: 'round', lineJoin: 'round', interactive: clickable,
     });
-    return [stroke('#fff', look.casing), stroke(colorOf(mode), look.line)];
+    return [stroke('#fff', look.casing, interactive),
+            stroke(colorOf(mode), look.line, false)];
 }
 
-function stopDots(stops, mode, times) {
+/** Klik w kropkę na mapie - przeskok do innego rozkładu (#155). Zdarzenie
+    zatrzymujemy, żeby nie dobiło do kliku w samą mapę. */
+const onPick = (layer, pick) => layer.on('click', event => {
+    L.DomEvent.stop(event);
+    pick();
+});
+
+/** `pick(stop, i)` - co robi klik w przystanek; bez niego kropka ma sam dymek. */
+function stopDots(stops, mode, times, pick) {
     return stops.map((stop, i) => {
         const marker = L.circleMarker([stop.lat, stop.lon], {
             radius: 5, weight: 2, color: colorOf(mode),
@@ -138,6 +149,7 @@ function stopDots(stops, mode, times) {
         });
         const time = times && times[i];
         marker.bindTooltip(time ? `${time} · ${stop.name}` : stop.name);
+        if (pick) onPick(marker, () => pick(stop, i));
         return marker;
     });
 }
@@ -165,10 +177,59 @@ const dimBase = dim => B.setBaseDim(dim);
 
 /** Trasa dociągnięta asynchronicznie - dokładamy ją do warstwy, która już
     stoi na mapie, zamiast przerysowywać całość: odpowiedzi wracają jedna po
-    drugiej i każde przerysowanie mrugałoby resztą. */
-function addRoute(path, mode) {
+    drugiej i każde przerysowanie mrugałoby resztą.
+
+    Klik w trasę otwiera rozkład jej linii (#155) - to samo, co przycisk
+    "cała trasa" pod rozwiniętym odjazdem. Linia, której rozkład nie zna
+    (pociągi PKP), klikalna nie jest: prowadziłaby donikąd. */
+function addRoute(path, line) {
     if (!routeLayer) routeLayer = L.layerGroup().addTo(map);
-    for (const layer of routeLines(path, mode, 'soft')) routeLayer.addLayer(layer);
+    const opens = LINE_KEYS.has(lineKey(line));
+    const layers = routeLines(path, line.mode, 'soft', opens);
+    if (opens) {
+        const [casing] = layers;
+        casing.bindTooltip(`${MODE_LABEL[line.mode] || 'Linia'} ${line.num} → `
+            + `${line.headsign} · kliknij, żeby otworzyć rozkład linii`, {sticky: true});
+        onPick(casing, () => window.timetableMode.openLine(
+            {num: line.num, mode: line.mode, headsign: line.headsign}));
+    }
+    for (const layer of layers) routeLayer.addLayer(layer);
+}
+
+/** Przystanki na trasie zaznaczonej linii, od tego przystanku dalej (#155).
+    Przystanek, przez który jedzie kilka zaznaczonych linii, to JEDNA kropka
+    z numerami ich wszystkich - przy ośmiu trasach przez jeden węzeł inaczej
+    robi się z niego kłębek. Klik robi z niego przystanek tablicy - tak samo,
+    jak klik w słupek na mapie (patrz pickStop): całe miejsce, wszystkie linie.
+
+    Własnych słupków tablicy tu nie ma: te rysuje boardDots, i to one zostają
+    na wierzchu - są wyborem słupka, a nie przeskokiem gdzie indziej. */
+function addRouteStops(trip, line, seen, mainDots) {
+    if (!markerLayer) markerLayer = L.layerGroup().addTo(map);
+    const own = new Set((data.points || []).map(point => point.id));
+    for (const stop of trip.stops.slice(trip.board_index + 1)) {
+        if (own.has(stop.id)) continue;
+        let entry = seen.get(stop.id);
+        if (!entry) {
+            const marker = L.circleMarker([stop.lat, stop.lon], {
+                radius: 5, weight: 2, color: colorOf(line.mode),
+                fillColor: '#fff', fillOpacity: 1,
+            });
+            onPick(marker, () => window.timetableMode.pickStop(stop.name));
+            entry = {marker, nums: []};
+            seen.set(stop.id, entry);
+            markerLayer.addLayer(marker);
+        }
+        if (!entry.nums.includes(line.num)) entry.nums.push(line.num);
+        const tip = `${stop.name} · ${entry.nums.join(', ')}`
+            + ' · kliknij, żeby pokazać odjazdy stąd';
+        if (entry.marker.getTooltip()) entry.marker.setTooltipContent(tip);
+        else entry.marker.bindTooltip(tip);
+    }
+    // Trasy dochodzą jedna po drugiej i każda ląduje nad tym, co już stoi -
+    // kropki mają leżeć na liniach, a słupki tablicy na wszystkim.
+    for (const entry of seen.values()) entry.marker.bringToFront();
+    for (const dot of mainDots) dot.bringToFront();
 }
 
 // ------------------------------------------------------ przełącznik ----
@@ -575,7 +636,9 @@ function drawLine(refit) {
     dimBase(true);
     showRoutes(
         routeLines(variant.path, data.mode),
-        [...stopDots(variant.stops, data.mode),
+        // Klik w przystanek linii na mapie = "odjazdy" z listy (#155) - a że
+        // pętle końcowe nie przyjmują kliku, trafia w kropkę pod nimi.
+        [...stopDots(variant.stops, data.mode, null, (stop, i) => boardFor(i)),
          ...terminusDots(variant.stops, data.mode)],
         refit,
         variant.path,
@@ -639,7 +702,8 @@ function renderLine() {
             </div>
             <ol class="tt-stops ${esc(data.mode)}">${stops}</ol>
             <p class="field-hint">Kliknij przystanek, żeby go przybliżyć —
-                a „odjazdy", żeby zobaczyć godziny tej linii z tego słupka.</p>
+                a „odjazdy", żeby zobaczyć godziny tej linii z tego słupka.
+                Klik w przystanek na mapie robi to samo, co „odjazdy".</p>
         </div>`;
 }
 
@@ -841,7 +905,8 @@ function drawBoard(refit) {
         for (const i of main) chosen.push({line: data.lines[i], i});
     }
 
-    showRoutes([], boardDots(), false, null);
+    const mainDots = boardDots();
+    showRoutes([], mainDots, false, null);
 
     if (!chosen.length || groups.length > MAX_ROUTES_ON_MAP) {
         // Bez tras na mapie zostaje sam przystanek - a wtedy reszta słupków
@@ -856,12 +921,14 @@ function drawBoard(refit) {
     // Każda trasa dokłada się do mapy sama, gdy tylko dojdzie - kadrujemy
     // dopiero po wszystkich, żeby widok nie skakał przy każdej odpowiedzi.
     const points = [boardCenter()];
+    const routeStops = new Map();      // słupek -> {marker, nums} (addRouteStops)
     Promise.all(chosen.map(({line, i}) => {
         const dep = representative(i);
         if (!dep) return null;
         return fetchTrip(dep).then(trip => {
             if (!trip || mine !== boardDraw || !active() || kind !== 'stop') return;
-            addRoute(trip.tail, line.mode);
+            addRoute(trip.tail, line);
+            addRouteStops(trip, line, routeStops, mainDots);
             points.push(...trip.tail);
         });
     })).then(() => {
@@ -905,7 +972,12 @@ function drawOpenDeparture() {
         focusLayer = L.layerGroup([
             ...routeLines(trip.path, trip.mode, 'ghost'),
             ...routeLines(trip.tail, trip.mode, 'full'),
-            ...stopDots(onward, trip.mode, onward.map(s => s.t)),
+            // Kolejne przystanki kursu przeskakują tak samo jak te na
+            // trasach tablicy (addRouteStops). Pierwszy to ten, na którego
+            // tablicy już jesteśmy - klik w niego nie ma dokąd prowadzić.
+            ...stopDots(onward, trip.mode, onward.map(s => s.t), (stop, i) => {
+                if (i > 0) window.timetableMode.pickStop(stop.name);
+            }),
         ]).addTo(map);
         fitTo(trip.tail);
     });
@@ -1050,7 +1122,9 @@ function renderBoard() {
         ? 'Nic nie zaznaczone — tablica jest pusta.'
         : groups.length > MAX_ROUTES_ON_MAP && pickedLines > MAX_ROUTES_ON_MAP
             ? `Zostaw najwyżej ${MAX_ROUTES_ON_MAP} linii, a ich trasy pokażą się na mapie.`
-            : 'Trasy zaznaczonych linii — stąd dalej — widać na mapie.';
+            : 'Trasy zaznaczonych linii — stąd dalej — widać na mapie. '
+                + 'Klik w trasę otwiera rozkład linii, a w przystanek na niej — '
+                + 'jego odjazdy.';
 
     resultsBox.innerHTML = `
         <div class="tt-title">
