@@ -33,6 +33,9 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
    napisz `@claude` w komentarzu pod PR-em.
 9. Przeczytaj ocenę, popraw, co trzeba, i dopiero wtedy poproś o recenzję
    w panelu bocznym („Reviewers"). Recenzent dostaje ping na Discordzie.
+   Gdy po merge'u czegoś do `main` PR ma z nim konflikt, prośby o recenzję
+   zdejmują się same, a Ty dostajesz ping. Rozwiąż konflikt i poproś
+   o recenzję ponownie.
 10. PR merguje jego autor.
 11. `docs/FLOW_MAP_CONTRACT.md` i `docs/PRINCIPLES.md` zmieniają się wyłącznie
     na wyraźne polecenie; PR, który ich dotyka, sam prosi o recenzję
@@ -105,6 +108,6 @@ zachowanie albo ograniczenie GitHuba, a nie awaria.
 29. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie
     tylko wtedy, gdy automat wysyła ją sam — dziś robią to ocena Claude'a,
     koniec pracy Claude'a nad zgłoszeniem, przypomnienie i zamknięcie po
-    ciszy.
+    ciszy, wstrzymanie recenzji przy konflikcie.
 30. **Ręczny ratunek:** Actions → „Claude - oceń PR” → Run workflow → numer
     PR-a ocenia go od nowa w każdym z powyższych przypadków poza forkiem.
