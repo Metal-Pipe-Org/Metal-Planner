@@ -513,6 +513,8 @@ body.start-onboard .endpoints .rail,
 body.start-onboard .endpoints #swap,
 body.start-onboard .endpoint-fields .ac-field:first-child,
 body.start-onboard .hint-place { display: none; }
+/* Zapamiętana trasa ma swój start - z pokładu nie ma go gdzie wstawić. */
+body.start-onboard .recall-offer { display: none; }
 
 /* Podpis celu zastępuje czerwoną kropkę szyny, która z pokładu znika razem
    z polem "skąd" - w zwykłym trybie jest zbędny, bo kropka mówi to samo. */
@@ -646,7 +648,7 @@ body.start-onboard .hint-onboard { display: block; }
     padding: 0 14px;
 }
 
-#locate-offer-no {
+#locate-offer-no, #recall-offer-no {
     border: 1px solid var(--accent);
     background: var(--surface);
     color: var(--accent);
@@ -668,6 +670,42 @@ body.start-onboard .hint-onboard { display: block; }
     margin: -2px -6px 0 6px;
     font-size: 14px;
     background: transparent;
+}
+
+/* Pytanie o ostatnią trasę (#237): krótkie pytanie, pod nim sama trasa.
+   Przyciski stoją obok, póki tekst mieści się w jednej kolumnie; przy długiej
+   trasie schodzą pod tekst, do prawej - jak akcje banera w Material - zamiast
+   ściskać trasę w wąski słupek. */
+.recall-offer {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 10px 8px 10px 12px;
+}
+
+.recall-offer .locate-offer-text {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.recall-offer-route { font-size: 14px; }
+
+/* Nazwa końca trasy się nie łamie - linia pęka tylko przed strzałką.
+   Nazwa dłuższa niż cała linia kończy się "…" (pełna jest w title). */
+.recall-offer-end {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+}
+
+.recall-offer-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
 }
 
 .ac-list {
