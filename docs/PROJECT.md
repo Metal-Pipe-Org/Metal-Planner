@@ -1217,6 +1217,20 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   świeżą. Teraz każde kliknięcie czeka na nowy odczyt z GPS-a; może to
   potrwać o sekundę–dwie dłużej, przycisk jest w tym czasie wyszarzony.
 
+- **2026-10-06** — **bez instrukcji obsługi w interfejsie** (zgłoszenie
+  #225). Znikają szare akapity tłumaczące, jak używać aplikacji: pod
+  wyszukiwarką („Wskaż na mapie przystanek…” i jego wersja dla jadącego),
+  pod propozycjami tras („im jaśniejsza linia…”, już nieprawdziwe),
+  w rozwiniętej trasie („Kliknij ponownie…”), w rozkładach („Wpisz numer
+  linii…”, „Kliknij przystanek…”, „Kliknij godzinę ponownie…”, „Pełny
+  rozkład czyta się…”, „Trasy zaznaczonych linii…”). Komunikaty o stanie
+  zostają („Nic nie zaznaczone”, „Zostaw najwyżej 8 linii”). Opisy pod
+  opcjami Ustawień też znikają; tam, gdzie nazwa nie wystarcza, opis
+  siedzi w ikonce ⓘ skrajnie z prawej wiersza — dymek pokazuje się po
+  najechaniu albo dotknięciu samej ikonki, a klik w nią nie przełącza
+  opcji. Ta sama ⓘ stoi przy „Słupkach” w tablicy przystanku. Sekcja
+  Eksperymenty zostaje bez zmian (osobny PR).
+
 - **2026-10-05** — **jedna mapa, bez Eksperymentów** (zgłoszenie #187).
   Serwer bez parametru liczył jeszcze starą mapę z progiem jasności, więc
   testy kontraktu sprawdzały mapę, której nikt już nie ogląda. Stara mapa
