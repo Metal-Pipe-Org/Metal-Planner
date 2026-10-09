@@ -275,6 +275,7 @@ const CAR_ICON =
 const markersByName = new Map();          // nazwa -> [L.circleMarker, ...]
 const stopsLayer = L.layerGroup();        // wszystkie słupki naraz
 const stopKind = new Map();               // nazwa -> 'stop' (MPK) | 'train' (PKP)
+const cityStops = [];                     // {name: miejsce, lat, lon} - nazwy przy przybliżeniu
 
 const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
                     fillColor: '#42a5f5', fillOpacity: 0.8};
@@ -781,6 +782,7 @@ const stopsReady = fetch('/api/stops')
         if (stops.error) { showError(stops.error); return; }
         for (const s of stops) {
             stopKind.set(s.name, s.kind);
+            cityStops.push({name: s.place || s.name, lat: s.lat, lon: s.lon});
             const m = L.circleMarker([s.lat, s.lon], styleFor(s.name));
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
@@ -1118,6 +1120,12 @@ const DOT_DEFAULTS = {
     // Debug: dlaczego kawałek jest na mapie (pole `why` kawałka, patrz
     // planner._value_map).
     whySeg: false,
+    // Od tego przybliżenia mapa podpisuje przystanki nazwami (zgłoszenia #252
+    // i #253): przy narysowanej trasie tylko te, przez które jedzie któraś
+    // z jej linii, bez trasy - wszystkie w kadrze. Zmierzone 2026-10-09: przy
+    // 16 nazwy całego centrum już się nie zderzają, ale numery linii i kropki
+    // zabierają im miejsce, więc domyślnie o jeden stopień bliżej.
+    namesZoom: 17,
 };
 
 const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
@@ -1261,7 +1269,21 @@ function timeAtHover(hit, containerPoint) {
         now,
         arrive: typeof seg.arrive === 'number' ? seg.arrive : null,
         at: L.latLng(a.lat + (b.lat - a.lat) * on.t, a.lng + (b.lng - a.lng) * on.t),
+        stop: nearestStopName(seg, on.pos),
     };
+}
+
+/** Nazwa przystanku najbliższego punktowi pod kursorem - mierzona wzdłuż
+    linii, nie w prostej: przy pętli i nawrocie najbliższy w prostej bywa
+    przystankiem drugiego kierunku. */
+function nearestStopName(seg, pos) {
+    const at = seg._stopAt, names = seg.stops_n;
+    if (!at || !names || names.length !== at.length) return null;
+    let best = 0;
+    for (let i = 1; i < at.length; i++) {
+        if (Math.abs(at[i] - pos) < Math.abs(at[best] - pos)) best = i;
+    }
+    return names[best];
 }
 
 let flowLayer = null;
@@ -1279,6 +1301,11 @@ let flowEndDot = null;      // kropka celu (patrz endDot)
 let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
 let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
 let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
+let flowLineStopLayer = null;   // przystanki linii wskazanej kursorem (patrz showLineHighlight)
+let flowStopsLayer = null;      // przystanki narysowanych linii przy dużym przybliżeniu
+let stopNameLayer = null;       // nazwy przystanków przy dużym przybliżeniu (placeStopNames)
+let hoveredLineStop = null;     // kropka przystanku linii pod kursorem
+let clusterBoxes = [];          // gdzie stoją grupki numerów - nazwy im ustępują
 
 function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
@@ -1301,6 +1328,7 @@ function clearFlow() {
     // i rowery. Włączona warstwa wraca wtedy do miejskiego feedu.
     refreshCarLayer();
     refreshBikeLayer();
+    placeStopNames();
 }
 
 /** Skład korytarza danego kawałka: wszystkie linie jadące tymi samymi,
@@ -1726,7 +1754,10 @@ function labelAnchors(latlngs, stepPx) {
 
 function placeLineLabels() {
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
-    if (!flowHits.length) return;
+    clusterBoxes = [];
+    // Nazwy przystanków liczą się PO grupkach, bo to one mają pierwszeństwo
+    // (punkt 7 kontraktu) - stąd wołane tutaj, a nie z osobnego moveend.
+    if (!flowHits.length) { placeStopNames(); return; }
 
     // Duże zapytania to ponad tysiąc kawałków, a numery przeliczają się po
     // każdym ruchu mapy - kawałki spoza kadru odsiewamy więc od razu, na
@@ -1765,6 +1796,8 @@ function placeLineLabels() {
 
     flowLabelLayer = L.layerGroup(markers).addTo(map);
     for (const marker of markers) bindCluster(marker);
+    clusterBoxes = boxes;
+    placeStopNames();
 }
 
 /** Godzina dla KAZDEJ linii grupki z osobna - o ktorej ta linia jest w tym
@@ -1861,6 +1894,7 @@ function dimFlow(dim) {
         else flowDotLayer.addTo(map);
     }
     if (flowLabelLayer) placeLineLabels();   // grupki przeliczają własną widoczność
+    else placeStopNames();                   // ...a nazwy liczą się po nich
 }
 
 // Numery stoją co tyle a tyle pikseli KORYTARZA i tylko w kadrze, więc po
@@ -2031,8 +2065,9 @@ function flowTipTimeHtml(when) {
     if (!timeOpts.hover || !when) return '';
     let html = '<span class="flow-tip-time">'
         + `<b>${esc(fmtClock(when.now))}</b>`
-        + '<span class="flow-tip-what">tu jesteś</span>'
-        + '</span>';
+        + '<span class="flow-tip-what">tu jesteś'
+        + (when.stop ? ` · najbliżej <b>${esc(prettyStopName(when.stop))}</b>` : '')
+        + '</span></span>';
     // Bez odczytanego przyjazdu do celu (kawalek bez widocznej kontynuacji)
     // nie pokazujemy NICZEGO o dalszej drodze - zgadnieta godzina lamalaby
     // punkt 10 kontraktu.
@@ -2081,10 +2116,17 @@ function showLineHighlight(num, kind) {
     }));
     flowHighlight = L.layerGroup([...halos, ...cores]).addTo(map);
     flowHighlightKey = key;
+    // Przystanki tej linii - tylko dopóki jest wskazana (zgłoszenie #252).
+    // Na wierzchu podświetlenia, bo ono przykryłoby je tak samo jak linię.
+    flowLineStopLayer = L.layerGroup(lineStopsOf(parts.map(h => h.seg))
+        .filter(st => !atTransfer(st))
+        .map(st => lineStopDot(st, color))).addTo(map);
 }
 
 function hideLineHighlight() {
     if (flowHighlight) { map.removeLayer(flowHighlight); flowHighlight = null; }
+    if (flowLineStopLayer) { map.removeLayer(flowLineStopLayer); flowLineStopLayer = null; }
+    hoveredLineStop = null;
     flowHighlightKey = null;
 }
 
@@ -2150,6 +2192,9 @@ function handleFlowHover(e) {
     // dopiero co wskazany numer.
     const target = e.originalEvent && e.originalEvent.target;
     if (target && target.closest && target.closest('.line-cluster')) return;
+    // Nad przystankiem wskazanej linii linia zostaje wskazana - inaczej jej
+    // przystanki znikałyby spod kursora, który właśnie po nie sięga.
+    if (hoveredLineStop) return;
     // Nad kropką przystanku rządzi kropka: leży na narysowanej linii, więc bez
     // tego tablica odjazdów i dymek "tu jesteś" wychodzą jeden na drugim.
     if (hoveredStopDot) { clearFlowHover(); return; }
@@ -2169,6 +2214,201 @@ function pickFromCluster(marker, index) {
         hit: hitFor(hits, l.num, l.kind),
     }));
     setFlowPick(options, at, index, point);
+}
+
+// --- przystanki narysowanych linii i ich nazwy (zgłoszenia #252, #253) -----
+//
+// Mijane przystanki nie są przesiadkami (punkt 11 kontraktu), więc ich
+// kropki są mniejsze i lżejsze od kropek przesiadek i nie mają tablicy
+// odjazdów - tylko nazwę i godzinę, jak przystanki linii w rozkładach.
+// Widać je pod kursorem na wskazanej linii, a od przybliżenia
+// dotOpts.namesZoom - wszystkie, razem z nazwami. Pozostałe słupki miasta
+// zostają blade i bez nazw: mówią o czymś innym niż ta mapa (ta sama zasada,
+// co przy ◉). Nic z tego nie rusza samych linii.
+
+const LINE_STOP_STYLE = {radius: 4.5, weight: 2, opacity: 1, fillColor: '#fff', fillOpacity: 1};
+const LINE_STOP_GREY = '#546e7a';   // kropka kilku linii naraz nie ma jednego koloru
+const PLACE_SPAN_M = 400;           // słupki jednej nazwy dalej niż tyle to inne miejsca
+                                    // (ten sam promień co gtfs.PLACE_MAX_SPAN_M)
+const NAME_UPPER_PX = 8.6;          // szerokość wielkiej litery przy foncie nazwy...
+const NAME_CHAR_PX = 6.9;           // ...i każdego innego znaku
+const NAME_PAD_PX = 8;              // razem z białą otoczką liter
+const NAME_ROW_PX = 17;
+const NAME_OFFSET_PX = 8;           // odstęp nazwy od kropki
+const NAME_DOT_PX = 7;              // ile wokół kropki nazwa nie zasłania
+
+/** Przystanki narysowanych kawałków, jeden na słupek: nazwa miejsca, nazwa
+    słupka (gdy inna - peron kierunkowy węzła) i godzina każdej linii, która
+    tędy jedzie. Godzina jest z rozkładu kawałka (stops_t), jak w dymku linii. */
+function lineStopsOf(segs) {
+    const byPole = new Map();
+    for (const seg of segs) {
+        if (!seg.stops_t || !seg.stops_n) continue;
+        seg.stops_t.forEach(([lat, lon, sec], i) => {
+            const key = lat + ',' + lon;
+            let st = byPole.get(key);
+            if (!st) {
+                st = {lat, lon, name: seg.stops_n[i],
+                      pole: seg.stops_pf ? seg.stops_pf[i] : null, lines: new Map()};
+                byPole.set(key, st);
+            }
+            const line = seg.kind + ' ' + seg.num;
+            const prev = st.lines.get(line);
+            if (!prev || sec < prev.sec) st.lines.set(line, {num: seg.num, kind: seg.kind, sec});
+        });
+    }
+    return [...byPole.values()];
+}
+
+/** Czy przystanek leży w miejscu, które ma już kropkę przesiadki - tam
+    druga, mniejsza kropka pytałaby o to samo i zasłaniała tablicę odjazdów. */
+function atTransfer(st) {
+    const nodes = (lastFlow && lastFlow.nodes) || [];
+    const here = L.latLng(st.lat, st.lon);
+    return nodes.some(n => n.place === st.name
+        && here.distanceTo(L.latLng(n.lat, n.lon)) <= PLACE_SPAN_M);
+}
+
+function lineStopTipHtml(st) {
+    const lines = [...st.lines.values()].sort((a, b) => a.sec - b.sec);
+    let html = lines.length === 1 ? `${esc(fmtClock(lines[0].sec))} · ` : '';
+    html += `<b>${esc(prettyStopName(st.name))}</b>`;
+    if (st.pole) html += `<span class="tip-platform">${esc(prettyStopName(st.pole))}</span>`;
+    if (lines.length > 1) {
+        html += '<span class="tip-line-times">' + lines.map(l =>
+            `<span><span class="badge ${esc(l.kind)}">${esc(l.num)}</span>`
+            + `${esc(fmtClock(l.sec))}</span>`).join('') + '</span>';
+    }
+    return html;
+}
+
+/** Klik nie przechodzi do mapy (jak przy kropce przesiadki): na telefonie
+    dotknięcie kropki jest jedynym sposobem, żeby przeczytać jej nazwę. */
+function lineStopDot(st, color) {
+    const dot = L.circleMarker([st.lat, st.lon], {...LINE_STOP_STYLE, color});
+    dot.bindTooltip(lineStopTipHtml(st), {direction: 'top', offset: [0, -4], opacity: 1});
+    dot.on('mouseover', () => {
+        hoveredLineStop = dot;
+        // Dymek linii i dymek przystanku stałyby jeden na drugim.
+        hideTimeDot();
+        if (flowTooltip) { map.removeLayer(flowTooltip); flowTooltip = null; }
+    });
+    dot.on('mouseout', () => { if (hoveredLineStop === dot) hoveredLineStop = null; });
+    dot.on('click', e => { L.DomEvent.stop(e); dot.openTooltip(); });
+    return dot;
+}
+
+/** Jedno miejsce na nazwę, nie jeden słupek: słupki tej samej nazwy stojące
+    obok siebie dostają jedną nazwę pośrodku. */
+function placesOf(stops) {
+    const groups = new Map();
+    for (const s of stops) {
+        const list = groups.get(s.name) || [];
+        const here = L.latLng(s.lat, s.lon);
+        let g = list.find(g => here.distanceTo(g.first) <= PLACE_SPAN_M);
+        if (!g) {
+            g = {name: s.name, first: here, pts: []};
+            list.push(g);
+            groups.set(s.name, list);
+        }
+        g.pts.push(s);
+    }
+    return [...groups.values()].flat().map(g => ({
+        name: g.name,
+        lat: g.pts.reduce((sum, p) => sum + p.lat, 0) / g.pts.length,
+        lon: g.pts.reduce((sum, p) => sum + p.lon, 0) / g.pts.length,
+        poles: g.pts.length,
+        pts: g.pts,
+    }));
+}
+
+function nameWidthPx(text) {
+    let w = NAME_PAD_PX;
+    for (const ch of text) w += ch !== ch.toLowerCase() ? NAME_UPPER_PX : NAME_CHAR_PX;
+    return w;
+}
+
+/** Pudełko, w które nazwa się zmieści: obok kropki - po prawej, po lewej,
+    nad nią, pod nią albo po skosie - najpierw przy środku miejsca, potem przy
+    każdym jego słupku. Null, gdy nigdzie: nazwa, która się nie mieści, nie
+    jest rysowana. Grupki numerów i inne nazwy mają pierwszeństwo zawsze.
+
+    Własne kropki miejsca są przeszkodą tylko w pierwszym podejściu. Słupki
+    jednego miejsca stoją po dwóch stronach ulicy, kilka pikseli od siebie,
+    a środek miejsca leży między nimi - każde pudełko przy nim zahaczało
+    o któryś z nich, więc nazwy nie dostawał akurat największy węzeł w kadrze
+    (pl. Grunwaldzki, 2026-10-09). Nazwa leżąca na kropce, którą opisuje, nie
+    zasłania niczego obcego. */
+function nameBox(anchors, width, taken, own) {
+    const size = map.getSize();
+    const h = NAME_ROW_PX, off = NAME_OFFSET_PX, d = NAME_OFFSET_PX * 0.7;
+    const around = at => [
+        [at.x + off, at.y - h / 2],
+        [at.x - off - width, at.y - h / 2],
+        [at.x - width / 2, at.y - off - h],
+        [at.x - width / 2, at.y + off],
+        [at.x + d, at.y - d - h],
+        [at.x + d, at.y + d],
+        [at.x - d - width, at.y - d - h],
+        [at.x - d - width, at.y + d],
+    ];
+    const hits = (list, box) =>
+        list.some(b => b[0] < box[2] && box[0] < b[2] && b[1] < box[3] && box[1] < b[3]);
+    for (const strict of [true, false]) {
+        for (const at of anchors) {
+            for (const [x, y] of around(at)) {
+                const box = [x, y, x + width, y + h];
+                if (box[0] < 0 || box[1] < 0 || box[2] > size.x || box[3] > size.y) continue;
+                if (hits(taken, box) || (strict && hits(own, box))) continue;
+                return box;
+            }
+        }
+    }
+    return null;
+}
+
+function placeStopNames() {
+    if (flowStopsLayer) { map.removeLayer(flowStopsLayer); flowStopsLayer = null; }
+    if (stopNameLayer) { map.removeLayer(stopNameLayer); stopNameLayer = null; }
+    if (hoveredLineStop && !flowLineStopLayer) hoveredLineStop = null;
+    if (map.getZoom() < dotOpts.namesZoom) return;
+    // Wybrana trasa ma własne przystanki po drodze - nazwy wachlarza
+    // opisywałyby to, co jest właśnie przygaszone.
+    if (lastFlow && flowDimmed) return;
+    const view = map.getBounds();
+    let named;
+    if (lastFlow) {
+        const stops = lineStopsOf(lastFlow.segments).filter(st => view.contains([st.lat, st.lon]));
+        flowStopsLayer = L.layerGroup(stops.filter(st => !atTransfer(st))
+            .map(st => lineStopDot(st, LINE_STOP_GREY))).addTo(map);
+        named = stops;
+    } else {
+        named = cityStops.filter(s => view.contains([s.lat, s.lon]));
+    }
+    const dotBox = at => [at.x - NAME_DOT_PX, at.y - NAME_DOT_PX,
+                          at.x + NAME_DOT_PX, at.y + NAME_DOT_PX];
+    const places = placesOf(named).map(p => {
+        const pins = p.pts.map(s => map.latLngToContainerPoint([s.lat, s.lon]));
+        return {...p, anchors: [map.latLngToContainerPoint([p.lat, p.lon]), ...pins],
+                dots: pins.map(dotBox)};
+    }).sort((a, b) => (b.poles - a.poles) || a.name.localeCompare(b.name));
+    // Kropki też są przeszkodą: nazwa jednego przystanku nie zasłania drugiego.
+    const taken = [...clusterBoxes];
+    const markers = [];
+    for (const p of places) {
+        const text = prettyStopName(p.name);
+        const width = nameWidthPx(text);
+        const others = places.filter(o => o !== p).flatMap(o => o.dots);
+        const box = nameBox(p.anchors, width, [...taken, ...others], p.dots);
+        if (!box) continue;
+        taken.push(box);
+        markers.push(L.marker(map.containerPointToLatLng(L.point(box[0], box[1])), {
+            icon: L.divIcon({className: 'stop-name', html: esc(text),
+                             iconSize: [width, NAME_ROW_PX], iconAnchor: [0, 0]}),
+            interactive: false, keyboard: false,
+        }));
+    }
+    stopNameLayer = L.layerGroup(markers).addTo(map);
 }
 
 // Klik w narysowany kurs NIE OTWIERA ŻADNEJ PROPOZYCJI (usunięte 2026-08-16).
@@ -5117,6 +5357,18 @@ function bindDotOpts() {
             if (timetableTarget) {
                 loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
             }
+        });
+    }
+    const namesZoom = $('names-zoom');
+    const namesZoomOut = $('names-zoom-value');
+    if (namesZoom) {
+        namesZoom.value = dotOpts.namesZoom;
+        if (namesZoomOut) namesZoomOut.textContent = namesZoom.value;
+        namesZoom.addEventListener('input', () => {
+            dotOpts.namesZoom = Number(namesZoom.value);
+            if (namesZoomOut) namesZoomOut.textContent = namesZoom.value;
+            saveDotPrefs();
+            placeStopNames();
         });
     }
     const ttPast = $('tt-past');

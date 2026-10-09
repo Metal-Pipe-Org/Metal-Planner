@@ -1592,6 +1592,123 @@ checks.przystanki_po_drodze_na_mapie = (() => {
     };
 })();
 
+// --- przystanki narysowanych linii i ich nazwy (zgłoszenia #252, #253) ------
+//
+// Fixture nie niesie nazw (powstał przed nimi), więc dokładamy je na kopii:
+// nazwa miejsca to współrzędne słupka, a kropki przesiadek dostają nazwę
+// swojego słupka - tak samo, jak robi to serwer (planner, pole `place`).
+
+const nazwaSlupka = (lat, lon) => 'P ' + lat + ' ' + lon;
+const zNazwami = JSON.parse(JSON.stringify(FLOW_FIXTURE));
+for (const seg of zNazwami.segments) {
+    if (seg.stops_t) seg.stops_n = seg.stops_t.map(([lat, lon]) => nazwaSlupka(lat, lon));
+}
+for (const node of zNazwami.nodes || []) node.place = nazwaSlupka(node.lat, node.lon);
+
+function boxOfName(marker) {
+    const at = app.map.latLngToContainerPoint(marker.getLatLng());
+    const [w, h] = marker.options.icon.iconSize;
+    return [at.x, at.y, at.x + w, at.y + h];
+}
+
+const warstwa = layer => (layer ? layer.getLayers() : []);
+const wskazanyKawalek = () => app.flowHits.find(h => h.seg.stops_n && h.seg.stops_n.length >= 3);
+
+checks.p252_bez_kursora_i_z_daleka_nie_ma_przystankow_linii = (() => {
+    app.dotOpts.namesZoom = 17;
+    app.drawFlow(zNazwami, true);
+    const zoom = app.map.getZoom();
+    return {ok: zoom < 17 && !app.flowLineStopLayer && warstwa(app.flowStopsLayer).length === 0
+                && warstwa(app.stopNameLayer).length === 0,
+            zoom, kropek: warstwa(app.flowStopsLayer).length, nazw: warstwa(app.stopNameLayer).length};
+})();
+
+checks.p252_wskazana_linia_pokazuje_swoje_przystanki = (() => {
+    const hit = wskazanyKawalek();
+    app.showLineHighlight(hit.seg.num, hit.seg.kind);
+    const kropki = warstwa(app.flowLineStopLayer);
+    const swoje = new Set(app.flowHits
+        .filter(h => h.seg.num === hit.seg.num && h.seg.kind === hit.seg.kind && h.seg.stops_t)
+        .flatMap(h => h.seg.stops_t.map(([lat, lon]) => lat + ',' + lon)));
+    const klucz = d => d.getLatLng().lat + ',' + d.getLatLng().lng;
+    const obce = kropki.filter(d => !swoje.has(klucz(d)));
+    const przesiadki = new Set((zNazwami.nodes || []).map(n => n.lat + ',' + n.lon));
+    const naPrzesiadce = kropki.filter(d => przesiadki.has(klucz(d)));
+    // Lżejsze od kropki przesiadki (punkt 11 kontraktu): mniejsze i cieńsze.
+    // Start ma swój własny, zielony wygląd - porównujemy ze zwykłą przesiadką.
+    const przesiadka = warstwa(app.flowDotLayer).find(d => !d.isStart);
+    const lzejsze = kropki.every(d => d.options.radius < przesiadka.options.radius
+                                      && d.options.weight < przesiadka.options.weight);
+    const dymek = kropki.length ? kropki[0].getTooltip().content : '';
+    app.hideLineHighlight();
+    return {ok: kropki.length > 0 && obce.length === 0 && naPrzesiadce.length === 0 && lzejsze
+                && /\d{1,2}:\d{2} · <b>P /.test(dymek) && !app.flowLineStopLayer,
+            kropek: kropki.length, obcych: obce.length, naPrzesiadce: naPrzesiadce.length,
+            lzejsze, dymek};
+})();
+
+checks.p252_dymek_linii_podaje_najblizszy_przystanek = (() => {
+    const hit = wskazanyKawalek();
+    const [lat, lon] = hit.seg.stops_t[1];
+    const when = app.timeAtHover(hit, app.map.latLngToContainerPoint([lat, lon]));
+    return {ok: !!when && when.stop === nazwaSlupka(lat, lon),
+            oczekiwany: nazwaSlupka(lat, lon), podany: when && when.stop};
+})();
+
+checks.p253_z_bliska_nazwy_tylko_przystankow_mapy = (() => {
+    const hit = wskazanyKawalek();
+    const [lat, lon] = hit.seg.stops_t[1];
+    // Słupek miasta, przez który nic z mapy nie jedzie - ma zostać bez nazwy.
+    app.cityStops.length = 0;
+    app.cityStops.push({name: 'OBCY', lat: lat + 0.0006, lon: lon + 0.0006});
+    app.map.setView([lat, lon], 17);
+    const nazwy = warstwa(app.stopNameLayer);
+    const teksty = nazwy.map(m => m.options.icon.html);
+    const zMapy = new Set(zNazwami.segments.flatMap(s => s.stops_n || []));
+    const boxes = nazwy.map(boxOfName);
+    let nachodzi = 0;
+    for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) if (overlaps(boxes[i], boxes[j])) nachodzi++;
+        for (const c of app.clusterBoxes) if (overlaps(boxes[i], c)) nachodzi++;
+    }
+    return {ok: nazwy.length > 0 && teksty.every(t => zMapy.has(t)) && !teksty.includes('OBCY')
+                && new Set(teksty).size === teksty.length && nachodzi === 0
+                && warstwa(app.flowStopsLayer).length > 0,
+            nazw: nazwy.length, nachodzi, grupek: app.clusterBoxes.length,
+            kropek: warstwa(app.flowStopsLayer).length};
+})();
+
+checks.p253_bez_mapy_nazwy_calego_miasta_raz_na_miejsce = (() => {
+    const hit = wskazanyKawalek();
+    const [lat, lon] = hit.seg.stops_t[1];
+    app.cityStops.length = 0;
+    // Dwa perony jednego miejsca i jedno inne miejsce obok.
+    app.cityStops.push({name: 'PLAC', lat, lon},
+                       {name: 'PLAC', lat: lat + 0.0002, lon},
+                       {name: 'ULICA', lat: lat - 0.0008, lon: lon - 0.0012});
+    app.clearFlow();
+    const blisko = warstwa(app.stopNameLayer).map(m => m.options.icon.html).sort();
+    app.map.setView([lat, lon], 15);
+    const daleko = warstwa(app.stopNameLayer).length;
+    app.cityStops.length = 0;
+    return {ok: JSON.stringify(blisko) === JSON.stringify(['PLAC', 'ULICA']) && daleko === 0,
+            blisko, daleko};
+})();
+
+checks.p253_wezel_z_peronami_po_obu_stronach_dostaje_nazwe = (() => {
+    // pl. Grunwaldzki (2026-10-09): dwa słupki miejsca kilka pikseli od
+    // siebie, po skosie - każde z czterech miejsc obok ŚRODKA zahacza
+    // o któryś z nich. Nazwa ma i tak stanąć, przy którymś ze słupków.
+    app.cityStops.length = 0;
+    const lat = 51.1115, lon = 17.061, dLat = 0.00004, dLon = 0.000064;
+    app.cityStops.push({name: 'WĘZEŁ', lat: lat + dLat, lon: lon - dLon},
+                       {name: 'WĘZEŁ', lat: lat - dLat, lon: lon + dLon});
+    app.map.setView([lat, lon], 17);
+    const nazwy = warstwa(app.stopNameLayer).map(m => m.options.icon.html);
+    app.cityStops.length = 0;
+    return {ok: JSON.stringify(nazwy) === JSON.stringify(['WĘZEŁ']), nazwy};
+})();
+
 // --- rura z miksera przeglądarki --------------------------------------------
 // Drugie uruchomienie app.js, tym razem z Web Audio - jak na każdym
 // współczesnym telefonie. Musi być na końcu: pierwsza kopia też zobaczy

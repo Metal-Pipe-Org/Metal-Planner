@@ -176,6 +176,14 @@ def _platform_base_name(stop_name):
     return stop_name[:m.end(1)] if m else None
 
 
+def place_label(stop_name):
+    """Nazwa miejsca, do którego należy słupek - ta, którą mapa podpisuje
+    przystanek: raz na miejsce, nie raz na peron. Peron kierunkowy dużego
+    węzła ('PL. GRUNWALDZKI W/t') podpisuje się nazwą bazową, a jego własna
+    nazwa zostaje do dymka (zgłoszenia #252 i #253)."""
+    return _platform_base_name(stop_name) or stop_name
+
+
 def _haversine_m(lat1, lon1, lat2, lon2):
     r = 6_371_000
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -1078,7 +1086,7 @@ def all_stops_geo():
     """Wszystkie słupki z współrzędnymi - do narysowania na mapie."""
     db = _connect()
     stops = [
-        {"name": name, "lat": lat, "lon": lon}
+        {"name": name, "place": place_label(name), "lat": lat, "lon": lon}
         for name, lat, lon in db.execute(
             "SELECT stop_name, stop_lat, stop_lon FROM stops"
         )

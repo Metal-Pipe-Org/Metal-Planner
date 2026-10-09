@@ -1493,6 +1493,47 @@ body.routes-off .results-body { display: none; }
 
 .flow-tip-goal b { color: var(--ink); }
 
+/* Nazwa najbliższego przystanku (#252) - to ją się czyta, nie „najbliżej". */
+.flow-tip-what b { color: var(--ink); }
+
+/* Przystanek linii na mapie (zgłoszenie #252): słupek, gdy różni się od
+   nazwy miejsca, i godziny linii, gdy kropka należy do kilku. */
+.tip-platform {
+    display: block;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+}
+
+.tip-line-times {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 8px;
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tip-line-times .badge { margin-right: 3px; }
+
+/* Nazwa przystanku przy dużym przybliżeniu (zgłoszenie #253). Szerokość
+   pudełka liczy app.js (nameWidthPx) - jej przekroczenie nie ucina tekstu,
+   tylko przestaje gwarantować, że nie wejdzie na sąsiada. Pełna biała
+   otoczka liter, jak w aplikacjach z mapą: napis leży na kreskach linii
+   i na nazwach ulic z kafelków, więc musi się od nich odciąć, a tło
+   prostokątem zasłaniałoby ulice. Kafelki OSM są zawsze jasne, a aplikacja
+   nie ma ciemnego motywu - otoczka jest więc biała zawsze. */
+.stop-name {
+    font: 700 12px/17px system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #0b1118;
+    white-space: nowrap;
+    pointer-events: none;
+    padding-left: 4px;
+    text-shadow:
+        -1.75px -1.75px 0 #fff, 0 -2px 0 #fff, 1.75px -1.75px 0 #fff,
+        -2px 0 0 #fff, 2px 0 0 #fff,
+        -1.75px 1.75px 0 #fff, 0 2px 0 #fff, 1.75px 1.75px 0 #fff,
+        0 0 5px #fff;
+}
+
 /* Numer i jego czas to jeden cel myszy - kursor na czasie wskazuje tę samą
    linię co kursor na numerze (patrz bindCluster). */
 .line-chip-slot {

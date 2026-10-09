@@ -888,9 +888,11 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
 
 - `GET /api/stops` — wszystkie słupki MPK i (o ile skonfigurowano
   `PKP_API_KEY` i geokodowanie zdążyło już znaleźć współrzędne - patrz
-  `pkp.py`/`update_pkp.py`) stacje PKP: `[{name, lat, lon, kind: "stop"|
+  `pkp.py`/`update_pkp.py`) stacje PKP: `[{name, place, lat, lon, kind: "stop"|
   "train"}, …]`. `kind` mówi frontowi, jakim stylem narysować marker
-  (`static/app.js`) - reszta pól jest taka sama dla obu rodzajów.
+  (`static/app.js`) - reszta pól jest taka sama dla obu rodzajów. `place` to
+  nazwa miejsca słupka (`gtfs.place_label`: peron kierunkowy węzła traci
+  sufiks) - po niej mapa podpisuje przystanki raz na miejsce (#253).
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
@@ -905,8 +907,12 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   journeys: [{departure, arrival, duration_min, wait_min, transfers,
   legs: [...]}, …]}`. `segments` posortowane rosnąco po `w` (kolejność
   rysowania); `path` to kolejne przystanki od wsiadania do ostatniego
-  użytecznego wyjścia. `nodes` to węzły przesiadkowe pod kropki na mapie:
-  `[{name, lat, lon, sec, lines: [{num, kind, headsign}, …]}, …]` — po jednym
+  użytecznego wyjścia. Kawałek z godzinami niesie `stops_t: [[lat, lon,
+  sekunda], …]` i równoległe `stops_n` — nazwy MIEJSC tych przystanków
+  (#252) — a gdy któryś słupek nazywa się inaczej niż jego miejsce (peron
+  kierunkowy), także `stops_pf` z nazwą słupka albo `null`.
+  `nodes` to węzły przesiadkowe pod kropki na mapie:
+  `[{name, place, lat, lon, sec, lines: [{num, kind, headsign}, …]}, …]` — po jednym
   na MIEJSCE, nie na słupek (plac z trzema peronami to jedna kropka), `sec` =
   najwcześniejsza godzina, o której można tam być, `lines` = linie, w które
   MAPA pozwala tam wsiąść, z kierunkiem (ta sama linia mija węzeł w obie
@@ -1189,6 +1195,24 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
 | `.claude/commands/` | polecenia Claude'a używane przez workflow: ocena PR-a, rozwiązanie zgłoszenia |
 
 ## Changelog
+
+- **2026-10-09** — **przystanki i ich nazwy na mapie** (zgłoszenia #252
+  i #253). Najechanie na linię pokazuje jej przystanki: małe białe kropki
+  w kolorze linii, lżejsze od kropek przesiadek, bez tablicy odjazdów, tylko
+  z godziną i nazwą w dymku (nazwa peronu dopisana pod spodem, gdy jest inna
+  niż nazwa miejsca). Zejście z linii je zabiera; na telefonie pokazuje je
+  dotknięcie linii, a chowa dotknięcie gdzie indziej. Dymek linii mówi
+  przy „tu jesteś” także, jaki przystanek jest najbliżej. Od dużego
+  przybliżenia (domyślnie 17, suwak „Nazwy przystanków od przybliżenia” pod
+  ⚙ w sekcji DEV „Przystanki i rozkład”) przystanki narysowanych linii stoją
+  na mapie na stałe, z nazwami — raz na miejsce, nie na słupek. Pozostałe
+  słupki miasta zostają blade i bez nazw. Bez narysowanej trasy przy tym
+  przybliżeniu podpisane są wszystkie przystanki w kadrze. Numery linii
+  mają pierwszeństwo: nazwa, która nie mieści się obok kropki, nie jest
+  rysowana. Próg 17 wynika z pomiaru: przy 16 nazwy centrum przestają się
+  zderzać ze sobą, ale numery i kropki zabierają im miejsce. Nowe pola
+  `stops_n`, `stops_pf` i `nodes[].place` w `/api/flow` oraz `place`
+  w `/api/stops`.
 
 - **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
   iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie
