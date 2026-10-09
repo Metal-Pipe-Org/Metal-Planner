@@ -33,7 +33,6 @@ const dateInput = $('tt-date');
 const timeInput = $('tt-time');
 const clearButton = $('tt-clear');
 const resultsBox = $('tt-results');
-const hintBox = $('tt-hint');
 if (!queryInput || !resultsBox) return;
 
 // Numery linii do podpowiedzi - wstawione w stronę razem z nazwami
@@ -411,7 +410,6 @@ function reset() {
 function syncField() {
     const filled = !!queryInput.value.trim();
     clearButton.hidden = !filled;
-    hintBox.hidden = !!data;
 }
 
 function fail(message, suggestions) {
@@ -701,9 +699,6 @@ function renderLine() {
                 <span class="tt-count">${variant.stops.length}</span>
             </div>
             <ol class="tt-stops ${esc(data.mode)}">${stops}</ol>
-            <p class="field-hint">Kliknij przystanek, żeby go przybliżyć —
-                a „odjazdy", żeby zobaczyć godziny tej linii z tego słupka.
-                Klik w przystanek na mapie robi to samo, co „odjazdy".</p>
         </div>`;
 }
 
@@ -1013,6 +1008,8 @@ function pointsCard(points) {
             <div class="tt-card-head">
                 <h3 class="tt-h3">Słupki</h3>
                 <span class="tt-count">${points.length}</span>
+                <span class="info" tabindex="0" role="button"
+                      data-tip="Jedna nazwa to kilka słupków — z każdego jedzie się w inną stronę. Wybrany widać na mapie.">i</span>
             </div>
             <div class="tt-points">
                 ${option('', 'Wszystkie', departures(data.departures.length),
@@ -1026,8 +1023,6 @@ function pointsCard(points) {
                         — z mniejszą liczbą odjazdów</summary>
                     <div class="tt-points">${tail.map(row).join('')}</div>
                 </details>` : ''}
-            <p class="field-hint">Jedna nazwa to kilka słupków — z każdego jedzie
-                się w inną stronę. Wybrany widać na mapie.</p>
         </div>`;
 }
 
@@ -1118,13 +1113,12 @@ function renderBoard() {
         </li>${open ? tripHtml(dep) : ''}`;
     }).join('');
 
-    const mapNote = pickedLines === 0
-        ? 'Nic nie zaznaczone — tablica jest pusta.'
-        : groups.length > MAX_ROUTES_ON_MAP && pickedLines > MAX_ROUTES_ON_MAP
-            ? `Zostaw najwyżej ${MAX_ROUTES_ON_MAP} linii, a ich trasy pokażą się na mapie.`
-            : 'Trasy zaznaczonych linii — stąd dalej — widać na mapie. '
-                + 'Klik w trasę otwiera rozkład linii, a w przystanek na niej — '
-                + 'jego odjazdy.';
+    const mapNote = full ? ''
+        : pickedLines === 0
+            ? 'Nic nie zaznaczone — tablica jest pusta.'
+            : groups.length > MAX_ROUTES_ON_MAP && pickedLines > MAX_ROUTES_ON_MAP
+                ? `Zostaw najwyżej ${MAX_ROUTES_ON_MAP} linii, a ich trasy pokażą się na mapie.`
+                : '';
 
     resultsBox.innerHTML = `
         <div class="tt-title">
@@ -1144,9 +1138,7 @@ function renderBoard() {
                     </button>`}
             </div>
             <div class="tt-chips">${chips}</div>
-            <p class="field-hint">${esc(full
-                ? 'Pełny rozkład czyta się dla jednej linii — klik przełącza na inną.'
-                : mapNote)}</p>
+            ${mapNote ? `<p class="field-hint">${esc(mapNote)}</p>` : ''}
         </div>
 
         <div class="card tt-card">
@@ -1186,7 +1178,6 @@ function tripStopsHtml(dep) {
     return `
         <ol class="tt-stops ${esc(trip.mode)}">${stops}</ol>
         <p class="field-hint tt-trip-foot">
-            <span>Kliknij godzinę ponownie, żeby zwinąć ten kurs.</span>
             ${routeButton(data.lines[dep.line], 'cała trasa')}
         </p>`;
 }
