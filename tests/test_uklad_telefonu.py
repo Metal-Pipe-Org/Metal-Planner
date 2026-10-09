@@ -13,7 +13,9 @@ stanie mierzy, czy
   - na ekranie mapy nakładki (panel, warstwy, pasek z czasem, okienko
     z rozkładem, zakładki) nie leżą jedna na drugiej,
 
-a po wyszukaniu - czy formularz zwinął się do jednej linijki. Do tego rozkład:
+a po wyszukaniu - czy formularz zwinął się do jednej linijki. Pasek z nazwą
+aplikacji ma w każdym stanie tę samą wysokość, a ⚙ to samo miejsce - osobno
+na każdym telefonie i osobno na komputerze (#257). Do tego rozkład:
 z pustego zakładka „Mapa" wychodzi sama, a z wybranym zostaje na mapie
 z „Zamknij rozkład".
 
@@ -106,6 +108,17 @@ UKLAD_JS = """async (mapView) => {
 }"""
 
 
+# Pasek z nazwą: jego wysokość i miejsce ⚙. Zaokrąglone do piksela - liczy
+# się przeskok widoczny dla oka, a nie ułamek z zaokrąglania czcionki.
+PASEK_JS = """() => {
+    const bar = document.querySelector('.app-bar').getBoundingClientRect();
+    const gear = document.getElementById('dev-toggle').getBoundingClientRect();
+    return {pasek: Math.round(bar.height), pasek_gora: Math.round(bar.top),
+            zebatka_gora: Math.round(gear.top), zebatka_lewo: Math.round(gear.left),
+            zebatka_prawo: Math.round(gear.right)};
+}"""
+
+
 def _chromium(playwright):
     try:
         return playwright.chromium.launch()
@@ -167,10 +180,19 @@ def przebieg(request, adres, przegladarka):
     page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
 
     uklad = {}
+    pasek = {}
+
+    def zmierz(stan, widok_mapy):
+        uklad[stan] = page.evaluate(UKLAD_JS, widok_mapy)
+        pasek[stan] = page.evaluate(PASEK_JS)
+
     page.goto(adres)
     page.wait_for_selector("#start")
     telefon = page.is_visible("#view-tabs")
-    uklad["start"] = page.evaluate(UKLAD_JS, True)
+    zmierz("start", True)
+    page.click("#mode-vehicle")
+    pasek["jestem w pojeździe"] = page.evaluate(PASEK_JS)
+    page.click("#mode-place")
 
     page.fill("#time", "12:00")
     _wybierz(page, "#start", TRASA[0])
@@ -179,7 +201,7 @@ def przebieg(request, adres, przegladarka):
         page.click("#search")
     page.wait_for_selector("#time-headline:not([hidden])", timeout=20000)
     page.wait_for_timeout(1500)       # tablica przystanku startowego dochodzi osobno
-    uklad["po wyszukaniu"] = page.evaluate(UKLAD_JS, True)
+    zmierz("po wyszukaniu", True)
     zwiniety = {
         "linijka": page.is_visible(".search-summary"),
         "pola": page.is_visible("#start"),
@@ -187,14 +209,14 @@ def przebieg(request, adres, przegladarka):
     }
 
     page.click(".search-summary")
-    uklad["rozwinięty formularz"] = page.evaluate(UKLAD_JS, True)
+    zmierz("rozwinięty formularz", True)
 
     page.click('#view-tabs [data-view="list"]')
-    uklad["zakładka Trasy"] = page.evaluate(UKLAD_JS, False)
+    zmierz("zakładka Trasy", False)
 
     w_rozkladzie = "document.body.classList.contains('mode-timetable')"
     page.click('#view-tabs [data-view="timetable"]')
-    uklad["zakładka Rozkład, nic nie wybrano"] = page.evaluate(UKLAD_JS, False)
+    zmierz("zakładka Rozkład, nic nie wybrano", False)
     page.click('#view-tabs [data-view="map"]')
     z_pustego = {"wciaz_rozklad": page.evaluate(w_rozkladzie),
                  "wyszukiwarka": page.is_visible(".search-card")}
@@ -203,14 +225,17 @@ def przebieg(request, adres, przegladarka):
     _wybierz(page, "#tt-query", PRZYSTANEK)
     page.wait_for_selector("#tt-results .tt-rows, #tt-results .card")
     page.wait_for_timeout(1000)
-    uklad["zakładka Rozkład, przystanek"] = page.evaluate(UKLAD_JS, False)
+    zmierz("zakładka Rozkład, przystanek", False)
     page.click('#view-tabs [data-view="map"]')
     z_wybranego = {"wciaz_rozklad": page.evaluate(w_rozkladzie),
                    "zamknij": page.is_visible("#tt-close")}
-    uklad["rozkład na mapie"] = page.evaluate(UKLAD_JS, True)
+    zmierz("rozkład na mapie", True)
+
+    page.click("#dev-toggle")
+    pasek["ustawienia"] = page.evaluate(PASEK_JS)
 
     context.close()
-    return {"telefon": telefon, "uklad": uklad, "zwiniety": zwiniety,
+    return {"telefon": telefon, "uklad": uklad, "pasek": pasek, "zwiniety": zwiniety,
             "z_pustego": z_pustego, "z_wybranego": z_wybranego, "bledy": bledy}
 
 
@@ -253,3 +278,42 @@ def test_bez_bledow_javascriptu(przebieg):
     """Błąd w skrypcie potrafi zostawić układ w połowie drogi - i przejść
     niezauważony, bo strona dalej się wyświetla."""
     assert not przebieg["bledy"], przebieg["bledy"]
+
+
+def _rozne_paski(pasek):
+    wzor = next(iter(pasek.values()))
+    return {stan: p for stan, p in pasek.items() if p != wzor}
+
+
+def test_pasek_z_nazwa_taki_sam_na_kazdej_zakladce(przebieg):
+    """#257: pasek z nazwą nie zmienia wysokości ani miejsca ⚙ między
+    zakładkami i widokami - przedtem na „Rozkładzie" rósł o 8 px."""
+    pasek = przebieg["pasek"]
+    assert not _rozne_paski(pasek), json.dumps(pasek, ensure_ascii=False, indent=2)
+
+
+def test_pasek_z_nazwa_taki_sam_na_komputerze(adres, przegladarka):
+    """To samo na komputerze: wyszukiwarka, start z pojazdu, rozkłady
+    i otwarte ustawienia mają ten sam pasek. Komputer ma własne wymiary
+    paska, więc porównuje się go tylko ze sobą."""
+    context = przegladarka.new_context(viewport={"width": 1280, "height": 800},
+                                       locale="pl-PL", service_workers="block")
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector("#start")
+    assert not page.is_visible("#view-tabs")
+    pasek = {"wyszukiwarka": page.evaluate(PASEK_JS)}
+    page.click("#mode-vehicle")
+    pasek["jestem w pojeździe"] = page.evaluate(PASEK_JS)
+    page.click("#mode-place")
+    page.click("#mode-toggle")
+    page.wait_for_function("document.body.classList.contains('mode-timetable')")
+    pasek["rozkłady"] = page.evaluate(PASEK_JS)
+    page.click("#mode-toggle")
+    page.click("#dev-toggle")
+    pasek["ustawienia"] = page.evaluate(PASEK_JS)
+    context.close()
+    assert not _rozne_paski(pasek), json.dumps(pasek, ensure_ascii=False, indent=2)

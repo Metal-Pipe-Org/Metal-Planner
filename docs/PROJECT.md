@@ -1173,6 +1173,17 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
 
 ## Changelog
 
+- **2026-10-09** — **pasek z nazwą jednakowy na każdej zakładce** (zgłoszenie
+  #257). Na telefonie pasek „Metal Planner Wrocław” z ⚙ miał na „Mapie”
+  48 px, a na „Rozkładzie” 56 px — ciaśniejsze odstępy były przypięte tylko
+  do widoku mapy, a ⚙ przeskakiwała o 4 px. Teraz wymiary paska są w jednym
+  miejscu dla telefonu (i osobno dla komputera), bez nadpisań zależnych od
+  zakładki. Panel, w którym pasek stoi, ma jedną ramkę na wszystkie
+  zakładki — zmieniają one już tylko jego dół i tło — a warstwy mapy nie
+  dokładają paskowi drugiego rzędu na zakładkach z listą (nie ma tam mapy).
+  Test układu telefonu sprawdza, że wysokość paska i miejsce ⚙ są takie same
+  we wszystkich stanach ekranu, osobno na każdym telefonie i na komputerze.
+
 - **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
   iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie
   wracała sama. Dwie przyczyny naraz: strona dostawała domyślną sesję
