@@ -99,19 +99,27 @@ jobs:
             '... on PullRequest { number title url author { login } }' \
             '.nodes | map({who: .author.login, kind: "merged", number, title, url})')
 
-          fixed=$(search "is:issue is:closed reason:completed closed:$start..$end" \
+          closed_issues=$(search "is:issue is:closed reason:completed closed:$start..$end" \
             '... on Issue { number title url
                timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent {
                  actor { __typename login } closer { ... on PullRequest { author { login } } } } } }
-               closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
-                 nodes { merged mergedAt author { login } } } }' \
-            '.nodes | map((.timelineItems.nodes[0] // {}) as $c
+               closedByPullRequestsReferences(first: 50, includeClosedPrs: true) {
+                 totalCount nodes { merged mergedAt author { login } } } }' \
+            '.nodes')
+          # Jak przy `search`: ucięta lista PR-ów może dać zasługę nie temu PR-owi,
+          # więc ma to być widać w logu.
+          jq -r '.[] | select(.closedByPullRequestsReferences.totalCount
+                              > (.closedByPullRequestsReferences.nodes | length))
+                 | "::warning::#\(.number) ma \(.closedByPullRequestsReferences.totalCount) powiązanych PR-ów, pobieramy \(.closedByPullRequestsReferences.nodes | length) — zasługa może trafić nie do tego autora."' \
+            <<<"$closed_issues"
+          fixed=$(jq '
+            map((.timelineItems.nodes[0] // {}) as $c
                           | ([.closedByPullRequestsReferences.nodes[] | select(.merged)]
                              | max_by(.mergedAt) // {} | .author.login) as $pr_author
                           | {who: ($c.closer.author.login
                                    // (if $c.actor.__typename == "Bot" then $pr_author else null end)
                                    // $c.actor.login),
-                             kind: "fixed", number, title, url})')
+                             kind: "fixed", number, title, url})' <<<"$closed_issues")
 
           created=$(search "is:issue created:$start..$end" \
             '... on Issue { number title url author { login } }' \
