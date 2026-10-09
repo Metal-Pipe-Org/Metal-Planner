@@ -29,7 +29,11 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
    (`GITHUB_TOKEN`), GitHub innym workflow w ogóle nie mówi. Każdy nowy ważny
    komentarz albo akcja bota musi więc sama wysłać wiadomość przez
    `.github/scripts/discord.sh` — tak jak robią to dziś ocena Claude'a, solver,
-   stale i zapasowe zamykanie.
+   stale i zapasowe zamykanie. Zasługa za zgłoszenie zamknięte naszym tokenem
+   nie idzie na bota: od wyłączenia automatycznego zamykania w ustawieniach
+   repo (#228) zamyka je zapasowy krok, a GitHub nie zapisuje wtedy PR-a jako
+   zamykającego. Wiadomość z zapasowego kroku podpisuje ten, kto zmergował
+   PR, a podsumowanie dnia — autor zmergowanego PR-a powiązanego ze zgłoszeniem.
 3. Skrypt pobieramy zawsze z `main` (sparse checkout `.github/scripts` do
    `.discord`), nigdy z drzewa PR-a ani pracy Claude'a: dostaje w env sekret
    webhooka.
