@@ -4108,9 +4108,35 @@ function loadPlan(token, refit) {
                 showError(data.error, data.suggestions);
                 return false;
             }
+            const shown = liveStamp(data);
             renderPlan(data, refit);
+            if (data.live_pending) refreshLive(token, params, shown);
             return true;      // znaleziono - patrz search() i playPipeDrop
         });
+}
+
+/** Serwer policzył trasę na starych rowerach i autach albo bez nich, żeby
+    nie czekać na cudze serwery (zgłoszenie #229, patrz warmup.py). Jedno
+    dopytanie o to samo z `fresh=1` czeka już na świeże dane; wynik zastępuje
+    mapę tylko wtedy, gdy coś zmienił, i tylko gdy nikt w międzyczasie nie
+    zapytał o coś innego (suwak, „Pokaż więcej", nowa trasa). Bez kadrowania,
+    jak przy suwakach. */
+function refreshLive(token, params, shown) {
+    const asked = params.toString();
+    const fresh = new URLSearchParams(params);
+    fresh.set('fresh', '1');
+    fetch('/api/flow?' + fresh).then(r => r.json())
+        .then(data => {
+            if (token !== requestToken || queryParams().toString() !== asked) return;
+            if (data.error || liveStamp(data) === shown) return;
+            renderPlan(data, false);
+        })
+        .catch(() => {});      // zostaje wynik, który już jest na ekranie
+}
+
+/** Odpowiedź do porównania - przed renderPlan, który ją potem uzupełnia. */
+function liveStamp(data) {
+    return JSON.stringify({...data, live_pending: undefined});
 }
 
 /** Rower zmienia ODPOWIEDŹ, nie tylko wygląd mapy: rowerowych propozycji nie

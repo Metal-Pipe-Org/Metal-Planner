@@ -14,8 +14,14 @@ import pkp
 import timetables
 import traficar
 import vehicles
+import warmup
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
                      stop_timetable)
+
+# Ile najwyżej dopytanie o świeże rowery i auta (`fresh=1`) czeka na ich
+# pobranie - wynik jest już na ekranie, więc to czekanie nikogo nie blokuje,
+# ale wątek serwera trzyma. Ponad timeouty feedów (10 s, patrz traficar._fetch).
+LIVE_REFRESH_WAIT_SEC = 20
 
 def _frontend_digest(app):
     """Odcisk zawartości frontu - wersja cache'ów service workera.
@@ -338,7 +344,21 @@ def init_routes(app):
         # doklejone wprost do tablicy połączeń, którą wczytuje gtfs.load_day
         # (wołane z wnętrza plan_flow), więc dla tego endpointu to zwykłe
         # wyszukiwanie MPK, tylko z szerszą siecią pod spodem.
-        return jsonify(plan_flow(
+        #
+        # Na rowery i auta wyszukiwanie nie czeka (zgłoszenie #229, patrz
+        # warmup.py): liczy na tym, co jest w pamięci, a gdy to było stare,
+        # odpowiedź mówi o tym w `live_pending` i strona dopytuje z `fresh=1`.
+        # Dopytanie czeka już na świeże dane - wtedy, gdy wynik jest na ekranie.
+        if request.args.get("fresh") == "1":
+            warmup.wait_for_refreshes(LIVE_REFRESH_WAIT_SEC)
+        with warmup.no_waiting() as search:
+            result = _flow()
+        if search.stale and "error" not in result:
+            result["live_pending"] = True
+        return jsonify(result)
+
+    def _flow():
+        return plan_flow(
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time"),request.args.get("date")),
@@ -384,4 +404,4 @@ def init_routes(app):
             # Propozycje tras wyłączone pod zębatką - "0" i serwer ich nie
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",
-        ))
+        )

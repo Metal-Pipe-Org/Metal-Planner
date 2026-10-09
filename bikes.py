@@ -47,6 +47,7 @@ import time
 import urllib.request
 
 import gtfs
+import warmup
 
 GBFS_BASE = os.environ.get(
     "WRM_GBFS_URL",
@@ -144,6 +145,14 @@ def ride_distance_m(straight_m):
 _lock = threading.Lock()
 _cache = {}      # klucz kanału -> payload, klucz + "_at" -> monotonic
 
+# Kanały z tym, jak długo wolno trzymać każdy z nich (klucz, adres, sekundy).
+_FEEDS = (
+    ("info", INFO_URL, INFO_CACHE_SEC),
+    ("status", STATUS_URL, STATUS_CACHE_SEC),
+    ("free", FREE_URL, STATUS_CACHE_SEC),
+    ("types", TYPES_URL, TYPES_CACHE_SEC),
+)
+
 
 def _fetch(url):
     request = urllib.request.Request(
@@ -158,14 +167,38 @@ def _cached(key, url, max_age_sec):
 
     Wołane pod `_lock`, więc dwa równoległe zapytania nie pobiorą tego
     samego kanału dwa razy.
+
+    Z wyszukiwania (warmup.no_waiting) nie czeka: stary kanał wraca od razu,
+    a świeże pobierają się w tle (zgłoszenie #229). Kanału, który nie
+    przyszedł jeszcze ani razu, nie ma - OSError, tak jak przy awarii.
     """
     now = time.monotonic()
     if _cache.get(key) is not None and now - _cache.get(f"{key}_at", 0.0) < max_age_sec:
+        return _cache[key]
+    if not warmup.waiting_allowed():
+        warmup.refresh_in_background("wrm", _refetch_stale)
+        if _cache.get(key) is None:
+            raise OSError(f"kanał {key} jeszcze się pobiera")
         return _cache[key]
     payload = _fetch(url)
     _cache[key] = payload
     _cache[f"{key}_at"] = now
     return payload
+
+
+def _refetch_stale():
+    """Pobranie w tle wszystkich przeterminowanych kanałów naraz - jedno
+    wyszukiwanie potrzebuje ich kilku, a pierwsze brakujące przerywa
+    czytanie. BEZ `_lock`: pod nim wyszukiwanie czytałoby kanały dopiero po
+    skończonym pobieraniu, czyli znowu czekało na sieć. Podmiana wpisu
+    w słowniku jest niepodzielna."""
+    for key, url, max_age_sec in _FEEDS:
+        if _cache.get(key) is not None and \
+                time.monotonic() - _cache.get(f"{key}_at", 0.0) < max_age_sec:
+            continue
+        payload = _fetch(url)
+        _cache[key] = payload
+        _cache[f"{key}_at"] = time.monotonic()
 
 
 def _electric_ids(types):

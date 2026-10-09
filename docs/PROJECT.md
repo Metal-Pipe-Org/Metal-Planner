@@ -1160,12 +1160,13 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
 | `pkp.py` | dokleja rozkład PKP wprost do tablicy połączeń MPK (`augment_day`) - jeden CSA widzi obie sieci |
 | `traficar.py` | auta Traficar z fioletowe.live: znaczniki w zasięgu mapy (`map_cars`) + para "przystanek + auto" na ostatni etap trasy |
 | `bikes.py` | stacje i wolne rowery WRM (GBFS) + model czasu roweru + rower jako miejsce na mapie |
+| `warmup.py` | rozkład dnia w pamięci z góry; rowery i auta pobierane obok wyszukiwania, bez czekania |
 | `timetables.py` | rozkład linii i tablica odjazdów z przystanku |
 | `onboard.py` | start z pokładu pojazdu: rozpoznanie kursu + opis wysiadki |
 | `vehicles.py` | pozycje autobusów i tramwajów na żywo (warstwa ◉) |
 | `routes.py` | endpointy Flaska |
 | `app.py` | start lokalny (port 5001) |
-| `gunicorn.conf.py` | serwer w kontenerze: workery, wątki, harmonogram aktualizacji w procesie głównym |
+| `gunicorn.conf.py` | serwer w kontenerze: workery, wątki, harmonogram aktualizacji w procesie głównym, rozgrzewka w workerze |
 | `Dockerfile`, `docker-compose.yml`, `docker/` | obraz, cały deployment z jednego pliku, `entrypoint.sh` i `deploy.sh` |
 | `templates/index.html` | szkielet strony: mapa, panel, Ustawienia Developerskie |
 | `static/app.js` | frontend wyszukiwarki: mapa, wyszukiwanie, lista propozycji |
@@ -1202,6 +1203,26 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   Element audio został tylko dla przeglądarek bez Web Audio. Jak dotąd,
   przy wyciszonym telefonie rura milczy.
 
+- **2026-10-07** — **wyszukiwanie nie czeka na rowery, auta i rozkład**
+  (zgłoszenie #229). Pomiar pokazał, że pierwsze wyszukiwanie liczyło trasę
+  ułamek sekundy, a resztę czekało: po starcie serwera na wczytanie rozkładu
+  dnia, a po każdej chwili ciszy na pobranie stanu stacji WRM, rowerów luzem
+  i aut Traficara, po kolei, z cudzych serwerów (raz 8 s, gdy feed
+  odpowiadał wolno). Rozkład dnia trzyma teraz w pamięci wątek w tle: od
+  startu, po nocnej podmianie bazy i od 23:00 także na dzień następny.
+  Danych na żywo w tle się nie odpytuje (decyzja użytkownika) - pyta dalej
+  tylko wyszukiwanie, nie częściej niż dotąd (auta co 20 s, rowery co 60 s).
+  Ale na nie nie czeka: liczy na tym, co jest w pamięci, choćby starym albo
+  żadnym, a świeże pobierają się obok. Odpowiedź mówi wtedy `live_pending`
+  i strona raz dopytuje o to samo z `fresh=1`; to dopytanie czeka na koniec
+  pobierania i, jeśli wynik jest inny, po cichu podmienia mapę (bez
+  kadrowania, jak przy suwakach). Warstwy aut i rowerów bez wyszukiwania
+  pobierają dane jak dotąd. Pomiar lokalny przez serwer: pierwsze
+  wyszukiwanie po starcie 2,0–2,3 s → 0,2–0,3 s, po ponad 5 minutach ciszy
+  0,56–0,78 s → 0,25–0,4 s (raz 1,3 s); świeże auta i rowery dochodzą
+  0,3–0,8 s później. Rozgrzewkę rozkładu uruchamia worker gunicorna
+  (post_worker_init) i app.py lokalnie.
+
 - **2026-10-07** — **przedawnienie ostatniego wyszukiwania** (zgłoszenie
   #237). Ostatnia trasa wracała po otwarciu strony zawsze sama, a na
   telefonie od razu zwijała formularz — po trasę z wczoraj trzeba było go
@@ -1215,6 +1236,17 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   (iPhone robił to chętnie), a dopiero ✕ i ponowne kliknięcie trafiało na
   świeżą. Teraz każde kliknięcie czeka na nowy odczyt z GPS-a; może to
   potrwać o sekundę–dwie dłużej, przycisk jest w tym czasie wyszarzony.
+
+- **2026-10-06** — **„Pokaż więcej” przy relacji z punktu na mapie**
+  (zgłoszenie #229). Pamięć wyszukiwań z #171 działała tylko między
+  przystankami: start albo cel kliknięty na mapie (albo z lokalizacji)
+  dokładał punkt do świeżej kopii dnia przy każdym zapytaniu, więc każde
+  „pokaż więcej”, suwak czy przełącznik liczyło wszystkie okna od zera.
+  Kopia z punktem zostaje teraz na dniu (cztery ostatnie punkty), więc
+  pytanie z tego samego punktu bierze z pamięci jak przy przystankach.
+  Pomiar lokalny, cztery relacje z punktu do punktu, drugie przejście
+  0–3 „więcej”: do 4,5 s na kliknięcie → najwyżej 0,6 s. Pierwsze sięgnięcie
+  po szersze okno kosztuje tyle co dotąd (do ok. 3 s).
 
 - **2026-10-06** — **„Jestem w pojeździe” ostrzega, gdy kurs jeszcze nie jedzie**
   (zgłoszenie #231). Gdy najbliższy kurs wybranej linii według rozkładu
