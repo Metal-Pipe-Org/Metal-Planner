@@ -386,9 +386,6 @@ def map_cars(day, reach, dest, drive_mps=MAP_DRIVE_MPS,
             **car,
             "at": at,
             "from": day.stop_names.get(stop, stop),
-            # Po MIEJSCU, nie po słupku: dwa perony jednego placu to dla
-            # idącego do auta to samo miejsce (patrz map_skyband).
-            "from_place": day.place_of.get(stop, stop),
             "walk_sec": walk_sec,
             "walk_m": walk_m,
             "to_dest_m": to_dest_m,
@@ -427,11 +424,10 @@ WHY_CRITERIA = ("najwcześniej przy aucie", "najwięcej z Ogarniam",
                 "najwcześniej w celu (szacunek)")
 
 
-def _why(car, shown, pool, group_size):
+def _why(car, shown, pool):
     """Dlaczego auto przeszło wybór - dla podglądu pod zębatką (Debug): w czym
-    jest najlepsze spośród zwycięzców grup, ile z nich je bije (jego poziom:
-    0 = nie bije go nic) i które - najwyżej trzy - oraz z ilu aut spod tego
-    samego miejsca wygrało (1, gdy grupowanie jest zgaszone)."""
+    jest najlepsze, ile aut je bije (jego poziom: 0 = nie bije go nic)
+    i które - najwyżej trzy."""
     mine = _shown_as(car)
     beaten_by = [other for other, theirs in zip(pool, shown) if _beats(theirs, mine)]
     return {
@@ -440,30 +436,20 @@ def _why(car, shown, pool, group_size):
         "beaten": len(beaten_by),
         "beaten_by": [other["plate"] for other in beaten_by[:3]],
         "of": len(pool),
-        "group": group_size,
     }
 
 
-def map_skyband(cars, limit, groups=False, min_level=0):
-    """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband, przy `groups`
-    - zwycięzców grup.
+def map_skyband(cars, limit, min_level=0):
+    """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband.
 
-    Grupę tworzą auta, do których idzie się z tego samego miejsca (`from_place`)
-    - trzy auta obok siebie przy starcie to dla pasażera jeden wybór. Z grupy
-    zostają auta, których nic W TEJ GRUPIE nie bije, i dalej żadne: poszerzanie
-    nie dokłada kolejnego auta z tej samej grupy, bo już pierwsze "więcej"
-    przywracałoby auta stojące obok siebie. Grupowanie jest przełącznikiem pod
-    zębatką, domyślnie zgaszonym: auta nie różnią się tu modelem, więc ktoś
-    polujący na konkretny model straciłby przez nie auto, którego szuka.
-
-    Między autami (zwycięzcami grup): auto A bije auto B, gdy jest co najmniej tak dobre
-    we wszystkich liczbach naraz (_shown_as) i w którejś lepsze. Poziom k to auta
-    pobite przez najwyżej k-1 innych; pierwszy poziom - te, których nie bije
-    nic - jest zawsze na mapie, choćby było ich więcej niż `limit`. Kolejne
-    poziomy dokłada się, aż uzbiera się `limit`, i każdy wchodzi W CAŁOŚCI:
-    ucięcie poziomu w środku wymagałoby zważenia minut przeciw złotówkom,
-    a tego mapa nie robi. Stąd gwarancja - nigdy nie widać auta, gdy schowane
-    jest takie, które je bije.
+    Auto A bije auto B, gdy jest co najmniej tak dobre we wszystkich liczbach
+    naraz (_shown_as) i w którejś lepsze. Poziom k to auta pobite przez
+    najwyżej k-1 innych; pierwszy poziom - te, których nie bije nic - jest
+    zawsze na mapie, choćby było ich więcej niż `limit`. Kolejne poziomy
+    dokłada się, aż uzbiera się `limit`, i każdy wchodzi W CAŁOŚCI: ucięcie
+    poziomu w środku wymagałoby zważenia minut przeciw złotówkom, a tego mapa
+    nie robi. Stąd gwarancja - nigdy nie widać auta, gdy schowane jest takie,
+    które je bije.
 
     Auto z „Ogarniam" nie ma tu osobnej reguły: jego kwota jest drugą
     z tych liczb i tyle.
@@ -474,44 +460,28 @@ def map_skyband(cars, limit, groups=False, min_level=0):
     którego nic nie bije, potrafi sam z siebie mieć więcej pozycji, niż
     prosi suwak, i wtedy zwiększenie limitu nie zmienia nic.
     """
-    grouped = {}
-    for car in cars:
-        grouped.setdefault(car["from_place"] if groups else id(car), []).append(car)
-    winners = []
-    group_size = {}
-    for group in grouped.values():
-        shown = [_shown_as(car) for car in group]
-        for car, mine in zip(group, shown):
-            if not any(_beats(other, mine) for other in shown):
-                winners.append(car)
-                group_size[id(car)] = len(group)
-    order = {id(car): i for i, car in enumerate(cars)}
-    winners.sort(key=lambda car: order[id(car)])
-
-    shown = [_shown_as(car) for car in winners]
+    shown = [_shown_as(car) for car in cars]
     beaten_by = [sum(_beats(other, mine) for other in shown) for mine in shown]
-    if len(winners) <= limit:
-        chosen = winners
+    if len(cars) <= limit:
+        chosen = list(cars)
     else:
         level = max(sorted(beaten_by)[limit - 1], min_level)
-        chosen = [car for car, beaten in zip(winners, beaten_by) if beaten <= level]
+        chosen = [car for car, beaten in zip(cars, beaten_by) if beaten <= level]
     for car in chosen:
-        car["why"] = _why(car, shown, winners, group_size[id(car)])
+        car["why"] = _why(car, shown, cars)
     return chosen
 
 
-def map_choice(cars, limit, groups=False, vans=False, min_level=0):
+def map_choice(cars, limit, vans=False, min_level=0):
     """Auta na mapę (punkt 15): osobówki zawsze, dostawczaki tylko na życzenie
     - i wtedy każdy rodzaj wybierany osobno (map_skyband), z tym samym `limit`.
 
     Dostawczak nie konkuruje z osobówką: kto wiezie szafę, nie weźmie Clio
     stojącego minutę bliżej, a kto jedzie sam, nie chce Mastera. Domyślnie
     dostawczaków nie ma wcale - zgłoszone przez użytkownika."""
-    chosen = map_skyband([car for car in cars if not car["van"]], limit, groups,
-                         min_level)
+    chosen = map_skyband([car for car in cars if not car["van"]], limit, min_level)
     if vans:
-        chosen += map_skyband([car for car in cars if car["van"]], limit, groups,
-                              min_level)
+        chosen += map_skyband([car for car in cars if car["van"]], limit, min_level)
     chosen_ids = {id(car) for car in chosen}
     return [car for car in cars if id(car) in chosen_ids]
 

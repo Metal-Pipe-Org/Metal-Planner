@@ -301,7 +301,7 @@ function styleFor(name) {
     // Przy narysowanej mapie start i cel mają po jednej własnej kropce
     // (stopDot, flowEndDot) - słupki powtarzałyby to samo kilka razy obok,
     // więc gasną jak wszystkie inne.
-    if (!plannerSuspended && !(baseDimmed && !dotOpts.oldEnds)) {
+    if (!plannerSuspended && !baseDimmed) {
         if (name === sel.start) return ENDPOINT_STYLE.start;
         if (name === sel.end) return ENDPOINT_STYLE.end;
     }
@@ -818,6 +818,7 @@ function pickEndpoint(value) {
     const hasEnd = endInput.value.trim() !== '';
     if (hasEnd && (hasStart || onboardOn)) return;
     const previous = [sel.start, sel.end];
+    hideRecallOffer();     // pasażer zaczął wskazywać nową relację
     // Z pokładu pojazdu startu się nie klika - startem jest pojazd - więc
     // każdy klik w mapę wskazuje cel.
     if (onboardOn || hasStart) {
@@ -916,6 +917,7 @@ startInput.addEventListener('input', hideLocateOffer);
     już był (o to się prosi, klikając go), ale celu nie rusza. */
 function useMyLocation(point) {
     const previous = sel.start;
+    hideRecallOffer();
     sel.start = point;
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
@@ -945,7 +947,10 @@ if (!navigator.geolocation) {
                 finish();
                 showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
             },
-            {enableHighAccuracy: true, timeout: 10000, maximumAge: 60000},
+            // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
+            // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
+            // pozycję sprzed kilkuset metrów.
+            {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
         );
     });
 }
@@ -1093,9 +1098,7 @@ const DOT_DEFAULTS = {
     size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
     rows: 20,          // ile odjazdów wypisuje tablica pod kropką
     ttPast: true,      // szare godziny sprzed chwili z mapy (timetableLinesHtml)
-    ttOld: false,      // powrót do starej tablicy (bez timetableLinesHtml)
     center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
-    oldEnds: false,    // powrót do zielonych/czerwonych słupków i białej kropki startu
     tipCursor: true,   // dymek przy kursorze
     tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
     // Godziny SAMEGO przejazdu rowerem - domyślnie zgaszone. Godzina "jesteś
@@ -1112,8 +1115,8 @@ const DOT_DEFAULTS = {
     carTimes: false,
     // Debug: dlaczego rower i auto przeszły wybór (pole `why` z serwera).
     why: false,
-    // Debug: dlaczego kawałek jest na mapie - tylko przy próbie „Mapa
-    // z wartości podróży" (pole `why` kawałka, patrz planner._value_map).
+    // Debug: dlaczego kawałek jest na mapie (pole `why` kawałka, patrz
+    // planner._value_map).
     whySeg: false,
 };
 
@@ -1376,15 +1379,7 @@ function drawFlow(flow, refit) {
     renderVehicles();
     if (!refit) return;
 
-    // Kadr: najciaśniejszy sensowny próg jasności, żeby nie skakać do widoku
-    // całego województwa przez jedną bladą nitkę... (progi własne - kadr nie
-    // ma się ruszać przy strojeniu wyglądu suwakami)
-    let points = [];
-    for (const threshold of [0.7, 0.45, 0]) {
-        points = flow.segments.filter(s => s.w >= threshold)
-                              .flatMap(s => s.path);
-        if (points.length >= 4) break;
-    }
+    const points = flow.segments.flatMap(s => s.path);
     fitTo([...points, ...endpointPoints()]);   // start i cel zawsze w kadrze
 }
 
@@ -2308,57 +2303,17 @@ function flowIcon(flow) {
         + '</svg>';
 }
 
-/** `mapSec` to godzina, o której MAPA stawia pasażera na tej kropce. Sama
-    tablica liczy od godziny z formularza (patrz timetableAnchor), więc na
-    liście bywają odjazdy sprzed tej chwili - i to jest cel zgłoszenia #143.
-    Zajmują najwyżej połowę listy: inaczej na ruchliwym węźle wypchnęłyby
-    poza suwak dokładnie te odjazdy, po które się tu przyszło. Kreski "tu
-    według mapy jesteś" między nimi już nie ma (decyzja użytkownika, 28.09). */
+/** `mapSec` to godzina, o której MAPA stawia pasażera na tej kropce - od
+    niej tablica szarzy wcześniejsze odjazdy (patrz timetableLinesHtml). */
 function timetableHtml(data, mapSec) {
     if (data.error) return `<div class="tt-note">${esc(data.error)}</div>`;
-    if (!dotOpts.ttOld && data.departures.length) return timetableLinesHtml(data, mapSec);
-    const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
-                 `<span class="tt-from">od ${esc(data.from_time)}</span></div>`;
-    if (!data.departures.length) {
-        return head + '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
-    }
-    // `all_departures` to tablica sprzed odsiewu - stąd bierze się takt
-    // linii, patrz summariseRepeats.
-    const wszystkie = summariseRepeats(data.departures, data.all_departures);
-    const ile = timetableRows();
-    const przed = mapSec === undefined ? []
-                                       : wszystkie.filter(d => d.sec < mapSec);
-    const reszta = mapSec === undefined ? wszystkie
-                                        : wszystkie.filter(d => d.sec >= mapSec);
-    // Odjazdy sprzed przyjazdu mapy to tło - najwyżej połowa wierszy, bez
-    // wymuszonego minimum: przy jednym wierszu zostaje ten, na który się
-    // zdąży, bo to o niego pyta tablica (#143).
-    const ilePrzed = Math.min(przed.length, Math.floor(ile / 2));
-    const list = [...przed.slice(0, ilePrzed), ...reszta].slice(0, ile);
-    // Kolumna z ikonką pojawia się tylko wtedy, gdy jest co w niej postawić.
-    // Tablica pod kropką WYBRANEJ trasy pyta o cały przystanek, a nie o węzeł
-    // mapy, więc nie wie, co się tu z którą linią dzieje - pusta kolumna
-    // przesuwałaby jej wiersze bez powodu.
-    const flows = list.some(d => FLOW_ICONS[d.flow]);
-    const rows = list.map(d =>
-        `<li>` + (flows ? flowIcon(d.flow) : '') +
-        `<span class="tt-time">${esc(d.time)}</span>` +
-        `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
-        `<span class="tip-dir">${esc(d.headsign)}</span>` +
-        // "0 min", nie "teraz": nagłówek mówi "od 16:57", a to nie jest
-        // godzina zegarowa, tylko najwcześniejsza, o której da się tu być -
-        // "teraz" obok niej znaczyłoby coś innego niż znaczy. Rytm dopisany
-        // W TEJ SAMEJ linii, żeby powtarzająca się linia nie miała wiersza
-        // wyższego od pozostałych.
-        `<span class="tt-in">${esc(d.in_min < 1 ? 0 : d.in_min)} min` +
-        (d.every_min ? `<small> · co ${esc(d.every_min)} min</small>` : '') +
-        `</span>` + routeButtonHtml(d, 'trasa') + `</li>`
-    ).join('');
-    return head + `<ul class="tt-rows${flows ? ' has-flow' : ''}">${rows}</ul>`;
+    if (data.departures.length) return timetableLinesHtml(data, mapSec);
+    return `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span>` +
+           `<span class="tt-from">od ${esc(data.from_time)}</span></div>` +
+           '<div class="tt-note">Nic już stąd nie odjeżdża tego dnia.</div>';
 }
 
-/** Tablica domyślna (stara wraca przełącznikiem w Eksperymentach, dotOpts.ttOld):
-    jeden wiersz na linię i kierunek, a w nim same
+/** Tablica odjazdów: jeden wiersz na linię i kierunek, a w nim same
     godziny odjazdów po kolei - do ostatniej, którą przepuściło sito mapy,
     czyli do ostatniego kursu, którym jeszcze się dojedzie (keepOfferedLines).
     Bez "za ile", bez "co N min" i bez godziny w nagłówku: takt z trzech
@@ -2480,11 +2435,8 @@ function keepOfferedLines(data, lines) {
 
     Godzina bierze się z węzła (`arrive`, patrz planner._transfer_nodes), czyli
     z rozkładu tego samego kursu, z którego narysowano kawałek - nie z
-    najbliższego kursu tej linii, bo tym akurat się tu nie przyjechało.
-
-    `fromSec` to ta sama godzina, od której liczy nagłówek ("od 16:06"), więc
-    "za ile" znaczy w każdym wierszu to samo. */
-function withArrivals(data, lines, fromSec) {
+    najbliższego kursu tej linii, bo tym akurat się tu nie przyjechało. */
+function withArrivals(data, lines) {
     if (!lines) return data;
     const rows = [];
     for (const l of lines) {
@@ -2492,7 +2444,6 @@ function withArrivals(data, lines, fromSec) {
         rows.push({
             time: fmtClock(l.arrive),
             sec: l.arrive,
-            in_min: Math.round((l.arrive - fromSec) / 60),
             num: l.num,
             mode: l.kind,
             headsign: l.headsign,
@@ -2500,7 +2451,7 @@ function withArrivals(data, lines, fromSec) {
         });
     }
     if (!rows.length) return data;
-    // Kolejność robi summariseRepeats (sortuje po `sec`) - przyjazd ląduje
+    // Kolejność robi timetableLinesHtml (sortuje po `sec`) - przyjazd ląduje
     // między odjazdami tam, gdzie naprawdę jest na osi czasu.
     return {...data, departures: [...data.departures, ...rows]};
 }
@@ -2520,80 +2471,6 @@ function keepWithinHorizon(data, deadline) {
     if (!deadline) return data;
     return {...data, horizon: deadline,
             departures: data.departures.filter(d => d.sec <= deadline)};
-}
-
-/** Zwija powtórzenia tej samej linii w JEDEN wiersz z częstotliwością.
-
-    Osiem odjazdów jednej linii to nie osiem opcji, tylko jedna opcja i jej
-    rytm - a po odsianiu linii, których mapa stąd nie proponuje, na rzadkim
-    węźle zostawała dokładnie taka lista. Zamiast wypisywać je wszystkie albo
-    część z nich gubić, zostaje najbliższy odjazd i notka "co X min":
-    "za 4 min, potem co 15 min" mówi to samo, w jednym wierszu i bez zgadywania,
-    czy pominięte kursy w ogóle istnieją.
-
-    Takt bierze się z `rhythmSource` - PEŁNEJ tablicy przystanku, sprzed
-    odsiewu - więc pisze się go także wtedy, gdy następny kurs wypada już poza
-    zakresem mapy. To informacja o LINII, nie o oknie: "co 20 min" tak samo
-    trzeba wiedzieć, gdy ten kolejny kurs mapa jeszcze rysuje, jak i gdy już
-    nie. Liczony z listy po odsiewie znikał dokładnie tam, gdzie był
-    najpotrzebniejszy - na rzadkim węźle blisko granicy okna.
-
-    Odstęp to MEDIANA przerw, nie średnia: jeden nocny przeskok o godzinę nie
-    ma prawa przesunąć liczby opisującej normalny takt.
-
-    Kierunek jest częścią tożsamości linii - ta sama linia w drugą stronę to
-    osobna opcja i osobny wiersz. */
-function summariseRepeats(departures, rhythmSource) {
-    const rytm = lineRhythms(rhythmSource || departures);
-    const groups = new Map();
-    for (const d of departures) {
-        // `flow` w kluczu, bo przyjazd i odjazd tej samej linii to dwa różne
-        // zdarzenia na tym przystanku - zwinięte w jeden wiersz udawałyby
-        // rytm kursowania tam, gdzie go nie ma.
-        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
-            + '|' + (d.flow || '');
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(d);
-    }
-    const out = [];
-    for (const list of groups.values()) {
-        const d = list[0];
-        // Wiersz przyjazdu to jedno zdarzenie z mapy, a nie oferta - takt
-        // przy nim mówiłby o odjazdach, o które nikt tu nie pyta.
-        // Takt z serwera liczy się z całego rozkładu linii (planner._every_min),
-        // więc jest także przy linii, która w pobranej tablicy wypada raz.
-        const every = d.flow === 'end' ? undefined
-            : d.every_min || rytm.get(lineKey({kind: d.mode, num: d.num, headsign: d.headsign}));
-        out.push({...d, every_min: every});
-    }
-    return out.sort((a, b) => a.sec - b.sec);
-}
-
-/** Takt każdej linii z tablicy: klucz linii -> mediana przerw w minutach.
-    Linie z jednym tylko odjazdem nie trafiają tu wcale - jeden kurs nie ma
-    rytmu, a "co 0 min" byłoby zdaniem o niczym. */
-function lineRhythms(departures) {
-    const groups = new Map();
-    for (const d of departures) {
-        // Przyjazd nie jest odjazdem: doklejony wiersz "end" tej samej linii
-        // stanąłby w rytmie obok jej odjazdów i zrobiłby takt z jednego kursu.
-        if (d.flow === 'end') continue;
-        const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign});
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(d);
-    }
-    const out = new Map();
-    for (const [key, list] of groups) {
-        if (list.length > 1) out.set(key, medianGapMin(list));
-    }
-    return out;
-}
-
-function medianGapMin(list) {
-    const gaps = [];
-    for (let i = 1; i < list.length; i++) gaps.push(list[i].sec - list[i - 1].sec);
-    gaps.sort((a, b) => a - b);
-    return Math.round(gaps[(gaps.length - 1) >> 1] / 60);
 }
 
 /** `where` to {name} albo {lat, lon}: trasa zna nazwę przystanku wprost
@@ -2674,13 +2551,9 @@ function loadTimetable(dot, where, sec) {
             // Przyjazdy doklejamy PO obu sitach: oba pytają "czy tym odjazdem
             // jeszcze się dojedzie", a wiersz przyjazdu nie jest odjazdem -
             // to fakt z samej mapy, więc nie ma go czym odsiewać.
-            // Pełna tablica jedzie przez oba sita nietknięta (dokładamy ją
-            // do odpowiedzi, a sita przepisują tylko `departures`): takt linii
-            // ma się liczyć z rozkładu, nie z tego, co przeżyło odsiew.
-            const pelna = {...data, all_departures: data.departures};
             const html = timetableHtml(data.error ? data : withArrivals(
-                keepWithinHorizon(keepOfferedLines(pelna, where.lines), where.deadline),
-                where.lines, from), sec);
+                keepWithinHorizon(keepOfferedLines(data, where.lines), where.deadline),
+                where.lines), sec);
             // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
             // nie: offline z service workera wraca jako {error}, a po powrocie
             // sieci kropka miałaby go w pamięci na zawsze.
@@ -2711,7 +2584,7 @@ function stopDot(point, where, sec, style) {
     const isStart = !!where.start;
     const dot = L.circleMarker(point, {
         ...(style || STOP_DOT_STYLE),
-        ...(isStart && !dotOpts.oldEnds ? ENDPOINT_STYLE.start : {}),
+        ...(isStart ? ENDPOINT_STYLE.start : {}),
     });
     dot.isStart = isStart;
     // Czym ta kropka jest - żeby dało się ją "najechać" bez kursora.
@@ -2804,7 +2677,7 @@ function flowStopDots(nodes, deadline) {
     tu się tylko wysiada. Osobno od flowDotLayer, bo wybrana trasa chowa
     tamte kropki, a cel ma zostać widać. */
 function endDot() {
-    const poles = !dotOpts.oldEnds && !isPoint(sel.end) && markersByName.get(sel.end);
+    const poles = !isPoint(sel.end) && markersByName.get(sel.end);
     if (!poles) return null;
     const center = L.latLngBounds(poles.map(m => m.getLatLng())).getCenter();
     return L.circleMarker(center, {...ENDPOINT_STYLE.end, interactive: false});
@@ -2877,8 +2750,7 @@ function carTooltipHtml(car) {
         `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
         ogarniamText(car.ogarniam),
         ...(dotOpts.why && car.why ? [
-            whyText(car.why) + (car.why.group > 1
-                ? ` · najlepsze z ${car.why.group} aut spod tego samego miejsca` : ''),
+            whyText(car.why),
         ] : []),
     ].join('<br>');
 }
@@ -3584,11 +3456,7 @@ function detailHtml(journey) {
         }
     });
 
-    return `<ol class="timeline">${rows.join('')}</ol>
-        <p class="j-collapse">
-            Kliknij ponownie — albo w mapę obok trasy — żeby wrócić do
-            wszystkich wariantów.
-        </p>`;
+    return `<ol class="timeline">${rows.join('')}</ol>`;
 }
 
 /** Dlaczego na liście nie ma roweru, choć warstwa 🚲 jest włączona.
@@ -3609,7 +3477,7 @@ function bikeNoteHtml() {
               + 'kompletna.'
             : 'Żadna trasa ze stacją WRM nie mieści się w oknie czasowym '
               + 'mapy — tutaj rower nic nie daje.';
-    // Kartka (.notice), a nie szara linijka jak .results-foot: ten tekst leży
+    // Kartka (.notice), a nie szara linijka: ten tekst leży
     // nad mapą, gdzie sam cień pod literami czyta się ledwo - a to jedyne
     // miejsce, w którym pada odpowiedź na „czemu nic nie widzę".
     return `<div class="notice bike-note"><p>🚲 ${esc(text)}</p></div>`;
@@ -3693,11 +3561,6 @@ function renderJourneys() {
             ${onboardNoteHtml()}
             <ol class="journeys">${cards}</ol>
             ${bikeNoteHtml()}
-            <p class="results-foot">
-                Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
-                tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
-                zobaczyć całą trasę.
-            </p>
         </div>`;
     resultsBox.classList.toggle('collapsed', resultsCollapsed);
 
@@ -3870,6 +3733,30 @@ function obNote(text) {
     obMsg.hidden = !text;
 }
 
+// Rozpoznany kurs nie pasuje do "jadę nim teraz" (#231), a mapa i tak liczy
+// od niego - nic poza tym ostrzeżeniem tego nie zdradza. Dwa przypadki (patrz
+// onboard.find_ride): `not_yet` - według rozkładu nie wyjechał jeszcze nawet
+// z poprzedniego przystanku, najczęściej pomyłka w linii, kierunku albo
+// przystanku; `late` - według rozkładu minął już przystanek, czyli jest
+// spóźniony, a godziny na mapie są liczone od jego rozkładu, nie od teraz.
+// Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
+const obWarn = $('ob-warn');
+
+function hideObWarn() {
+    obWarn.hidden = true;
+}
+
+function warnOnboardRide(kurs) {
+    if (!kurs || !(kurs.not_yet || kurs.late)) { hideObWarn(); return; }
+    const przystanek = esc(prettyStopName(kurs.stop_name));
+    const godzina = `<b>${esc(kurs.at)}</b>`;
+    $('ob-warn-text').innerHTML =
+        `${esc(kurs.num)} według rozkładu ${kurs.late ? 'była' : 'będzie'} `
+        + `na przystanku ${przystanek} o ${godzina}.`
+        + `\nGodziny na mapie liczą się od ${godzina}, a nie od teraz.`;
+    obWarn.hidden = false;
+}
+
 /** Przełącznik "Stoję tutaj" / "Jestem w pojeździe". Zmienia PYTANIE, więc
     zabiera poprzednią odpowiedź na nie: start z drugiego trybu przestaje
     obowiązywać (nie da się naraz stać na przystanku i jechać autobusem).
@@ -3888,6 +3775,7 @@ function setStartMode(vehicle, focus = true) {
     updatePointMarker('start', null);
     restyle(previous);
     showLocateMsg('');
+    hideObWarn();
     saveUiState({startOnboard: vehicle});
     // Kursor w polu linii tylko wtedy, gdy ktoś sam kliknął przełącznik.
     // Przy wracaniu do zapamiętanego trybu (odświeżenie strony) klawiatura
@@ -3939,6 +3827,7 @@ function fillStops() {
         + stops.map(stop =>
             `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
     obStopSelect.disabled = !stops.length;
+    hideObWarn();
     syncOnboardView();
 }
 
@@ -3967,6 +3856,7 @@ if (obLineInput) {
     // samą kartę: komplet mówi jedno zdanie, a zajmuje trzy rzędy panelu.
     obStopSelect.addEventListener('change', () => {
         obCollapsed = true;
+        hideObWarn();
         syncOnboardView();
         if (onboardReady() && endInput.value) search();
     });
@@ -3978,6 +3868,8 @@ if (obLineInput) {
         obCollapsed = false;
         syncOnboardView();
     });
+
+    $('ob-warn-close').addEventListener('click', hideObWarn);
 
     // Tryb przeżywa odświeżenie strony (patrz saveUiState) - ale sam wybór
     // pojazdu już nie: kurs sprzed odświeżenia zdążył odjechać.
@@ -3996,6 +3888,7 @@ function resetResults() {
     clearJourney();
     clearPreview();
     clearFlow();
+    hideObWarn();
     renderVehicles();
     resultsBox.innerHTML = '';
     setTabCount(0);
@@ -4026,22 +3919,15 @@ function queryParams() {
         density: $('density').value,
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
-        car_groups: $('car-groups').checked ? '1' : '0',
         car_vans: $('car-vans').checked ? '1' : '0',
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
-        latest_start: $('latest-start').checked ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
         walk_pace: WALK_PACES[$('walk-pace').value],
         bike_kmh: $('bike-kmh').value,
         bike_overhead_sec: (Number($('bike-overhead').value) * 60).toFixed(0),
         car_kmh: $('car-kmh').value,
         car_overhead_sec: (Number($('car-overhead').value) * 60).toFixed(0),
-        // Mapa z wartości podróży jest domyślna; stara wraca przełącznikiem.
-        value_map: $('old-map').checked ? '0' : '1',
-        // Jazda tym samym kursem zamiast marszu jest domyślna; stara reguła
-        // bliźniaków wraca przełącznikiem.
-        same_vehicle: $('old-twins').checked ? '0' : '1',
     });
     // Wyłączonych propozycji serwer nie składa wcale - patrz routes.api_flow.
     if (!$('routes-on').checked) params.set('routes', '0');
@@ -4206,6 +4092,7 @@ function renderPlan(data, refit) {
         renderJourneys();
     }
     showWaitNotice(data);
+    warnOnboardRide(data.onboard);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
@@ -4217,6 +4104,7 @@ function loadPlan(token, refit) {
             if (token !== requestToken) return false;
             if (data.error) {
                 clearFlow();
+                hideObWarn();
                 showError(data.error, data.suggestions);
                 return false;
             }
@@ -4287,10 +4175,20 @@ function forgetLastSearch() {
     }
 }
 
-/** Ostatnie wyszukiwanie (skąd/dokąd) wraca po odświeżeniu strony - tylko
+// Ostatnie wyszukiwanie nie wraca samo, tylko pyta (#237): po otwarciu
+// strony to często już nie ta podróż, a na telefonie samo wyszukanie zwija
+// formularz, który trzeba by rozwinąć, żeby zacząć od nowa.
+const recallOffer = $('recall-offer');
+let recalled = null;      // {start, end} - o którą trasę padło pytanie
+
+function hideRecallOffer() {
+    recalled = null;
+    recallOffer.hidden = true;
+}
+
+/** Po odświeżeniu strony pyta o ostatnie wyszukiwanie (skąd/dokąd) - tylko
     gdy pola są jeszcze puste (nie nadpisujemy tego, co user już zdążył
-    wpisać, zanim ten kod się uruchomił). Godzina wraca sama z siebie do
-    "teraz", bo tak ustawia ją serwer przy każdym renderowaniu strony. */
+    wpisać, zanim ten kod się uruchomił). */
 function restoreLastSearch() {
     if (onboardOn || startInput.value || endInput.value) return;
     let saved;
@@ -4300,6 +4198,21 @@ function restoreLastSearch() {
         return;
     }
     if (!saved || !saved.start || !saved.end) return;
+    recalled = saved;
+    // Każdy koniec w osobnym kawałku, który się nie łamie - linia może pęknąć
+    // tylko przed strzałką, a nie w środku nazwy ("Iwiny -" / "nr" / "127").
+    const end = text => {
+        const span = document.createElement('span');
+        span.className = 'recall-offer-end';
+        span.textContent = span.title = text;
+        return span;
+    };
+    $('recall-offer-name').replaceChildren(
+        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)));
+    recallOffer.hidden = false;
+}
+
+function applyLastSearch(saved) {
     sel.start = saved.start;
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
@@ -4311,6 +4224,22 @@ function restoreLastSearch() {
     restyle(sel.start, sel.end);
     search();
 }
+
+$('recall-offer-yes').addEventListener('click', () => {
+    const saved = recalled;
+    hideRecallOffer();
+    // Pasażer mógł już zacząć nową relację - pytanie dotyczy wtedy pustego
+    // formularza, którego już nie ma.
+    if (onboardOn || startInput.value || endInput.value) return;
+    applyLastSearch(saved);
+});
+// "Nie" zapomina trasę jak ✕ - inaczej pytanie wracałoby przy każdym otwarciu.
+$('recall-offer-no').addEventListener('click', () => {
+    hideRecallOffer();
+    forgetLastSearch();
+});
+startInput.addEventListener('input', hideRecallOffer);
+endInput.addEventListener('input', hideRecallOffer);
 
 /** Kółko ładowania w dwóch miejscach naraz, bo w każdym widoku widać co
     innego: w komunikacie pod kartą (szeroki ekran, zakładka „Trasy") i na
@@ -4327,9 +4256,14 @@ function search() {
     // i przystanek (patrz onboardReady).
     if (!endInput.value) return;
     if (onboardOn ? !onboardReady() : !startInput.value) return;
+    // Rozwinięty przez „zmień” wybór pojazdu wraca po szukaniu do jednej
+    // linijki tak samo jak po wybraniu przystanku - inaczej trzy pola
+    // zasłaniają wynik.
+    if (onboardOn) { obCollapsed = true; syncOnboardView(); }
     // Dla układu na telefonie: formularz zwija się wtedy do jednej linijki
     // (patrz phone.js).
     document.dispatchEvent(new Event('planner:search'));
+    hideRecallOffer();
     const token = ++requestToken;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     clearJourney();
@@ -4645,6 +4579,7 @@ $('clear').addEventListener('click', () => {
     updatePointMarker('end', null);
     showLocateMsg('');
     hideLocateOffer();
+    hideRecallOffer();
     resetResults();
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
@@ -4741,13 +4676,11 @@ function showWalkPace() {
 $('walk-pace').addEventListener('input', showWalkPace);
 showWalkPace();
 
-// Grupowanie aut, dostawczaki i rodzaj roweru zmieniają odpowiedź serwera,
-// więc jak suwak: pamiętane w tym samym kluczu i od razu nowe zapytanie.
+// Dostawczaki i rodzaj roweru zmieniają odpowiedź serwera, więc jak suwak:
+// pamiętane w tym samym kluczu i od razu nowe zapytanie.
 // Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
 // wygląda tak, jak wyglądała przed zgłoszeniem #147.
-for (const [id, domyslnie] of [['car-groups', false], ['car-vans', false],
-                               ['latest-start', false], ['old-map', false],
-                               ['old-twins', false]]) {
+for (const [id, domyslnie] of [['car-vans', false]]) {
     const input = $(id);
     const zapisane = loadDevPrefs()[id];
     input.checked = zapisane === undefined ? domyslnie : zapisane === true;
@@ -4852,8 +4785,8 @@ startModeSwitch.addEventListener('change', () => {
 // bez ponownego zapytania. Wartości są już dobrane (siedzą w LOOK_DEFAULTS),
 // więc cała sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca
 // ją, gdyby trzeba było stroić od nowa.
-// Grubość linii to grubość najjaśniejszej: na mapie z wartości podróży
-// każda linia jest najjaśniejsza (patrz look-weight w index.html).
+// Grubość linii to grubość najjaśniejszej: każda linia jest najjaśniejsza
+// (patrz look-weight w index.html).
 const LOOK_KNOBS = {
     'look-weight': 'maxWeight',
     'look-dim': 'dimFactor',
@@ -4974,6 +4907,18 @@ function saveSoundPrefs() {
 
 let pipeAudio = null;
 let soundMixer = null;
+let pipeBuffer = null;       // zdekodowane nagranie, gdy gra mikser
+let pipeLoading = false;
+let pipeUrl;                 // undefined, dopóki nie zapytaliśmy przeglądarki
+let pipePending = false;     // rura miała zagrać, zanim nagranie doszło
+let pipeVoice = null;        // aktualnie grająca rura z miksera
+
+// iPhone domyślnie traktuje dźwięk ze strony jak odtwarzacz: przejmuje
+// głośnik i zatrzymuje Spotify czy podcast, którego pasażer słucha (#243).
+// "ambient" to kategoria efektów w tle - miesza się z muzyką, a muzyka gra
+// dalej. Nie "transient": ta miała ściszać muzykę na chwilę, ale Safari
+// mapuje ją na to samo, a na części wersji gubi przy niej dźwięk.
+if (navigator.audioSession) navigator.audioSession.type = 'ambient';
 
 /** Mikser przeglądarki - jeden na stronę, null bez Web Audio. */
 function mixer() {
@@ -4984,6 +4929,59 @@ function mixer() {
     return soundMixer;
 }
 
+/** Plik w formacie, który przeglądarka umie odtworzyć; null, gdy żaden.
+    Pytamy raz: odpowiedź się nie zmienia, a bez zapamiętania przeglądarka
+    bez naszych formatów sondowałaby je przy każdym dotknięciu i klawiszu. */
+function pipeSourceUrl() {
+    if (pipeUrl !== undefined) return pipeUrl;
+    const probe = document.createElement('audio');
+    const pick = probe.canPlayType
+        && PIPE_SOURCES.find(([type]) => probe.canPlayType(type));
+    pipeUrl = pick ? pick[1] : null;
+    return pipeUrl;
+}
+
+// Nagranie gra z bufora miksera, a nie z elementu audio: element to dla
+// iOS "odtwarzacz multimediów", a ten zatrzymuje muzykę innych aplikacji
+// bez względu na typ sesji dźwięku. Czysty mikser zostaje efektem w tle.
+// Pobieramy przy pierwszym dotknięciu, żeby nagranie było gotowe, zanim
+// serwer odpowie na wyszukiwanie.
+function loadPipe() {
+    if (pipeLoading) return;
+    const ctx = mixer();
+    const url = ctx && pipeSourceUrl();
+    if (!url) return;
+    pipeLoading = true;
+    // Nieudane pobranie zapomina też o czekającej rurze - inaczej
+    // kolejna próba przy zwykłym dotknięciu zagrałaby ją bez wyszukiwania.
+    const fail = () => { pipeLoading = false; pipePending = false; };
+    fetch(url)
+        .then(response => response.arrayBuffer())
+        // Dekodowanie na callbackach, bo starsze Safari nie zwracają obietnicy.
+        .then(data => ctx.decodeAudioData(data, buffer => {
+            pipeBuffer = buffer;
+            if (pipePending) playPipeBuffer();
+        }, fail))
+        .catch(fail);
+}
+
+function playPipeBuffer() {
+    pipePending = false;
+    const ctx = mixer();
+    // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,
+    // a nie nałożyć się na poprzednie.
+    if (pipeVoice) pipeVoice.stop();
+    const gain = ctx.createGain();
+    gain.gain.value = PIPE_VOLUME;
+    gain.connect(ctx.destination);
+    const voice = ctx.createBufferSource();
+    voice.buffer = pipeBuffer;
+    voice.connect(gain);
+    voice.onended = () => { if (pipeVoice === voice) pipeVoice = null; };
+    voice.start(0);
+    pipeVoice = voice;
+}
+
 // Safari wpuszcza dźwięk z miksera tylko wtedy, gdy obudzi się go W TRAKCIE
 // gestu, a rura gra dopiero po odpowiedzi serwera - już po geście. Budzimy
 // go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
@@ -4991,31 +4989,25 @@ function mixer() {
 function wakeMixer() {
     if (!soundOpts.pipe) return;
     const ctx = mixer();
-    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+    if (!ctx) return;
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    loadPipe();
 }
 for (const type of ['pointerdown', 'keydown']) {
     document.addEventListener(type, wakeMixer, {capture: true});
 }
 
-/** Element audio powstaje przy pierwszym użyciu i zostaje - jeden na stronę.
-    Zwraca null, gdy przeglądarka nie umie żadnego z naszych formatów. */
+/** Element audio tylko dla przeglądarek bez Web Audio. Powstaje przy
+    pierwszym użyciu i zostaje - jeden na stronę. Zwraca null, gdy
+    przeglądarka nie umie żadnego z naszych formatów. */
 function pipeElement() {
     if (pipeAudio) return pipeAudio;
+    const url = pipeSourceUrl();
+    if (!url) return null;
     const element = document.createElement('audio');
-    if (!element.canPlayType) return null;
-    const pick = PIPE_SOURCES.find(([type]) => element.canPlayType(type));
-    if (!pick) return null;
-    element.src = pick[1];
+    element.src = url;
     element.preload = 'auto';
-    const ctx = mixer();
-    if (ctx) {
-        const gain = ctx.createGain();
-        gain.gain.value = PIPE_VOLUME;
-        ctx.createMediaElementSource(element).connect(gain);
-        gain.connect(ctx.destination);
-    } else {
-        element.volume = PIPE_VOLUME;
-    }
+    element.volume = PIPE_VOLUME;
     pipeAudio = element;
     return pipeAudio;
 }
@@ -5029,6 +5021,11 @@ function prefersLessMotion() {
     animacji albo gdy przeglądarka nie umie żadnego z formatów. */
 function playPipeDrop() {
     if (!soundOpts.pipe || prefersLessMotion()) return;
+    if (mixer()) {
+        if (pipeBuffer) playPipeBuffer();
+        else { pipePending = true; loadPipe(); }
+        return;
+    }
     const audio = pipeElement();
     if (!audio) return;
     // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,
@@ -5103,7 +5100,6 @@ const DOT_TOGGLES = {
     'car-times': 'carTimes',
     'debug-why': 'why',
     'debug-why-seg': 'whySeg',
-    'old-ends': 'oldEnds',
 };
 
 function applyDotOpts() {
@@ -5149,19 +5145,6 @@ function bindDotOpts() {
             }
         });
     }
-    const ttOld = $('tt-old');
-    if (ttOld) {
-        ttOld.checked = dotOpts.ttOld;
-        ttOld.addEventListener('change', () => {
-            dotOpts.ttOld = ttOld.checked;
-            saveDotPrefs();
-            // W pamięci leży gotowy HTML starej tablicy.
-            timetableCache.clear();
-            if (timetableTarget) {
-                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
-            }
-        });
-    }
     const ttPast = $('tt-past');
     if (ttPast) {
         ttPast.checked = dotOpts.ttPast;
@@ -5194,7 +5177,7 @@ bindDotOpts();
 const DEV_FOLD_IDS = [
     'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
-    'fold-experiments', 'fold-debug', 'look-section',
+    'fold-debug', 'look-section',
     'fold-layout', 'fold-version',
 ];
 
@@ -5233,6 +5216,47 @@ function markChangedSettings() {
 devPanel.addEventListener('input', markChangedSettings);
 devPanel.addEventListener('change', markChangedSettings);
 markChangedSettings();
+
+// Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
+// na <body>: panele przewijają się w sobie i przycięłyby go na krawędzi. Klik
+// też go pokazuje - na telefonie nie ma najechania - i nie przełącza opcji,
+// w której etykiecie ikonka siedzi.
+const infoTip = document.createElement('div');
+infoTip.className = 'info-tip';
+infoTip.hidden = true;
+document.body.appendChild(infoTip);
+
+function showInfoTip(icon) {
+    infoTip.textContent = icon.dataset.tip;
+    infoTip.hidden = false;
+    const at = icon.getBoundingClientRect();
+    const tip = infoTip.getBoundingClientRect();
+    const below = at.bottom + 6 + tip.height <= innerHeight;
+    infoTip.style.top = `${below ? at.bottom + 6 : at.top - 6 - tip.height}px`;
+    infoTip.style.left = `${Math.max(8, Math.min(at.right - tip.width, innerWidth - tip.width - 8))}px`;
+}
+
+document.addEventListener('mouseover', event => {
+    const icon = event.target.closest('.info');
+    if (icon) showInfoTip(icon);
+});
+document.addEventListener('mouseout', event => {
+    if (event.target.closest('.info')) infoTip.hidden = true;
+});
+document.addEventListener('focusin', event => {
+    const icon = event.target.closest('.info');
+    if (icon) showInfoTip(icon);
+});
+document.addEventListener('focusout', event => {
+    if (event.target.closest('.info')) infoTip.hidden = true;
+});
+document.addEventListener('click', event => {
+    const icon = event.target.closest('.info');
+    if (!icon) return;
+    event.preventDefault();
+    showInfoTip(icon);
+});
+document.addEventListener('scroll', () => { infoTip.hidden = true; }, true);
 
 // Jeden przycisk na cały panel: kasuje wszystkie zapamiętane ustawienia
 // i przeładowuje stronę, więc każda wartość wraca z *_DEFAULTS tą samą drogą,

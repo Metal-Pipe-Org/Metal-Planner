@@ -42,10 +42,10 @@ def _w_pojezdzie(stop="WSIADAM", num="146", mode="bus", headsign=None):
     return {"num": num, "mode": mode, "stop": stop, "headsign": headsign}
 
 
-def _plan(install_day, pin_deadline, **kwargs):
+def _plan(install_day, **kwargs):
     install_day(_day())
-    pin_deadline(3000)
-    return planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(**kwargs))
+    return planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(**kwargs),
+                             density=planner.MAX_MAP_DENSITY)
 
 
 # ----------------------------------------------------------- rozpoznanie kursu
@@ -63,14 +63,43 @@ def test_rozpoznaje_najblizszy_kurs_linii():
     assert kurs["headsign"] == "CEL"
 
 
-def test_kurs_ktory_juz_odjechal_sie_nie_liczy():
-    """Pytanie pada z pokładu, więc następny przystanek jest z definicji
-    przed pojazdem: kurs, który minął WSIADAM o 00:10, o 00:15 już nie jest
-    naszym kursem."""
+def test_najblizszy_jest_kurs_przeszly_gdy_blizej():
+    """Zgłoszenie #231: o 00:15 „nasz" minął WSIADAM według rozkładu pięć
+    minut temu, a „nastepny" będzie tam dopiero o 00:40. Bliżej jest ten
+    przeszły - najpewniej spóźniony pojazd, w którym pasażer siedzi. Mapa
+    liczy się od jego rozkładu, a flaga `late` każe frontowi to powiedzieć."""
     kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 900)
+
+    assert kurs["trip"] == "nasz"
+    assert kurs["sec"] == 600
+    assert kurs["late"] is True
+    assert kurs["not_yet"] is False
+
+
+def test_najblizszy_jest_kurs_przyszly_gdy_blizej():
+    """O 00:27 „nasz" minął WSIADAM 17 minut temu, a „nastepny" będzie tam
+    za 13 - wygrywa przyszły i nie jest spóźniony."""
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 1620)
 
     assert kurs["trip"] == "nastepny"
     assert kurs["sec"] == 2400
+    assert kurs["late"] is False
+
+
+def test_lekkie_spoznienie_nie_jest_ostrzezeniem():
+    """Kurs złapany przed przystankiem jest według rozkładu zawsze trochę
+    spóźniony - o tym nie ma co mówić, dopóki mieści się w zapasie."""
+    w_zapasie = 600 + onboard.OFF_SCHEDULE_SLACK_SEC
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie)
+    assert kurs["trip"] == "nasz" and kurs["late"] is False
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie + 1)["late"] is True
+
+
+def test_pierwszy_kurs_dnia_nie_ma_przeszlego():
+    """Bez kursu wcześniejszego bierzemy przyszły, choćby był daleko."""
+    kurs = onboard.find_ride(_rzadki_day(), "146", "bus", "WSIADAM", 0)
+
+    assert kurs["trip"] == "rzadki" and kurs["late"] is False
 
 
 def test_petla_koncowa_tez_jest_przystankiem():
@@ -100,26 +129,70 @@ def test_kierunek_zaweza_wybor():
                              headsign="cel")["trip"] == "nasz"
 
 
+def _rzadki_day():
+    """Jedyny 146 dnia rusza z POCZATEK o 01:00 - wcześniejszego nie ma, więc
+    najbliższym jest on, choćby pytanie padło dużo wcześniej."""
+    return make_day([
+        {"trip_id": "rzadki", "label": "Autobus 146", "headsign": "CEL",
+         "stops": [("POCZATEK", 3600, 3600), ("WSIADAM", 4200, 4200),
+                   ("CEL", 6000, 6000)]},
+    ])
+
+
+def test_kurs_ktory_dopiero_przyjedzie_budzi_watpliwosc():
+    """Zgłoszenie #231: o 00:00 najbliższy 146 będzie przy WSIADAM dopiero
+    o 01:10. Kurs zostaje rozpoznany (liczymy od niego), ale z flagą, po
+    której front ostrzega, że godziny na mapie liczą się od 01:10."""
+    kurs = onboard.find_ride(_rzadki_day(), "146", "bus", "WSIADAM", 0)
+
+    assert kurs["trip"] == "rzadki"
+    assert kurs["not_yet"] is True
+
+
+def test_zapas_jest_ten_sam_w_przod_co_wstecz():
+    """„Będzie" ostrzega od tego samego zapasu co „była": liczonego od
+    rozkładowej godziny przy wskazanym przystanku."""
+    w_zapasie = 600 - onboard.OFF_SCHEDULE_SLACK_SEC
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie)
+    assert kurs["trip"] == "nasz" and kurs["not_yet"] is False
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie - 1)["not_yet"] is True
+
+
 # ------------------------------------------------------- start z pokładu
 
 
-def test_wyszukiwanie_rusza_spod_nastepnego_przystanku(install_day, pin_deadline):
+def test_wyszukiwanie_rusza_spod_nastepnego_przystanku(install_day):
     """Startem jest słupek, przy którym pojazd zaraz stanie, a godziną -
     sekunda, o której z niego rusza. Nie godzina z formularza: przed nią nie
     da się zrobić niczego, bo drzwi są zamknięte."""
-    wynik = _plan(install_day, pin_deadline)
+    wynik = _plan(install_day)
 
     assert wynik["start"] == "WSIADAM"
     assert wynik["departure"] == "00:10"
     assert wynik["onboard"]["line"] == "Autobus 146"
     assert wynik["onboard"]["headsign"] == "CEL"
     assert wynik["onboard"]["stop_name"] == "WSIADAM"
+    assert wynik["onboard"]["late"] is False
 
 
-def test_kazda_propozycja_mowi_gdzie_wysiasc(install_day, pin_deadline):
+def test_spozniony_kurs_liczy_mape_od_rozkladu(install_day):
+    """O 00:15 najbliższy jest „nasz", który według rozkładu ruszył spod
+    WSIADAM o 00:10. Mapa liczy się od tej rozkładowej sekundy - tak, jakby
+    jechał o czasie - a odpowiedź mówi, że jest spóźniony."""
+    install_day(_day())
+    wynik = planner.plan_flow("", "CEL", WHEN.replace(minute=15),
+                              in_vehicle=_w_pojezdzie(),
+                              density=planner.MAX_MAP_DENSITY)
+
+    assert wynik["departure"] == "00:10"
+    assert wynik["onboard"]["late"] is True
+    assert wynik["onboard"]["at"] == "00:10"
+
+
+def test_kazda_propozycja_mowi_gdzie_wysiasc(install_day):
     """To jest cały sens tego trybu: pasażer w pojeździe nie pyta „czym
     jechać", tylko „gdzie wysiąść"."""
-    wynik = _plan(install_day, pin_deadline)
+    wynik = _plan(install_day)
 
     assert wynik["journeys"]
     for propozycja in wynik["journeys"]:
@@ -127,10 +200,10 @@ def test_kazda_propozycja_mowi_gdzie_wysiasc(install_day, pin_deadline):
         assert propozycja["onboard"]["stops"] >= 0
 
 
-def test_jazda_dalej_tym_samym_pojazdem(install_day, pin_deadline):
+def test_jazda_dalej_tym_samym_pojazdem(install_day):
     """Zostanie w pojeździe to dla skanu zwykłe wsiadanie w ten kurs na tym
     przystanku - a dla pasażera „siedź jeszcze dwa przystanki"."""
-    wynik = _plan(install_day, pin_deadline)
+    wynik = _plan(install_day)
 
     dalej = [j for j in wynik["journeys"]
              if j["legs"][0].get("num") == "146"]
@@ -142,11 +215,11 @@ def test_jazda_dalej_tym_samym_pojazdem(install_day, pin_deadline):
     assert jazda["transfers"] == 0
 
 
-def test_przesiadka_od_razu_to_zero_przystankow(install_day, pin_deadline):
+def test_przesiadka_od_razu_to_zero_przystankow(install_day):
     """Propozycja, która NIE jedzie dalej naszym kursem, zaczyna się wysiadką
     na najbliższym przystanku - i tak właśnie ma być opisana, a nie milczeniem
     o tym, że trzeba wysiąść."""
-    wynik = _plan(install_day, pin_deadline)
+    wynik = _plan(install_day)
 
     tramwaj = [j for j in wynik["journeys"] if j["legs"][0].get("num") == "7"]
     assert tramwaj, [j["legs"][0] for j in wynik["journeys"]]
@@ -156,11 +229,10 @@ def test_przesiadka_od_razu_to_zero_przystankow(install_day, pin_deadline):
     assert tramwaj[0]["transfers"] == 1
 
 
-def test_bez_pojazdu_odpowiedz_sie_nie_zmienia(install_day, pin_deadline):
+def test_bez_pojazdu_odpowiedz_sie_nie_zmienia(install_day):
     """Zwykłe wyszukiwanie ma wyglądać dokładnie tak, jak wyglądało - pole
     `onboard` pojawia się tylko wtedy, gdy ktoś o nie poprosił."""
     install_day(_day())
-    pin_deadline(3000)
     wynik = planner.plan_flow("WSIADAM", "CEL", WHEN)
 
     assert "onboard" not in wynik
@@ -186,39 +258,53 @@ def _linie_na_mapie(wynik):
     return {s["num"] for s in wynik["segments"]}
 
 
-def test_przesiadka_na_starcie_z_pokladu_wymaga_zapasu(install_day, pin_deadline):
+def test_przesiadka_na_starcie_z_pokladu_wymaga_zapasu(install_day):
     """Z pokładu na przystanek się PRZYJEŻDŻA, więc tramwaj, który rusza pół
     minuty po naszym autobusie, jest przesiadką bez zapasu - mapa go nie
     rysuje. Stojąc na tym przystanku (zwykłe wyszukiwanie) zdąży się na niego
     bez problemu i tam ma zostać."""
     install_day(_dzien_z_tramwajem(630, 1500))
-    pin_deadline(3000)
 
-    z_pokladu = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie())
+    z_pokladu = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(),
+                                  density=planner.MAX_MAP_DENSITY)
     assert _linie_na_mapie(z_pokladu) == {"146"}
 
     z_przystanku = planner.plan_flow("WSIADAM", "CEL", WHEN.replace(minute=10))
     assert "7" in _linie_na_mapie(z_przystanku)
 
 
-def test_dalsza_jazda_wygrywa_z_przesiadka_ktora_malo_daje(install_day,
-                                                            pin_deadline):
+def test_mapa_z_pokladu_liczy_pojazd_w_ktorym_sie_siedzi(install_day):
+    """Na mapie z wartości podróży przesiadka z naszego autobusu w tramwaj to
+    dwa pojazdy, a dalsza jazda - jeden. Wyjście jest jedno dla wszystkich:
+    pasażer już jedzie, więc późniejsze „wyjście" niczego mu nie daje."""
+    install_day(_dzien_z_tramwajem(700, 2100))
+
+    wynik = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(),
+                              density=planner.MAX_MAP_DENSITY)
+
+    podroze = {seg["num"]: seg["why"]["journeys"][0] for seg in wynik["segments"]}
+    assert podroze["146"]["transfers"] == 0
+    assert podroze["7"]["transfers"] == 1
+    assert podroze["146"]["dep"] == podroze["7"]["dep"] == 600
+
+
+def test_dalsza_jazda_wygrywa_z_przesiadka_ktora_malo_daje(install_day):
     """Wysiadka i zmiana pojazdu to przesiadka, więc musi się opłacić tak jak
     każda inna (TRANSFER_GAIN_SEC). Tramwaj szybszy o pięć minut nie wyprzedza
     więc dalszej jazdy autobusem, w którym się siedzi."""
     install_day(_dzien_z_tramwajem(700, 2100))
-    pin_deadline(3000)
 
-    wynik = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie())
+    wynik = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(),
+                              density=planner.MAX_MAP_DENSITY)
 
     assert _linie_na_mapie(wynik) == {"146", "7"}
     assert wynik["journeys"][0]["legs"][0]["num"] == "146"
     assert wynik["journeys"][0]["onboard"]["transfer"] is False
 
 
-def test_przesiadka_ktora_sie_oplaca_dalej_wygrywa(install_day, pin_deadline):
+def test_przesiadka_ktora_sie_oplaca_dalej_wygrywa(install_day):
     """Tramwaj szybszy o pół godziny (z _day()) wyprzedza jazdę dalej mimo
     przesiadki - próg ma odsiewać drobne zyski, a nie każdą zmianę pojazdu."""
-    wynik = _plan(install_day, pin_deadline)
+    wynik = _plan(install_day)
 
     assert wynik["journeys"][0]["legs"][0]["num"] == "7"
