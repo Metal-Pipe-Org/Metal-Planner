@@ -1183,6 +1183,13 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   dokładają paskowi drugiego rzędu na zakładkach z listą (nie ma tam mapy).
   Test układu telefonu sprawdza, że wysokość paska i miejsce ⚙ są takie same
   we wszystkich stanach ekranu, osobno na każdym telefonie i na komputerze.
+  Przy okazji telefon w poziomie przestał być wspierany: na niskim ekranie
+  formularz „Jestem w pojeździe” wchodził na zakładki. Zainstalowana
+  aplikacja na Androidzie trzyma pion sama (manifest miał to już wcześniej),
+  ale przeglądarka i iPhone obracają stronę zawsze i nie da się im tego
+  zabronić — tam cały ekran zasłania prośba „Obróć telefon pionowo”.
+  Zasłona dotyczy tylko niskiego ekranu dotykowego (do 500 px wysokości
+  w poziomie), więc tablet i laptop jej nie dostają.
 
 - **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
   iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie

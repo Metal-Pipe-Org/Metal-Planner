@@ -301,3 +301,35 @@ body:has(#flow-panel:not([hidden])) .timetable-tip { display: none; }
     max-height: calc(70vh - env(safe-area-inset-top, 0px));
     overflow-y: auto;
 }
+
+/* ------------------------------------------------- telefon w poziomie --- */
+
+/* Telefon w poziomie nie jest wspierany - zasłona prosi o obrót (patrz
+   templates/index.html). Warunek to ten sam „niski ekran dotykowy", co
+   w <link id="phone-css">: telefon w poziomie ma najwyżej ~450 px wysokości,
+   najmniejszy tablet ponad 700, a laptop nie ma dotyku jako wskaźnika. */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+    .rotate-cover {
+        position: fixed;
+        inset: 0;
+        z-index: 5000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 24px calc(24px + env(safe-area-inset-right, 0px))
+                 24px calc(24px + env(safe-area-inset-left, 0px));
+        background: var(--sheet);
+        color: var(--ink);
+        text-align: center;
+    }
+
+    .rotate-cover-icon { margin-bottom: 6px; color: var(--accent); }
+
+    .rotate-cover p { margin: 0; }
+
+    .rotate-cover-title { font-size: 17px; font-weight: 700; }
+
+    .rotate-cover-text { color: var(--ink-soft); font-size: 14px; }
+}

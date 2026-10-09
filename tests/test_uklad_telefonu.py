@@ -4,8 +4,7 @@ Telefon ma własny arkusz i własny skrypt (static/phone.css, static/phone.js),
 ale zmiany robi się zwykle pod komputer i to one psuły telefon po cichu:
 przycisk wystający poza kartę, pasek schowany pod okienkiem, przyciski +/−
 pod zakładkami. Ten test zamiast pamiętania: otwiera stronę w rozmiarze
-dwóch telefonów i jednego obróconego poziomo (ma zostać układem telefonu),
-przechodzi przez wyszukanie trasy, zakładki i rozkład przystanku i w każdym
+dwóch telefonów, przechodzi przez wyszukanie trasy, zakładki i rozkład przystanku i w każdym
 stanie mierzy, czy
 
   - strony nie da się przewinąć w bok,
@@ -17,7 +16,8 @@ a po wyszukaniu - czy formularz zwinął się do jednej linijki. Pasek z nazwą
 aplikacji ma w każdym stanie tę samą wysokość, a ⚙ to samo miejsce - osobno
 na każdym telefonie i osobno na komputerze (#257). Do tego rozkład:
 z pustego zakładka „Mapa" wychodzi sama, a z wybranym zostaje na mapie
-z „Zamknij rozkład".
+z „Zamknij rozkład". Telefon w poziomie nie jest wspierany: zamiast układu
+widać zasłonę „Obróć telefon pionowo", a tablet i komputer jej nie widzą.
 
 Trasa jest liczona na prawdziwej bazie rozkładów (o 12:00, żeby zawsze coś
 jechało); żywe źródła - pojazdy, auta, rowery - dostają puste listy, żeby
@@ -39,8 +39,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 
 import gtfs
 
-TELEFONY = {"iphone": (390, 844), "maly-android": (360, 640),
-            "iphone-poziomo": (844, 390)}
+TELEFONY = {"iphone": (390, 844), "maly-android": (360, 640)}
 
 TRASA = ("Sosnowiecka", "Wojszyce")
 PRZYSTANEK = "Sosnowiecka"
@@ -188,10 +187,10 @@ def przebieg(request, adres, przegladarka):
 
     page.goto(adres)
     page.wait_for_selector("#start")
-    telefon = page.is_visible("#view-tabs")
+    telefon = page.is_visible("#view-tabs") and not page.is_visible("#rotate-cover")
     zmierz("start", True)
     page.click("#mode-vehicle")
-    pasek["jestem w pojeździe"] = page.evaluate(PASEK_JS)
+    zmierz("jestem w pojeździe", True)
     page.click("#mode-place")
 
     page.fill("#time", "12:00")
@@ -240,8 +239,8 @@ def przebieg(request, adres, przegladarka):
 
 
 def test_uklad_telefonu_obowiazuje(przebieg):
-    """Kontrola samego scenariusza - także telefon obrócony poziomo ma układ
-    telefonu (zakładki na dole), a nie komputerowy."""
+    """Kontrola samego scenariusza - telefon w pionie ma układ telefonu
+    (zakładki na dole) i nie ma na nim zasłony od obrotu."""
     assert przebieg["telefon"]
 
 
@@ -305,6 +304,7 @@ def test_pasek_z_nazwa_taki_sam_na_komputerze(adres, przegladarka):
     page.goto(adres)
     page.wait_for_selector("#start")
     assert not page.is_visible("#view-tabs")
+    assert not page.is_visible("#rotate-cover")
     pasek = {"wyszukiwarka": page.evaluate(PASEK_JS)}
     page.click("#mode-vehicle")
     pasek["jestem w pojeździe"] = page.evaluate(PASEK_JS)
@@ -317,3 +317,38 @@ def test_pasek_z_nazwa_taki_sam_na_komputerze(adres, przegladarka):
     pasek["ustawienia"] = page.evaluate(PASEK_JS)
     context.close()
     assert not _rozne_paski(pasek), json.dumps(pasek, ensure_ascii=False, indent=2)
+
+
+# Ekrany dotykowe w poziomie: telefon ma dostać zasłonę, tablet nie.
+POZIOMO = {"iphone-poziomo": ((844, 390), True), "maly-android-poziomo": ((640, 360), True),
+           "ipad-mini-poziomo": ((1133, 744), False)}
+
+
+@pytest.mark.parametrize("ekran", list(POZIOMO), ids=list(POZIOMO))
+def test_telefon_w_poziomie_dostaje_zaslone(ekran, adres, przegladarka):
+    """Telefon w poziomie nie jest wspierany - cały ekran zasłania prośba
+    o obrót i nic spod niej nie da się stuknąć. Tablet w poziomie to nie
+    telefon: dostaje zwykły układ, bez zasłony."""
+    (width, height), zaslona = POZIOMO[ekran]
+    context = przegladarka.new_context(
+        viewport={"width": width, "height": height}, device_scale_factor=2,
+        is_mobile=True, has_touch=True, locale="pl-PL", service_workers="block")
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector("#start", state="attached")
+    widac = page.is_visible("#rotate-cover")
+    pokrycie = page.evaluate("""() => {
+        const cover = document.getElementById('rotate-cover');
+        const b = cover.getBoundingClientRect();
+        const W = innerWidth, H = innerHeight;
+        const punkty = [[W / 2, H / 2], [10, 10], [W - 10, H - 10], [W - 10, 10], [10, H - 10]];
+        return {caly: b.left <= 0 && b.top <= 0 && b.right >= W && b.bottom >= H,
+                na_wierzchu: punkty.every(([x, y]) => cover.contains(document.elementFromPoint(x, y)))};
+    }""")
+    context.close()
+    assert widac == zaslona, (ekran, widac)
+    if zaslona:
+        assert pokrycie["caly"] and pokrycie["na_wierzchu"], pokrycie
