@@ -599,3 +599,39 @@ def test_stops_along_the_way_stand_on_the_map(front):
     """#169: wybrana trasa ma na mapie obwódkę na każdym mijanym przystanku,
     z nazwą i godziną pod kursorem - zawsze, niezależnie od opcji listy."""
     _check(front, "przystanki_po_drodze_na_mapie")
+
+
+# ------------------------------------------- przystanki linii (#252, #253) -
+
+def test_far_away_the_map_has_no_line_stops_until_a_line_is_pointed(front):
+    """Mijane przystanki nie stoją na mapie na stałe - z daleka nic się nie
+    dokłada, ani kropki, ani nazwy."""
+    _check(front, "p252_bez_kursora_i_z_daleka_nie_ma_przystankow_linii")
+
+
+def test_pointed_line_shows_its_own_stops_lighter_than_transfers(front):
+    """Wskazana linia pokazuje SWOJE przystanki, bez tych, które mają już
+    kropkę przesiadki, i lżejsze od niej (punkt 11 kontraktu); dymek kropki
+    to godzina i nazwa. Zejście z linii je zabiera."""
+    _check(front, "p252_wskazana_linia_pokazuje_swoje_przystanki")
+
+
+def test_line_tooltip_names_the_nearest_stop(front):
+    _check(front, "p252_dymek_linii_podaje_najblizszy_przystanek")
+
+
+def test_close_up_names_only_stops_of_drawn_lines_without_overlaps(front):
+    """Z bliska nazwy dostają tylko przystanki narysowanych linii, raz na
+    miejsce, bez nachodzenia na siebie ani na grupki numerów (te mają
+    pierwszeństwo - punkt 7)."""
+    _check(front, "p253_z_bliska_nazwy_tylko_przystankow_mapy")
+
+
+def test_without_a_map_close_up_names_the_whole_city_once_per_place(front):
+    _check(front, "p253_bez_mapy_nazwy_calego_miasta_raz_na_miejsce")
+
+
+def test_a_place_with_poles_on_both_sides_still_gets_its_name(front):
+    """Środek miejsca leży między jego słupkami - nazwa szuka miejsca też
+    przy każdym słupku, zamiast znikać (pl. Grunwaldzki)."""
+    _check(front, "p253_wezel_z_peronami_po_obu_stronach_dostaje_nazwe")
