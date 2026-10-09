@@ -155,7 +155,7 @@ Mapa odpowiada nie tylko na „jak dojechać”, ale też na „ile to trwa” i
 **Bez ruszania myszą** widać czas całej podróży: o której wyjść na najszybszą
 trasę, o której się nią dojedzie i od kiedy do kiedy sięga mapa. Wyjście to
 najpóźniejsza chwila, z której wciąż dojeżdża się najszybciej — wcześniejsze
-kazałoby tylko gdzieś czekać. Godziny przyjazdu mają przy sobie „za ile",
+kazałoby tylko gdzieś czekać. Przyjazd najszybszą trasą ma przy sobie „za ile",
 liczone od godziny z formularza — czekanie na pierwszy pojazd jest w tej
 liczbie zawarte, bo pasażer i tak czeka.
 

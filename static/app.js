@@ -1460,30 +1460,55 @@ function showMore() {
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
     (patrz summaryHtml): dojscie OTWIERAJACE albo ZAMYKAJACE trase dostaje
     wlasny znak, bo inaczej pasek obiecuje wsiadanie na przystanku, ktorego
-    nikt nie wskazywal; przejscie miedzy pojazdami zostaje kreska. */
+    nikt nie wskazywal; przejscie miedzy pojazdami zostaje kreska. Obok
+    plakietek idzie opis tej samej trasy slowami - do dymka, bo sam numer
+    nie mowi, czy to autobus, czy tramwaj, ani gdzie sie przesiada. */
 function headlineChips(legs) {
-    const parts = [];
+    const parts = [], words = [];
     let pendingWalk = false;
     legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
             if (i === 0 || i === legs.length - 1) {
-                parts.push(`<span class="headline-walk" title="Przejście pieszo` +
-                           ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`);
+                parts.push(`<span class="headline-walk">${WALK_ICON}${leg.minutes}</span>`);
+                words.push(`pieszo ok. ${leg.minutes} min`);
             } else {
                 pendingWalk = true;
             }
             return;
         }
-        if (pendingWalk) parts.push('<span class="headline-hop"></span>');
+        if (pendingWalk) {
+            parts.push('<span class="headline-hop"></span>');
+            words.push('przejście na przesiadkę');
+        }
         pendingWalk = false;
         parts.push(`<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`);
+        words.push(`${(MODE_LABEL[leg.kind] || MODE_LABEL.other).toLowerCase()} ${leg.num}`);
     });
-    return parts.join('');
+    return {html: parts.join(''), words: words.join(', ')};
 }
+
+// Piktogramy paska - jednobarwne i na currentColor, z tej samej rodziny co
+// WALK_ICON: emoji wyglądałyby na każdym systemie inaczej.
+const HEADLINE_CLOCK_ICON =
+    '<svg class="headline-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/>'
+    + '<path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.6"'
+    + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const HEADLINE_RIDE_ICON =
+    '<svg class="headline-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<rect x="3" y="1.8" width="10" height="10.4" rx="2" fill="none" stroke="currentColor"'
+    + ' stroke-width="1.6"/><path d="M3.4 7.4h9.2M5.4 12.2v2M10.6 12.2v2" fill="none"'
+    + ' stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+const HEADLINE_MAP_ICON =
+    '<svg class="headline-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<path d="M1.8 3.6 5.8 2l4.4 1.8 4-1.6v10.2l-4 1.6-4.4-1.8-4 1.6z M5.8 2v10.2'
+    + 'M10.2 3.8V14" fill="none" stroke="currentColor" stroke-width="1.4"'
+    + ' stroke-linejoin="round"/></svg>';
 
 function renderTimeHeadline() {
     const el = $('time-headline');
     if (!el) return;
+    hideHeadlineTip();
     const flow = lastFlow;
     if (!timeOpts.headline || !flow || typeof flow.best_sec !== 'number') {
         el.hidden = true;
@@ -1492,29 +1517,62 @@ function renderTimeHeadline() {
         return;
     }
     const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
+    const chipsTip = `Najszybsza trasa: ${chips.words}. Najedź na pasek albo go `
+        + 'stuknij, żeby zobaczyć ją na mapie.';
     // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
     // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
     // z wartości podróży wie to dopiero po szerszym szukaniu.
     const more = flow.more < MAX_MAP_MORE
-        ? `<button type="button" class="headline-more" title="Rysuj też gorsze `
-          + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">Pokaż więcej</button>`
+        ? '<button type="button" class="headline-more"'
+          + ` data-tip="Rysuj też gorsze opcje - mapa ${flow.more + 2}×`
+          + ' gęstsza niż wyjściowa.">Pokaż więcej</button>'
         : '';
     // Sama jazda to osobna liczba na życzenie: "za ile" zostaje zawsze.
     const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
-        ? `, jazda <b>${esc(fmtMins(flow.ride_sec))}</b>` : '';
+        ? `<span class="headline-item" data-tip="Sama jazda: ${esc(fmtMins(flow.ride_sec))},`
+          + ' od odjazdu pierwszego pojazdu do celu, bez czekania na niego.">'
+          + `${HEADLINE_RIDE_ICON}<b>${esc(fmtMins(flow.ride_sec))}</b></span>`
+        : '';
+    // Słowa zeszły do dymków (zgłoszenie #247): w pasku zostają godziny,
+    // czasy i plakietki, czytane jednym spojrzeniem jak podsumowanie trasy
+    // w Google Maps czy Jakdojade, a każdy kawałek tłumaczy się sam po
+    // najechaniu albo stuknięciu.
     el.innerHTML =
-        // "za", nie "w": obie liczby są mierzone od godziny z formularza,
-        // więc mówią, ZA ILE się tam będzie, a nie ile trwa sama jazda
-        // (zgłoszenie #143). Czekanie na pierwszy pojazd jest w nich zawarte.
+        '<span class="headline-best" tabindex="0" aria-label="Najszybciej: wyjeżdżasz'
+        + ` o ${esc(flow.starts)}, dojeżdżasz o ${esc(flow.best_arrival)},`
+        + ` za ${esc(fmtMins(flow.best_sec))}">`
+        // Plakietki na początku (decyzja użytkownika, #247): najpierw czym się
+        // jedzie, potem kiedy.
+        + (chips.html ? `<span class="headline-item headline-chips" data-tip="${esc(chipsTip)}">`
+                        + `${chips.html}</span>` : '')
         // "Wyjeżdżasz o" to najpóźniejszy wyjazd, który wciąż daje najszybszy
         // przyjazd - wcześniej wychodzi się tylko po to, żeby gdzieś czekać.
-        `<span class="headline-best" tabindex="0">Najszybciej: wyjeżdżasz o `
-        + `<b>${esc(flow.starts)}</b>, dojeżdżasz o <b>${esc(flow.best_arrival)}</b>, `
-        + `za <b>${esc(fmtMins(flow.best_sec))}</b>${ride}${chips}</span>`
-        + `<span class="headline-sep">·</span>`
-        + `<span class="headline-limit">mapa od <b>${esc(flow.map_from)}</b> `
-        + `do <b>${esc(flow.deadline)}</b>, za <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
-        + more;
+        + `<span class="headline-item" data-tip="Wyjeżdżasz o ${esc(flow.starts)} -`
+        + ' najpóźniej, jak się da, żeby wciąż dojechać najszybciej. Wcześniej'
+        + ` wychodzi się tylko po to, żeby czekać."><b>${esc(flow.starts)}</b></span>`
+        + '<span class="headline-arrow" aria-hidden="true">→</span>'
+        + `<span class="headline-item" data-tip="Dojeżdżasz o ${esc(flow.best_arrival)}`
+        + ` - najszybszy możliwy dojazd do celu."><b>${esc(flow.best_arrival)}</b></span>`
+        // "za", nie "w": liczba jest mierzona od godziny z formularza, więc
+        // mówi, ZA ILE się tam będzie, a nie ile trwa sama jazda (zgłoszenie
+        // #143). Czekanie na pierwszy pojazd jest w niej zawarte.
+        + `<span class="headline-item" data-tip="Na miejscu za ${esc(fmtMins(flow.best_sec))}`
+        + ` - liczone od godziny wyszukania (${esc(flow.departure)}), razem`
+        + ` z czekaniem na pierwszy pojazd.">${HEADLINE_CLOCK_ICON}`
+        + `<b>${esc(fmtMins(flow.best_sec))}</b></span>`
+        + ride
+        + '</span>'
+        // Zakres mapy i jego przycisk to jedna całość: zawinięty pasek przenosi
+        // je razem, a nie zostawia samotnego przycisku w drugiej linijce.
+        + '<span class="headline-map">'
+        + '<span class="headline-sep" aria-hidden="true"></span>'
+        + '<span class="headline-item headline-limit" data-tip="Mapa rysuje dojazdy'
+        + ` wyjeżdżające od ${esc(flow.map_from)} i dojeżdżające najpóźniej`
+        + ` o ${esc(flow.deadline)}, czyli za ${esc(fmtMins(flow.limit_sec))}`
+        + ' od wyszukania.">'
+        + `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b></span>`
+        + more
+        + '</span>';
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
@@ -1532,6 +1590,58 @@ function renderTimeHeadline() {
         if (fastestLayer) hideFastest(); else showFastest();
     });
     placeTimeHeadline();
+}
+
+// Dymki paska: ten sam ciemny dymek, co przy ⓘ w ustawieniach. Wisi na
+// <body>, bo pasek jest przycięty do pigułki i przyklejony do krawędzi okna.
+// Na telefonie nie ma najechania, więc dymek otwiera też stuknięcie -
+// łapane w fazie przechwytywania, bo klik w najszybszą trasę przerywa
+// bąbelkowanie (stopPropagation wyżej), a i tak ma pokazać swój opis.
+const headlineTip = document.createElement('div');
+headlineTip.className = 'headline-tip';
+headlineTip.hidden = true;
+document.body.appendChild(headlineTip);
+
+function showHeadlineTip(item) {
+    headlineTip.textContent = item.dataset.tip;
+    headlineTip.hidden = false;
+    const at = item.getBoundingClientRect();
+    const tip = headlineTip.getBoundingClientRect();
+    // Na komputerze pasek stoi u góry, na telefonie w doku na dole - dymek
+    // idzie tam, gdzie jest miejsce.
+    const below = at.bottom + 8 + tip.height <= innerHeight;
+    headlineTip.style.top = `${below ? at.bottom + 8 : at.top - 8 - tip.height}px`;
+    const centred = (at.left + at.right - tip.width) / 2;
+    headlineTip.style.left = `${Math.max(8, Math.min(centred, innerWidth - tip.width - 8))}px`;
+}
+
+function hideHeadlineTip() {
+    headlineTip.hidden = true;
+}
+
+{
+    const bar = $('time-headline');
+    const itemOf = event => event.target.closest('[data-tip]');
+    bar.addEventListener('pointerover', event => {
+        const item = itemOf(event);
+        if (event.pointerType === 'mouse' && item) showHeadlineTip(item);
+    });
+    bar.addEventListener('pointerout', event => {
+        if (event.pointerType === 'mouse' && itemOf(event)) hideHeadlineTip();
+    });
+    bar.addEventListener('focusin', event => {
+        const item = itemOf(event);
+        if (item) showHeadlineTip(item);
+    });
+    bar.addEventListener('focusout', hideHeadlineTip);
+    bar.addEventListener('click', event => {
+        const item = itemOf(event);
+        if (item) showHeadlineTip(item);
+    }, true);
+    document.addEventListener('click', event => {
+        if (!bar.contains(event.target)) hideHeadlineTip();
+    });
+    document.addEventListener('scroll', hideHeadlineTip, true);
 }
 
 // Odstęp paska od krawędzi okna i od tego, co może mu stanąć na drodze.
