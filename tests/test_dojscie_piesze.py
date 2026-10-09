@@ -415,6 +415,24 @@ def test_the_map_anchors_such_a_course_at_the_nearer_stop(install_day):
     assert [n["name"] for n in flow["nodes"]] == ["Skrajna"]
 
 
+def test_asking_again_from_the_same_point_does_not_search_again(install_day,
+                                                                 monkeypatch):
+    """Zgłoszenie #229: „pokaż więcej" przy relacji z punktu liczyło wszystko
+    od zera, bo każde zapytanie dokładało punkt do świeżej kopii dnia - z pustą
+    pamięcią wyszukiwań. To samo pytanie z tego samego punktu ma z niej brać."""
+    install_day(_day_z_dwoma_dojsciami())
+    searches = []
+    value_journeys = planner._value_journeys
+    monkeypatch.setattr(planner, "_value_journeys",
+                        lambda *args: searches.append(args) or value_journeys(*args))
+    first = planner.plan_flow("", "CEL", when=WHEN, start_point=A, value_map=True)
+    searched = len(searches)
+    assert searched, "mapa z wartości w ogóle nie szukała"
+    again = planner.plan_flow("", "CEL", when=WHEN, start_point=A, value_map=True)
+    assert len(searches) == searched
+    assert again["segments"] == first["segments"]
+
+
 # ---- dojście musi ZDĄŻYĆ ------------------------------------------------
 
 ODJAZD_168 = 8 * 3600 + 31 * 60     # 08:31 - godzina ze zgłoszenia #168
