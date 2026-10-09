@@ -886,7 +886,17 @@ checks.czekanie_jest_widoczne = (() => {
    w dymkach (#247) - sprawdzamy wierzch i dymki. */
 checks.pasek_mowi_kiedy_wyjechac = (() => {
     const html = () => document.getElementById('time-headline').innerHTML;
-    const pasek = () => html().replace(/<[^>]+>/g, '');
+    // Atrapa DOM-u nie parsuje HTML-a, więc textContent jest pusty - tekst
+    // z wierzchu zbieramy sami: wszystko poza nawiasami < >.
+    const pasek = () => {
+        let tekst = '', wZnaczniku = false;
+        for (const znak of html()) {
+            if (znak === '<') wZnaczniku = true;
+            else if (znak === '>') wZnaczniku = false;
+            else if (!wZnaczniku) tekst += znak;
+        }
+        return tekst;
+    };
     const dymki = () => [...html().matchAll(/data-tip="([^"]*)"/g)].map(m => m[1]).join(' | ');
     const flow = {...FLOW_FIXTURE, starts: '12:25', best_arrival: '12:40',
                   best_sec: 40 * 60, ride_sec: 15 * 60,

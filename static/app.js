@@ -254,6 +254,12 @@ function esc(text) {
     return div.innerHTML;
 }
 
+/** esc() do wartości atrybutu: innerHTML zostawia cudzysłowy, a w atrybucie
+    cudzysłów kończy wartość i resztę tekstu czyta się jak kod. */
+function escAttr(text) {
+    return esc(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
@@ -1517,60 +1523,61 @@ function renderTimeHeadline() {
         return;
     }
     const chips = headlineChips((flow.fastest && flow.fastest.legs) || []);
-    const chipsTip = `Najszybsza trasa: ${chips.words}. Najedź na pasek albo go `
-        + 'stuknij, żeby zobaczyć ją na mapie.';
+    // Kawałek paska z dymkiem. Opis jest zwykłym tekstem i do atrybutu idzie
+    // przez escAttr w jednym miejscu, a nie sklejany z esc() po kawałku.
+    const item = (cls, tip, html) =>
+        `<span class="headline-item${cls}" data-tip="${escAttr(tip)}">${html}</span>`;
     // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
     // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
     // z wartości podróży wie to dopiero po szerszym szukaniu.
     const more = flow.more < MAX_MAP_MORE
-        ? '<button type="button" class="headline-more"'
-          + ` data-tip="Rysuj też gorsze opcje - mapa ${flow.more + 2}×`
-          + ' gęstsza niż wyjściowa.">Pokaż więcej</button>'
+        ? '<button type="button" class="headline-more" data-tip="'
+          + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
+          + '">Pokaż więcej</button>'
         : '';
     // Sama jazda to osobna liczba na życzenie: "za ile" zostaje zawsze.
     const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
-        ? `<span class="headline-item" data-tip="Sama jazda: ${esc(fmtMins(flow.ride_sec))},`
-          + ' od odjazdu pierwszego pojazdu do celu, bez czekania na niego.">'
-          + `${HEADLINE_RIDE_ICON}<b>${esc(fmtMins(flow.ride_sec))}</b></span>`
+        ? item('', `Sama jazda: ${fmtMins(flow.ride_sec)}, od odjazdu pierwszego pojazdu`
+                   + ' do celu, bez czekania na niego.',
+               `${HEADLINE_RIDE_ICON}<b>${esc(fmtMins(flow.ride_sec))}</b>`)
         : '';
     // Słowa zeszły do dymków (zgłoszenie #247): w pasku zostają godziny,
     // czasy i plakietki, czytane jednym spojrzeniem jak podsumowanie trasy
     // w Google Maps czy Jakdojade, a każdy kawałek tłumaczy się sam po
     // najechaniu albo stuknięciu.
     el.innerHTML =
-        '<span class="headline-best" tabindex="0" aria-label="Najszybciej: wyjeżdżasz'
-        + ` o ${esc(flow.starts)}, dojeżdżasz o ${esc(flow.best_arrival)},`
-        + ` za ${esc(fmtMins(flow.best_sec))}">`
+        '<span class="headline-best" tabindex="0" aria-label="'
+        + escAttr(`Najszybciej: wyjeżdżasz o ${flow.starts}, dojeżdżasz`
+                  + ` o ${flow.best_arrival}, za ${fmtMins(flow.best_sec)}`) + '">'
         // Plakietki na początku (decyzja użytkownika, #247): najpierw czym się
         // jedzie, potem kiedy.
-        + (chips.html ? `<span class="headline-item headline-chips" data-tip="${esc(chipsTip)}">`
-                        + `${chips.html}</span>` : '')
+        + (chips.html ? item(' headline-chips', `Najszybsza trasa: ${chips.words}. Najedź`
+                             + ' na pasek albo go stuknij, żeby zobaczyć ją na mapie.',
+                             chips.html) : '')
         // "Wyjeżdżasz o" to najpóźniejszy wyjazd, który wciąż daje najszybszy
         // przyjazd - wcześniej wychodzi się tylko po to, żeby gdzieś czekać.
-        + `<span class="headline-item" data-tip="Wyjeżdżasz o ${esc(flow.starts)} -`
-        + ' najpóźniej, jak się da, żeby wciąż dojechać najszybciej. Wcześniej'
-        + ` wychodzi się tylko po to, żeby czekać."><b>${esc(flow.starts)}</b></span>`
+        + item('', `Wyjeżdżasz o ${flow.starts} - najpóźniej, jak się da, żeby wciąż`
+                   + ' dojechać najszybciej. Wcześniej wychodzi się tylko po to, żeby czekać.',
+               `<b>${esc(flow.starts)}</b>`)
         + '<span class="headline-arrow" aria-hidden="true">→</span>'
-        + `<span class="headline-item" data-tip="Dojeżdżasz o ${esc(flow.best_arrival)}`
-        + ` - najszybszy możliwy dojazd do celu."><b>${esc(flow.best_arrival)}</b></span>`
+        + item('', `Dojeżdżasz o ${flow.best_arrival} - najszybszy możliwy dojazd do celu.`,
+               `<b>${esc(flow.best_arrival)}</b>`)
         // "za", nie "w": liczba jest mierzona od godziny z formularza, więc
         // mówi, ZA ILE się tam będzie, a nie ile trwa sama jazda (zgłoszenie
         // #143). Czekanie na pierwszy pojazd jest w niej zawarte.
-        + `<span class="headline-item" data-tip="Na miejscu za ${esc(fmtMins(flow.best_sec))}`
-        + ` - liczone od godziny wyszukania (${esc(flow.departure)}), razem`
-        + ` z czekaniem na pierwszy pojazd.">${HEADLINE_CLOCK_ICON}`
-        + `<b>${esc(fmtMins(flow.best_sec))}</b></span>`
+        + item('', `Na miejscu za ${fmtMins(flow.best_sec)} - liczone od godziny`
+                   + ` wyszukania (${flow.departure}), razem z czekaniem na pierwszy pojazd.`,
+               `${HEADLINE_CLOCK_ICON}<b>${esc(fmtMins(flow.best_sec))}</b>`)
         + ride
         + '</span>'
         // Zakres mapy i jego przycisk to jedna całość: zawinięty pasek przenosi
         // je razem, a nie zostawia samotnego przycisku w drugiej linijce.
         + '<span class="headline-map">'
         + '<span class="headline-sep" aria-hidden="true"></span>'
-        + '<span class="headline-item headline-limit" data-tip="Mapa rysuje dojazdy'
-        + ` wyjeżdżające od ${esc(flow.map_from)} i dojeżdżające najpóźniej`
-        + ` o ${esc(flow.deadline)}, czyli za ${esc(fmtMins(flow.limit_sec))}`
-        + ' od wyszukania.">'
-        + `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b></span>`
+        + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
+                                  + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
+                                  + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
+               `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
         + more
         + '</span>';
     el.hidden = false;
@@ -1629,14 +1636,18 @@ function hideHeadlineTip() {
     bar.addEventListener('pointerout', event => {
         if (event.pointerType === 'mouse' && itemOf(event)) hideHeadlineTip();
     });
+    // "Pokaż więcej" to przycisk, a nie opis: klik i stuknięcie mają tylko
+    // zagęścić mapę. Kliknięty przycisk dostaje też fokus, więc fokus
+    // z myszy albo palca (bez :focus-visible) nie otwiera jego dymka.
+    const isMore = item => item.classList.contains('headline-more');
     bar.addEventListener('focusin', event => {
         const item = itemOf(event);
-        if (item) showHeadlineTip(item);
+        if (item && !(isMore(item) && !item.matches(':focus-visible'))) showHeadlineTip(item);
     });
     bar.addEventListener('focusout', hideHeadlineTip);
     bar.addEventListener('click', event => {
         const item = itemOf(event);
-        if (item) showHeadlineTip(item);
+        if (item && !isMore(item)) showHeadlineTip(item);
     }, true);
     document.addEventListener('click', event => {
         if (!bar.contains(event.target)) hideHeadlineTip();
