@@ -37,12 +37,16 @@ body.routes-off #view-tabs [data-view="list"] { display: none; }
 
 #sidebar {
     /* Zainstalowana aplikacja rysuje się pod wcięciem ekranu
-       (viewport-fit=cover), więc panel musi je omijać sam. */
-    top: calc(8px + env(safe-area-inset-top, 0px));
-    left: 8px;
-    right: 8px;
-    bottom: calc(var(--tabs-h) + 8px);
+       (viewport-fit=cover), więc panel musi je omijać sam.
+       Ramka panelu jest jedna dla wszystkich zakładek (#257): pasek z nazwą
+       stoi w niej, więc każda zakładka z własnym odsunięciem panelu
+       przesuwała go razem z nim. Zakładki zmieniają tylko dół i tło. */
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: var(--tabs-h);
     width: auto;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
 }
 
 /* Chowanie panelu to mechanizm szerokiego ekranu - tu panel zawsze jest,
@@ -54,22 +58,21 @@ body.panel-hidden #sidebar {
     pointer-events: auto;
 }
 
-/* Widok mapy: z panelu zostaje sama karta, reszta ekranu to mapa. */
-body.view-map #sidebar { bottom: auto; }
+/* Widok mapy: z panelu zostaje sama karta, reszta ekranu to mapa - także
+   pas odstępu wokół kart, przez który stuknięcie ma trafić w mapę. */
+body.view-map #sidebar {
+    bottom: auto;
+    padding-bottom: 0;
+    pointer-events: none;
+}
+body.view-map #sidebar > * { pointer-events: auto; }
 body.view-map .results { display: none; }
 
 /* Widok listy: panel na cały ekran, na własnym tle - mapa pod spodem
    zostaje w DOM (Leaflet musi znać rozmiar kontenera, żeby poprawnie
    kadrować także wtedy, gdy patrzymy na listę), ale nie prześwituje
    między kartami. */
-body.view-list #sidebar {
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: var(--tabs-h);
-    padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
-    background: var(--sheet);
-}
+body.view-list #sidebar { background: var(--sheet); }
 
 /* Poświata pod tekstem była na czytelność nad mapą - na jednolitym tle
    tylko brudzi. */
@@ -79,8 +82,11 @@ body.view-list .results-head h2 { text-shadow: none; }
 
 /* Warstwy zmieniają to, co widać NA MAPIE, więc w widoku mapy stoją na niej:
    kolumna przy prawej krawędzi, tuż pod panelem (jego dolną krawędź podaje
-   phone.js). W pasku aplikacji zostaje jedna linijka: nazwa, a z prawej ⚙. */
-body.view-map .app-bar { padding: 6px 8px 6px 12px; }
+   phone.js). W pasku aplikacji zostaje jedna linijka: nazwa, a z prawej ⚙.
+   To jedyne miejsce z wymiarami paska na telefonie (#257) - żadna zakładka,
+   widok ani tryb ich nie nadpisuje, bo każde takie nadpisanie dawało pasek
+   innej wysokości i przeskakującą ⚙. */
+.app-bar { padding: 6px 8px 6px 12px; }
 
 body.view-map .layer-bar {
     position: fixed;
@@ -103,9 +109,9 @@ body.view-map .layer-button {
 
 body.view-map .layer-button:not(.active) { background: var(--surface); }
 
-/* Zakładka Rozkład to sama lista rozkładów - warstw mapy nie ma tam na czym
-   pokazać. */
-body.mode-timetable.view-list .layer-bar { display: none; }
+/* Zakładki z listą nie pokazują mapy - warstw nie ma tam na czym pokazać.
+   Zostawione w pasku z nazwą dokładałyby mu drugi rząd (#257). */
+body.view-list .layer-bar { display: none; }
 
 /* --------------------------------------------- karta wyszukiwania --- */
 
@@ -292,4 +298,36 @@ body:has(#flow-panel:not([hidden])) .timetable-tip { display: none; }
     width: auto;
     max-height: calc(70vh - env(safe-area-inset-top, 0px));
     overflow-y: auto;
+}
+
+/* ------------------------------------------------- telefon w poziomie --- */
+
+/* Telefon w poziomie nie jest wspierany - zasłona prosi o obrót (patrz
+   templates/index.html). Warunek to ten sam „niski ekran dotykowy", co
+   w <link id="phone-css">: telefon w poziomie ma najwyżej ~450 px wysokości,
+   najmniejszy tablet ponad 700, a laptop nie ma dotyku jako wskaźnika. */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+    .rotate-cover {
+        position: fixed;
+        inset: 0;
+        z-index: 5000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 24px calc(24px + env(safe-area-inset-right, 0px))
+                 24px calc(24px + env(safe-area-inset-left, 0px));
+        background: var(--sheet);
+        color: var(--ink);
+        text-align: center;
+    }
+
+    .rotate-cover-icon { margin-bottom: 6px; color: var(--accent); }
+
+    .rotate-cover p { margin: 0; }
+
+    .rotate-cover-title { font-size: 17px; font-weight: 700; }
+
+    .rotate-cover-text { color: var(--ink-soft); font-size: 14px; }
 }
