@@ -17,7 +17,9 @@ do przeczytania przez człowieka.
 - `gh pr diff <PR_NUMBER> --repo <REPO>` — pełna zmiana. Jeśli diff jest ogromny,
   zacznij od `--name-only` i czytaj po pliku.
 - `gh pr view <PR_NUMBER> --repo <REPO> --comments` — dyskusja, o ile jakaś jest.
-- `README.md` i `docs/PROJECT.md`; przy zmianach w mapie przepływów albo
+- `README.md` i `docs/PROJECT.md` (jego changelog to historia do 2026-10-08,
+  nowsze wpisy są po pliku na PR w `docs/changelog/`, tam też wpis tego
+  PR-a); przy zmianach w mapie przepływów albo
   w wyszukiwaniu połączeń dołóż `docs/ROUTING_ALGORITHM.md`
   i `docs/FLOW_MAP_CONTRACT.md`.
 - Repozytorium masz wypożyczone na commicie z czubka PR-a — czytaj **cały** plik
@@ -64,7 +66,9 @@ Szukaj rzeczy, które naprawdę bolą, w tej kolejności:
   `gtfs.py` / `planner.py` / `routes.py` / `static/app.js`, kontrakt mapy
   przepływów, kształt odpowiedzi API, styl i nazewnictwo z okolicznego kodu,
   komentarze i dokumentacja po polsku, aktualność `docs/` przy zmianie
-  zachowania. Gdy PR dokłada testy — hermetyczne, przez `tests/gtfs_builder.py`,
+  zachowania. Wpis do changelogu ma być nowym plikiem w `docs/changelog/`
+  (zasady w `docs/changelog/README.md`); dopisek do zamkniętego changelogu
+  w `docs/PROJECT.md` to uwaga 🟡. Gdy PR dokłada testy — hermetyczne, przez `tests/gtfs_builder.py`,
   bez sieci i bez `data/gtfs.sqlite`.
 - **Wielkość PR-a** — czy da się to sensownie przejrzeć na raz, czy siedzi w nim
   kilka niezależnych zmian, które lepiej byłoby rozdzielić.

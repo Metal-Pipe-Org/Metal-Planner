@@ -7,7 +7,8 @@ Rozwiąż zgłoszenie z GitHuba podane w argumentach: $ARGUMENTS
 ## 1. Wczytaj kontekst
 
 - `gh issue view <ISSUE_NUMBER> --repo <REPO> --comments` — treść zgłoszenia i dyskusja.
-- Przeczytaj `README.md` oraz `docs/PROJECT.md`; jeśli zgłoszenie dotyczy mapy
+- Przeczytaj `README.md` oraz `docs/PROJECT.md` (jego changelog to historia
+  do 2026-10-08, nowsze wpisy są w `docs/changelog/`); jeśli zgłoszenie dotyczy mapy
   przepływów albo wyszukiwania połączeń, dołóż `docs/ROUTING_ALGORITHM.md`
   i `docs/FLOW_MAP_CONTRACT.md`.
 - Znajdź w repo kod, którego zgłoszenie faktycznie dotyczy, zanim cokolwiek zmienisz.
@@ -42,6 +43,11 @@ w sekretach albo w uprawnieniach — to zawsze robi człowiek.
   hermetyczne — budują syntetyczne dane przez `tests/gtfs_builder.py`
   i nie ruszają sieci ani `data/gtfs.sqlite`. Trzymaj to tak dalej.
 - Jeśli zmiana dotyczy zachowania opisanego w `docs/`, zaktualizuj opis.
+- Wpis do changelogu dodaj jako nowy plik w `docs/changelog/`, nazwany
+  `RRRR-MM-DD-<ISSUE_NUMBER>-<krótki-opis>.md`, w stylu dotychczasowych
+  wpisów (zasady w `docs/changelog/README.md`). Przy kolejnym wpisie w tym
+  samym wątku popraw ten sam plik. Changelogu w `docs/PROJECT.md` nie ruszaj:
+  to zamknięta historia, tylko do czytania.
 
 ## 4. Zweryfikuj
 
