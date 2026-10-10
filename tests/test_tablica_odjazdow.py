@@ -19,6 +19,8 @@ Dwie rzeczy, które łatwo tu zepsuć i których nie widać po wyniku na oko:
 
 import datetime
 
+import pytest
+
 import planner
 from tests.gtfs_builder import make_day
 
@@ -158,3 +160,120 @@ def test_kurs_przy_dwoch_slupkach_to_jeden_odjazd(install_day):
 
     assert _godziny(planner.stop_timetable("WEZEL", WHEN, from_sec=0)) == ["00:16"]
     assert _godziny(planner.stop_timetable("WEZEL", WHEN, from_sec=0, until_sec=3600)) == ["00:16"]
+
+
+# --------------------------------------- spóźnione kursy na starcie (#238) ---
+
+def _start_ze_spoznionymi():
+    """START -> CEL, pytanie o 1000. Mapa: 16 o 1300 (w celu 1700).
+
+    Poprzednie kursy, sprzed pytania:
+      - 16 o 940, w celu 1340 - spóźniona o minutę jest w celu 1400: przechodzi;
+      - 4 o 990, przez SRODEK, w celu 1200 - spóźniona o 10 s: przechodzi,
+        choć mapa jej nie rysuje;
+      - 9 o 400, w celu 1650 - spóźniona o 10 min dopiero 2250: odpada;
+      - 2 o 300, bieg skończony o 600 - nie stoi już na przystanku: odpada.
+    """
+    return make_day(
+        [
+            {"trip_id": "16-wczesniej", "label": "Tramwaj 16", "headsign": "OSOBOWICE",
+             "stops": [("START", 940, 940), ("CEL", 1340, 1340)]},
+            {"trip_id": "16", "label": "Tramwaj 16", "headsign": "OSOBOWICE",
+             "stops": [("START", 1300, 1300), ("CEL", 1700, 1700)]},
+            {"trip_id": "4", "label": "Tramwaj 4", "headsign": "BISKUPIN",
+             "stops": [("START", 990, 990), ("SRODEK", 1100, 1100), ("CEL", 1200, 1200)]},
+            {"trip_id": "9", "label": "Tramwaj 9", "headsign": "8 MAJA",
+             "stops": [("START", 400, 400), ("SRODEK", 1050, 1050), ("CEL", 1650, 1650)]},
+            {"trip_id": "2", "label": "Tramwaj 2", "headsign": "KRZYKI",
+             "stops": [("START", 300, 300), ("CEL", 600, 600)]},
+        ],
+    )
+
+
+def test_start_niesie_poprzednie_kursy_ktore_spoznione_by_dowiozly(install_day):
+    """Zgłoszenie #238: tablica dostaje
+    przy każdej linii jej poprzedni kurs, jeśli spóźniony o tyle, ile minęło
+    od jego odjazdu, dowiózłby wcześniej niż najszybsza trasa. Mapy ani
+    najszybszej trasy to nie rusza."""
+    install_day(_start_ze_spoznionymi())
+    wynik = planner.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
+
+    start = [n for n in wynik["nodes"] if n.get("start")][0]
+    assert start["late"] == [
+        {"num": "16", "kind": "tram", "headsign": "OSOBOWICE", "sec": 940},
+        {"num": "4", "kind": "tram", "headsign": "BISKUPIN", "sec": 990},
+    ]
+    assert {s["num"] for s in wynik["segments"]} == {"16"}
+    assert wynik["fastest"]["arrival"] == "00:28"
+
+
+def _przesiadka_ze_spoznionymi():
+    """START -> X (1000 -> 1300), na X przesiadka na B (1500 -> CEL 1900).
+
+    Na X, przed przyjazdem o 1300, odjechały według rozkładu:
+      - C o 1250, w celu 1600 - spóźniona do 1300 jest w celu 1650: przechodzi,
+        choć mapa jej nie rysuje;
+      - E o 1200, w celu 1800 - spóźniona do 1300 jest w celu 1900, na remis
+        z najszybszą trasą: odpada, bo niczego nie wygrywa.
+    """
+    return make_day(
+        [
+            {"trip_id": "A", "label": "Tramwaj 1", "headsign": "X",
+             "stops": [("START", 1000, 1000), ("X", 1300, 1300)]},
+            {"trip_id": "B", "label": "Tramwaj 2", "headsign": "CEL",
+             "stops": [("X", 1500, 1500), ("CEL", 1900, 1900)]},
+            {"trip_id": "C", "label": "Tramwaj 3", "headsign": "CEL",
+             "stops": [("X", 1250, 1250), ("CEL", 1600, 1600)]},
+            {"trip_id": "E", "label": "Tramwaj 5", "headsign": "CEL",
+             "stops": [("X", 1200, 1200), ("CEL", 1800, 1800)]},
+        ],
+    )
+
+
+def test_przesiadka_ma_te_sama_regule_co_start(install_day):
+    """Jedna reguła dla każdej tablicy mapy, nie tylko startu: na przesiadce
+    poprzedni kurs liczy się sprzed chwili, w której można tu być
+    (przyjazd), i musi dowieźć WCZEŚNIEJ niż najszybsza trasa - remis
+    odpada."""
+    install_day(_przesiadka_ze_spoznionymi())
+    wynik = planner.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
+
+    assert wynik["fastest"]["arrival"] == "00:31"
+    wezly = {n["name"]: n for n in wynik["nodes"]}
+    assert wezly["X"]["late"] == [{"num": "3", "kind": "tram", "headsign": "CEL",
+                                   "sec": 1250}]
+    assert "late" not in wezly["START"]
+
+
+def _punkt_pod_grunwaldzkim():
+    """Zgłoszone na żywo 8.10: start w punkcie na mapie, kilkadziesiąt metrów
+    od GRUNWALDZKI, cel WOJSZYCE. 146 jedzie o 17:51 (w celu 18:20) i o 18:07
+    (w celu 18:43); na 17:51 pieszo się już nie zdąży."""
+    return make_day(
+        [
+            {"trip_id": "146-1751", "label": "Autobus 146", "headsign": "GAJ pętla",
+             "stops": [("GRUNWALDZKI", 64260, 64260), ("WOJSZYCE", 66000, 66000)]},
+            {"trip_id": "146-1807", "label": "Autobus 146", "headsign": "GAJ pętla",
+             "stops": [("GRUNWALDZKI", 65220, 65220), ("WOJSZYCE", 67380, 67380)]},
+        ],
+    )
+
+
+@pytest.mark.parametrize("minuta", [51, 52])
+def test_start_z_punktu_ma_tablice_startu_u_przystanku_do_ktorego_sie_idzie(
+        install_day, minuta):
+    """Start z punktu na mapie nie jest przystankiem - tablicą startu jest
+    przystanek, do którego się z niego dochodzi. Dawniej spóźnione kursy
+    dostawał tylko węzeł będący samym startem, więc tu nie dostawał ich nikt:
+    o 17:51 szara 17:51 była jeszcze zwykłą szarą godziną (między formularzem
+    a mapą), a o 17:52 znikała. Ma być w obu."""
+    day = _punkt_pod_grunwaldzkim()
+    install_day(day)
+    lat, lon = day.stop_coords["GRUNWALDZKI"]
+    wynik = planner.plan_flow("", "WOJSZYCE", WHEN.replace(hour=17, minute=minuta),
+                              start_point=(lat + 0.0004, lon))
+
+    assert wynik["fastest"]["arrival"] == "18:43"
+    wezel = [n for n in wynik["nodes"] if n["name"] == "GRUNWALDZKI"][0]
+    assert wezel["late"] == [{"num": "146", "kind": "bus", "headsign": "GAJ pętla",
+                              "sec": 64260}]

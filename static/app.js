@@ -2337,6 +2337,8 @@ function timetableLinesHtml(data, mapSec) {
         // Z szarych tylko ostatnia - "uciekło ci o 3 minuty" - bo starsze
         // zajmowały miejsca godzinom, na które się zdąży, i wypychały je
         // z wiersza (Lutosławskiego: sześć szarych 310, żadnej na czas).
+        // Spóźniony kurs (#238, patrz withLate) to też szara godzina - z obu
+        // rodzajów razem zostaje najpóźniejsza.
         const szare = dotOpts.ttPast ? przed.slice(-1) : [];
         const miejsce = TT_TIMES_MAX - szare.length;
         const ciete = po.length > miejsce;
@@ -2456,6 +2458,36 @@ function withArrivals(data, lines) {
     return {...data, departures: [...data.departures, ...rows]};
 }
 
+/** Spóźnione kursy (zgłoszenie #238): na tablicy każdego przystanku mapy
+    każda linia - także ta, której mapa tam nie rysuje - dostaje swój
+    poprzedni kurs, jeśli spóźniony i wciąż stojący na przystanku dowiózłby
+    wcześniej niż najszybsza trasa (`late` przy węźle, patrz
+    planner._late_departures). O 8:11 z pl. Wróblewskiego mapa nie znała
+    czwórki z 8:10, która spóźniona stała na przystanku.
+
+    To zwykła szara godzina w tablicy: z niej i ze zwykłych szarych linia
+    pokazuje tylko najpóźniejszą (patrz timetableLinesHtml), a ten sam kurs
+    nie wchodzi drugi raz. Podlega temu samemu ustawieniu, co szare godziny.
+
+    Wiersz dostaje `flow` linii z mapy, jeśli ją mapa proponuje - inaczej
+    stanąłby jako osobny wiersz obok jej odjazdów. */
+function withLate(data, where) {
+    if (!dotOpts.ttPast || !where.late) return data;
+    const flow = new Map((where.lines || []).filter(l => l.flow !== 'end')
+        .map(l => [lineKey(l), l.flow]));
+    const key = d => `${lineKey({kind: d.mode, num: d.num, headsign: d.headsign})}@${d.sec}`;
+    const known = new Set(data.departures.map(key));
+    const rows = where.late.map(l => ({
+        time: fmtClock(l.sec),
+        sec: l.sec,
+        num: l.num,
+        mode: l.kind,
+        headsign: l.headsign,
+        flow: flow.get(lineKey(l)),
+    })).filter(d => !known.has(key(d)));
+    return {...data, departures: [...rows, ...data.departures]};
+}
+
 /** Wycina odjazdy zza horyzontu mapy.
 
     Siatka bezpieczeństwa POD odsiewem z keepOfferedLines, nie zamiast niego:
@@ -2552,7 +2584,8 @@ function loadTimetable(dot, where, sec) {
             // jeszcze się dojedzie", a wiersz przyjazdu nie jest odjazdem -
             // to fakt z samej mapy, więc nie ma go czym odsiewać.
             const html = timetableHtml(data.error ? data : withArrivals(
-                keepWithinHorizon(keepOfferedLines(data, where.lines), where.deadline),
+                withLate(keepWithinHorizon(keepOfferedLines(data, where.lines),
+                                           where.deadline), where),
                 where.lines), sec);
             // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
             // nie: offline z service workera wraca jako {error}, a po powrocie
@@ -2666,7 +2699,9 @@ const flowDotStyle = (w = 1) => {
     z czego odtworzyć - i nie powinien zgadywać po odległości na ekranie. */
 function flowStopDots(nodes, deadline) {
     return (nodes || []).map(n => stopDot(
-        nodePoint(n), {name: n.name, lines: n.lines, deadline, start: n.start},
+        nodePoint(n),
+        // `late` - spóźnione kursy z tego przystanku (#238, patrz withLate).
+        {name: n.name, lines: n.lines, deadline, start: n.start, late: n.late},
         // Start nigdy nie blednie: to nie jest jedna z opcji, tylko miejsce,
         // w którym stoisz.
         n.sec, flowDotStyle(n.start ? 1 : n.w)));

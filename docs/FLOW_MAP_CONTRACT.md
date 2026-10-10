@@ -235,11 +235,21 @@ liczona od tamtej godziny zabrałaby mu nie kilka wierszy, tylko całą
 odpowiedź.
 
 Odjazdy sprzed chwili, w której mapa stawia tu pasażera, są więc na liście
-celowo — jako szare godziny. Linia, na którą według mapy już się nie zdąży,
-idzie na koniec, żeby na ruchliwym węźle nie wypchnęła tych, po które się tu
-przyszło. Szare godziny da się wyłączyć w ustawieniach (domyślnie są) — wtedy
-tablica zaczyna się od chwili z mapy. Wszystko na osi doby rozkładowej, nie
-zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
+celowo — jako szare godziny. Są dwa rodzaje:
+1. odjazdy od godziny z formularza do chwili z mapy — pasażer może tu być
+   wcześniej, niż mapa policzyła;
+2. spóźniony kurs — ostatni odjazd linii sprzed chwili, w której pasażer może
+   tu być, jeśli spóźniony dowiózłby go do celu wcześniej niż najszybsza
+   trasa. Według rozkładu już odjechał, ale bywa właśnie tym pojazdem, który
+   stoi na przystanku. Dostaje go też linia, której mapa tu nie rysuje.
+
+Z kilku szarych godzin linia pokazuje tylko najpóźniejszą.
+
+Linia, na którą według mapy już się nie zdąży, idzie na koniec, żeby na
+ruchliwym węźle nie wypchnęła tych, po które się tu przyszło. Szare godziny
+da się wyłączyć w ustawieniach (domyślnie są) — wtedy tablica zaczyna się od
+chwili z mapy. Wszystko na osi doby rozkładowej, nie zegarowej: przesiadka
+o 24:40 należy do rozkładu dnia poprzedniego.
 
 **Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
 ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne
