@@ -224,22 +224,30 @@ body.view-list #map-dock { display: none; }
    wchodził. Wraca razem z nowym wyszukaniem, które zwija formularz. */
 body:not(.search-collapsed) #map-dock { display: none; }
 
-/* Pasek to tu zwykły tekst w dwóch linijkach: najszybszy dojazd, pod nim
-   zakres mapy. Rząd kafelków ze style.css na tej szerokości ciął zdania
-   w przypadkowych miejscach („wyjeżdżasz / o"). */
+/* Pasek bez słów (#247) mieści się tu w jednym wierszu. Gdy plakietek jest
+   dużo, zakres mapy schodzi w całości pod spód - kawałki paska są
+   nierozrywalne, więc nic nie łamie się w pół. */
 .time-headline {
     position: static;
-    display: block;
     max-width: 100%;
-    padding: 7px 12px;
+    gap: 6px;
+    padding: 6px 10px;
     border-radius: var(--radius);
     font-size: 12px;
-    text-align: center;
 }
 
-.headline-best { display: block; margin: 0; padding: 0; }
+/* Trasa z czterema przesiadkami nie zmieści się w 390 px nawet bez słów -
+   wtedy plakietki schodzą pod godziny, zamiast wystawać za ekran. */
+.headline-best {
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+}
+.headline-more { margin: 0; }
+/* Na tej szerokości zakres mapy i tak stoi zwykle w drugiej linijce, więc
+   kreska oddzielająca go od trasy zostawałaby na początku pustego miejsca. */
 .headline-sep { display: none; }
-.headline-more { margin: 0 0 0 6px; }
 
 #flow-panel,
 body.dev-open #flow-panel {

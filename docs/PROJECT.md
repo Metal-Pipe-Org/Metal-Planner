@@ -1190,6 +1190,21 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
 
 ## Changelog
 
+- **2026-10-08** — **pasek nad mapą bez słów** (zgłoszenie #247). Pasek
+  „Najszybciej: wyjeżdżasz o …, dojeżdżasz o …, za … · mapa od … do … ·
+  Pokaż więcej” był zdaniem, zawijał się do dwóch linijek i czytało się go
+  dłużej niż mapę. Teraz to linijka znaków, jak podsumowanie trasy
+  w Google Maps czy Jakdojade: najpierw plakietki linii najszybszej trasy,
+  potem „18:07 → 18:43 ◷ 52 min”, ikonka mapy z zakresem „18:03–18:43”
+  (już bez minut) i przycisk „Pokaż więcej”. Każdy kawałek tłumaczy się
+  w ciemnym dymku po najechaniu, a na telefonie po stuknięciu — w tym
+  słowami całą najszybszą trasę (rodzaj pojazdu, numer, przejścia). Na
+  telefonie najszybsza trasa stoi w pierwszej linijce, a zakres mapy
+  z przyciskiem w całości pod nią. Kontrakt (punkt 10, na polecenie
+  użytkownika) wymaga „za ile” już tylko przy przyjeździe najszybszą trasą.
+  Dane i zachowanie bez zmian: najechanie lub stuknięcie dalej pokazuje
+  najszybszą trasę na mapie, a „Pokaż więcej” zagęszcza mapę jak dotąd.
+
 - **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
   iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie
   wracała sama. Dwie przyczyny naraz: strona dostawała domyślną sesję

@@ -1582,10 +1582,48 @@ body.routes-off .results-body { display: none; }
     background: var(--surface-alt);
 }
 
-.headline-sep { color: var(--ink-faint); }
+/* Jeden kawałek paska z własnym dymkiem: piktogram i liczba sklejone, żeby
+   zawijanie nie odrywało ikonki od tego, co opisuje. */
+.headline-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+}
 
-/* "+X min" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie jak
-   przycisk formularza: stoi w pasku, w którym wszystko inne jest tekstem. */
+.headline-icon {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    color: var(--ink-soft);
+}
+
+.headline-arrow { color: var(--ink-faint); margin: 0 -1px; }
+
+/* Plakietki mają odstęp od godzin za nimi, a między sobą stoją ciasno -
+   to jedna trasa, a nie kilka osobnych liczb. */
+.headline-chips { gap: 2px; margin-right: 2px; }
+/* Odstęp przed dojściem był na plakietki stojące za godzinami; na początku
+   paska odsuwałby je od krawędzi pigułki. */
+.headline-chips .headline-walk { margin-left: 0; }
+
+.headline-map {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+/* Kreska zamiast kropki: oddziela najszybszą trasę od zakresu mapy
+   wyraźniej, a nie wygląda na kolejne słowo zdania. */
+.headline-sep {
+    align-self: stretch;
+    width: 1px;
+    margin: 2px 1px;
+    background: var(--line);
+}
+
+/* "Pokaż więcej" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie
+   jak przycisk formularza; co robi, mówi dymek. */
 .headline-more {
     flex: none;
     margin: -2px -6px -2px 0;
@@ -1596,12 +1634,30 @@ body.routes-off .results-body { display: none; }
     color: var(--ink);
     font: inherit;
     font-size: 12px;
-    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     cursor: pointer;
 }
 
 .headline-more:hover { background: var(--ink); color: #fff; }
 .headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+/* Dymek paska - ten sam wygląd, co dymek ⓘ w ustawieniach. Nad wszystkim,
+   także nad dokiem telefonu, i przepuszcza kliknięcia do mapy pod sobą. */
+.headline-tip {
+    position: fixed;
+    z-index: 2000;
+    max-width: 260px;
+    padding: 9px 12px;
+    border-radius: 9px;
+    background: #1f2733;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.45;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+}
+
+.headline-tip[hidden] { display: none; }
 
 /* Ustawienia, które dotyczą tylko układu na telefonie - tu ich nie widać
    (pokazuje je phone.css). */

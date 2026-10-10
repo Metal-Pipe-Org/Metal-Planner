@@ -881,10 +881,23 @@ checks.czekanie_jest_widoczne = (() => {
 })();
 
 /* Pasek nad mapą: o której wyjechać i dojechać najszybszą trasą, "za ile"
-   zawsze, sam czas jazdy tylko z ustawieniem, i zakres godzin mapy. */
+   przy najszybszej trasie, sam czas jazdy tylko z ustawieniem, i zakres
+   godzin mapy, już bez minut. Plakietki stoją przed godzinami, słowa są
+   w dymkach (#247) - sprawdzamy wierzch i dymki. */
 checks.pasek_mowi_kiedy_wyjechac = (() => {
-    const pasek = () => document.getElementById('time-headline').innerHTML
-        .replace(/<[^>]+>/g, '');
+    const html = () => document.getElementById('time-headline').innerHTML;
+    // Atrapa DOM-u nie parsuje HTML-a, więc textContent jest pusty - tekst
+    // z wierzchu zbieramy sami: wszystko poza nawiasami < >.
+    const pasek = () => {
+        let tekst = '', wZnaczniku = false;
+        for (const znak of html()) {
+            if (znak === '<') wZnaczniku = true;
+            else if (znak === '>') wZnaczniku = false;
+            else if (!wZnaczniku) tekst += znak;
+        }
+        return tekst;
+    };
+    const dymki = () => [...html().matchAll(/data-tip="([^"]*)"/g)].map(m => m[1]).join(' | ');
     const flow = {...FLOW_FIXTURE, starts: '12:25', best_arrival: '12:40',
                   best_sec: 40 * 60, ride_sec: 15 * 60,
                   map_from: '12:00', deadline: '12:55', limit_sec: 55 * 60};
@@ -892,19 +905,24 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
 
     app.timeOpts.ride = false;
     app.drawFlow(flow, false);
-    const bez = pasek();
+    const bez = pasek(), bezDymki = dymki();
     app.timeOpts.ride = true;
     app.drawFlow(flow, false);
-    const z = pasek();
+    const z = pasek(), zDymki = dymki();
 
     app.timeOpts.ride = bylo;
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
     return {
-        ok: bez.includes('wyjeżdżasz o 12:25') && bez.includes('dojeżdżasz o 12:40')
-            && bez.includes('za 40 min') && !bez.includes('jazda')
-            && bez.includes('mapa od 12:00 do 12:55')
-            && z.includes('za 40 min, jazda 15 min'),
-        bez, z,
+        ok: bez.includes('61212:25→12:40') && bez.includes('40 min')    // plakietki przed godzinami
+            && bez.includes('12:00–12:55Pokaż więcej') && !bez.includes('55 min')
+            && !bez.includes('15 min') && !bez.includes('wyjeżdżasz')
+            && bezDymki.includes('Wyjeżdżasz o 12:25')
+            && bezDymki.includes('Dojeżdżasz o 12:40')
+            && bezDymki.includes('Na miejscu za 40 min')
+            && bezDymki.includes('od 12:00 i dojeżdżające najpóźniej o 12:55, czyli za 55 min')
+            && !bezDymki.includes('Sama jazda')
+            && z.includes('40 min15 min') && zDymki.includes('Sama jazda: 15 min'),
+        bez, z, bezDymki,
     };
 })();
 
