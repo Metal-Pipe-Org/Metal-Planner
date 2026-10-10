@@ -3456,11 +3456,7 @@ function detailHtml(journey) {
         }
     });
 
-    return `<ol class="timeline">${rows.join('')}</ol>
-        <p class="j-collapse">
-            Kliknij ponownie — albo w mapę obok trasy — żeby wrócić do
-            wszystkich wariantów.
-        </p>`;
+    return `<ol class="timeline">${rows.join('')}</ol>`;
 }
 
 /** Dlaczego na liście nie ma roweru, choć warstwa 🚲 jest włączona.
@@ -3481,7 +3477,7 @@ function bikeNoteHtml() {
               + 'kompletna.'
             : 'Żadna trasa ze stacją WRM nie mieści się w oknie czasowym '
               + 'mapy — tutaj rower nic nie daje.';
-    // Kartka (.notice), a nie szara linijka jak .results-foot: ten tekst leży
+    // Kartka (.notice), a nie szara linijka: ten tekst leży
     // nad mapą, gdzie sam cień pod literami czyta się ledwo - a to jedyne
     // miejsce, w którym pada odpowiedź na „czemu nic nie widzę".
     return `<div class="notice bike-note"><p>🚲 ${esc(text)}</p></div>`;
@@ -3565,11 +3561,6 @@ function renderJourneys() {
             ${onboardNoteHtml()}
             <ol class="journeys">${cards}</ol>
             ${bikeNoteHtml()}
-            <p class="results-foot">
-                Na mapie widać wszystkie sensowne dojazdy — im jaśniejsza linia,
-                tym lepsza opcja. Kliknij propozycję albo linię na mapie, żeby
-                zobaczyć całą trasę.
-            </p>
         </div>`;
     resultsBox.classList.toggle('collapsed', resultsCollapsed);
 
@@ -3742,6 +3733,30 @@ function obNote(text) {
     obMsg.hidden = !text;
 }
 
+// Rozpoznany kurs nie pasuje do "jadę nim teraz" (#231), a mapa i tak liczy
+// od niego - nic poza tym ostrzeżeniem tego nie zdradza. Dwa przypadki (patrz
+// onboard.find_ride): `not_yet` - według rozkładu nie wyjechał jeszcze nawet
+// z poprzedniego przystanku, najczęściej pomyłka w linii, kierunku albo
+// przystanku; `late` - według rozkładu minął już przystanek, czyli jest
+// spóźniony, a godziny na mapie są liczone od jego rozkładu, nie od teraz.
+// Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
+const obWarn = $('ob-warn');
+
+function hideObWarn() {
+    obWarn.hidden = true;
+}
+
+function warnOnboardRide(kurs) {
+    if (!kurs || !(kurs.not_yet || kurs.late)) { hideObWarn(); return; }
+    const przystanek = esc(prettyStopName(kurs.stop_name));
+    const godzina = `<b>${esc(kurs.at)}</b>`;
+    $('ob-warn-text').innerHTML =
+        `${esc(kurs.num)} według rozkładu ${kurs.late ? 'była' : 'będzie'} `
+        + `na przystanku ${przystanek} o ${godzina}.`
+        + `\nGodziny na mapie liczą się od ${godzina}, a nie od teraz.`;
+    obWarn.hidden = false;
+}
+
 /** Przełącznik "Stoję tutaj" / "Jestem w pojeździe". Zmienia PYTANIE, więc
     zabiera poprzednią odpowiedź na nie: start z drugiego trybu przestaje
     obowiązywać (nie da się naraz stać na przystanku i jechać autobusem).
@@ -3760,6 +3775,7 @@ function setStartMode(vehicle, focus = true) {
     updatePointMarker('start', null);
     restyle(previous);
     showLocateMsg('');
+    hideObWarn();
     saveUiState({startOnboard: vehicle});
     // Kursor w polu linii tylko wtedy, gdy ktoś sam kliknął przełącznik.
     // Przy wracaniu do zapamiętanego trybu (odświeżenie strony) klawiatura
@@ -3811,6 +3827,7 @@ function fillStops() {
         + stops.map(stop =>
             `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
     obStopSelect.disabled = !stops.length;
+    hideObWarn();
     syncOnboardView();
 }
 
@@ -3839,6 +3856,7 @@ if (obLineInput) {
     // samą kartę: komplet mówi jedno zdanie, a zajmuje trzy rzędy panelu.
     obStopSelect.addEventListener('change', () => {
         obCollapsed = true;
+        hideObWarn();
         syncOnboardView();
         if (onboardReady() && endInput.value) search();
     });
@@ -3850,6 +3868,8 @@ if (obLineInput) {
         obCollapsed = false;
         syncOnboardView();
     });
+
+    $('ob-warn-close').addEventListener('click', hideObWarn);
 
     // Tryb przeżywa odświeżenie strony (patrz saveUiState) - ale sam wybór
     // pojazdu już nie: kurs sprzed odświeżenia zdążył odjechać.
@@ -3868,6 +3888,7 @@ function resetResults() {
     clearJourney();
     clearPreview();
     clearFlow();
+    hideObWarn();
     renderVehicles();
     resultsBox.innerHTML = '';
     setTabCount(0);
@@ -4071,6 +4092,7 @@ function renderPlan(data, refit) {
         renderJourneys();
     }
     showWaitNotice(data);
+    warnOnboardRide(data.onboard);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
@@ -4082,6 +4104,7 @@ function loadPlan(token, refit) {
             if (token !== requestToken) return false;
             if (data.error) {
                 clearFlow();
+                hideObWarn();
                 showError(data.error, data.suggestions);
                 return false;
             }
@@ -4207,6 +4230,10 @@ function search() {
     // i przystanek (patrz onboardReady).
     if (!endInput.value) return;
     if (onboardOn ? !onboardReady() : !startInput.value) return;
+    // Rozwinięty przez „zmień” wybór pojazdu wraca po szukaniu do jednej
+    // linijki tak samo jak po wybraniu przystanku - inaczej trzy pola
+    // zasłaniają wynik.
+    if (onboardOn) { obCollapsed = true; syncOnboardView(); }
     // Dla układu na telefonie: formularz zwija się wtedy do jednej linijki
     // (patrz phone.js).
     document.dispatchEvent(new Event('planner:search'));
@@ -5163,6 +5190,47 @@ function markChangedSettings() {
 devPanel.addEventListener('input', markChangedSettings);
 devPanel.addEventListener('change', markChangedSettings);
 markChangedSettings();
+
+// Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
+// na <body>: panele przewijają się w sobie i przycięłyby go na krawędzi. Klik
+// też go pokazuje - na telefonie nie ma najechania - i nie przełącza opcji,
+// w której etykiecie ikonka siedzi.
+const infoTip = document.createElement('div');
+infoTip.className = 'info-tip';
+infoTip.hidden = true;
+document.body.appendChild(infoTip);
+
+function showInfoTip(icon) {
+    infoTip.textContent = icon.dataset.tip;
+    infoTip.hidden = false;
+    const at = icon.getBoundingClientRect();
+    const tip = infoTip.getBoundingClientRect();
+    const below = at.bottom + 6 + tip.height <= innerHeight;
+    infoTip.style.top = `${below ? at.bottom + 6 : at.top - 6 - tip.height}px`;
+    infoTip.style.left = `${Math.max(8, Math.min(at.right - tip.width, innerWidth - tip.width - 8))}px`;
+}
+
+document.addEventListener('mouseover', event => {
+    const icon = event.target.closest('.info');
+    if (icon) showInfoTip(icon);
+});
+document.addEventListener('mouseout', event => {
+    if (event.target.closest('.info')) infoTip.hidden = true;
+});
+document.addEventListener('focusin', event => {
+    const icon = event.target.closest('.info');
+    if (icon) showInfoTip(icon);
+});
+document.addEventListener('focusout', event => {
+    if (event.target.closest('.info')) infoTip.hidden = true;
+});
+document.addEventListener('click', event => {
+    const icon = event.target.closest('.info');
+    if (!icon) return;
+    event.preventDefault();
+    showInfoTip(icon);
+});
+document.addEventListener('scroll', () => { infoTip.hidden = true; }, true);
 
 // Jeden przycisk na cały panel: kasuje wszystkie zapamiętane ustawienia
 // i przeładowuje stronę, więc każda wartość wraca z *_DEFAULTS tą samą drogą,
