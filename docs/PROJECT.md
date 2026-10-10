@@ -1190,6 +1190,15 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
 
 ## Changelog
 
+- **2026-10-09** — **zasługa za zamknięte zgłoszenie w podsumowaniu dnia**
+  (zgłoszenie #254). Od wyłączenia automatycznego zamykania w repo (#228)
+  zgłoszenia z „Closes #N” zamyka po merge'u nasz zapasowy krok, a GitHub
+  zapisuje wtedy jako zamykającego bota, bez PR-a. Podsumowanie dnia
+  wrzucało takie zgłoszenia na kartę „Pozostali” z podpisem
+  „github-actions”. Teraz, gdy zamknął bot, zgłoszenie trafia na kartę
+  autora zmergowanego PR-a powiązanego ze zgłoszeniem; bez takiego PR-a
+  zostaje jak było.
+
 - **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
   iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie
   wracała sama. Dwie przyczyny naraz: strona dostawała domyślną sesję
