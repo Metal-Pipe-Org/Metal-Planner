@@ -781,13 +781,27 @@ wychodzi o tej samej sekundzie i rozstrzyga sam przyjazd.
 Zostają więc dwie rzeczy do zrobienia:
 
 1. **Rozpoznanie kursu** (`find_ride`) — z trójki linia + kierunek + przystanek
-   ten kurs, który z tego słupka rusza najbliżej godziny pytania. Idzie
+   ten kurs, który z tego słupka rusza najbliżej godziny pytania — w przód
+   ALBO WSTECZ (zgłoszenie #231): kurs, który według rozkładu minął przystanek
+   5 min temu, gdy następny jest za pół godziny, to najpewniej spóźniony
+   pojazd, w którym pasażer siedzi. Spóźnienia nie znamy (danych na żywo
+   ten wybór nie używa), więc mapa liczy się od takiego kursu według jego
+   rozkładu, jakby jechał o czasie. Idzie
    indeksem odjazdów dnia (`gtfs.departures_between`), więc kosztuje
    przeszukanie binarne; kurs KOŃCZĄCY bieg na wskazanym przystanku odjazdu nie
    ma wcale, więc „jadę na pętlę, co dalej" znajduje się osobną, wolniejszą
    drogą — po przyjeździe, w oknie połączeń. Nierozpoznany kurs to komunikat
    („linia X nie przejeżdża już dziś przez Y"), a nie pusta lista: pomyłka
-   w którymś z trzech pól ma wyglądać jak pomyłka.
+   w którymś z trzech pól ma wyglądać jak pomyłka. Gdy rozkładowa godzina
+   kursu przy wskazanym przystanku odjeżdża od godziny pytania o więcej niż
+   3 min (`OFF_SCHEDULE_SLACK_SEC`, ten sam zapas w obie strony — do tylu
+   kurs uchodzi za punktualny), nad polem celu staje ostrzeżenie: dla kursu
+   przyszłego (`not_yet`) „134 według rozkładu będzie na przystanku …
+   o 16:28. Godziny na mapie liczą się od 16:28, a nie od teraz.", dla
+   przeszłego (`late`) „134 według rozkładu była na przystanku … o 15:55.
+   Godziny na mapie liczą się od 15:55, a nie od teraz."
+   Oba ostrzeżenia to nie pytania: mały „×" w rogu tylko je chowa, znikają też samo przy zmianie linii, kierunku albo przystanku,
+   a wybór pojazdu poprawia się przez „zmień".
 2. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
    samym słupku, więc przypadki są dokładnie dwa: pierwszy etap jedzie NASZYM
    kursem (siedzimy dalej, wysiadka `stops` przystanków dalej) albo czymkolwiek
@@ -974,8 +988,11 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   Z POKŁADU pojazdu (patrz `onboard.py`) — zamiast `start`/`start_lat`.
   `onboard_stop` to identyfikator SŁUPKA z `/api/onboard`, nie nazwa: pasażer
   jedzie jedną krawędzią przystanku i tylko na niej otworzą się drzwi.
-  Odpowiedź niesie wtedy `onboard: {num, mode, line, headsign, stop_name, at}`
-  (rozpoznany kurs — front pisze z tego nagłówek listy), a KAŻDA propozycja
+  Odpowiedź niesie wtedy `onboard: {num, mode, line, headsign, stop_name, at,
+  not_yet, late}` (rozpoznany kurs — front pisze z tego nagłówek listy;
+  `not_yet` to kurs, którym według rozkładu nie da się jeszcze jechać, `late`
+  — kurs, który według rozkładu minął już przystanek, a `departure` jest
+  wtedy wcześniejsze niż godzina pytania), a KAŻDA propozycja
   dostaje `onboard: {stop, stops, time, transfer}`: gdzie wysiąść, za ile to
   przystanków, o której i czy po wysiadce jedzie się jeszcze dalej
   (`stops: 0` = wysiadka na najbliższym przystanku, `transfer: false` = ten
@@ -1216,6 +1233,24 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   (iPhone robił to chętnie), a dopiero ✕ i ponowne kliknięcie trafiało na
   świeżą. Teraz każde kliknięcie czeka na nowy odczyt z GPS-a; może to
   potrwać o sekundę–dwie dłużej, przycisk jest w tym czasie wyszarzony.
+
+- **2026-10-06** — **„Jestem w pojeździe” ostrzega, gdy kurs jeszcze nie jedzie**
+  (zgłoszenie #231). Gdy najbliższy kurs wybranej linii według rozkładu
+  będzie przy wybranym przystanku za więcej niż 3 min, mapa liczy się od
+  godziny, która nie jest „teraz”. Mapa liczy się jak dotąd, ale pod wyborem pojazdu pojawia się ostrzeżenie
+  „134 według rozkładu będzie na przystanku … o 16:28. Godziny na mapie
+  liczą się od 16:28, a nie od teraz.”, które zamyka się
+  małym „×” w rogu i znika samo przy zmianie linii, kierunku albo przystanku;
+  wybór pojazdu poprawia się przez „zmień”. Przy okazji „Szukaj” zawsze
+  zwija wybór pojazdu do jednej linijki — po „zmień” bez zmian zostawał
+  rozwinięty. Nowe pole `onboard.not_yet` w `/api/flow`.
+  Rozpoznany kurs to od teraz najbliższy godziny pytania w obie strony, a nie
+  tylko najbliższy przyszły: o 16:00 kurs rozkładowo z 15:55 wygrywa z tym
+  z 16:28 (najpewniej spóźniony). Mapa liczy się od jego rozkładu, a przy
+  spóźnieniu ponad 3 min (ten sam zapas co dla „będzie”) ostrzeżenie mówi „134 według rozkładu była na
+  przystanku … o 15:55. Godziny na mapie liczą się od 15:55, a nie od
+  teraz.” Nowe pole
+  `onboard.late`.
 
 - **2026-10-06** — **bez instrukcji obsługi w interfejsie** (zgłoszenie
   #225). Znikają szare akapity tłumaczące, jak używać aplikacji: pod

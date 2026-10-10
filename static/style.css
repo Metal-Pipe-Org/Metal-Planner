@@ -643,6 +643,22 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 
 .locate-offer[hidden] { display: none; }
 
+/* Blok z „×” opływanym przez tekst, a nie flex: w flexie przycisk zabiera
+   całą kolumnę po prawej i pod nim zostaje pusty pas. Dlatego w HTML stoi
+   PRZED tekstem - float działa tylko na to, co idzie po nim. */
+#ob-warn { display: block; padding: 8px 12px; }
+#ob-warn[hidden] { display: none; }
+#ob-warn-text { white-space: pre-line; }
+
+#ob-warn-close {
+    float: right;
+    width: 24px;
+    height: 24px;
+    margin: -2px -6px 0 6px;
+    font-size: 14px;
+    background: transparent;
+}
+
 /* Pytanie o ostatnią trasę (#237): krótkie pytanie, pod nim sama trasa.
    Przyciski stoją obok, póki tekst mieści się w jednej kolumnie; przy długiej
    trasie schodzą pod tekst, do prawej - jak akcje banera w Material - zamiast

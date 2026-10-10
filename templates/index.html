@@ -223,6 +223,17 @@
         <button type="button" id="ob-summary" class="onboard-summary" hidden
                 aria-controls="onboard-fields" aria-expanded="true"></button>
 
+        {# Rozpoznany kurs nie może jeszcze być przy tym przystanku (#231).
+           Ostrzeżenie, nie pytanie: mapa i tak jest liczona, a wybór pojazdu
+           poprawia się przez „zmień”. Wygląda jak pytanie o przystanek
+           przy GPS, więc dzieli z nim styl; nie ma na co odpowiadać, więc
+           zostaje tylko mały „×” w rogu. #}
+        <div class="locate-offer" id="ob-warn" role="status" hidden>
+            <button type="button" class="icon-button" id="ob-warn-close"
+                    aria-label="Zamknij">×</button>
+            <span id="ob-warn-text"></span>
+        </div>
+
         <div class="endpoints">
             <div class="rail" aria-hidden="true">
                 <span class="rail-dot start"></span>

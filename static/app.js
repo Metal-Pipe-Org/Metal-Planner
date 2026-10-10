@@ -3733,6 +3733,30 @@ function obNote(text) {
     obMsg.hidden = !text;
 }
 
+// Rozpoznany kurs nie pasuje do "jadę nim teraz" (#231), a mapa i tak liczy
+// od niego - nic poza tym ostrzeżeniem tego nie zdradza. Dwa przypadki (patrz
+// onboard.find_ride): `not_yet` - według rozkładu nie wyjechał jeszcze nawet
+// z poprzedniego przystanku, najczęściej pomyłka w linii, kierunku albo
+// przystanku; `late` - według rozkładu minął już przystanek, czyli jest
+// spóźniony, a godziny na mapie są liczone od jego rozkładu, nie od teraz.
+// Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
+const obWarn = $('ob-warn');
+
+function hideObWarn() {
+    obWarn.hidden = true;
+}
+
+function warnOnboardRide(kurs) {
+    if (!kurs || !(kurs.not_yet || kurs.late)) { hideObWarn(); return; }
+    const przystanek = esc(prettyStopName(kurs.stop_name));
+    const godzina = `<b>${esc(kurs.at)}</b>`;
+    $('ob-warn-text').innerHTML =
+        `${esc(kurs.num)} według rozkładu ${kurs.late ? 'była' : 'będzie'} `
+        + `na przystanku ${przystanek} o ${godzina}.`
+        + `\nGodziny na mapie liczą się od ${godzina}, a nie od teraz.`;
+    obWarn.hidden = false;
+}
+
 /** Przełącznik "Stoję tutaj" / "Jestem w pojeździe". Zmienia PYTANIE, więc
     zabiera poprzednią odpowiedź na nie: start z drugiego trybu przestaje
     obowiązywać (nie da się naraz stać na przystanku i jechać autobusem).
@@ -3751,6 +3775,7 @@ function setStartMode(vehicle, focus = true) {
     updatePointMarker('start', null);
     restyle(previous);
     showLocateMsg('');
+    hideObWarn();
     saveUiState({startOnboard: vehicle});
     // Kursor w polu linii tylko wtedy, gdy ktoś sam kliknął przełącznik.
     // Przy wracaniu do zapamiętanego trybu (odświeżenie strony) klawiatura
@@ -3802,6 +3827,7 @@ function fillStops() {
         + stops.map(stop =>
             `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
     obStopSelect.disabled = !stops.length;
+    hideObWarn();
     syncOnboardView();
 }
 
@@ -3830,6 +3856,7 @@ if (obLineInput) {
     // samą kartę: komplet mówi jedno zdanie, a zajmuje trzy rzędy panelu.
     obStopSelect.addEventListener('change', () => {
         obCollapsed = true;
+        hideObWarn();
         syncOnboardView();
         if (onboardReady() && endInput.value) search();
     });
@@ -3841,6 +3868,8 @@ if (obLineInput) {
         obCollapsed = false;
         syncOnboardView();
     });
+
+    $('ob-warn-close').addEventListener('click', hideObWarn);
 
     // Tryb przeżywa odświeżenie strony (patrz saveUiState) - ale sam wybór
     // pojazdu już nie: kurs sprzed odświeżenia zdążył odjechać.
@@ -3859,6 +3888,7 @@ function resetResults() {
     clearJourney();
     clearPreview();
     clearFlow();
+    hideObWarn();
     renderVehicles();
     resultsBox.innerHTML = '';
     setTabCount(0);
@@ -4062,6 +4092,7 @@ function renderPlan(data, refit) {
         renderJourneys();
     }
     showWaitNotice(data);
+    warnOnboardRide(data.onboard);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
@@ -4073,6 +4104,7 @@ function loadPlan(token, refit) {
             if (token !== requestToken) return false;
             if (data.error) {
                 clearFlow();
+                hideObWarn();
                 showError(data.error, data.suggestions);
                 return false;
             }
@@ -4198,6 +4230,10 @@ function search() {
     // i przystanek (patrz onboardReady).
     if (!endInput.value) return;
     if (onboardOn ? !onboardReady() : !startInput.value) return;
+    // Rozwinięty przez „zmień” wybór pojazdu wraca po szukaniu do jednej
+    // linijki tak samo jak po wybraniu przystanku - inaczej trzy pola
+    // zasłaniają wynik.
+    if (onboardOn) { obCollapsed = true; syncOnboardView(); }
     // Dla układu na telefonie: formularz zwija się wtedy do jednej linijki
     // (patrz phone.js).
     document.dispatchEvent(new Event('planner:search'));
