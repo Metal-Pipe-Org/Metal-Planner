@@ -9,7 +9,6 @@ Jak front z tego korzysta, sprawdza tests/test_flow_map_front.py.
 """
 
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -42,10 +41,27 @@ def test_kawalek_niesie_nazwy_swoich_przystankow(install_day):
     assert "stops_pf" not in kawalek
 
 
+def _z_miejscami(day, obok):
+    """Miejsca złożone tak, jak w gtfs.load_day (perony kierunkowe, scalenia
+    z naming.PLACE_MERGES) - make_day grupuje tylko po identycznej nazwie.
+    `obok`: {stop_id: (nazwa, stop_id, przy którym stoi)} - dodatkowy słupek
+    kilkadziesiąt metrów od istniejącego, bez kursów."""
+    for stop_id, (name, przy) in obok.items():
+        lat, lon = day.stop_coords[przy]
+        day.stop_names[stop_id] = name
+        day.stop_coords[stop_id] = (lat + 0.0003, lon)
+        gtfs._register_stop_name(day, stop_id, name)
+    day.stops_by_place = gtfs._build_places(day.stop_names, day.stop_coords,
+                                            day.stops_by_key)
+    day.place_of = {sid: key for key, ids in day.stops_by_place.items() for sid in ids}
+    return day
+
+
 def test_peron_kierunkowy_podpisuje_sie_nazwa_miejsca(install_day):
-    """Jedna nazwa na miejsce, nie na peron: 'Beta W/t' to Beta, a nazwa
-    peronu zostaje do dymka."""
-    install_day(make_day([CZWORKA], names={**NAZWY, "B": "Beta W/t"}))
+    """Jedna nazwa na miejsce, nie na peron: 'Beta W/t' przy słupku 'Beta' to
+    Beta, a nazwa peronu zostaje do dymka."""
+    install_day(_z_miejscami(make_day([CZWORKA], names={**NAZWY, "B": "Beta W/t"}),
+                             {"B0": ("Beta", "B")}))
 
     [kawalek] = _kawalki(planner.plan_flow("Start", "Koniec", WHEN))
 
@@ -53,44 +69,55 @@ def test_peron_kierunkowy_podpisuje_sie_nazwa_miejsca(install_day):
     assert kawalek["stops_pf"] == [None, None, "Beta W/t", None]
 
 
+def test_stacja_scalona_z_przystankiem_ma_jego_nazwe(install_day):
+    """Wrocław Główny i DWORZEC GŁÓWNY to jedno miejsce (naming.PLACE_MERGES),
+    więc i jedna nazwa - nie dwa podpisy na największym węźle miasta."""
+    install_day(_z_miejscami(
+        make_day([CZWORKA], names={**NAZWY, "B": "Wrocław Główny"}),
+        {"DG": ("DWORZEC GŁÓWNY", "B")}))
+
+    [kawalek] = _kawalki(planner.plan_flow("Start", "Koniec", WHEN))
+
+    assert kawalek["stops_n"] == ["Start", "Alfa", "DWORZEC GŁÓWNY", "Koniec"]
+    assert kawalek["stops_pf"] == [None, None, "Wrocław Główny", None]
+
+
 def test_kropka_przesiadki_mowi_jakie_to_miejsce(install_day):
     """Po `place` front nie stawia kropki mijanego przystanku tam, gdzie stoi
     już kropka przesiadki - ta sama nazwa co w stops_n."""
-    install_day(make_day([CZWORKA], names={**NAZWY, "S": "Start W/t"}))
+    install_day(_z_miejscami(make_day([CZWORKA], names={**NAZWY, "S": "Start W/t"}),
+                             {"S0": ("Start", "S")}))
 
     wynik = planner.plan_flow("Start W/t", "Koniec", WHEN)
 
+    [kawalek] = _kawalki(wynik)
     assert wynik["nodes"]
     for node in wynik["nodes"]:
-        assert node["place"] == gtfs.place_label(node["name"])
+        assert node["place"] in kawalek["stops_n"]
     assert any(node["place"] == "Start" for node in wynik["nodes"])
 
 
-def test_nazwa_miejsca_ucina_tylko_peron():
-    assert gtfs.place_label("PL. GRUNWALDZKI W/t") == "PL. GRUNWALDZKI"
-    assert gtfs.place_label("Kozanowska") == "Kozanowska"
-    assert gtfs.place_label("Bzowa (Centrum Historii Zajezdnia)") == \
-        "Bzowa (Centrum Historii Zajezdnia)"
-
-
-def test_slupki_miasta_niosa_nazwe_miejsca(monkeypatch):
+def test_slupki_miasta_niosa_nazwe_miejsca():
     """Bez narysowanej trasy mapa podpisuje wszystkie przystanki w kadrze -
     też raz na miejsce, więc /api/stops mówi, do jakiego miejsca należy
-    każdy słupek."""
-    db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE stops (stop_id TEXT, stop_name TEXT, stop_lat REAL, stop_lon REAL)")
-    db.executemany("INSERT INTO stops VALUES (?, ?, ?, ?)", [
-        ("1", "PL. GRUNWALDZKI W/t", 51.11, 17.06),
-        ("2", "PL. GRUNWALDZKI", 51.111, 17.061),
-        ("3", "Kozanowska", 51.13, 16.97),
+    każdy słupek, z tym samym grupowaniem co przy trasie: peron kierunkowy
+    i stacja scalona z przystankiem MPK dostają nazwę miejsca."""
+    slupki = gtfs.with_place_names([
+        {"name": "PL. GRUNWALDZKI W/t", "lat": 51.11, "lon": 17.06},
+        {"name": "PL. GRUNWALDZKI", "lat": 51.111, "lon": 17.061},
+        {"name": "DWORZEC GŁÓWNY", "lat": 51.09919, "lon": 17.03433},
+        {"name": "Kozanowska", "lat": 51.13, "lon": 16.97},
+        {"name": "Wrocław Główny", "lat": 51.09805, "lon": 17.03627, "kind": "train"},
     ])
-    monkeypatch.setattr(gtfs, "_connect", lambda: db)
 
-    slupki = {s["name"]: s["place"] for s in gtfs.all_stops_geo()}
-
-    assert slupki == {"PL. GRUNWALDZKI W/t": "PL. GRUNWALDZKI",
-                      "PL. GRUNWALDZKI": "PL. GRUNWALDZKI",
-                      "Kozanowska": "Kozanowska"}
+    assert {s["name"]: s["place"] for s in slupki} == {
+        "PL. GRUNWALDZKI W/t": "PL. GRUNWALDZKI",
+        "PL. GRUNWALDZKI": "PL. GRUNWALDZKI",
+        "DWORZEC GŁÓWNY": "DWORZEC GŁÓWNY",
+        "Kozanowska": "Kozanowska",
+        "Wrocław Główny": "DWORZEC GŁÓWNY",
+    }
+    assert slupki[-1]["kind"] == "train"
 
 
 def test_prog_nazw_jest_suwakiem_dev_z_ta_sama_wartoscia_co_front():

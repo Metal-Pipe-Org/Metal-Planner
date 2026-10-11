@@ -254,6 +254,12 @@ function esc(text) {
     return div.innerHTML;
 }
 
+/** esc() do wartości atrybutu: innerHTML zostawia cudzysłowy, a w atrybucie
+    cudzysłów kończy wartość i resztę tekstu czyta się jak kod. */
+function escAttr(text) {
+    return esc(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
@@ -1305,6 +1311,7 @@ let flowLineStopLayer = null;   // przystanki linii wskazanej kursorem (patrz sh
 let flowStopsLayer = null;      // przystanki narysowanych linii przy dużym przybliżeniu
 let stopNameLayer = null;       // nazwy przystanków przy dużym przybliżeniu (placeStopNames)
 let hoveredLineStop = null;     // kropka przystanku linii pod kursorem
+let flowLineStops = null;       // {flow, stops} - przystanki całego wachlarza (patrz flowStopsOf)
 let clusterBoxes = [];          // gdzie stoją grupki numerów - nazwy im ustępują
 
 function clearFlow() {
@@ -2269,6 +2276,19 @@ function atTransfer(st) {
         && here.distanceTo(L.latLng(n.lat, n.lon)) <= PLACE_SPAN_M);
 }
 
+/** Przystanki całego wachlarza, liczone raz na odpowiedź /api/flow, a nie
+    przy każdym ruchu mapy: duże zapytania mają ponad tysiąc kawałków, a przy
+    dużym przybliżeniu placeStopNames biegnie po każdym przesunięciu. Zmienia
+    się to tylko z nową mapą, więc ruch mapy przesiewa już gotową listę. */
+function flowStopsOf(flow) {
+    if (!flowLineStops || flowLineStops.flow !== flow) {
+        const stops = lineStopsOf(flow.segments);
+        for (const st of stops) st.transfer = atTransfer(st);
+        flowLineStops = {flow, stops};
+    }
+    return flowLineStops.stops;
+}
+
 function lineStopTipHtml(st) {
     const lines = [...st.lines.values()].sort((a, b) => a.sec - b.sec);
     let html = lines.length === 1 ? `${esc(fmtClock(lines[0].sec))} · ` : '';
@@ -2276,7 +2296,7 @@ function lineStopTipHtml(st) {
     if (st.pole) html += `<span class="tip-platform">${esc(prettyStopName(st.pole))}</span>`;
     if (lines.length > 1) {
         html += '<span class="tip-line-times">' + lines.map(l =>
-            `<span><span class="badge ${esc(l.kind)}">${esc(l.num)}</span>`
+            `<span><span class="badge ${escAttr(l.kind)}">${esc(l.num)}</span>`
             + `${esc(fmtClock(l.sec))}</span>`).join('') + '</span>';
     }
     return html;
@@ -2378,8 +2398,8 @@ function placeStopNames() {
     const view = map.getBounds();
     let named;
     if (lastFlow) {
-        const stops = lineStopsOf(lastFlow.segments).filter(st => view.contains([st.lat, st.lon]));
-        flowStopsLayer = L.layerGroup(stops.filter(st => !atTransfer(st))
+        const stops = flowStopsOf(lastFlow).filter(st => view.contains([st.lat, st.lon]));
+        flowStopsLayer = L.layerGroup(stops.filter(st => !st.transfer)
             .map(st => lineStopDot(st, LINE_STOP_GREY))).addTo(map);
         named = stops;
     } else {

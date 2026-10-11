@@ -891,8 +891,10 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   `pkp.py`/`update_pkp.py`) stacje PKP: `[{name, place, lat, lon, kind: "stop"|
   "train"}, …]`. `kind` mówi frontowi, jakim stylem narysować marker
   (`static/app.js`) - reszta pól jest taka sama dla obu rodzajów. `place` to
-  nazwa miejsca słupka (`gtfs.place_label`: peron kierunkowy węzła traci
-  sufiks) - po niej mapa podpisuje przystanki raz na miejsce (#253).
+  nazwa miejsca słupka (`gtfs.with_place_names`, to samo grupowanie co
+  miejsca dnia: peron kierunkowy węzła i stacja scalona z przystankiem MPK
+  przez `naming.PLACE_MERGES` dostają nazwę miejsca, np. Wrocław Główny →
+  DWORZEC GŁÓWNY) - po niej mapa podpisuje przystanki raz na miejsce (#253).
 - `GET /api/plan?start=&end=&time=HH:MM` — jedna najszybsza trasa: etapy
   z godzinami, przystankami po drodze i współrzędnymi (`legs[].path`).
   Nieużywany obecnie przez UI, zostaje jako narzędzie/debug.
@@ -910,7 +912,9 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   użytecznego wyjścia. Kawałek z godzinami niesie `stops_t: [[lat, lon,
   sekunda], …]` i równoległe `stops_n` — nazwy MIEJSC tych przystanków
   (#252) — a gdy któryś słupek nazywa się inaczej niż jego miejsce (peron
-  kierunkowy), także `stops_pf` z nazwą słupka albo `null`.
+  kierunkowy, stacja scalona z przystankiem MPK), także `stops_pf` z nazwą
+  słupka albo `null`. Nazwę miejsca daje `gtfs.place_name` z miejsc dnia
+  (`day.place_of`), tak samo dla `nodes[].place`.
   `nodes` to węzły przesiadkowe pod kropki na mapie:
   `[{name, place, lat, lon, sec, lines: [{num, kind, headsign}, …]}, …]` — po jednym
   na MIEJSCE, nie na słupek (plac z trzema peronami to jedna kropka), `sec` =
@@ -1205,7 +1209,11 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   przy „tu jesteś” także, jaki przystanek jest najbliżej. Od dużego
   przybliżenia (domyślnie 17, suwak „Nazwy przystanków od przybliżenia” pod
   ⚙ w sekcji DEV „Przystanki i rozkład”) przystanki narysowanych linii stoją
-  na mapie na stałe, z nazwami — raz na miejsce, nie na słupek. Pozostałe
+  na mapie na stałe, z nazwami — raz na miejsce, nie na słupek (miejsce
+  jak wszędzie indziej: z peronami i ze stacją scaloną z przystankiem MPK,
+  więc dworzec ma jeden podpis, nie „DWORZEC GŁÓWNY” i „Wrocław Główny”
+  naraz). Przystanki narysowanych linii liczą się raz na mapę, a nie przy
+  każdym jej przesunięciu. Pozostałe
   słupki miasta zostają blade i bez nazw. Bez narysowanej trasy przy tym
   przybliżeniu podpisane są wszystkie przystanki w kadrze. Numery linii
   mają pierwszeństwo: nazwa, która nie mieści się obok kropki, nie jest

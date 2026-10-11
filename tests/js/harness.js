@@ -576,6 +576,7 @@ const INJECTION = `
     get flowStopsLayer() { return flowStopsLayer; },
     get stopNameLayer() { return stopNameLayer; },
     get clusterBoxes() { return clusterBoxes; },
+    get flowLineStops() { return flowLineStops; },
 };
 `;
 

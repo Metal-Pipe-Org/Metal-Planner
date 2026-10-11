@@ -1678,6 +1678,22 @@ checks.p253_z_bliska_nazwy_tylko_przystankow_mapy = (() => {
             kropek: warstwa(app.flowStopsLayer).length};
 })();
 
+checks.p253_ruch_mapy_nie_liczy_przystankow_wachlarza_od_nowa = (() => {
+    // Z bliska nazwy przeliczają się po każdym ruchu mapy - same przystanki
+    // wachlarza nie zmieniają się jednak bez nowej mapy.
+    const przed = app.flowLineStops && app.flowLineStops.stops;
+    const c = app.map.getCenter();
+    app.map.setView([c.lat + 0.0003, c.lng + 0.0003], 17);
+    const poRuchu = app.flowLineStops && app.flowLineStops.stops;
+    app.drawFlow(JSON.parse(JSON.stringify(zNazwami)), true);
+    app.map.setView([c.lat, c.lng], 17);
+    const poNowejMapie = app.flowLineStops && app.flowLineStops.stops;
+    return {ok: !!przed && przed.length > 0 && poRuchu === przed
+                && !!poNowejMapie && poNowejMapie !== przed,
+            zoom: app.map.getZoom(), przystankow: przed && przed.length,
+            tenSamPoRuchu: poRuchu === przed, nowyPoNowejMapie: poNowejMapie !== przed};
+})();
+
 checks.p253_bez_mapy_nazwy_calego_miasta_raz_na_miejsce = (() => {
     const hit = wskazanyKawalek();
     const [lat, lon] = hit.seg.stops_t[1];

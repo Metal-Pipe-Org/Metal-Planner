@@ -627,6 +627,12 @@ def test_close_up_names_only_stops_of_drawn_lines_without_overlaps(front):
     _check(front, "p253_z_bliska_nazwy_tylko_przystankow_mapy")
 
 
+def test_moving_the_map_does_not_recount_the_stops_of_the_drawn_lines(front):
+    """Z bliska nazwy liczą się po każdym ruchu mapy, ale przystanki
+    wachlarza (ponad tysiąc kawałków przy dużym zapytaniu) - raz na mapę."""
+    _check(front, "p253_ruch_mapy_nie_liczy_przystankow_wachlarza_od_nowa")
+
+
 def test_without_a_map_close_up_names_the_whole_city_once_per_place(front):
     _check(front, "p253_bez_mapy_nazwy_calego_miasta_raz_na_miejsce")
 
