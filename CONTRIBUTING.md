@@ -66,18 +66,45 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
     `external`. Żeby zgłosić, trzeba mieć konto na GitHubie.
 18. Zgłoszenie bez niczyjego wpisu przez 14 dni dostaje pytanie, czy temat
     jest aktualny, i etykietę `stale`. Po kolejnych 7 dniach ciszy zamyka się
-    jako „not planned". Wystarczy odpisać. Nie dotyczy zgłoszeń z etykietą
-    `blocked` ani takich, które mają otwarte pod-zgłoszenia. Dając
-    `blocked`, zdejmij `stale` — te dwie etykiety nie powinny stać razem,
-    a automat sam tego nie posprząta.
+    jako „not planned". Żeby zgłoszenie zostało otwarte, nie wystarczy
+    odpisać — napisz, dlaczego ma zostać, choć nikt go nie ruszał przez
+    14 dni. Nie dotyczy zgłoszeń z etykietą `blocked` ani takich, które mają
+    otwarte pod-zgłoszenia.
+19. Zgłoszenie, które stoi przez coś poza naszym wpływem, dostaje etykietę
+    `blocked`, a w zgłoszeniu trzeba napisać, na co czeka. Dając `blocked`,
+    zdejmij `stale` — te dwie etykiety nie powinny stać razem, a automat sam
+    tego nie posprząta.
+20. `to discuss` znaczy, że autor nie może albo nie chce rozstrzygnąć sprawy
+    sam i chce ją omówić z zespołem. Każdy z zespołu jest zachęcany, żeby
+    dorzucić swoje zdanie. Etykietę zdejmujemy, gdy dyskusję uznamy
+    za zakończoną.
+21. `to revisit` dajemy przy zamykaniu zgłoszeń, które teraz wykraczają poza
+    zakres, ale są dobrym pomysłem na przyszłość. Dzięki niej można je
+    zamknąć, żeby nie zawyżały listy otwartej pracy, a wciąż da się je
+    odróżnić od inncyh zgłoszeń zamkniętych.
+22. Przypisanie do zgłoszenia znaczy, że nad nim pracujesz. Gdy przypisanych jest
+    kilka osób, ustalają między sobą, jak dzielą pracę, żeby nie robić
+    tego samego dwa razy.
+23. Gdy przestajesz pracować nad zgłoszeniem, a go nie zamykasz (np. zmiana
+    planów), wypisz się z niego.
+24. „Open for taking” otwierasz, gdy chcesz wziąć coś nowego.
+25. „Todo” to twoja lista. Tego nikt za ciebie nie zrobi.
 
 ## Discord
 
-19. Kanał repo dostaje zgłoszenia, PR-y, przypisania, recenzje i komentarze
+26. Kanał repo dostaje zgłoszenia, PR-y, przypisania, recenzje i komentarze
     ludzi — z prawdziwymi pingami osób, których dotyczą.
-20. W komentarzu na GitHubie `@login` pinguje tę osobę także na Discordzie,
+27. Co rano osobny kanał dostaje podsumowanie dnia: kartę każdej osoby
+    z jej wczorajszym postępem (zmergowane PR-y, zamknięte i założone
+    zgłoszenia) oraz kartę „Ogólnie” z tym, co jest do zrobienia, linkami
+    do „Todo” i „Open for taking” i liczbami zgłoszeń i PR-ów.
+28. Podsumowanie pinguje tylko tam, gdzie na kogoś czeka ruch: recenzentów
+    otwartych PR-ów (albo autora, który jeszcze nie poprosił o recenzję),
+    autora zgłoszenia z `merged - is it ok?` i przypisanych do zgłoszeń
+    `stale` (bez przypisania — autora). Wersje robocze są bez pingu.
+29. W komentarzu na GitHubie `@login` pinguje tę osobę także na Discordzie,
     `**login**` tylko ją wymienia.
-21. Nowa osoba w zespole potrzebuje wpisu w mapie kont GitHub → Discord
+30. Nowa osoba w zespole potrzebuje wpisu w mapie kont GitHub → Discord
     (zmienna repozytorium `DISCORD_IDS`), inaczej nie dostaje pingów.
 
 ## Kiedy automat celowo milczy
