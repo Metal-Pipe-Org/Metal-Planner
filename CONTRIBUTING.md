@@ -78,7 +78,7 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
 20. `to revisit` dajemy przy zamykaniu zgłoszeń, które teraz wykraczają poza
     zakres, ale są dobrym pomysłem na przyszłość. Dzięki niej można je
     zamknąć, żeby nie zawyżały listy otwartej pracy, a wciąż da się je
-    odróżnić od inncyh zgłoszeń zamkniętych.
+    odróżnić od innych zamkniętych zgłoszeń.
 21. Przypisanie do zgłoszenia znaczy, że nad nim pracujesz. Gdy przypisanych jest
     kilka osób, ustalają między sobą, jak dzielą pracę, żeby nie robić
     tego samego dwa razy.
