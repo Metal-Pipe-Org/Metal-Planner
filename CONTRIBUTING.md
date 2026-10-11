@@ -112,26 +112,26 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
 Zanim uznasz ciszę za błąd, sprawdź tę listę. Każdy punkt to zamierzone
 zachowanie albo ograniczenie GitHuba, a nie awaria.
 
-22. **PR w wersji roboczej nie dostaje oceny.** Ocena przychodzi po „Ready for
+31. **PR w wersji roboczej nie dostaje oceny.** Ocena przychodzi po „Ready for
     review”. Wcześniej tylko na wyraźne `@claude`.
-23. **PR do gałęzi innej niż `main` i `stable` nie dostaje oceny.** Dostanie ją
+32. **PR do gałęzi innej niż `main` i `stable` nie dostaje oceny.** Dostanie ją
     tylko po `@claude` albo po ręcznym biegu.
-24. **PR otwarty w konflikcie z bazą dostaje ocenę dopiero przy pierwszym
+33. **PR otwarty w konflikcie z bazą dostaje ocenę dopiero przy pierwszym
     pushu, który ten konflikt usuwa.** Przy konflikcie GitHub w ogóle nie
     uruchamia automatów PR-a, więc w Actions nie ma nawet śladu biegu.
-25. **PR z forka nie dostaje oceny.** Kod spoza repo nie trafia do Claude'a
+34. **PR z forka nie dostaje oceny.** Kod spoza repo nie trafia do Claude'a
     razem z sekretami.
-26. **PR, który zmienia sam workflow oceny, nie dostaje oceny przy otwarciu.**
+35. **PR, który zmienia sam workflow oceny, nie dostaje oceny przy otwarciu.**
     Akcja Claude'a działa tylko z workflow takim jak na `main`. Pod PR-em
     pojawia się o tym informacja — napisz `@claude`, a ocena ruszy.
-27. **`@claude` działa tylko we własnym tekście i tylko od osoby z prawem
+36. **`@claude` działa tylko we własnym tekście i tylko od osoby z prawem
     zapisu.** Wołanie przepisane w cytacie albo od kogoś bez zapisu jest
     pomijane bez komentarza.
-28. **Zmiana workflow na gałęzi nie działa dla `@claude` ani ręcznego biegu, aż
+37. **Zmiana workflow na gałęzi nie działa dla `@claude` ani ręcznego biegu, aż
     trafi na `main`.** Te wyzwalacze zawsze czytają wersję z `main`.
-29. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie
+38. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie
     tylko wtedy, gdy automat wysyła ją sam — dziś robią to ocena Claude'a,
     koniec pracy Claude'a nad zgłoszeniem, przypomnienie i zamknięcie po
     ciszy.
-30. **Ręczny ratunek:** Actions → „Claude - oceń PR” → Run workflow → numer
+39. **Ręczny ratunek:** Actions → „Claude - oceń PR” → Run workflow → numer
     PR-a ocenia go od nowa w każdym z powyższych przypadków poza forkiem.
