@@ -32,3 +32,5 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 19. Zanim agent weźmie się za issue, sprawdzam, czy użytkownik jest do niego przypisany.
 20. Gdy PR jest scalony, usuwam lokalnie jego gałąź i worktree agenta.
 21. Po zamknięciu większej partii spraw proponuję użytkownikowi /compact, zanim rozmowa zrobi się za długa (automatyczne kompaktowanie przychodzi za późno).
+22. Gdy rozmowa odbiega od czekającej sprawy (dowolny powód), zostaję przy temacie pobocznym i nie doklejam do odpowiedzi czekającej sprawy ani przypomnień o niej. Dopiero gdy temat poboczny jest zamknięty i wracamy do sprawy, wklejam ją ponownie w całości: co się zmieniło, decyzję i paczkę. Nie odsyłam do przewijania ani nie skracam do jednej linii.
+23. Po każdej zmianie kontraktu daję użytkownikowi polecenie, którym sam zobaczy jej diff (zamiast wklejać diff od siebie).
