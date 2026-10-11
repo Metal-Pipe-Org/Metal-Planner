@@ -908,10 +908,19 @@ $('locate-offer-yes').addEventListener('click', () => {
     updatePointMarker('start', null);
     restyle(name);
     if (endInput.value) search();
+    else focusEnd();
 });
 
 $('locate-offer-no').addEventListener('click', hideLocateOffer);
 startInput.addEventListener('input', hideLocateOffer);
+
+/** Gotowy start przy pustym celu: kursor sam przechodzi do „Dokąd" (#275),
+    jak w Jakdojade. Wpisanego celu nie ruszamy - wtedy start od razu szuka.
+    Klik w mapę ani ◎ tego nie wołają: oba zostawiają mapę do wskazania celu,
+    a klawiatura telefonu zasłoniłaby jej pół (i pytanie „Stoisz na…"). */
+function focusEnd() {
+    if (!endInput.value.trim()) endInput.focus();
+}
 
 /** Przycisk ◎ - w przeciwieństwie do kliknięcia w mapę nadpisuje start, który
     już był (o to się prosi, klikając go), ale celu nie rusza. */
@@ -4515,7 +4524,9 @@ function attachAutocomplete(input, onPick, options = {}) {
 attachAutocomplete(startInput, () => {
     if (isPoint(sel.start)) { sel.start = null; updatePointMarker('start', null); }
     if (endInput.value) search();
-}, {suggest: suggestRecentFirst('start')});
+    else focusEnd();
+}, {suggest: suggestRecentFirst('start'),
+    onEnter: () => (startInput.value.trim() && !endInput.value.trim() ? focusEnd() : search())});
 attachAutocomplete(endInput, () => {
     if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
     if (startInput.value) search();
