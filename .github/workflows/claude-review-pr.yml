@@ -8,7 +8,10 @@ name: Claude - oceń PR
 # nie miał jak się dowiedzieć, że ocena już jest, i trzeba go było szturchać
 # ręcznie. Nowy komentarz z @wzmianką autora powiadamia go na GitHubie, a ta
 # sama wiadomość leci na Discorda, gdzie zespół faktycznie śledzi repo. Gdy
-# ocena już stoi, zapowiedź zwijamy (nie kasujemy), żeby nie zalegała.
+# ocena już stoi, zapowiedź zwijamy (nie kasujemy), żeby nie zalegała. Jedyny
+# wyjątek od zakazu edycji to starsze oceny pod tym samym PR-em: gdy wpada
+# nowa, zostawiamy im sam werdykt, a resztę chowamy pod „rozwiń” — tu
+# powiadomienie nie jest potrzebne, bo przychodzi z nową oceną.
 #
 # Recenzentów ten workflow nie woła. Autor czyta ocenę i dopiero gdy uzna PR za
 # gotowy, prosi o recenzję w panelu bocznym („Reviewers"); ping na Discordzie
@@ -409,6 +412,7 @@ jobs:
           EXEC: ${{ steps.claude.outputs.execution_file }}
         run: |
           set -euo pipefail
+          source .discord/.github/scripts/guard.sh
 
           json=$(gh api "repos/$REPO/pulls/$N")
           author=$(printf '%s' "$json" | jq -r .user.login)
@@ -468,6 +472,8 @@ jobs:
             kind=failed
             verdict=""
           fi
+          # Znak „to komentarz z oceną” dla zwijania starszych ocen niżej.
+          printf '\n%s\n' "$REVIEW_MARK" >> "$RUNNER_TEMP/post.md"
 
           url=$(gh pr comment "$N" --repo "$REPO" --body-file "$RUNNER_TEMP/post.md")
           echo "Komentarz ($kind): $url" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -492,6 +498,23 @@ jobs:
         run: |
           source .discord/.github/scripts/guard.sh
           minimize_comment "$NODE"
+
+      - name: Zwiń starsze oceny
+        # Pod PR-em liczy się najnowsza ocena. Starsze oceny i informacje
+        # o porażkach zostają z samym werdyktem na wierzchu, reszta pod
+        # „rozwiń”, a informację o zmienionym workflow zwijamy w całości —
+        # szczegóły w `fold_old_reviews`. Gdy nowa ocena się nie
+        # udała, starszych nie ruszamy: to one są wtedy aktualne. Porażka tego
+        # kroku nie może zaczerwienić oceny, która już stoi.
+        if: ${{ !cancelled() && steps.post.outputs.kind == 'review' }}
+        continue-on-error: true
+        env:
+          N: ${{ steps.pr.outputs.number }}
+          URL: ${{ steps.post.outputs.url }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/guard.sh
+          fold_old_reviews "$N" "${URL##*-}"
 
       - name: Daj znać autorowi na Discordzie
         # Zespół śledzi repo na Discordzie, a @wzmianka z GitHuba tam nikogo
