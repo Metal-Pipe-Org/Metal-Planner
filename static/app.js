@@ -254,6 +254,14 @@ function esc(text) {
     return div.innerHTML;
 }
 
+function escAttr(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
@@ -3163,11 +3171,11 @@ function routeButtonHtml(line, label, trip) {
     const tt = window.timetableMode;
     if (!tt || !tt.hasLine || !tt.hasLine(line.num, line.mode)) return '';
     return `<button type="button" class="tt-route"
-                    data-route-num="${esc(line.num)}"
-                    data-route-mode="${esc(line.mode)}"
-                    data-route-headsign="${esc(line.headsign || '')}"
-                    data-route-trip="${esc(trip || '')}"
-                    title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
+                    data-route-num="${escAttr(line.num)}"
+                    data-route-mode="${escAttr(line.mode)}"
+                    data-route-headsign="${escAttr(line.headsign || '')}"
+                    data-route-trip="${escAttr(trip || '')}"
+                    title="Cała trasa: ${escAttr(MODE_LABEL[line.mode] || 'Linia')} ${escAttr(line.num)}"
                     >${ROUTE_ICON}${esc(label)}</button>`;
 }
 
