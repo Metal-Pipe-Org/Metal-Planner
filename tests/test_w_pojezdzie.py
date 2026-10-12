@@ -19,6 +19,9 @@ import planner
 from tests.gtfs_builder import make_day
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, czytelne liczby
+# Pytanie zadane wtedy, gdy „nasz" 146 jest według rozkładu przy WSIADAM -
+# pojazd jedzie o czasie, więc liczy się wprost z rozkładu.
+NA_CZAS = WHEN.replace(minute=10)
 
 
 def _day():
@@ -44,7 +47,7 @@ def _w_pojezdzie(stop="WSIADAM", num="146", mode="bus", headsign=None):
 
 def _plan(install_day, **kwargs):
     install_day(_day())
-    return planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(**kwargs),
+    return planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(**kwargs),
                              density=planner.MAX_MAP_DENSITY)
 
 
@@ -54,11 +57,12 @@ def _plan(install_day, **kwargs):
 def test_rozpoznaje_najblizszy_kurs_linii():
     """Z dwóch kursów 146 tym, którym się jedzie, jest ten, który z WSIADAM
     rusza najbliżej godziny pytania - nie ten późniejszy."""
-    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 0)
+    kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 540)
 
     assert kurs["trip"] == "nasz"
     assert kurs["sec"] == 600
     assert kurs["at"] == "00:10"
+    assert kurs["late_sec"] == 0
     assert kurs["num"] == "146" and kurs["mode"] == "bus"
     assert kurs["headsign"] == "CEL"
 
@@ -66,47 +70,50 @@ def test_rozpoznaje_najblizszy_kurs_linii():
 def test_najblizszy_jest_kurs_przeszly_gdy_blizej():
     """Zgłoszenie #231: o 00:15 „nasz" minął WSIADAM według rozkładu pięć
     minut temu, a „nastepny" będzie tam dopiero o 00:40. Bliżej jest ten
-    przeszły - najpewniej spóźniony pojazd, w którym pasażer siedzi. Mapa
-    liczy się od jego rozkładu, a flaga `late` każe frontowi to powiedzieć."""
+    przeszły - najpewniej spóźniony pojazd, w którym pasażer siedzi. Pasażer
+    jest w nim teraz, więc kurs jedzie od teraz: pięć minut po rozkładzie."""
     kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 900)
 
     assert kurs["trip"] == "nasz"
-    assert kurs["sec"] == 600
-    assert kurs["late"] is True
-    assert kurs["not_yet"] is False
+    assert kurs["late_sec"] == 300
+    assert kurs["sec"] == 900 and kurs["at"] == "00:15"
+    assert kurs["at_sched"] == "00:10"
 
 
 def test_najblizszy_jest_kurs_przyszly_gdy_blizej():
     """O 00:27 „nasz" minął WSIADAM 17 minut temu, a „nastepny" będzie tam
-    za 13 - wygrywa przyszły i nie jest spóźniony."""
+    za 13 - wygrywa przyszły, jadący 13 minut przed rozkładem."""
     kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", 1620)
 
     assert kurs["trip"] == "nastepny"
-    assert kurs["sec"] == 2400
-    assert kurs["late"] is False
+    assert kurs["late_sec"] == -780
+    assert kurs["sec"] == 1620 and kurs["at_sched"] == "00:40"
 
 
-def test_lekkie_spoznienie_nie_jest_ostrzezeniem():
+def test_lekkie_spoznienie_liczy_sie_z_rozkladu():
     """Kurs złapany przed przystankiem jest według rozkładu zawsze trochę
-    spóźniony - o tym nie ma co mówić, dopóki mieści się w zapasie."""
+    spóźniony - dopóki mieści się w zapasie, liczymy wprost z rozkładu.
+    Sekunda dalej wchodzi tryb względny."""
     w_zapasie = 600 + onboard.OFF_SCHEDULE_SLACK_SEC
     kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie)
-    assert kurs["trip"] == "nasz" and kurs["late"] is False
-    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie + 1)["late"] is True
+    assert kurs["trip"] == "nasz" and kurs["late_sec"] == 0 and kurs["sec"] == 600
+    za_progiem = onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie + 1)
+    assert za_progiem["late_sec"] == w_zapasie + 1 - 600
+    assert za_progiem["sec"] == w_zapasie + 1
 
 
 def test_pierwszy_kurs_dnia_nie_ma_przeszlego():
     """Bez kursu wcześniejszego bierzemy przyszły, choćby był daleko."""
     kurs = onboard.find_ride(_rzadki_day(), "146", "bus", "WSIADAM", 0)
 
-    assert kurs["trip"] == "rzadki" and kurs["late"] is False
+    assert kurs["trip"] == "rzadki" and kurs["late_sec"] < 0
 
 
 def test_petla_koncowa_tez_jest_przystankiem():
     """Na ostatnim przystanku kursu nie ma odjazdu (patrz gtfs.stop_departures),
     a mimo to „jadę na pętlę, co dalej" jest pytaniem jak każde inne - kurs
     rozpoznajemy wtedy po przyjeździe."""
-    kurs = onboard.find_ride(_day(), "146", "bus", "CEL", 0)
+    kurs = onboard.find_ride(_day(), "146", "bus", "CEL", 2340)
 
     assert kurs["trip"] == "nasz"
     assert kurs["sec"] == 2400
@@ -139,23 +146,35 @@ def _rzadki_day():
     ])
 
 
-def test_kurs_ktory_dopiero_przyjedzie_budzi_watpliwosc():
+def test_kurs_ktory_dopiero_przyjedzie_jedzie_od_teraz():
     """Zgłoszenie #231: o 00:00 najbliższy 146 będzie przy WSIADAM dopiero
-    o 01:10. Kurs zostaje rozpoznany (liczymy od niego), ale z flagą, po
-    której front ostrzega, że godziny na mapie liczą się od 01:10."""
+    o 01:10. Pasażer jest w pojeździe teraz, więc kurs jedzie od teraz,
+    a rozkładowa 01:10 zostaje w odpowiedzi - po niej front mówi, że to
+    najpewniej pomyłka w linii, kierunku albo przystanku."""
     kurs = onboard.find_ride(_rzadki_day(), "146", "bus", "WSIADAM", 0)
 
     assert kurs["trip"] == "rzadki"
-    assert kurs["not_yet"] is True
+    assert kurs["late_sec"] == -4200
+    assert kurs["sec"] == 0 and kurs["at"] == "00:00"
+    assert kurs["at_sched"] == "01:10"
 
 
 def test_zapas_jest_ten_sam_w_przod_co_wstecz():
-    """„Będzie" ostrzega od tego samego zapasu co „była": liczonego od
-    rozkładowej godziny przy wskazanym przystanku."""
+    """Przed rozkładem tryb względny wchodzi od tego samego zapasu co po
+    nim: liczonego od rozkładowej godziny przy wskazanym przystanku."""
     w_zapasie = 600 - onboard.OFF_SCHEDULE_SLACK_SEC
     kurs = onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie)
-    assert kurs["trip"] == "nasz" and kurs["not_yet"] is False
-    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", w_zapasie - 1)["not_yet"] is True
+    assert kurs["trip"] == "nasz" and kurs["late_sec"] == 0
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM",
+                             w_zapasie - 1)["late_sec"] == -181
+
+
+def test_prog_trybu_wzglednego_da_sie_zmienic():
+    """Próg trybu względnego to suwak w ⚙ (sekcja „Jestem w pojeździe")."""
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", 900,
+                             slack_sec=300)["late_sec"] == 0
+    assert onboard.find_ride(_day(), "146", "bus", "WSIADAM", 900,
+                             slack_sec=0)["late_sec"] == 300
 
 
 # ------------------------------------------------------- start z pokładu
@@ -172,21 +191,47 @@ def test_wyszukiwanie_rusza_spod_nastepnego_przystanku(install_day):
     assert wynik["onboard"]["line"] == "Autobus 146"
     assert wynik["onboard"]["headsign"] == "CEL"
     assert wynik["onboard"]["stop_name"] == "WSIADAM"
-    assert wynik["onboard"]["late"] is False
+    assert wynik["onboard"]["late_sec"] == 0
 
 
-def test_spozniony_kurs_liczy_mape_od_rozkladu(install_day):
-    """O 00:15 najbliższy jest „nasz", który według rozkładu ruszył spod
-    WSIADAM o 00:10. Mapa liczy się od tej rozkładowej sekundy - tak, jakby
-    jechał o czasie - a odpowiedź mówi, że jest spóźniony."""
+def test_spozniony_kurs_jedzie_dalej_od_teraz(install_day):
+    """Zgłoszenie #231: o 00:15 najbliższy jest „nasz", który według rozkładu
+    ruszył spod WSIADAM o 00:10. Pasażer w nim siedzi, więc pojazd jedzie
+    pięć minut po rozkładzie - aż do celu, z tymi samymi odstępami między
+    przystankami. Tramwaj 7 (00:11) już odjechał i na liście go nie ma."""
     install_day(_day())
     wynik = planner.plan_flow("", "CEL", WHEN.replace(minute=15),
                               in_vehicle=_w_pojezdzie(),
                               density=planner.MAX_MAP_DENSITY)
 
-    assert wynik["departure"] == "00:10"
-    assert wynik["onboard"]["late"] is True
-    assert wynik["onboard"]["at"] == "00:10"
+    assert wynik["departure"] == "00:15"
+    assert wynik["onboard"]["late_sec"] == 300
+    assert wynik["onboard"]["at"] == "00:15"
+    assert wynik["onboard"]["at_sched"] == "00:10"
+    jazda = wynik["journeys"][0]
+    assert jazda["legs"][0]["num"] == "146" and jazda["legs"][0]["onboard"] is True
+    assert jazda["onboard"] == {"stop": "CEL", "stops": 2, "time": "00:45",
+                                "transfer": False}
+    assert [p["t"] for p in jazda["legs"][0]["via"]] == ["00:25"]
+
+
+def test_rozkladowego_egzemplarza_naszego_kursu_juz_nie_ma(install_day):
+    """Przesunięty kurs zastępuje rozkładowy: to ten sam pojazd, więc nie da
+    się do niego „przesiąść o czasie" kilka przystanków dalej. Tu tramwaj 8
+    dowozi z WSIADAM do SRODEK na 00:18, a rozkładowy „nasz" rusza stamtąd
+    o 00:20 - ale naprawdę będzie tam dopiero o 00:30, razem z pasażerem."""
+    install_day(make_day([
+        {"trip_id": "nasz", "label": "Autobus 146", "headsign": "CEL",
+         "stops": [("POCZATEK", 0, 0), ("WSIADAM", 600, 600),
+                   ("SRODEK", 1200, 1200), ("CEL", 2400, 2400)]},
+        {"trip_id": "skrot", "label": "Tramwaj 8", "headsign": "SRODEK",
+         "stops": [("WSIADAM", 960, 960), ("SRODEK", 1080, 1080)]},
+    ]))
+    wynik = planner.plan_flow("", "CEL", WHEN.replace(minute=15),
+                              in_vehicle=_w_pojezdzie(),
+                              density=planner.MAX_MAP_DENSITY)
+
+    assert all(j["arrival"] == "00:45" for j in wynik["journeys"])
 
 
 def test_kazda_propozycja_mowi_gdzie_wysiasc(install_day):
@@ -265,7 +310,7 @@ def test_przesiadka_na_starcie_z_pokladu_wymaga_zapasu(install_day):
     bez problemu i tam ma zostać."""
     install_day(_dzien_z_tramwajem(630, 1500))
 
-    z_pokladu = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(),
+    z_pokladu = planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(),
                                   density=planner.MAX_MAP_DENSITY)
     assert _linie_na_mapie(z_pokladu) == {"146"}
 
@@ -279,7 +324,7 @@ def test_mapa_z_pokladu_liczy_pojazd_w_ktorym_sie_siedzi(install_day):
     pasażer już jedzie, więc późniejsze „wyjście" niczego mu nie daje."""
     install_day(_dzien_z_tramwajem(700, 2100))
 
-    wynik = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(),
+    wynik = planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(),
                               density=planner.MAX_MAP_DENSITY)
 
     podroze = {seg["num"]: seg["why"]["journeys"][0] for seg in wynik["segments"]}
@@ -294,7 +339,7 @@ def test_dalsza_jazda_wygrywa_z_przesiadka_ktora_malo_daje(install_day):
     więc dalszej jazdy autobusem, w którym się siedzi."""
     install_day(_dzien_z_tramwajem(700, 2100))
 
-    wynik = planner.plan_flow("", "CEL", WHEN, in_vehicle=_w_pojezdzie(),
+    wynik = planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(),
                               density=planner.MAX_MAP_DENSITY)
 
     assert _linie_na_mapie(wynik) == {"146", "7"}
@@ -308,3 +353,30 @@ def test_przesiadka_ktora_sie_oplaca_dalej_wygrywa(install_day):
     wynik = _plan(install_day)
 
     assert wynik["journeys"][0]["legs"][0]["num"] == "7"
+
+
+def test_indeksy_dnia_z_przesunietym_kursem_zgadzaja_sie_z_tablica():
+    """Dzień z przesuniętym kursem nie przebudowuje indeksów od zera (patrz
+    gtfs._ShiftedTripIndex) - a mają mówić dokładnie to, co powiedziałby
+    indeks zbudowany od nowa z jego tablicy połączeń."""
+    import gtfs
+
+    day = _day()
+    for late in (300, -420):
+        dzien, kurs = gtfs.with_shifted_trip(day, "nasz", "WSIADAM", late)
+
+        od_nowa = {}
+        for i, conn in enumerate(dzien.conns):
+            od_nowa.setdefault(conn[4], []).append(i)
+        assert dzien.dep_times == sorted(dzien.dep_times)
+        assert dzien.dep_times == [c[0] for c in dzien.conns]
+        assert "nasz" not in od_nowa
+        for trip in {*od_nowa, "nasz"}:
+            assert list(gtfs.trip_conns(dzien, trip)) == od_nowa.get(trip, []), trip
+
+        odjazdy = {}
+        for dep, _arr, skad, _dokad, trip in dzien.conns:
+            odjazdy.setdefault(skad, []).append((dep, trip))
+        assert {k: v for k, v in dzien.deps_by_stop.items() if v} == odjazdy
+        assert [dzien.conns[i][0] for i in gtfs.trip_conns(dzien, kurs)] == [
+            600 + late, 1200 + late]

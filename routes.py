@@ -120,6 +120,9 @@ def _onboard_arg():
     tylko zawęża wybór kursu. `onboard_stop` to identyfikator słupka z
     /api/onboard, a nie nazwa: pasażer jedzie jedną krawędzią przystanku,
     a nie całym placem, i tylko na niej otworzą się drzwi.
+
+    `onboard_slack_sec` to próg trybu względnego z ⚙ (zgłoszenie #231, patrz
+    onboard.find_ride); bez niego obowiązuje domyślny.
     """
     num = (request.args.get("onboard_num") or "").strip()
     stop = (request.args.get("onboard_stop") or "").strip()
@@ -130,6 +133,7 @@ def _onboard_arg():
         "mode": request.args.get("onboard_mode") or None,
         "headsign": request.args.get("onboard_headsign") or None,
         "stop": stop,
+        "slack_sec": _float_arg("onboard_slack_sec"),
     }
 
 
