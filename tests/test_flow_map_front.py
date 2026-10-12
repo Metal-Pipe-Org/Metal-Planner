@@ -290,7 +290,8 @@ def test_a_route_that_starts_much_later_says_so(front):
 def test_the_headline_says_when_to_leave(front):
     """Pasek nad mapą mówi, o której wyjechać i o której się dojedzie
     najszybszą trasą, oraz od kiedy do kiedy sięga mapa. Sam czas jazdy
-    dopisuje dopiero ustawienie - "za ile tam będziesz" zostaje zawsze."""
+    dopisuje dopiero ustawienie. "Za ile tam będziesz" jest w dymku godzin,
+    a każdy widoczny kawałek paska ma swój dymek."""
     _check(front, "pasek_mowi_kiedy_wyjechac")
 
 
