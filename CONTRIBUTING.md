@@ -23,7 +23,7 @@ Wspólny sposób pracy na GitHubie: branche, pull requesty, review Claude'a, iss
 9. Zaraz po otwarciu pod PR-em pojawia się jednolinijkowa zapowiedź, że Claude go czyta, a po kilku minutach review: werdykt, podsumowanie, uwagi do kodu. Zapowiedź zwija się, gdy review już stoi. Dostajesz ping na GitHubie i na Discordzie.
 10. PR otwarty w konflikcie dostaje review Claude'a dopiero przy pierwszym pushu, który konflikt usuwa.
 11. Review leci raz na PR. Po większych poprawkach albo gdy się nie udało, napisz `@claude` w komentarzu pod PR-em.
-12. Przeczytaj review Claude'a, popraw, co trzeba, i dopiero wtedy poproś o review w panelu bocznym („Reviewers”). Reviewer dostaje ping na Discordzie.
+12. Przeczytaj review Claude'a, popraw, co trzeba, i dopiero wtedy poproś o review w panelu bocznym („Reviewers”). Reviewer dostaje ping na Discordzie. Gdy po merge'u czegoś do `main` PR ma z nim konflikt, prośby o review zdejmują się same, a Ty dostajesz ping. Rozwiąż konflikt i poproś o review ponownie.
 13. Kto pilnuje których plików, wyznacza `.github/CODEOWNERS` — to jedyne źródło prawdy. Gdy PR dotyka pliku z ownerem, GitHub sam dodaje go do reviewerów.
 14. PR merguje jego autor. Można używać automerge.
 
@@ -73,7 +73,7 @@ Zanim uznasz ciszę za błąd, sprawdź tę listę. Każdy punkt to zamierzone z
 39. **PR, który zmienia sam workflow review, nie dostaje review przy otwarciu.** Akcja Claude'a działa tylko z workflow takim jak na `main`. Pod PR-em pojawia się o tym informacja — napisz `@claude`, a review ruszy.
 40. **`@claude` działa tylko we własnym tekście i tylko od osoby z prawem zapisu.** Wołanie przepisane w cytacie albo od kogoś bez zapisu jest pomijane bez komentarza.
 41. **Zmiana workflow na branchu nie działa dla `@claude` ani ręcznego biegu, aż trafi na `main`.** Te wyzwalacze zawsze czytają wersję z `main`.
-42. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie tylko wtedy, gdy automat wysyła ją sam — dziś robią to review Claude'a, koniec pracy Claude'a nad issue, codzienne podsumowanie, przypomnienie i zamknięcie po ciszy.
+42. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie tylko wtedy, gdy automat wysyła ją sam — dziś robią to review Claude'a, koniec pracy Claude'a nad issue, codzienne podsumowanie, przypomnienie, zamknięcie po ciszy i wstrzymanie review przy konflikcie.
 43. **Ręczny ratunek:** Actions → „Claude - oceń PR” → Run workflow → numer PR-a robi review od nowa w każdym z powyższych przypadków poza forkiem.
 
 Aktualizacja: 12-10-2026
