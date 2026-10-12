@@ -299,7 +299,7 @@ const ENDPOINT_STYLE = {
 
 function styleFor(name) {
     // Przy narysowanej mapie start i cel mają po jednej własnej kropce
-    // (stopDot, flowEndDot) - słupki powtarzałyby to samo kilka razy obok,
+    // (stopDot, flowEndDots) - słupki powtarzałyby to samo kilka razy obok,
     // więc gasną jak wszystkie inne.
     if (!plannerSuspended && !baseDimmed) {
         if (name === sel.start) return ENDPOINT_STYLE.start;
@@ -1275,7 +1275,7 @@ let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania be
 let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
 let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
 let flowDotLayer = null;    // węzły przesiadkowe wachlarza (patrz flowStopDots)
-let flowEndDot = null;      // kropka celu (patrz endDot)
+let flowEndDots = null;     // kropki startu i celu (patrz endDots)
 let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
 let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
 let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
@@ -1284,7 +1284,7 @@ function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
-    if (flowEndDot) { map.removeLayer(flowEndDot); flowEndDot = null; }
+    if (flowEndDots) { map.removeLayer(flowEndDots); flowEndDots = null; }
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
     clearBikeRides();
@@ -1367,9 +1367,8 @@ function drawFlow(flow, refit) {
     if (flowDotLayer) map.removeLayer(flowDotLayer);
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
-    if (flowEndDot) map.removeLayer(flowEndDot);
-    flowEndDot = endDot();
-    if (flowEndDot) flowEndDot.addTo(map);
+    if (flowEndDots) map.removeLayer(flowEndDots);
+    flowEndDots = endDots(flow.nodes).addTo(map);
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
@@ -2672,15 +2671,28 @@ function flowStopDots(nodes, deadline) {
         n.sec, flowDotStyle(n.start ? 1 : n.w)));
 }
 
-/** Kropka celu - jedna w środku jego słupków, w miejsce ich wszystkich
-    (patrz styleFor). Start ma ją z węzła wachlarza, ale cel węzłem nie jest:
-    tu się tylko wysiada. Osobno od flowDotLayer, bo wybrana trasa chowa
-    tamte kropki, a cel ma zostać widać. */
-function endDot() {
-    const poles = !isPoint(sel.end) && markersByName.get(sel.end);
+/** Kropki startu i celu - po jednej w środku ich słupków, w miejsce ich
+    wszystkich (patrz styleFor). Cel węzłem nie jest: tu się tylko wysiada.
+    Start ma kropkę z węzła wachlarza, ale tylko wtedy, gdy dotyka go któryś
+    narysowany kawałek - gdy każda droga zaczyna się dojściem pieszym na inny
+    przystanek, węzła startu nie ma i bez tej kropki start znikał z mapy
+    (zgłoszenie #276). Taki start wygląda jak kliknięty punkt (POINT_STYLE):
+    też jest miejscem, z którego się dopiero dochodzi do przystanku.
+    Osobno od flowDotLayer, bo wybrana trasa chowa tamte kropki, a start
+    i cel mają zostać widać. */
+function endDots(nodes) {
+    const dots = [endpointDot(sel.end, ENDPOINT_STYLE.end)];
+    if (!(nodes || []).some(n => n.start)) {
+        dots.push(endpointDot(sel.start, POINT_STYLE.start));
+    }
+    return L.layerGroup(dots.filter(Boolean));
+}
+
+function endpointDot(name, style) {
+    const poles = !isPoint(name) && markersByName.get(name);
     if (!poles) return null;
     const center = L.latLngBounds(poles.map(m => m.getLatLng())).getCenter();
-    return L.circleMarker(center, {...ENDPOINT_STYLE.end, interactive: false});
+    return L.circleMarker(center, {...style, interactive: false});
 }
 
 /** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
@@ -5264,7 +5276,7 @@ function suspendPlanner() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
-    if (flowEndDot) { map.removeLayer(flowEndDot); flowEndDot = null; }
+    if (flowEndDots) { map.removeLayer(flowEndDots); flowEndDots = null; }
     // Punkty i wyróżnione słupki relacji schodzą razem z wachlarzem: same,
     // bez linii między nimi, mówiłyby o wyszukiwaniu, którego nie widać.
     updatePointMarker('start', null);
