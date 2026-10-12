@@ -262,6 +262,14 @@ function escAttr(value) {
         .replace(/>/g, '&gt;');
 }
 
+function escClass(value) {
+    return String(value ?? '')
+        .split(/\s+/)
+        .map(token => token.replace(/[^A-Za-z0-9_-]/g, ''))
+        .filter(Boolean)
+        .join(' ');
+}
+
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
@@ -1482,7 +1490,7 @@ function showMore() {
 function headlineChips(legs) {
     const parts = [];
     const piece = (cls, tip, html) =>
-        `<span class="${cls}" data-tip="${escAttr(tip)}">${html}</span>`;
+        `<span class="${escClass(cls)}" data-tip="${escAttr(tip)}">${html}</span>`;
     let pendingWalk = null;
     legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -1503,7 +1511,7 @@ function headlineChips(legs) {
                 + `, ok. ${pendingWalk.minutes} min pieszo.`, ''));
         }
         pendingWalk = null;
-        parts.push(piece(`line-chip ${esc(leg.kind)}`,
+        parts.push(piece(`line-chip ${leg.kind}`,
                          `${MODE_LABEL[leg.kind] || MODE_LABEL.other} ${leg.num}, ok. `
                          + `${fmtMins(leg.sec)} jazdy.`, esc(leg.num)));
     });
