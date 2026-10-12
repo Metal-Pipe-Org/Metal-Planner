@@ -399,7 +399,7 @@ def test_lines_sharing_a_corridor_each_carry_the_whole_corridor(install_day):
     """Sedno punktu 7: dwie linie na dokładnie tym samym korytarzu leżą na
     mapie JEDNA NA DRUGIEJ - i tak ma zostać. Geometria jest prawdziwa, po
     torach i ulicach (punkt 6), nikt jej nie rozsuwa; próby rozjeżdżania
-    wiązki na pasma odpadły trzy razy z rzędu (patrz FLOW_MAP_NOTES.md).
+    wiązki na pasma odpadły trzy razy z rzędu (patrz historia commitów).
 
     Rozpoznanie linii bierze się stąd, że KAŻDY kawałek niesie PEŁNY skład
     swojego korytarza - razem z sobą samym. Front stawia z tego jedną grupkę
