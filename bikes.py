@@ -348,8 +348,10 @@ def ride_time_sec(straight_m, mps=MAP_RIDE_MPS, overhead_sec=MAP_OVERHEAD_SEC):
     return overhead_sec + _whole_minutes(straight_m / mps)
 
 
-def _ma_rodzaj(place, electric, regular):
-    """Czy w tym miejscu stoi choć jeden rower WŁĄCZONEGO rodzaju.
+def ma_rodzaj(place, electric, regular):
+    """Czy w tym miejscu stoi choć jeden rower WŁĄCZONEGO rodzaju - odsiew
+    i kropek na mapie, i stacji wsiadania w propozycjach z rowerem
+    (planner._bike_boardings, zgłoszenie #163).
 
     Kanał podaje, ile rowerów stoi razem i ile z nich to elektryki (patrz
     _electric_count); zwykłe to reszta. Rower luzem ma tę samą parę liczb,
@@ -440,7 +442,7 @@ def map_places(day, arrivals, onward, target_set, limit, live=True,
     # nie wiadomo, co tam wtedy stoi, a udawanie tej wiedzy jest gorsze niż
     # pokazanie kropki, która wprost mówi, że stanu nie zna.
     if live and not (electric and regular):
-        starts = [s for s in starts if _ma_rodzaj(s, electric, regular)]
+        starts = [s for s in starts if ma_rodzaj(s, electric, regular)]
 
     reach = arrivals()
     reach_cells = _cells(day, reach)

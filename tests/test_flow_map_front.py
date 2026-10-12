@@ -585,6 +585,12 @@ def test_debug_says_why_a_bike_or_car_is_on_the_map(front):
     _check(front, "debug_mowi_dlaczego")
 
 
+def test_cars_off_is_sent_to_the_server(front):
+    """Zgłoszenie #163: zgaszony 🚗 to lista bez propozycji z Traficarem -
+    składa je serwer, więc zgaszenie idzie w zapytaniu."""
+    _check(front, "auto_gaszone_leci_do_serwera")
+
+
 def test_bike_kinds_are_switches_sent_to_the_server(front):
     """Zgłoszenie #147: rowery elektryczne i zwykłe to dwa przełączniki pod
     zębatką, oba domyślnie włączone - ich stan idzie w zapytaniu, bo odsiew
