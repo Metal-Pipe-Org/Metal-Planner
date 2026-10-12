@@ -15,6 +15,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `issue-triage.yml` | Etykieta `external` dla autorów spoza zespołu. |
 | `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. Zablokowanych nie rusza. |
 | `discord.yml` | Kanał repo na Discordzie z prawdziwymi pingami. |
+| `pr-conflicts.yml` | Po pushu do `main`: otwarte PR-y z prośbą o recenzję, które mają konflikt z `main`, tracą prośby o recenzję, a autor dostaje ping na Discordzie. Logika w `.github/scripts/conflicts.sh`. |
 | `daily-digest.yml` | Co rano na Discordzie: postęp z wczoraj po karcie na osobę, potem karta „Ogólnie” z tym, co do zrobienia, i liczbami. |
 | `tests.yml` | Testy, odpalane wyłącznie ręcznie. |
 
@@ -29,11 +30,12 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
    (`GITHUB_TOKEN`), GitHub innym workflow w ogóle nie mówi. Każdy nowy ważny
    komentarz albo akcja bota musi więc sama wysłać wiadomość przez
    `.github/scripts/discord.sh` — tak jak robią to dziś ocena Claude'a, solver,
-   stale i zapasowe zamykanie. Zasługa za zgłoszenie zamknięte naszym tokenem
-   nie idzie na bota: od wyłączenia automatycznego zamykania w ustawieniach
-   repo (#228) zamyka je zapasowy krok, a GitHub nie zapisuje wtedy PR-a jako
-   zamykającego. Wiadomość z zapasowego kroku podpisuje ten, kto zmergował
-   PR, a podsumowanie dnia — autor zmergowanego PR-a powiązanego ze zgłoszeniem.
+   stale, zapasowe zamykanie i wstrzymanie recenzji przy konflikcie. Zasługa
+   za zgłoszenie zamknięte naszym tokenem nie idzie na bota: od wyłączenia
+   automatycznego zamykania w ustawieniach repo (#228) zamyka je zapasowy
+   krok, a GitHub nie zapisuje wtedy PR-a jako zamykającego. Wiadomość
+   z zapasowego kroku podpisuje ten, kto zmergował PR, a podsumowanie dnia —
+   autor zmergowanego PR-a powiązanego ze zgłoszeniem.
 3. Skrypt pobieramy zawsze z `main` (sparse checkout `.github/scripts` do
    `.discord`), nigdy z drzewa PR-a ani pracy Claude'a: dostaje w env sekret
    webhooka.

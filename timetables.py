@@ -128,7 +128,7 @@ def _path_of(shape_id, coords, db):
     return [[round(lat, 5), round(lon, 5)] for lat, lon in sliced]
 
 
-def line_timetable(num, day, mode=None, geometry=True):
+def line_timetable(num, day, mode=None, geometry=True, trip=None):
     """Rozkład jednej linii na dany dzień: którędy jedzie i przez co.
 
     Kursy grupujemy po CIĄGU PRZYSTANKÓW, nie po samym kierunku: linia ma
@@ -147,6 +147,12 @@ def line_timetable(num, day, mode=None, geometry=True):
     wariant), i w wadze - a pytającemu o SAM WYBÓR KIERUNKU nie jest do
     niczego potrzebny (patrz onboard.directions: lista kierunków i przystanków
     pod pole „jestem w pojeździe" niczego nie rysuje).
+
+    `trip` (kurs, spod którego kliknięto "cała trasa") dokłada `trip_variant`:
+    indeks wariantu, którym jedzie WŁAŚNIE TEN kurs. Sam napis na czole go nie
+    wskaże - zjazd do zajezdni z jednej i z drugiej pętli nosi ten sam
+    (zgłoszenie #270). Kurs spoza dzisiejszych wariantów (egzemplarz z doby
+    poprzedniej innego kalendarza) pola nie dostaje.
     """
     num = " ".join((num or "").split())
     if not num:
@@ -237,11 +243,18 @@ def line_timetable(num, day, mode=None, geometry=True):
         # Najpierw warianty pełne (najwięcej kursów) - to one są "tą linią",
         # a kursy skrócone dopisują się pod nimi.
         out.sort(key=lambda v: (-v["trips"], v["headsign"]))
-        return {
+        result = {
             "num": num, "mode": line_mode,
             "label": f"{MODE_LABEL[line_mode]} {num}",
             "date": day.isoformat(), "variants": out,
         }
+        if trip:
+            raw_trip, _ = gtfs.db_trip(trip)
+            sequence = _stop_sequences(db, [raw_trip]).get(raw_trip)
+            keys = [[stop["id"] for stop in v["stops"]] for v in out]
+            if sequence in keys:
+                result["trip_variant"] = keys.index(sequence)
+        return result
     finally:
         db.close()
 
