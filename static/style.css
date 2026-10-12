@@ -1000,6 +1000,18 @@ body.routes-off .results-body { display: none; }
 .badge.bike { background: var(--bike); }
 .badge.car { background: var(--car); }
 
+/* Peron i tor pociągu (zgłoszenie #271) - dopisek przy nazwie stacji,
+   ciszej niż sama nazwa: nazwę się czyta, peron się sprawdza. */
+.platform {
+    margin-left: 6px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.tip-dir .platform { display: block; margin-left: 0; }
+
 /* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
    a nie w Ustawieniach Developerskich ⚙, bo to wybór PASAŻERA (mam konto w WRM
    albo nie), a nie strojenie algorytmu. */

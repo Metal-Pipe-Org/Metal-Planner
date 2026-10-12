@@ -164,6 +164,8 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             "num": num,
             "mode": mode,
             "headsign": headsign,
+            **({"platform": platform}
+               if (platform := _platform(day, trip, _stop_id)) else {}),
         })
 
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
@@ -587,6 +589,17 @@ def _drop_private(legs):
     return legs
 
 
+def _platform(day, trip, stop):
+    """Peron i tor pociągu przy stacji (zgłoszenie #271) - {"platform",
+    "track"} z tym, co rozkład PLK podaje, albo None. Tylko kolej je ma
+    (patrz pkp.augment_day); peron jest planowy, nie z dzisiejszej zmiany."""
+    found = day.pkp_platforms.get((trip, stop))
+    if not found:
+        return None
+    platform, track = found
+    return {k: v for k, v in (("platform", platform), ("track", track)) if v}
+
+
 def _via_stops(day, rows):
     """Przystanki MIJANE w czasie przejazdu (zgłoszenie #169) - bez wsiadania
     i wysiadania, które etap ma już w `from`/`to`. Front wypisuje je w osi
@@ -606,6 +619,16 @@ def _via_stops(day, rows):
             item["lat"], item["lon"] = _round_path([coords])[0]
         via.append(item)
     return via
+
+
+def _platform_fields(day, trip, board_stop, exit_stop):
+    """`from_platform`/`to_platform` etapu - tylko te, które są (#271)."""
+    out = {}
+    for key, stop in (("from_platform", board_stop), ("to_platform", exit_stop)):
+        platform = _platform(day, trip, stop)
+        if platform:
+            out[key] = platform
+    return out
 
 
 def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
@@ -639,6 +662,7 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "stops_count": max(len(path_rows) - 1, 1),
         "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
+        **_platform_fields(day, trip, board_stop, exit_stop),
         # Publiczny odpowiednik `_trip`: przycisk "trasa" otwiera rozkład linii
         # na wariancie tego kursu - sam headsign nie odróżni zjazdów do
         # zajezdni z dwóch pętli (#270).
@@ -3435,6 +3459,7 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
                                 for s in stops[1:-1]]),
         "path": _round_path(path),
         "trip": seg["trip_id"],
+        **_platform_fields(day, seg["trip_id"], from_stop, to_stop),
     }
 
 

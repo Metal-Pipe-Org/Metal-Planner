@@ -309,11 +309,19 @@ def augment_day(day, date):
 
     db = _connect()
     try:
+        # Peron i tor (zgłoszenie #271) są w bazie od niedawna - baza
+        # zbudowana starszym update_pkp.py ich nie ma, a przebudowuje się
+        # raz na dobę. Do tego czasu po prostu ich nie pokazujemy.
+        columns = {row[1] for row in db.execute("PRAGMA table_info(stops)")}
+        platform_cols = ("s.arrival_platform, s.arrival_track, "
+                         "s.departure_platform, s.departure_track"
+                         if "departure_platform" in columns
+                         else "NULL, NULL, NULL, NULL")
         rows = db.execute(
-            """
+            f"""
             SELECT r.carrier_code, r.national_number, r.category,
                    s.schedule_id, s.order_id, s.station_id, s.order_number,
-                   s.arrival_time, s.departure_time
+                   s.arrival_time, s.departure_time, {platform_cols}
             FROM stops s
             JOIN routes r ON r.schedule_id = s.schedule_id AND r.order_id = s.order_id
             JOIN operating_dates d
@@ -377,7 +385,8 @@ def augment_day(day, date):
     prev_dep_c = None
     for row in rows:
         (carrier_code, national_number, category, schedule_id, order_id,
-         station_id, order_number, arrival_time, departure_time) = row
+         station_id, order_number, arrival_time, departure_time,
+         arr_platform, arr_track, dep_platform, dep_track) = row
         key = (schedule_id, order_id)
         if key != prev_key:
             prev_key = key
@@ -434,6 +443,15 @@ def augment_day(day, date):
             arr_c if arr_c is not None else dep_c,
             dep_c if dep_c is not None else arr_c,
         ))
+        # Peron i tor przy tej stacji (zgłoszenie #271). PLK wpisuje je
+        # zwykle do pól ODJAZDU, także pociągowi, który tu kończy bieg (na
+        # Wrocławiu Głównym: 1177 postojów z peronem odjazdu, 0 z peronem
+        # przyjazdu), więc przyjazd jest tylko zapasem. Pociąg wjeżdża
+        # i odjeżdża z tego samego toru - jedna para na postój.
+        platform = dep_platform or arr_platform
+        track = dep_track or arr_track
+        if platform or track:
+            day.pkp_platforms[(trip_id, stop_id)] = (platform, track)
         if dep_c is not None:
             prev_stop, prev_dep_c = stop_id, dep_c
         else:
