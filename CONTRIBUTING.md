@@ -23,9 +23,10 @@ Wspólny sposób pracy na GitHubie: branche, pull requesty, review Claude'a, iss
 9. Zaraz po otwarciu pod PR-em pojawia się jednolinijkowa zapowiedź, że Claude go czyta, a po kilku minutach review: werdykt, podsumowanie, uwagi do kodu. Zapowiedź zwija się, gdy review już stoi. Dostajesz ping na GitHubie i na Discordzie.
 10. PR otwarty w konflikcie dostaje review Claude'a dopiero przy pierwszym pushu, który konflikt usuwa.
 11. Review leci raz na PR. Po większych poprawkach albo gdy się nie udało, napisz `@claude` w komentarzu pod PR-em.
-12. Przeczytaj review Claude'a, popraw, co trzeba, i dopiero wtedy poproś o review w panelu bocznym („Reviewers”). Reviewer dostaje ping na Discordzie. Gdy po merge'u czegoś do `main` PR ma z nim konflikt, prośby o review zdejmują się same, a Ty dostajesz ping. Rozwiąż konflikt i poproś o review ponownie.
-13. Kto pilnuje których plików, wyznacza `.github/CODEOWNERS` — to jedyne źródło prawdy. Gdy PR dotyka pliku z ownerem, GitHub sam dodaje go do reviewerów.
-14. PR merguje jego autor. Można używać automerge.
+12. Przeczytaj review Claude'a, popraw, co trzeba, i dopiero wtedy poproś o review w panelu bocznym („Reviewers”). Reviewer dostaje ping na Discordzie.
+13. Gdy po merge'u czegoś do `main` PR ma z nim konflikt, prośby o review zdejmują się same, a Ty dostajesz ping. Rozwiąż konflikt i poproś o review ponownie.
+14. Kto pilnuje których plików, wyznacza `.github/CODEOWNERS` — to jedyne źródło prawdy. Gdy PR dotyka pliku z ownerem, GitHub sam dodaje go do reviewerów.
+15. PR merguje jego autor. Można używać automerge.
 
 ## Release
 
