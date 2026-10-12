@@ -25,7 +25,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 
 13. Gdy bierzemy się za zadanie, sam przełączam projekt użytkownika na gałąź tego zadania i nakładam zmiany. Nie robię tego, gdy rozmawiamy o czymś innym.
 14. Zanim użytkownik dostanie paczkę do Ridera, może kliknąć zmianę w aplikacji; uwagi wracają do agenta przed commitem.
-15. Commit, push i PR robi użytkownik w Riderze. Dostaje gałąź (już przełączoną) oraz tytuł i opis PR-a; komunikatu commita nie przygotowuję. Na wyraźne polecenie użytkownika commit i push robi agent.
+15. Commit, push i PR robi użytkownik w Riderze. Dostaje gałąź (już przełączoną); tytuł i opis PR-a daję dopiero, gdy użytkownik powie, że robimy push. Komunikatu commita nie przygotowuję. Na wyraźne polecenie użytkownika commit i push robi agent.
 16. Konflikty w PR-ach rozwiązuje osobny agent; szkice (draft) pomijam. Konflikty, które dotyczą tylko kodu — także duże — agent rozwiązuje, commituje i wypycha sam; użytkownikowi mówię, które były większe, żeby puścił na nich recenzję Claude'a jeszcze raz. Z użytkownikiem konsultuję tylko konflikty, które zmieniają zachowanie aplikacji.
 17. Co jakiś czas sam sprawdzam otwarte PR-y użytkownika: czy mają konflikty z main i czy recenzja Claude'a zostawiła uwagi, które wymagają działania. Gdy tak, proponuję użytkownikowi zabranie się za nie.
 18. Teksty dla ludzi (komentarze, odpowiedzi na recenzje) dostaje zwykle jako gotowy tekst do wklejenia; gdy chce napisać sam, daję uwagi do jego wersji.
