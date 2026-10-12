@@ -149,10 +149,10 @@ jobs:
                 echo "#$n: przypomnienie do $who" | tee -a "$GITHUB_STEP_SUMMARY"
                 discord_send warn "" "Cisza od ${DAYS_QUIET} dni: #$n $(jq -r .title "$RUNNER_TEMP/issue.json")" \
                   "$(jq -r .html_url "$RUNNER_TEMP/issue.json")" \
-                  "$who, czy to zgłoszenie jest nadal potrzebne?
+                  "Czy to zgłoszenie jest nadal potrzebne?
           1. **Tak** — napisz pod nim komentarz, dlaczego.
           2. **Nie** — zamknij je jako „not planned”, a przypomnienia ustaną.
-          Bez odpowiedzi zamknie się samo za ${DAYS_GRACE} dni."
+          Bez odpowiedzi zamknie się samo za ${DAYS_GRACE} dni." "" "${who//@/}"
                 ;;
               close)
                 gh issue comment "$n" --repo "$REPO" --body \
@@ -162,7 +162,7 @@ jobs:
                 gh issue close "$n" --repo "$REPO" --reason "not planned"
                 echo "#$n: zamknięte po ciszy" | tee -a "$GITHUB_STEP_SUMMARY"
                 discord_send grey "" "Zamknięte po ciszy: #$n $(jq -r .title "$RUNNER_TEMP/issue.json")" \
-                  "$(jq -r .html_url "$RUNNER_TEMP/issue.json")" "Nie robimy · $who"
+                  "$(jq -r .html_url "$RUNNER_TEMP/issue.json")" "" "" "${who//@/}"
                 ;;
               unlabel)
                 gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL_STALE"
