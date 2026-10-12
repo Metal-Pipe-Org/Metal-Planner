@@ -14,7 +14,6 @@ from math import sqrt
 import bikes
 import gtfs
 import onboard
-import polinka
 import traficar
 
 # Przesiadka na DOKŁADNIE tym samym słupku - bez marszu, więc nie wycenia się
@@ -609,12 +608,6 @@ def _via_stops(day, rows):
     return via
 
 
-def _notice(trip):
-    """Uwaga do etapu, której nie da się wyczytać z godzin - dziś tylko przy
-    Polince: rozkład wpisany ręcznie i osobny bilet (zgłoszenie #165)."""
-    return {"notice": polinka.NOTE} if trip.startswith(polinka.ID_PREFIX) else {}
-
-
 def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
     """Etap przejazdu jednym kursem, od wsiadania do wysiadania.
 
@@ -646,7 +639,6 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "stops_count": max(len(path_rows) - 1, 1),
         "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
-        **_notice(trip),
         # Publiczny odpowiednik `_trip`: przycisk "trasa" otwiera rozkład linii
         # na wariancie tego kursu - sam headsign nie odróżni zjazdów do
         # zajezdni z dwóch pętli (#270).
@@ -3444,7 +3436,6 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
                                 for s in stops[1:-1]]),
         "path": _round_path(path),
         "trip": seg["trip_id"],
-        **_notice(seg["trip_id"]),
     }
 
 

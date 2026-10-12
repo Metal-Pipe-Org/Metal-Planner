@@ -2,7 +2,7 @@
 
 Pilnujemy trzech rzeczy: że jeździ wtedy, kiedy według PWr jeździ (i ani
 minuty dłużej), że wyszukiwarka bierze ją pod uwagę jak każdy inny pojazd
-i że przy każdym przejeździe stoi notka o ręcznym rozkładzie i osobnym bilecie.
+i że ma własny rodzaj (kolor) na plakietce.
 """
 
 from datetime import date, datetime
@@ -71,7 +71,7 @@ def _dzien_z_polinka():
     return day
 
 
-def test_wyszukiwarka_jedzie_polinka_z_notka(install_day):
+def test_wyszukiwarka_jedzie_polinka(install_day):
     install_day(_dzien_z_polinka())
     wynik = planner.plan_flow(polinka.STATIONS[NG][0], polinka.STATIONS[WW][0],
                               datetime(2026, 10, 13, 7, 0))
@@ -80,8 +80,3 @@ def test_wyszukiwarka_jedzie_polinka_z_notka(install_day):
     etap = pierwsza["legs"][0]
     assert etap["num"] == "Polinka" and etap["mode"] == "cable"
     assert pierwsza["arrival"] == "07:03"
-    assert etap["notice"] == polinka.NOTE
-    assert "Bilety MPK nie obowiązują" in etap["notice"]
-    assert f"{polinka.UPDATED:%d.%m.%Y}" in etap["notice"]
-    assert all("notice" not in leg for j in wynik["journeys"][1:]
-               for leg in j["legs"])

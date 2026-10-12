@@ -5,8 +5,8 @@ DLACZEGO RĘCZNIE. Polinki nie ma w żadnym rozkładzie: wrocławski GTFS jej ni
 zna, a Politechnika, która ją prowadzi, publikuje tylko godziny otwarcia na
 swojej stronie (SOURCE_URL). Nie ma też rozkładu w ścisłym sensie - dwie
 kabiny kursują wahadłowo przez cały czas otwarcia. Wszystko, co tu stoi, jest
-więc przepisane ręcznie i ma datę (UPDATED), a front mówi to wprost przy
-każdym przejeździe Polinką (patrz NOTE).
+więc przepisane ręcznie i ma datę (UPDATED) - do sprawdzenia na stronie PWr
+przy każdej zmianie.
 
 KURSY. Bez rozkładu liczymy ostrożnie (zasada 2 w docs/PRINCIPLES.md - szacunek
 myli się w bezpieczną stronę): odjazd co HEADWAY_SEC w obie strony, przejazd
@@ -16,18 +16,14 @@ co 5 minut zdąży się zawsze.
 
 KIEDY. Według PWr: od poniedziałku do piątku 7:00-18:00, z przerwą
 13:30-14:00; w weekendy i święta nieczynna. Przestoje z powodu pogody (burza,
-śnieg, silny wiatr, mgła) i przeglądy co pół roku są nie do przewidzenia - tego
-nie udajemy, mówi o tym notka.
-
-Bilety MPK ani Urbancard nie obowiązują (osobny bilet z biletomatu), więc
-notka mówi też o cenie: to jedyny odcinek w wyszukiwarce, za który płaci się
-osobno, a pasażer z biletem miejskim musi o tym wiedzieć, zanim wsiądzie.
+śnieg, silny wiatr, mgła) i przeglądy co pół roku są nie do przewidzenia.
+Bilety MPK ani Urbancard nie obowiązują (osobny bilet z biletomatu, 4,60 zł).
 """
 
 from datetime import date, timedelta
 
-# Kiedy ostatnio sprawdzono dane z tego pliku na stronie PWr - front pokazuje
-# tę datę w notce. Przy każdej zmianie czegokolwiek niżej: nowa data.
+# Kiedy ostatnio sprawdzono dane z tego pliku na stronie PWr. Przy każdej
+# zmianie czegokolwiek niżej: nowa data.
 UPDATED = date(2026, 10, 12)
 SOURCE_URL = "https://pwr.edu.pl/en/polinka"
 
@@ -50,13 +46,6 @@ CLOSE_SEC = 18 * 3600
 BREAK_SEC = (13 * 3600 + 30 * 60, 14 * 3600)
 HEADWAY_SEC = 5 * 60
 RIDE_SEC = 3 * 60
-
-FARE = "4,60 zł, ulgowy 2,30 zł"
-
-NOTE = (f"Rozkład wpisany ręcznie — Polinka nie publikuje go online. "
-        f"Stan na {UPDATED:%d.%m.%Y}: pn–pt 7:00–18:00, przerwa 13:30–14:00, "
-        f"w weekendy i święta nieczynna; przy złej pogodzie bywa zamknięta. "
-        f"Bilety MPK nie obowiązują ({FARE}).")
 
 
 def _easter(year):

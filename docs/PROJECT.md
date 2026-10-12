@@ -91,9 +91,9 @@ sensie też nie ma — dwie kabiny jeżdżą wahadłowo — więc przejazdy są
 ostrożne: odjazd co 5 min w obie strony, jazda 3 min. `gtfs.load_day` dokleja
 stacje i przejazdy tuż po kolei, przed budowaniem miejsc, więc przejścia
 piesze do przystanków obok powstają same. Etykieta „Kolejka Polinka" daje
-plakietkę „Polinka" w rodzaju `cable` (granat PWr), a każdy etap Polinką niesie
-`notice`: rozkład wpisany ręcznie, stan na dzień, pogoda i to, że bilety MPK
-nie obowiązują. Stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w
+plakietkę „Polinka" w rodzaju `cable` (granat PWr). Bez notki przy etapie
+(decyzja z #165): to, że rozkład jest wpisany ręcznie, wie ten plik, nie
+pasażer. Stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w
 podpowiedziach nazw. Do trybu rozkładów Polinka nie trafia.
 
 ### 2. Backend — Flask

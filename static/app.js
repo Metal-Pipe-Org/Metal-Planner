@@ -3873,9 +3873,6 @@ function detailHtml(journey) {
                 ? `<button type="button" class="tl-info tl-via-toggle" data-leg="${i}"` +
                   ` aria-expanded="${viaOn}">${ile}</button>`
                 : `<span class="tl-info">${ile}</span>`) +
-            // Uwaga, której nie da się wyczytać z godzin (planner._notice) -
-            // dziś Polinka: rozkład wpisany ręcznie i osobny bilet (#165).
-            (leg.notice ? `<span class="tl-notice">${esc(leg.notice)}</span>` : '') +
             `</span></li>`,
         );
         // Wiersze są zawsze w osi, a zwinięte tylko schowane: rozwinięcie

@@ -1132,20 +1132,6 @@ body.routes-off .results-body { display: none; }
     padding: 2px 0 8px;
 }
 
-/* Uwaga przy etapie (planner._notice) - dziś tylko Polinka (#165): rozkład
-   wpisany ręcznie i osobny bilet. Pełna szerokość, pod liczbą stacji. */
-.tl-notice {
-    flex-basis: 100%;
-    margin-top: 4px;
-    padding: 6px 8px;
-    border-left: 3px solid var(--cable);
-    border-radius: 6px;
-    background: var(--surface-alt);
-    color: var(--ink-soft);
-    font-size: 12px;
-    line-height: 1.35;
-}
-
 .tl-headsign {
     font-size: 12.5px;
     color: var(--ink-soft);
