@@ -1012,6 +1012,27 @@ body.routes-off .results-body { display: none; }
 
 .tip-dir .platform { display: block; margin-left: 0; }
 
+/* Opóźnienie pociągu na żywo (zgłoszenie #71): planowa godzina przekreślona,
+   pod nią rzeczywista, przy nazwie stacji „+7 min" - na czerwono, bo to
+   jedyne miejsce na osi, które nie zgadza się z rozkładem. */
+.tl-time.late { display: flex; flex-direction: column; line-height: 1.1; color: #c62828; }
+.tl-time.late s { color: var(--ink-faint); font-weight: 400; font-size: 11px; }
+.delay {
+    margin-left: 6px;
+    color: #c62828;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.tl-warn {
+    margin: 4px 0 4px 52px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #fdecea;
+    color: #8c2b23;
+    font-size: 12px;
+}
+
 /* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
    a nie w Ustawieniach Developerskich ⚙, bo to wybór PASAŻERA (mam konto w WRM
    albo nie), a nie strojenie algorytmu. */

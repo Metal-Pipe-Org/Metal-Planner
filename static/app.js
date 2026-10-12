@@ -3754,10 +3754,17 @@ function toggleVia(button) {
 
 function detailHtml(journey) {
     const rows = [];
-    const stopRow = (time, name, cls, platform) =>
-        `<li class="tl-stop ${cls}"><span class="tl-time">${esc(time)}</span>` +
+    // `late` - opóźnienie pociągu przy tej stacji w minutach (#71, patrz
+    // loadTrainDelays): planowa godzina przekreślona, pod nią rzeczywista.
+    const stopRow = (time, name, cls, platform, late) =>
+        `<li class="tl-stop ${cls}">` +
+        (late > 0
+            ? `<span class="tl-time late"><s>${esc(time)}</s>${esc(addMinutes(time, late))}</span>`
+            : `<span class="tl-time">${esc(time)}</span>`) +
         `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
-        `${platformHtml(platform)}</span></li>`;
+        `${platformHtml(platform)}` +
+        (late > 0 ? `<span class="delay">+${late} min</span>` : '') +
+        `</span></li>`;
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -3868,8 +3875,11 @@ function detailHtml(journey) {
         // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
         const via = leg.via || [];
         const viaOn = via.length > 0 && viaOpen(leg);
+        const late = trainDelays[leg.trip] || {};
+        const depLate = (late[leg.from] || {}).dep;
+        const arrLate = (late[leg.to] || {}).arr;
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
-                          leg.from_platform));
+                          leg.from_platform, depLate));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
@@ -3906,13 +3916,19 @@ function detailHtml(journey) {
         if (!next || next.kind === 'walk') {
             rows.push(stopRow(leg.to_time, leg.to,
                               `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`,
-                              leg.to_platform));
+                              leg.to_platform, arrLate));
         } else if (leg.onboard) {
             // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
             // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
             // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
             // całej osi - to jest ten moment, w którym trzeba wstać.
-            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform));
+            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform, arrLate));
+        }
+        const missed = missedTransfer(journey.legs, i, arrLate);
+        if (missed) {
+            rows.push(`<li class="tl-warn">⚠️ Przez opóźnienie ${esc(leg.num)} `
+                + `(+${arrLate} min) możesz nie zdążyć na ${esc(missed.num)} `
+                + `o ${esc(missed.from_time)}</li>`);
         }
     });
 
@@ -4527,6 +4543,57 @@ function showWaitNotice(data) {
     if (html) resultsBox.insertAdjacentHTML('afterbegin', html);
 }
 
+// ---------------------------------------- opóźnienia pociągów na żywo (#71) --
+//
+// Trasy liczą się z rozkładu i tak zostaje: opóźnienia przychodzą PO
+// narysowaniu wyniku, osobnym zapytaniem, i tylko dopisują się na osi trasy
+// (patrz detailHtml). Serwer pyta PLK pociąg po pociągu i pilnuje własnych
+// limitów (pkp_live.py) - gdy ich zabraknie, opóźnień po prostu nie ma.
+let trainDelays = {};      // kurs -> {stacja: {arr, dep}} (minuty)
+let delaysToken = 0;       // odsiewa odpowiedź na listę, której już nie ma
+
+function loadTrainDelays() {
+    trainDelays = {};
+    const mine = ++delaysToken;
+    const trips = [...new Set(journeys.flatMap(j => j.legs)
+        .filter(leg => leg.kind === 'ride' && leg.mode === 'train'
+            && String(leg.trip || '').startsWith('PKP:'))
+        .map(leg => leg.trip))];
+    if (!trips.length) return;
+    fetch('/api/train_delays?' + new URLSearchParams({
+        trips: trips.join(','), date: $('date').value,
+    }))
+        .then(r => r.json())
+        .then(data => {
+            if (mine !== delaysToken || !data.delays) return;
+            trainDelays = data.delays;
+            if (Object.keys(trainDelays).length) renderJourneys();
+        })
+        .catch(() => {});      // bez opóźnień trasa jest ta sama, co z rozkładu
+}
+
+/** "15:15" + 7 -> "15:22" (przez północ też). */
+function addMinutes(hhmm, minutes) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const total = ((h * 60 + m + minutes) % 1440 + 1440) % 1440;
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Następny przejazd, na który przez opóźnienie `late` (min) etapu `i` się
+    nie zdąży - albo null. Ta sama minuta zapasu co w planerze
+    (TRANSFER_SEC) plus przejścia pieszo po drodze. */
+function missedTransfer(legs, i, late) {
+    if (!(late > 0)) return null;
+    let walkSec = 0;
+    for (const next of legs.slice(i + 1)) {
+        if (next.kind === 'walk') { walkSec += (next.minutes || 0) * 60; continue; }
+        if (next.kind !== 'ride') return null;
+        const ready = legs[i].arr_sec + late * 60 + walkSec + 60;
+        return ready > next.dep_sec ? next : null;
+    }
+    return null;
+}
+
 /** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
     dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
 function renderPlan(data, refit) {
@@ -4551,6 +4618,7 @@ function renderPlan(data, refit) {
     } else {
         renderJourneys();
     }
+    loadTrainDelays();
     showWaitNotice(data);
     warnOnboardRide(data.onboard);
     if (data.degraded) showDegradedNotice();

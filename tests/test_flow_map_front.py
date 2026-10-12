@@ -617,6 +617,12 @@ def test_platform_and_track_stand_by_boarding_and_alighting(front):
     _check(front, "peron_przy_wsiadaniu_i_wysiadaniu")
 
 
+def test_train_delay_shows_in_the_timeline(front):
+    """#71: opóźnienie pociągu na osi trasy i ostrzeżenie, gdy przez nie
+    przepada przesiadka."""
+    _check(front, "opoznienie_pociagu_w_osi")
+
+
 def test_stops_along_the_way_stand_on_the_map(front):
     """#169: wybrana trasa ma na mapie obwódkę na każdym mijanym przystanku,
     z nazwą i godziną pod kursorem - zawsze, niezależnie od opcji listy."""
