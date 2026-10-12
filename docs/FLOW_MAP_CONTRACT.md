@@ -2,8 +2,8 @@
 
 Gwarancje zachowania **rysowania mapy przepływów** (segmenty, próg,
 kształt sieci) — nie dotyczy listy „Propozycje tras” obok mapy. Testy dla
-każdego punktu, historia wdrożeń i otwarte pytania są w
-[FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md); jak to jest policzone — w
+każdego punktu i otwarte pytania są w
+[FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), historią wdrożeń jest lista commitów; jak to jest policzone — w
 [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md). Edytuj tę listę tylko
 wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 
@@ -13,8 +13,8 @@ wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 > który się zdezaktualizował. Jeśli uważasz, że coś tu wymaga zmiany —
 > zgłoś propozycję i czekaj na zgodę. Nieaktualny akapit w tym pliku jest
 > mniejszym problemem niż kontrakt przepisujący się sam. Wszystko inne
-> (historia, pomiary, szczegóły implementacji) idzie do
-> [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), który wolno dopisywać zawsze.
+> (historia, pomiary, szczegóły implementacji) idzie do opisu commita
+> albo PR-a.
 
 ## 1. Cały wachlarz, nie jedna trasa
 
@@ -235,11 +235,21 @@ liczona od tamtej godziny zabrałaby mu nie kilka wierszy, tylko całą
 odpowiedź.
 
 Odjazdy sprzed chwili, w której mapa stawia tu pasażera, są więc na liście
-celowo — jako szare godziny. Linia, na którą według mapy już się nie zdąży,
-idzie na koniec, żeby na ruchliwym węźle nie wypchnęła tych, po które się tu
-przyszło. Szare godziny da się wyłączyć w ustawieniach (domyślnie są) — wtedy
-tablica zaczyna się od chwili z mapy. Wszystko na osi doby rozkładowej, nie
-zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
+celowo — jako szare godziny. Są dwa rodzaje:
+1. odjazdy od godziny z formularza do chwili z mapy — pasażer może tu być
+   wcześniej, niż mapa policzyła;
+2. spóźniony kurs — ostatni odjazd linii sprzed chwili, w której pasażer może
+   tu być, jeśli spóźniony dowiózłby go do celu wcześniej niż najszybsza
+   trasa. Według rozkładu już odjechał, ale bywa właśnie tym pojazdem, który
+   stoi na przystanku. Dostaje go też linia, której mapa tu nie rysuje.
+
+Z kilku szarych godzin linia pokazuje tylko najpóźniejszą.
+
+Linia, na którą według mapy już się nie zdąży, idzie na koniec, żeby na
+ruchliwym węźle nie wypchnęła tych, po które się tu przyszło. Szare godziny
+da się wyłączyć w ustawieniach (domyślnie są) — wtedy tablica zaczyna się od
+chwili z mapy. Wszystko na osi doby rozkładowej, nie zegarowej: przesiadka
+o 24:40 należy do rozkładu dnia poprzedniego.
 
 **Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
 ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne

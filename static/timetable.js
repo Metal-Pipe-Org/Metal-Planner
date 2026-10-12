@@ -87,7 +87,7 @@ let openDep = null;       // rozwinięty odjazd (indeks) - jego kurs jest na map
 let viewBeforeTrip = null;   // widok mapy sprzed rozwinięcia kursu, do odtworzenia
 let tripCache = new Map();
 let pendingBoard = null;  // wybór przyniesiony z rozkładu linii: {point, num, mode}
-let pendingLine = null;   // to samo w drugą stronę: {mode, headsign} spoza rozkładów
+let pendingLine = null;   // to samo w drugą stronę: {mode, headsign, trip} spoza rozkładów
 
 // ------------------------------------------------------ warstwy mapy ----
 
@@ -320,7 +320,7 @@ window.timetableMode = {
         ponownego szukania. */
     openLine(line) {
         if (!line || !this.hasLine(line.num, line.mode)) return false;
-        pendingLine = {mode: line.mode, headsign: line.headsign};
+        pendingLine = {mode: line.mode, headsign: line.headsign, trip: line.trip};
         setMode(true);
         queryInput.value = line.num;
         load('line');
@@ -450,6 +450,7 @@ function load(forced) {
         // tramwaj o tym samym numerze.
         const mode = (pendingDir && pendingDir.mode) || MODE_OF_NUM.get(query);
         if (mode) params.set('mode', mode);
+        if (pendingDir && pendingDir.trip) params.set('trip', pendingDir.trip);
         url = '/api/line?' + params;
     } else {
         // W polu stoi ETYKIETA (patrz B.prettyStopName), a /api/stop_board
@@ -479,8 +480,11 @@ function load(forced) {
             // Otwieramy na wariancie, którym linia jeździ cały dzień - a nie
             // na pierwszym z brzegu zjeździe do zajezdni. Wyjątek: wejście
             // przyciskiem "trasa" zna kierunek konkretnego kursu i ma prawo
-            // wskazać wariant dokładniej (patrz variantForHeadsign).
-            const wanted = pendingDir ? variantForHeadsign(pendingDir.headsign) : -1;
+            // wskazać wariant dokładniej (patrz variantForHeadsign). Spod
+            // rozwiniętego kursu znany jest sam kurs - a ten sam napis na
+            // czole noszą zjazdy z obu pętli, więc kurs wygrywa (#270).
+            const wanted = payload.trip_variant ?? (pendingDir
+                ? variantForHeadsign(pendingDir.headsign) : -1);
             variantIndex = wanted >= 0 ? wanted
                 : payload.variants.indexOf(mainVariants()[0] || payload.variants[0]);
             sideOpen = wanted >= 0 && !mainVariants().includes(payload.variants[wanted]);
@@ -1178,19 +1182,20 @@ function tripStopsHtml(dep) {
     return `
         <ol class="tt-stops ${esc(trip.mode)}">${stops}</ol>
         <p class="field-hint tt-trip-foot">
-            ${routeButton(data.lines[dep.line], 'cała trasa')}
+            ${routeButton(data.lines[dep.line], 'cała trasa', dep.trip)}
         </p>`;
 }
 
 /** Przycisk "trasa" - ten sam, co "odjazdy" w rozkładzie linii, tylko wiedzie
     w drugą stronę. Pusty napis tam, gdzie rozkład tej linii nie zna (pociągi
     PKP), bo przycisk prowadzący donikąd jest gorszy niż jego brak. */
-function routeButton(line, label) {
+function routeButton(line, label, trip) {
     if (!line || !LINE_KEYS.has(`${line.mode}|${line.num}`)) return '';
     return `<button type="button" class="tt-route"
                     data-route-num="${esc(line.num)}"
                     data-route-mode="${esc(line.mode)}"
                     data-route-headsign="${esc(line.headsign || '')}"
+                    data-route-trip="${esc(trip || '')}"
                     title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'linia')} ${esc(line.num)}"
                     >${ROUTE_ICON}${esc(label)}</button>`;
 }
@@ -1223,6 +1228,7 @@ resultsBox.addEventListener('click', event => {
             num: route.dataset.routeNum,
             mode: route.dataset.routeMode,
             headsign: route.dataset.routeHeadsign,
+            trip: route.dataset.routeTrip,
         });
         return;
     }

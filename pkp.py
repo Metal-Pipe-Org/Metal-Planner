@@ -213,7 +213,7 @@ def _city_group_labels(station_names, coords_by_name, literal_wildcards):
     w jedną "opcję" wyszukiwania - CSA wybrałby MIĘDZY NIMI jak gdyby były
     zamiennikami, co dawałoby PEWNĄ, ale BŁĘDNĄ trasę zamiast "nie
     znaleziono" (dokładnie ten rodzaj błędu, którego cała reszta tego
-    pliku unika - patrz np. NAME_OVERRIDES i historia w docs/PROJECT.md).
+    pliku unika - patrz np. NAME_OVERRIDES i historia commitów).
     Stąd dodatkowy warunek: wszystkie stacje kandydata muszą zmieścić się
     w promieniu CITY_GROUP_MAX_RADIUS_KM od ŚRODKA CIĘŻKOŚCI grupy -
     prawdziwe miasto (nawet duże, patrz stała) przechodzi, dwie różne

@@ -201,6 +201,13 @@ def test_the_board_lists_departure_times_per_line(front):
     _check(front, "tablica_godziny_w_wierszu_linii")
 
 
+def test_board_shows_late_courses_beside_grey_hours(front):
+    """Zgłoszenie #238: spóźniony kurs to też szara godzina - z obu rodzajów
+    linia pokazuje tylko najpóźniejszą, ten sam kurs raz, także na linii
+    spoza mapy; bez szarych godzin w ustawieniach go nie ma."""
+    _check(front, "tablica_spoznione_kursy_obok_szarych")
+
+
 def test_recent_places_come_first_in_suggestions(front):
     """Ostatnio wyszukiwane miejsca stoją w podpowiedziach na początku, od
     najświeższego, a reszta trafień zostaje w swojej kolejności (#142)."""
@@ -408,6 +415,14 @@ def test_the_start_dot_on_a_route_needs_no_recognising(front):
     """Na wybranej trasie startem jest wsiadanie do pierwszego przejazdu -
     to wynika z samej trasy, więc nie ma tu czego dopasowywać po nazwie."""
     _check(front, "kropka_startowa_na_trasie")
+
+
+def test_the_start_without_a_node_still_has_its_dot(front):
+    """Gdy każda droga zaczyna się dojściem pieszym na inny przystanek, startu
+    nie dotyka żaden kawałek mapy i nie ma on węzła - a jego słupki i tak
+    gasną. Zielona kropka ma stanąć w środku słupków sama, wyglądająca jak
+    kliknięty punkt startu, i tylko wtedy (zgłoszenie #276)."""
+    _check(front, "start_bez_wezla_ma_kropke")
 
 
 def test_the_corner_window_opens_on_the_start_stop(front):
