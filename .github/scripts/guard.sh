@@ -62,8 +62,6 @@ minimize_comment() {
 }
 
 # Ocena Claude'a i informacja o nieudanej ocenie niosą na końcu ten znacznik.
-# Starsze, sprzed znacznika, rozpoznaje stopka pod oceną albo nagłówek
-# informacji o porażce.
 REVIEW_MARK='<!-- claude-review -->'
 FOLDED_MARK='<!-- claude-review-folded -->'
 
@@ -76,9 +74,7 @@ fold_review_comments() {
     .[]
     | select(.user.login == "github-actions[bot]" and .id != $keep)
     | select(.body | contains($folded) | not)
-    | select(.body | contains($mark)
-        or contains("— ocena gotowa. Gdy uznasz")
-        or test("^(⚪|⏳) \\*\\*Ocena się nie udała"))
+    | select(.body | contains($mark))
     | (.body | split("\n")) as $lines
     | {id, body: ($lines[0] + "\n\n<details><summary>Starsza ocena — rozwiń</summary>\n\n"
         + ($lines[1:] | join("\n")) + "\n\n</details>\n\n" + $folded)}'
