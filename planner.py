@@ -898,7 +898,7 @@ def _round_path(coords):
 # GĘSTOŚĆ (patrz _map_density), a nie tam, gdzie wypada jakaś liczba minut -
 # ta sama liczba minut dawała raz pustą mapę, raz nieczytelny gąszcz.
 # Domyślna wartość jest poniżej mediany dawnych map (3,5 przy oknie 125%,
-# 5-15 min) - wybór użytkownika, pomiar w FLOW_MAP_NOTES.md, 2026-09-13.
+# 5-15 min) - wybór użytkownika, pomiar w historii commitów, 2026-09-13.
 DEFAULT_MAP_DENSITY = 2.5    # km różnych korytarzy na km boku kadru (km/√km²)
 MIN_MAP_DENSITY = 0.5
 MAX_MAP_DENSITY = 15.0       # sufit suwaka pod zębatką - pilnowany tutaj
@@ -1131,8 +1131,8 @@ def _map_density(corridor_km, frame_km2):
     w to samo okno, a kreska ma stałą grubość w pikselach - tłok to więc
     długość korytarzy przez BOK kadru, nie przez jego powierzchnię. Przez
     powierzchnię kadr 30 razy większy dostawał 30 razy mniej, choć na
-    ekranie jest ciaśniej tylko √30 ≈ 5,5 raza (FLOW_MAP_NOTES.md,
-    2026-09-13)."""
+    ekranie jest ciaśniej tylko √30 ≈ 5,5 raza (pomiar w historii
+    commitów, 2026-09-13)."""
     return corridor_km / sqrt(frame_km2)
 
 

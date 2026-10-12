@@ -34,7 +34,7 @@ i kraje sąsiednie naraz) - węzły OTAGOWANE jako infrastruktura kolejowa
 Nominatim (usunięty z tego pliku wcześniej, na wyraźną prośbę użytkownika -
 dopasowywał po samej nazwie, a Polska ma więcej niż jedno miejsce o tej
 samej nazwie w różnych regionach, co kilkukrotnie kończyło się złym, ale
-przekonującym wynikiem, patrz historia w docs/PROJECT.md; węzeł otagowany
+przekonującym wynikiem, patrz historia commitów; węzeł otagowany
 wprost jako stacja kolejowa tego problemu nie ma). Trwały cache na dysku -
 raz znaleziona stacja nigdy nie jest odpytywana drugi raz, kolejne przebiegi
 dogadują tylko nowe. Stacja, której żadne z trzech źródeł nie ma, zostaje
@@ -403,7 +403,7 @@ def _save_unmapped_stations(unmapped):
 # OpenStreetMap (Overpass) - TRZECIE źródło, po mapie PLK i portalu
 # pasażera. Przywrócone na wyraźną prośbę użytkownika, ale INACZEJ niż
 # usunięty wcześniej Nominatim (patrz nagłówek geocode_missing_stations
-# i historia w docs/PROJECT.md, dlaczego w ogóle wypadł): to zapytanie
+# i historia commitów, dlaczego w ogóle wypadł): to zapytanie
 # o węzły OTAGOWANE JAKO INFRASTRUKTURA KOLEJOWA w warstwie transportu
 # publicznego (tag `railway`), nie o dopasowanie tekstowe do nazwy
 # miejscowości. Pyta się więc wprost "gdzie jest węzeł kolejowy o nazwie
@@ -426,7 +426,7 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 # zwraca `remark: runtime error: Query timed out` po >220 s i 0 wyników,
 # mimo że każdy z dwóch mniejszych zakresów osobno kończy się bez
 # problemu. Ten sam podział, co w usuniętym wcześniej mechanizmie "stacje
-# za granicą" (patrz historia w docs/PROJECT.md) - tu bez trwałego
+# za granicą" (patrz historia commitów) - tu bez trwałego
 # oznaczania "to na pewno zagranica": oba zapytania są tanie (raz na
 # geokodowanie), więc nie ma po co dodawać tej złożoności z powrotem.
 OVERPASS_TIMEOUT_SEC = 200
@@ -594,7 +594,7 @@ def _fetch_osm_nodes(query, timeout_sec):
         # nazwa węzła, gdy ktoś w OSM ją dodał - dodatkowa, nie zamienna
         # szansa na trafienie, bez cofania się do dopasowania tekstowego
         # po dowolnej nazwie miejscowości (to był problem Nominatim, patrz
-        # historia w docs/PROJECT.md) - to wciąż ten sam węzeł, tylko więcej
+        # historia commitów) - to wciąż ten sam węzeł, tylko więcej
         # jego udokumentowanych nazw.
         names = {tags.get("name"), tags.get("name:en"), tags.get("int_name")}
         for name in names:
@@ -703,7 +703,7 @@ def geocode_missing_stations(stations_by_id):
     domenowo polskie) - dogania na końcu OpenStreetMap: węzły OTAGOWANE
     jako infrastruktura kolejowa, nie dopasowanie tekstowe do nazwy
     miejscowości (patrz nagłówek _fetch_osm_nodes, czym różni się od
-    usuniętego wcześniej Nominatim - historia w docs/PROJECT.md). DWA
+    usuniętego wcześniej Nominatim - historia commitów). DWA
     OSOBNE zapytania - najpierw Polska (_fetch_osm_stations), potem kraje
     sąsiednie naraz (_fetch_osm_stations_abroad) - jedno połączone zapytanie
     o wszystko na raz nie mieści się w rozsądnym czasie (sprawdzone na
