@@ -254,10 +254,12 @@ function esc(text) {
     return div.innerHTML;
 }
 
-/** esc() do wartości atrybutu: innerHTML zostawia cudzysłowy, a w atrybucie
-    cudzysłów kończy wartość i resztę tekstu czyta się jak kod. */
-function escAttr(text) {
-    return esc(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+function escAttr(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
@@ -305,7 +307,7 @@ const ENDPOINT_STYLE = {
 
 function styleFor(name) {
     // Przy narysowanej mapie start i cel mają po jednej własnej kropce
-    // (stopDot, flowEndDot) - słupki powtarzałyby to samo kilka razy obok,
+    // (stopDot, flowEndDots) - słupki powtarzałyby to samo kilka razy obok,
     // więc gasną jak wszystkie inne.
     if (!plannerSuspended && !baseDimmed) {
         if (name === sel.start) return ENDPOINT_STYLE.start;
@@ -914,10 +916,19 @@ $('locate-offer-yes').addEventListener('click', () => {
     updatePointMarker('start', null);
     restyle(name);
     if (endInput.value) search();
+    else focusEnd();
 });
 
 $('locate-offer-no').addEventListener('click', hideLocateOffer);
 startInput.addEventListener('input', hideLocateOffer);
+
+/** Gotowy start przy pustym celu: kursor sam przechodzi do „Dokąd" (#275),
+    jak w Jakdojade. Wpisanego celu nie ruszamy - wtedy start od razu szuka.
+    Klik w mapę ani ◎ tego nie wołają: oba zostawiają mapę do wskazania celu,
+    a klawiatura telefonu zasłoniłaby jej pół (i pytanie „Stoisz na…"). */
+function focusEnd() {
+    if (!endInput.value.trim()) endInput.focus();
+}
 
 /** Przycisk ◎ - w przeciwieństwie do kliknięcia w mapę nadpisuje start, który
     już był (o to się prosi, klikając go), ale celu nie rusza. */
@@ -1281,7 +1292,7 @@ let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania be
 let flowSpanLayer = null;   // kropki "stąd - dotąd" pod kursorem
 let fastestLayer = null;    // najszybsza trasa spod paska nad mapą
 let flowDotLayer = null;    // węzły przesiadkowe wachlarza (patrz flowStopDots)
-let flowEndDot = null;      // kropka celu (patrz endDot)
+let flowEndDots = null;     // kropki startu i celu (patrz endDots)
 let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
 let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
 let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
@@ -1290,7 +1301,7 @@ function clearFlow() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
-    if (flowEndDot) { map.removeLayer(flowEndDot); flowEndDot = null; }
+    if (flowEndDots) { map.removeLayer(flowEndDots); flowEndDots = null; }
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
     clearBikeRides();
@@ -1373,9 +1384,8 @@ function drawFlow(flow, refit) {
     if (flowDotLayer) map.removeLayer(flowDotLayer);
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
-    if (flowEndDot) map.removeLayer(flowEndDot);
-    flowEndDot = endDot();
-    if (flowEndDot) flowEndDot.addTo(map);
+    if (flowEndDots) map.removeLayer(flowEndDots);
+    flowEndDots = endDots(flow.nodes).addTo(map);
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
@@ -2458,6 +2468,8 @@ function timetableLinesHtml(data, mapSec) {
         // Z szarych tylko ostatnia - "uciekło ci o 3 minuty" - bo starsze
         // zajmowały miejsca godzinom, na które się zdąży, i wypychały je
         // z wiersza (Lutosławskiego: sześć szarych 310, żadnej na czas).
+        // Spóźniony kurs (#238, patrz withLate) to też szara godzina - z obu
+        // rodzajów razem zostaje najpóźniejsza.
         const szare = dotOpts.ttPast ? przed.slice(-1) : [];
         const miejsce = TT_TIMES_MAX - szare.length;
         const ciete = po.length > miejsce;
@@ -2577,6 +2589,36 @@ function withArrivals(data, lines) {
     return {...data, departures: [...data.departures, ...rows]};
 }
 
+/** Spóźnione kursy (zgłoszenie #238): na tablicy każdego przystanku mapy
+    każda linia - także ta, której mapa tam nie rysuje - dostaje swój
+    poprzedni kurs, jeśli spóźniony i wciąż stojący na przystanku dowiózłby
+    wcześniej niż najszybsza trasa (`late` przy węźle, patrz
+    planner._late_departures). O 8:11 z pl. Wróblewskiego mapa nie znała
+    czwórki z 8:10, która spóźniona stała na przystanku.
+
+    To zwykła szara godzina w tablicy: z niej i ze zwykłych szarych linia
+    pokazuje tylko najpóźniejszą (patrz timetableLinesHtml), a ten sam kurs
+    nie wchodzi drugi raz. Podlega temu samemu ustawieniu, co szare godziny.
+
+    Wiersz dostaje `flow` linii z mapy, jeśli ją mapa proponuje - inaczej
+    stanąłby jako osobny wiersz obok jej odjazdów. */
+function withLate(data, where) {
+    if (!dotOpts.ttPast || !where.late) return data;
+    const flow = new Map((where.lines || []).filter(l => l.flow !== 'end')
+        .map(l => [lineKey(l), l.flow]));
+    const key = d => `${lineKey({kind: d.mode, num: d.num, headsign: d.headsign})}@${d.sec}`;
+    const known = new Set(data.departures.map(key));
+    const rows = where.late.map(l => ({
+        time: fmtClock(l.sec),
+        sec: l.sec,
+        num: l.num,
+        mode: l.kind,
+        headsign: l.headsign,
+        flow: flow.get(lineKey(l)),
+    })).filter(d => !known.has(key(d)));
+    return {...data, departures: [...rows, ...data.departures]};
+}
+
 /** Wycina odjazdy zza horyzontu mapy.
 
     Siatka bezpieczeństwa POD odsiewem z keepOfferedLines, nie zamiast niego:
@@ -2673,7 +2715,8 @@ function loadTimetable(dot, where, sec) {
             // jeszcze się dojedzie", a wiersz przyjazdu nie jest odjazdem -
             // to fakt z samej mapy, więc nie ma go czym odsiewać.
             const html = timetableHtml(data.error ? data : withArrivals(
-                keepWithinHorizon(keepOfferedLines(data, where.lines), where.deadline),
+                withLate(keepWithinHorizon(keepOfferedLines(data, where.lines),
+                                           where.deadline), where),
                 where.lines), sec);
             // Pustą tablicę zapamiętujemy (to też odpowiedź), ale błędu już
             // nie: offline z service workera wraca jako {error}, a po powrocie
@@ -2787,21 +2830,36 @@ const flowDotStyle = (w = 1) => {
     z czego odtworzyć - i nie powinien zgadywać po odległości na ekranie. */
 function flowStopDots(nodes, deadline) {
     return (nodes || []).map(n => stopDot(
-        nodePoint(n), {name: n.name, lines: n.lines, deadline, start: n.start},
+        nodePoint(n),
+        // `late` - spóźnione kursy z tego przystanku (#238, patrz withLate).
+        {name: n.name, lines: n.lines, deadline, start: n.start, late: n.late},
         // Start nigdy nie blednie: to nie jest jedna z opcji, tylko miejsce,
         // w którym stoisz.
         n.sec, flowDotStyle(n.start ? 1 : n.w)));
 }
 
-/** Kropka celu - jedna w środku jego słupków, w miejsce ich wszystkich
-    (patrz styleFor). Start ma ją z węzła wachlarza, ale cel węzłem nie jest:
-    tu się tylko wysiada. Osobno od flowDotLayer, bo wybrana trasa chowa
-    tamte kropki, a cel ma zostać widać. */
-function endDot() {
-    const poles = !isPoint(sel.end) && markersByName.get(sel.end);
+/** Kropki startu i celu - po jednej w środku ich słupków, w miejsce ich
+    wszystkich (patrz styleFor). Cel węzłem nie jest: tu się tylko wysiada.
+    Start ma kropkę z węzła wachlarza, ale tylko wtedy, gdy dotyka go któryś
+    narysowany kawałek - gdy każda droga zaczyna się dojściem pieszym na inny
+    przystanek, węzła startu nie ma i bez tej kropki start znikał z mapy
+    (zgłoszenie #276). Taki start wygląda jak kliknięty punkt (POINT_STYLE):
+    też jest miejscem, z którego się dopiero dochodzi do przystanku.
+    Osobno od flowDotLayer, bo wybrana trasa chowa tamte kropki, a start
+    i cel mają zostać widać. */
+function endDots(nodes) {
+    const dots = [endpointDot(sel.end, ENDPOINT_STYLE.end)];
+    if (!(nodes || []).some(n => n.start)) {
+        dots.push(endpointDot(sel.start, POINT_STYLE.start));
+    }
+    return L.layerGroup(dots.filter(Boolean));
+}
+
+function endpointDot(name, style) {
+    const poles = !isPoint(name) && markersByName.get(name);
     if (!poles) return null;
     const center = L.latLngBounds(poles.map(m => m.getLatLng())).getCenter();
-    return L.circleMarker(center, {...ENDPOINT_STYLE.end, interactive: false});
+    return L.circleMarker(center, {...style, interactive: false});
 }
 
 /** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
@@ -3280,14 +3338,15 @@ const ROUTE_ICON =
     przycisku zamiast prowadzić w komunikat o nieznanej linii. Kierunek jedzie
     razem z numerem - rozkład ma się otworzyć na tym wariancie, którym jedzie
     ten kurs, a nie na przeciwnym. */
-function routeButtonHtml(line, label) {
+function routeButtonHtml(line, label, trip) {
     const tt = window.timetableMode;
     if (!tt || !tt.hasLine || !tt.hasLine(line.num, line.mode)) return '';
     return `<button type="button" class="tt-route"
-                    data-route-num="${esc(line.num)}"
-                    data-route-mode="${esc(line.mode)}"
-                    data-route-headsign="${esc(line.headsign || '')}"
-                    title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
+                    data-route-num="${escAttr(line.num)}"
+                    data-route-mode="${escAttr(line.mode)}"
+                    data-route-headsign="${escAttr(line.headsign || '')}"
+                    data-route-trip="${escAttr(trip || '')}"
+                    title="Cała trasa: ${escAttr(MODE_LABEL[line.mode] || 'Linia')} ${escAttr(line.num)}"
                     >${ROUTE_ICON}${esc(label)}</button>`;
 }
 
@@ -3302,6 +3361,7 @@ function routeClick(event) {
         num: button.dataset.routeNum,
         mode: button.dataset.routeMode,
         headsign: button.dataset.routeHeadsign,
+        trip: button.dataset.routeTrip,
     });
     return true;
 }
@@ -3544,7 +3604,7 @@ function detailHtml(journey) {
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
             (leg.onboard ? '<span class="tl-tag">jedziesz tym pojazdem</span>' : '') +
-            routeButtonHtml(leg, 'trasa') +
+            routeButtonHtml(leg, 'trasa', leg.trip) +
             (via.length
                 ? `<button type="button" class="tl-info tl-via-toggle" data-leg="${i}"` +
                   ` aria-expanded="${viaOn}">${ile}</button>`
@@ -4636,7 +4696,9 @@ function attachAutocomplete(input, onPick, options = {}) {
 attachAutocomplete(startInput, () => {
     if (isPoint(sel.start)) { sel.start = null; updatePointMarker('start', null); }
     if (endInput.value) search();
-}, {suggest: suggestRecentFirst('start')});
+    else focusEnd();
+}, {suggest: suggestRecentFirst('start'),
+    onEnter: () => (startInput.value.trim() && !endInput.value.trim() ? focusEnd() : search())});
 attachAutocomplete(endInput, () => {
     if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
     if (startInput.value) search();
@@ -5385,7 +5447,7 @@ function suspendPlanner() {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
-    if (flowEndDot) { map.removeLayer(flowEndDot); flowEndDot = null; }
+    if (flowEndDots) { map.removeLayer(flowEndDots); flowEndDots = null; }
     // Punkty i wyróżnione słupki relacji schodzą razem z wachlarzem: same,
     // bez linii między nimi, mówiłyby o wyszukiwaniu, którego nie widać.
     updatePointMarker('start', null);
