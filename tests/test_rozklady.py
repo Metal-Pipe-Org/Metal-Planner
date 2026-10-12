@@ -159,6 +159,26 @@ def test_kurs_po_polnocy_nalezy_do_doby_ktora_wyjechal(feed):
     assert [s["name"] for s in zjazd[0]["stops"]] == ["RYNEK", "Zajezdnia GAJ"]
 
 
+def test_cala_trasa_kursu_wskazuje_jego_wariant_a_nie_napis(feed):
+    """"Cała trasa" spod rozwiniętego kursu ma otworzyć przebieg TEGO kursu
+    (#270). Napis na czole go nie wskaże: skrót i pełny kierunek oba jadą
+    do CENTRUM, a zjazdy do zajezdni z obu pętli też noszą jeden napis."""
+    def wariant(kurs):
+        rozklad = timetables.line_timetable("17", SUNDAY, trip=kurs)
+        return rozklad["variants"][rozklad["trip_variant"]]
+
+    assert [s["id"] for s in wariant("t17_skrot")["stops"]] == ["R1", "C"]
+    assert [s["id"] for s in wariant("t17_a")["stops"]] == ["R1", "B", "C"]
+
+
+def test_kurs_spoza_wariantow_dnia_nie_wskazuje_niczego(feed):
+    """Sobotni zjazd o 24:20 stoi na NIEDZIELNEJ tablicy, ale w niedzielnym
+    rozkładzie linii go nie ma - front wraca wtedy do wyboru po napisie."""
+    rozklad = timetables.line_timetable(
+        "17", SUNDAY, trip=gtfs.PREV_DAY_PREFIX + "t17_noc")
+    assert "trip_variant" not in rozklad
+
+
 def test_linia_bez_kursow_tego_dnia_nie_jest_bledem(feed):
     """Rozkład na dzień, w którym linia nie jeździ, ma być pustą tablicą
     z wyjaśnieniem - nie komunikatem "nie ma takiej linii"."""
