@@ -84,7 +84,7 @@ Python 3.11 — na nim chodzą testy i lokalne środowisko (obraz Dockera używa
 Flask bez frameworka na froncie i bez kroku budowania. `update_gtfs.py`
 pobiera rozkład i buduje z niego SQLite; `planner.py` liczy mapę i trasy na
 tablicy połączeń dnia trzymanej w pamięci; `routes.py` wystawia API;
-`static/app.js` to cały front mapy. Pełny opis — w
+`static/app.js` to cały front mapy. Architektura i algorytmy — w
 [docs/PROJECT.md](docs/PROJECT.md).
 
 ## Wdrożenie
@@ -162,14 +162,14 @@ Cały sposób pracy opisuje [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Dokumentacja
 
-25. [docs/PROJECT.md](docs/PROJECT.md) — architektura, algorytmy, API,
-    struktura plików i changelog.
+25. [docs/PROJECT.md](docs/PROJECT.md) — architektura, algorytmy,
+    znane ograniczenia.
 26. [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md) — gwarancje
     zachowania mapy przepływów; zmienia się wyłącznie na wyraźne polecenie.
 27. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad
     pojedynczymi funkcjami; też tylko na wyraźne polecenie.
-28. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu,
-    otwarte pytania i dziennik zmian mapy z pomiarami i decyzjami.
+28. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu
+    i otwarte pytania.
 29. [docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md) — jak mapa jest
     liczona, krok po kroku na przykładzie (po angielsku).
 30. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład

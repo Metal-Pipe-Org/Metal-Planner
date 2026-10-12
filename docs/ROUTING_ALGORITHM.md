@@ -29,10 +29,10 @@ What frames the map:
    the drawn network has a target density: total length of *distinct*
    corridors divided by the side of the frame the relation is shown in
    (`_corridor_km`, `_map_density`). Lines lying on top of each other count
-   once. The target is a slider under ⚙ (default 2.5); "Pokaż więcej"
+   once, and the frame is never narrower than a kilometre. The target is a slider under ⚙ (default 2.5, range 0.5–15); "Pokaż więcej"
    ("show more") multiplies it by 2, 3 and 4, and every click is guaranteed
    to add something — if the new target changes nothing, the threshold keeps
-   moving to the first thing that is actually new.
+   moving to the first thing that is actually new. How late the map reaches is a result of the threshold, not a setting.
 5. **Everything after the choice**: cutting into pieces, real street
    geometry, corridor number groups, transfer dots, cars and bikes
    (`_finalize_segments` onwards).
@@ -83,7 +83,7 @@ than the search window earlier than another label standing at the same
 place no later. The search window starts at 20 minutes past `best_arr` and
 grows in 5-minute steps up to 40 only when the map needs it — the cost
 grows steeply with the width, because nothing else cuts off "riding around
-while waiting".
+while waiting". In practice: tenths of a second for an ordinary map, up to a few seconds after three "Pokaż więcej" clicks on dense relations.
 
 Labels with the same minutes are **twins**: they travel on as one label and
 reach the map together. Two lines arriving at a transfer in the same minute
