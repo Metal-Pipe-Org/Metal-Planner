@@ -140,21 +140,18 @@ jobs:
 
             issues/assigned)
               if [ "$ASSIGNEE" = "$SENDER" ]; then
-                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "**$ASSIGNEE** bierze to na siebie"
+                discord_send info "$SENDER" "Przypisanie sobie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               else
-                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "@$ASSIGNEE, **$SENDER** przypisuje Ci to zgłoszenie"
+                discord_send info "$SENDER" "Przypisanie dla $ASSIGNEE: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "" "" "$ASSIGNEE"
               fi
               ;;
 
             issues/unassigned)
               if [ "$ASSIGNEE" = "$SENDER" ]; then
-                discord_send grey "$SENDER" "Zdjęte przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "**$ASSIGNEE** rezygnuje z tego zgłoszenia"
+                discord_send grey "$SENDER" "Zdjęte przypisanie sobie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               else
-                discord_send grey "$SENDER" "Zdjęte przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "**$ASSIGNEE**, wypisano Cię z tego zgłoszenia"
+                discord_send grey "$SENDER" "Zdjęte przypisanie dla $ASSIGNEE: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               fi
               ;;
 
@@ -229,7 +226,7 @@ jobs:
 
             pull_request_target/review_requested)
               discord_send info "$SENDER" "Prośba o recenzję: #$PR_N $PR_TITLE" "$PR_URL" \
-                "@$REVIEWER, **$SENDER** prosi Cię o recenzję"
+                "" "" "$REVIEWER"
               ;;
 
             pull_request_review/submitted)
@@ -247,13 +244,19 @@ jobs:
               esac
               extra=""
               if [ "${count:-0}" -gt 0 ]; then
-                extra=" · komentarze w kodzie: $count"
+                extra="Komentarze w kodzie: $count"
               fi
               excerpt=$REVIEW_BODY
               if [ -z "$excerpt" ] && [ "${count:-0}" -gt 0 ]; then
                 excerpt=$(gh api "repos/$REPO/pulls/$PR_N/reviews/$REVIEW_ID/comments" --jq '.[0].body')
               fi
+              # Recenzja zawsze dotyczy autora PR-a, więc wystarczy ping nad
+              # kartą; wymienianie go jeszcze w treści tylko ją wydłuża.
+              ping=""
+              if [ "$PR_AUTHOR" != "$SENDER" ]; then
+                ping=$PR_AUTHOR
+              fi
               discord_send "$color" "$SENDER" "$what: #$PR_N $PR_TITLE" "$REVIEW_URL" \
-                "Autor PR-a: $(autor "$PR_AUTHOR")$extra" "$excerpt"
+                "$extra" "$excerpt" "$ping"
               ;;
           esac
