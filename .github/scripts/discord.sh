@@ -25,7 +25,9 @@
 #   FRAGMENT  tekst od ludzi (opis, komentarz) — wstawiany pod opisem w całości
 #             albo wcale
 #   PINGI     loginy po spacji, które wołamy nad kartą bez wymieniania ich
-#             w treści — gdy z tytułu i tak wiadomo, czemu ktoś dostał ping
+#             w treści — gdy z tytułu i tak wiadomo, czemu ktoś dostał ping.
+#             Login spoza mapy stoi tam pogrubiony, bez pingu: inaczej karta
+#             nie mówiłaby, kogo dotyczy
 discord_send() {
   if [ -z "${DISCORD_WEBHOOK:-}" ]; then
     echo "Brak sekretu DISCORD_WEBHOOK — pomijam Discorda."
@@ -87,7 +89,14 @@ discord_send() {
         | if ($scan | test($re; "i"))
           then .desc |= gsub($re; "<@" + $p.value + ">"; "i") | .users += [$p.value]
           else . end)
-    | {content: (.users | map("<@" + . + ">") | join(" ")),
+    | ($ids | with_entries(.key |= ascii_downcase)) as $lids
+    | ($pings | split(" ") | map(select(. != ""))
+      | reduce .[] as $l ([]; if any(.[]; ascii_downcase == ($l | ascii_downcase))
+          then . else . + [$l] end)) as $named
+    | {content: ([$named[] | $lids[ascii_downcase] as $id
+          | if $id then "<@" + $id + ">" else "**" + . + "**" end]
+        + (.users - [$named[] | $lids[ascii_downcase] // empty] | map("<@" + . + ">"))
+        | join(" ")),
        allowed_mentions: {parse: [], users: .users},
        embeds: [{color: ($colors[$color] // $colors.grey), title: $title, url: $url}
          + (if .desc != "" then {description: .desc} else {} end)]}
