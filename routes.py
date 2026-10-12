@@ -11,6 +11,7 @@ import gtfs
 import naming
 import onboard
 import pkp
+import polinka
 import timetables
 import traficar
 import vehicles
@@ -170,6 +171,9 @@ def init_routes(app):
             {"name": name, "kind": "train" if name in train_only else "stop"}
             for name in sorted(gtfs_names | pkp_names)
         ]
+        # Stacje Polinki (zgłoszenie #165) - do podpowiedzi jak każdy słupek.
+        stops += [{"name": s["name"], "kind": "cable"} for s in polinka.stations_geo()]
+        stops.sort(key=lambda s: s["name"])
 
         return render_template(
             "index.html",
@@ -217,6 +221,8 @@ def init_routes(app):
         # miejsce, gdzie PKP i MPK są traktowane inaczej - bo tylko to
         # naprawdę je różni (markery), nie samo wyszukiwanie tras.
         stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
+        # Stacje Polinki (zgłoszenie #165) - własny rodzaj, własny kolor.
+        stops += [{**s, "kind": "cable"} for s in polinka.stations_geo()]
         # Nazwa miejsca dopiero na całej liście: DWORZEC GŁÓWNY i stacja
         # Wrocław Główny to jedno miejsce, więc i jeden podpis na mapie.
         return jsonify(gtfs.with_place_names(stops))

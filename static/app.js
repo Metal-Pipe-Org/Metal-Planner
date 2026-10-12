@@ -270,10 +270,13 @@ function escClass(value) {
 
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
+// `cable` to Polinka (zgłoszenie #165) - granat Politechniki, która ją prowadzi.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
+                     cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
+                    cable: 'Kolej linowa',
                     bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
 
 /** Autko do wiersza "jedziesz autem" na osi trasy. Bierze `currentColor`, tak
@@ -298,6 +301,8 @@ const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
 // zwykły słupek MPK, zanim jeszcze ktoś najedzie kursorem na nazwę.
 const TRAIN_STYLE = {radius: 5, weight: 1, color: '#1b5e20',
                      fillColor: '#2e7d32', fillOpacity: 0.85};
+// Stacja Polinki (#165) - jak stacja kolejowa, w kolorze Polinki.
+const CABLE_STYLE = {...TRAIN_STYLE, color: '#000d1f', fillColor: '#002147'};
 // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
 const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
                    fillColor: '#90a4ae', fillOpacity: 0.25};
@@ -321,7 +326,8 @@ function styleFor(name) {
         if (name === sel.end) return ENDPOINT_STYLE.end;
     }
     if (baseDimmed) return DIM_STYLE;
-    return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
+    const kind = stopKind.get(name);
+    return kind === 'train' ? TRAIN_STYLE : kind === 'cable' ? CABLE_STYLE : BASE_STYLE;
 }
 
 function setBaseDim(dim) {
@@ -801,7 +807,8 @@ const stopsReady = fetch('/api/stops')
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
             // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
-            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP` : s.name);
+            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP`
+                : s.kind === 'cable' ? `${s.name} · kolej linowa` : s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
             m.on('click', e => {
@@ -3839,7 +3846,7 @@ function detailHtml(journey) {
             rows.push(stopRow(leg.to_time, leg.to, 'last'));
             return;
         }
-        const stopWord = leg.mode === 'train'
+        const stopWord = leg.mode === 'train' || leg.mode === 'cable'
             ? plural(leg.stops_count, 'stacja', 'stacje', 'stacji')
             : plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków');
         const ile = `${leg.stops_count} ${stopWord} · ${leg.minutes} min`;
@@ -3866,6 +3873,9 @@ function detailHtml(journey) {
                 ? `<button type="button" class="tl-info tl-via-toggle" data-leg="${i}"` +
                   ` aria-expanded="${viaOn}">${ile}</button>`
                 : `<span class="tl-info">${ile}</span>`) +
+            // Uwaga, której nie da się wyczytać z godzin (planner._notice) -
+            // dziś Polinka: rozkład wpisany ręcznie i osobny bilet (#165).
+            (leg.notice ? `<span class="tl-notice">${esc(leg.notice)}</span>` : '') +
             `</span></li>`,
         );
         // Wiersze są zawsze w osi, a zwinięte tylko schowane: rozwinięcie
