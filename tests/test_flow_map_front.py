@@ -417,6 +417,14 @@ def test_the_start_dot_on_a_route_needs_no_recognising(front):
     _check(front, "kropka_startowa_na_trasie")
 
 
+def test_the_start_without_a_node_still_has_its_dot(front):
+    """Gdy każda droga zaczyna się dojściem pieszym na inny przystanek, startu
+    nie dotyka żaden kawałek mapy i nie ma on węzła - a jego słupki i tak
+    gasną. Zielona kropka ma stanąć w środku słupków sama, wyglądająca jak
+    kliknięty punkt startu, i tylko wtedy (zgłoszenie #276)."""
+    _check(front, "start_bez_wezla_ma_kropke")
+
+
 def test_the_corner_window_opens_on_the_start_stop(front):
     """Okienko w rogu startuje z tablicą odjazdów przystanku, z którego się
     wyrusza - bez najeżdżania na cokolwiek. Przy wyłączonym okienku i bez

@@ -776,6 +776,49 @@ checks.kropka_startowa_na_trasie = (() => {
     };
 })();
 
+/* Start bez węzła wachlarza (#276): każda droga zaczyna się dojściem pieszym
+   na inny przystanek, więc żaden narysowany kawałek startu nie dotyka. Jego
+   słupki i tak gasną (patrz styleFor), więc zielona kropka ma stanąć sama,
+   wyglądająca jak kliknięty punkt startu - a gdy węzeł startu jest, druga
+   zielona obok niego już nie. */
+checks.start_bez_wezla_ma_kropke = (function () {
+    app.sel = {start: 'KAMIEŃSKIEGO (Pętla)', end: 'Wojszyce'};
+    app.markersByName.set('KAMIEŃSKIEGO (Pętla)', [
+        L.circleMarker([51.150, 17.040]), L.circleMarker([51.152, 17.044]),
+    ]);
+    app.markersByName.set('Wojszyce', [L.circleMarker([51.06, 17.03])]);
+    const zielone = () => app.flowEndDots.getLayers()
+        .filter(d => d.options.fillColor === '#4caf50');
+    const czerwone = () => app.flowEndDots.getLayers()
+        .filter(d => d.options.fillColor === '#ef5350');
+
+    app.drawFlow({...FLOW_FIXTURE, nodes: [
+        {name: 'Milicka', lat: 51.152, lon: 17.043, sec: 79980, lines: []},
+    ]}, false);
+    const bezWezla = zielone().map(d => [d._latlng.lat, d._latlng.lng]);
+    const jakPunkt = zielone().every(d => d.options.dashArray === '2,4'
+                                         && d.options.radius === 9);
+    const celBezWezla = czerwone().length;
+
+    app.drawFlow({...FLOW_FIXTURE, nodes: [
+        {name: 'KAMIEŃSKIEGO (Pętla)', lat: 51.15, lon: 17.04, sec: 79980,
+         lines: [], start: true},
+    ]}, false);
+    const zWezlem = zielone().length;
+
+    app.markersByName.delete('KAMIEŃSKIEGO (Pętla)');
+    app.markersByName.delete('Wojszyce');
+    app.sel = {start: null, end: null};
+    app.drawFlow(FLOW_FIXTURE, false);
+    return {
+        ok: bezWezla.length === 1
+            && Math.abs(bezWezla[0][0] - 51.151) < 1e-9
+            && Math.abs(bezWezla[0][1] - 17.042) < 1e-9
+            && jakPunkt && celBezWezla === 1 && zWezlem === 0,
+        bezWezla, jakPunkt, celBezWezla, zWezlem,
+    };
+})();
+
 /* Okienko w rogu otwiera się samo, z tablicą przystanku startowego - tak,
    jakby ktoś od razu najechał na jego kropkę. (fetch w emulatorze nigdy nie
    odpowiada, więc do okienka trafia stan "Ładowanie..." - to wystarcza, żeby

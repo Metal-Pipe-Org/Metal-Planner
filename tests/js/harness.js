@@ -545,6 +545,10 @@ const INJECTION = `
     // do sprawdzenia trzeba widzieć kropki węzłów i markery relacji.
     suspendPlanner, resumePlanner, styleFor, updatePointMarker,
     get flowDotLayer() { return flowDotLayer; },
+    // Kropki startu i celu stoją w środku słupków (patrz endDots) - test
+    // podstawia słupki sam, bo /api/stops w emulatorze nie odpowiada.
+    markersByName,
+    get flowEndDots() { return flowEndDots; },
     get pointMarkers() { return pointMarkers; },
     get sel() { return sel; },
     set sel(v) { sel = v; },
