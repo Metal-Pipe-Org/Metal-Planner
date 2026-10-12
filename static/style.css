@@ -1378,15 +1378,18 @@ body.routes-off .results-body { display: none; }
     height: calc(10px * var(--chip-scale, 1));
 }
 
-/* Przejście MIĘDZY pojazdami - kreska między plakietkami, jak na karcie. */
+/* Przejście MIĘDZY pojazdami - kreska między plakietkami, jak na karcie.
+   Kreska ma 2 px, a ma swój dymek: wyściółka daje palcowi i kursorowi
+   większy cel, a tło zostaje na samej kresce. */
 .headline-hop {
     display: inline-block;
+    box-sizing: content-box;
     width: 10px;
     height: 2px;
-    margin: 0 3px;
+    padding: 6px 3px;
     vertical-align: middle;
     background: repeating-linear-gradient(
-        to right, #c5cfda 0 3px, transparent 3px 6px);
+        to right, #c5cfda 0 3px, transparent 3px 6px) content-box;
 }
 
 .line-chip.tram { color: var(--tram); }
@@ -1617,9 +1620,11 @@ body.routes-off .results-body { display: none; }
    wyraźniej, a nie wygląda na kolejne słowo zdania. */
 .headline-sep {
     align-self: stretch;
+    box-sizing: content-box;
     width: 1px;
-    margin: 2px 1px;
-    background: var(--line);
+    margin: 2px -2px;
+    padding: 0 3px;
+    background: var(--line) content-box;
 }
 
 /* "Pokaż więcej" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie

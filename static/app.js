@@ -1476,40 +1476,42 @@ function showMore() {
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
     (patrz summaryHtml): dojscie OTWIERAJACE albo ZAMYKAJACE trase dostaje
     wlasny znak, bo inaczej pasek obiecuje wsiadanie na przystanku, ktorego
-    nikt nie wskazywal; przejscie miedzy pojazdami zostaje kreska. Obok
-    plakietek idzie opis tej samej trasy slowami - do dymka, bo sam numer
-    nie mowi, czy to autobus, czy tramwaj, ani gdzie sie przesiada. */
+    nikt nie wskazywal; przejscie miedzy pojazdami zostaje kreska. Kazdy znak
+    ma wlasny dymek, bo sam numer nie mowi, czy to autobus, czy tramwaj, ani
+    gdzie sie przesiada. */
 function headlineChips(legs) {
-    const parts = [], words = [];
-    let pendingWalk = false;
+    const parts = [];
+    const piece = (cls, tip, html) =>
+        `<span class="${cls}" data-tip="${escAttr(tip)}">${html}</span>`;
+    let pendingWalk = null;
     legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
-            if (i === 0 || i === legs.length - 1) {
-                parts.push(`<span class="headline-walk">${WALK_ICON}${leg.minutes}</span>`);
-                words.push(`pieszo ok. ${leg.minutes} min`);
+            const first = i === 0, last = i === legs.length - 1;
+            if (first || last) {
+                const tip = first && last ? `Cała droga pieszo, ok. ${leg.minutes} min.`
+                    : first ? `Dojście pieszo do pierwszego przystanku, ok. ${leg.minutes} min.`
+                    : `Dojście pieszo od ostatniego przystanku do celu, ok. ${leg.minutes} min.`;
+                parts.push(piece('headline-walk', tip, `${WALK_ICON}${leg.minutes}`));
             } else {
-                pendingWalk = true;
+                pendingWalk = leg;
             }
             return;
         }
         if (pendingWalk) {
-            parts.push('<span class="headline-hop"></span>');
-            words.push('przejście na przesiadkę');
+            parts.push(piece('headline-hop', 'Przesiadka'
+                + (pendingWalk.to ? ` na przystanku ${pendingWalk.to}` : '')
+                + `, ok. ${pendingWalk.minutes} min pieszo.`, ''));
         }
-        pendingWalk = false;
-        parts.push(`<span class="line-chip ${esc(leg.kind)}">${esc(leg.num)}</span>`);
-        words.push(`${(MODE_LABEL[leg.kind] || MODE_LABEL.other).toLowerCase()} ${leg.num}`);
+        pendingWalk = null;
+        parts.push(piece(`line-chip ${esc(leg.kind)}`,
+                         `${MODE_LABEL[leg.kind] || MODE_LABEL.other} ${leg.num}, ok. `
+                         + `${fmtMins(leg.sec)} jazdy.`, esc(leg.num)));
     });
-    return {html: parts.join(''), words: words.join(', ')};
+    return parts.join('');
 }
 
 // Piktogramy paska - jednobarwne i na currentColor, z tej samej rodziny co
 // WALK_ICON: emoji wyglądałyby na każdym systemie inaczej.
-const HEADLINE_CLOCK_ICON =
-    '<svg class="headline-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
-    + '<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/>'
-    + '<path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.6"'
-    + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const HEADLINE_RIDE_ICON =
     '<svg class="headline-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
     + '<rect x="3" y="1.8" width="10" height="10.4" rx="2" fill="none" stroke="currentColor"'
@@ -1545,7 +1547,7 @@ function renderTimeHeadline() {
           + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
           + '">Pokaż więcej</button>'
         : '';
-    // Sama jazda to osobna liczba na życzenie: "za ile" zostaje zawsze.
+    // Sama jazda to osobna liczba na życzenie.
     const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
         ? item('', `Sama jazda: ${fmtMins(flow.ride_sec)}, od odjazdu pierwszego pojazdu`
                    + ' do celu, bez czekania na niego.',
@@ -1561,29 +1563,24 @@ function renderTimeHeadline() {
                   + ` o ${flow.best_arrival}, za ${fmtMins(flow.best_sec)}`) + '">'
         // Plakietki na początku (decyzja użytkownika, #247): najpierw czym się
         // jedzie, potem kiedy.
-        + (chips.html ? item(' headline-chips', `Najszybsza trasa: ${chips.words}. Najedź`
-                             + ' na pasek albo go stuknij, żeby zobaczyć ją na mapie.',
-                             chips.html) : '')
-        // "Wyjeżdżasz o" to najpóźniejszy wyjazd, który wciąż daje najszybszy
-        // przyjazd - wcześniej wychodzi się tylko po to, żeby gdzieś czekać.
-        + item('', `Wyjeżdżasz o ${flow.starts} - najpóźniej, jak się da, żeby wciąż`
-                   + ' dojechać najszybciej. Wcześniej wychodzi się tylko po to, żeby czekać.',
-               `<b>${esc(flow.starts)}</b>`)
-        + '<span class="headline-arrow" aria-hidden="true">→</span>'
-        + item('', `Dojeżdżasz o ${flow.best_arrival} - najszybszy możliwy dojazd do celu.`,
-               `<b>${esc(flow.best_arrival)}</b>`)
-        // "za", nie "w": liczba jest mierzona od godziny z formularza, więc
-        // mówi, ZA ILE się tam będzie, a nie ile trwa sama jazda (zgłoszenie
-        // #143). Czekanie na pierwszy pojazd jest w niej zawarte.
-        + item('', `Na miejscu za ${fmtMins(flow.best_sec)} - liczone od godziny`
-                   + ` wyszukania (${flow.departure}), razem z czekaniem na pierwszy pojazd.`,
-               `${HEADLINE_CLOCK_ICON}<b>${esc(fmtMins(flow.best_sec))}</b>`)
+        + (chips ? `<span class="headline-item headline-chips">${chips}</span>` : '')
+        // "Za ile" tylko w dymku (uwaga do #247): na wierzchu każdy czytał
+        // tę liczbę jako czas jazdy, a jest mierzona od godziny z formularza,
+        // razem z czekaniem na pierwszy pojazd (zgłoszenie #143). Wyjazd to
+        // najpóźniejszy, który wciąż daje najszybszy przyjazd - wcześniej
+        // wychodzi się tylko po to, żeby gdzieś czekać.
+        + item('', `Wyjazd ${flow.starts}, przyjazd ${flow.best_arrival} - na miejscu`
+                   + ` za ${fmtMins(flow.best_sec)}, licząc od ${flow.departure} (godzina`
+                   + ' wyszukania).',
+               `<b>${esc(flow.starts)}</b><span class="headline-arrow" aria-hidden="true">→</span>`
+               + `<b>${esc(flow.best_arrival)}</b>`)
         + ride
         + '</span>'
         // Zakres mapy i jego przycisk to jedna całość: zawinięty pasek przenosi
         // je razem, a nie zostawia samotnego przycisku w drugiej linijce.
         + '<span class="headline-map">'
-        + '<span class="headline-sep" aria-hidden="true"></span>'
+        + '<span class="headline-sep" aria-hidden="true"'
+        + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
         + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
                                   + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
                                   + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,

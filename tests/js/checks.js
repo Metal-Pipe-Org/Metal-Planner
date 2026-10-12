@@ -978,10 +978,11 @@ checks.czekanie_jest_widoczne = (() => {
     };
 })();
 
-/* Pasek nad mapą: o której wyjechać i dojechać najszybszą trasą, "za ile"
-   przy najszybszej trasie, sam czas jazdy tylko z ustawieniem, i zakres
-   godzin mapy, już bez minut. Plakietki stoją przed godzinami, słowa są
-   w dymkach (#247) - sprawdzamy wierzch i dymki. */
+/* Pasek nad mapą: o której wyjechać i dojechać najszybszą trasą, sam czas
+   jazdy tylko z ustawieniem, i zakres godzin mapy, już bez minut. "Za ile"
+   jest tylko w dymku godzin - na wierzchu czytano je jako czas jazdy.
+   Plakietki stoją przed godzinami, słowa są w dymkach (#247), a każdy
+   widoczny kawałek ma swój dymek - sprawdzamy wierzch i dymki. */
 checks.pasek_mowi_kiedy_wyjechac = (() => {
     const html = () => document.getElementById('time-headline').innerHTML;
     // Atrapa DOM-u nie parsuje HTML-a, więc textContent jest pusty - tekst
@@ -1011,15 +1012,16 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
     app.timeOpts.ride = bylo;
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
     return {
-        ok: bez.includes('61212:25→12:40') && bez.includes('40 min')    // plakietki przed godzinami
+        ok: bez.includes('61212:25→12:40') && !bez.includes('40 min')   // plakietki przed godzinami
             && bez.includes('12:00–12:55Pokaż więcej') && !bez.includes('55 min')
             && !bez.includes('15 min') && !bez.includes('wyjeżdżasz')
-            && bezDymki.includes('Wyjeżdżasz o 12:25')
-            && bezDymki.includes('Dojeżdżasz o 12:40')
-            && bezDymki.includes('Na miejscu za 40 min')
+            && bezDymki.includes('Wyjazd 12:25, przyjazd 12:40 - na miejscu za 40 min')
+            && bezDymki.includes('Autobus 343, ok. 7 min jazdy.')
+            && bezDymki.includes('Przesiadka na przystanku Armii Krajowej, ok. 3 min pieszo.')
+            && bezDymki.includes('Z lewej najszybsza trasa')
             && bezDymki.includes('od 12:00 i dojeżdżające najpóźniej o 12:55, czyli za 55 min')
             && !bezDymki.includes('Sama jazda')
-            && z.includes('40 min15 min') && zDymki.includes('Sama jazda: 15 min'),
+            && z.includes('12:4015 min') && zDymki.includes('Sama jazda: 15 min'),
         bez, z, bezDymki,
     };
 })();
