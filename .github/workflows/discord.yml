@@ -219,7 +219,12 @@ jobs:
               ;;
 
             pull_request_target/closed)
-              if [ "$PR_MERGED" = true ]; then
+              if [ "$PR_MERGED" = true ] && [ "$PR_AUTHOR" != "$SENDER" ]; then
+                # PR merguje zwykle autor; gdy zrobił to ktoś inny, autor ma
+                # się o tym dowiedzieć.
+                discord_send merged "$SENDER" "PR zmergowany (autor: $PR_AUTHOR): #$PR_N $PR_TITLE" "$PR_URL" \
+                  "" "" "$PR_AUTHOR"
+              elif [ "$PR_MERGED" = true ]; then
                 discord_send merged "$SENDER" "PR zmergowany: #$PR_N $PR_TITLE" "$PR_URL"
               else
                 discord_send closed "$SENDER" "PR zamknięty bez merge'a: #$PR_N $PR_TITLE" "$PR_URL"
