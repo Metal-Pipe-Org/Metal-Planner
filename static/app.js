@@ -3159,13 +3159,14 @@ const ROUTE_ICON =
     przycisku zamiast prowadzić w komunikat o nieznanej linii. Kierunek jedzie
     razem z numerem - rozkład ma się otworzyć na tym wariancie, którym jedzie
     ten kurs, a nie na przeciwnym. */
-function routeButtonHtml(line, label) {
+function routeButtonHtml(line, label, trip) {
     const tt = window.timetableMode;
     if (!tt || !tt.hasLine || !tt.hasLine(line.num, line.mode)) return '';
     return `<button type="button" class="tt-route"
                     data-route-num="${esc(line.num)}"
                     data-route-mode="${esc(line.mode)}"
                     data-route-headsign="${esc(line.headsign || '')}"
+                    data-route-trip="${esc(trip || '')}"
                     title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
                     >${ROUTE_ICON}${esc(label)}</button>`;
 }
@@ -3181,6 +3182,7 @@ function routeClick(event) {
         num: button.dataset.routeNum,
         mode: button.dataset.routeMode,
         headsign: button.dataset.routeHeadsign,
+        trip: button.dataset.routeTrip,
     });
     return true;
 }
@@ -3423,7 +3425,7 @@ function detailHtml(journey) {
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
             (leg.onboard ? '<span class="tl-tag">jedziesz tym pojazdem</span>' : '') +
-            routeButtonHtml(leg, 'trasa') +
+            routeButtonHtml(leg, 'trasa', leg.trip) +
             (via.length
                 ? `<button type="button" class="tl-info tl-via-toggle" data-leg="${i}"` +
                   ` aria-expanded="${viaOn}">${ile}</button>`

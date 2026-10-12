@@ -639,6 +639,10 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "stops_count": max(len(path_rows) - 1, 1),
         "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
+        # Publiczny odpowiednik `_trip`: przycisk "trasa" otwiera rozkład linii
+        # na wariancie tego kursu - sam headsign nie odróżni zjazdów do
+        # zajezdni z dwóch pętli (#270).
+        "trip": trip,
         "_trip": trip,
         "_from_id": board_stop,
         "_to_id": exit_stop,
@@ -3321,6 +3325,7 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
         "via": _via_stops(day, [(s, seg["best_deps"].get(s, seg["arr_times"].get(s)))
                                 for s in stops[1:-1]]),
         "path": _round_path(path),
+        "trip": seg["trip_id"],
     }
 
 
