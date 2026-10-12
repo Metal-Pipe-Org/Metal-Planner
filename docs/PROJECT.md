@@ -955,7 +955,9 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   to napisać zamiast podać dzisiejszą liczbę jako jutrzejszą.
   `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
-  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, via, path}` —
+  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, via, path,
+  trip}` — `trip` to kurs, którym jedzie etap: przycisk „trasa" otwiera
+  rozkład linii na jego wariancie (#270);
   `via` to mijane przystanki bez wsiadania i wysiadania, `{name, t, lat,
   lon}` z godziną odjazdu (`lat`/`lon` tylko tam, gdzie są znane; stacji
   PKP bywa bez nich); etap
@@ -1094,6 +1096,9 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   zajezdni raz na dobę. `stops[].id` to słupek —
   tym samym identyfikatorem posługuje się `points` z `/api/stop_board`, więc
   front umie przeskoczyć z rozkładu linii na tablicę tej właśnie krawędzi.
+  Opcjonalny `trip` (kurs spod „cała trasa") dokłada `trip_variant` —
+  indeks wariantu, którym jedzie ten kurs; napis na czole by go nie wskazał,
+  bo zjazdy do zajezdni z obu pętli noszą ten sam (#270).
 - `GET /api/stop_board?stop=&date=YYYY-MM-DD` — tablica odjazdów:
   `{stop, date, center: [lat, lon], points: [{id, name, lat, lon}, …],
   lines: [{mode, num, headsign, count}, …], departures: [{line, t: "12:03",

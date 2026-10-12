@@ -254,6 +254,14 @@ function esc(text) {
     return div.innerHTML;
 }
 
+function escAttr(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
@@ -3206,14 +3214,15 @@ const ROUTE_ICON =
     przycisku zamiast prowadzić w komunikat o nieznanej linii. Kierunek jedzie
     razem z numerem - rozkład ma się otworzyć na tym wariancie, którym jedzie
     ten kurs, a nie na przeciwnym. */
-function routeButtonHtml(line, label) {
+function routeButtonHtml(line, label, trip) {
     const tt = window.timetableMode;
     if (!tt || !tt.hasLine || !tt.hasLine(line.num, line.mode)) return '';
     return `<button type="button" class="tt-route"
-                    data-route-num="${esc(line.num)}"
-                    data-route-mode="${esc(line.mode)}"
-                    data-route-headsign="${esc(line.headsign || '')}"
-                    title="Cała trasa: ${esc(MODE_LABEL[line.mode] || 'Linia')} ${esc(line.num)}"
+                    data-route-num="${escAttr(line.num)}"
+                    data-route-mode="${escAttr(line.mode)}"
+                    data-route-headsign="${escAttr(line.headsign || '')}"
+                    data-route-trip="${escAttr(trip || '')}"
+                    title="Cała trasa: ${escAttr(MODE_LABEL[line.mode] || 'Linia')} ${escAttr(line.num)}"
                     >${ROUTE_ICON}${esc(label)}</button>`;
 }
 
@@ -3228,6 +3237,7 @@ function routeClick(event) {
         num: button.dataset.routeNum,
         mode: button.dataset.routeMode,
         headsign: button.dataset.routeHeadsign,
+        trip: button.dataset.routeTrip,
     });
     return true;
 }
@@ -3470,7 +3480,7 @@ function detailHtml(journey) {
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
             (leg.onboard ? '<span class="tl-tag">jedziesz tym pojazdem</span>' : '') +
-            routeButtonHtml(leg, 'trasa') +
+            routeButtonHtml(leg, 'trasa', leg.trip) +
             (via.length
                 ? `<button type="button" class="tl-info tl-via-toggle" data-leg="${i}"` +
                   ` aria-expanded="${viaOn}">${ile}</button>`
