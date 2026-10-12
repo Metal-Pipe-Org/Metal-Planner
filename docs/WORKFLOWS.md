@@ -9,7 +9,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 | Plik | Co robi |
 |---|---|
-| `claude-review-pr.yml` | Ocena każdego nowego PR-a przez Claude'a; wynik nowym komentarzem i pingiem autora. Kształt oceny: `.claude/commands/review-pr.md`. |
+| `claude-review-pr.yml` | Ocena każdego nowego PR-a przez Claude'a; wynik nowym komentarzem i pingiem autora; nowa ocena zwija starsze do samego werdyktu. Kształt oceny: `.claude/commands/review-pr.md`. |
 | `claude-issue.yml` | Solver: `@claude` pod zgłoszeniem, praca na gałęzi `claude/issue-<numer>`. |
 | `issue-labels.yml` | Etykiety stanu na zgłoszeniach wskazanych przez PR i zapasowe zamykanie po merge'u. |
 | `issue-triage.yml` | Etykieta `external` dla autorów spoza zespołu. |
@@ -34,10 +34,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 3. Skrypt pobieramy zawsze z `main` (sparse checkout `.github/scripts` do
    `.discord`), nigdy z drzewa PR-a ani pracy Claude'a: dostaje w env sekret
    webhooka.
-4. Sprawdzanie, kto może zawołać Claude'a (cytat, prawo zapisu) i zwijanie
-   zapowiedzi siedzą w jednym miejscu: `.github/scripts/guard.sh`. Workflow
-   pobierają go z `main` tak samo jak skrypt Discorda; nie kopiuj tej logiki
-   do workflow.
+4. Sprawdzanie, kto może zawołać Claude'a (cytat, prawo zapisu), zwijanie zapowiedzi i zwijanie starszych ocen siedzą w jednym miejscu: `.github/scripts/guard.sh`. Workflow pobierają go z `main` tak samo jak skrypt Discorda; nie kopiuj tej logiki do workflow. Starsze oceny nie są zwijane przez GitHuba, tylko edytowane (werdykt na wierzchu, reszta pod „rozwiń”), a informacja o zmienionym workflow oceny zwija się w całości jak zapowiedź; edycja nie wysyła powiadomień ani nie trafia na Discorda, bo żaden workflow nie słucha edycji komentarzy.
 5. W treści `@login` znaczy ping (dla osób z mapy), `**login**` — samo
    wymienienie bez pingu.
 6. Konfiguracja: sekret `DISCORD_WEBHOOK`, zmienna repo `DISCORD_IDS` (JSON

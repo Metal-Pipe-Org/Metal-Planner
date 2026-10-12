@@ -29,8 +29,7 @@ zmienianiu, opisuje [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
    go czyta, a po kilku minutach ocena: werdykt, podsumowanie, uwagi do kodu.
    Zapowiedź zwija się, gdy ocena już stoi. Dostajesz ping na GitHubie
    i na Discordzie.
-8. Ocena leci raz na PR. Po większych poprawkach albo gdy się nie udała,
-   napisz `@claude` w komentarzu pod PR-em.
+8. Ocena leci raz na PR. Po większych poprawkach albo gdy się nie udała, napisz `@claude` w komentarzu pod PR-em. Gdy przyjdzie nowa ocena, starsze oceny i informacje o nieudanych ocenach zwijają się same: widać z nich tylko werdykt, resztę rozwija się kliknięciem „Starsza ocena — rozwiń”. Informacja, że PR zmienia workflow oceny, zwija się wtedy w całości. Nieudana ponowna ocena niczego nie zwija.
 9. Przeczytaj ocenę, popraw, co trzeba, i dopiero wtedy poproś o recenzję
    w panelu bocznym („Reviewers"). Recenzent dostaje ping na Discordzie.
    Gdy po merge'u czegoś do `main` PR ma z nim konflikt, prośby o recenzję
