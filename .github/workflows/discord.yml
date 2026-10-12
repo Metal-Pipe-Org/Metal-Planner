@@ -171,10 +171,11 @@ jobs:
               case "$(jq -r '.__typename // ""' <<<"$closer")" in
                 PullRequest)
                   how="PR-em"
-                  link="[PR #$(jq -r .number <<<"$closer") $(jq -r .title <<<"$closer")]($(jq -r .url <<<"$closer"))" ;;
+                  link=$(discord_link "PR #$(jq -r .number <<<"$closer") $(jq -r .title <<<"$closer")" \
+                    "$(jq -r .url <<<"$closer")") ;;
                 Commit)
                   how="commitem"
-                  link="[$(jq -r .abbreviatedOid <<<"$closer")]($(jq -r .url <<<"$closer"))" ;;
+                  link=$(discord_link "$(jq -r .abbreviatedOid <<<"$closer")" "$(jq -r .url <<<"$closer")") ;;
                 *)
                   how="ręcznie" ;;
               esac

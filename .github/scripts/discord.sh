@@ -106,3 +106,14 @@ discord_send() {
     echo "::warning::Nie udało się wysłać na Discorda: $3"
   fi
 }
+
+# discord_link TEKST URL — link w markdownie do OPISU. Tekst bywa od ludzi
+# (tytuł PR-a), a nawias kwadratowy w nim zamknąłby link w pół i Discord
+# pokazałby resztę surowo. Backslash escapujemy pierwszy, bo inaczej
+# zjadłby znak po sobie.
+discord_link() {
+  local text=${1//\\/\\\\}
+  text=${text//\[/\\[}
+  text=${text//\]/\\]}
+  printf '[%s](%s)' "$text" "$2"
+}

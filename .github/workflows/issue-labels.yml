@@ -334,5 +334,5 @@ jobs:
             fi
             discord_send merged "$MERGER" "Zamknięte PR-em: #$n $(printf '%s' "$json" | jq -r .title)" \
               "$(printf '%s' "$json" | jq -r .html_url)" \
-              "[PR #$PR $PR_TITLE]($PR_URL)" "" "$ping"
+              "$(discord_link "PR #$PR $PR_TITLE" "$PR_URL")" "" "$ping"
           done
