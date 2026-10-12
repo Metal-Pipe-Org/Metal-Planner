@@ -3689,8 +3689,12 @@ function summaryHtml(legs) {
     Zlanie ich w jedno („wysiądź: X, za N przystanków") czytałoby się przy
     N = 0 jak polecenie wyskoczenia w biegu. */
 function exitText(exit) {
-    const ile = `${exit.stops} ${plural(exit.stops, 'przystanek', 'przystanki', 'przystanków')}`;
-    if (!exit.stops) return ['Wysiądź na najbliższym przystanku', exit.stop];
+    // Z pociągu wysiada się na stacji (#167) - pasażer liczy stacje, nie przystanki.
+    const train = lastFlow && lastFlow.onboard && lastFlow.onboard.mode === 'train';
+    const ile = `${exit.stops} ${train
+        ? plural(exit.stops, 'stację', 'stacje', 'stacji')
+        : plural(exit.stops, 'przystanek', 'przystanki', 'przystanków')}`;
+    if (!exit.stops) return [`Wysiądź na najbliższ${train ? 'ej stacji' : 'ym przystanku'}`, exit.stop];
     if (!exit.transfer) return [`Dojedziesz tym pojazdem — wysiadka za ${ile}`, exit.stop];
     return [`Wysiądź za ${ile}`, exit.stop];
 }
@@ -4108,6 +4112,12 @@ let obToken = 0;           // odsiewa odpowiedzi na nieaktualną już linię
 // linii sama z siebie pokazuje pola z powrotem.
 let obCollapsed = false;
 let obLineAuto = null;     // uchwyt podpowiedzi linii (patrz attachAutocomplete)
+// Rodzaj wybrany z podpowiedzi - numer „113" bywa i autobusem, i pociągiem,
+// więc o rodzaju rozstrzyga wybrany wiersz, a nie sam napis (#167).
+let obPickedMode = null;
+// Pociągi pod wpisane cyfry, z serwera (#167, patrz onboard.trains) -
+// klucz to data i cyfry, bo lista pociągów zależy od dnia.
+const obTrainCache = new Map();
 
 /** Co pojedzie do serwera jako `onboard_*` - albo null, gdy wybór jest jeszcze
     niekompletny. Kierunek jedzie razem z numerem i przystankiem, bo słupek
@@ -4118,7 +4128,40 @@ function onboardPick() {
     const kierunek = obDirection();
     const stop = obStopSelect.value;
     if (!num || !kierunek || !stop) return null;
-    return {num, mode: LINE_MODE_OF.get(num) || '', headsign: kierunek.headsign, stop};
+    return {num, mode: obLineMode(num), headsign: kierunek.headsign, stop};
+}
+
+/** Rodzaj wpisanej linii: wybrany z podpowiedzi, a bez wyboru - linia
+    z rozkładu albo, gdy takiej nie ma, a są same cyfry (co najmniej trzy),
+    pociąg (zgłoszenie #167). */
+function obLineMode(num) {
+    if (obPickedMode) return obPickedMode;
+    if (LINE_MODE_OF.has(num)) return LINE_MODE_OF.get(num);
+    return /^\d{3,}$/.test(num) ? 'train' : '';
+}
+
+const obTrainKey = query => `${$('date').value}|${query.replace(/\D/g, '')}`;
+
+/** Pociągi, których numer zaczyna się od wpisanych cyfr - z pamięci, a gdy
+    ich tam nie ma, dociągane z serwera; lista podpowiedzi przelicza się sama,
+    kiedy przyjdą. */
+function obTrainSuggestions(query) {
+    const digits = query.replace(/\D/g, '');
+    if (digits.length < 2 || digits.length !== query.trim().length) return [];
+    const key = obTrainKey(query);
+    const known = obTrainCache.get(key);
+    if (known) return known;
+    obTrainCache.set(key, []);
+    fetch('/api/onboard/trains?' + new URLSearchParams({q: digits, date: $('date').value}))
+        .then(r => r.json())
+        .then(data => {
+            obTrainCache.set(key, (data.trains || []).map(train => ({
+                name: train.num, mode: 'train', label: train.label,
+                headsign: train.headsign})));
+            if (obLineAuto && obLineInput.value.trim() === query.trim()) obLineAuto.refresh();
+        })
+        .catch(() => obTrainCache.delete(key));
+    return [];
 }
 
 const onboardReady = () => onboardOn && !!onboardPick();
@@ -4249,7 +4292,7 @@ function loadDirections() {
     const mine = ++obToken;
     obNote('Szukam kierunków…');
     fetch('/api/onboard?' + new URLSearchParams({
-        num, mode: LINE_MODE_OF.get(num) || '', date: $('date').value,
+        num, mode: obLineMode(num), date: $('date').value,
     }))
         .then(r => r.json())
         .then(data => {
@@ -4292,14 +4335,27 @@ if (obLineInput) {
     // Podpowiedzi numerów linii - plakietka w kolorze pojazdu, tak samo jak
     // w trybie rozkładów (patrz timetable.js): numer JEST plakietką, więc
     // trafienia w nim nie podświetlamy.
-    obLineAuto = attachAutocomplete(obLineInput, () => loadDirections(), {
-        suggest: query => suggestionsFor(query, LINE_NUMBERS, null, OB_LINE_LIMIT)
-            .map(item => ({...item, mode: LINE_MODE_OF.get(item.name)})),
-        render: item =>
-            `<span class="badge ${esc(item.mode)}">${esc(item.name)}</span>`
-            + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
+    obLineAuto = attachAutocomplete(obLineInput, item => {
+        obPickedMode = item.mode || null;
+        loadDirections();
+    }, {
+        // Linie z rozkładu, a pod nimi pociągi dnia po numerze (#167) - to
+        // samo pole, bo pasażer pociągu też widzi przed sobą tylko numer.
+        suggest: query => [
+            ...suggestionsFor(query, LINE_NUMBERS, null, OB_LINE_LIMIT)
+                .map(item => ({...item, mode: LINE_MODE_OF.get(item.name)})),
+            ...obTrainSuggestions(query),
+        ].slice(0, OB_LINE_LIMIT),
+        render: item => item.label
+            ? `<span class="badge train">${esc(item.label)}</span>`
+              + `<span class="ac-kind">→ ${esc(item.headsign)}</span>`
+            : `<span class="badge ${esc(item.mode)}">${esc(item.name)}</span>`
+              + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
         onEnter: () => loadDirections(),
     });
+    // Ręczne wpisywanie kasuje wybór z podpowiedzi - rodzaj ma wtedy wynikać
+    // z tego, co jest w polu (patrz obLineMode).
+    obLineInput.addEventListener('input', () => { obPickedMode = null; });
     // Wpisanie z ręki (bez wybrania podpowiedzi) też ma działać - linia to
     // dwa, trzy znaki, więc lista bywa szybsza do minięcia niż do trafienia.
     obLineInput.addEventListener('change', loadDirections);
@@ -4964,7 +5020,9 @@ function attachAutocomplete(input, onPick, options = {}) {
     // Lista zamyka się sama (blur, Esc, wybór), ale bywa chowana razem z całym
     // polem - a wtedy nie ma komu jej zamknąć i wraca otwarta, gdy pole wróci
     // na ekran (patrz syncOnboardView: zwijanie kompletu w jedną linijkę).
-    return {close};
+    // `refresh` przelicza otwartą listę, gdy podpowiedzi doszły później
+    // (numery pociągów idą z serwera, patrz obTrainSuggestions).
+    return {close, refresh: () => { if (document.activeElement === input) open(); }};
 }
 
 // Wybór podpowiedzi kończy tryb "wybrany punkt" i - gdy relacja jest

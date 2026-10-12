@@ -301,6 +301,16 @@ def init_routes(app):
             request.args.get("mode") or None,
         ))
 
+    @app.route("/api/onboard/trains")
+    def api_onboard_trains():
+        """Podpowiedzi numeru pociągu w polu „linia" (zgłoszenie #167) -
+        pociągi wybranego dnia, których numer zaczyna się od wpisanych cyfr."""
+        try:
+            day = gtfs.load_day(_day_arg())
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 503
+        return jsonify({"trains": onboard.trains(day, request.args.get("q", ""))})
+
     @app.route("/api/stop_board")
     def api_stop_board():
         """Tablica odjazdów z jednego przystanku - wszystkie linie naraz."""

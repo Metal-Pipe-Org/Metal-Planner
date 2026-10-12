@@ -826,6 +826,18 @@ w stronę BARTOSZOWICE — najbliższy przystanek Świeradowska o 13:29": pomył
 w kierunku albo przystanku daje przecież wyniki wyglądające równie sensownie,
 tylko dla kogoś innego, więc musi być gdzie sprawdzić, co serwer rozpoznał.
 
+**Pociągi** (zgłoszenie #167) wybiera się w tym samym polu co linię — po
+numerze, bo tylko on stoi na bilecie i tablicy. Podpowiedzi idą z serwera
+(`/api/onboard/trains`, `onboard.trains`): wszystkie pociągi wybranego dnia,
+których numer zaczyna się od wpisanych cyfr (od dwóch) — pełna lista to ok.
+7 tys. pozycji, za dużo, żeby jechała w stronie jak lista linii. O rodzaju
+rozstrzyga wybrany wiersz podpowiedzi („113" bywa i autobusem), a bez wyboru
+— linia z rozkładu albo, gdy jej nie ma, same cyfry (co najmniej trzy).
+Kierunek to stacja docelowa, a lista stacji to przebieg pociągu z dnia
+(`onboard._train_directions`, tylko stacje ze współrzędnymi). `find_ride`
+porównuje u pociągu same cyfry numeru, więc „64402" i „KD 64402" trafiają
+w ten sam kurs; tryb względny działa tak samo jak dla autobusu.
+
 Czego ten tryb świadomie NIE robi: nie szuka w kolejnych dobach (pytanie
 dotyczy tego przejazdu, a on kończy się dzisiaj) i nie zapamiętuje się między
 wizytami (kurs sprzed odświeżenia strony dawno odjechał — wraca sam
