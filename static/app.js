@@ -4189,14 +4189,25 @@ function warnOnboardRide(kurs) {
     const przystanek = esc(prettyStopName(kurs.stop_name));
     const rozklad = `<b>${esc(kurs.at_sched)}</b>`;
     const ile = `${Math.round(Math.abs(kurs.late_sec) / 60)} min`;
-    $('ob-warn-text').innerHTML = kurs.late_sec > 0
-        ? `${esc(kurs.num)} jedzie ok. <b>${ile}</b> po rozkładzie — według `
-          + `rozkładu był na przystanku ${przystanek} o ${rozklad}.`
-          + `\nGodziny tego pojazdu na mapie są przesunięte o ${ile}.`
-        : `Najbliższy kurs ${esc(kurs.num)} jest według rozkładu na przystanku `
-          + `${przystanek} dopiero o ${rozklad}, za ${ile}.`
-          + `\nLiczę tak, jakby jechał teraz — sprawdź linię, kierunek `
-          + `i przystanek.`;
+    // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
+    // polem celu. Pełne zdanie zostaje w dymku i dla czytnika ekranu.
+    const [ikona, fakt, ikona2, rada, pelne] = kurs.late_sec > 0
+        ? ['🕒', `${esc(kurs.num)} spóźniony ~${ile} (${przystanek} ${rozklad})`,
+           '⏩', 'Godziny pojazdu przesunięte',
+           `${kurs.num} jedzie ok. ${ile} po rozkładzie — według rozkładu był `
+           + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `
+           + `Godziny tego pojazdu na mapie są przesunięte o ${ile}.`]
+        : ['⚠️', `${esc(kurs.num)} na ${przystanek} dopiero o ${rozklad} (za ${ile})`,
+           '🔎', 'Sprawdź linię i przystanek',
+           `Najbliższy kurs ${kurs.num} jest według rozkładu na przystanku `
+           + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at_sched}, za `
+           + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię, kierunek `
+           + `i przystanek.`];
+    $('ob-warn-text').innerHTML =
+        `<span aria-hidden="true">${ikona}</span> ${fakt}`
+        + `\n<span aria-hidden="true">${ikona2}</span> ${rada}`;
+    obWarn.title = pelne;
+    obWarn.setAttribute('aria-label', pelne);
     obWarn.hidden = false;
 }
 

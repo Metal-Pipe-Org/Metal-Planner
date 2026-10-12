@@ -802,15 +802,14 @@ Zostają więc trzy rzeczy do zrobienia:
    ten sam pojazd, a przesiadka w niego „o czasie" dalej na trasie byłaby
    przesiadką w pojazd, którego tam wtedy nie będzie. Indeksów dnia kopia nie
    buduje od nowa (`gtfs._ShiftedTripIndex`), więc kosztuje pojedyncze
-   milisekundy. Nad polem celu staje wtedy żółty komunikat: przy spóźnieniu
-   „134 jedzie ok. 12 min po rozkładzie — według rozkładu był na przystanku
-   … o 15:48. Godziny tego pojazdu na mapie są przesunięte o 12 min.", przy
-   kursie, który według rozkładu dopiero przyjedzie, „Najbliższy kurs 134
-   jest według rozkładu na przystanku … dopiero o 16:28, za 28 min. Liczę
-   tak, jakby jechał teraz — sprawdź linię, kierunek i przystanek." To nie
-   pytanie: mały „×" w rogu tylko je chowa, znika też samo przy zmianie
-   linii, kierunku albo przystanku, a wybór pojazdu poprawia się przez
-   „zmień".
+   milisekundy. Nad polem celu staje wtedy żółty komunikat z dwóch krótkich
+   linijek z ikonami — fakt i co z nim zrobić: przy spóźnieniu „🕒 134
+   spóźniony ~12 min (Karwińska 15:48) / ⏩ Godziny pojazdu przesunięte", przy
+   kursie, który według rozkładu dopiero przyjedzie, „⚠️ 134 na Karwińska
+   dopiero o 16:28 (za 28 min) / 🔎 Sprawdź linię i przystanek". Pełne zdanie
+   jest w dymku i dla czytnika ekranu. To nie pytanie: mały „×" w rogu tylko
+   je chowa, znika też samo przy zmianie linii, kierunku albo przystanku,
+   a wybór pojazdu poprawia się przez „zmień".
 3. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
    samym słupku, więc przypadki są dokładnie dwa: pierwszy etap jedzie NASZYM
    kursem (siedzimy dalej, wysiadka `stops` przystanków dalej) albo czymkolwiek

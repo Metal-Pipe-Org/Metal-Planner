@@ -1526,10 +1526,10 @@ checks.tryb_wzgledny_mowi_o_rozjezdzie = (() => {
     const naCzas = !warn.hidden;
     return {
         ok: widacSpozniony && widacPrzed && !naCzas
-            && spozniony.includes('12 min') && spozniony.includes('po rozkładzie')
-            && spozniony.includes('15:48')
-            && przed.includes('16:28') && przed.includes('za 28 min')
-            && przed.includes('sprawdź linię'),
+            && spozniony.includes('spóźniony ~12 min') && spozniony.includes('15:48')
+            && spozniony.includes('przesunięte')
+            && przed.includes('dopiero o <b>16:28</b>') && przed.includes('za 28 min')
+            && przed.includes('Sprawdź linię'),
         spozniony, przed, naCzas,
     };
 })();
