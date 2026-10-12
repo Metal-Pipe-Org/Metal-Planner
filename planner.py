@@ -2109,9 +2109,35 @@ def plan_flow(start_query, end_query, when=None,
         dep_sec = chosen_map["map_from"]
         degraded = False
         if kept:
+            near_target = _target_reach(day, target_set)
+
+            neg_deps, arrs, _board = profile
+
+            def late_arrival(trip, dep_sec, shift):
+                """O której w celu, jadąc kursem `trip` (odjazd stąd `dep_sec`)
+                spóźnionym o `shift` - patrz _late_departures. Wysiadka w celu
+                albo przesiadka odczytana z profilu celu o przesuniętej
+                godzinie wysiadki."""
+                best = INF
+                for i in gtfs.trip_conns(day, trip):
+                    conn_dep, conn_arr, _from, to_stop, _trip = day.conns[i]
+                    if conn_dep < dep_sec:
+                        continue
+                    arr = conn_arr + shift
+                    if to_stop in near_target:
+                        best = min(best, arr + near_target[to_stop][0])
+                    for stop2, buffer in _reach_from(day, to_stop):
+                        times = neg_deps.get(stop2)
+                        if times is None:
+                            continue
+                        j = bisect_right(times, -(arr + buffer)) - 1
+                        if j >= 0 and arrs[stop2][j] < best:
+                            best = arrs[stop2][j]
+                return best
+
             seg_list, nodes = _finalize_segments(
                 day, kept, ranges, geo_db, earliest, profile[2], deadline,
-                source_stops, why_of)
+                source_stops, why_of, late=(best_arr, late_arrival))
             journeys = []
             if with_journeys:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
@@ -2874,7 +2900,7 @@ def _drawn_onward(day, runs, target_set):
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
                        board_value=None, deadline=None, source_stops=None,
-                       why_of=None):
+                       why_of=None, late=None):
     """Tnie każdy narysowany kurs na kawałki tam, gdzie zmienia się zestaw
     linii dzielących ten sam odcinek ulicy/torów (patrz
     _membership_boundaries) - kawałek niesie jeden skład korytarza na całej
@@ -2983,7 +3009,7 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
             item["why"] = why_of(label, stops_seq)
         seg_list.append(item)
     return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline,
-                                    source_stops)
+                                    source_stops, late=late)
 
 
 def _rides_back(earliest, board, alight):
@@ -3069,7 +3095,7 @@ def _place_center(day, place_key, fallback_stop):
 
 
 def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
-                    source_stops=None):
+                    source_stops=None, late=None):
     """Węzły przesiadkowe mapy - to, na czym front stawia kropki z tablicą
     odjazdów.
 
@@ -3114,6 +3140,11 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
 
     `depart_by` (tylko przy "start"/"through") to ostatni odjazd, którym
     jeszcze się zdąży (patrz _line_deadlines).
+
+    `late` (przy każdym węźle, tylko gdy niepuste) to poprzednie kursy linii stąd,
+    które spóźnione i wciąż stojące na przystanku dowiozłyby wcześniej niż
+    najszybsza trasa (patrz _late_departures). Front pokazuje je na szaro
+    w tablicy przystanku, obok zwykłych szarych godzin; mapy to nie rusza. Jedna reguła dla każdego przystanku: startu, dojścia, przesiadki.
 
     `sec` to najwcześniejsza godzina, o której można tu być - od niej liczy się
     "co stąd jeszcze odjedzie".
@@ -3237,7 +3268,70 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         }
         if key in start_places:
             entry["start"] = True     # tylko przy tym jednym - pole ma nie puchnąć
+        if late is not None:
+            place_stops = day.stops_by_place.get(key, [node["stop"]])
+            # Poprzedni kurs to ten sprzed chwili, w której da się tu w ogóle
+            # być (na starcie godzina z formularza, po dojściu - chwila
+            # dojścia), a nie sprzed `sec` węzła: kurs pomiędzy jednym
+            # a drugim jeszcze nie odjechał.
+            here = min((earliest.get(s, INF) for s in place_stops), default=INF) \
+                if earliest else INF
+            late_rows = _late_departures(day, place_stops,
+                                         min(here, node["sec"]), *late)
+            if late_rows:
+                entry["late"] = late_rows
         out.append(entry)
+    return out
+
+
+def _late_departures(day, stops, at_sec, arrive_by, arrival_of):
+    """Poprzedni kurs każdej linii i kierunku z tego miejsca przed `at_sec`,
+    o ile - spóźniony i wciąż tu stojący - dowiózłby do celu wcześniej niż
+    najszybsza trasa mapy (`arrive_by`). Zgłoszenie #238: o 8:11 mapa nie
+    znała czwórki z 8:10, która spóźniona stała na przystanku.
+
+    Spóźnienie to co najmniej tyle, ile minęło od rozkładowego odjazdu do
+    `at_sec`, i o tyle samo przesuwa się cała dalsza jazda tym kursem.
+    `arrival_of(kurs, odjazd, spóźnienie)` liczy z tego przyjazd do celu:
+    wysiadką w celu albo przesiadką z profilu celu, o przesuniętej godzinie
+    (patrz late_arrival w plan_flow). Przesuwać trzeba sam przejazd, a nie
+    gotową wartość kursu: 16 z 8:04 według rozkładu jest w celu przed 8:11,
+    więc profil liczony od 8:11 w ogóle jej nie zna. Bez spóźnienia w progu
+    kurs sprzed kwadransa miałby kwadrans zapasu i przechodziłby z byle
+    przesiadką, w byle którą stronę - na Rynku wychodziło tak kilkanaście
+    linii.
+
+    Kurs stający przy dwóch słupkach miejsca liczy się pierwszym postojem,
+    jak w tablicy (patrz stop_timetable).
+    """
+    index = gtfs.deps_by_stop(day)
+    first = {}
+    for stop_id in stops:
+        deps = index.get(stop_id, ())
+        for dep_sec, trip in deps[:bisect_left(deps, (at_sec,))]:
+            if dep_sec < first.get(trip, INF):
+                first[trip] = dep_sec
+    previous = {}
+    for trip, dep_sec in first.items():
+        key = day.trip_info[trip]
+        if key not in previous or dep_sec > previous[key][0]:
+            previous[key] = (dep_sec, trip)
+
+    out = []
+    for dep_sec, trip in sorted(previous.values()):
+        # Kurs, który według rozkładu skończył już bieg, nie stoi spóźniony
+        # na przystanku - z niego zostałby nocny autobus sprzed czterech
+        # godzin, bo spóźnienie przesuwa jazdę dokładnie do "teraz".
+        if day.conns[gtfs.trip_conns(day, trip)[-1]][1] < at_sec:
+            continue
+        # Wcześniej, nie "nie później": na remis spóźniony kurs prowadzi tylko
+        # do tego samego pojazdu, co najszybsza trasa, i niczego nie wygrywa -
+        # na pl. Grunwaldzkim 32 z 35 linii dowoziło dokładnie na 18:43.
+        if arrival_of(trip, dep_sec, at_sec - dep_sec) >= arrive_by:
+            continue
+        label, headsign = day.trip_info[trip]
+        num, mode = _line_parts(label)
+        out.append({"num": num, "kind": mode, "headsign": headsign, "sec": dep_sec})
     return out
 
 

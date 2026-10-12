@@ -471,6 +471,61 @@ checks.kawalek_bez_godziny_nie_wygrywa = (() => {
     };
 })();
 
+/* Zgłoszenie #238: spóźniony kurs to też szara godzina, a z szarych linia
+   pokazuje tylko najpóźniejszą. Mapa stawia tu pasażera o 8:16, tablica
+   liczy od 8:11.
+     - 16 (z mapy): zwykłej szarej nie ma, spóźniona 8:04 jest szara;
+     - 5 (z mapy): zwykła szara 8:14 i spóźniona 8:05 - tylko 8:14;
+     - 3 (z mapy): zwykła szara 8:12 to ten sam kurs, co spóźniony - raz;
+     - 4 (spoza mapy): tylko spóźniona 8:10, bez kolejnej 8:22.
+   Bez szarych godzin w ustawieniach spóźnionych nie ma. */
+checks.tablica_spoznione_kursy_obok_szarych = (() => {
+    const dep = (sec, num, headsign) => ({time: '00:00', sec, num,
+                                          mode: 'tram', headsign});
+    const linia = (num, headsign, depart_by) => ({num, kind: 'tram', headsign,
+                                                  flow: 'start', depart_by});
+    const [dot] = app.flowStopDots([
+        {name: 'Pl. Wróblewskiego', lat: 51.105, lon: 17.048, sec: 29760,
+         lines: [linia('16', 'OSOBOWICE', 29760), linia('5', 'KSIĘŻE MAŁE', 30180),
+                 linia('3', 'LEŚNICA', 30180)],
+         late: [{num: '16', kind: 'tram', headsign: 'OSOBOWICE', sec: 29040},
+                {num: '5', kind: 'tram', headsign: 'KSIĘŻE MAŁE', sec: 29100},
+                {num: '4', kind: 'tram', headsign: 'BISKUPIN', sec: 29400},
+                {num: '3', kind: 'tram', headsign: 'LEŚNICA', sec: 29520}]},
+    ], 30180);
+    const data = {stop: 'Pl. Wróblewskiego', from_time: '8:11', departures: [
+        dep(29520, '3', 'LEŚNICA'),        // 8:12 - zwykła szara, ten sam kurs co spóźniony
+        dep(29640, '5', 'KSIĘŻE MAŁE'),    // 8:14 - zwykła szara
+        dep(29760, '16', 'OSOBOWICE'),     // 8:16
+        dep(30120, '4', 'BISKUPIN'),       // 8:22 - mapa jej nie proponuje
+        dep(30180, '3', 'LEŚNICA'),        // 8:23
+        dep(30180, '5', 'KSIĘŻE MAŁE'),    // 8:23
+    ]};
+    const tablica = () => app.timetableHtml(app.withLate(
+        app.keepOfferedLines(data, dot.where.lines), dot.where), dot.sec);
+    const bylo = app.dotOpts.ttPast;
+    app.dotOpts.ttPast = true;
+    const z = tablica();
+    app.dotOpts.ttPast = false;
+    const bezSzarych = tablica();
+    app.dotOpts.ttPast = bylo;
+    const wiersze = z.match(/<li>.*?<\/li>/g) || [];
+    const wiersz = num => wiersze.find(w => w.includes(`>${num}<`)) || '';
+    const szare = w => (w.match(/tt-past">[^<]*/g) || []).map(t => t.slice(9));
+    return {
+        ok: wiersze.length === 4
+            && szare(wiersz('16')).join() === '8:04' && wiersz('16').includes('8:16')
+            && wiersz('16').includes('tt-flow-start')
+            && szare(wiersz('5')).join() === '8:14' && !wiersz('5').includes('8:05')
+            && wiersz('5').includes('8:23')
+            && szare(wiersz('3')).join() === '8:12'
+            && (wiersz('3').match(/8:12/g) || []).length === 1
+            && szare(wiersz('4')).join() === '8:10' && !z.includes('8:22')
+            && !bezSzarych.includes('tt-past') && !bezSzarych.includes('>4<'),
+        wiersze,
+    };
+})();
+
 /* Kropki wachlarza: po jednej na węzeł z backendu, każda do najechania. */
 checks.kropki_wachlarza = (() => {
     const dots = app.flowStopDots([
