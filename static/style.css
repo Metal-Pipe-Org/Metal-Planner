@@ -1000,6 +1000,15 @@ body.routes-off .results-body { display: none; }
 .badge.bike { background: var(--bike); }
 .badge.car { background: var(--car); }
 
+/* Pojazd, w którym się już siedzi (zgłoszenie #224): obwódka w kolorze
+   akcentu, odsunięta od plakietki paskiem tła - ten sam akcent, co
+   „jedziesz tym pojazdem" i przystanek wysiadki na osi trasy. Margines, bo
+   obwódka rysuje się poza plakietką i weszłaby na sąsiednią strzałkę. */
+.badge.current {
+    margin: 0 4px;
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
 /* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
    a nie w Ustawieniach Developerskich ⚙, bo to wybór PASAŻERA (mam konto w WRM
    albo nie), a nie strojenie algorytmu. */
