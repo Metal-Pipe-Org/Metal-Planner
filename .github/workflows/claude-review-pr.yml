@@ -515,11 +515,11 @@ jobs:
           source .discord/.github/scripts/discord.sh
 
           if [ "$KIND" = review ]; then
-            discord_send info "" "Ocena Claude'a: #$N $TITLE" "$URL" "@$AUTHOR, $VERDICT"
+            discord_send info "" "Ocena Claude'a: #$N $TITLE" "$URL" "$VERDICT" "" "$AUTHOR"
           elif [ "$KIND" = workflow ]; then
             discord_send grey "" "Claude nie oceni przy otwarciu: #$N $TITLE" "$URL" \
-              "@$AUTHOR, PR zmienia workflow oceny — napisz pod nim @claude"
+              "PR zmienia workflow oceny — napisz pod nim @claude" "" "$AUTHOR"
           else
             discord_send grey "" "Ocena Claude'a się nie udała: #$N $TITLE" "$URL" \
-              "@$AUTHOR, szczegóły pod PR-em"
+              "Szczegóły pod PR-em" "" "$AUTHOR"
           fi
