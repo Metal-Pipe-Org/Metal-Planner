@@ -955,7 +955,9 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   to napisać zamiast podać dzisiejszą liczbę jako jutrzejszą.
   `journeys` posortowane po godzinie przyjazdu; etap
   przejazdu: `{kind: "ride", line, num, mode, headsign, from, from_time,
-  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, via, path}` —
+  to, to_time, dep_sec, arr_sec, minutes, stops, stops_count, via, path,
+  trip}` — `trip` to kurs, którym jedzie etap: przycisk „trasa" otwiera
+  rozkład linii na jego wariancie (#270);
   `via` to mijane przystanki bez wsiadania i wysiadania, `{name, t, lat,
   lon}` z godziną odjazdu (`lat`/`lon` tylko tam, gdzie są znane; stacji
   PKP bywa bez nich); etap
@@ -1094,6 +1096,9 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   zajezdni raz na dobę. `stops[].id` to słupek —
   tym samym identyfikatorem posługuje się `points` z `/api/stop_board`, więc
   front umie przeskoczyć z rozkładu linii na tablicę tej właśnie krawędzi.
+  Opcjonalny `trip` (kurs spod „cała trasa") dokłada `trip_variant` —
+  indeks wariantu, którym jedzie ten kurs; napis na czole by go nie wskazał,
+  bo zjazdy do zajezdni z obu pętli noszą ten sam (#270).
 - `GET /api/stop_board?stop=&date=YYYY-MM-DD` — tablica odjazdów:
   `{stop, date, center: [lat, lon], points: [{id, name, lat, lon}, …],
   lines: [{mode, num, headsign, count}, …], departures: [{line, t: "12:03",
@@ -1189,6 +1194,25 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
 | `.claude/commands/` | polecenia Claude'a używane przez workflow: ocena PR-a, rozwiązanie zgłoszenia |
 
 ## Changelog
+
+- **2026-10-08** — **spóźnione kursy na tablicach przystanków**
+  (zgłoszenie #238). Wyszukiwanie o 8:11 z pl. Wróblewskiego nie znało
+  czwórki z 8:10, choć spóźniona stała na przystanku. Teraz tablica każdego
+  przystanku mapy — startu, dojścia pieszego, przesiadki — ma przy każdej
+  linii, także tej, której mapa tam nie rysuje, jej ostatni odjazd sprzed
+  chwili, w której można tu być (na starcie godzina z formularza, po dojściu
+  chwila dojścia, na przesiadce przyjazd), na szaro — jeśli spóźniony do tej
+  chwili dowiózłby do celu WCZEŚNIEJ niż najszybsza trasa. Remis odpada:
+  taki kurs prowadzi tylko do tego samego pojazdu co najszybsza trasa (przy
+  „nie później” na pl. Grunwaldzkim przechodziło 35 linii, z czego 32 na
+  remis). Kurs, który według rozkładu skończył już bieg, się nie liczy.
+  Spóźniony kurs to też szara godzina: z niej i ze zwykłych szarych linia
+  pokazuje tylko najpóźniejszą (ten sam kurs raz). Podlega ustawieniu
+  „Szare godziny w tablicy”. Mapa, pasek „Najszybciej”, jasność
+  i propozycje tras bez zmian. Przykłady: pl. Wróblewskiego 8:11 — 16 z 8:04
+  i 4 z 8:10; punkt pod pl. Grunwaldzkim → Wojszyce o 17:51 i 17:52 — 146
+  z 17:51, 145 z 17:44 i D z 17:49. Nowe pole `late` przy węźle
+  w `/api/flow`.
 
 - **2026-10-08** — **rura nie przerywa muzyki** (zgłoszenie #243). Na
   iPhonie dźwięk rury zatrzymywał Spotify czy podcast pasażera i muzyka nie

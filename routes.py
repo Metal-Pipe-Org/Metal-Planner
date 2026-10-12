@@ -280,6 +280,7 @@ def init_routes(app):
             request.args.get("num", ""),
             _day_arg(),
             request.args.get("mode") or None,
+            trip=request.args.get("trip") or None,
         ))
 
     @app.route("/api/onboard")
