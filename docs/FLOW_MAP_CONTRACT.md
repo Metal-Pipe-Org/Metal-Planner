@@ -2,8 +2,8 @@
 
 Gwarancje zachowania **rysowania mapy przepływów** (segmenty, próg,
 kształt sieci) — nie dotyczy listy „Propozycje tras” obok mapy. Testy dla
-każdego punktu, historia wdrożeń i otwarte pytania są w
-[FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md); jak to jest policzone — w
+każdego punktu i otwarte pytania są w
+[FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), historią wdrożeń jest lista commitów; jak to jest policzone — w
 [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md). Edytuj tę listę tylko
 wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 
@@ -13,8 +13,8 @@ wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 > który się zdezaktualizował. Jeśli uważasz, że coś tu wymaga zmiany —
 > zgłoś propozycję i czekaj na zgodę. Nieaktualny akapit w tym pliku jest
 > mniejszym problemem niż kontrakt przepisujący się sam. Wszystko inne
-> (historia, pomiary, szczegóły implementacji) idzie do
-> [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), który wolno dopisywać zawsze.
+> (historia, pomiary, szczegóły implementacji) idzie do opisu commita
+> albo PR-a.
 
 ## 1. Cały wachlarz, nie jedna trasa
 
