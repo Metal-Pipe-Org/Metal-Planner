@@ -3586,7 +3586,7 @@ function openJourney(index) {
     przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
 function infoHtml(text) {
     return text ? `<span class="info info-inline" tabindex="0" role="button"`
-        + ` aria-label="${esc(text)}" data-tip="${esc(text)}">i</span>` : '';
+        + ` aria-label="${escAttr(text)}" data-tip="${escAttr(text)}">i</span>` : '';
 }
 
 function badgeHtml(leg) {
