@@ -2935,3 +2935,68 @@ ul.tt-legend {
 
 .tt-more { width: 100%; margin-top: 8px; background: var(--surface-alt); }
 .tt-more:hover { background: #e8edf3; }
+
+/* 21:37 (static/rura.js) - zasłania cały planer, ponad każdą nakładką. */
+#rura {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    justify-content: safe center;
+    gap: 18px;
+    padding: 24px 16px;
+    overflow-y: auto;
+    background: radial-gradient(circle at 50% 40%, #2b333d, #0d1116);
+    color: #f1f4f7;
+    text-align: center;
+}
+#rura[hidden] { display: none; }
+.rura-photo {
+    margin: 0;
+    flex-shrink: 0;
+    max-width: 100%;
+}
+/* Szerokość ograniczona do natywnych 474 px, żeby zdjęcie nie było
+   rozmyte; wysokość od ekranu, żeby na telefonie przycisk mieścił się
+   bez przewijania. */
+.rura-photo img {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: min(100%, 474px);
+    max-height: 45vh;
+    max-height: 45dvh;
+    border-radius: var(--radius);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+.rura-clock {
+    font-size: 15px;
+    letter-spacing: 0.04em;
+    color: #aab6c2;
+    font-variant-numeric: tabular-nums;
+}
+.rura-text {
+    margin: 0;
+    max-width: 560px;
+    font-size: clamp(22px, 6vw, 30px);
+    font-weight: 700;
+    line-height: 1.25;
+}
+.rura-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 22px;
+    border: 1px solid #8c98a4;
+    border-radius: var(--radius);
+    background: linear-gradient(#4a545e, #2a3139);
+    color: #fff;
+    font: inherit;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.rura-button:disabled { opacity: 0.7; cursor: default; }
