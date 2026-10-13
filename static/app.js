@@ -3756,6 +3756,8 @@ function detailHtml(journey) {
     const rows = [];
     // `late` - opóźnienie pociągu przy tej stacji w minutach (#71, patrz
     // loadTrainDelays): planowa godzina przekreślona, pod nią rzeczywista.
+    // Zero albo mniej to „o czasie" - ale tylko gdy PLK ten czas zna; bez
+    // danych (`late` null/undefined) nie mówimy nic, bo nie wiemy.
     const stopRow = (time, name, cls, platform, late) =>
         `<li class="tl-stop ${cls}">` +
         (late > 0
@@ -3763,7 +3765,8 @@ function detailHtml(journey) {
             : `<span class="tl-time">${esc(time)}</span>`) +
         `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
         `${platformHtml(platform)}` +
-        (late > 0 ? `<span class="delay">+${late} min</span>` : '') +
+        (late > 0 ? `<span class="delay">+${late} min</span>`
+            : typeof late === 'number' ? '<span class="ontime">o czasie</span>' : '') +
         `</span></li>`;
 
     journey.legs.forEach((leg, i) => {

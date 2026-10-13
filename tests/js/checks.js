@@ -1721,11 +1721,16 @@ checks.opoznienie_pociagu_w_osi = (() => {
     const html = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
     app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 1, dep: 1}}};
     const lekko = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 0, dep: 0}}};
+    const naCzas = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
     app.trainDelays = {};
+    const bezDanych = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
     return {
         ok: html.includes('<s>16:06</s>16:13') && html.includes('+7 min')
             && html.includes('tl-warn') && html.includes('nie zdążyć na 5')
-            && !lekko.includes('tl-warn'),
+            && !lekko.includes('tl-warn')
+            && naCzas.includes('o czasie') && !naCzas.includes('class="delay"')
+            && !bezDanych.includes('o czasie'),
         html: html.slice(0, 300),
     };
 })();

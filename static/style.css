@@ -1024,6 +1024,13 @@ body.routes-off .results-body { display: none; }
     font-weight: 700;
     white-space: nowrap;
 }
+.ontime {
+    margin-left: 6px;
+    color: #2e7d32;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
 .tl-warn {
     margin: 4px 0 4px 52px;
     padding: 6px 8px;
