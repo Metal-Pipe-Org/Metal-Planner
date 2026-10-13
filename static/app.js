@@ -3572,10 +3572,10 @@ function badgeHtml(leg) {
     // „4 › D" nie mówi inaczej, czy w 4 trzeba dopiero wsiąść, czy jedzie się
     // nią dalej (zgłoszenie #224).
     if (leg.onboard) {
-        return `<span class="badge ${leg.mode} current" title="${esc(leg.line)}`
+        return `<span class="badge ${leg.mode} current" title="${escAttr(leg.line)}`
              + ` — jedziesz tym pojazdem">${esc(leg.num)}</span>`;
     }
-    return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
+    return `<span class="badge ${leg.mode}" title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
 }
 
 // Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
