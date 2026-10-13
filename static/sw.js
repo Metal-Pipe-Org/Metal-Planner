@@ -43,6 +43,8 @@ const SHELL_URLS = [
     '/static/app.js',
     '/static/timetable.js',
     '/static/pwa.js',
+    '/static/rura.js',
+    '/static/images/jp2.jpg',
     '/static/manifest.webmanifest',
     '/static/icons/icon-192.png',
     '/static/icons/icon-512.png',

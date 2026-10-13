@@ -27,9 +27,9 @@ hold_reviews() {
 
   if [ "${DRY_RUN:-}" = 1 ]; then
     echo "[na sucho] #$n: zdjąłbym prośby o recenzję ($who) i wysłał:"
+    echo "  @$author"
     echo "  Konflikt z main: #$n $title"
-    echo "  @$author, ten PR ma konflikt z main. Prośby o recenzję zdjęte: $who."
-    echo "  Rozwiąż konflikt i poproś o recenzję ponownie."
+    echo "  Prośby o recenzję zdjęte ($who)"
     return 0
   fi
 
@@ -45,9 +45,8 @@ hold_reviews() {
 
   echo "#$n: konflikt z main — zdjęte prośby o recenzję: $users $teams" \
     | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-  discord_send warn "" "Konflikt z main: #$n $title" "$url" \
-    "@$author, ten PR ma konflikt z main. Prośby o recenzję zdjęte: $who.
-Rozwiąż konflikt i poproś o recenzję ponownie."
+  discord_send warn "" "⚔️ Konflikt z main: #$n $title" "$url" \
+    "Prośby o recenzję zdjęte ($who)" "" "$author"
 }
 
 # hold_conflicting_reviews

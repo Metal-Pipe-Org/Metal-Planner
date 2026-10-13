@@ -119,42 +119,31 @@ jobs:
           set -euo pipefail
           source .discord/.github/scripts/discord.sh
 
-          # Pingujemy autora, chyba że to on sam wywołał zdarzenie.
-          autor() {
-            if [ "$1" = "$SENDER" ]; then
-              printf '**%s**' "$1"
-            else
-              printf '@%s' "$1"
-            fi
-          }
-
           case "$EVENT/$ACTION" in
             issues/opened)
-              discord_send open "$SENDER" "Nowe zgłoszenie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+              discord_send open "$SENDER" "🎯 Nowe zgłoszenie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
                 "" "$ISSUE_BODY"
               ;;
 
             issues/reopened)
-              discord_send open "$SENDER" "Zgłoszenie otwarte ponownie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
+              discord_send open "$SENDER" "🔄 Zgłoszenie otwarte ponownie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               ;;
 
             issues/assigned)
               if [ "$ASSIGNEE" = "$SENDER" ]; then
-                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "**$ASSIGNEE** bierze to na siebie"
+                discord_send info "$SENDER" "👤 Przypisanie sobie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               else
-                discord_send info "$SENDER" "Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "@$ASSIGNEE, **$SENDER** przypisuje Ci to zgłoszenie"
+                # Komu przypisano, mówi ping nad kartą.
+                discord_send info "$SENDER" "👤 Przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                  "" "" "$ASSIGNEE"
               fi
               ;;
 
             issues/unassigned)
               if [ "$ASSIGNEE" = "$SENDER" ]; then
-                discord_send grey "$SENDER" "Zdjęte przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "**$ASSIGNEE** rezygnuje z tego zgłoszenia"
+                discord_send grey "$SENDER" "↩️ Zdjęte przypisanie sobie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               else
-                discord_send grey "$SENDER" "Zdjęte przypisanie: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                  "**$ASSIGNEE**, wypisano Cię z tego zgłoszenia"
+                discord_send grey "$SENDER" "↩️ Zdjęte przypisanie dla $ASSIGNEE: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL"
               fi
               ;;
 
@@ -168,68 +157,92 @@ jobs:
                       timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) {
                         nodes { ... on ClosedEvent { closer {
                           __typename
-                          ... on PullRequest { number title }
-                          ... on Commit { abbreviatedOid }
+                          ... on PullRequest { number title url }
+                          ... on Commit { abbreviatedOid url }
                         } } }
                       }
                     }
                   }
                 }' --jq '.data.repository.issue.timelineItems.nodes[0].closer // {}')
 
+              # Czym zamknięto, mówi tytuł; kto, widać po nadawcy, a autora
+              # zgłoszenia — po pingu nad kartą. Treść zostaje tylko na nazwę
+              # PR-a albo commita i linkiem jest w niej sam numer albo skrót
+              # commita: tytuł prowadzi już do zgłoszenia, a drugi cały
+              # niebieski link w karcie mylił, który prowadzi dokąd.
+              by=""
               case "$(jq -r '.__typename // ""' <<<"$closer")" in
                 PullRequest)
-                  why="przez PR **#$(jq -r .number <<<"$closer") $(jq -r .title <<<"$closer")**" ;;
+                  how="PR-em"
+                  by=$(printf 'PR [#%s](%s) %s' "$(jq -r .number <<<"$closer")" \
+                    "$(jq -r .url <<<"$closer")" "$(jq -r .title <<<"$closer")") ;;
                 Commit)
-                  why="commitem \`$(jq -r .abbreviatedOid <<<"$closer")\`" ;;
+                  how="commitem"
+                  by=$(printf 'Commit: [%s](%s)' "$(jq -r .abbreviatedOid <<<"$closer")" \
+                    "$(jq -r .url <<<"$closer")") ;;
                 *)
-                  why="przez **$SENDER**" ;;
+                  how="ręcznie" ;;
               esac
               # Jak na GitHubie: zrobione na fioletowo, odpuszczone na szaro.
               case "$STATE_REASON" in
-                not_planned) color=grey; why+=" — nie robimy" ;;
-                duplicate)   color=grey; why+=" — duplikat" ;;
-                *)           color=merged ;;
+                not_planned) color=grey;   icon="🚫"; how+=" — nie robimy" ;;
+                duplicate)   color=grey;   icon="📑"; how+=" — duplikat" ;;
+                *)           color=merged; icon="🔒" ;;
               esac
+              ping=""
+              if [ "$ISSUE_AUTHOR" != "$SENDER" ]; then
+                ping=$ISSUE_AUTHOR
+              fi
 
-              discord_send "$color" "$SENDER" "Zgłoszenie zamknięte: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
-                "Zamknięte $why · autor zgłoszenia: $(autor "$ISSUE_AUTHOR")"
+              discord_send "$color" "$SENDER" "$icon Zamknięte $how: #$ISSUE_N $ISSUE_TITLE" "$ISSUE_URL" \
+                "$by" "" "$ping"
               ;;
 
             issue_comment/created)
-              discord_send comment "$SENDER" "Komentarz: #$ISSUE_N $ISSUE_TITLE" "$COMMENT_URL" \
+              discord_send comment "$SENDER" "💬 Komentarz: #$ISSUE_N $ISSUE_TITLE" "$COMMENT_URL" \
                 "" "$COMMENT_BODY"
               ;;
 
             pull_request_target/opened)
               color=open
+              icon="📦"
               draft=""
               if [ "$PR_DRAFT" = true ]; then
                 color=grey
+                icon="🚧"
                 draft=" · wersja robocza"
               fi
-              discord_send "$color" "$SENDER" "Nowy PR: #$PR_N $PR_TITLE" "$PR_URL" \
+              discord_send "$color" "$SENDER" "$icon Nowy PR: #$PR_N $PR_TITLE" "$PR_URL" \
                 "\`$PR_HEAD\` → \`$PR_BASE\`$draft" "$PR_BODY"
               ;;
 
             pull_request_target/ready_for_review)
-              discord_send open "$SENDER" "PR wychodzi z wersji roboczej: #$PR_N $PR_TITLE" "$PR_URL"
+              discord_send open "$SENDER" "🚀 PR wychodzi z wersji roboczej: #$PR_N $PR_TITLE" "$PR_URL"
               ;;
 
             pull_request_target/reopened)
-              discord_send open "$SENDER" "PR otwarty ponownie: #$PR_N $PR_TITLE" "$PR_URL"
+              discord_send open "$SENDER" "🔄 PR otwarty ponownie: #$PR_N $PR_TITLE" "$PR_URL"
               ;;
 
             pull_request_target/closed)
               if [ "$PR_MERGED" = true ]; then
-                discord_send merged "$SENDER" "PR zmergowany: #$PR_N $PR_TITLE" "$PR_URL"
+                # PR merguje zwykle autor; gdy zrobił to ktoś inny, autor ma
+                # się o tym dowiedzieć. Że chodzi o niego, mówi ping nad kartą,
+                # więc w tytule go nie powtarzamy.
+                ping=""
+                if [ "$PR_AUTHOR" != "$SENDER" ]; then
+                  ping=$PR_AUTHOR
+                fi
+                discord_send merged "$SENDER" "🔀 PR zmergowany: #$PR_N $PR_TITLE" "$PR_URL" \
+                  "" "" "$ping"
               else
-                discord_send closed "$SENDER" "PR zamknięty bez merge'a: #$PR_N $PR_TITLE" "$PR_URL"
+                discord_send closed "$SENDER" "🚫 PR zamknięty bez merge'a: #$PR_N $PR_TITLE" "$PR_URL"
               fi
               ;;
 
             pull_request_target/review_requested)
-              discord_send info "$SENDER" "Prośba o recenzję: #$PR_N $PR_TITLE" "$PR_URL" \
-                "@$REVIEWER, **$SENDER** prosi Cię o recenzję"
+              discord_send info "$SENDER" "📝 Prośba o recenzję: #$PR_N $PR_TITLE" "$PR_URL" \
+                "" "" "$REVIEWER"
               ;;
 
             pull_request_review/submitted)
@@ -241,19 +254,25 @@ jobs:
               count=$(gh api "repos/$REPO/pulls/$PR_N/reviews/$REVIEW_ID/comments" --paginate --jq 'length' \
                 | jq -s add)
               case "$REVIEW_STATE" in
-                approved)          color=open;    what="PR zatwierdzony" ;;
-                changes_requested) color=closed;  what="Prośba o zmiany" ;;
-                *)                 color=comment; what="Recenzja" ;;
+                approved)          color=open;    what="✅ PR zatwierdzony" ;;
+                changes_requested) color=closed;  what="🛠️ Prośba o zmiany" ;;
+                *)                 color=comment; what="💬 Recenzja" ;;
               esac
               extra=""
               if [ "${count:-0}" -gt 0 ]; then
-                extra=" · komentarze w kodzie: $count"
+                extra="Komentarze w kodzie: $count"
               fi
               excerpt=$REVIEW_BODY
               if [ -z "$excerpt" ] && [ "${count:-0}" -gt 0 ]; then
                 excerpt=$(gh api "repos/$REPO/pulls/$PR_N/reviews/$REVIEW_ID/comments" --jq '.[0].body')
               fi
+              # Recenzja zawsze dotyczy autora PR-a, więc wystarczy ping nad
+              # kartą; wymienianie go jeszcze w treści tylko ją wydłuża.
+              ping=""
+              if [ "$PR_AUTHOR" != "$SENDER" ]; then
+                ping=$PR_AUTHOR
+              fi
               discord_send "$color" "$SENDER" "$what: #$PR_N $PR_TITLE" "$REVIEW_URL" \
-                "Autor PR-a: $(autor "$PR_AUTHOR")$extra" "$excerpt"
+                "$extra" "$excerpt" "$ping"
               ;;
           esac
