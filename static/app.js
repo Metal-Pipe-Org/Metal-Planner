@@ -4131,13 +4131,18 @@ function onboardPick() {
     return {num, mode: obLineMode(num), headsign: kierunek.headsign, stop};
 }
 
+// Numer pociągu tak, jak się go wpisuje: sam („60221") albo z przewoźnikiem
+// („KD 60221", „kd60221") - przewoźnik to litery przed cyframi (#167).
+const TRAIN_NUMBER = /^([a-ząćęłńóśźż]*)\s*(\d+)$/i;
+
 /** Rodzaj wpisanej linii: wybrany z podpowiedzi, a bez wyboru - linia
-    z rozkładu albo, gdy takiej nie ma, a są same cyfry (co najmniej trzy),
-    pociąg (zgłoszenie #167). */
+    z rozkładu albo, gdy takiej nie ma, a jest numer pociągu (co najmniej
+    trzy cyfry, z przewoźnikiem albo bez), pociąg (zgłoszenie #167). */
 function obLineMode(num) {
     if (obPickedMode) return obPickedMode;
     if (LINE_MODE_OF.has(num)) return LINE_MODE_OF.get(num);
-    return /^\d{3,}$/.test(num) ? 'train' : '';
+    const train = TRAIN_NUMBER.exec(num);
+    return train && train[2].length >= 3 ? 'train' : '';
 }
 
 const obTrainKey = query => `${$('date').value}|${query.replace(/\D/g, '')}`;
@@ -4146,17 +4151,24 @@ const obTrainKey = query => `${$('date').value}|${query.replace(/\D/g, '')}`;
     ich tam nie ma, dociągane z serwera; lista podpowiedzi przelicza się sama,
     kiedy przyjdą. */
 function obTrainSuggestions(query) {
-    const digits = query.replace(/\D/g, '');
-    if (digits.length < 2 || digits.length !== query.trim().length) return [];
+    const train = TRAIN_NUMBER.exec(query.trim());
+    if (!train || train[2].length < 2) return [];
+    const [, carrier, digits] = train;
+    // Wpisany przewoźnik zawęża listę: „KD 602" bez pociągów PR 602…
+    const pick = list => list.filter(
+        item => item.label.toUpperCase().startsWith(carrier.toUpperCase()));
     const key = obTrainKey(query);
     const known = obTrainCache.get(key);
-    if (known) return known;
+    if (known) return pick(known);
     obTrainCache.set(key, []);
     fetch('/api/onboard/trains?' + new URLSearchParams({q: digits, date: $('date').value}))
         .then(r => r.json())
         .then(data => {
+            // Do pola idzie pełny numer z przewoźnikiem („KD 60221") - tak,
+            // jak stoi na plakietce i na tablicy; rozpoznanie i tak patrzy
+            // tylko na cyfry (onboard._matches).
             obTrainCache.set(key, (data.trains || []).map(train => ({
-                name: train.num, mode: 'train', label: train.label,
+                name: train.label, mode: 'train', label: train.label,
                 headsign: train.headsign})));
             if (obLineAuto && obLineInput.value.trim() === query.trim()) obLineAuto.refresh();
         })

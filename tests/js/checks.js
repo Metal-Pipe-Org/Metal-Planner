@@ -1536,6 +1536,15 @@ checks.tryb_wzgledny_mowi_o_rozjezdzie = (() => {
 })();
 
 
+/* Numer pociągu w polu „linia" (#167): sam albo z przewoźnikiem - oba
+   to pociąg; za krótki albo z czymś po cyfrach - nie. */
+checks.numer_pociagu_z_przewoznikiem_i_bez = (() => {
+    const tryby = ['60221', 'KD 60221', 'kd60221', '12', 'KD 602x', '']
+        .map(num => app.obLineMode(num));
+    return {ok: tryby.join(',') === 'train,train,train,,,', tryby};
+})();
+
+
 /* Próg trybu względnego (suwak w ⚙, #231) leci razem z wyborem pojazdu. */
 checks.prog_trybu_wzglednego_leci_do_serwera = (() => {
     document.getElementById('onboard-slack').value = '5';

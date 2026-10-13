@@ -592,6 +592,11 @@ def test_relative_mode_notice_says_what_is_off(front):
     _check(front, "tryb_wzgledny_mowi_o_rozjezdzie")
 
 
+def test_train_number_with_or_without_carrier(front):
+    """#167: „60221" i „KD 60221" w polu linii to ten sam pociąg."""
+    _check(front, "numer_pociagu_z_przewoznikiem_i_bez")
+
+
 def test_relative_mode_threshold_only_goes_with_a_vehicle(front):
     """Próg trybu względnego (⚙, #231) nie zaśmieca zwykłego wyszukiwania."""
     _check(front, "prog_trybu_wzglednego_leci_do_serwera")
