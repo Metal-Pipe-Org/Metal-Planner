@@ -203,11 +203,11 @@ jobs:
             fi
             case "$name" in
               ogólnie)
-                discord_send info "" "Ogólnie — do zrobienia" "https://github.com/$REPO/pulls" "$desc" ;;
+                discord_send info "" "📋 Ogólnie — do zrobienia" "https://github.com/$REPO/pulls" "$desc" ;;
               pozostali)
-                discord_send grey "" "Pozostali — $day" "https://github.com/$REPO/issues" "$desc" ;;
+                discord_send grey "" "📊 Pozostali — $day" "https://github.com/$REPO/issues" "$desc" ;;
               *)
-                discord_send info "$name" "Podsumowanie dnia — $day" \
+                discord_send info "$name" "📊 Podsumowanie dnia — $day" \
                   "https://github.com/$REPO/issues?q=involves:$name" "$desc" ;;
             esac
             # Webhook Discorda przyjmuje kilka wiadomości na parę sekund.

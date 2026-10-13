@@ -360,8 +360,8 @@ jobs:
           source .discord/.github/scripts/discord.sh
 
           if [ "$OUTCOME" != success ]; then
-            discord_send grey "" "Claude nie dokończył: #$N $TITLE" "$RUN" \
+            discord_send grey "" "⚠️ Claude nie dokończył: #$N $TITLE" "$RUN" \
               "Link prowadzi do logu biegu" "" "$WHO"
           else
-            discord_send info "" "Claude skończył: #$N $TITLE" "$ISSUE_URL" "" "" "$WHO"
+            discord_send info "" "🤖 Claude skończył: #$N $TITLE" "$ISSUE_URL" "" "" "$WHO"
           fi
