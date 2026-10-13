@@ -1384,6 +1384,9 @@ def with_shifted_trip(day, trip_id, from_stop, late_sec):
     przesiadka w niego „o czasie" kilka przystanków dalej byłaby przesiadką
     w pojazd, którego tam wtedy nie będzie.
 
+    Gdy od `from_stop` kurs nie ma już żadnego odjazdu (pętla końcowa),
+    przesuwać nie ma czego - wraca dzień bez zmian i ten sam kurs.
+
     Kopia płytka, jak w with_point: dotykamy tylko tego, co się zmienia.
     Tablica połączeń jest tu jednak inna (kurs zmienia w niej miejsce), więc
     jest kopiowana - to ~1 ms, w przeciwieństwie do przebudowy indeksów,
@@ -1399,6 +1402,12 @@ def with_shifted_trip(day, trip_id, from_stop, late_sec):
         started = started or from_s == from_stop
         if started:
             tail.append((dep + late_sec, arr + late_sec, from_s, to_s, new_id))
+    # Na pętli końcowej (onboard._by_arrival) kurs nie ma już odjazdu - nie
+    # ma czego przesuwać, a usunięcie zabrałoby z dnia cały kurs i nie
+    # wstawiło nic w zamian. Pasażer i tak tylko wysiada, więc dzień zostaje
+    # taki, jaki był.
+    if not tail:
+        return day, trip_id
 
     data = copy.copy(day)
     data.conns = list(day.conns)

@@ -380,3 +380,30 @@ def test_indeksy_dnia_z_przesunietym_kursem_zgadzaja_sie_z_tablica():
         assert {k: v for k, v in dzien.deps_by_stop.items() if v} == odjazdy
         assert [dzien.conns[i][0] for i in gtfs.trip_conns(dzien, kurs)] == [
             600 + late, 1200 + late]
+
+
+def test_petla_koncowa_poza_rozkladem_nie_kasuje_kursu(install_day):
+    """Ocena PR #307: „jadę na pętlę" z pojazdem ponad próg od rozkładu.
+    Na pętli kurs nie ma już odjazdu, więc nie ma czego przesuwać - dzień ma
+    zostać nietknięty, a nie stracić cały kurs."""
+    import gtfs
+
+    day = _day()
+    przed = list(gtfs.trip_conns(day, "nasz"))
+    dzien, kurs = gtfs.with_shifted_trip(day, "nasz", "CEL", 600)
+    assert dzien is day and kurs == "nasz"
+    assert list(gtfs.trip_conns(dzien, "nasz")) == przed
+
+    # Cała ścieżka: o 00:50 „nasz" według rozkładu był na pętli CEL o 00:40.
+    install_day(make_day([
+        {"trip_id": "nasz", "label": "Autobus 146", "headsign": "CEL",
+         "stops": [("POCZATEK", 0, 0), ("WSIADAM", 600, 600),
+                   ("SRODEK", 1200, 1200), ("CEL", 2400, 2400)]},
+        {"trip_id": "dalej", "label": "Tramwaj 7", "headsign": "DALEJ",
+         "stops": [("CEL", 3300, 3300), ("DALEJ", 3900, 3900)]},
+    ]))
+    wynik = planner.plan_flow("", "DALEJ", WHEN.replace(minute=50),
+                              in_vehicle=_w_pojezdzie(stop="CEL"),
+                              density=planner.MAX_MAP_DENSITY)
+    assert wynik["onboard"]["late_sec"] == 600
+    assert wynik["journeys"] and wynik["journeys"][0]["arrival"] == "01:05"
