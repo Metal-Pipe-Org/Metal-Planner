@@ -2762,9 +2762,9 @@ function timetableLinesHtml(data, mapSec) {
         // „i" za plakietką, w tej samej komórce siatki: za kierunkiem ucinałby
         // go wielokropek, a osobny element przesunąłby kolumny wiersza.
         (d.info
-            ? `<span class="tt-badge-info"><span class="badge ${esc(d.mode)}">${esc(d.num)}</span>`
+            ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
               + `${infoHtml(d.info)}</span>`
-            : `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>`) +
+            : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
         `<span class="tip-dir">${esc(d.headsign)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
