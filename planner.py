@@ -3000,6 +3000,18 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
             item["stops_t"] = [
                 [*point, when] for point, when in zip(_round_path(coords), times)
             ]
+            # Nazwy tych samych przystanków, po kolei (zgłoszenie #252): mapa
+            # pokazuje je pod kursorem i przy dużym przybliżeniu. stops_n to
+            # nazwa MIEJSCA, stops_pf - nazwa słupka tam, gdzie jest inna
+            # (peron kierunkowy węzła, stacja scalona z przystankiem MPK);
+            # bez takich słupków pola nie ma.
+            poles = [day.stop_names[s] for s in stops_seq]
+            item["stops_n"] = [gtfs.place_name(day, s) for s in stops_seq]
+            if any(pole != place for pole, place in zip(poles, item["stops_n"])):
+                item["stops_pf"] = [
+                    pole if pole != place else None
+                    for pole, place in zip(poles, item["stops_n"])
+                ]
         if reach is not None and reach_ok:
             item["arrive"] = reach
         corridor = corridors.get((label, stops_seq))
@@ -3261,6 +3273,9 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         clat, clon = _place_center(day, key, node["stop"])
         entry = {
             "name": day.stop_names[node["stop"]],
+            # Nazwa miejsca, ta sama co w stops_n kawałków - po niej mapa
+            # nie stawia kropki przystanku linii tam, gdzie stoi już ta.
+            "place": gtfs.place_name(day, node["stop"]),
             "lat": lat,
             "lon": lon,
             "clat": clat,

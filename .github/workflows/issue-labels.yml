@@ -307,6 +307,7 @@ jobs:
         env:
           KEYWORD: ${{ steps.refs.outputs.keyword }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
           MERGER: ${{ github.event.pull_request.merged_by.login }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
@@ -327,13 +328,11 @@ jobs:
               | tee -a "$GITHUB_STEP_SUMMARY"
 
             # Autora pingujemy, chyba że to on zmergował.
-            author=$(printf '%s' "$json" | jq -r .user.login)
-            if [ "$author" = "$MERGER" ]; then
-              author="**$author**"
-            else
-              author="@$author"
+            ping=$(printf '%s' "$json" | jq -r .user.login)
+            if [ "$ping" = "$MERGER" ]; then
+              ping=""
             fi
-            discord_send merged "$MERGER" "Zgłoszenie zamknięte: #$n $(printf '%s' "$json" | jq -r .title)" \
+            discord_send merged "$MERGER" "Zamknięte PR-em: #$n $(printf '%s' "$json" | jq -r .title)" \
               "$(printf '%s' "$json" | jq -r .html_url)" \
-              "Zamknięte przez PR **#$PR $PR_TITLE** · autor zgłoszenia: $author"
+              "$(discord_link "PR #$PR $PR_TITLE" "$PR_URL")" "" "$ping"
           done

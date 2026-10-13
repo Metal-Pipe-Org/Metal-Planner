@@ -155,9 +155,7 @@ Mapa odpowiada nie tylko na „jak dojechać”, ale też na „ile to trwa” i
 **Bez ruszania myszą** widać czas całej podróży: o której wyjść na najszybszą
 trasę, o której się nią dojedzie i od kiedy do kiedy sięga mapa. Wyjście to
 najpóźniejsza chwila, z której wciąż dojeżdża się najszybciej — wcześniejsze
-kazałoby tylko gdzieś czekać. Godziny przyjazdu mają przy sobie „za ile",
-liczone od godziny z formularza — czekanie na pierwszy pojazd jest w tej
-liczbie zawarte, bo pasażer i tak czeka.
+kazałoby tylko gdzieś czekać.
 
 **Pod kursorem, dla punktu pod kursorem** — nie dla całej linii i nie dla
 jakiegoś jej kawałka — widać dwie godziny: o której tym pojazdem jest się
@@ -540,6 +538,14 @@ i tylko z tej chwili. Przy pytaniu o inny dzień kropki zostają — stacja stoi
 tam zawsze — ale mapa mówi wprost, że stanu nie zna, zamiast podać dzisiejszą
 liczbę jako jutrzejszą. Milczące źródło zabiera kropki, nigdy odpowiedź na
 pytanie „jak tam dojadę".
+
+## 17. Mapa mówi, które przystanki się mija i jak się nazywają
+
+1. Wskazana linia pokazuje swoje mijane przystanki, każdy z nazwą i godziną. Są lżejsze od kropek przesiadek (punkt 11), żeby nie udawały miejsca, w którym mapa radzi się przesiąść. Znikają, gdy linia przestaje być wskazana.
+2. Godzina „tu jesteś” (punkt 10) ma przy sobie nazwę najbliższego przystanku na tej linii.
+3. Od dużego przybliżenia przystanki narysowanych linii stoją na mapie na stałe, z nazwami. Przystanki, przez które nic na mapie nie jedzie, zostają bez nazw. Bez narysowanej trasy nazwy mają wszystkie przystanki w kadrze.
+4. Jedno miejsce ma jedną nazwę, nawet gdy ma kilka słupków.
+5. Numery linii mają pierwszeństwo przed nazwami (punkt 7). Nazwa, która nigdzie się nie mieści, nie jest rysowana, bo lepszy brak napisu niż napis na napisie.
 
 ## Priorytet: poprawność przed szybkością
 
