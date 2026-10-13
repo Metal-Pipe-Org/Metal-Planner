@@ -297,6 +297,37 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     return _merge_named_places(places, stop_coords)
 
 
+def place_name(day, stop_id):
+    """Nazwa miejsca, do którego należy słupek (patrz _build_places) - ta,
+    którą mapa podpisuje przystanek: raz na miejsce, nie raz na peron ani na
+    sieć. Peron kierunkowy węzła ('PL. GRUNWALDZKI W/t') i stacja scalona
+    z przystankiem MPK ('Wrocław Główny' przy 'DWORZEC GŁÓWNY') dostają nazwę
+    miejsca, a własna nazwa słupka zostaje do dymka (zgłoszenia #252 i #253).
+    Słupek spoza miejsc (punkt kliknięty na mapie) nazywa się sobą."""
+    key = day.place_of.get(stop_id)
+    return day.display_name[key] if key is not None else day.stop_names[stop_id]
+
+
+def with_place_names(stops):
+    """Te same słupki ({name, lat, lon, ...}) z nazwą miejsca w `place` - do
+    podpisów na mapie bez narysowanej trasy. Grupuje je ten sam młynek co
+    dzień (_build_places), więc miejsce ma tu tę samą nazwę co przy trasie.
+    Lista ma być CAŁA naraz, MPK przed koleją: scalenie nazw łączy obie
+    sieci, a przy wspólnym kluczu wygrywa pisownia MPK, jak w load_day."""
+    stop_names = {i: s["name"] for i, s in enumerate(stops)}
+    stop_coords = {i: (s["lat"], s["lon"]) for i, s in enumerate(stops)}
+    stops_by_key, display = {}, {}
+    for i, name in stop_names.items():
+        stops_by_key.setdefault(name.casefold(), []).append(i)
+        display.setdefault(name.casefold(), name)
+    places = _build_places(stop_names, stop_coords, stops_by_key)
+    place_of = {i: key for key, ids in places.items() for i in ids}
+    return [
+        {**s, "place": display[place_of[i]] if i in place_of else s["name"]}
+        for i, s in enumerate(stops)
+    ]
+
+
 def walk_time_sec(meters, mps=WALK_SPEED_MPS):
     """Ile trwa przejście pieszo na dystansie `meters` w linii prostej
     Zaokrąglamy W GÓRĘ do pełnej minuty - tak samo, jak cała reszta godzin
