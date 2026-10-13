@@ -829,6 +829,8 @@ const stopsReady = fetch('/api/stops')
     kasował (#154). Z tego samego powodu ruszamy wyłącznie pole, które klik
     uzupełnia - drugiego nie przepisujemy z `sel`. */
 function pickEndpoint(value) {
+    // Okno „mojego miejsca" czeka na wskazanie - ten klik jest dla niego.
+    if (placePickTook(value)) return;
     if (selectedJourney !== null) { deselectJourney(); return; }
     const hasStart = startInput.value.trim() !== '';
     const hasEnd = endInput.value.trim() !== '';
@@ -4999,6 +5001,266 @@ $('clear').addEventListener('click', () => {
     setView('map');       // nową relację wybiera się na mapie
     forgetLastSearch();
 });
+
+// ----------------------------------------------------------- moje miejsca ----
+//
+// Trzy przyciski „jedź tam stąd" (pasek .places-bar, patrz index.html).
+// Miejsce to to samo, co cel wyszukiwania: nazwa przystanku (kanoniczna, jak
+// w `sel`) albo punkt {lat, lon}. Zapisane tylko w tej przeglądarce, osobnym
+// kluczem - „Przywróć domyślne" w ⚙ ich nie kasuje, bo to nie ustawienie.
+const MY_PLACES_KEY = 'metal-planner:my-places';
+const MY_PLACES_COUNT = 3;
+const placesBar = $('places-bar');
+const placeDialog = $('place-dialog');
+const placeWhere = $('place-where');
+const placeMsg = $('place-msg');
+const placePickHint = $('place-pick-hint');
+
+let myPlaces = loadMyPlaces();
+let placeSlot = null;      // które miejsce jest w oknie
+let placeDraft = null;     // punkt z ◎ albo z mapy - pole pokazuje go jako tekst
+let placePicking = false;  // okno schowane, czeka na klik w mapę
+let placeLongPress = false;
+
+function loadMyPlaces() {
+    let saved = [];
+    try {
+        saved = JSON.parse(localStorage.getItem(MY_PLACES_KEY)) || [];
+    } catch {
+        // localStorage niedostępny albo zepsuty JSON - przyciski zaczynają puste
+    }
+    return Array.from({length: MY_PLACES_COUNT}, (_, i) => {
+        const p = saved[i];
+        return p && p.icon && (typeof p.place === 'string' || isPoint(p.place)) ? p : null;
+    });
+}
+
+function saveMyPlaces() {
+    try {
+        localStorage.setItem(MY_PLACES_KEY, JSON.stringify(myPlaces));
+    } catch {
+        // localStorage niedostępny - miejsce działa do odświeżenia strony
+    }
+}
+
+function renderPlaces() {
+    placesBar.replaceChildren(...myPlaces.map((p, i) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'icon-button place-button' + (p ? ' set' : '');
+        button.dataset.slot = i;
+        button.textContent = p ? p.icon : '+';
+        const label = p ? `Jedź stąd do: ${displayValue(p.place)}`
+            : `Moje miejsce ${i + 1} — przypisz miejsce`;
+        button.setAttribute('aria-label', label);
+        button.title = p ? `${label}\nPrzytrzymaj, żeby zmienić` : label;
+        return button;
+    }));
+}
+
+function showPlaceMsg(text) {
+    placeMsg.textContent = text || '';
+    placeMsg.hidden = !text;
+}
+
+function setPlaceDraft(point) {
+    placeDraft = point;
+    placeWhere.value = displayValue(point);
+    showPlaceMsg('');
+}
+
+function openPlaceDialog(slot) {
+    if (placeDialog.open) return;
+    placeSlot = slot;
+    const p = myPlaces[slot];
+    $('place-title').textContent = `Moje miejsce ${slot + 1}`;
+    for (const radio of placeDialog.querySelectorAll('[name="place-icon"]')) {
+        radio.checked = !!p && radio.value === p.icon;
+    }
+    placeDraft = p && isPoint(p.place) ? p.place : null;
+    placeWhere.value = p ? displayValue(p.place) : '';
+    $('place-remove').hidden = !p;
+    showPlaceMsg('');
+    placeDialog.showModal();
+}
+
+/** „51.1093, 17.0386", „(51.1093, 17.0386)" albo z przecinkami dziesiętnymi
+    „51,1093 17,0386" - wpisane ręcznie albo skopiowane z pola „Skąd". */
+function parsePoint(text) {
+    const m = text.trim().match(
+        /^\(?\s*(-?\d{1,2}(?:[.,]\d+)?)\s*(?:[,;]\s*|\s+)(-?\d{1,3}(?:[.,]\d+)?)\s*\)?$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1].replace(',', '.'));
+    const lon = parseFloat(m[2].replace(',', '.'));
+    return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? {lat, lon} : null;
+}
+
+/** Co jest teraz w polu okna: punkt ze szkicu, gdy pole wciąż go pokazuje,
+    inaczej przystanek z listy albo wpisane współrzędne. */
+function placeFromField() {
+    const text = placeWhere.value.trim();
+    if (placeDraft && text === displayValue(placeDraft)) return placeDraft;
+    if (STOP_KIND.has(text)) return rawStopName(text);
+    return parsePoint(text);
+}
+
+function savePlace() {
+    const icon = placeDialog.querySelector('[name="place-icon"]:checked');
+    const place = placeFromField();
+    if (!icon) { showPlaceMsg('Wybierz ikonę.'); return; }
+    if (!place) {
+        showPlaceMsg(placeWhere.value.trim()
+            ? 'Nie znam takiego przystanku — wybierz go z podpowiedzi, wpisz współrzędne albo wskaż miejsce na mapie.'
+            : 'Wybierz miejsce.');
+        placeWhere.focus();
+        return;
+    }
+    myPlaces[placeSlot] = {icon: icon.value, place};
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+}
+
+/** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
+function locateOnce(onPoint, onError) {
+    if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
+    navigator.geolocation.getCurrentPosition(
+        position => onPoint({lat: position.coords.latitude,
+                             lon: position.coords.longitude}),
+        error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
+        {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
+    );
+}
+
+/** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
+    od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
+function goToPlace(slot, button) {
+    const {place} = myPlaces[slot];
+    if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
+    hideRecallOffer();
+    hideLocateOffer();
+    showLocateMsg('');
+    const previous = [sel.start, sel.end];
+    sel.end = place;
+    endInput.value = displayValue(place);
+    updatePointMarker('end', place);
+    restyle(...previous, sel.end);
+    button.disabled = true;               // GPS potrafi mielić kilka sekund
+    locateOnce(point => {
+        button.disabled = false;
+        const before = sel.start;
+        sel.start = point;
+        startInput.value = displayValue(point);
+        updatePointMarker('start', point);
+        restyle(before);
+        offerNearestStop(point);
+        search();
+    }, message => {
+        button.disabled = false;
+        showLocateMsg(message);
+        if (startInput.value) search();
+    });
+}
+
+/** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
+function placePickTook(value) {
+    if (!placePicking) return false;
+    stopPlacePick();
+    // Słupek to przystanek z nazwą, nie punkt - pole dostaje wtedy nazwę.
+    if (isPoint(value)) setPlaceDraft(value);
+    else { placeDraft = null; placeWhere.value = displayValue(value); showPlaceMsg(''); }
+    placeDialog.showModal();
+    return true;
+}
+
+function stopPlacePick() {
+    placePicking = false;
+    placePickHint.hidden = true;
+}
+
+placesBar.addEventListener('click', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
+    if (placeLongPress) { placeLongPress = false; return; }
+    const slot = Number(button.dataset.slot);
+    if (myPlaces[slot]) goToPlace(slot, button);
+    else openPlaceDialog(slot);
+});
+
+// Zmiana przypisanego miejsca: prawy przycisk myszy albo przytrzymanie palca
+// (iPhone nie zgłasza przytrzymania jako contextmenu, więc liczymy je sami).
+placesBar.addEventListener('contextmenu', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    event.preventDefault();
+    // Android zgłasza przytrzymanie palca także tak - okno ma się otworzyć
+    // raz, a puszczenie palca nie może potem „kliknąć".
+    clearTimeout(placePressTimer);
+    if (placeLongPress) return;           // przytrzymanie było pierwsze
+    placeLongPress = true;
+    openPlaceDialog(Number(button.dataset.slot));
+});
+
+let placePressTimer = null;
+placesBar.addEventListener('pointerdown', event => {
+    const button = event.target.closest('.place-button');
+    placeLongPress = false;
+    if (!button || event.button !== 0) return;
+    placePressTimer = setTimeout(() => {
+        placeLongPress = true;
+        openPlaceDialog(Number(button.dataset.slot));
+    }, 600);
+});
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+    placesBar.addEventListener(type, () => clearTimeout(placePressTimer));
+}
+
+attachAutocomplete(placeWhere, () => { placeDraft = null; showPlaceMsg(''); },
+                   {suggest: suggestRecentFirst('end'), onEnter: savePlace});
+placeWhere.addEventListener('input', () => showPlaceMsg(''));
+
+$('place-form').addEventListener('submit', event => {
+    event.preventDefault();
+    savePlace();
+});
+
+$('place-remove').addEventListener('click', () => {
+    myPlaces[placeSlot] = null;
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+});
+
+const placeLocate = $('place-locate');
+if (!navigator.geolocation) placeLocate.hidden = true;
+placeLocate.addEventListener('click', () => {
+    placeLocate.disabled = true;
+    locateOnce(point => {
+        placeLocate.disabled = false;
+        setPlaceDraft(point);
+    }, message => {
+        placeLocate.disabled = false;
+        showPlaceMsg(message);
+    });
+});
+
+$('place-pick').addEventListener('click', () => {
+    placeDialog.close();
+    placePicking = true;
+    $('place-pick-text').textContent = `Kliknij na mapie: moje miejsce ${placeSlot + 1}`;
+    placePickHint.hidden = false;
+    setView('map');            // na telefonie z listy tras mapy nie widać
+});
+
+$('place-pick-cancel').addEventListener('click', () => {
+    stopPlacePick();
+    placeDialog.showModal();
+});
+
+placeDialog.addEventListener('close', () => { placeLongPress = false; });
+
+renderPlaces();
 
 // Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa

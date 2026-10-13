@@ -90,7 +90,7 @@ UKLAD_JS = """async (mapView) => {
     }
 
     if (mapView) {
-        const overlays = ['#sidebar', '.layer-bar', '#time-headline', '#flow-panel',
+        const overlays = ['#sidebar', '.layer-bar', '.places-bar', '#time-headline', '#flow-panel',
                           '#tt-results', '#view-tabs']
             .map(sel => document.querySelector(sel)).filter(el => visible(el) && !el.hidden);
         for (let i = 0; i < overlays.length; i++) {
