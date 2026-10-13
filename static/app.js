@@ -957,27 +957,38 @@ function useMyLocation(point) {
 if (!navigator.geolocation) {
     locateButton.hidden = true;
 } else {
-    locateButton.addEventListener('click', () => {
-        showLocateMsg('');
-        hideLocateOffer();
-        locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
-        const finish = () => { locateButton.disabled = false; };
-        navigator.geolocation.getCurrentPosition(
-            position => {
-                finish();
-                useMyLocation({lat: position.coords.latitude,
-                               lon: position.coords.longitude});
-            },
-            error => {
-                finish();
-                showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
-            },
-            // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
-            // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
-            // pozycję sprzed kilkuset metrów.
-            {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
-        );
-    });
+    locateButton.addEventListener('click', () => locateStart());
+}
+
+function locateStart(onFail = () => {}) {
+    showLocateMsg('');
+    hideLocateOffer();
+    locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
+    const finish = () => { locateButton.disabled = false; };
+    navigator.geolocation.getCurrentPosition(
+        position => {
+            finish();
+            useMyLocation({lat: position.coords.latitude,
+                           lon: position.coords.longitude});
+        },
+        error => {
+            finish();
+            showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
+            onFail();
+        },
+        // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
+        // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
+        // pozycję sprzed kilkuset metrów.
+        {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
+    );
+}
+
+/** Cel gotowy przy pustym starcie (#275): jedzie się stąd, czyli to samo co
+    ◎ - łącznie z „Stoisz na przystanku…?" i szukaniem. Bez lokalizacji
+    kursor idzie do „Skąd", bo bez startu nie ma czego szukać. */
+function startFromHere() {
+    if (navigator.geolocation) locateStart(() => startInput.focus());
+    else startInput.focus();
 }
 
 // ---------------------------------------------------- kadrowanie widoku ----
@@ -4959,7 +4970,10 @@ attachAutocomplete(startInput, () => {
 attachAutocomplete(endInput, () => {
     if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
     if (startInput.value) search();
-}, {suggest: suggestRecentFirst('end')});
+    else if (!onboardOn) startFromHere();
+}, {suggest: suggestRecentFirst('end'),
+    onEnter: () => (endInput.value.trim() && !startInput.value.trim() && !onboardOn
+                    ? startFromHere() : search())});
 
 $('swap').addEventListener('click', () => {
     const previous = [sel.start, sel.end];

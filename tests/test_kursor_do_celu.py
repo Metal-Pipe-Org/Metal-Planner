@@ -90,3 +90,47 @@ def test_moja_lokalizacja_i_tak_przenosi_do_celu(przegladarka, adres, ekran):
     assert page.evaluate(FOKUS) == "end"
     context.close()
     assert not bledy
+
+
+# W drugą stronę: cel wybrany przy pustym starcie znaczy „stąd" - to samo co
+# ◎, łącznie z pytaniem „Stoisz na…" i szukaniem.
+
+def test_cel_bez_startu_jedzie_z_mojej_lokalizacji(przegladarka, adres, ekran):
+    slupek = next(s for s in gtfs.all_stops_geo() if s["name"] == TRASA[0])
+    context, page, bledy = _otworz(
+        przegladarka, adres, ekran, permissions=["geolocation"],
+        geolocation={"latitude": slupek["lat"], "longitude": slupek["lon"]})
+    page.fill("#time", "12:00")
+    _wybierz(page, "#end", TRASA[1])
+    page.wait_for_selector("#locate-offer", state="visible")
+    assert page.input_value("#start")
+    page.wait_for_selector("#time-headline:not([hidden])", timeout=20000)
+
+    page.click("#locate-offer-yes")
+    assert TRASA[0] in page.input_value("#start")
+    assert page.input_value("#end")
+    context.close()
+    assert not bledy
+
+
+def test_cel_bez_startu_i_bez_lokalizacji_wraca_do_startu(przegladarka, adres, ekran):
+    context, page, bledy = _otworz(przegladarka, adres, ekran)
+    page.fill("#end", TRASA[1])
+    page.click("#end-list .ac-item")
+    page.wait_for_selector("#locate-msg", state="visible")
+    assert page.evaluate(FOKUS) == "start"
+    assert not page.input_value("#start")
+    context.close()
+    assert not bledy
+
+
+def test_cel_przy_gotowym_starcie_nie_pyta_o_lokalizacje(przegladarka, adres, ekran):
+    context, page, bledy = _otworz(przegladarka, adres, ekran)
+    page.fill("#time", "12:00")
+    _wybierz(page, "#start", TRASA[0])
+    _wybierz(page, "#end", TRASA[1])
+    page.wait_for_selector("#time-headline:not([hidden])", timeout=20000)
+    assert page.is_hidden("#locate-msg")
+    assert TRASA[0] in page.input_value("#start")
+    context.close()
+    assert not bledy
