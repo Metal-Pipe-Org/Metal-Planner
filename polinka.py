@@ -41,6 +41,12 @@ STATIONS = {
     ID_PREFIX + "NG": ("Polinka (Na Grobli)", 51.1059580, 17.0533566),
 }
 
+# Treść „i" przy Polince na osi trasy i w tablicy odjazdów: godziny otwarcia
+# i data sprawdzenia danych - jedyne miejsce, gdzie pasażer je zobaczy.
+INFO = (f"Godziny otwarcia: pn–pt 7:00–18:00, przerwa 13:30–14:00; "
+        f"w weekendy i święta nieczynna. Rozkładu nie ma — przyjmujemy odjazd "
+        f"co 5 min. Dane wpisane ręcznie, stan na {UPDATED:%d.%m.%Y}.")
+
 OPEN_SEC = 7 * 3600
 CLOSE_SEC = 18 * 3600
 BREAK_SEC = (13 * 3600 + 30 * 60, 14 * 3600)

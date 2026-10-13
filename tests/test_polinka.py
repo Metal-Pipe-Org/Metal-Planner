@@ -2,7 +2,8 @@
 
 Pilnujemy trzech rzeczy: że jeździ wtedy, kiedy według PWr jeździ (i ani
 minuty dłużej), że wyszukiwarka bierze ją pod uwagę jak każdy inny pojazd
-i że ma własny rodzaj (kolor) na plakietce.
+i że ma własny rodzaj (kolor) na plakietce, a godziny otwarcia i datę
+danych pod „i".
 """
 
 from datetime import date, datetime
@@ -80,3 +81,7 @@ def test_wyszukiwarka_jedzie_polinka(install_day):
     etap = pierwsza["legs"][0]
     assert etap["num"] == "Polinka" and etap["mode"] == "cable"
     assert pierwsza["arrival"] == "07:03"
+    # „i" przy Polince: godziny otwarcia i data sprawdzenia danych - i tylko tam.
+    assert etap["info"] == polinka.INFO
+    assert "7:00–18:00" in etap["info"] and f"{polinka.UPDATED:%d.%m.%Y}" in etap["info"]
+    assert all("info" not in leg for j in wynik["journeys"][1:] for leg in j["legs"])
