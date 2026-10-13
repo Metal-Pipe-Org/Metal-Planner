@@ -4192,7 +4192,8 @@ function warnOnboardRide(kurs) {
     // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
     // polem celu. Pełne zdanie zostaje w dymku i dla czytnika ekranu.
     const [ikona, fakt, ikona2, rada, pelne] = kurs.late_sec > 0
-        ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (${przystanek} ${rozklad})`,
+        // Bez nazwy przystanku: „(JAGODNO (P+R) 21:01)" czytało się jak kierunek.
+        ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (rozkład ${rozklad})`,
            '⏩', 'Godziny pojazdu przesunięte',
            `${kurs.num} jedzie prawdopodobnie ok. ${ile} po rozkładzie — według rozkładu był `
            + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `

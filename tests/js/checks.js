@@ -1526,7 +1526,8 @@ checks.tryb_wzgledny_mowi_o_rozjezdzie = (() => {
     const naCzas = !warn.hidden;
     return {
         ok: widacSpozniony && widacPrzed && !naCzas
-            && spozniony.includes('prawdopodobnie spóźniony ~12 min') && spozniony.includes('15:48')
+            && spozniony.includes('prawdopodobnie spóźniony ~12 min (rozkład <b>15:48</b>)')
+            && !spozniony.includes('Karwińska')
             && spozniony.includes('przesunięte')
             && przed.includes('dopiero o <b>16:28</b>') && przed.includes('za 28 min')
             && przed.includes('Sprawdź linię'),

@@ -804,7 +804,7 @@ Zostają więc trzy rzeczy do zrobienia:
    buduje od nowa (`gtfs._ShiftedTripIndex`), więc kosztuje pojedyncze
    milisekundy. Nad polem celu staje wtedy żółty komunikat z dwóch krótkich
    linijek z ikonami — fakt i co z nim zrobić: przy spóźnieniu „🕒 134
-   prawdopodobnie spóźniony ~12 min (Karwińska 15:48) / ⏩ Godziny pojazdu przesunięte", przy
+   prawdopodobnie spóźniony ~12 min (rozkład 15:48) / ⏩ Godziny pojazdu przesunięte", przy
    kursie, który według rozkładu dopiero przyjedzie, „⚠️ 134 na Karwińska
    dopiero o 16:28 (za 28 min) / 🔎 Sprawdź linię i przystanek". Pełne zdanie
    jest w dymku i dla czytnika ekranu. To nie pytanie: mały „×" w rogu tylko
