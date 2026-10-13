@@ -332,7 +332,7 @@ jobs:
             if [ "$ping" = "$MERGER" ]; then
               ping=""
             fi
-            discord_send merged "$MERGER" "Zamknięte PR-em: #$n $(printf '%s' "$json" | jq -r .title)" \
+            discord_send merged "$MERGER" "🔒 Zamknięte PR-em: #$n $(printf '%s' "$json" | jq -r .title)" \
               "$(printf '%s' "$json" | jq -r .html_url)" \
-              "$(discord_link "PR #$PR $PR_TITLE" "$PR_URL")" "" "$ping"
+              "PR [#$PR]($PR_URL) $PR_TITLE" "" "$ping"
           done
