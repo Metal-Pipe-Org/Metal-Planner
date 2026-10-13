@@ -302,6 +302,10 @@ body:has(#flow-panel:not([hidden])) .timetable-tip { display: none; }
 
 /* ------------------------------------------------- telefon w poziomie --- */
 
+/* Klasę na <html> ustawia skrypt w <head> przed pierwszym rysowaniem; display
+   z reguły poniżej przegrywa z nią specyficznością. */
+html.rotate-cover-dismissed .rotate-cover { display: none; }
+
 /* Telefon w poziomie nie jest wspierany - zasłona prosi o obrót (patrz
    templates/index.html). Warunek to ten sam „niski ekran dotykowy", co
    w <link id="phone-css">: telefon w poziomie ma najwyżej ~450 px wysokości,
@@ -330,4 +334,10 @@ body:has(#flow-panel:not([hidden])) .timetable-tip { display: none; }
     .rotate-cover-title { font-size: 17px; font-weight: 700; }
 
     .rotate-cover-text { color: var(--ink-soft); font-size: 14px; }
+
+    .rotate-cover-dismiss {
+        margin-top: 14px;
+        background: var(--tram);
+        color: #fff;
+    }
 }

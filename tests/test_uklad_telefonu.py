@@ -352,3 +352,33 @@ def test_telefon_w_poziomie_dostaje_zaslone(ekran, adres, przegladarka):
     assert widac == zaslona, (ekran, widac)
     if zaslona:
         assert pokrycie["caly"] and pokrycie["na_wierzchu"], pokrycie
+
+
+def test_zaslone_mozna_odrzucic_na_stale(adres, przegladarka):
+    """„Pokaż mimo to" zdejmuje zasłonę i zostaje zapamiętane: po odświeżeniu
+    telefon w poziomie dostaje już zwykły układ."""
+    context = przegladarka.new_context(
+        viewport={"width": 844, "height": 390}, device_scale_factor=2,
+        is_mobile=True, has_touch=True, locale="pl-PL", service_workers="block")
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector("#start", state="attached")
+    przed = page.is_visible("#rotate-cover")
+    page.click("#rotate-cover-dismiss")
+    po_kliknieciu = page.is_visible("#rotate-cover")
+    page.add_init_script("""
+        document.addEventListener('DOMContentLoaded', () => {
+            const cover = document.getElementById('rotate-cover');
+            window.__zaslonaPrzyStarcie = cover ? getComputedStyle(cover).display : 'brak';
+        });
+    """)
+    page.reload()
+    page.wait_for_selector("#start", state="attached")
+    przy_starcie = page.evaluate("window.__zaslonaPrzyStarcie")
+    po_odswiezeniu = page.is_visible("#rotate-cover")
+    context.close()
+    assert (przed, po_kliknieciu, po_odswiezeniu) == (True, False, False)
+    assert przy_starcie == "none", przy_starcie
