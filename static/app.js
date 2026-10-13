@@ -2752,7 +2752,11 @@ function timetableLinesHtml(data, mapSec) {
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
-            `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
+            `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
+            // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
+            (d.trip ? `<span class="tt-live" data-trip="${esc(d.trip)}"`
+                      + ` data-stop="${esc(d.trip_stop)}">${boardLiveHtml(d.trip, d.trip_stop)}</span>` : '')
+            + '</span>' +
         routeButtonHtml(d, 'trasa') + '</li>',
     ).join('');
     return head + `<ul class="tt-rows tt-lines${flows ? ' has-flow' : ''}">${html}</ul>`;
@@ -2905,6 +2909,63 @@ function keepWithinHorizon(data, deadline) {
 function emitTimetable(dot, html) {
     if (dot.getTooltip()) dot.setTooltipContent(html);
     if (timetableTarget === dot) showSidePanel(html);
+    fillBoardDelays();
+}
+
+// ------------------------------- opóźnienia pociągów w tablicy odjazdów (#71) --
+//
+// Przy odjeździe pociągu mały zegar: zielony, gdy PLK wie, że jedzie o czasie,
+// czerwony, gdy jest spóźniony (minuty w dymku). Tablica rysuje się od razu
+// z rozkładu, a zegary dochodzą, gdy przyjdzie odpowiedź - jak na osi trasy
+// (loadTrainDelays). Serwer pilnuje limitów zapytań do PLK (pkp_live.py), więc
+// tu tylko pamiętamy odpowiedzi przez minutę, żeby każde najechanie na kropkę
+// nie pytało od nowa.
+const BOARD_DELAYS_TTL_MS = 60000;
+const boardDelays = new Map();     // kurs -> {at, stops: {stacja: {arr, dep}} | null}
+const boardPending = new Set();
+const CLOCK_ICON = '<svg viewBox="0 0 12 12" aria-hidden="true">'
+    + '<circle cx="6" cy="6" r="4.75"/><path d="M6 3.4V6l1.8 1.2"/></svg>';
+
+function boardLiveHtml(trip, stop) {
+    const known = boardDelays.get(trip);
+    const at = known && known.stops && known.stops[stop];
+    const late = at ? at.dep : null;
+    if (typeof late !== 'number') return '';
+    return late > 0
+        ? `<span class="tt-clock late" title="Spóźniony ${late} min">${CLOCK_ICON}</span>`
+        : `<span class="tt-clock ontime" title="O czasie">${CLOCK_ICON}</span>`;
+}
+
+function fillBoardDelays() {
+    const slots = [...document.querySelectorAll('.tt-live[data-trip]')];
+    const now = Date.now();
+    const missing = new Set();
+    for (const slot of slots) {
+        const known = boardDelays.get(slot.dataset.trip);
+        if (known && now - known.at < BOARD_DELAYS_TTL_MS) {
+            slot.innerHTML = boardLiveHtml(slot.dataset.trip, slot.dataset.stop);
+        } else if (!boardPending.has(slot.dataset.trip)) {
+            missing.add(slot.dataset.trip);
+        }
+    }
+    const trips = [...missing].slice(0, 10);
+    if (!trips.length) return;
+    trips.forEach(trip => boardPending.add(trip));
+    fetch('/api/train_delays?' + new URLSearchParams({trips: trips.join(','), date: $('date').value}))
+        .then(r => r.json())
+        .then(data => {
+            const at = Date.now();
+            for (const trip of trips) boardDelays.set(trip, {at, stops: (data.delays || {})[trip] || null});
+        })
+        .catch(() => {})
+        .finally(() => {
+            trips.forEach(trip => boardPending.delete(trip));
+            for (const slot of document.querySelectorAll('.tt-live[data-trip]')) {
+                if (trips.includes(slot.dataset.trip)) {
+                    slot.innerHTML = boardLiveHtml(slot.dataset.trip, slot.dataset.stop);
+                }
+            }
+        });
 }
 
 // Kropka, której tablicę pokazujemy teraz - patrz emitTimetable.

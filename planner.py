@@ -166,6 +166,12 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             "headsign": headsign,
             **({"platform": platform}
                if (platform := _platform(day, trip, _stop_id)) else {}),
+            # Kurs kolejowy niesie identyfikator - po nim front dopytuje
+            # o opóźnienie na żywo (zgłoszenie #71, patrz pkp_live.py).
+            # Razem z nazwą stacji, przy której stoi - tablica bywa MIEJSCEM
+            # („DWORZEC GŁÓWNY"), a opóźnienia są pod nazwą stacji PKP.
+            **({"trip": trip, "trip_stop": day.stop_names[_stop_id]}
+               if trip.startswith("PKP:") else {}),
         })
 
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}

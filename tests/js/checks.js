@@ -1710,6 +1710,24 @@ checks.peron_przy_wsiadaniu_i_wysiadaniu = (() => {
 })();
 
 
+/* Zegar przy pociągu w tablicy odjazdów (#71): zielony o czasie, czerwony
+   spóźniony, a bez danych - nic. */
+checks.zegar_opoznienia_w_tablicy = (() => {
+    const at = Date.now();
+    app.boardDelays.set('PKP:1', {at, stops: {'Wrocław Główny': {arr: null, dep: 0}}});
+    app.boardDelays.set('PKP:2', {at, stops: {'Wrocław Główny': {arr: null, dep: 9}}});
+    app.boardDelays.set('PKP:3', {at, stops: null});
+    const [naCzas, spozniony, brak, nieznany] = ['PKP:1', 'PKP:2', 'PKP:3', 'PKP:4']
+        .map(trip => app.boardLiveHtml(trip, 'Wrocław Główny'));
+    app.boardDelays.clear();
+    return {
+        ok: naCzas.includes('tt-clock ontime') && spozniony.includes('tt-clock late')
+            && spozniony.includes('Spóźniony 9 min') && brak === '' && nieznany === '',
+        naCzas, spozniony,
+    };
+})();
+
+
 /* Opóźnienie pociągu (zgłoszenie #71): przy stacji wysiadania planowa
    godzina przekreślona, rzeczywista i „+7 min", a gdy przez nie nie zdąży
    się na następny przejazd - ostrzeżenie w osi. */
