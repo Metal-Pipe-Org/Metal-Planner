@@ -4192,17 +4192,16 @@ function warnOnboardRide(kurs) {
     // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
     // polem celu. Pełne zdanie zostaje w dymku i dla czytnika ekranu.
     const [ikona, fakt, ikona2, rada, pelne] = kurs.late_sec > 0
-        ? ['🕒', `${esc(kurs.num)} spóźniony ~${ile} (${przystanek} ${rozklad})`,
+        ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (${przystanek} ${rozklad})`,
            '⏩', 'Godziny pojazdu przesunięte',
-           `${kurs.num} jedzie ok. ${ile} po rozkładzie — według rozkładu był `
+           `${kurs.num} jedzie prawdopodobnie ok. ${ile} po rozkładzie — według rozkładu był `
            + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `
            + `Godziny tego pojazdu na mapie są przesunięte o ${ile}.`]
         : ['⚠️', `${esc(kurs.num)} na ${przystanek} dopiero o ${rozklad} (za ${ile})`,
            '🔎', 'Sprawdź linię i przystanek',
            `Najbliższy kurs ${kurs.num} jest według rozkładu na przystanku `
            + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at_sched}, za `
-           + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię, kierunek `
-           + `i przystanek.`];
+           + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię i przystanek.`];
     $('ob-warn-text').innerHTML =
         `<span aria-hidden="true">${ikona}</span> ${fakt}`
         + `\n<span aria-hidden="true">${ikona2}</span> ${rada}`;
