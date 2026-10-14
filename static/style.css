@@ -260,11 +260,24 @@ body.panel-hidden #sidebar {
     gap: 6px;
 }
 
-/* Warstwy i moje miejsca w jednym rzędzie, rozdzielone kreską. */
+/* Warstwy i moje miejsca w jednym rzędzie, rozdzielone kreską. Przy komplecie
+   (z 🅿) to osiem przycisków - na szerokim panelu mieszczą się z zapasem
+   kilkunastu pikseli, na najwęższym telefonie już nie. Zamiast zawijać rząd
+   albo wystawać, przyciski kurczą się wtedy równo, najwyżej do 30 px;
+   gdy miejsca jest dość, zostają pełne 36 px. Pilnuje tego test
+   test_pasek_przyciskow_w_jednym_rzedzie (tests/test_uklad_telefonu.py). */
 .app-tools {
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+.app-tools .layer-bar,
+.app-tools .places-bar { min-width: 0; }
+
+.app-tools .icon-button {
+    flex-shrink: 1;
+    min-width: 30px;
 }
 
 .tools-sep {

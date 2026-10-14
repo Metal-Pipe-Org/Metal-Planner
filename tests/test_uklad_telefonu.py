@@ -17,6 +17,11 @@ a po wyszukaniu - czy formularz zwinął się do jednej linijki. Do tego rozkła
 z pustego zakładka „Mapa" wychodzi sama, a z wybranym zostaje na mapie
 z „Zamknij rozkład".
 
+Osobno pasek przycisków pod nazwą aplikacji (warstwy i moje miejsca) - także
+na szerokim ekranie, bo tam stoi w panelu stałej szerokości i każdy kolejny
+przycisk zjada jego zapas. Mierzony przy komplecie (z 🅿), w rzędzie, czyli
+na telefonie w zakładce „Trasy".
+
 Trasa jest liczona na prawdziwej bazie rozkładów (o 12:00, żeby zawsze coś
 jechało); żywe źródła - pojazdy, auta, rowery - dostają puste listy, żeby
 wynik nie zależał od internetu. Leaflet i tak idzie z sieci.
@@ -247,6 +252,67 @@ def test_wybrany_rozklad_zostaje_na_mapie(przebieg):
     „Zamknij rozkład"."""
     p = przebieg["z_wybranego"]
     assert p["wciaz_rozklad"] and p["zamknij"], p
+
+
+EKRANY = {"komputer": (1280, 800), **TELEFONY}
+
+# Pasek przycisków pod nazwą aplikacji: wszystkie w jednym rzędzie i w środku
+# paska (bez wjeżdżania w jego wewnętrzny margines). Kolumny na mapie
+# telefonu (position: fixed) to inny układ - tu liczy się sam rząd.
+PASEK_JS = """async () => {
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const EPS = 0.5;
+    const bar = document.querySelector('.app-bar');
+    const box = bar.getBoundingClientRect();
+    const s = getComputedStyle(bar);
+    const left = box.left + parseFloat(s.paddingLeft);
+    const right = box.right - parseFloat(s.paddingRight);
+    const buttons = [...document.querySelectorAll('.app-tools button')]
+        .filter(b => b.getClientRects().length);
+    const problems = [];
+    const tops = new Set(buttons.map(b => Math.round(b.getBoundingClientRect().top)));
+    if (tops.size !== 1) problems.push('przyciski w ' + tops.size + ' rzędach');
+    for (const b of buttons) {
+        const r = b.getBoundingClientRect();
+        const name = b.id || b.getAttribute('aria-label');
+        if (r.left < left - EPS || r.right > right + EPS) {
+            problems.push(name + ' wychodzi poza pasek o '
+                          + Math.round(Math.max(left - r.left, r.right - right)) + ' px');
+        }
+        if (r.width < 30 - EPS) problems.push(name + ' ma tylko ' + Math.round(r.width) + ' px');
+    }
+    return {count: buttons.length, problems};
+}"""
+
+
+@pytest.mark.parametrize("ekran", list(EKRANY), ids=list(EKRANY))
+def test_pasek_przyciskow_w_jednym_rzedzie(ekran, adres, przegladarka):
+    """Komplet: pięć warstw (z 🅿, który dokłada się przy zapalonych autach
+    i włączonym przycisku strefy) i trzy moje miejsca."""
+    width, height = EKRANY[ekran]
+    telefon = ekran != "komputer"
+    context = przegladarka.new_context(
+        viewport={"width": width, "height": height}, device_scale_factor=2,
+        is_mobile=telefon, has_touch=telefon, locale="pl-PL", service_workers="block")
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector(".place-button")
+    page.evaluate("""() => {
+        const zone = document.getElementById('zone-button');
+        zone.checked = true;
+        zone.dispatchEvent(new Event('change'));
+        const cars = document.getElementById('cars-toggle');
+        if (!cars.classList.contains('active')) cars.click();
+    }""")
+    if page.is_visible("#view-tabs"):
+        page.click('#view-tabs [data-view="list"]')
+    pasek = page.evaluate(PASEK_JS)
+    context.close()
+    assert pasek["count"] == 8, pasek
+    assert not pasek["problems"], pasek["problems"]
 
 
 def test_bez_bledow_javascriptu(przebieg):
