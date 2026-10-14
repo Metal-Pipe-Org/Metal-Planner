@@ -14,10 +14,10 @@ Dane na żywo: bez odpytywania w tle bez przerwy (decyzja użytkownika) -
 pyta dalej tylko wyszukiwanie i nie częściej niż dotąd (te same czasy
 ważności kanałów). Zmienia się tylko to, że wyszukiwanie (no_waiting) na nie
 nie czeka: liczy na tym, co jest w pamięci, choćby starym, a świeże pobierają
-się obok (refresh_in_background). Odpowiedź mówi wtedy, że dane się
-pobierają, a strona dopytuje o tę samą trasę z `fresh=1` - takie pytanie
-czeka już na koniec pobierania (wait_for_refreshes) i dostaje wynik na
-świeżych danych (patrz routes.api_flow i loadPlan w app.js).
+się obok (refresh_in_background). Gdy tak było, to samo wyszukiwanie po
+wysłaniu wyniku czeka na koniec pobierania (wait_for_refreshes) i dosyła
+rowery i auta na świeżych danych ostatnim etapem odpowiedzi (patrz
+routes.api_flow i planner.plan_flow_stages).
 
 Wątek rozkładu startuje w procesie, który obsługuje zapytania: z
 post_worker_init w gunicorn.conf.py (master tylko forkuje - wątek w nim nie

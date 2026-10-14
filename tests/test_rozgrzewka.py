@@ -146,33 +146,35 @@ def test_ten_sam_kanal_nie_pobiera_sie_dwa_razy_naraz():
 
 
 def _api(monkeypatch, stale):
-    def plan_flow(*args, **kwargs):
+    """Serwer z wyszukiwaniem, które tylko notuje, czy dane na żywo były
+    stare, i pyta, czy po wyniku warto policzyć je jeszcze raz."""
+    zapytane = []
+
+    def plan_flow_stages(*args, live_refreshed=None, **kwargs):
         if stale:
             warmup._search.current.stale = True
-        return {"segments": []}
-    monkeypatch.setattr(routes, "plan_flow", plan_flow)
+        yield "extras", {"segments": []}
+        zapytane.append(live_refreshed())
+    monkeypatch.setattr(routes, "plan_flow_stages", plan_flow_stages)
     czekania = []
     monkeypatch.setattr(warmup, "wait_for_refreshes", czekania.append)
     app = Flask(__name__)
     routes.init_routes(app)
-    return app.test_client(), czekania
+    return app.test_client(), czekania, zapytane
 
 
-def test_odpowiedz_mowi_ze_dane_na_zywo_sie_pobieraja(monkeypatch):
-    client, czekania = _api(monkeypatch, stale=True)
-    assert client.get("/api/flow?start=A&end=B").get_json()["live_pending"] is True
-    assert czekania == []
-
-
-def test_odpowiedz_na_swiezych_danych_o_niczym_nie_mowi(monkeypatch):
-    client, _ = _api(monkeypatch, stale=False)
-    assert "live_pending" not in client.get("/api/flow?start=A&end=B").get_json()
-
-
-def test_dopytanie_czeka_na_swieze_dane(monkeypatch):
-    client, czekania = _api(monkeypatch, stale=False)
-    client.get("/api/flow?start=A&end=B&fresh=1")
+def test_po_wyniku_na_starych_danych_czeka_na_swieze(monkeypatch):
+    client, czekania, zapytane = _api(monkeypatch, stale=True)
+    client.get("/api/flow?start=A&end=B").get_data()
     assert czekania == [routes.LIVE_REFRESH_WAIT_SEC]
+    assert zapytane == [True]
+
+
+def test_na_swiezych_danych_nie_czeka(monkeypatch):
+    client, czekania, zapytane = _api(monkeypatch, stale=False)
+    client.get("/api/flow?start=A&end=B").get_data()
+    assert czekania == []
+    assert zapytane == [False]
 
 
 @pytest.mark.parametrize("godzina, dni", [

@@ -217,7 +217,6 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 let sel = {start: null, end: null};
 let journeys = [];
 let selectedJourney = null;   // indeks pozycji z listy albo null
-let requestToken = 0;         // odsiewa odpowiedzi na nieaktualne zapytania
 let resultsCollapsed = !!uiState.resultsCollapsed; // ukrywa samą listę propozycji (nie cały panel)
 
 const isPoint = v => v !== null && typeof v === 'object';
@@ -1269,6 +1268,9 @@ let flowParts = [];       // {layer, opacity, weight} - do przygaszania pod wybr
 let flowHits = [];        // {seg, layer, casing, weight, latlngs} - kursor nad korytarzem
 let flowLabelLayer = null;
 let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania bez zapytania
+// To, o czym mówi pasek nad mapą: zwykle lastFlow, a w pierwszym etapie
+// wyszukiwania sama najszybsza trasa, zanim jest jakakolwiek mapa.
+let headlineFlow = null;
 // Warstwy "czasu na mapie" - zadeklarowane razem z resztą warstw wachlarza,
 // zanim cokolwiek zdąży je sprzątnąć (clearFlow leci niżej, ale wywołuje się
 // też przy starcie).
@@ -1280,7 +1282,10 @@ let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarker
 let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
 let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
 
-function clearFlow() {
+/** `cityLayers` false: mapa nowej relacji jest już w drodze, więc auta
+    i rowery nie wracają na tę chwilę do całego miasta - zeszłyby zaraz
+    znowu, przy mapie. */
+function clearFlow(cityLayers = true) {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
@@ -1292,11 +1297,13 @@ function clearFlow() {
     flowParts = [];
     flowHits = [];
     lastFlow = null;
+    headlineFlow = null;
     clearFlowHover();
     hideSidePanel();
     timetableTarget = null;
     renderTimeHeadline();
     setBaseDim(false);
+    if (!cityLayers) return;
     // Zdjęta mapa = nie ma już pytania, na które odpowiadały tamte auta
     // i rowery. Włączona warstwa wraca wtedy do miejskiego feedu.
     refreshCarLayer();
@@ -1321,6 +1328,7 @@ function drawFlow(flow, refit) {
     flowParts = [];                              // wszystkich słupków tam i z powrotem
     flowHits = [];                               // - stare warstwy z podświetlenia i tak znikają
     lastFlow = flow;
+    headlineFlow = flow;
     clearFlowHover();
     setBaseDim(true);                            // to przy każdym ruchu suwaka za dużo
     const faint = [], casings = [], bright = [];
@@ -1372,7 +1380,10 @@ function drawFlow(flow, refit) {
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
-    seedStartPanel();
+    // Okienko w rogu otwiera się samo przy nowej relacji. Przy przerysowaniu
+    // tej samej (suwaki, „Pokaż więcej", kolejne etapy wyszukiwania) zostaje
+    // to, co user w nim zostawił - także zamknięte.
+    if (refit || !timetableTarget) seedStartPanel();
     // Nowa mapa = inny zestaw linii, więc i inne pojazdy dotyczą tego, co
     // widać (patrz vehiclesFilter). Przy zgaszonej warstwie to nic nie kosztuje.
     renderVehicles();
@@ -1395,7 +1406,7 @@ function drawFlow(flow, refit) {
 
 function showFastest() {
     hideFastest();
-    const fastest = lastFlow && lastFlow.fastest;
+    const fastest = headlineFlow && headlineFlow.fastest;
     if (!fastest || !fastest.legs || !fastest.legs.length) return;
     const halos = [], cores = [];
     for (const leg of fastest.legs) {
@@ -1438,22 +1449,13 @@ const MAX_MAP_MORE = 3;
 let mapMore = 0;                   // ile razy kliknięto "pokaż więcej"
 let moreBusy = false;              // klik w locie - drugi klik ma poczekać
 
+/** Gęstsza mapa dorysowuje się na tę, która już jest - bez kadrowania i bez
+    gubienia wybranej trasy (patrz renderPlan). Przycisk kręci się, aż
+    dojdą wszystkie etapy, a bez kółka klik wyglądał na zignorowany. */
 function showMore() {
     if (moreBusy) return;
-    moreBusy = true;
     mapMore += 1;
-    // To samo kółko co przy „Szukaj" - gęstsza mapa liczy się tak samo długo,
-    // a bez niego klik wyglądał na zignorowany.
-    setSearching(true);
-    const token = requestToken;
-    // Kadru NIE przestawiamy: gęstsza mapa dokłada linie, nie zmienia tego,
-    // na co user patrzy.
-    loadPlan(token, false)
-        .catch(() => showError('Nie udało się połączyć z serwerem.'))
-        .finally(() => {
-            moreBusy = false;
-            if (token === requestToken) setSearching(false);
-        });
+    loadPlan('more').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
@@ -1483,7 +1485,7 @@ function headlineChips(legs) {
 function renderTimeHeadline() {
     const el = $('time-headline');
     if (!el) return;
-    const flow = lastFlow;
+    const flow = headlineFlow;
     if (!timeOpts.headline || !flow || typeof flow.best_sec !== 'number') {
         el.hidden = true;
         el.innerHTML = '';
@@ -1494,9 +1496,13 @@ function renderTimeHeadline() {
     // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
     // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
     // z wartości podróży wie to dopiero po szerszym szukaniu.
-    const more = flow.more < MAX_MAP_MORE
+    // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - zakresu mapy
+    // i przycisku jeszcze nie ma.
+    const mapped = typeof flow.limit_sec === 'number';
+    const more = mapped && flow.more < MAX_MAP_MORE
         ? `<button type="button" class="headline-more" title="Rysuj też gorsze `
-          + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">Pokaż więcej</button>`
+          + `opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa">`
+          + `<span class="spinner" aria-hidden="true"></span>Pokaż więcej</button>`
         : '';
     // Sama jazda to osobna liczba na życzenie: "za ile" zostaje zawsze.
     const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
@@ -1510,9 +1516,11 @@ function renderTimeHeadline() {
         `<span class="headline-best" tabindex="0">Najszybciej: wyjeżdżasz o `
         + `<b>${esc(flow.starts)}</b>, dojeżdżasz o <b>${esc(flow.best_arrival)}</b>, `
         + `za <b>${esc(fmtMins(flow.best_sec))}</b>${ride}${chips}</span>`
-        + `<span class="headline-sep">·</span>`
-        + `<span class="headline-limit">mapa od <b>${esc(flow.map_from)}</b> `
-        + `do <b>${esc(flow.deadline)}</b>, za <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
+        + (mapped
+            ? `<span class="headline-sep">·</span>`
+              + `<span class="headline-limit">mapa od <b>${esc(flow.map_from)}</b> `
+              + `do <b>${esc(flow.deadline)}</b>, za <b>${esc(fmtMins(flow.limit_sec))}</b></span>`
+            : '')
         + more;
     el.hidden = false;
     const best = el.querySelector('.headline-best');
@@ -3891,10 +3899,10 @@ if (obLineInput) {
 // ------------------------------------------------------------ wyszukiwanie ----
 
 function resetResults() {
-    // Nowy token porzuca zapytanie w locie: po ✕ nie ma dorysować się wynik
-    // relacji, której już nie ma na ekranie (a kółko musi zgasnąć od razu).
-    ++requestToken;
-    setSearching(false);
+    // Po ✕ nie ma dorysować się wynik relacji, której już nie ma na ekranie
+    // (a kółko musi zgasnąć od razu).
+    if (planRun) { planRun.abort.abort(); planRun = null; }
+    showBusy(new Set());
     journeys = [];
     selectedJourney = null;
     clearJourney();
@@ -4079,18 +4087,48 @@ function showWaitNotice(data) {
     if (html) resultsBox.insertAdjacentHTML('afterbegin', html);
 }
 
-/** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
-    dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
+/** Mapa z listą - z kompletnej odpowiedzi albo z jej etapu "map", który ma
+    już wszystko poza autami i rowerami. Wydzielona z loadPlan, żeby dało się
+    ją uruchomić bez sieci (patrz tests/js/harness.js).
+
+    Wybrana trasa zostaje wybrana, jeśli nowa lista ją ma (ta sama trasa po
+    „Pokaż więcej", po suwaku) - inaczej przerysowanie zabierałoby ją spod
+    ręki. */
 function renderPlan(data, refit) {
     adoptNames(data);
     drawFlow(data, refit);
-
-    journeys = data.journeys;
-    selectedJourney = null;      // nowa lista = stary wybór nieaktualny
-    clearJourney();
-    clearPreview();
-    dimFlow(false);
+    pickJourneys(data.journeys);
     renderVehicles();            // nowa mapa - inne linie, inne pojazdy
+    renderList(data);
+    warnOnboardRide(data.onboard);
+}
+
+/** Tożsamość trasy na liście: te same przejazdy tymi samymi kursami i te
+    same przejścia. */
+function journeyKey(journey) {
+    return journey.legs.map(leg => [leg.kind, leg.line, leg.from, leg.to,
+                                    leg.from_time, leg.to_time].join('|')).join('/');
+}
+
+/** Podmienia listę, zostawiając wybór na tej samej trasie, o ile ona na niej
+    jest. Wybrana trasa leży wtedy na wierzchu nowej mapy, tak jak po
+    kliknięciu. */
+function pickJourneys(list) {
+    const chosen = selectedJourney === null ? null : journeyKey(journeys[selectedJourney]);
+    journeys = list;
+    clearPreview();
+    const index = chosen === null ? -1 : journeys.findIndex(j => journeyKey(j) === chosen);
+    if (index < 0) {
+        selectedJourney = null;
+        clearJourney();
+        dimFlow(false);
+        return;
+    }
+    selectedJourney = index;
+    if (journeyLayer) { map.removeLayer(journeyLayer); journeyLayer.addTo(map); }
+}
+
+function renderList(data) {
     if (!journeys.length) {
         // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
@@ -4104,51 +4142,148 @@ function renderPlan(data, refit) {
         renderJourneys();
     }
     showWaitNotice(data);
-    warnOnboardRide(data.onboard);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
 
-function loadPlan(token, refit) {
-    const params = queryParams();
-    return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
-        .then(([data]) => {
-            if (token !== requestToken) return false;
-            if (data.error) {
-                clearFlow();
-                hideObWarn();
-                showError(data.error, data.suggestions);
-                return false;
-            }
-            const shown = liveStamp(data);
-            renderPlan(data, refit);
-            if (data.live_pending) refreshLive(token, params, shown);
-            return true;      // znaleziono - patrz search() i playPipeDrop
+/** Pierwszy etap nowego wyszukiwania: sam pasek „Najszybciej…" (decyzja
+    użytkownika). Poprzednia relacja schodzi z mapy razem ze swoimi autami
+    i rowerami, a mapa i lista pokazują się dopiero z prawdziwą mapą
+    przepływów - do tego czasu lista mówi, że szuka. */
+function renderHeadlineOnly(data) {
+    clearFlow(false);
+    headlineFlow = data;
+    renderTimeHeadline();
+}
+
+// Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
+const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, bike_places: [],
+                     bike_places_live: false};
+
+/** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
+    zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
+    nowe - przerysowanie nie zostawia na chwilę mapy bez nich (decyzja
+    użytkownika). Nowa relacja startuje bez nich: poprzednie zeszły
+    z poprzednią mapą (patrz renderHeadlineOnly). */
+function keepLive(flow, shown) {
+    for (const [key, none] of Object.entries(LIVE_FIELDS)) {
+        if (!(key in flow)) flow[key] = shown ? shown[key] : none;
+    }
+}
+
+/** Auta, rowery i propozycje z nimi - dokładane do mapy, która już stoi:
+    linie, wybrana trasa i okienko w rogu zostają. Nowe propozycje idą na
+    koniec listy, żeby te, które już się czyta, nie skakały (decyzja
+    użytkownika: lista będzie jeszcze przebudowana, na razie ma po prostu
+    działać); znikają tylko te, których serwer już nie proponuje. */
+function renderLive(data) {
+    refreshBikeLayer();
+    refreshCarLayer();
+    // Auta i rowery mają leżeć pod kropkami i pod wybraną trasą, tak jak po
+    // drawFlow - kursor ma trafić najpierw w to, co opisuje całe miejsce.
+    for (const layer of [flowDotLayer, flowEndDots, journeyLayer]) {
+        if (layer && map.hasLayer(layer)) { map.removeLayer(layer); layer.addTo(map); }
+    }
+    const fresh = new Map(data.journeys.map(j => [journeyKey(j), j]));
+    const shown = journeys.map(journeyKey).filter(key => fresh.has(key));
+    const order = [...shown, ...[...fresh.keys()].filter(key => !shown.includes(key))];
+    pickJourneys(order.map(key => fresh.get(key)));
+    renderList(data);
+}
+
+// Wyszukiwanie w toku: {abort, busy, search, acc}. Jedno naraz - nowe
+// przerywa poprzednie, a serwer kończy przerwane na najbliższym etapie.
+let planRun = null;
+
+/** Zapytanie o mapę, czytane etapami (patrz routes.api_flow): każdy etap
+    rysuje się, gdy tylko przyjdzie. `kind` mówi, kto pyta: 'search' - nowe
+    wyszukiwanie (kadruje, gra rurę, zwija formularz na telefonie), 'more' -
+    „Pokaż więcej", 'quiet' - suwaki i przełączniki. Kończy się, gdy dojdzie
+    ostatni etap albo gdy zastąpi je następne zapytanie. */
+function loadPlan(kind) {
+    const prev = planRun;
+    if (prev) prev.abort.abort();
+    const run = planRun = {
+        abort: new AbortController(),
+        // Kółka przerwanego zapytania kręcą się dalej, aż skończy to, które
+        // je zastąpiło - suwak ruszony w trakcie wyszukiwania nie może
+        // zgasić „Szukaj", zanim cokolwiek się pokaże.
+        busy: new Set([...(prev ? prev.busy : []), kind]),
+        // Zapytanie, które przerwało wyszukiwanie przed dojściem mapy, samo
+        // jest tym wyszukiwaniem: nowa relacja ma się wykadrować i tak dalej.
+        search: kind === 'search' ? {found: false, mapped: false}
+            : prev && prev.search && !prev.search.mapped ? prev.search : null,
+        acc: {},
+    };
+    showBusy(run.busy);
+    return Promise.all([fetch('/api/flow?' + queryParams(), {signal: run.abort.signal}),
+                        stopsReady])
+        .then(([response]) => readLines(response, data => {
+            if (planRun === run) applyStage(run, data);
+        }))
+        .catch(error => {
+            if (!run.abort.signal.aborted) throw error;
+        })
+        .finally(() => {
+            if (planRun !== run) return;
+            planRun = null;
+            showBusy(new Set());
         });
 }
 
-/** Serwer policzył trasę na starych rowerach i autach albo bez nich, żeby
-    nie czekać na cudze serwery (zgłoszenie #229, patrz warmup.py). Jedno
-    dopytanie o to samo z `fresh=1` czeka już na świeże dane; wynik zastępuje
-    mapę tylko wtedy, gdy coś zmienił, i tylko gdy nikt w międzyczasie nie
-    zapytał o coś innego (suwak, „Pokaż więcej", nowa trasa). Bez kadrowania,
-    jak przy suwakach. */
-function refreshLive(token, params, shown) {
-    const asked = params.toString();
-    const fresh = new URLSearchParams(params);
-    fresh.set('fresh', '1');
-    fetch('/api/flow?' + fresh).then(r => r.json())
-        .then(data => {
-            if (token !== requestToken || queryParams().toString() !== asked) return;
-            if (data.error || liveStamp(data) === shown) return;
-            renderPlan(data, false);
-        })
-        .catch(() => {});      // zostaje wynik, który już jest na ekranie
+function applyStage(run, data) {
+    if (data.error) {
+        clearFlow();
+        hideObWarn();
+        showError(data.error, data.suggestions);
+        return;
+    }
+    const {stage, ...delta} = data;
+    // Etapy dopisują się do jednej odpowiedzi; mapa trzyma do niej
+    // odwołanie (lastFlow), więc późniejsze etapy widzi od razu.
+    Object.assign(run.acc, delta);
+    const search = run.search && !run.search.mapped ? run.search : null;
+    if (stage === 'fastest') {
+        if (search) renderHeadlineOnly(run.acc);
+    } else if (stage === 'map') {
+        keepLive(run.acc, lastFlow);
+        renderPlan(run.acc, !!search);
+        if (search) search.mapped = true;
+    } else if (lastFlow === run.acc) {
+        renderLive(run.acc);
+    }
+    if (search && !search.found) {
+        search.found = true;
+        // Formularz na telefonie zwija się dopiero przy wyniku - przy
+        // błędzie zostaje rozwinięty do poprawki (patrz phone.js).
+        document.dispatchEvent(new Event('planner:found'));
+        playPipeDrop();
+    }
 }
 
-/** Odpowiedź do porównania - przed renderPlan, który ją potem uzupełnia. */
-function liveStamp(data) {
-    return JSON.stringify({...data, live_pending: undefined});
+/** Linijki NDJSON z odpowiedzi, każda zaraz po przyjściu. Odpowiedź bez
+    końca linii (błąd offline z service workera) to po prostu jedna linijka. */
+async function readLines(response, onLine) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+        const {done, value} = await reader.read();
+        buffer += decoder.decode(value, {stream: !done});
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) if (line.trim()) onLine(JSON.parse(line));
+        if (done) break;
+    }
+    if (buffer.trim()) onLine(JSON.parse(buffer));
+}
+
+/** Kółka w toku: „Szukaj" (i linijka zwiniętego formularza na telefonie)
+    przy wyszukiwaniu, „Pokaż więcej" przy dokładaniu mapy. */
+function showBusy(busy) {
+    setSearching(busy.has('search'));
+    moreBusy = busy.has('more');
+    document.body.classList.toggle('more-busy', moreBusy);
 }
 
 /** Rower zmienia ODPOWIEDŹ, nie tylko wygląd mapy: rowerowych propozycji nie
@@ -4158,8 +4293,7 @@ function liveStamp(data) {
     i nie ma po co znowu odgrywać dźwięku znalezienia trasy. */
 function replanForBikes() {
     if (!lastFlow || !startInput.value || !endInput.value) return;
-    loadPlan(requestToken, false)
-        .catch(() => showError('Nie udało się połączyć z serwerem.'));
+    loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
@@ -4253,13 +4387,15 @@ $('recall-offer-no').addEventListener('click', () => {
 startInput.addEventListener('input', hideRecallOffer);
 endInput.addEventListener('input', hideRecallOffer);
 
-/** Kółko ładowania w dwóch miejscach naraz, bo w każdym widoku widać co
-    innego: w komunikacie pod kartą (szeroki ekran, zakładka „Trasy") i na
+/** Kółko ładowania w kilku miejscach naraz, bo w każdym widoku widać co
+    innego: w komunikacie pod kartą (szeroki ekran, zakładka „Trasy"), na
     przycisku „Szukaj" (telefon w widoku mapy - tam wyników nie widać, a
-    wyszukiwanie odpala się samo po drugim kliknięciu w mapę). */
+    wyszukiwanie odpala się samo po drugim kliknięciu w mapę) i w linijce
+    zwiniętego formularza na telefonie (patrz phone.css). Kręci się, aż
+    dojdzie ostatni etap - także wtedy, gdy pierwsze wyniki już widać.
+    Przycisk zostaje klikalny: nowe wyszukiwanie przerywa to w toku. */
 function setSearching(on) {
     document.body.classList.toggle('searching', on);
-    $('search').disabled = on;
     resultsBox.setAttribute('aria-busy', String(on));
 }
 
@@ -4272,15 +4408,11 @@ function search() {
     // linijki tak samo jak po wybraniu przystanku - inaczej trzy pola
     // zasłaniają wynik.
     if (onboardOn) { obCollapsed = true; syncOnboardView(); }
-    // Dla układu na telefonie: formularz zwija się wtedy do jednej linijki
-    // (patrz phone.js).
-    document.dispatchEvent(new Event('planner:search'));
     hideRecallOffer();
-    const token = ++requestToken;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
+    selectedJourney = null;
     clearJourney();
     clearPreview();
-    setSearching(true);
     resultsBox.innerHTML =
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
@@ -4289,16 +4421,9 @@ function search() {
     rememberPlace('end', endInput.value);
     // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
-    // zakładce „Trasy".
-    loadPlan(token, true)
-        // Rura spada tylko po WYSZUKANIU, nie po każdym przeliczeniu: suwaki
-        // w panelu ⚙ wołają loadPlan bezpośrednio i mają zostać ciche.
-        .then(found => { if (found) playPipeDrop(); })
-        .catch(() => showError('Nie udało się połączyć z serwerem.'))
-        // Kółko gasi tylko odpowiedź na AKTUALNE zapytanie - przy szybkiej
-        // zmianie relacji stare, odsiane zapytanie nie może udawać, że nowe
-        // już się doliczyło.
-        .finally(() => { if (token === requestToken) setSearching(false); });
+    // zakładce „Trasy". Rura spada przy pierwszym wyniku WYSZUKANIA, nie po
+    // każdym przeliczeniu (patrz applyStage).
+    loadPlan('search').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 $('search').addEventListener('click', search);
@@ -4666,8 +4791,7 @@ function liveSlider(inputId, valueId, resetsMore) {
         clearTimeout(timer);
         timer = setTimeout(() => {
             if (!startInput.value || !endInput.value) return;
-            loadPlan(requestToken, false)
-                .catch(() => showError('Nie udało się połączyć z serwerem.'));
+            loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
         }, 200);
     });
 }
@@ -4701,8 +4825,7 @@ for (const [id, domyslnie] of [['car-vans', false]]) {
         saveDevPref(id, input.checked);
         if (id === 'car-vans' && !flowOnScreen()) refreshCarLayer();
         if (!startInput.value || !endInput.value) return;
-        loadPlan(requestToken, false)
-            .catch(() => showError('Nie udało się połączyć z serwerem.'));
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     });
 }
 
@@ -4726,9 +4849,8 @@ bikesMergedInput.addEventListener('change', () => {
 
 // Propozycje tras da się wyłączyć w całości (sekcja „Wygląd aplikacji") -
 // zostaje sama mapa, a serwer listy w ogóle nie składa (patrz queryParams).
-// Znika lista i jej nagłówek ze strzałką, ale nie komunikaty w tym samym
-// miejscu („Szukam połączeń…", błędy): te mówią o wyszukiwaniu, nie
-// o propozycjach. Na telefonie znika też zakładka „Trasy".
+// Znika lista, jej nagłówek ze strzałką i karta „Szukam połączeń…” (czeka
+// na listę), ale nie błędy w tym samym miejscu: te mówią o wyszukiwaniu. Na telefonie znika też zakładka „Trasy".
 const routesOn = $('routes-on');
 
 function showRoutes(on) {

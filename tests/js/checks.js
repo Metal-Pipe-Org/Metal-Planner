@@ -776,28 +776,38 @@ checks.okienko_startuje_od_przystanku_startowego = (() => {
     ];
     const bezFlagi = nodes.map(n => ({...n, start: undefined}));
 
+    // Nowa relacja: poprzednia mapa zdjęta (clearFlow), nowa rysowana.
     app.dotOpts.tipPanel = false;
-    app.flowPanel.hidden = true;
+    app.clearFlow();
     app.drawFlow({...FLOW_FIXTURE, nodes}, false);
     const przyWylaczonym = app.flowPanel.hidden;
 
     app.dotOpts.tipPanel = true;
+    app.clearFlow();
     app.drawFlow({...FLOW_FIXTURE, nodes}, false);
     const przyWlaczonym = app.flowPanel.hidden;
     const tresc = String(app.flowPanelBody.innerHTML || '');
 
+    // Przerysowanie tej samej relacji (suwak, „Pokaż więcej", kolejny etap
+    // wyszukiwania) zostawia w okienku to, co w nim jest (#229).
+    app.flowPanelBody.innerHTML = 'tablica innego przystanku';
+    app.drawFlow({...FLOW_FIXTURE, nodes}, false);
+    const poPrzerysowaniu = String(app.flowPanelBody.innerHTML);
+
     // Odpowiedź bez oznaczonego startu nie ma czego pokazać - okienko milczy.
-    app.flowPanel.hidden = true;
+    app.clearFlow();
     app.drawFlow({...FLOW_FIXTURE, nodes: bezFlagi}, false);
     const bezStartu = app.flowPanel.hidden;
 
     app.dotOpts.tipPanel = bylPanel;
     return {
         ok: przyWylaczonym === true && przyWlaczonym === false
-            && tresc.length > 0 && bezStartu === true,
+            && tresc.length > 0 && bezStartu === true
+            && poPrzerysowaniu === 'tablica innego przystanku',
         przy_wylaczonym_schowane: przyWylaczonym,
         przy_wlaczonym_schowane: przyWlaczonym,
         bez_startu_schowane: bezStartu,
+        po_przerysowaniu: poPrzerysowaniu.slice(0, 60),
         tresc: tresc.slice(0, 60),
     };
 })();
@@ -1695,6 +1705,57 @@ checks.mikser_wyszukiwanie_przed_nagraniem_gra_po_pobraniu = (() => {
     return {ok: przedPobraniem === 0 && poPobraniu === 1
                 && audioLog.zagrane === start.elementy,
             przedPobraniem, poPobraniu};
+})();
+
+/* Etapy wyszukiwania (zgłoszenie #229). Pierwszy to sam pasek - poprzednia
+   mapa schodzi, a nowej i listy jeszcze nie ma. Przy przerysowaniu tej samej
+   relacji („Pokaż więcej", suwaki) auta nie znikają razem ze starą mapą:
+   zostają, aż przyjdzie etap z nowymi, i wtedy podmieniają się naraz. */
+checks.etapy_pasek_najpierw_auta_bez_przerwy = (() => {
+    const pasek = () => document.getElementById('time-headline').innerHTML;
+    const auto = (plate, lat) => ({
+        lat, lon: 17.02, plate, model: 'Renault Clio', where: '', fuel: 80,
+        range: 300, ogarniam: [], at: 56100, walk_sec: 420, walk_m: 300,
+        from: 'Kamienna', to_dest_m: 2744,
+    });
+    const {cars, cars_dest_in_zone, bike_places, bike_places_live, ...bezAut} = FLOW_FIXTURE;
+    const fastest = {best_arrival: FLOW_FIXTURE.best_arrival, best_sec: FLOW_FIXTURE.best_sec,
+                     fastest: FLOW_FIXTURE.fastest, starts: FLOW_FIXTURE.starts,
+                     ride_sec: FLOW_FIXTURE.ride_sec};
+    const znaczniki = () => (app.flowCarLayer ? app.flowCarLayer.getLayers().length : 0);
+
+    app.renderPlan({...FLOW_FIXTURE, cars: [auto('A', 51.09)]}, false);
+
+    // Nowe wyszukiwanie: pierwszy etap to sam pasek.
+    const szukanie = {search: {found: false, mapped: false}, acc: {}};
+    app.applyStage(szukanie, {stage: 'fastest', ...fastest});
+    const poPierwszym = {mapa: !!app.flowLayer, auta: znaczniki(),
+                         pasek: pasek().includes('headline-best'),
+                         zakres: pasek().includes('headline-limit')};
+    app.applyStage(szukanie, {stage: 'map', ...bezAut, more: 0});
+    const poMapie = {mapa: !!app.flowLayer, auta: znaczniki()};
+    app.applyStage(szukanie, {stage: 'extras', cars: [auto('A', 51.09)],
+                              cars_dest_in_zone: null, bike_places: [], bike_places_live: true});
+    const poAutach = znaczniki();
+
+    // „Pokaż więcej": gęstsza mapa przychodzi bez aut - stare zostają.
+    const wiecej = {search: null, acc: {}};
+    app.applyStage(wiecej, {stage: 'fastest', ...fastest});
+    app.applyStage(wiecej, {stage: 'map', ...bezAut, more: 1});
+    const poGestszejMapie = znaczniki();
+    app.applyStage(wiecej, {stage: 'extras', cars: [auto('A', 51.09), auto('B', 51.1)],
+                            cars_dest_in_zone: null, bike_places: [], bike_places_live: true});
+    const poNowychAutach = znaczniki();
+
+    app.clearFlow();
+    app.drawFlow(FLOW_FIXTURE, false);   // stan z fixture'a wraca na miejsce
+    return {
+        ok: !poPierwszym.mapa && poPierwszym.auta === 0 && poPierwszym.pasek
+            && !poPierwszym.zakres
+            && poMapie.mapa && poMapie.auta === 0 && poAutach === 1
+            && poGestszejMapie === 1 && poNowychAutach === 2,
+        poPierwszym, poMapie, poAutach, poGestszejMapie, poNowychAutach,
+    };
 })();
 
 JSON.stringify(checks);

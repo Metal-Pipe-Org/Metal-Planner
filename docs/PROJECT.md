@@ -1213,15 +1213,31 @@ trzech „Pokaż więcej" na gęstych relacjach (pomiary w
   Danych na żywo w tle się nie odpytuje (decyzja użytkownika) - pyta dalej
   tylko wyszukiwanie, nie częściej niż dotąd (auta co 20 s, rowery co 60 s).
   Ale na nie nie czeka: liczy na tym, co jest w pamięci, choćby starym albo
-  żadnym, a świeże pobierają się obok. Odpowiedź mówi wtedy `live_pending`
-  i strona raz dopytuje o to samo z `fresh=1`; to dopytanie czeka na koniec
-  pobierania i, jeśli wynik jest inny, po cichu podmienia mapę (bez
-  kadrowania, jak przy suwakach). Warstwy aut i rowerów bez wyszukiwania
+  żadnym, a świeże pobierają się obok; gdy tak było, to samo wyszukiwanie
+  czeka po wyniku na koniec pobierania i dosyła auta i rowery jeszcze raz
+  (patrz wyniki etapami niżej). Warstwy aut i rowerów bez wyszukiwania
   pobierają dane jak dotąd. Pomiar lokalny przez serwer: pierwsze
   wyszukiwanie po starcie 2,0–2,3 s → 0,2–0,3 s, po ponad 5 minutach ciszy
   0,56–0,78 s → 0,25–0,4 s (raz 1,3 s); świeże auta i rowery dochodzą
   0,3–0,8 s później. Rozgrzewkę rozkładu uruchamia worker gunicorna
   (post_worker_init) i app.py lokalnie.
+
+  **Wyniki etapami.** `/api/flow` odpowiada linijkami JSON (NDJSON), po
+  jednej na etap: najszybsza trasa (sam pasek nad mapą - mapy ani listy
+  jeszcze nie ma, poprzednia relacja schodzi z ekranu), potem mapa z listą
+  przeczytaną z niej, potem auta, rowery i propozycje z nimi, a na końcu -
+  tylko gdy dane na żywo były stare i świeże coś zmieniły - to samo na
+  świeżych. Sklejone etapy to dokładnie dawna odpowiedź (`planner.plan_flow`).
+  Strona pokazuje każdy etap od razu; późniejsze dokładają się do mapy bez
+  czyszczenia jej, wybranej trasy ani okienka w rogu, a nowe propozycje idą
+  na koniec listy. Auta i rowery nie znikają przy przerysowaniu mapy tej samej
+  relacji („Pokaż więcej", suwaki): zostają te, które były, aż przyjdzie etap
+  z nowymi, i wtedy podmieniają się naraz. „Szukaj" kręci się
+  do ostatniego etapu, „Pokaż więcej" tak samo przy sobie, a na telefonie
+  formularz zwija się przy pierwszym wyniku (przy błędzie zostaje), z kółkiem
+  w zwiniętej linijce, dopóki coś dochodzi. Nowe zapytanie przerywa
+  poprzednie, a serwer kończy przerwane na granicy etapu. Odpowiedź ma
+  nagłówek `X-Accel-Buffering: no` - bez niego nginx oddałby etapy naraz.
 
 - **2026-10-07** — **przedawnienie ostatniego wyszukiwania** (zgłoszenie
   #237). Ostatnia trasa wracała po otwarciu strony zawsze sama, a na

@@ -861,9 +861,11 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 /* Całość pod nagłówkiem, a nie elementy wymienione z nazwy: kartka o rowerze,
    dopisana później między nie, zostawała na wierzchu zwiniętej listy. */
 /* Propozycje tras wyłączone w panelu ⚙ (sekcja „Wygląd aplikacji”, patrz app.js):
-   znika lista i nagłówek ze strzałką, komunikaty wyszukiwania zostają. */
+   znika lista, nagłówek ze strzałką i karta „Szukam połączeń…” (czeka na listę,
+   której nie ma); błędy wyszukiwania zostają. */
 body.routes-off .results-head,
-body.routes-off .results-body { display: none; }
+body.routes-off .results-body,
+body.routes-off #results .notice.loading { display: none; }
 
 #results.collapsed .results-body {
     display: none;
@@ -1601,6 +1603,18 @@ body.routes-off .results-body { display: none; }
 }
 
 .headline-more:hover { background: var(--ink); color: #fff; }
+
+/* Kręci się, aż gęstsza mapa dojdzie w całości (patrz showMore). */
+.headline-more .spinner {
+    display: none;
+    width: 9px;
+    height: 9px;
+    margin-right: 5px;
+    border-width: 1.5px;
+    vertical-align: -1px;
+}
+body.more-busy .headline-more .spinner { display: inline-block; }
+body.more-busy .headline-more { cursor: progress; }
 .headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
 /* Ustawienia, które dotyczą tylko układu na telefonie - tu ich nie widać

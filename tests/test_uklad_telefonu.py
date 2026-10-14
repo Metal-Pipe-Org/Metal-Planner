@@ -175,7 +175,10 @@ def przebieg(request, adres, przegladarka):
     page.fill("#time", "12:00")
     _wybierz(page, "#start", TRASA[0])
     _wybierz(page, "#end", TRASA[1])
-    if not page.is_disabled("#search") and page.is_visible("#search"):
+    # Wybór celu z podpowiedzi sam odpala wyszukiwanie - wtedy „Szukaj" kręci
+    # się aż do końca, a formularz zwija się przy pierwszym wyniku.
+    if not page.evaluate("document.body.classList.contains('searching')") \
+            and page.is_visible("#search"):
         page.click("#search")
     page.wait_for_selector("#time-headline:not([hidden])", timeout=20000)
     page.wait_for_timeout(1500)       # tablica przystanku startowego dochodzi osobno
