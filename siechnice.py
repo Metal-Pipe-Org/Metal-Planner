@@ -63,6 +63,10 @@ _DIACRITIC_MAP = str.maketrans({
     "ó": "o", "ś": "s", "ź": "z", "ż": "z",
 })
 
+# Źródło pisze ten sam przystanek raz z łącznikiem, raz z półpauzą; reszta
+# danych ma łącznik, więc inaczej autouzupełnianie pokazuje dwa "różne" słupki.
+_DASHES = re.compile("[\u2013\u2014]")
+
 SECONDS_PER_DAY = 24 * 3600
 
 # Kolumny tabeli calendar w kolejności date.weekday() - zarazem nazwy
@@ -101,7 +105,7 @@ def parse_stops(rows):
         designator, _code, name, lon_e6, lat_e6 = row[0], row[1], row[2], row[3], row[4]
         stops.append({
             "designator": designator,
-            "name": name.strip(),
+            "name": _DASHES.sub("-", name.strip()),
             "lat": lat_e6 / 1e6,
             "lon": lon_e6 / 1e6,
         })

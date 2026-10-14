@@ -36,6 +36,19 @@ def test_parse_stops_odwraca_kolejnosc_i_skaluje_wspolrzedne():
 
 # --- numer linii kursu -----------------------------------------------------
 
+def test_parse_stops_ujednolica_polpauze_do_lacznika():
+    # Źródło pisze "Radwanice - Szkoła" i "Radwanice – Szkoła" jako dwa słupki;
+    # po ujednoliceniu autouzupełnianie widzi jedną nazwę.
+    rows = [
+        ["30333:54962", 1, "Radwanice - Szkoła", 17100000, 51100000, 0, 0, 0],
+        ["1432006:1494566", 2, "Radwanice – Szkoła", 17100200, 51100000, 0, 0, 0],
+    ]
+
+    names = {stop["name"] for stop in siechnice.parse_stops(rows)}
+
+    assert names == {"Radwanice - Szkoła"}
+
+
 def test_resolve_line_bierze_linie_wspolna_dla_wszystkich_slupkow():
     lines_by_stop = {"a": {"800+80", "89+890"}, "b": {"800+80"}, "c": {"800+80", "810+81"}}
 
