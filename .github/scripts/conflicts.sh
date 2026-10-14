@@ -45,7 +45,7 @@ hold_reviews() {
 
   echo "#$n: konflikt z main — zdjęte prośby o recenzję: $users $teams" \
     | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-  discord_send warn "" "Konflikt z main: #$n $title" "$url" \
+  discord_send warn "" "⚔️ Konflikt z main: #$n $title" "$url" \
     "Prośby o recenzję zdjęte ($who)" "" "$author"
 }
 

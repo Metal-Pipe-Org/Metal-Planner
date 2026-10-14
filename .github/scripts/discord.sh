@@ -6,7 +6,8 @@
 #
 # Wiadomość to karta w stylu wbudowanej integracji GitHuba: kolorowy pasek,
 # kto to zrobił (z awatarem), tytuł-link i opis. Na pierwszy rzut oka widać,
-# że to automat, a kolor mówi, co się stało, zanim ktoś przeczyta tekst.
+# że to automat, a kolor i ikona na początku tytułu mówią, co się stało,
+# zanim ktoś przeczyta tekst.
 #
 # Każde `@login` z mapy — w opisie od nas i w cytowanym fragmencie od ludzi —
 # zamienia się w prawdziwy ping. Dlatego wołający pisze `@login`, gdy chce
@@ -20,8 +21,27 @@
 #   KOLOR     open / merged / closed / grey / info / comment / warn
 #   AKTOR     login GitHuba, który to zrobił — wiadomość idzie pod jego nazwą
 #             i awatarem; pusty, gdy zrobił to automat (wtedy nazwa webhooka)
-#   TYTUŁ     np. „Nowe zgłoszenie #12 Tytuł” — link do LINK
-#   OPIS      linijka od nas z tym, czego nie ma w tytule; tu padają pingi
+#   TYTUŁ     np. „🎯 Nowe zgłoszenie: #12 Tytuł” — link do LINK. Zaczyna się
+#             od ikony rodzaju zdarzenia, żeby kanał dało się przeglądać
+#             wzrokiem; ten sam rodzaj ma wszędzie tę samą ikonę:
+#               🎯 nowe zgłoszenie           📦 nowy PR
+#               🚧 nowy PR w wersji roboczej 🚀 PR wychodzi z wersji roboczej
+#               🔄 otwarte ponownie
+#               👤 przypisanie               ↩️ zdjęte przypisanie
+#               💬 komentarz, recenzja       📝 prośba o recenzję
+#               ✅ PR zatwierdzony           🛠️ prośba o zmiany
+#               🔀 PR zmergowany             🔒 zgłoszenie zamknięte jako zrobione
+#               🚫 nie robimy / PR zamknięty bez merge'a
+#               📑 duplikat                  ⚔️ konflikt z main
+#               ⏳ cisza w zgłoszeniu        💤 zamknięte po ciszy
+#               🤖 Claude skończył / ocenił  ⚠️ Claude nie dał rady
+#               📊 podsumowanie dnia         📋 ogólnie — do zrobienia
+#   OPIS      linijka od nas z tym, czego nie ma w tytule; tu padają pingi.
+#             Przy pojedynczym zdarzeniu linkiem jest tu najwyżej sam numer
+#             (np. „PR [#298](url) Tytuł”): tytuł jest już linkiem, a drugi
+#             cały niebieski link w karcie myli, który prowadzi dokąd; sam
+#             numer da się od niego odróżnić. Kogo wołamy przez PINGI, tego
+#             tu nie wymieniamy drugi raz
 #   FRAGMENT  tekst od ludzi (opis, komentarz) — wstawiany pod opisem w całości
 #             albo wcale
 #   PINGI     loginy po spacji, które wołamy nad kartą bez wymieniania ich
@@ -114,15 +134,4 @@ discord_send() {
   else
     echo "::warning::Nie udało się wysłać na Discorda: $3"
   fi
-}
-
-# discord_link TEKST URL — link w markdownie do OPISU. Tekst bywa od ludzi
-# (tytuł PR-a), a nawias kwadratowy w nim zamknąłby link w pół i Discord
-# pokazałby resztę surowo. Backslash escapujemy pierwszy, bo inaczej
-# zjadłby znak po sobie.
-discord_link() {
-  local text=${1//\\/\\\\}
-  text=${text//\[/\\[}
-  text=${text//\]/\\]}
-  printf '[%s](%s)' "$text" "$2"
 }
