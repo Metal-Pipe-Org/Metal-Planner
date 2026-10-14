@@ -64,19 +64,14 @@ services:
       PKP_AUTO_UPDATE_HOUR: "3"
       PKP_UPDATE_ON_START: "on"
 
-      # Autobusow gminy Siechnice (800, 810, 83-89, 860, 870, 890) nie ma
-      # w zadnych otwartych danych - jedyne strukturalne zrodlo to
-      # niedokumentowane API systemu kiedyPrzyjedzie, ktorego robots.txt
-      # brzmi "Disallow: /" i ktore nie ma zadnego regulaminu. Dlatego "off":
-      # wlaczenie jest swiadoma decyzja, nie ustawieniem domyslnym.
-      # Patrz docs/SIECHNICE_DANE.md.
-      SIECHNICE_ENABLED: "off"
+      # Gdzie aplikacja czyta kopie rozkladu Siechnic - na osobnym wolumenie
+      # (patrz volumes nizej). Zmieniaj razem ze sciezka montowania.
+      SIECHNICE_ROZKLAD: "/app/data/siechnice/rozklad.json"
 
       # Stacje Wroclawskiego Roweru Miejskiego (kanal GBFS operatora,
-      # system_id nextbike_pl, licencja CC0-1.0 - patrz bikes.py). Inaczej
-      # niz Siechnice sa domyslnie WLACZONE: zrodlo jest otwarte, oficjalnie
-      # zarejestrowane i nic z niego nie trafia do bazy. "off" gdy kontener
-      # nie ma wyjscia na zewnatrz albo gdy rower ma byc niedostepny -
+      # system_id nextbike_pl, licencja CC0-1.0 - patrz bikes.py). Domyslnie
+      # WLACZONE: zrodlo jest otwarte, oficjalnie zarejestrowane i nic
+      # z niego nie trafia do bazy. "off" gdy kontener nie ma wyjscia na zewnatrz albo gdy rower ma byc niedostepny -
       # awaria samego kanalu i tak nie psuje wyszukiwarki, wiec ta zmienna
       # nie jest do tego potrzebna.
       WRM_ENABLED: "on"
@@ -107,8 +102,23 @@ services:
       # Kopia zapasowa = skopiowanie tego folderu.
       - ./data:/app/data
 
+      # Osobny wolumen na statyczna kopie rozkladu autobusow gminy Siechnice
+      # (800, 810, 83-89, 860, 870, 890). Niczego tu nie wgrywasz recznie:
+      # plik jedzie w obrazie (rozklady/siechnice.json z repo), a entrypoint
+      # przy kazdym starcie kopiuje go na ten wolumen, wiec nowsza wersja
+      # z repo dociera tu sama ze zwyklym build + up. Baza przebudowuje sie
+      # z nim przy starcie (GTFS_UPDATE_ON_START) albo w nocy.
+      # Bez ":ro", bo entrypoint pisze na ten wolumen i przejmuje cale
+      # /app/data na wlasnosc (chown -R).
+      # Serwer NIGDY nie odpytuje kiedyPrzyjedzie: kodu, ktory to umie
+      # (pobierz_siechnice.py), nie ma w obrazie. Patrz docs/SIECHNICE_DANE.md.
+      - siechnice:/app/data/siechnice
+
     networks:
       - reverse_proxy
+
+volumes:
+  siechnice:
 
 networks:
   # Wspolna siec z kontenerem nginxa - to po niej idzie ruch z internetu

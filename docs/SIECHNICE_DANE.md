@@ -59,7 +59,7 @@ razem z pozycjami pojazdów w czasie rzeczywistym.
 
 To jedyne istniejące strukturalne źródło tych rozkładów. Jego API jest
 niedokumentowane, ale kompletne - kontrakt odtworzony z bundla aplikacji
-opisuje nagłówek [`siechnice.py`](../siechnice.py):
+opisuje nagłówek [`pobierz_siechnice.py`](../pobierz_siechnice.py):
 
 - `GET /stops` — 237 słupków z nazwami i współrzędnymi,
 - `GET /api/directions/<słupek>` — linie i kierunki na słupku,
@@ -72,7 +72,7 @@ Z `trip_id` + `index` odtwarza się kompletne kursy - to dokładnie tyle
 informacji, ile ma GTFS. **Nie trzeba tykać PDF-ów ani OSM-a**, wbrew temu, co
 zakładała pierwsza diagnoza w issue.
 
-## Dlaczego mimo to jest domyślnie wyłączone
+## Dlaczego serwer go nie odpytuje
 
 `https://siechnice.kiedyprzyjedzie.pl/robots.txt` to `User-agent: * / Disallow: /`.
 Regulaminu nie ma (`kiedyprzyjedzie.pl/regulamin` → 404), dokumentacji API nie
@@ -80,8 +80,20 @@ ma, deklaracji o ponownym wykorzystaniu danych nie ma. To najgorszy możliwy
 zestaw: zgody nikt nie udzielił i nie ma nawet warunków, których dałoby się
 dotrzymać.
 
-Dlatego `siechnice.py` pobiera cokolwiek tylko po jawnym `SIECHNICE_ENABLED=on`,
-z wymuszoną przerwą między zapytaniami i własnym `User-Agent`.
+## Tymczasowy plan: statyczna kopia ([issue #261](https://github.com/Metal-Pipe-Org/Metal-Planner/issues/261))
+
+Decyzja z października 2026: rozkład pobieramy **raz, ręcznie, lokalnie**, jako statyczną kopię jednego pełnego tygodnia - to te same publiczne dane, które gmina wykłada w PDF-ach - i serwer czyta już tylko ją. Zmienna `SIECHNICE_ENABLED` zniknęła razem z pobieraniem przy aktualizacji.
+
+Kopia to jeden plik w repo, `rozklady/siechnice.json`: surowe odpowiedzi API (słupki, linie na słupkach, odjazdy z każdego słupka na każdy z 7 dni), żeby całe przekształcenie w kursy żyło w jednym miejscu w kodzie (`siechnice.py`). Lokalnie aplikacja czyta go wprost z repo. W kontenerze plik jedzie w obrazie, a `docker/entrypoint.sh` przy każdym starcie kopiuje go na osobny wolumen `siechnice` (`/app/data/siechnice`, ścieżka w `SIECHNICE_ROZKLAD`), z którego czyta aplikacja - zwykłe wdrożenie (build + up) wystarcza, bez ręcznego wgrywania.
+
+**Serwer nigdy nie odpytuje kiedyPrzyjedzie.** Cały kod sieciowy jest w osobnym skrypcie `pobierz_siechnice.py`, którego `.dockerignore` nie wpuszcza do obrazu - w kontenerze po prostu nie ma czym tego zrobić. `siechnice.py` nie importuje niczego sieciowego (pilnuje tego test).
+
+Przy każdej aktualizacji bazy każdy dzień tygodnia z kopii dostaje regułę w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia - dzięki temu kopia nie wygasa po tygodniu, a komunikat „rozkładu jeszcze nie opublikowano" dalej liczy się z paczki Wrocławia. Święta jeżdżą wg dnia tygodnia - kopia ich nie zna. Bez pliku aplikacja działa po prostu bez Siechnic.
+
+Odświeżenie kopii (np. po zmianie rozkładu przez gminę), na własnym komputerze:
+
+1. `python pobierz_siechnice.py` - pobiera tydzień od dziś do `rozklady/siechnice.json` (ok. 1900 zapytań, wspólne tempo ~3 zapytania/s, własny `User-Agent`; ok. 10 minut). Lepiej wybrać tydzień bez świąt.
+2. Commit i PR jak przy każdej zmianie w repo. Po wdrożeniu nowy plik trafia na wolumen sam, przy starcie kontenera.
 
 ## Co zrobić, żeby było legalnie i trwale
 

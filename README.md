@@ -109,7 +109,6 @@ albo z `data/.env` (zmienne ze środowiska przebijają plik). Najważniejsze:
 | `PKP_API_KEY` | brak | klucz PKP PLK OpenData; bez niego nie ma pociągów |
 | `GTFS_AUTO_UPDATE_HOUR` | w compose 3 | godzina codziennej aktualizacji rozkładu; pusta wyłącza |
 | `GTFS_UPDATE_ON_START` | `on` | odświeżanie rozkładu przy starcie serwera |
-| `SIECHNICE_ENABLED` | `off` | autobusy gminy Siechnice (niżej) |
 | `WRM_ENABLED` | `on` | rower miejski |
 | `TRAFICAR` | `1` | auta Traficara; `0` wyłącza |
 | `DEV_MODE` | wyłączony | `1` pokazuje sekcje DEV w ⚙ i dokłada w „O aplikacji” linki zespołu; lokalnie i na serwerze testowym |
@@ -125,10 +124,7 @@ komentarze w `docker-compose.yml`.
     i przy każdym starcie, w tle, bez przerwy w działaniu. Nieudane pobranie
     zostawia poprzednią bazę.
 17. **Kolej** — PKP PLK OpenData, tylko z `PKP_API_KEY`.
-18. **Autobusy gminy Siechnice** — nie ma ich w żadnych otwartych danych;
-    umiemy je złożyć z API kiedyPrzyjedzie, ale to jest **domyślnie
-    wyłączone**, bo serwis nie zgadza się na ponowne użycie danych. Szczegóły
-    i wzór pisma do gminy: [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
+18. **Autobusy gminy Siechnice** — nie ma ich w żadnych otwartych danych; serwer czyta statyczną kopię tygodnia rozkładu z repo (`rozklady/siechnice.json`), pobraną raz, ręcznie i lokalnie z kiedyPrzyjedzie (`pobierz_siechnice.py`, którego nie ma w obrazie Dockera - serwer nigdy tego API nie odpytuje). Szczegóły i wzór pisma do gminy: [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
 19. **Rower miejski** — kanał GBFS operatora (nextbike, licencja CC0-1.0).
 20. **Traficar** — [fioletowe.live](https://fioletowe.live/), strona trzecia
     republikująca API Traficara; może zniknąć bez ostrzeżenia.

@@ -1,4 +1,4 @@
-"""Rozkład Siechnickiej Komunikacji Publicznej - dociągany osobno i doklejany
+"""Rozkład Siechnickiej Komunikacji Publicznej - statyczna kopia doklejana
 do bazy zbudowanej z wrocławskiego GTFS-a (patrz update_gtfs.py).
 
 DLACZEGO OSOBNO. Linie gminy Siechnice (800, 810, 83..89, 860, 870, 890)
@@ -13,22 +13,20 @@ Jedyne strukturalne źródło, jakie istnieje, to JSON-owe API systemu
 kiedyPrzyjedzie (dostawca: Operibus sp. z o.o.), którym gmina obsługuje
 informację pasażerską. Jest niedokumentowane i - co ważne - jego robots.txt
 to "Disallow: /", a nigdzie nie ma regulaminu ani zgody na ponowne
-wykorzystanie. Dlatego pobieranie jest DOMYŚLNIE WYŁĄCZONE i włącza się je
-świadomie (SIECHNICE_ENABLED=on). Docelowo poprosić gminę o eksport GTFS -
-platforma Operibus już go u innych klientów wystawia (Zduńska Wola, Oborniki
-figurują w tabeli KPD z formatem "GTFS static/realtime"), więc to kwestia
-włączenia funkcji, a nie budowania czegokolwiek. Szczegóły i wzór pisma:
-docs/SIECHNICE_DANE.md.
+wykorzystanie. Dlatego serwer go NIE odpytuje i nawet nie umie: ten moduł
+nie ma żadnego kodu sieciowego. Rozkład pobrano raz, ręcznie i lokalnie
+(pobierz_siechnice.py, którego nie ma w obrazie Dockera), jako statyczną
+kopię tygodnia - to te same publiczne dane, które gmina wykłada w PDF-ach.
+Kopia leży w repo (REPO_SNAPSHOT_PATH), a aktualizacja bazy dokleja ją co
+noc do rozkładu Wrocławia. Brak pliku = brak Siechnic, nic więcej.
+Docelowo poprosić gminę o eksport GTFS - platforma Operibus już go u innych
+klientów wystawia (Zduńska Wola, Oborniki figurują w tabeli KPD z formatem
+"GTFS static/realtime"), więc to kwestia włączenia funkcji, a nie budowania
+czegokolwiek. Szczegóły i wzór pisma: docs/SIECHNICE_DANE.md.
 
-KONTRAKT API (odtworzony z bundla aplikacji, stan: sierpień 2026):
-  GET /stops?rev=<n>                      - wszystkie słupki: [designator, kod,
-                                            nazwa, lon*1e6, lat*1e6, ...]
-  GET /api/directions/<designator>        - linie i kierunki na tym słupku
-  GET /api/timetables/<designator>?date=  - cały dzień odjazdów z tego słupka:
-                                            {departure: sek. od północy,
-                                             trip_id, index: pozycja słupka
-                                             w kursie}
-
+Kopia to surowe odpowiedzi API (kontrakt: pobierz_siechnice.py) - słupki,
+linie na słupkach i odjazdy z każdego słupka na każdy dzień tygodnia
+({departure: sek. od północy, trip_id, index: pozycja słupka w kursie}).
 Z tego składamy kursy: odjazdy o tym samym trip_id, posortowane po `index`,
 to jeden przejazd - dokładnie to, czym w GTFS jest trip + stop_times. Numer
 linii bierzemy z przecięcia zbiorów linii obsługujących kolejne słupki kursu
@@ -36,42 +34,19 @@ linii bierzemy z przecięcia zbiorów linii obsługujących kolejne słupki kurs
 z tych zbiorów).
 """
 
-import concurrent.futures
-import http.client
 import json
 import os
 import re
 import sqlite3
-import threading
-import time
-import urllib.parse
-from datetime import date, timedelta
+from datetime import date
+from pathlib import Path
 
-BASE_URL = "https://siechnice.kiedyprzyjedzie.pl"
-USER_AGENT = "Metal-Planner/0.1 (+https://github.com/Metal-Pipe-Org/Metal-Planner)"
+# Kopia rozkładu w repo - z niej czyta uruchomienie lokalne.
+REPO_SNAPSHOT_PATH = Path(__file__).resolve().parent / "rozklady" / "siechnice.json"
 
-# Ile dni rozkładu do przodu ściągamy. API oddaje rozkład tylko dla konkretnej
-# daty (nie ma calendar.txt z regułą tygodniową), więc każdy dzień to osobne
-# przejście po wszystkich słupkach - stąd okno tygodniowe, nie miesięczne.
-DEFAULT_DAYS = 7
-
-# Przerwa między zapytaniami - wspólna dla wszystkich wątków, więc jest
-# sufitem tempa całego pobierania (~3 zapytania/s), nie tempa jednego wątku.
-# To nie strojenie wydajności, tylko uprzejmość wobec cudzego serwera.
-REQUEST_DELAY_SEC = 0.3
-REQUEST_TIMEOUT_SEC = 30
-
-# Ile zapytań naraz. Tempa to nie podnosi - sufitem jest REQUEST_DELAY_SEC,
-# wspólny dla wszystkich wątków. Chodzi o to, żeby pojedyncza wolniejsza
-# odpowiedź nie wstrzymywała kolejnych: przy jednym wątku każda sekunda
-# czekania to sekunda przestoju całego pobierania.
-CONCURRENCY = 4
-
-# Utrzymywane połączenie serwer może zamknąć w dowolnym momencie (limit
-# zapytań na połączenie, keep-alive timeout). Wtedy zapytanie trzeba powtórzyć
-# na świeżym gnieździe - bez tego jedno takie zamknięcie kasuje całe pobieranie.
-REQUEST_RETRIES = 3
-RETRY_BACKOFF_SEC = 2.0
+# W kontenerze kopia leży na osobnym wolumenie, który entrypoint napełnia
+# plikiem z obrazu (patrz docker/entrypoint.sh) - stąd ścieżka ze zmiennej.
+SNAPSHOT_PATH = Path(os.environ.get("SIECHNICE_ROZKLAD") or REPO_SNAPSHOT_PATH)
 
 # Prefiks identyfikatorów, żeby dane z tego źródła dały się odróżnić od
 # wrocławskiego GTFS-a w jednej bazie (i skasować bez ruszania reszty).
@@ -90,10 +65,9 @@ _DIACRITIC_MAP = str.maketrans({
 
 SECONDS_PER_DAY = 24 * 3600
 
-
-def enabled():
-    """Czy wolno ruszać API kiedyPrzyjedzie. Domyślnie nie - patrz nagłówek."""
-    return os.environ.get("SIECHNICE_ENABLED", "off").strip().lower() == "on"
+# Kolumny tabeli calendar w kolejności date.weekday() - zarazem nazwy
+# service_id kopii (SIE:monday, ...).
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
 def normalize_name(name):
@@ -110,108 +84,6 @@ def haversine_m(lat1, lon1, lat2, lon2):
     dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * r * math.asin(math.sqrt(a))
-
-
-# --------------------------------------------------------------------------
-# Warstwa sieciowa - jedyne miejsce, które dotyka cudzego serwera.
-# --------------------------------------------------------------------------
-
-class HttpError(Exception):
-    """Serwer odpowiedział statusem innym niż 200."""
-
-
-class Client:
-    """Odpytywanie API po połączeniu trwałym, z wymuszonym tempem.
-
-    POŁĄCZENIE JEST TU RZECZĄ ISTOTNĄ, nie szczegółem. Zwykłe
-    urllib.request.urlopen otwiera nowe połączenie TLS na każde zapytanie,
-    a przy kilkuset zapytaniach pod rząd ten serwer przestaje odpowiadać na
-    część nawiązań: co kilkanaste zapytanie wisiało 20-60 s (charakterystyczne
-    czasy retransmisji SYN), niezależnie od tego, jak wolno pytaliśmy.
-    Na jednym połączeniu trzymanym otwartym te same zapytania idą po ~0,14 s
-    i nie zwiecha się ani jedno - pełne przejście po 237 słupkach skraca się
-    z ~20 minut do ~40 sekund.
-
-    Połączenie jest per wątek (threading.local): http.client.HTTPSConnection
-    nie jest bezpieczne dla wielu wątków, a każdy wątek i tak potrzebuje
-    własnego gniazda.
-
-    Tempo jest wspólne dla wszystkich wątków. Zamek obejmuje samo wyznaczenie
-    terminu, nie czekanie - inaczej wątki stałyby w kolejce po zamek zamiast
-    po termin i cała równoległość zeszłaby na nie.
-    """
-
-    def __init__(self, base_url=BASE_URL, delay=REQUEST_DELAY_SEC):
-        self.host = urllib.parse.urlsplit(base_url).netloc
-        self.delay = delay
-        self._next_slot_at = 0.0
-        self._slot_lock = threading.Lock()
-        self._local = threading.local()
-
-    def _wait_for_slot(self):
-        with self._slot_lock:
-            now = time.monotonic()
-            slot = max(now, self._next_slot_at)
-            self._next_slot_at = slot + self.delay
-        wait = slot - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-
-    def _connection(self):
-        connection = getattr(self._local, "connection", None)
-        if connection is None:
-            connection = http.client.HTTPSConnection(self.host, timeout=REQUEST_TIMEOUT_SEC)
-            self._local.connection = connection
-        return connection
-
-    def _drop_connection(self):
-        connection = getattr(self._local, "connection", None)
-        if connection is not None:
-            connection.close()
-            self._local.connection = None
-
-    def close(self):
-        self._drop_connection()
-
-    def get_json(self, path, params=None):
-        if params:
-            path += "?" + urllib.parse.urlencode(params)
-
-        for attempt in range(REQUEST_RETRIES):
-            self._wait_for_slot()
-            try:
-                connection = self._connection()
-                connection.request("GET", path, headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "application/json",
-                    "Connection": "keep-alive",
-                })
-                response = connection.getresponse()
-                body = response.read()
-                if response.status != 200:
-                    raise HttpError(f"HTTP {response.status} dla {path}")
-                return json.loads(body.decode("utf-8"))
-            except HttpError:
-                # Odpowiedź serwera, nie awaria łącza - ponowienie da to samo.
-                raise
-            except (OSError, http.client.HTTPException):
-                # Utrzymywane połączenie serwer może zamknąć w dowolnym
-                # momencie - wtedy trzeba je odtworzyć, a nie tylko ponowić.
-                self._drop_connection()
-                if attempt == REQUEST_RETRIES - 1:
-                    raise
-                time.sleep(RETRY_BACKOFF_SEC * (attempt + 1))
-
-    def stops(self):
-        return self.get_json("/stops")["stops"]
-
-    def directions(self, designator):
-        path = "/api/directions/" + urllib.parse.quote(designator, safe="")
-        return self.get_json(path)["directions"]
-
-    def timetable(self, designator, day):
-        path = "/api/timetables/" + urllib.parse.quote(designator, safe="")
-        return self.get_json(path, {"date": day.strftime("%Y-%m-%d")})
 
 
 # --------------------------------------------------------------------------
@@ -345,16 +217,19 @@ def match_existing_stops(stops, existing_rows, max_distance_m=SAME_STOP_MAX_M):
     return matched
 
 
-def to_gtfs_rows(days, stops, stop_id_map):
-    """Kursy z kolejnych dni -> wiersze w kształcie tabel z update_gtfs.SCHEMA.
+def to_gtfs_rows(days, stops, stop_id_map, window):
+    """Kursy z tygodnia kopii -> wiersze w kształcie tabel z update_gtfs.SCHEMA.
 
-    days: [(datetime.date, [kurs, ...]), ...] - wynik build_trips dla każdej daty.
+    days: [(datetime.date, [kurs, ...]), ...] - wynik build_trips dla każdej
+    daty z kopii, po jednej na dzień tygodnia.
     stop_id_map: {designator: stop_id w bazie}.
+    window: (pierwszy, ostatni dzień) jako "RRRRMMDD" - okres, w którym
+    kopia ma obowiązywać.
 
-    Każda data dostaje własny service_id i wpis w calendar_dates z
-    exception_type=1. To celowo nie jest calendar.txt z regułą tygodniową:
-    API oddaje rozkład dla konkretnej daty, więc kalendarz odtworzony z reguł
-    byłby zgadywaniem, a wyjątek na datę jest tym, co faktycznie wiemy.
+    Każdy dzień tygodnia dostaje własny service_id z regułą w calendar
+    (kursy z poniedziałku kopii jeżdżą w każdy poniedziałek okna). API oddaje
+    rozkład per data, ale kopia ma działać tygodniami, a rozkład gminy jest
+    tygodniowy. Świąt kopia nie zna - jeżdżą wg swojego dnia tygodnia.
     """
     stop_rows = [
         (stop_id_map[s["designator"]], s["name"], s["lat"], s["lon"])
@@ -370,17 +245,19 @@ def to_gtfs_rows(days, stops, stop_id_map):
     routes = {}
     trip_rows = []
     stop_time_rows = []
-    calendar_date_rows = []
+    calendar_rows = []
 
     for day, trips in days:
-        service_id = f"{ID_PREFIX}{day:%Y%m%d}"
-        calendar_date_rows.append((service_id, day.strftime("%Y%m%d"), 1))
+        weekday = WEEKDAYS[day.weekday()]
+        service_id = f"{ID_PREFIX}{weekday}"
+        flags = [int(column == weekday) for column in WEEKDAYS]
+        calendar_rows.append((service_id, *flags, *window))
         for trip in trips:
             line = trip["line"]
             route_id = f"{ID_PREFIX}{line}"
             routes[route_id] = (route_id, line, f"Siechnice - linia {line}", 3)
 
-            trip_id = f"{ID_PREFIX}{day:%Y%m%d}:{trip['trip_id']}"
+            trip_id = f"{service_id}:{trip['trip_id']}"
             headsign = names.get(trip["stops"][-1][0], "")
             trip_rows.append((trip_id, route_id, service_id, headsign, ""))
             for sequence, (designator, seconds) in enumerate(trip["stops"]):
@@ -393,7 +270,7 @@ def to_gtfs_rows(days, stops, stop_id_map):
         "routes": sorted(routes.values()),
         "trips": trip_rows,
         "stop_times": stop_time_rows,
-        "calendar_dates": calendar_date_rows,
+        "calendar": calendar_rows,
     }
 
 
@@ -401,52 +278,19 @@ def to_gtfs_rows(days, stops, stop_id_map):
 # Złożenie całości
 # --------------------------------------------------------------------------
 
-def fetch_feed(client=None, days=DEFAULT_DAYS, today=None, log=print):
-    """Pobiera rozkład na `days` najbliższych dni i zwraca surowe kursy.
-
-    Zwraca (stops, [(data, kursy), ...]). Nie dotyka bazy - to celowo, żeby
-    dało się obejrzeć wynik przed doklejeniem go do czegokolwiek.
-    """
-    client = client or Client()
-    today = today or date.today()
-
-    stop_rows = client.stops()
-    stops = parse_stops(stop_rows)
-    log(f"  słupki: {len(stops)}")
-
-    designators = [s["designator"] for s in stops]
-    result = []
-
-    # Jedna pula na całe pobieranie, nie po jednej na przebieg: wątek trzyma
-    # otwarte połączenie (patrz Client), a nowa pula co przebieg kazałaby
-    # nawiązywać je od nowa - czyli dokładnie to, czego unikamy.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-        def gather(fetch_one):
-            """fetch_one(designator) na wszystkich słupkach -> {designator: wynik}."""
-            return dict(zip(designators, pool.map(fetch_one, designators)))
-
-        lines_by_stop = {
-            designator: {d["line"] for d in directions if d.get("line")}
-            for designator, directions in gather(client.directions).items()
-        }
-        all_lines = sorted({line for lines in lines_by_stop.values() for line in lines})
-        log(f"  linie: {', '.join(all_lines) or '(brak)'}")
-
-        for offset in range(days):
-            day = today + timedelta(days=offset)
-            departures_by_stop = {
-                designator: payload.get("departures", [])
-                for designator, payload in gather(
-                    lambda designator: client.timetable(designator, day)
-                ).items()
-            }
-            trips, stats = build_trips(departures_by_stop, lines_by_stop)
-            log(f"  {day}: kursów {len(trips)}"
-                f" (pominięto: bez linii {stats['skipped_no_line']},"
-                f" jednoprzystankowych {stats['skipped_short']})")
-            result.append((day, trips))
-
-    return stops, result
+def feed_from_snapshot(snapshot, log=print):
+    """Kopia z pobierz_siechnice.fetch_snapshot -> (słupki, [(data, kursy), ...])."""
+    stops = parse_stops(snapshot["stops"])
+    lines_by_stop = {k: set(v) for k, v in snapshot["lines_by_stop"].items()}
+    days = []
+    for entry in snapshot["days"]:
+        day = date.fromisoformat(entry["date"])
+        trips, stats = build_trips(entry["departures_by_stop"], lines_by_stop)
+        log(f"  {day} ({WEEKDAYS[day.weekday()]}): kursów {len(trips)}"
+            f" (pominięto: bez linii {stats['skipped_no_line']},"
+            f" jednoprzystankowych {stats['skipped_short']})")
+        days.append((day, trips))
+    return stops, days
 
 
 def purge(db):
@@ -464,13 +308,29 @@ def purge(db):
     )
     for table, column in (
         ("trips", "trip_id"), ("routes", "route_id"),
-        ("calendar_dates", "service_id"), ("stops", "stop_id"),
+        ("calendar", "service_id"), ("stops", "stop_id"),
     ):
         db.execute(f"DELETE FROM {table} WHERE {column} LIKE ?", (prefix,))
 
 
+def service_window(db):
+    """(pierwszy, ostatni) dzień rozkładu Wrocławia w bazie, jako "RRRRMMDD".
+
+    Kopia Siechnic jeździ dokładnie w tym oknie, a nie "do odwołania": po
+    ostatnim dniu wrocławskiej paczki aplikacja mówi pasażerowi, że rozkładu
+    jeszcze nie opublikowano (gtfs.last_service_date) - Siechnice z datą
+    końca w dalekiej przyszłości zagłuszyłyby ten komunikat. Baza buduje się
+    od nowa co dzień, więc okno przesuwa się razem z paczką Wrocławia.
+    """
+    return db.execute(
+        "SELECT MIN(d0), MAX(d1) FROM ("
+        " SELECT start_date AS d0, end_date AS d1 FROM calendar"
+        " UNION ALL SELECT date, date FROM calendar_dates WHERE exception_type = 1)"
+    ).fetchone()
+
+
 def merge_into(db_path, stops, days, log=print):
-    """Dokleja pobrany rozkład do gotowej bazy GTFS. Zwraca statystyki.
+    """Dokleja rozkład z kopii do gotowej bazy GTFS. Zwraca statystyki.
 
     Wołane po zbudowaniu bazy z wrocławskiej paczki, a przed atomową
     podmianą - dzięki temu działająca aplikacja nigdy nie widzi bazy
@@ -479,6 +339,7 @@ def merge_into(db_path, stops, days, log=print):
     db = sqlite3.connect(db_path)
     try:
         purge(db)
+        window = service_window(db)
         existing = list(db.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops"))
         matched = match_existing_stops(stops, existing)
         stop_id_map = {
@@ -488,31 +349,36 @@ def merge_into(db_path, stops, days, log=print):
         log(f"  słupki wspólne z wrocławskim GTFS: {len(matched)}"
             f", nowe: {len(stop_id_map) - len(matched)}")
 
-        rows = to_gtfs_rows(days, stops, stop_id_map)
+        rows = to_gtfs_rows(days, stops, stop_id_map, window)
         db.executemany("INSERT OR REPLACE INTO stops VALUES (?, ?, ?, ?)", rows["stops"])
         db.executemany("INSERT OR REPLACE INTO routes VALUES (?, ?, ?, ?)", rows["routes"])
         db.executemany("INSERT OR REPLACE INTO trips VALUES (?, ?, ?, ?, ?)", rows["trips"])
         db.executemany("INSERT INTO stop_times VALUES (?, ?, ?, ?, ?)", rows["stop_times"])
-        db.executemany("INSERT INTO calendar_dates VALUES (?, ?, ?)", rows["calendar_dates"])
+        db.executemany(
+            "INSERT INTO calendar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows["calendar"])
         db.commit()
     finally:
         db.close()
 
     counts = {name: len(value) for name, value in rows.items()}
-    log("  doklejono: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    log("  doklejono: " + ", ".join(f"{k} {v}" for k, v in counts.items())
+        + f" (okno {window[0]}-{window[1]})")
     return counts
 
 
-def update(db_path, days=DEFAULT_DAYS, log=print):
-    """Pełne przejście dla Siechnic. Zwraca True, gdy coś doklejono.
+def update(db_path, snapshot_path=SNAPSHOT_PATH, log=print):
+    """Dokleja Siechnice z kopii, jeśli leży na miejscu. True, gdy doklejono.
 
-    Wyłączone (SIECHNICE_ENABLED != on) nie jest błędem - to stan domyślny.
+    Brak kopii nie jest błędem - aplikacja działa wtedy po prostu bez Siechnic.
     """
-    if not enabled():
-        log("Siechnice: pominięte (SIECHNICE_ENABLED != on).")
+    if not snapshot_path.exists():
+        log(f"Siechnice: pominięte (brak kopii rozkładu {snapshot_path}).")
         return False
 
-    log("Siechnice: pobieram rozkład z kiedyPrzyjedzie...")
-    stops, days_data = fetch_feed(days=days, log=log)
-    merge_into(db_path, stops, days_data, log=log)
+    log(f"Siechnice: doklejam rozkład z kopii {snapshot_path}...")
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    stops, days = feed_from_snapshot(snapshot, log=log)
+    merge_into(db_path, stops, days, log=log)
     return True
+
+

@@ -5,11 +5,15 @@ jakie oddaje API (kształt sprawdzony na żywym serwerze, patrz siechnice.py),
 wyjściem - wiersze w kształcie tabel z update_gtfs.SCHEMA.
 """
 
+import ast
+import json
 import sqlite3
 from datetime import date
+from pathlib import Path
 
 import pytest
 
+import pobierz_siechnice
 import siechnice
 import update_gtfs
 
@@ -163,37 +167,42 @@ def test_match_existing_stops_wybiera_najblizszy_z_imiennikow():
 
 # --- wiersze GTFS ----------------------------------------------------------
 
+WINDOW = ("20261001", "20261031")
+
+
 def _feed():
     stops = [
         {"designator": "a", "name": "Siechnice - Rynek", "lat": 51.03, "lon": 17.14},
         {"designator": "b", "name": "Sucha", "lat": 51.0968, "lon": 17.0382},
     ]
     trips = [{"trip_id": 4403, "line": "800+80", "stops": [("a", 20000), ("b", 21000)]}]
-    return stops, [(date(2026, 8, 28), trips)]
+    return stops, [(date(2026, 8, 28), trips)]   # piątek
 
 
 def test_to_gtfs_rows_nie_wystawia_slupka_ktory_juz_jest_w_bazie():
     stops, days = _feed()
     stop_id_map = {"a": "SIE:a", "b": "5632"}   # 'b' sklejone z wrocławskim
 
-    rows = siechnice.to_gtfs_rows(days, stops, stop_id_map)
+    rows = siechnice.to_gtfs_rows(days, stops, stop_id_map, WINDOW)
 
     assert [r[0] for r in rows["stops"]] == ["SIE:a"]
     assert [r[2] for r in rows["stop_times"]] == ["SIE:a", "5632"]
 
 
-def test_to_gtfs_rows_daje_kazdej_dacie_wlasny_service_id():
+def test_to_gtfs_rows_powtarza_dzien_kopii_co_tydzien_w_oknie():
+    # Kopia to jeden tydzień, a ma działać tygodniami: piątek z kopii jeździ
+    # w każdy piątek okna, sobota w każdą sobotę.
     stops, days = _feed()
     days = days + [(date(2026, 8, 29), days[0][1])]
     stop_id_map = {"a": "SIE:a", "b": "SIE:b"}
 
-    rows = siechnice.to_gtfs_rows(days, stops, stop_id_map)
+    rows = siechnice.to_gtfs_rows(days, stops, stop_id_map, WINDOW)
 
-    assert rows["calendar_dates"] == [
-        ("SIE:20260828", "20260828", 1),
-        ("SIE:20260829", "20260829", 1),
+    assert rows["calendar"] == [
+        ("SIE:friday", 0, 0, 0, 0, 1, 0, 0, "20261001", "20261031"),
+        ("SIE:saturday", 0, 0, 0, 0, 0, 1, 0, "20261001", "20261031"),
     ]
-    assert {t[2] for t in rows["trips"]} == {"SIE:20260828", "SIE:20260829"}
+    assert {t[2] for t in rows["trips"]} == {"SIE:friday", "SIE:saturday"}
     # Ten sam trip_id w dwóch dniach to dwa różne kursy - identyfikatory
     # muszą się różnić, inaczej drugi dzień nadpisze pierwszy.
     assert len({t[0] for t in rows["trips"]}) == 2
@@ -202,7 +211,7 @@ def test_to_gtfs_rows_daje_kazdej_dacie_wlasny_service_id():
 def test_to_gtfs_rows_ustawia_kierunek_na_ostatni_przystanek():
     stops, days = _feed()
 
-    rows = siechnice.to_gtfs_rows(days, stops, {"a": "SIE:a", "b": "SIE:b"})
+    rows = siechnice.to_gtfs_rows(days, stops, {"a": "SIE:a", "b": "SIE:b"}, WINDOW)
 
     assert rows["trips"][0][3] == "Sucha"
 
@@ -210,17 +219,28 @@ def test_to_gtfs_rows_ustawia_kierunek_na_ostatni_przystanek():
 def test_to_gtfs_rows_daje_linii_typ_autobusowy():
     stops, days = _feed()
 
-    rows = siechnice.to_gtfs_rows(days, stops, {"a": "SIE:a", "b": "SIE:b"})
+    rows = siechnice.to_gtfs_rows(days, stops, {"a": "SIE:a", "b": "SIE:b"}, WINDOW)
 
     assert rows["routes"] == [("SIE:800+80", "800+80", "Siechnice - linia 800+80", 3)]
 
 
 # --- wejście do bazy -------------------------------------------------------
 
-def test_merge_into_wpisuje_kursy_do_bazy_o_schemacie_z_update_gtfs(tmp_path):
+def _wroclaw_db(tmp_path):
+    """Baza o schemacie z update_gtfs z wrocławskim kalendarzem na październik."""
     db_path = tmp_path / "gtfs.sqlite"
     db = sqlite3.connect(db_path)
     db.executescript(update_gtfs.SCHEMA)
+    db.execute("INSERT INTO calendar VALUES ('s1', 1, 1, 1, 1, 1, 0, 0, '20261001', '20261025')")
+    db.execute("INSERT INTO calendar_dates VALUES ('s2', '20261031', 1)")
+    db.commit()
+    db.close()
+    return db_path
+
+
+def test_merge_into_wpisuje_kursy_do_bazy_o_schemacie_z_update_gtfs(tmp_path):
+    db_path = _wroclaw_db(tmp_path)
+    db = sqlite3.connect(db_path)
     db.execute("INSERT INTO stops VALUES ('5632', 'SUCHA', 51.09686508, 17.03828127)")
     db.commit()
     db.close()
@@ -238,14 +258,25 @@ def test_merge_into_wpisuje_kursy_do_bazy_o_schemacie_z_update_gtfs(tmp_path):
     db.close()
 
 
+def test_merge_into_bierze_okno_dat_z_rozkladu_wroclawia(tmp_path):
+    # Po końcu wrocławskiej paczki aplikacja ma mówić, że rozkładu jeszcze
+    # nie ma - Siechnice nie mogą tej daty przesunąć dalej.
+    db_path = _wroclaw_db(tmp_path)
+
+    stops, days = _feed()
+    siechnice.merge_into(db_path, stops, days, log=lambda *_: None)
+
+    db = sqlite3.connect(db_path)
+    assert db.execute(
+        "SELECT start_date, end_date FROM calendar WHERE service_id = 'SIE:friday'"
+    ).fetchone() == ("20261001", "20261031")
+    db.close()
+
+
 def test_merge_into_daje_sie_powtorzyc_bez_zdublowania_slupkow(tmp_path):
     # Aktualizacja leci codziennie na świeżo zbudowanej bazie, ale gdyby
     # kiedyś poszła dwa razy na tej samej, słupki i linie mają się nadpisać.
-    db_path = tmp_path / "gtfs.sqlite"
-    db = sqlite3.connect(db_path)
-    db.executescript(update_gtfs.SCHEMA)
-    db.commit()
-    db.close()
+    db_path = _wroclaw_db(tmp_path)
 
     stops, days = _feed()
     siechnice.merge_into(db_path, stops, days, log=lambda *_: None)
@@ -255,7 +286,8 @@ def test_merge_into_daje_sie_powtorzyc_bez_zdublowania_slupkow(tmp_path):
     assert db.execute("SELECT count(*) FROM stops").fetchone()[0] == 2
     assert db.execute("SELECT count(*) FROM routes").fetchone()[0] == 1
     assert db.execute("SELECT count(*) FROM trips").fetchone()[0] == 1
-    assert db.execute("SELECT count(*) FROM calendar_dates").fetchone()[0] == 1
+    assert db.execute(
+        "SELECT count(*) FROM calendar WHERE service_id LIKE 'SIE:%'").fetchone()[0] == 1
     # stop_times nie ma klucza głównego - bez czyszczenia drugi przebieg
     # dołożyłby drugi komplet wierszy zamiast je nadpisać.
     assert db.execute("SELECT count(*) FROM stop_times").fetchone()[0] == 2
@@ -263,14 +295,12 @@ def test_merge_into_daje_sie_powtorzyc_bez_zdublowania_slupkow(tmp_path):
 
 
 def test_merge_into_nie_rusza_danych_wroclawskich(tmp_path):
-    db_path = tmp_path / "gtfs.sqlite"
+    db_path = _wroclaw_db(tmp_path)
     db = sqlite3.connect(db_path)
-    db.executescript(update_gtfs.SCHEMA)
     db.execute("INSERT INTO stops VALUES ('1', 'Rynek', 51.11, 17.03)")
     db.execute("INSERT INTO routes VALUES ('r1', '33', 'tramwaj', 0)")
     db.execute("INSERT INTO trips VALUES ('t1', 'r1', 's1', 'Rynek', '')")
     db.execute("INSERT INTO stop_times VALUES ('t1', 0, '1', 100, 100)")
-    db.execute("INSERT INTO calendar_dates VALUES ('s1', '20260828', 1)")
     db.commit()
     db.close()
 
@@ -282,25 +312,123 @@ def test_merge_into_nie_rusza_danych_wroclawskich(tmp_path):
     assert db.execute("SELECT count(*) FROM routes WHERE route_id = 'r1'").fetchone()[0] == 1
     assert db.execute(
         "SELECT count(*) FROM stop_times WHERE trip_id = 't1'").fetchone()[0] == 1
+    assert db.execute("SELECT count(*) FROM calendar WHERE service_id = 's1'").fetchone()[0] == 1
     db.close()
 
 
-# --- wyłącznik -------------------------------------------------------------
+# --- statyczna kopia -------------------------------------------------------
 
-def test_update_nie_rusza_sieci_gdy_wylaczone(monkeypatch, tmp_path):
-    monkeypatch.delenv("SIECHNICE_ENABLED", raising=False)
+class _FakeClient:
+    """Odpowiada tak jak API, bez sieci: dwa słupki, jeden kurs dziennie."""
 
-    def _explode(*args, **kwargs):
-        raise AssertionError("wyłączone źródło nie ma prawa odpytywać API")
+    def __init__(self):
+        self.timetable_dates = []
 
-    monkeypatch.setattr(siechnice, "fetch_feed", _explode)
+    def stops(self):
+        return [
+            ["a", 1, "Siechnice - Rynek", 17140000, 51030000, 0],
+            ["b", 2, "Sucha", 17038200, 51096800, 0],
+        ]
 
-    assert siechnice.update(tmp_path / "gtfs.sqlite", log=lambda *_: None) is False
+    def directions(self, designator):
+        return [{"line": "800+80", "direction": "Sucha"}, {"line": None}]
+
+    def timetable(self, designator, day):
+        self.timetable_dates.append(day)
+        index, seconds = {"a": (1, 20000), "b": (2, 21000)}[designator]
+        return {"departures": [
+            {"departure": seconds, "trip_id": 4403, "index": index, "extra": "x"},
+        ]}
 
 
-def test_enabled_reaguje_na_zmienna(monkeypatch):
-    monkeypatch.setenv("SIECHNICE_ENABLED", "on")
-    assert siechnice.enabled() is True
+def test_fetch_snapshot_zbiera_tydzien_od_podanego_dnia():
+    client = _FakeClient()
 
-    monkeypatch.setenv("SIECHNICE_ENABLED", "off")
-    assert siechnice.enabled() is False
+    snapshot = pobierz_siechnice.fetch_snapshot(
+        client, today=date(2026, 10, 13), log=lambda *_: None)
+
+    assert [d["date"] for d in snapshot["days"]] == [
+        "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16",
+        "2026-10-17", "2026-10-18", "2026-10-19",
+    ]
+    assert snapshot["lines_by_stop"] == {"a": ["800+80"], "b": ["800+80"]}
+    # Do pliku idą tylko pola, z których składamy kursy.
+    assert snapshot["days"][0]["departures_by_stop"]["a"] == [
+        {"departure": 20000, "trip_id": 4403, "index": 1},
+    ]
+
+
+def test_feed_from_snapshot_sklada_kursy_po_przejsciu_przez_json():
+    # Kopia leży na dysku jako JSON - po drodze zbiory stają się listami,
+    # a klucze napisami. Złożenie kursów ma to przeżyć.
+    snapshot = json.loads(json.dumps(pobierz_siechnice.fetch_snapshot(
+        _FakeClient(), days=1, today=date(2026, 10, 13), log=lambda *_: None)))
+
+    stops, days = siechnice.feed_from_snapshot(snapshot, log=lambda *_: None)
+
+    assert [s["designator"] for s in stops] == ["a", "b"]
+    assert days == [(date(2026, 10, 13), [
+        {"trip_id": 4403, "line": "800+80", "stops": [("a", 20000), ("b", 21000)]},
+    ])]
+
+
+def test_update_bez_kopii_nie_dokleja_niczego(tmp_path):
+    db_path = _wroclaw_db(tmp_path)
+
+    merged = siechnice.update(db_path, tmp_path / "brak.json", log=lambda *_: None)
+
+    assert merged is False
+    db = sqlite3.connect(db_path)
+    assert db.execute("SELECT count(*) FROM trips").fetchone()[0] == 0
+    db.close()
+
+
+def test_update_dokleja_kopie_z_pliku(tmp_path):
+    db_path = _wroclaw_db(tmp_path)
+    snapshot_path = tmp_path / "rozklad.json"
+    snapshot_path.write_text(json.dumps(pobierz_siechnice.fetch_snapshot(
+        _FakeClient(), today=date(2026, 10, 12), log=lambda *_: None)))
+
+    merged = siechnice.update(db_path, snapshot_path, log=lambda *_: None)
+
+    assert merged is True
+    db = sqlite3.connect(db_path)
+    assert db.execute(
+        "SELECT count(*) FROM calendar WHERE service_id LIKE 'SIE:%'").fetchone()[0] == 7
+    assert db.execute("SELECT count(*) FROM trips").fetchone()[0] == 7
+    db.close()
+
+
+# --- serwer nie odpytuje kiedyPrzyjedzie -----------------------------------
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_modul_serwera_nie_ma_kodu_sieciowego():
+    # siechnice.py jedzie w obrazie i woła go nocna aktualizacja - nie może
+    # umieć niczego pobrać, nawet przez pomyłkę.
+    tree = ast.parse((ROOT / "siechnice.py").read_text(encoding="utf-8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            imported.add(node.module.split(".")[0])
+
+    assert not imported & {"http", "urllib", "socket", "ssl", "requests",
+                           "pobierz_siechnice"}
+
+
+def test_skrypt_pobierania_nie_trafia_do_obrazu():
+    ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+
+    assert "pobierz_siechnice.py" in ignored
+
+
+def test_kopia_z_repo_daje_kursy_na_kazdy_dzien_tygodnia():
+    snapshot = json.loads(siechnice.REPO_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+    _, days = siechnice.feed_from_snapshot(snapshot, log=lambda *_: None)
+
+    assert sorted(day.weekday() for day, _ in days) == list(range(7))
+    assert all(trips for _, trips in days)

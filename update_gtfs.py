@@ -291,12 +291,13 @@ def build_database(zip_path, db_path):
 
 
 def _merge_siechnice(db_path):
-    """Dokleja rozkład gminy Siechnice do świeżo zbudowanej bazy.
+    """Dokleja rozkład gminy Siechnice ze statycznej kopii do świeżo
+    zbudowanej bazy (patrz siechnice.py).
 
-    Awaria tego kroku nie przerywa aktualizacji: to osobne, cudze API bez
-    żadnej gwarancji dostępności (patrz siechnice.py), a rozkład Wrocławia -
-    właściwy przedmiot tej aktualizacji - jest już w bazie i ma wjechać na
-    miejsce niezależnie od tego, czy Siechnice akurat odpowiadają.
+    Awaria tego kroku nie przerywa aktualizacji: kopię wgrywa się ręcznie,
+    osobno od kodu, a rozkład Wrocławia - właściwy przedmiot tej
+    aktualizacji - jest już w bazie i ma wjechać na miejsce niezależnie od
+    tego, czy plik z Siechnicami da się przeczytać.
     """
     try:
         siechnice.update(db_path)

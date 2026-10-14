@@ -19,3 +19,7 @@ data/
 logs/
 *.log
 *.sqlite
+
+# Jedyny kod, który umie odpytać kiedyPrzyjedzie (Siechnice) - pobiera się
+# ręcznie, lokalnie. Bez niego w obrazie serwer nie ma czym tego zrobić.
+pobierz_siechnice.py
