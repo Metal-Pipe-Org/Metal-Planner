@@ -38,6 +38,7 @@ liczyły osobno, z inną prędkością, innym marszem i innym narzutem. Dojście
 stacji nie jest tu liczone wcale - to zwykły marsz (gtfs.walk_time_sec).
 """
 
+import http.client
 import json
 import math
 from bisect import bisect_left
@@ -287,7 +288,7 @@ def stations_quiet():
     """
     try:
         return stations()
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, http.client.HTTPException):
         return []
 
 
@@ -416,7 +417,7 @@ def map_places(day, arrivals, onward, target_set, limit, live=True,
     try:
         docks = stations()
         loose = free_bikes() if live else []
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, http.client.HTTPException):
         return []
 
     # Dokąd wolno przyjechać. Przy nieznanym stanie stojaków bierzemy każdą
