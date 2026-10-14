@@ -201,6 +201,13 @@ def test_the_board_lists_departure_times_per_line(front):
     _check(front, "tablica_godziny_w_wierszu_linii")
 
 
+def test_board_shows_late_courses_beside_grey_hours(front):
+    """Zgłoszenie #238: spóźniony kurs to też szara godzina - z obu rodzajów
+    linia pokazuje tylko najpóźniejszą, ten sam kurs raz, także na linii
+    spoza mapy; bez szarych godzin w ustawieniach go nie ma."""
+    _check(front, "tablica_spoznione_kursy_obok_szarych")
+
+
 def test_recent_places_come_first_in_suggestions(front):
     """Ostatnio wyszukiwane miejsca stoją w podpowiedziach na początku, od
     najświeższego, a reszta trafień zostaje w swojej kolejności (#142)."""
@@ -283,7 +290,8 @@ def test_a_route_that_starts_much_later_says_so(front):
 def test_the_headline_says_when_to_leave(front):
     """Pasek nad mapą mówi, o której wyjechać i o której się dojedzie
     najszybszą trasą, oraz od kiedy do kiedy sięga mapa. Sam czas jazdy
-    dopisuje dopiero ustawienie - "za ile tam będziesz" zostaje zawsze."""
+    dopisuje dopiero ustawienie. "Za ile tam będziesz" jest w dymku godzin,
+    a każdy widoczny kawałek paska ma swój dymek."""
     _check(front, "pasek_mowi_kiedy_wyjechac")
 
 
@@ -614,3 +622,45 @@ def test_search_stages_show_the_bar_first_and_keep_cars(front):
     i bez aut poprzedniej relacji. Gęstsza mapa tej samej relacji przychodzi
     bez aut, a te, które są na ekranie, zostają do etapu z nowymi."""
     _check(front, "etapy_pasek_najpierw_auta_bez_przerwy")
+
+
+# ------------------------------------------- przystanki linii (#252, #253) -
+
+def test_far_away_the_map_has_no_line_stops_until_a_line_is_pointed(front):
+    """Mijane przystanki nie stoją na mapie na stałe - z daleka nic się nie
+    dokłada, ani kropki, ani nazwy."""
+    _check(front, "p252_bez_kursora_i_z_daleka_nie_ma_przystankow_linii")
+
+
+def test_pointed_line_shows_its_own_stops_lighter_than_transfers(front):
+    """Wskazana linia pokazuje SWOJE przystanki, bez tych, które mają już
+    kropkę przesiadki, i lżejsze od niej (punkt 11 kontraktu); dymek kropki
+    to godzina i nazwa. Zejście z linii je zabiera."""
+    _check(front, "p252_wskazana_linia_pokazuje_swoje_przystanki")
+
+
+def test_line_tooltip_names_the_nearest_stop(front):
+    _check(front, "p252_dymek_linii_podaje_najblizszy_przystanek")
+
+
+def test_close_up_names_only_stops_of_drawn_lines_without_overlaps(front):
+    """Z bliska nazwy dostają tylko przystanki narysowanych linii, raz na
+    miejsce, bez nachodzenia na siebie ani na grupki numerów (te mają
+    pierwszeństwo - punkt 7)."""
+    _check(front, "p253_z_bliska_nazwy_tylko_przystankow_mapy")
+
+
+def test_moving_the_map_does_not_recount_the_stops_of_the_drawn_lines(front):
+    """Z bliska nazwy liczą się po każdym ruchu mapy, ale przystanki
+    wachlarza (ponad tysiąc kawałków przy dużym zapytaniu) - raz na mapę."""
+    _check(front, "p253_ruch_mapy_nie_liczy_przystankow_wachlarza_od_nowa")
+
+
+def test_without_a_map_close_up_names_the_whole_city_once_per_place(front):
+    _check(front, "p253_bez_mapy_nazwy_calego_miasta_raz_na_miejsce")
+
+
+def test_a_place_with_poles_on_both_sides_still_gets_its_name(front):
+    """Środek miejsca leży między jego słupkami - nazwa szuka miejsca też
+    przy każdym słupku, zamiast znikać (pl. Grunwaldzki)."""
+    _check(front, "p253_wezel_z_peronami_po_obu_stronach_dostaje_nazwe")

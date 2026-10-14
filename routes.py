@@ -225,7 +225,9 @@ def init_routes(app):
         # miejsce, gdzie PKP i MPK są traktowane inaczej - bo tylko to
         # naprawdę je różni (markery), nie samo wyszukiwanie tras.
         stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
-        return jsonify(stops)
+        # Nazwa miejsca dopiero na całej liście: DWORZEC GŁÓWNY i stacja
+        # Wrocław Główny to jedno miejsce, więc i jeden podpis na mapie.
+        return jsonify(gtfs.with_place_names(stops))
 
     @app.route("/api/vehicles")
     def api_vehicles():
@@ -288,6 +290,7 @@ def init_routes(app):
             request.args.get("num", ""),
             _day_arg(),
             request.args.get("mode") or None,
+            trip=request.args.get("trip") or None,
         ))
 
     @app.route("/api/onboard")

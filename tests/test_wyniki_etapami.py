@@ -64,7 +64,7 @@ def test_pierwszy_etap_to_sam_pasek(install_day):
     name, first = next(planner.plan_flow_stages("S", "E", WHEN))
 
     assert name == "fastest"
-    assert set(first) == {"best_arrival", "best_sec", "fastest", "starts", "ride_sec"}
+    assert set(first) == {"best_arrival", "best_sec", "departure", "fastest", "starts", "ride_sec"}
     assert first["fastest"]["arrival"] == first["best_arrival"]
 
 

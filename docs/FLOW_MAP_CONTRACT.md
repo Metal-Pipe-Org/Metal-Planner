@@ -2,8 +2,8 @@
 
 Gwarancje zachowania **rysowania mapy przepływów** (segmenty, próg,
 kształt sieci) — nie dotyczy listy „Propozycje tras” obok mapy. Testy dla
-każdego punktu, historia wdrożeń i otwarte pytania są w
-[FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md); jak to jest policzone — w
+każdego punktu i otwarte pytania są w
+[FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), historią wdrożeń jest lista commitów; jak to jest policzone — w
 [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md). Edytuj tę listę tylko
 wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 
@@ -13,8 +13,8 @@ wtedy, gdy zmienia się sama obietnica, nie przy okazji naprawiania buga.
 > który się zdezaktualizował. Jeśli uważasz, że coś tu wymaga zmiany —
 > zgłoś propozycję i czekaj na zgodę. Nieaktualny akapit w tym pliku jest
 > mniejszym problemem niż kontrakt przepisujący się sam. Wszystko inne
-> (historia, pomiary, szczegóły implementacji) idzie do
-> [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md), który wolno dopisywać zawsze.
+> (historia, pomiary, szczegóły implementacji) idzie do opisu commita
+> albo PR-a.
 
 ## 1. Cały wachlarz, nie jedna trasa
 
@@ -155,9 +155,7 @@ Mapa odpowiada nie tylko na „jak dojechać”, ale też na „ile to trwa” i
 **Bez ruszania myszą** widać czas całej podróży: o której wyjść na najszybszą
 trasę, o której się nią dojedzie i od kiedy do kiedy sięga mapa. Wyjście to
 najpóźniejsza chwila, z której wciąż dojeżdża się najszybciej — wcześniejsze
-kazałoby tylko gdzieś czekać. Godziny przyjazdu mają przy sobie „za ile",
-liczone od godziny z formularza — czekanie na pierwszy pojazd jest w tej
-liczbie zawarte, bo pasażer i tak czeka.
+kazałoby tylko gdzieś czekać.
 
 **Pod kursorem, dla punktu pod kursorem** — nie dla całej linii i nie dla
 jakiegoś jej kawałka — widać dwie godziny: o której tym pojazdem jest się
@@ -235,11 +233,21 @@ liczona od tamtej godziny zabrałaby mu nie kilka wierszy, tylko całą
 odpowiedź.
 
 Odjazdy sprzed chwili, w której mapa stawia tu pasażera, są więc na liście
-celowo — jako szare godziny. Linia, na którą według mapy już się nie zdąży,
-idzie na koniec, żeby na ruchliwym węźle nie wypchnęła tych, po które się tu
-przyszło. Szare godziny da się wyłączyć w ustawieniach (domyślnie są) — wtedy
-tablica zaczyna się od chwili z mapy. Wszystko na osi doby rozkładowej, nie
-zegarowej: przesiadka o 24:40 należy do rozkładu dnia poprzedniego.
+celowo — jako szare godziny. Są dwa rodzaje:
+1. odjazdy od godziny z formularza do chwili z mapy — pasażer może tu być
+   wcześniej, niż mapa policzyła;
+2. spóźniony kurs — ostatni odjazd linii sprzed chwili, w której pasażer może
+   tu być, jeśli spóźniony dowiózłby go do celu wcześniej niż najszybsza
+   trasa. Według rozkładu już odjechał, ale bywa właśnie tym pojazdem, który
+   stoi na przystanku. Dostaje go też linia, której mapa tu nie rysuje.
+
+Z kilku szarych godzin linia pokazuje tylko najpóźniejszą.
+
+Linia, na którą według mapy już się nie zdąży, idzie na koniec, żeby na
+ruchliwym węźle nie wypchnęła tych, po które się tu przyszło. Szare godziny
+da się wyłączyć w ustawieniach (domyślnie są) — wtedy tablica zaczyna się od
+chwili z mapy. Wszystko na osi doby rozkładowej, nie zegarowej: przesiadka
+o 24:40 należy do rozkładu dnia poprzedniego.
 
 **Ten sam punkt mówi zawsze to samo.** Drgnięcie kursora o piksel nie zmienia
 ani godziny, ani listy. Gdy leży tu kilka kawałków tej samej linii — a to różne
@@ -530,6 +538,14 @@ i tylko z tej chwili. Przy pytaniu o inny dzień kropki zostają — stacja stoi
 tam zawsze — ale mapa mówi wprost, że stanu nie zna, zamiast podać dzisiejszą
 liczbę jako jutrzejszą. Milczące źródło zabiera kropki, nigdy odpowiedź na
 pytanie „jak tam dojadę".
+
+## 17. Mapa mówi, które przystanki się mija i jak się nazywają
+
+1. Wskazana linia pokazuje swoje mijane przystanki, każdy z nazwą i godziną. Są lżejsze od kropek przesiadek (punkt 11), żeby nie udawały miejsca, w którym mapa radzi się przesiąść. Znikają, gdy linia przestaje być wskazana.
+2. Godzina „tu jesteś” (punkt 10) ma przy sobie nazwę najbliższego przystanku na tej linii.
+3. Od dużego przybliżenia przystanki narysowanych linii stoją na mapie na stałe, z nazwami. Przystanki, przez które nic na mapie nie jedzie, zostają bez nazw. Bez narysowanej trasy nazwy mają wszystkie przystanki w kadrze.
+4. Jedno miejsce ma jedną nazwę, nawet gdy ma kilka słupków.
+5. Numery linii mają pierwszeństwo przed nazwami (punkt 7). Nazwa, która nigdzie się nie mieści, nie jest rysowana, bo lepszy brak napisu niż napis na napisie.
 
 ## Priorytet: poprawność przed szybkością
 

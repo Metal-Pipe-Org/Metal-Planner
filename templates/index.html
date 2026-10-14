@@ -50,6 +50,44 @@
 </head>
 <body{% if dev_mode %} class="dev-mode"{% endif %}>
 
+{#
+  21:37 - ekran z metalową rurą (static/rura.js). Poza blokiem data_error:
+  żart nie zależy od tego, czy jest baza rozkładów.
+  Na razie tylko w trybie deweloperskim - pasażerowie nie dostają nawet
+  znaczników. Żeby wypuścić żart do wszystkich, wystarczy zmienić ten set.
+#}
+{% set rura_enabled = dev_mode %}
+{% if rura_enabled %}
+<div id="rura" hidden>
+    <figure class="rura-photo">
+        <img src="{{ url_for('static', filename='images/jp2.jpg') }}" width="474" height="300"
+             alt="Jan Paweł II">
+    </figure>
+    <p id="rura-text" class="rura-text"></p>
+    <div id="rura-clock" class="rura-clock"></div>
+    <button type="button" id="rura-button" class="rura-button">
+        <svg viewBox="0 0 64 24" width="56" height="21" aria-hidden="true">
+            <defs>
+                <linearGradient id="rura-steel" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#5f6b76"/>
+                    <stop offset="0.35" stop-color="#e4e9ee"/>
+                    <stop offset="0.6" stop-color="#a7b1ba"/>
+                    <stop offset="1" stop-color="#4a545e"/>
+                </linearGradient>
+            </defs>
+            <rect x="4" y="5" width="56" height="14" rx="2" fill="url(#rura-steel)"/>
+            <rect x="1" y="3" width="7" height="18" rx="1.5" fill="url(#rura-steel)"/>
+            <rect x="56" y="3" width="7" height="18" rx="1.5" fill="url(#rura-steel)"/>
+        </svg>
+        Uczcij metalową rurą
+    </button>
+    <audio id="rura-sound" preload="auto">
+        <source src="{{ url_for('static', filename='sounds/metal-pipe.ogg') }}" type="audio/ogg; codecs=opus">
+        <source src="{{ url_for('static', filename='sounds/metal-pipe.m4a') }}" type='audio/mp4; codecs="mp4a.40.2"'>
+    </audio>
+</div>
+{% endif %}
+
 <div id="map"></div>
 
 <button id="sidebar-toggle" class="icon-button floating" title="Pokaż/ukryj panel"
@@ -653,6 +691,15 @@
             <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
         </div>
 
+        <div class="field compact">
+            <label for="names-zoom">
+                Nazwy przystanków od przybliżenia <output id="names-zoom-value">17</output>
+                <span class="info" tabindex="0" role="button"
+                      data-tip="Przy narysowanej trasie podpisuje tylko przystanki jej linii, bez trasy - wszystkie w kadrze. 19 to najbliżej, jak się da.">i</span>
+            </label>
+            <input type="range" id="names-zoom" min="14" max="19" step="1" value="17">
+        </div>
+
         <div class="dev-section-head">Gdzie pokazać rozkład</div>
 
         <label class="dev-check">
@@ -855,6 +902,9 @@
 </div>
 {% endif %}
 
+{% if rura_enabled %}
+<script src="{{ url_for('static', filename='rura.js') }}"></script>
+{% endif %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='phone.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>

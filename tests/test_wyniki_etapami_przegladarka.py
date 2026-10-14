@@ -247,7 +247,7 @@ def test_kolejne_etapy_dokladaja_sie_do_mapy(etapy, przegladarka):
     etapy.pusc("fastest", "map")
     # Gęstsza mapa już stoi (przycisk obiecuje kolejne zagęszczenie), a auta
     # jeszcze się liczą.
-    page.wait_for_selector('#time-headline .headline-more[title*="3×"]')
+    page.wait_for_selector('#time-headline .headline-more[data-tip*="3×"]')
     assert page.evaluate("document.body.classList.contains('more-busy')")
     assert page.is_visible("#time-headline .headline-more .spinner")
     # Auta z poprzedniej mapy stoją dalej - do etapu z nowymi.

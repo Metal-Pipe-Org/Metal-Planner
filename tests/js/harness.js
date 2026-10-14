@@ -538,7 +538,7 @@ const INJECTION = `
     waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
     timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
     keepWithinHorizon, recentFirst,
-    withArrivals, flowIcon, FLOW_ICONS,
+    withArrivals, withLate, flowIcon, FLOW_ICONS,
     playPipeDrop, wakeMixer, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },
     get flowLabelLayer() { return flowLabelLayer; },
@@ -583,6 +583,14 @@ const INJECTION = `
     get mapMore() { return mapMore; },
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },
+    // Przystanki narysowanych linii i nazwy przy przybliżeniu (#252, #253).
+    placeStopNames, lineStopsOf, nearestStopName, showLineHighlight, hideLineHighlight,
+    cityStops, LINE_STOP_STYLE, NAME_ROW_PX, PLACE_SPAN_M,
+    get flowLineStopLayer() { return flowLineStopLayer; },
+    get flowStopsLayer() { return flowStopsLayer; },
+    get stopNameLayer() { return stopNameLayer; },
+    get clusterBoxes() { return clusterBoxes; },
+    get flowLineStops() { return flowLineStops; },
 };
 `;
 

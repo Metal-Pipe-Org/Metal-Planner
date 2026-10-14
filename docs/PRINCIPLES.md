@@ -5,8 +5,8 @@ dopiero powstanie. Kontrakt ([FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md))
 mówi, co ma robić mapa; ten plik — czym kierujemy się wszędzie.
 
 > **Zmienia się wyłącznie na wyraźne polecenie użytkownika**, tak jak
-> kontrakt. Propozycje zgłasza się słowami; historia zmian idzie do
-> [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md).
+> kontrakt. Propozycje zgłasza się słowami; historią zmian jest lista
+> commitów.
 
 ## 1. Aplikacja nie wybiera za użytkownika
 

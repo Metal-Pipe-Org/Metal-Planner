@@ -60,3 +60,58 @@ minimize_comment() {
       }
     }' >/dev/null
 }
+
+# Ocena Claude'a i informacja o nieudanej ocenie niosą na końcu ten znacznik.
+REVIEW_MARK='<!-- claude-review -->'
+FOLDED_MARK='<!-- claude-review-folded -->'
+
+# fold_review_comments KEEP_ID — filtr: na wejściu tablica komentarzy z API,
+# na wyjściu po jednej linii `{id, body}` dla każdej starszej oceny do zwinięcia,
+# z gotową nową treścią. Pierwsza linijka (werdykt) zostaje na wierzchu, reszta
+# idzie pod „rozwiń”. Zwinięte niosą drugi znacznik i drugi raz się ich nie owija.
+fold_review_comments() {
+  jq -c --argjson keep "$1" --arg mark "$REVIEW_MARK" --arg folded "$FOLDED_MARK" '
+    .[]
+    | select(.user.login == "github-actions[bot]" and .id != $keep)
+    | select(.body | contains($folded) | not)
+    | select(.body | contains($mark))
+    | (.body | split("\n")) as $lines
+    | {id, body: ($lines[0] + "\n\n<details><summary>Starsza ocena — rozwiń</summary>\n\n"
+        + ($lines[1:] | join("\n")) + "\n\n</details>\n\n" + $folded)}'
+}
+
+# fold_old_reviews PR NOWY_ID — zwija pod PR-em starsze oceny Claude'a
+# i informacje o nieudanych ocenach, gdy stoi już nowa ocena. Edytujemy treść
+# zamiast `minimize_comment`, bo zwinięcie przez GitHuba chowa także werdykt,
+# a po starych werdyktach widać, jak PR szedł. Edycja nikogo nie powiadamia
+# (wzmianka w treści była już wcześniej) i nie odpala żadnego workflow: żaden
+# nie słucha `edited`, a zdarzeń z `GITHUB_TOKEN` GitHub innym workflow nie daje.
+#
+# Informację „Ten PR zmienia workflow oceny” zwijamy za to w całości przez
+# `minimize_comment`: to jedna linijka bez werdyktu, więc nie ma czego zostawić
+# na wierzchu, a ocena, na którą czekała, właśnie przyszła. Zwinięty komentarz
+# API dalej zwraca, więc dalej działa jako znak „ocena już była” dla pushy.
+# Ponowne zwinięcie zwiniętego niczego nie zmienia.
+fold_old_reviews() {
+  local comments line node
+  comments=$(gh api --paginate --slurp "repos/$REPO/issues/$1/comments" | jq 'add // []')
+  fold_review_comments "$2" <<<"$comments" \
+    | while IFS= read -r line; do
+        jq -c '{body}' <<<"$line" \
+          | gh api -X PATCH "repos/$REPO/issues/comments/$(jq -r .id <<<"$line")" \
+              --input - >/dev/null
+      done
+  workflow_notice_nodes <<<"$comments" \
+    | while IFS= read -r node; do
+        minimize_comment "$node"
+      done
+}
+
+# workflow_notice_nodes — filtr: z tablicy komentarzy wypisuje node_id
+# informacji botów o tym, że PR zmienia workflow oceny.
+workflow_notice_nodes() {
+  jq -r '.[]
+    | select(.user.login == "github-actions[bot]")
+    | select(.body | startswith("⚪ Ten PR zmienia workflow oceny"))
+    | .node_id'
+}

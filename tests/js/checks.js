@@ -471,6 +471,61 @@ checks.kawalek_bez_godziny_nie_wygrywa = (() => {
     };
 })();
 
+/* Zgłoszenie #238: spóźniony kurs to też szara godzina, a z szarych linia
+   pokazuje tylko najpóźniejszą. Mapa stawia tu pasażera o 8:16, tablica
+   liczy od 8:11.
+     - 16 (z mapy): zwykłej szarej nie ma, spóźniona 8:04 jest szara;
+     - 5 (z mapy): zwykła szara 8:14 i spóźniona 8:05 - tylko 8:14;
+     - 3 (z mapy): zwykła szara 8:12 to ten sam kurs, co spóźniony - raz;
+     - 4 (spoza mapy): tylko spóźniona 8:10, bez kolejnej 8:22.
+   Bez szarych godzin w ustawieniach spóźnionych nie ma. */
+checks.tablica_spoznione_kursy_obok_szarych = (() => {
+    const dep = (sec, num, headsign) => ({time: '00:00', sec, num,
+                                          mode: 'tram', headsign});
+    const linia = (num, headsign, depart_by) => ({num, kind: 'tram', headsign,
+                                                  flow: 'start', depart_by});
+    const [dot] = app.flowStopDots([
+        {name: 'Pl. Wróblewskiego', lat: 51.105, lon: 17.048, sec: 29760,
+         lines: [linia('16', 'OSOBOWICE', 29760), linia('5', 'KSIĘŻE MAŁE', 30180),
+                 linia('3', 'LEŚNICA', 30180)],
+         late: [{num: '16', kind: 'tram', headsign: 'OSOBOWICE', sec: 29040},
+                {num: '5', kind: 'tram', headsign: 'KSIĘŻE MAŁE', sec: 29100},
+                {num: '4', kind: 'tram', headsign: 'BISKUPIN', sec: 29400},
+                {num: '3', kind: 'tram', headsign: 'LEŚNICA', sec: 29520}]},
+    ], 30180);
+    const data = {stop: 'Pl. Wróblewskiego', from_time: '8:11', departures: [
+        dep(29520, '3', 'LEŚNICA'),        // 8:12 - zwykła szara, ten sam kurs co spóźniony
+        dep(29640, '5', 'KSIĘŻE MAŁE'),    // 8:14 - zwykła szara
+        dep(29760, '16', 'OSOBOWICE'),     // 8:16
+        dep(30120, '4', 'BISKUPIN'),       // 8:22 - mapa jej nie proponuje
+        dep(30180, '3', 'LEŚNICA'),        // 8:23
+        dep(30180, '5', 'KSIĘŻE MAŁE'),    // 8:23
+    ]};
+    const tablica = () => app.timetableHtml(app.withLate(
+        app.keepOfferedLines(data, dot.where.lines), dot.where), dot.sec);
+    const bylo = app.dotOpts.ttPast;
+    app.dotOpts.ttPast = true;
+    const z = tablica();
+    app.dotOpts.ttPast = false;
+    const bezSzarych = tablica();
+    app.dotOpts.ttPast = bylo;
+    const wiersze = z.match(/<li>.*?<\/li>/g) || [];
+    const wiersz = num => wiersze.find(w => w.includes(`>${num}<`)) || '';
+    const szare = w => (w.match(/tt-past">[^<]*/g) || []).map(t => t.slice(9));
+    return {
+        ok: wiersze.length === 4
+            && szare(wiersz('16')).join() === '8:04' && wiersz('16').includes('8:16')
+            && wiersz('16').includes('tt-flow-start')
+            && szare(wiersz('5')).join() === '8:14' && !wiersz('5').includes('8:05')
+            && wiersz('5').includes('8:23')
+            && szare(wiersz('3')).join() === '8:12'
+            && (wiersz('3').match(/8:12/g) || []).length === 1
+            && szare(wiersz('4')).join() === '8:10' && !z.includes('8:22')
+            && !bezSzarych.includes('tt-past') && !bezSzarych.includes('>4<'),
+        wiersze,
+    };
+})();
+
 /* Kropki wachlarza: po jednej na węzeł z backendu, każda do najechania. */
 checks.kropki_wachlarza = (() => {
     const dots = app.flowStopDots([
@@ -933,11 +988,25 @@ checks.czekanie_jest_widoczne = (() => {
     };
 })();
 
-/* Pasek nad mapą: o której wyjechać i dojechać najszybszą trasą, "za ile"
-   zawsze, sam czas jazdy tylko z ustawieniem, i zakres godzin mapy. */
+/* Pasek nad mapą: o której wyjechać i dojechać najszybszą trasą, sam czas
+   jazdy tylko z ustawieniem, i zakres godzin mapy, już bez minut. "Za ile"
+   jest tylko w dymku godzin - na wierzchu czytano je jako czas jazdy.
+   Plakietki stoją przed godzinami, słowa są w dymkach (#247), a każdy
+   widoczny kawałek ma swój dymek - sprawdzamy wierzch i dymki. */
 checks.pasek_mowi_kiedy_wyjechac = (() => {
-    const pasek = () => document.getElementById('time-headline').innerHTML
-        .replace(/<[^>]+>/g, '');
+    const html = () => document.getElementById('time-headline').innerHTML;
+    // Atrapa DOM-u nie parsuje HTML-a, więc textContent jest pusty - tekst
+    // z wierzchu zbieramy sami: wszystko poza nawiasami < >.
+    const pasek = () => {
+        let tekst = '', wZnaczniku = false;
+        for (const znak of html()) {
+            if (znak === '<') wZnaczniku = true;
+            else if (znak === '>') wZnaczniku = false;
+            else if (!wZnaczniku) tekst += znak;
+        }
+        return tekst;
+    };
+    const dymki = () => [...html().matchAll(/data-tip="([^"]*)"/g)].map(m => m[1]).join(' | ');
     const flow = {...FLOW_FIXTURE, starts: '12:25', best_arrival: '12:40',
                   best_sec: 40 * 60, ride_sec: 15 * 60,
                   map_from: '12:00', deadline: '12:55', limit_sec: 55 * 60};
@@ -945,19 +1014,25 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
 
     app.timeOpts.ride = false;
     app.drawFlow(flow, false);
-    const bez = pasek();
+    const bez = pasek(), bezDymki = dymki();
     app.timeOpts.ride = true;
     app.drawFlow(flow, false);
-    const z = pasek();
+    const z = pasek(), zDymki = dymki();
 
     app.timeOpts.ride = bylo;
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
     return {
-        ok: bez.includes('wyjeżdżasz o 12:25') && bez.includes('dojeżdżasz o 12:40')
-            && bez.includes('za 40 min') && !bez.includes('jazda')
-            && bez.includes('mapa od 12:00 do 12:55')
-            && z.includes('za 40 min, jazda 15 min'),
-        bez, z,
+        ok: bez.includes('61212:25→12:40') && !bez.includes('40 min')   // plakietki przed godzinami
+            && bez.includes('12:00–12:55Pokaż więcej') && !bez.includes('55 min')
+            && !bez.includes('15 min') && !bez.includes('wyjeżdżasz')
+            && bezDymki.includes('Wyjazd 12:25, przyjazd 12:40 - na miejscu za 40 min')
+            && bezDymki.includes('Autobus 343, ok. 7 min jazdy.')
+            && bezDymki.includes('Przesiadka na przystanku Armii Krajowej, ok. 3 min pieszo.')
+            && bezDymki.includes('Z lewej najszybsza trasa')
+            && bezDymki.includes('od 12:00 i dojeżdżające najpóźniej o 12:55, czyli za 55 min')
+            && !bezDymki.includes('Sama jazda')
+            && z.includes('12:4015 min') && zDymki.includes('Sama jazda: 15 min'),
+        bez, z, bezDymki,
     };
 })();
 
@@ -1643,6 +1718,139 @@ checks.przystanki_po_drodze_na_mapie = (() => {
         kropki: kropki.length, poDrodze: poDrodze.length, podglad: podglad.length,
         dymek: dot && dot._tooltip.content,
     };
+})();
+
+// --- przystanki narysowanych linii i ich nazwy (zgłoszenia #252, #253) ------
+//
+// Fixture nie niesie nazw (powstał przed nimi), więc dokładamy je na kopii:
+// nazwa miejsca to współrzędne słupka, a kropki przesiadek dostają nazwę
+// swojego słupka - tak samo, jak robi to serwer (planner, pole `place`).
+
+const nazwaSlupka = (lat, lon) => 'P ' + lat + ' ' + lon;
+const zNazwami = JSON.parse(JSON.stringify(FLOW_FIXTURE));
+for (const seg of zNazwami.segments) {
+    if (seg.stops_t) seg.stops_n = seg.stops_t.map(([lat, lon]) => nazwaSlupka(lat, lon));
+}
+for (const node of zNazwami.nodes || []) node.place = nazwaSlupka(node.lat, node.lon);
+
+function boxOfName(marker) {
+    const at = app.map.latLngToContainerPoint(marker.getLatLng());
+    const [w, h] = marker.options.icon.iconSize;
+    return [at.x, at.y, at.x + w, at.y + h];
+}
+
+const warstwa = layer => (layer ? layer.getLayers() : []);
+const wskazanyKawalek = () => app.flowHits.find(h => h.seg.stops_n && h.seg.stops_n.length >= 3);
+
+checks.p252_bez_kursora_i_z_daleka_nie_ma_przystankow_linii = (() => {
+    app.dotOpts.namesZoom = 17;
+    app.drawFlow(zNazwami, true);
+    const zoom = app.map.getZoom();
+    return {ok: zoom < 17 && !app.flowLineStopLayer && warstwa(app.flowStopsLayer).length === 0
+                && warstwa(app.stopNameLayer).length === 0,
+            zoom, kropek: warstwa(app.flowStopsLayer).length, nazw: warstwa(app.stopNameLayer).length};
+})();
+
+checks.p252_wskazana_linia_pokazuje_swoje_przystanki = (() => {
+    const hit = wskazanyKawalek();
+    app.showLineHighlight(hit.seg.num, hit.seg.kind);
+    const kropki = warstwa(app.flowLineStopLayer);
+    const swoje = new Set(app.flowHits
+        .filter(h => h.seg.num === hit.seg.num && h.seg.kind === hit.seg.kind && h.seg.stops_t)
+        .flatMap(h => h.seg.stops_t.map(([lat, lon]) => lat + ',' + lon)));
+    const klucz = d => d.getLatLng().lat + ',' + d.getLatLng().lng;
+    const obce = kropki.filter(d => !swoje.has(klucz(d)));
+    const przesiadki = new Set((zNazwami.nodes || []).map(n => n.lat + ',' + n.lon));
+    const naPrzesiadce = kropki.filter(d => przesiadki.has(klucz(d)));
+    // Lżejsze od kropki przesiadki (punkt 11 kontraktu): mniejsze i cieńsze.
+    // Start ma swój własny, zielony wygląd - porównujemy ze zwykłą przesiadką.
+    const przesiadka = warstwa(app.flowDotLayer).find(d => !d.isStart);
+    const lzejsze = kropki.every(d => d.options.radius < przesiadka.options.radius
+                                      && d.options.weight < przesiadka.options.weight);
+    const dymek = kropki.length ? kropki[0].getTooltip().content : '';
+    app.hideLineHighlight();
+    return {ok: kropki.length > 0 && obce.length === 0 && naPrzesiadce.length === 0 && lzejsze
+                && /\d{1,2}:\d{2} · <b>P /.test(dymek) && !app.flowLineStopLayer,
+            kropek: kropki.length, obcych: obce.length, naPrzesiadce: naPrzesiadce.length,
+            lzejsze, dymek};
+})();
+
+checks.p252_dymek_linii_podaje_najblizszy_przystanek = (() => {
+    const hit = wskazanyKawalek();
+    const [lat, lon] = hit.seg.stops_t[1];
+    const when = app.timeAtHover(hit, app.map.latLngToContainerPoint([lat, lon]));
+    return {ok: !!when && when.stop === nazwaSlupka(lat, lon),
+            oczekiwany: nazwaSlupka(lat, lon), podany: when && when.stop};
+})();
+
+checks.p253_z_bliska_nazwy_tylko_przystankow_mapy = (() => {
+    const hit = wskazanyKawalek();
+    const [lat, lon] = hit.seg.stops_t[1];
+    // Słupek miasta, przez który nic z mapy nie jedzie - ma zostać bez nazwy.
+    app.cityStops.length = 0;
+    app.cityStops.push({name: 'OBCY', lat: lat + 0.0006, lon: lon + 0.0006});
+    app.map.setView([lat, lon], 17);
+    const nazwy = warstwa(app.stopNameLayer);
+    const teksty = nazwy.map(m => m.options.icon.html);
+    const zMapy = new Set(zNazwami.segments.flatMap(s => s.stops_n || []));
+    const boxes = nazwy.map(boxOfName);
+    let nachodzi = 0;
+    for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) if (overlaps(boxes[i], boxes[j])) nachodzi++;
+        for (const c of app.clusterBoxes) if (overlaps(boxes[i], c)) nachodzi++;
+    }
+    return {ok: nazwy.length > 0 && teksty.every(t => zMapy.has(t)) && !teksty.includes('OBCY')
+                && new Set(teksty).size === teksty.length && nachodzi === 0
+                && warstwa(app.flowStopsLayer).length > 0,
+            nazw: nazwy.length, nachodzi, grupek: app.clusterBoxes.length,
+            kropek: warstwa(app.flowStopsLayer).length};
+})();
+
+checks.p253_ruch_mapy_nie_liczy_przystankow_wachlarza_od_nowa = (() => {
+    // Z bliska nazwy przeliczają się po każdym ruchu mapy - same przystanki
+    // wachlarza nie zmieniają się jednak bez nowej mapy.
+    const przed = app.flowLineStops && app.flowLineStops.stops;
+    const c = app.map.getCenter();
+    app.map.setView([c.lat + 0.0003, c.lng + 0.0003], 17);
+    const poRuchu = app.flowLineStops && app.flowLineStops.stops;
+    app.drawFlow(JSON.parse(JSON.stringify(zNazwami)), true);
+    app.map.setView([c.lat, c.lng], 17);
+    const poNowejMapie = app.flowLineStops && app.flowLineStops.stops;
+    return {ok: !!przed && przed.length > 0 && poRuchu === przed
+                && !!poNowejMapie && poNowejMapie !== przed,
+            zoom: app.map.getZoom(), przystankow: przed && przed.length,
+            tenSamPoRuchu: poRuchu === przed, nowyPoNowejMapie: poNowejMapie !== przed};
+})();
+
+checks.p253_bez_mapy_nazwy_calego_miasta_raz_na_miejsce = (() => {
+    const hit = wskazanyKawalek();
+    const [lat, lon] = hit.seg.stops_t[1];
+    app.cityStops.length = 0;
+    // Dwa perony jednego miejsca i jedno inne miejsce obok.
+    app.cityStops.push({name: 'PLAC', lat, lon},
+                       {name: 'PLAC', lat: lat + 0.0002, lon},
+                       {name: 'ULICA', lat: lat - 0.0008, lon: lon - 0.0012});
+    app.clearFlow();
+    const blisko = warstwa(app.stopNameLayer).map(m => m.options.icon.html).sort();
+    app.map.setView([lat, lon], 15);
+    const daleko = warstwa(app.stopNameLayer).length;
+    app.cityStops.length = 0;
+    return {ok: JSON.stringify(blisko) === JSON.stringify(['PLAC', 'ULICA']) && daleko === 0,
+            blisko, daleko};
+})();
+
+checks.p253_wezel_z_peronami_po_obu_stronach_dostaje_nazwe = (() => {
+    // pl. Grunwaldzki (2026-10-09): dwa słupki miejsca kilka pikseli od
+    // siebie, po skosie - każde z czterech miejsc obok ŚRODKA zahacza
+    // o któryś z nich. Nazwa ma i tak stanąć, przy którymś ze słupków.
+    app.cityStops.length = 0;
+    const lat = 51.1115, lon = 17.061, dLat = 0.00004, dLon = 0.000064;
+    app.cityStops.push({name: 'WĘZEŁ', lat: lat + dLat, lon: lon - dLon},
+                       {name: 'WĘZEŁ', lat: lat - dLat, lon: lon + dLon});
+    app.map.setView([lat, lon], 17);
+    const nazwy = warstwa(app.stopNameLayer).map(m => m.options.icon.html);
+    app.cityStops.length = 0;
+    return {ok: JSON.stringify(nazwy) === JSON.stringify(['WĘZEŁ']), nazwy};
 })();
 
 // --- rura z miksera przeglądarki --------------------------------------------
