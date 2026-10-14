@@ -233,8 +233,9 @@ def stations():
     """Aktualny stan wszystkich stacji WRM.
 
     Rzuca wyjątkiem sieciowym (OSError, w tym urllib.error.URLError i timeout)
-    albo ValueError przy odpowiedzi, która nie jest JSON-em - tak jak
-    vehicles.get_vehicles(). Kto woła z wnętrza wyszukiwarki, powinien użyć
+    albo ValueError przy odpowiedzi, która nie jest JSON-em, albo
+    http.client.HTTPException (np. przerwane pobieranie, IncompleteRead) - tak
+    jak vehicles.get_vehicles(). Kto woła z wnętrza wyszukiwarki, powinien użyć
     `stations_quiet`."""
     if not enabled():
         return []
