@@ -155,6 +155,29 @@ o zapamiętaną przez przeglądarkę (#236). Przeglądarki dają pozycję **tylk
 `localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
 chowa.
 
+◎ ustawia też godzinę i datę na „teraz" (jak przycisk „teraz"): pozycja z GPS-a
+bez godziny „teraz" liczyłaby trasę z miejsca, w którym ktoś stoi, na chwilę,
+w której już go tam nie ma (#267). Da się to wyłączyć w ⚙ („Wygląd aplikacji",
+„◎ ustawia godzinę na teraz", domyślnie włączone, pamiętane w `dev-prefs`) —
+wtedy ◎ ustawia sam start, a godzina i data zostają, jakie były; dotyczy to też
+odświeżania poniżej, które wtedy odświeża tylko pozycję. Drugie kliknięcie ◎, gdy start już jest
+moją pozycją, nie pyta o start, tylko przełącza **odświeżanie co 30 s**:
+włączone zapala ◎ (styl aktywnych przycisków, podpis „Wyłącz odświeżanie"),
+wyłączone wraca do zwykłego wyglądu („Odświeżaj co 30 s"). Włączenie odświeża
+od razu. Na telefonie, gdy po wyszukaniu karta jest zwinięta do jednej linijki,
+a start pochodzi z ◎, drugi ◎ stoi w tej linijce, na prawo od godziny (karta
+nie rośnie): ten sam stan świecenia i ten sam podpis, bez rozwijania formularza.
+Przy innym starcie zwinięta karta wygląda jak dawniej, a na komputerze tego
+przycisku nie ma. Stan nie jest pamiętany — po odświeżeniu strony nie ma pozycji, więc
+nie ma czego odświeżać. Co 30 s aplikacja czyta pozycję od nowa, ustawia „teraz" (przy włączonej opcji z ⚙)
+i przelicza tą samą drogą co suwaki w ⚙ — bez kadrowania, bez dźwięku, bez
+zwijania formularza i bez kółka wyszukiwania. Wybrana propozycja zostaje, jeśli
+nowy wynik wciąż ją zawiera (te same godziny i linie). Odświeżanie gaśnie, gdy
+start przestaje być „moją pozycją" (klik w mapę, wpisanie, zamiana, ✕), a
+zegar pauzuje, gdy karta jest ukryta (wznawia się po powrocie); tick pomija
+się też w trakcie ręcznego szukania i edycji pola godziny. Brak sygnału w tle
+jest cichy: zostaje poprzedni wynik.
+
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
 - na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;
