@@ -398,7 +398,7 @@ def test_update_dokleja_kopie_z_pliku(tmp_path):
 # --- sprawdzenie wgranego pliku -------------------------------------------
 
 def test_validate_snapshot_przyjmuje_pelny_tydzien():
-    assert siechnice.validate_snapshot(_raw(_snapshot()))["lines_by_stop"]["a"] == ["800+80"]
+    assert siechnice.validate_snapshot(_raw(_snapshot())) is None
 
 
 def _broken(change):
@@ -423,17 +423,15 @@ def _broken(change):
     (_broken(lambda s: s.update(lines_by_stop={})), "ani jednego kursu"),
 ])
 def test_validate_snapshot_odrzuca_zly_plik_z_powodem(raw, fragment):
-    with pytest.raises(siechnice.InvalidSnapshot, match=fragment):
-        siechnice.validate_snapshot(raw)
+    assert fragment in siechnice.validate_snapshot(raw)
 
 
 def test_save_snapshot_zapisuje_tylko_dobry_plik(tmp_path):
     path = tmp_path / "siechnice" / "rozklad.json"
-    siechnice.save_snapshot(_raw(_snapshot()), path)
+    assert siechnice.save_snapshot(_raw(_snapshot()), path) is None
     good = path.read_bytes()
 
-    with pytest.raises(siechnice.InvalidSnapshot):
-        siechnice.save_snapshot(b"{}", path)
+    assert "Brak pól" in siechnice.save_snapshot(b"{}", path)
 
     assert path.read_bytes() == good
     assert [p.name for p in path.parent.iterdir()] == ["rozklad.json"]

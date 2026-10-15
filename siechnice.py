@@ -377,10 +377,6 @@ def merge_into(db_path, stops, days, log=print):
 # Wgranie kopii
 # --------------------------------------------------------------------------
 
-class InvalidSnapshot(ValueError):
-    """Wgrany plik nie jest kopią rozkładu - treść idzie wprost do dewelopera."""
-
-
 def _is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -390,7 +386,7 @@ def _is_int(value):
 
 
 def validate_snapshot(raw):
-    """Sprawdza wgrany plik i zwraca go jako słownik. Zły -> InvalidSnapshot.
+    """Sprawdza wgrany plik. Zwraca powód odrzucenia albo None, gdy plik jest dobry.
 
     Oczekiwany format (JSON):
       {"stops": [[designator, kod, nazwa, lon*1e6, lat*1e6, ...], ...],
@@ -403,29 +399,32 @@ def validate_snapshot(raw):
     z siedmioma dniami - po jednym na każdy dzień tygodnia, bo każdy z nich
     staje się regułą tygodniową (to_gtfs_rows). Pozostałe pola są ignorowane.
 
+    Powód wraca jako wartość, a nie wyjątek: trafia wprost do dewelopera w
+    odpowiedzi HTTP i nie ma w nim treści żadnego złapanego błędu.
+
     Sprawdzamy kształt przed zapisem, bo zły plik na serwerze wyszedłby na
     jaw dopiero w nocy, jako ciche zniknięcie Siechnic z bazy.
     """
     try:
         snapshot = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise InvalidSnapshot(f"To nie jest plik JSON ({e}).") from None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "To nie jest plik JSON."
     if not isinstance(snapshot, dict):
-        raise InvalidSnapshot("Plik nie jest obiektem JSON z polami stops, lines_by_stop, days.")
+        return "Plik nie jest obiektem JSON z polami stops, lines_by_stop, days."
     missing = [key for key in ("stops", "lines_by_stop", "days") if key not in snapshot]
     if missing:
-        raise InvalidSnapshot("Brak pól: " + ", ".join(missing) + ".")
+        return "Brak pól: " + ", ".join(missing) + "."
 
     stops = snapshot["stops"]
     if not isinstance(stops, list) or not stops:
-        raise InvalidSnapshot("Pole stops musi być niepustą listą słupków.")
+        return "Pole stops musi być niepustą listą słupków."
     designators = set()
     for row in stops:
         if not (isinstance(row, list) and len(row) >= 5
                 and isinstance(row[0], str) and row[0]
                 and isinstance(row[2], str)
                 and _is_number(row[3]) and _is_number(row[4])):
-            raise InvalidSnapshot(
+            return (
                 f"Zły słupek w stops: {json.dumps(row, ensure_ascii=False)[:120]}"
                 " (oczekiwane [designator, kod, nazwa, lon*1e6, lat*1e6, ...]).")
         designators.add(row[0])
@@ -434,59 +433,62 @@ def validate_snapshot(raw):
     if not (isinstance(lines_by_stop, dict) and all(
             isinstance(lines, list) and all(isinstance(line, str) for line in lines)
             for lines in lines_by_stop.values())):
-        raise InvalidSnapshot("Pole lines_by_stop musi mapować słupek na listę numerów linii.")
+        return "Pole lines_by_stop musi mapować słupek na listę numerów linii."
 
     days = snapshot["days"]
     if not isinstance(days, list):
-        raise InvalidSnapshot("Pole days musi być listą dni.")
+        return "Pole days musi być listą dni."
     weekdays = set()
     for entry in days:
         if not isinstance(entry, dict):
-            raise InvalidSnapshot("Każdy element days musi mieć pola date i departures_by_stop.")
+            return "Każdy element days musi mieć pola date i departures_by_stop."
         try:
             day = date.fromisoformat(entry.get("date"))
         except (TypeError, ValueError):
-            raise InvalidSnapshot(f"Zła data w days: {entry.get('date')!r}.") from None
+            return f"Zła data w days: {entry.get('date')!r}."
         if day.weekday() in weekdays:
-            raise InvalidSnapshot(f"Dzień tygodnia daty {day} powtarza się w days.")
+            return f"Dzień tygodnia daty {day} powtarza się w days."
         weekdays.add(day.weekday())
 
         departures_by_stop = entry.get("departures_by_stop")
         if not isinstance(departures_by_stop, dict):
-            raise InvalidSnapshot(f"{day}: departures_by_stop musi być obiektem.")
+            return f"{day}: departures_by_stop musi być obiektem."
         for designator, departures in departures_by_stop.items():
             if designator not in designators:
-                raise InvalidSnapshot(f"{day}: odjazdy z nieznanego słupka {designator!r}.")
+                return f"{day}: odjazdy z nieznanego słupka {designator!r}."
             if not (isinstance(departures, list) and all(
                     isinstance(d, dict)
                     and _is_int(d.get("departure")) and d["departure"] >= 0
                     and _is_int(d.get("trip_id"))
                     and _is_int(d.get("index"))
                     for d in departures)):
-                raise InvalidSnapshot(
+                return (
                     f"{day}, słupek {designator}: odjazd musi mieć departure,"
                     " trip_id i index.")
     if len(weekdays) != len(WEEKDAYS):
-        raise InvalidSnapshot(
+        return (
             f"Plik ma {len(weekdays)} z 7 dni tygodnia - potrzebny pełny tydzień.")
 
     _, built = feed_from_snapshot(snapshot, log=lambda *_: None)
     if not any(trips for _, trips in built):
-        raise InvalidSnapshot("Z pliku nie da się złożyć ani jednego kursu.")
-    return snapshot
+        return "Z pliku nie da się złożyć ani jednego kursu."
+    return None
 
 
 def save_snapshot(raw, path=SNAPSHOT_PATH):
-    """Sprawdza i zapisuje wgraną kopię. Zły plik -> InvalidSnapshot, bez zapisu.
+    """Sprawdza i zapisuje wgraną kopię. Zwraca powód odrzucenia (bez zapisu) albo None.
 
     Przez plik obok i podmianę: przebudowa bazy może czytać kopię w tej samej
     chwili i nie może trafić na połowę pliku.
     """
-    validate_snapshot(raw)
+    reason = validate_snapshot(raw)
+    if reason:
+        return reason
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(path.name + ".tmp")
     tmp_path.write_bytes(raw)
     os.replace(tmp_path, path)
+    return None
 
 
 def update(db_path, snapshot_path=SNAPSHOT_PATH, log=print):
