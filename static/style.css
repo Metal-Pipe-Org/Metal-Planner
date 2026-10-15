@@ -594,6 +594,13 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 
 .icon-button.in-field:hover { background: #e8edf3; }
 
+/* ◎ świeci, gdy pozycja odświeża się sama (#267) - jak inne włączone przyciski. */
+.icon-button.in-field.active,
+.icon-button.in-field.active:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
 /* Czekanie na GPS: przycisk pulsuje i nie przyjmuje kolejnych kliknięć. */
 .icon-button.in-field:disabled {
     cursor: default;
