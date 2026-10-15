@@ -126,6 +126,21 @@ body.search-collapsed .search-card > .locate-offer:not([hidden]) {
     margin: 0 8px 8px;
 }
 
+/* Odświeżanie pozycji (#267): przy starcie z ◎ przełącznik jest też w zwiniętej
+   karcie, na prawo od godziny - karta nie rośnie. */
+body.search-collapsed .search-card { position: relative; }
+
+body.search-collapsed.here-start .search-card > .locate-peek {
+    display: flex;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+}
+
+body.search-collapsed.here-start .search-summary { padding-right: 48px; }
+
 body.search-collapsed .search-summary {
     display: flex;
     align-items: center;

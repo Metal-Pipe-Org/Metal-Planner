@@ -601,6 +601,9 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
     color: #fff;
 }
 
+/* Drugi ◎ dla zwiniętej karty na telefonie - gdzie indziej go nie ma (phone.css). */
+.locate-peek { display: none; }
+
 /* Czekanie na GPS: przycisk pulsuje i nie przyjmuje kolejnych kliknięć. */
 .icon-button.in-field:disabled {
     cursor: default;

@@ -173,7 +173,11 @@ odświeżania poniżej, które wtedy odświeża tylko pozycję. Drugie kliknięc
 moją pozycją, nie pyta o start, tylko przełącza **odświeżanie co 30 s**:
 włączone zapala ◎ (styl aktywnych przycisków, podpis „Wyłącz odświeżanie"),
 wyłączone wraca do zwykłego wyglądu („Odświeżaj co 30 s"). Włączenie odświeża
-od razu. Stan nie jest pamiętany — po odświeżeniu strony nie ma pozycji, więc
+od razu. Na telefonie, gdy po wyszukaniu karta jest zwinięta do jednej linijki,
+a start pochodzi z ◎, drugi ◎ stoi w tej linijce, na prawo od godziny (karta
+nie rośnie): ten sam stan świecenia i ten sam podpis, bez rozwijania formularza.
+Przy innym starcie zwinięta karta wygląda jak dawniej, a na komputerze tego
+przycisku nie ma. Stan nie jest pamiętany — po odświeżeniu strony nie ma pozycji, więc
 nie ma czego odświeżać. Co 30 s aplikacja czyta pozycję od nowa, ustawia „teraz" (przy włączonej opcji z ⚙)
 i przelicza tą samą drogą co suwaki w ⚙ — bez kadrowania, bez dźwięku, bez
 zwijania formularza i bez kółka wyszukiwania. Wybrana propozycja zostaje, jeśli

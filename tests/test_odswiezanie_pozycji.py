@@ -240,6 +240,49 @@ def test_wylaczone_przestaje_przeliczac(przegladarka, adres):
     assert not bledy
 
 
+def test_zwinieta_karta_ma_wlasne_kolko_tylko_przy_mojej_pozycji(przegladarka, adres):
+    context, page, bledy = _otworz(przegladarka, adres)
+    zapytania = []
+    page.on("request", lambda r: zapytania.append(r.url) if "/api/flow" in r.url else None)
+    _wybierz(page, "#end", TRASA[1])
+    _wybierz(page, "#start", TRASA[0])
+    page.wait_for_selector(".search-summary", state="visible", timeout=20000)
+    assert not page.is_visible("#locate-peek")
+
+    page.click(".search-summary")
+    page.click("#locate")
+    page.wait_for_selector("#locate-offer", state="visible")
+    page.wait_for_selector("body:not(.searching) .journey", state="attached",
+                           timeout=20000)
+    page.wait_for_selector(".search-summary", state="visible")
+    wysokosc = page.evaluate("document.querySelector('.search-card').offsetHeight")
+    assert page.is_visible("#locate-peek")
+    assert page.evaluate("document.querySelector('.search-card').offsetHeight") == wysokosc
+    assert not _swieci(page)
+    assert page.get_attribute("#locate-peek", "title") == "Odświeżaj co 30 s"
+
+    with page.expect_request(lambda r: "/api/flow" in r.url, timeout=20000):
+        page.click("#locate-peek")
+    page.wait_for_selector("body:not(.searching)", state="attached")
+    page.wait_for_timeout(500)
+    assert "active" in page.get_attribute("#locate-peek", "class").split()
+    assert page.get_attribute("#locate-peek", "title") == "Wyłącz odświeżanie"
+    assert page.is_visible(".search-summary")
+    zapytania.clear()
+    with page.expect_request(lambda r: "/api/flow" in r.url, timeout=20000):
+        page.clock.run_for(30000)
+
+    page.click("#locate-peek")
+    assert "active" not in page.get_attribute("#locate-peek", "class").split()
+    page.wait_for_timeout(500)
+    zapytania.clear()
+    page.clock.run_for(90000)
+    page.wait_for_timeout(500)
+    assert zapytania == []
+    context.close()
+    assert not bledy
+
+
 def test_zmiana_startu_na_przystanek_gasi_odswiezanie(przegladarka, adres):
     context, page, bledy = _otworz(przegladarka, adres)
     zapytania = []

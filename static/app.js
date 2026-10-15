@@ -968,6 +968,7 @@ function useMyLocation(point) {
 // z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
 const locateSetsTime = $('locate-sets-time');
 
+const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
 const GEO_OPTIONS = {enableHighAccuracy: true, timeout: 10000, maximumAge: 0};
 
@@ -978,15 +979,21 @@ const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onbo
     starcie, więc jego utrata gasi też sam przycisk. */
 function syncAutoRefresh() {
     if (!hereIsStart()) autoRefreshOn = false;
-    locateButton.classList.toggle('active', autoRefreshOn);
-    locateButton.setAttribute('aria-pressed', String(autoRefreshOn));
     const hint = autoRefreshOn ? 'Wyłącz odświeżanie'
         : hereIsStart() ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
-    locateButton.title = hint;
-    locateButton.setAttribute('aria-label', autoRefreshOn
+    const label = autoRefreshOn
         ? 'Wyłącz odświeżanie mojej lokalizacji'
         : hereIsStart() ? 'Odświeżaj moją lokalizację co 30 sekund'
-                        : 'Ustaw start na mojej lokalizacji');
+                        : 'Ustaw start na mojej lokalizacji';
+    // Drugi ◎ siedzi w zwiniętej karcie telefonu (patrz phone.css) i pokazuje
+    // to samo, co pierwszy - tylko przy starcie z mojej pozycji.
+    document.body.classList.toggle('here-start', hereIsStart());
+    for (const button of [locateButton, locatePeek]) {
+        button.classList.toggle('active', autoRefreshOn);
+        button.setAttribute('aria-pressed', String(autoRefreshOn));
+        button.title = hint;
+        button.setAttribute('aria-label', label);
+    }
     const run = autoRefreshOn && !document.hidden;
     if (run && !autoRefreshTimer) {
         autoRefreshTimer = setInterval(refreshHere, AUTO_REFRESH_MS);
@@ -994,6 +1001,12 @@ function syncAutoRefresh() {
         clearInterval(autoRefreshTimer);
         autoRefreshTimer = null;
     }
+}
+
+function toggleAutoRefresh() {
+    autoRefreshOn = !autoRefreshOn;
+    syncAutoRefresh();
+    if (autoRefreshOn) refreshHere();
 }
 
 /** Ta sama propozycja po odświeżeniu: godziny i linie, bez numeru z listy -
@@ -1038,6 +1051,7 @@ function refreshHere() {
 }
 
 document.addEventListener('visibilitychange', syncAutoRefresh);
+locatePeek.addEventListener('click', toggleAutoRefresh);
 
 // Brak API (stara przeglądarka albo strona po http) - przycisk, który i tak
 // nic by nie zrobił, lepiej schować.
@@ -1048,9 +1062,7 @@ if (!navigator.geolocation) {
         // Drugie kliknięcie, gdy start już jest moją pozycją, nie pyta GPS-a o
         // start, tylko przełącza odświeżanie - pierwsze ma zostać zwykłym ◎.
         if (hereIsStart()) {
-            autoRefreshOn = !autoRefreshOn;
-            syncAutoRefresh();
-            if (autoRefreshOn) refreshHere();
+            toggleAutoRefresh();
             return;
         }
         showLocateMsg('');

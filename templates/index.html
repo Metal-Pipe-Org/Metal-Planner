@@ -175,6 +175,13 @@
 
     <div class="card search-card">
 
+        {# Drugi ◎ tylko dla zwiniętej karty na telefonie (patrz phone.css):
+           formularz z pierwszym jest wtedy schowany, a odświeżanie pozycji
+           (#267) ma się dać przełączyć bez rozwijania. Stan i podpis ustawia
+           syncAutoRefresh w app.js. #}
+        <button type="button" id="locate-peek" class="icon-button locate-peek"
+                title="Odświeżaj co 30 s" aria-label="Odświeżaj moją lokalizację co 30 sekund">◎</button>
+
         {#
           Skąd zaczyna się podróż. Domyślnie ze STOJĄCEGO MIEJSCA — przystanku
           albo punktu na mapie. Drugi przycisk mówi coś innego: „jestem
