@@ -222,6 +222,8 @@ zerowy kontener i policzył bezsensowny kadr); po prostu jej nie widać. Po znal
 mapę, bo tam wybiera się nową relację. Zakładki zastępują ☰ (dwa mechanizmy
 chowania panelu naraz tylko by myliły).
 
+**Mapa pod palcem (#274).** Najechania palcem nie ma, więc to, co na komputerze robi kursor nad linią przepływu albo nad numerem w grupce, robi stuknięcie (`tapFlow` i klik w `bindCluster`, app.js) — z szerszym marginesem trafienia (`FLOW_TAP_SLACK_PX`), bo palec trafia kilkanaście pikseli obok cienkiej linii. Czy wskazuje palec, rozstrzyga ostatnie `pointerdown`, a nie szerokość ekranu; udawany ruch myszy, który przeglądarka dosyła po stuknięciu, jest wtedy pomijany. `#map` ma wyłączone zaznaczanie tekstu i menu przytrzymania (`-webkit-touch-callout`), żeby przytrzymanie nie wyciągało „Kopiuj / Przetłumacz".
+
 Trzecia zakładka, „Rozkład", to ta sama lista w **drugim trybie panelu**
 (rozkłady jazdy — patrz niżej) — na telefonie jedyne wejście w ten tryb, bo
 pływające ◷ jest tam schowane razem z ☰. Zakładek jest więc trzy, a stanu

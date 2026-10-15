@@ -861,6 +861,7 @@ function timetableTook(stopName) {
 
 map.on('click', e => {
     if (document.body.classList.contains('mode-timetable')) return;
+    if (touchInput && tapFlow(e)) return;
     pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
 });
 
@@ -2000,18 +2001,20 @@ function clusterMarker(at, roster, weight, times) {
     return marker;
 }
 
-/** Numer w grupce wskazuje się WYŁĄCZNIE najechaniem: kursor nad numerem
-    podświetla DOKŁADNIE tę linię. Bez tego grupka mówiłaby, co tędy jedzie,
-    ale nie dałaby tego wskazać. Klik nie robi tu nic - jest tylko wygaszany,
-    żeby nie dobił do map.on('click') i nie ustawił punktu trasy. */
+/** Numer w grupce wskazuje się najechaniem: kursor nad numerem podświetla
+    DOKŁADNIE tę linię. Bez tego grupka mówiłaby, co tędy jedzie, ale nie
+    dałaby tego wskazać. Klik robi to samo co najechanie, bo na telefonie
+    najechania nie ma - jest tylko stuknięcie (#274). Klik jest przy tym
+    wygaszany, żeby nie dobił do map.on('click') i nie ustawił punktu trasy. */
 function bindCluster(marker) {
     const el = marker.getElement();
     if (!el) return;
-    L.DomEvent.on(el, 'mouseover', ev => {
+    const pick = ev => {
         const slot = ev.target.closest && ev.target.closest('.line-chip-slot');
         if (slot) pickFromCluster(marker, Number(slot.dataset.i));
-    });
-    L.DomEvent.on(el, 'click', ev => L.DomEvent.stop(ev));
+    };
+    L.DomEvent.on(el, 'mouseover', pick);
+    L.DomEvent.on(el, 'click', ev => { L.DomEvent.stop(ev); pick(ev); });
 }
 
 let flowDimmed = false;
@@ -2061,6 +2064,10 @@ let flowPick = null;      // {key, index, options} - wskazana linia korytarza
 let flowPickAt = null;    // gdzie stoi kursor - do przerysowania po przełączeniu
 let flowPickPoint = null; // ...to samo w pikselach ekranu - do rzutu na linię
 const FLOW_HIT_SLACK_PX = 5;   // margines poza grubością linii, na niecelny kursor
+// Palec zasłania to, w co celuje, i trafia o kilkanaście pikseli obok - przy
+// marginesie kursora w cienką linię nie dało się stuknąć wcale (#274). Razem
+// z grubością linii pas do stuknięcia ma ok. 40 px, tyle co zwykły przycisk.
+const FLOW_TAP_SLACK_PX = 16;
 const HALO_EXTRA_PX = 6;       // o tyle otoczka podświetlenia szersza od linii
 const HIGHLIGHT_EXTRA_PX = 2;  // o tyle sama linia grubsza pod kursorem
 
@@ -2089,9 +2096,10 @@ function polylineDistancePx(containerPoint, latlngs) {
     współrzędnych), a dokładny pomiar odległości dopiero dla reszty. Margines
     ramki liczy się z aktualnego powiększenia, żeby przy widoku całego miasta,
     gdzie kilka pikseli to ponad sto metrów, nic nie wypadło przedwcześnie. */
-function flowHitsAt(containerPoint) {
+function flowHitsAt(containerPoint, slack = FLOW_HIT_SLACK_PX) {
+    const reach = 11 + slack;
     const here = map.containerPointToLatLng(containerPoint);
-    const away = map.containerPointToLatLng(L.point(containerPoint.x + 16, containerPoint.y + 16));
+    const away = map.containerPointToLatLng(L.point(containerPoint.x + reach, containerPoint.y + reach));
     const padLat = Math.abs(away.lat - here.lat);
     const padLng = Math.abs(away.lng - here.lng);
     const hits = [];
@@ -2100,7 +2108,7 @@ function flowHitsAt(containerPoint) {
             || here.lng < h.box.getWest() - padLng || here.lng > h.box.getEast() + padLng) {
             continue;
         }
-        const tol = h.weight / 2 + FLOW_HIT_SLACK_PX;
+        const tol = h.weight / 2 + slack;
         const dist = polylineDistancePx(containerPoint, h.latlngs);
         if (dist <= tol) hits.push({...h, dist});
     }
@@ -2322,6 +2330,10 @@ function setFlowPick(options, at, index, containerPoint) {
 }
 
 function handleFlowHover(e) {
+    // Po stuknięciu przeglądarka dosyła udawany ruch myszy - w miejscu palca,
+    // ale z wąskim marginesem kursora. Linię pod palcem wskazuje stuknięcie
+    // (tapFlow), a ten ruch gasiłby ją albo wskazywał inną.
+    if (touchInput) return;
     // Nad grupką numerów rządzi grupka (patrz bindCluster): kursor jest wtedy
     // kilka pikseli obok samej linii, więc szukanie po geometrii zgasiłoby
     // dopiero co wskazany numer.
@@ -2561,10 +2573,37 @@ function placeStopNames() {
 
 // Klik w narysowany kurs NIE OTWIERA ŻADNEJ PROPOZYCJI (usunięte 2026-08-16).
 // Mapa przepływów tylko pokazuje wachlarz, a wskazywanie konkretnej linii jest
-// wyłącznie pod kursorem (hover). Propozycje otwiera się z listy obok.
+// wyłącznie pod kursorem (hover), a na telefonie stuknięciem. Propozycje
+// otwiera się z listy obok.
 
 map.on('mousemove', handleFlowHover);
-map.on('mouseout', clearFlowHover);
+map.on('mouseout', () => { if (!touchInput) clearFlowHover(); });
+
+// Palcem nie da się najechać, więc na telefonie najechanie na linię robi
+// stuknięcie (#274): wskazuje linię pod palcem tak, jak kursor - z tym samym
+// podświetleniem i dymkiem. Stuknięcie obok linii, gdy jakaś jest wskazana,
+// odpowiada zjechaniu z niej kursorem i tylko ją gasi - dopiero następne
+// stuknięcie w pustą mapę działa jak zwykły klik (pickEndpoint).
+// Czy to palec, mówi ostatnie pointerdown, a nie szerokość ekranu: laptop
+// z ekranem dotykowym ma i mysz, i palec.
+let touchInput = false;
+$('map').addEventListener('pointerdown', e => {
+    touchInput = e.pointerType !== 'mouse';
+}, true);
+$('map').addEventListener('pointermove', e => {
+    if (e.pointerType === 'mouse') touchInput = false;
+}, true);
+
+function tapFlow(e) {
+    const hits = flowHits.length ? flowHitsAt(e.containerPoint, FLOW_TAP_SLACK_PX) : [];
+    if (hits.length) {
+        setFlowPick(corridorOptions(hits), e.latlng, undefined, e.containerPoint);
+        return true;
+    }
+    if (!flowPick) return false;
+    clearFlowHover();
+    return true;
+}
 
 // Prawy przycisk myszy NIE ROBI TU NIC (usunięte 2026-08-15). Przechodził
 // kiedyś na następną linię korytarza, ale wybieranie linii jest już w grupce

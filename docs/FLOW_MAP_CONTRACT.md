@@ -146,6 +146,7 @@ wspólnego korytarza leżą jedna na drugiej. Czytelność robią NUMERY:
   jedna linia — na CAŁEJ swojej narysowanej długości, nie tylko kawałek pod
   kursorem — a podpowiedź podaje jej numer wprost. Żeby wskazać inną,
   najeżdża się na jej numer w grupce.
+- **Na telefonie kursorem jest stuknięcie.** Stuknięcie w linię albo w numer w grupce wskazuje ją tak samo jak najechanie, a palec nie musi trafić w samą kreskę: liczy się pas kilkunastu pikseli wokół niej i powiększone pole wokół numeru. Stuknięcie w pustą mapę, gdy jakaś linia jest wskazana, gasi ją jak zjechanie kursorem. Przytrzymanie palcem na mapie nie zaznacza napisów.
 
 ## 10. Mapa mówi, ile to trwa i o której się tam będzie
 

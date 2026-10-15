@@ -38,6 +38,13 @@ body {
 #map {
     position: fixed;
     inset: 0;
+    /* Przytrzymanie palcem na mapie to gest mapy, nie tekstu: bez tego Safari
+       zaznaczał napis spod palca (dymek linii, nazwę przystanku) i wyciągał
+       menu „Kopiuj / Przetłumacz" na pół ekranu (#274). Tekst do skopiowania
+       jest w panelach obok, a nie na mapie. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }
 
 /* Strona się nie przybliża (patrz viewport w templates/index.html) - palcem
@@ -1545,6 +1552,21 @@ body.routes-off .results-body { display: none; }
     align-items: center;
     line-height: 1;
     border-radius: 5px;
+}
+
+/* Numer ma kilkanaście pikseli, a palec trafia o tyle obok (#274). Cel
+   stuknięcia rośnie niewidocznym marginesem, żeby grupka nie urosła na mapie
+   i nie zmieniła miejsca, które zajmuje. */
+@media (pointer: coarse) {
+    .line-chip-slot {
+        position: relative;
+    }
+
+    .line-chip-slot::after {
+        content: "";
+        position: absolute;
+        inset: -10px -2px;
+    }
 }
 
 .chip-time {
