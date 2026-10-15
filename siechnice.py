@@ -42,9 +42,10 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
-# Kopia leży poza repo: lokalnie w data/ (gitignorowane), w kontenerze na
-# osobnym wolumenie (SIECHNICE_ROZKLAD, patrz docker-compose.yml). Trafia tam
-# wyłącznie przez wgranie w trybie deweloperskim.
+# Kopia leży poza repo: lokalnie w data/ (gitignorowane), w kontenerze
+# w podmontowanym folderze ./siechnice (SIECHNICE_ROZKLAD, patrz
+# docker-compose.yml). Trafia tam wyłącznie przez wgranie w trybie
+# deweloperskim.
 SNAPSHOT_PATH = Path(
     os.environ.get("SIECHNICE_ROZKLAD")
     or Path(__file__).resolve().parent / "data" / "siechnice" / "rozklad.json"
@@ -402,7 +403,7 @@ def validate_snapshot(raw):
     z siedmioma dniami - po jednym na każdy dzień tygodnia, bo każdy z nich
     staje się regułą tygodniową (to_gtfs_rows). Pozostałe pola są ignorowane.
 
-    Sprawdzamy kształt przed zapisem, bo zły plik na wolumenie wyszedłby na
+    Sprawdzamy kształt przed zapisem, bo zły plik na serwerze wyszedłby na
     jaw dopiero w nocy, jako ciche zniknięcie Siechnic z bazy.
     """
     try:

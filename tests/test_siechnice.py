@@ -428,7 +428,7 @@ def test_validate_snapshot_odrzuca_zly_plik_z_powodem(raw, fragment):
 
 
 def test_save_snapshot_zapisuje_tylko_dobry_plik(tmp_path):
-    path = tmp_path / "wolumen" / "rozklad.json"
+    path = tmp_path / "siechnice" / "rozklad.json"
     siechnice.save_snapshot(_raw(_snapshot()), path)
     good = path.read_bytes()
 

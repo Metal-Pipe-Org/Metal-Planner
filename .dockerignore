@@ -16,6 +16,7 @@ __pycache__/
 
 # Baza rozkładów mieszka w wolumenie, nie w obrazie.
 data/
+siechnice/
 logs/
 *.log
 *.sqlite

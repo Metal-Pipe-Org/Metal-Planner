@@ -124,7 +124,7 @@ komentarze w `docker-compose.yml`.
     i przy każdym starcie, w tle, bez przerwy w działaniu. Nieudane pobranie
     zostawia poprzednią bazę.
 17. **Kolej** — PKP PLK OpenData, tylko z `PKP_API_KEY`.
-18. **Autobusy gminy Siechnice** — nie ma ich w żadnych otwartych danych, a serwer nie odpytuje jedynego źródła (kiedyPrzyjedzie). Statyczną kopię tygodnia rozkładu wgrywa się w trybie deweloperskim (⚙ → „Wgraj rozkład Siechnic”); trafia na osobny wolumen i baza od razu się przebudowuje. Bez wgranej kopii Siechnic po prostu nie ma. Format pliku i wzór pisma do gminy: [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
+18. **Autobusy gminy Siechnice** — nie ma ich w żadnych otwartych danych, a serwer nie odpytuje jedynego źródła (kiedyPrzyjedzie). Statyczną kopię tygodnia rozkładu wgrywa się w trybie deweloperskim (⚙ → „Wgraj rozkład Siechnic”); trafia do folderu `siechnice` obok `docker-compose.yml` i baza od razu się przebudowuje. Bez wgranej kopii Siechnic po prostu nie ma. Format pliku i wzór pisma do gminy: [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
 19. **Rower miejski** — kanał GBFS operatora (nextbike, licencja CC0-1.0).
 20. **Traficar** — [fioletowe.live](https://fioletowe.live/), strona trzecia
     republikująca API Traficara; może zniknąć bez ostrzeżenia.

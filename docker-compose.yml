@@ -64,8 +64,8 @@ services:
       PKP_AUTO_UPDATE_HOUR: "3"
       PKP_UPDATE_ON_START: "on"
 
-      # Gdzie aplikacja czyta kopie rozkladu Siechnic - na osobnym wolumenie
-      # (patrz volumes nizej). Zmieniaj razem ze sciezka montowania.
+      # Gdzie aplikacja czyta kopie rozkladu Siechnic - w folderze ./siechnice
+      # podmontowanym nizej (volumes). Zmieniaj razem ze sciezka montowania.
       SIECHNICE_ROZKLAD: "/app/data/siechnice/rozklad.json"
 
       # Stacje Wroclawskiego Roweru Miejskiego (kanal GBFS operatora,
@@ -102,19 +102,19 @@ services:
       # Kopia zapasowa = skopiowanie tego folderu.
       - ./data:/app/data
 
-      # Osobny wolumen na kopie rozkladu autobusow gminy Siechnice
-      # (800, 810, 83-89, 860, 870, 890). Napelnia go wylacznie wgranie pliku
-      # w trybie deweloperskim (zebatka -> "Wgraj rozklad Siechnic"), po ktorym
-      # baza od razu przebudowuje sie w tle. Pusty wolumen = brak Siechnic.
-      # Bez ":ro", bo aplikacja zapisuje tu wgrany plik.
-      # Serwer NIGDY nie odpytuje kiedyPrzyjedzie. Patrz docs/SIECHNICE_DANE.md.
-      - siechnice:/app/data/siechnice
+      # Kopia rozkladu autobusow gminy Siechnice (800, 810, 83-89, 860, 870,
+      # 890) - zwykly folder ./siechnice obok tego pliku, widoczny wprost na
+      # serwerze (./siechnice/rozklad.json). Docker zaklada go przy pierwszym
+      # starcie, a entrypoint oddaje uzytkownikowi aplikacji. Napelnia go
+      # wylacznie wgranie pliku w trybie deweloperskim (zebatka -> "Wgraj
+      # rozklad Siechnic"), po ktorym baza od razu przebudowuje sie w tle.
+      # Pusty folder = brak Siechnic. Bez ":ro", bo aplikacja zapisuje tu
+      # wgrany plik. Serwer NIGDY nie odpytuje kiedyPrzyjedzie.
+      # Patrz docs/SIECHNICE_DANE.md.
+      - ./siechnice:/app/data/siechnice
 
     networks:
       - reverse_proxy
-
-volumes:
-  siechnice:
 
 networks:
   # Wspolna siec z kontenerem nginxa - to po niej idzie ruch z internetu

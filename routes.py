@@ -401,7 +401,7 @@ def init_routes(app):
         """Wgranie kopii rozkładu Siechnic (⚙ → „Wgraj rozkład Siechnic”).
 
         Tylko w trybie deweloperskim - poza nim endpointu po prostu nie ma.
-        POST zapisuje plik na wolumen i od razu odpala przebudowę bazy w tle;
+        POST zapisuje plik do folderu ./siechnice i od razu odpala przebudowę bazy w tle;
         GET mówi, czy przebudowa trwa i czy obecna baza ma już wgrany plik.
         """
         if not config.dev_mode():

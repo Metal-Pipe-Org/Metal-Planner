@@ -90,10 +90,10 @@ Decyzja z października 2026: serwer korzysta wyłącznie ze statycznej kopii je
 W trybie deweloperskim (`DEV_MODE=1`) panel ⚙ ma sekcję „Rozkład Siechnic” z przyciskiem „Wgraj rozkład Siechnic”. Po wybraniu pliku:
 
 1. Serwer sprawdza format (niżej). Zły plik zostaje odrzucony z komunikatem, co jest nie tak, a poprzednia kopia zostaje nietknięta.
-2. Dobry plik ląduje w miejscu z `SIECHNICE_ROZKLAD` - w kontenerze na osobnym wolumenie `siechnice` (`/app/data/siechnice/rozklad.json`), lokalnie domyślnie w `data/siechnice/rozklad.json`. Zapis idzie przez plik obok i podmianę, więc przebudowa nigdy nie czyta połowy pliku.
+2. Dobry plik ląduje w miejscu z `SIECHNICE_ROZKLAD` - na serwerze w folderze `siechnice` obok `docker-compose.yml` (`./siechnice/rozklad.json`, w kontenerze `/app/data/siechnice/rozklad.json`; Docker zakłada go przy pierwszym starcie), lokalnie domyślnie w `data/siechnice/rozklad.json`. Zapis idzie przez plik obok i podmianę, więc przebudowa nigdy nie czyta połowy pliku.
 3. Od razu, w tle, rusza przebudowa bazy - ta sama, co w nocy (pobiera też paczkę Wrocławia, ok. minuty). Dwie przebudowy nigdy nie biegną naraz: kolejna czeka, aż poprzednia skończy. Sekcja w ⚙ pokazuje, że przebudowa trwa, i potem, czy baza ma już wgrany rozkład.
 
-Poza trybem deweloperskim tego wgrania w ogóle nie ma - ani sekcji, ani adresu na serwerze. Hasła nie ma celowo. Na pustym wolumenie Siechnic po prostu nie ma, a reszta aplikacji działa bez zmian. Wgrana kopia przeżywa restart i nowe wdrożenie, bo wolumen jest osobny od obrazu.
+Poza trybem deweloperskim tego wgrania w ogóle nie ma - ani sekcji, ani adresu na serwerze. Hasła nie ma celowo. Gdy folder jest pusty, Siechnic po prostu nie ma, a reszta aplikacji działa bez zmian. Wgrana kopia przeżywa restart i nowe wdrożenie, bo folder leży na serwerze, poza obrazem.
 
 ### Format pliku
 
