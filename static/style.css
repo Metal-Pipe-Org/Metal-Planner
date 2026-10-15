@@ -2473,18 +2473,15 @@ body.mode-timetable .time-headline { display: none; }
 .tt-top .ac-list { top: 48px; }
 
 /* Wysokość pola szukania (44 px) - także w rozkładzie linii, gdzie w ramce
-   została sama data. */
+   została sama data. Godzina i data stoją obok siebie w jednej ramce, bez
+   rozwijania; rozkład linii nie ma godziny, więc zostaje w nim sama data,
+   bez „teraz". */
 .tt-top .time-field {
     position: relative;
     box-sizing: border-box;
     min-height: 44px;
     padding-top: 3px;
     padding-bottom: 3px;
-}
-
-/* Godzina i data obok siebie w jednej ramce, bez rozwijania. Rozkład linii
-   nie ma godziny: zostaje w nim sama data, bez „teraz". */
-.tt-top .time-field {
     flex-direction: row;
     align-items: center;
     gap: 14px;
