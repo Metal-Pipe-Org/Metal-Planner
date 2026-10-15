@@ -187,14 +187,14 @@ body.mode-timetable.view-map #tt-results { display: none; }
 /* ...a skoro została sama karta, to z niej musi dać się wyjść na mapę,
    którą się właśnie ogląda (zakładka „Trasy" wyprowadza na listę). */
 body.mode-timetable.view-map .tt-close {
-    display: flex;
-    width: 100%;
-    margin-top: 10px;
-    background: var(--surface-alt);
-    color: var(--ink-soft);
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    background: var(--accent);
+    color: #fff;
 }
 
-body.mode-timetable.view-map .tt-close:hover { background: #e8edf3; }
+body.mode-timetable.view-map .tt-close:hover { background: #1d4fd7; color: #fff; }
 
 /* ----------------------------------------------------------------- dok --- */
 

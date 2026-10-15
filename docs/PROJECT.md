@@ -233,9 +233,8 @@ a nie z ostatniego kliknięcia — w rozkłady wchodzi się także spoza paska
 (klik w słupek), a nie wyjście z nich; wychodzi się dopiero „Trasami",
 które przywracają wachlarz propozycji bez ponownego szukania. A że „Trasy"
 przy okazji zabierają z mapy na listę, karta rozkładu dostaje w tym jednym
-widoku (telefon + mapa) przycisk **„✕ Zamknij rozkład"** — to samo wyjście
-z trybu, tyle że zostawia na ekranie mapę, na którą się właśnie patrzyło.
-Stoi w miejscu podpowiedzi, która w widoku mapy i tak jest schowana. Klasy `view-map`/`view-list` na
+widoku (telefon + mapa) mały niebieski przycisk **✕ „Zamknij rozkład"** na prawym końcu wiersza z czasem — to samo wyjście
+z trybu, tyle że zostawia na ekranie mapę, na którą się właśnie patrzyło. Klasy `view-map`/`view-list` na
 `<body>` na szerokim ekranie nie robią nic — tam widać oba widoki naraz.
 Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
 ten kadr zobaczymy po przełączeniu zakładki.
@@ -290,7 +289,7 @@ i przeładowuje stronę.
 Obok wyszukiwarki połączeń panel ma drugi tryb, przełączany przyciskiem
 **◷ Rozkłady** tuż obok ← (chowania panelu); na telefonie jest to trzecia
 zakładka na dole, „Rozkład", obok „Mapy" i „Tras". W widoku mapy karta
-rozkładu ma przycisk **„✕ Zamknij rozkład"** — wychodzi z trybu bez
+rozkładu ma mały niebieski przycisk **✕ „Zamknij rozkład"** przy czasie — wychodzi z trybu bez
 schodzenia z mapy. Oba tryby zajmują to samo miejsce — wejście w rozkłady
 chowa okienko wyszukiwania, wyjście przywraca je razem z tym, co było
 narysowane na mapie, bez ponownego szukania.
@@ -300,10 +299,7 @@ przystanek. Rodzaj widać na liście podpowiedzi — linie mają plakietkę
 w kolorze pojazdu, przystanki znaczek słupka — czyli tam, gdzie faktycznie
 jest potrzebny, a nie w przełączniku ustawianym przed wpisaniem czegokolwiek.
 
-Pod polem stoi **dzień i godzina**. Godzina jest jedna na oba rozkłady
-i nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko
-przesuwa to, od czego zaczyna się tablica, i to, który kurs linii jest
-„ten najbliższy".
+Pod polem stoi **czas** — ta sama ramka co w wyszukiwarce, na całą szerokość karty: „Odjazd", godzina i „teraz", a obok nich — bez rozwijania — data. Godzina nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko przesuwa to, od czego zaczyna się tablica przystanku, i kurs rysowany na mapie. Rozkład linii godziny nie używa, więc po wczytaniu linii w ramce zostaje sama **data**, bez godziny i „teraz"; pusty wpis albo przystanek przywracają pełne pole.
 
 **Linia** odpowiada na „którędy jedzie": wybór wariantu i lista jego
 przystanków, z przebiegiem na mapie. Kierunki podstawowe stoją obok siebie,

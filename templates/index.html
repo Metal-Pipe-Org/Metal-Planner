@@ -359,51 +359,60 @@
           widać na liście podpowiedzi (plakietka linii / znaczek przystanku),
           czyli tam, gdzie faktycznie potrzebny.
         #}
-        <div class="ac-field tt-field">
-            <input type="text" id="tt-query" class="with-action" autocomplete="off"
-                   role="combobox" aria-label="Numer linii albo nazwa przystanku"
-                   aria-autocomplete="list" aria-expanded="false"
-                   aria-controls="tt-query-list"
-                   placeholder="Linia albo przystanek — np. 17, Katedra">
-            <button id="tt-clear" class="icon-button in-field" title="Wyczyść"
-                    aria-label="Wyczyść rozkład" hidden>&#10005;</button>
+        <div class="tt-top">
+            <div class="tt-query-row">
+                <div class="ac-field tt-field">
+                    <input type="text" id="tt-query" class="with-action" autocomplete="off"
+                           role="combobox" aria-label="Numer linii albo nazwa przystanku"
+                           aria-autocomplete="list" aria-expanded="false"
+                           aria-controls="tt-query-list"
+                           placeholder="Linia albo przystanek">
+                    <button id="tt-clear" class="icon-button in-field" title="Wyczyść"
+                            aria-label="Wyczyść rozkład" hidden>&#10005;</button>
+                </div>
+            </div>
+
+            {# Lista poza polem, żeby miała szerokość całego wiersza, a nie tylko wąskiego pola obok czasu. #}
             <ul class="ac-list" id="tt-query-list" role="listbox" hidden
                 aria-label="Podpowiedzi linii i przystanków"></ul>
+
+            {#
+              Dzień i godzina w TEJ SAMEJ ramce, co czas wyszukiwarki
+              (.time-field), w osobnym wierszu pod polem szukania. Data stoi
+              obok godziny, bez rozwijania - na całą szerokość karty jest na
+              nią miejsce. Godzina nie odpytuje serwera - odpowiedź niesie
+              całą dobę, więc jest punktem odniesienia tablicy przystanku: od
+              niej lecą odjazdy i na niej stoi kurs rysowany na mapie. Rozkład
+              linii godziny nie używa, więc zostaje w nim sam dzień (klasa
+              `date-only`, ustawia ją timetable.js).
+            #}
+            <div class="tt-time-row">
+                <div class="time-field" id="tt-time-field">
+                    <div class="time-row tt-hour-row">
+                        <span>Odjazd</span>
+                        <input type="text" id="tt-time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
+                               maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
+                        <button type="button" id="tt-now" class="time-now-button">teraz</button>
+                    </div>
+                    <div class="time-row tt-date-part">
+                        <span>Data</span>
+                        <input type="date" id="tt-date" value="{{ form_date }}">
+                    </div>
+                    <span class="spinner tt-spinner" aria-hidden="true"></span>
+                </div>
+
+                {# Wyjście z rozkładów BEZ opuszczania mapy - tylko tam, gdzie nic
+                   innego tego nie umie: telefon, widok mapy. Zakładka „Trasy"
+                   też zamyka ten tryb, ale przy okazji zabiera z mapy na listę,
+                   a tu patrzy się właśnie na mapę. W widoku listy przycisku nie
+                   ma (pod listą stoją zakładki), na szerokim ekranie też nie
+                   (jest ◷). #}
+                <button type="button" id="tt-close" class="icon-button tt-close"
+                        title="Zamknij rozkład" aria-label="Zamknij rozkład">&#10005;</button>
+            </div>
         </div>
 
         <script id="line-names" type="application/json">{{ lines|tojson }}</script>
-
-        {#
-          Dzień i godzina w jednym polu, w takiej samej ramce, co czas
-          wyszukiwarki. Godzina nie odpytuje serwera - odpowiedź niesie całą
-          dobę, więc jest punktem odniesienia dla obu rozkładów naraz: od niej
-          lecą odjazdy tablicy i na niej otwiera się rozkład linii.
-        #}
-        <div class="tt-when">
-            <span class="tt-when-part">
-                <label for="tt-date">Dzień</label>
-                <input type="date" id="tt-date" value="{{ form_date }}">
-            </span>
-            <span class="tt-when-part">
-                <label for="tt-time">Godzina</label>
-                <input type="text" id="tt-time" inputmode="numeric"
-                       pattern="[0-9]{2}:[0-9]{2}" maxlength="5" size="5"
-                       placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
-                <button type="button" id="tt-now" class="time-now-button">teraz</button>
-            </span>
-            <span class="spinner tt-spinner" aria-hidden="true"></span>
-        </div>
-
-        {#
-          Wyjście z rozkładów BEZ opuszczania mapy - tylko tam, gdzie nic
-          innego tego nie umie: telefon, widok mapy. Zakładka „Trasy" też
-          zamyka ten tryb, ale przy okazji zabiera z mapy na listę, a tu
-          patrzy się właśnie na mapę. W widoku listy przycisku nie ma (pod
-          listą stoją zakładki), na szerokim ekranie też nie (jest ◷).
-        #}
-        <button type="button" id="tt-close" class="button tt-close">
-            &#10005; Zamknij rozkład
-        </button>
 
     </div>
 
