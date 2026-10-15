@@ -1,4 +1,5 @@
 import hashlib
+import http.client
 import math
 from datetime import datetime
 from pathlib import Path
@@ -271,7 +272,7 @@ def init_routes(app):
         warstw, bez związku z wyszukiwaniem (patrz api_cars)."""
         try:
             return jsonify({"stations": bikes.stations(), "free": bikes.free_bikes()})
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             return jsonify({"error": f"Nie udało się pobrać rowerów: {e}"}), 503
 
     @app.route("/api/plan")
