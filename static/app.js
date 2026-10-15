@@ -5604,7 +5604,7 @@ const DEV_FOLD_IDS = [
     'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
-    'fold-layout', 'fold-version',
+    'fold-layout', 'fold-siechnice', 'fold-version',
 ];
 
 function bindDevFolds() {
@@ -5627,7 +5627,8 @@ bindDevFolds();
 function markChangedSettings() {
     for (const fold of devPanel.querySelectorAll('.dev-fold')) {
         let changed = 0;
-        for (const input of fold.querySelectorAll('input')) {
+        // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
+        for (const input of fold.querySelectorAll('input:not([type=file])')) {
             const differs = input.type === 'checkbox'
                 ? input.checked !== input.defaultChecked
                 : Number(input.value) !== Number(input.defaultValue);
@@ -5642,6 +5643,82 @@ function markChangedSettings() {
 devPanel.addEventListener('input', markChangedSettings);
 devPanel.addEventListener('change', markChangedSettings);
 markChangedSettings();
+
+// --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
+//
+// Plik idzie na serwer, ten go sprawdza, zapisuje i sam odpala przebudowę
+// bazy w tle. Przebudowa trwa około minuty (pobiera też paczkę Wrocławia),
+// więc dopytujemy o jej stan, zamiast kazać zgadywać, kiedy odświeżyć.
+const SIECHNICE_POLL_MS = 3000;
+// Przebudowa startuje w osobnym procesie, więc pierwsze dopytanie może ją
+// jeszcze minąć. Gdy po tym czasie nie trwa i bazy nie ma, to się nie udała.
+const SIECHNICE_START_GRACE_MS = 20000;
+
+function setSiechniceStatus(text, state) {
+    const el = $('siechnice-status');
+    el.textContent = text;
+    el.className = state ? `field-hint ${state}` : 'field-hint';
+}
+
+function describeSiechnice(status) {
+    if (!status.uploaded_at) {
+        setSiechniceStatus('Nic nie wgrano — w bazie nie ma Siechnic.');
+    } else if (status.rebuilding) {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at}. Przebudowa bazy w toku…`, 'warn');
+    } else if (status.in_database) {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at} — jest w bazie.`, 'ok');
+    } else {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at}, ale baza jeszcze go nie ma.`, 'warn');
+    }
+}
+
+async function fetchSiechniceStatus(init) {
+    const response = await fetch('/api/dev/siechnice', init);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+    return body;
+}
+
+async function followSiechniceRebuild() {
+    const started = Date.now();
+    let sawRebuild = false;
+    for (;;) {
+        await new Promise(resolve => setTimeout(resolve, SIECHNICE_POLL_MS));
+        const status = await fetchSiechniceStatus();
+        if (status.in_database && !status.rebuilding) {
+            setSiechniceStatus('Gotowe — baza przebudowana z wgranym rozkładem.', 'ok');
+            return;
+        }
+        sawRebuild = sawRebuild || status.rebuilding;
+        if (!status.rebuilding && (sawRebuild || Date.now() - started > SIECHNICE_START_GRACE_MS)) {
+            setSiechniceStatus('Plik zapisany, ale przebudowa bazy się nie udała — '
+                + 'szczegóły w logach serwera. Wejdzie przy nocnej aktualizacji.', 'bad');
+            return;
+        }
+        setSiechniceStatus('Przyjęto. Przebudowa bazy w toku…', 'warn');
+    }
+}
+
+if (devMode) {
+    const input = $('siechnice-file');
+    input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        // Ten sam plik wybrany drugi raz ma znów wywołać change.
+        input.value = '';
+        setSiechniceStatus(`Wysyłam ${file.name}…`);
+        try {
+            await fetchSiechniceStatus({method: 'POST', body: form});
+            setSiechniceStatus('Przyjęto. Przebudowa bazy w toku…', 'warn');
+            await followSiechniceRebuild();
+        } catch (e) {
+            setSiechniceStatus(`Nie wgrano: ${e.message}`, 'bad');
+        }
+    });
+    fetchSiechniceStatus().then(describeSiechnice).catch(() => {});
+}
 
 // Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
 // na <body>: panele przewijają się w sobie i przycięłyby go na krawędzi. Klik

@@ -64,19 +64,14 @@ services:
       PKP_AUTO_UPDATE_HOUR: "3"
       PKP_UPDATE_ON_START: "on"
 
-      # Autobusow gminy Siechnice (800, 810, 83-89, 860, 870, 890) nie ma
-      # w zadnych otwartych danych - jedyne strukturalne zrodlo to
-      # niedokumentowane API systemu kiedyPrzyjedzie, ktorego robots.txt
-      # brzmi "Disallow: /" i ktore nie ma zadnego regulaminu. Dlatego "off":
-      # wlaczenie jest swiadoma decyzja, nie ustawieniem domyslnym.
-      # Patrz docs/SIECHNICE_DANE.md.
-      SIECHNICE_ENABLED: "off"
+      # Gdzie aplikacja czyta kopie rozkladu Siechnic - w folderze ./siechnice
+      # podmontowanym nizej (volumes). Zmieniaj razem ze sciezka montowania.
+      SIECHNICE_ROZKLAD: "/app/data/siechnice/rozklad.json"
 
       # Stacje Wroclawskiego Roweru Miejskiego (kanal GBFS operatora,
-      # system_id nextbike_pl, licencja CC0-1.0 - patrz bikes.py). Inaczej
-      # niz Siechnice sa domyslnie WLACZONE: zrodlo jest otwarte, oficjalnie
-      # zarejestrowane i nic z niego nie trafia do bazy. "off" gdy kontener
-      # nie ma wyjscia na zewnatrz albo gdy rower ma byc niedostepny -
+      # system_id nextbike_pl, licencja CC0-1.0 - patrz bikes.py). Domyslnie
+      # WLACZONE: zrodlo jest otwarte, oficjalnie zarejestrowane i nic
+      # z niego nie trafia do bazy. "off" gdy kontener nie ma wyjscia na zewnatrz albo gdy rower ma byc niedostepny -
       # awaria samego kanalu i tak nie psuje wyszukiwarki, wiec ta zmienna
       # nie jest do tego potrzebna.
       WRM_ENABLED: "on"
@@ -106,6 +101,17 @@ services:
       #                             (wzor: data/.env.example z repo)
       # Kopia zapasowa = skopiowanie tego folderu.
       - ./data:/app/data
+
+      # Kopia rozkladu autobusow gminy Siechnice (800, 810, 83-89, 860, 870,
+      # 890) - zwykly folder ./siechnice obok tego pliku, widoczny wprost na
+      # serwerze (./siechnice/rozklad.json). Docker zaklada go przy pierwszym
+      # starcie, a entrypoint oddaje uzytkownikowi aplikacji. Napelnia go
+      # wylacznie wgranie pliku w trybie deweloperskim (zebatka -> "Wgraj
+      # rozklad Siechnic"), po ktorym baza od razu przebudowuje sie w tle.
+      # Pusty folder = brak Siechnic. Bez ":ro", bo aplikacja zapisuje tu
+      # wgrany plik. Serwer NIGDY nie odpytuje kiedyPrzyjedzie.
+      # Patrz docs/SIECHNICE_DANE.md.
+      - ./siechnice:/app/data/siechnice
 
     networks:
       - reverse_proxy
