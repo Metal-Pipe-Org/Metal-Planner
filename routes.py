@@ -415,8 +415,9 @@ def init_routes(app):
                 return jsonify({"error": "Nie wybrano pliku."}), 400
             try:
                 siechnice.save_snapshot(upload.read(), siechnice.SNAPSHOT_PATH)
-            except siechnice.InvalidSnapshot as e:
-                return jsonify({"error": str(e)}), 400
+            except siechnice.InvalidSnapshot:
+                app.logger.warning("Invalid Siechnice snapshot upload rejected", exc_info=True)
+                return jsonify({"error": "Nieprawidłowy plik rozkładu."}), 400
             update_gtfs.start_update_in_background()
 
         path = siechnice.SNAPSHOT_PATH
