@@ -102,16 +102,12 @@ services:
       # Kopia zapasowa = skopiowanie tego folderu.
       - ./data:/app/data
 
-      # Osobny wolumen na statyczna kopie rozkladu autobusow gminy Siechnice
-      # (800, 810, 83-89, 860, 870, 890). Niczego tu nie wgrywasz recznie:
-      # plik jedzie w obrazie (rozklady/siechnice.json z repo), a entrypoint
-      # przy kazdym starcie kopiuje go na ten wolumen, wiec nowsza wersja
-      # z repo dociera tu sama ze zwyklym build + up. Baza przebudowuje sie
-      # z nim przy starcie (GTFS_UPDATE_ON_START) albo w nocy.
-      # Bez ":ro", bo entrypoint pisze na ten wolumen i przejmuje cale
-      # /app/data na wlasnosc (chown -R).
-      # Serwer NIGDY nie odpytuje kiedyPrzyjedzie: kodu, ktory to umie
-      # (pobierz_siechnice.py), nie ma w obrazie. Patrz docs/SIECHNICE_DANE.md.
+      # Osobny wolumen na kopie rozkladu autobusow gminy Siechnice
+      # (800, 810, 83-89, 860, 870, 890). Napelnia go wylacznie wgranie pliku
+      # w trybie deweloperskim (zebatka -> "Wgraj rozklad Siechnic"), po ktorym
+      # baza od razu przebudowuje sie w tle. Pusty wolumen = brak Siechnic.
+      # Bez ":ro", bo aplikacja zapisuje tu wgrany plik.
+      # Serwer NIGDY nie odpytuje kiedyPrzyjedzie. Patrz docs/SIECHNICE_DANE.md.
       - siechnice:/app/data/siechnice
 
     networks:

@@ -14,17 +14,18 @@ kiedyPrzyjedzie (dostawca: Operibus sp. z o.o.), którym gmina obsługuje
 informację pasażerską. Jest niedokumentowane i - co ważne - jego robots.txt
 to "Disallow: /", a nigdzie nie ma regulaminu ani zgody na ponowne
 wykorzystanie. Dlatego serwer go NIE odpytuje i nawet nie umie: ten moduł
-nie ma żadnego kodu sieciowego. Rozkład pobrano raz, ręcznie i lokalnie
-(pobierz_siechnice.py, którego nie ma w obrazie Dockera), jako statyczną
-kopię tygodnia - to te same publiczne dane, które gmina wykłada w PDF-ach.
-Kopia leży w repo (REPO_SNAPSHOT_PATH), a aktualizacja bazy dokleja ją co
-noc do rozkładu Wrocławia. Brak pliku = brak Siechnic, nic więcej.
+nie ma żadnego kodu sieciowego, a w repo nie ma ani kodu pobierania, ani
+samych danych. Kopię tygodnia rozkładu (te same publiczne dane, które gmina
+wykłada w PDF-ach) przygotowuje się poza projektem i wgrywa w trybie
+deweloperskim (⚙ → „Wgraj rozkład Siechnic”, patrz validate_snapshot
+i save_snapshot); aktualizacja bazy dokleja ją co noc do rozkładu Wrocławia.
+Brak pliku = brak Siechnic, nic więcej.
 Docelowo poprosić gminę o eksport GTFS - platforma Operibus już go u innych
 klientów wystawia (Zduńska Wola, Oborniki figurują w tabeli KPD z formatem
 "GTFS static/realtime"), więc to kwestia włączenia funkcji, a nie budowania
 czegokolwiek. Szczegóły i wzór pisma: docs/SIECHNICE_DANE.md.
 
-Kopia to surowe odpowiedzi API (kontrakt: pobierz_siechnice.py) - słupki,
+Kopia to surowe odpowiedzi API (format: validate_snapshot) - słupki,
 linie na słupkach i odjazdy z każdego słupka na każdy dzień tygodnia
 ({departure: sek. od północy, trip_id, index: pozycja słupka w kursie}).
 Z tego składamy kursy: odjazdy o tym samym trip_id, posortowane po `index`,
@@ -41,12 +42,13 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
-# Kopia rozkładu w repo - z niej czyta uruchomienie lokalne.
-REPO_SNAPSHOT_PATH = Path(__file__).resolve().parent / "rozklady" / "siechnice.json"
-
-# W kontenerze kopia leży na osobnym wolumenie, który entrypoint napełnia
-# plikiem z obrazu (patrz docker/entrypoint.sh) - stąd ścieżka ze zmiennej.
-SNAPSHOT_PATH = Path(os.environ.get("SIECHNICE_ROZKLAD") or REPO_SNAPSHOT_PATH)
+# Kopia leży poza repo: lokalnie w data/ (gitignorowane), w kontenerze na
+# osobnym wolumenie (SIECHNICE_ROZKLAD, patrz docker-compose.yml). Trafia tam
+# wyłącznie przez wgranie w trybie deweloperskim.
+SNAPSHOT_PATH = Path(
+    os.environ.get("SIECHNICE_ROZKLAD")
+    or Path(__file__).resolve().parent / "data" / "siechnice" / "rozklad.json"
+)
 
 # Prefiks identyfikatorów, żeby dane z tego źródła dały się odróżnić od
 # wrocławskiego GTFS-a w jednej bazie (i skasować bez ruszania reszty).
@@ -283,7 +285,7 @@ def to_gtfs_rows(days, stops, stop_id_map, window):
 # --------------------------------------------------------------------------
 
 def feed_from_snapshot(snapshot, log=print):
-    """Kopia z pobierz_siechnice.fetch_snapshot -> (słupki, [(data, kursy), ...])."""
+    """Kopia (patrz validate_snapshot) -> (słupki, [(data, kursy), ...])."""
     stops = parse_stops(snapshot["stops"])
     lines_by_stop = {k: set(v) for k, v in snapshot["lines_by_stop"].items()}
     days = []
@@ -368,6 +370,122 @@ def merge_into(db_path, stops, days, log=print):
     log("  doklejono: " + ", ".join(f"{k} {v}" for k, v in counts.items())
         + f" (okno {window[0]}-{window[1]})")
     return counts
+
+
+# --------------------------------------------------------------------------
+# Wgranie kopii
+# --------------------------------------------------------------------------
+
+class InvalidSnapshot(ValueError):
+    """Wgrany plik nie jest kopią rozkładu - treść idzie wprost do dewelopera."""
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_snapshot(raw):
+    """Sprawdza wgrany plik i zwraca go jako słownik. Zły -> InvalidSnapshot.
+
+    Oczekiwany format (JSON):
+      {"stops": [[designator, kod, nazwa, lon*1e6, lat*1e6, ...], ...],
+       "lines_by_stop": {designator: [linia, ...]},
+       "days": [{"date": "RRRR-MM-DD",
+                 "departures_by_stop": {designator: [
+                     {"departure": sek. od północy, "trip_id": liczba,
+                      "index": pozycja słupka w kursie},
+                 ]}}, ...]}
+    z siedmioma dniami - po jednym na każdy dzień tygodnia, bo każdy z nich
+    staje się regułą tygodniową (to_gtfs_rows). Pozostałe pola są ignorowane.
+
+    Sprawdzamy kształt przed zapisem, bo zły plik na wolumenie wyszedłby na
+    jaw dopiero w nocy, jako ciche zniknięcie Siechnic z bazy.
+    """
+    try:
+        snapshot = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise InvalidSnapshot(f"To nie jest plik JSON ({e}).") from None
+    if not isinstance(snapshot, dict):
+        raise InvalidSnapshot("Plik nie jest obiektem JSON z polami stops, lines_by_stop, days.")
+    missing = [key for key in ("stops", "lines_by_stop", "days") if key not in snapshot]
+    if missing:
+        raise InvalidSnapshot("Brak pól: " + ", ".join(missing) + ".")
+
+    stops = snapshot["stops"]
+    if not isinstance(stops, list) or not stops:
+        raise InvalidSnapshot("Pole stops musi być niepustą listą słupków.")
+    designators = set()
+    for row in stops:
+        if not (isinstance(row, list) and len(row) >= 5
+                and isinstance(row[0], str) and row[0]
+                and isinstance(row[2], str)
+                and _is_number(row[3]) and _is_number(row[4])):
+            raise InvalidSnapshot(
+                f"Zły słupek w stops: {json.dumps(row, ensure_ascii=False)[:120]}"
+                " (oczekiwane [designator, kod, nazwa, lon*1e6, lat*1e6, ...]).")
+        designators.add(row[0])
+
+    lines_by_stop = snapshot["lines_by_stop"]
+    if not (isinstance(lines_by_stop, dict) and all(
+            isinstance(lines, list) and all(isinstance(line, str) for line in lines)
+            for lines in lines_by_stop.values())):
+        raise InvalidSnapshot("Pole lines_by_stop musi mapować słupek na listę numerów linii.")
+
+    days = snapshot["days"]
+    if not isinstance(days, list):
+        raise InvalidSnapshot("Pole days musi być listą dni.")
+    weekdays = set()
+    for entry in days:
+        if not isinstance(entry, dict):
+            raise InvalidSnapshot("Każdy element days musi mieć pola date i departures_by_stop.")
+        try:
+            day = date.fromisoformat(entry.get("date"))
+        except (TypeError, ValueError):
+            raise InvalidSnapshot(f"Zła data w days: {entry.get('date')!r}.") from None
+        if day.weekday() in weekdays:
+            raise InvalidSnapshot(f"Dzień tygodnia daty {day} powtarza się w days.")
+        weekdays.add(day.weekday())
+
+        departures_by_stop = entry.get("departures_by_stop")
+        if not isinstance(departures_by_stop, dict):
+            raise InvalidSnapshot(f"{day}: departures_by_stop musi być obiektem.")
+        for designator, departures in departures_by_stop.items():
+            if designator not in designators:
+                raise InvalidSnapshot(f"{day}: odjazdy z nieznanego słupka {designator!r}.")
+            if not (isinstance(departures, list) and all(
+                    isinstance(d, dict)
+                    and _is_int(d.get("departure")) and d["departure"] >= 0
+                    and _is_int(d.get("trip_id"))
+                    and _is_int(d.get("index"))
+                    for d in departures)):
+                raise InvalidSnapshot(
+                    f"{day}, słupek {designator}: odjazd musi mieć departure,"
+                    " trip_id i index.")
+    if len(weekdays) != len(WEEKDAYS):
+        raise InvalidSnapshot(
+            f"Plik ma {len(weekdays)} z 7 dni tygodnia - potrzebny pełny tydzień.")
+
+    _, built = feed_from_snapshot(snapshot, log=lambda *_: None)
+    if not any(trips for _, trips in built):
+        raise InvalidSnapshot("Z pliku nie da się złożyć ani jednego kursu.")
+    return snapshot
+
+
+def save_snapshot(raw, path=SNAPSHOT_PATH):
+    """Sprawdza i zapisuje wgraną kopię. Zły plik -> InvalidSnapshot, bez zapisu.
+
+    Przez plik obok i podmianę: przebudowa bazy może czytać kopię w tej samej
+    chwili i nie może trafić na połowę pliku.
+    """
+    validate_snapshot(raw)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_bytes(raw)
+    os.replace(tmp_path, path)
 
 
 def update(db_path, snapshot_path=SNAPSHOT_PATH, log=print):

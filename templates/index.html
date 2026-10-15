@@ -838,6 +838,24 @@
 
     </details>
 
+    {#
+      Rozkładu Siechnic nie ma w repo ani serwer go nie pobiera - kopię
+      tygodnia wgrywa się stąd (patrz siechnice.validate_snapshot). Nie jest
+      ustawieniem: nic tu nie trafia do pamięci przeglądarki.
+    #}
+    <details class="dev-fold dev-only" id="fold-siechnice">
+    <summary>Rozkład Siechnic <span class="dev-badge">DEV</span></summary>
+
+    <div class="field">
+        <div class="sw-row">
+            <label class="button" for="siechnice-file">Wgraj rozkład Siechnic</label>
+            <input type="file" id="siechnice-file" accept=".json,application/json" hidden>
+        </div>
+        <p class="field-hint" id="siechnice-status" role="status"></p>
+    </div>
+
+    </details>
+
     <details class="dev-fold dev-only" id="fold-version">
     <summary>Wersja aplikacji <span class="dev-badge">DEV</span></summary>
 

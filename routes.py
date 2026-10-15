@@ -3,7 +3,7 @@ import math
 from datetime import datetime
 from pathlib import Path
 
-from flask import jsonify, render_template, request
+from flask import abort, jsonify, render_template, request
 
 import bikes
 import config
@@ -11,11 +11,18 @@ import gtfs
 import naming
 import onboard
 import pkp
+import siechnice
 import timetables
 import traficar
+import update_gtfs
 import vehicles
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
                      stop_timetable)
+
+# Tydzień rozkładu Siechnic to ~3 MB; sufit tylko po to, żeby przypadkowo
+# wybrany duży plik nie lądował cały w pamięci workera.
+SIECHNICE_MAX_BYTES = 30 * 1024 * 1024
+
 
 def _frontend_digest(app):
     """Odcisk zawartości frontu - wersja cache'ów service workera.
@@ -388,3 +395,35 @@ def init_routes(app):
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",
         ))
+
+    @app.route("/api/dev/siechnice", methods=["GET", "POST"])
+    def api_dev_siechnice():
+        """Wgranie kopii rozkładu Siechnic (⚙ → „Wgraj rozkład Siechnic”).
+
+        Tylko w trybie deweloperskim - poza nim endpointu po prostu nie ma.
+        POST zapisuje plik na wolumen i od razu odpala przebudowę bazy w tle;
+        GET mówi, czy przebudowa trwa i czy obecna baza ma już wgrany plik.
+        """
+        if not config.dev_mode():
+            abort(404)
+
+        if request.method == "POST":
+            if (request.content_length or 0) > SIECHNICE_MAX_BYTES:
+                return jsonify({"error": "Plik jest za duży jak na tydzień rozkładu."}), 413
+            upload = request.files.get("file")
+            if upload is None:
+                return jsonify({"error": "Nie wybrano pliku."}), 400
+            try:
+                siechnice.save_snapshot(upload.read(), siechnice.SNAPSHOT_PATH)
+            except siechnice.InvalidSnapshot as e:
+                return jsonify({"error": str(e)}), 400
+            update_gtfs.start_update_in_background()
+
+        path = siechnice.SNAPSHOT_PATH
+        uploaded = path.stat().st_mtime if path.exists() else None
+        built = update_gtfs.DB_PATH.stat().st_mtime if update_gtfs.DB_PATH.exists() else None
+        return jsonify({
+            "uploaded_at": uploaded and datetime.fromtimestamp(uploaded).isoformat(timespec="seconds"),
+            "rebuilding": update_gtfs.update_running(),
+            "in_database": bool(uploaded and built and built >= uploaded),
+        })

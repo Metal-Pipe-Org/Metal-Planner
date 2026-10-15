@@ -12,15 +12,6 @@ DATA_DIR=/app/data
 # użytkownika - serwer nie działa z uprawnieniami roota.
 if [ "$(id -u)" = "0" ]; then
     mkdir -p "$DATA_DIR"
-    # Kopia rozkładu Siechnic jedzie w obrazie, a aplikacja czyta ją z osobnego
-    # wolumenu (SIECHNICE_ROZKLAD, patrz docker-compose.yml). Kopiujemy przy
-    # każdym starcie, bez porównywania: plik w obrazie jest jedynym źródłem
-    # prawdy, więc nowsza wersja z repo dociera na wolumen z samym wdrożeniem,
-    # a świeży, pusty wolumen napełnia się sam.
-    if [ -n "$SIECHNICE_ROZKLAD" ]; then
-        mkdir -p "$(dirname "$SIECHNICE_ROZKLAD")"
-        cp /app/rozklady/siechnice.json "$SIECHNICE_ROZKLAD"
-    fi
     chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
     exec gosu "$APP_USER" "$0" "$@"
 fi

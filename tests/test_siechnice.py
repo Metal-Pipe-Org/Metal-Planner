@@ -6,14 +6,15 @@ wyjściem - wiersze w kształcie tabel z update_gtfs.SCHEMA.
 """
 
 import ast
+import io
 import json
+import os
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
-import pobierz_siechnice
 import siechnice
 import update_gtfs
 
@@ -331,51 +332,34 @@ def test_merge_into_nie_rusza_danych_wroclawskich(tmp_path):
 
 # --- statyczna kopia -------------------------------------------------------
 
-class _FakeClient:
-    """Odpowiada tak jak API, bez sieci: dwa słupki, jeden kurs dziennie."""
-
-    def __init__(self):
-        self.timetable_dates = []
-
-    def stops(self):
-        return [
+def _snapshot(days=7, start=date(2026, 10, 12)):
+    """Kopia w formacie wgrywanego pliku: dwa słupki, jeden kurs dziennie."""
+    return {
+        "source": "test",
+        "stops": [
             ["a", 1, "Siechnice - Rynek", 17140000, 51030000, 0],
             ["b", 2, "Sucha", 17038200, 51096800, 0],
-        ]
+        ],
+        "lines_by_stop": {"a": ["800+80"], "b": ["800+80"]},
+        "days": [
+            {"date": (start + timedelta(days=offset)).isoformat(),
+             "departures_by_stop": {
+                 "a": [{"departure": 20000, "trip_id": 4403, "index": 1}],
+                 "b": [{"departure": 21000, "trip_id": 4403, "index": 2}],
+             }}
+            for offset in range(days)
+        ],
+    }
 
-    def directions(self, designator):
-        return [{"line": "800+80", "direction": "Sucha"}, {"line": None}]
 
-    def timetable(self, designator, day):
-        self.timetable_dates.append(day)
-        index, seconds = {"a": (1, 20000), "b": (2, 21000)}[designator]
-        return {"departures": [
-            {"departure": seconds, "trip_id": 4403, "index": index, "extra": "x"},
-        ]}
-
-
-def test_fetch_snapshot_zbiera_tydzien_od_podanego_dnia():
-    client = _FakeClient()
-
-    snapshot = pobierz_siechnice.fetch_snapshot(
-        client, today=date(2026, 10, 13), log=lambda *_: None)
-
-    assert [d["date"] for d in snapshot["days"]] == [
-        "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16",
-        "2026-10-17", "2026-10-18", "2026-10-19",
-    ]
-    assert snapshot["lines_by_stop"] == {"a": ["800+80"], "b": ["800+80"]}
-    # Do pliku idą tylko pola, z których składamy kursy.
-    assert snapshot["days"][0]["departures_by_stop"]["a"] == [
-        {"departure": 20000, "trip_id": 4403, "index": 1},
-    ]
+def _raw(snapshot):
+    return json.dumps(snapshot).encode("utf-8")
 
 
 def test_feed_from_snapshot_sklada_kursy_po_przejsciu_przez_json():
     # Kopia leży na dysku jako JSON - po drodze zbiory stają się listami,
     # a klucze napisami. Złożenie kursów ma to przeżyć.
-    snapshot = json.loads(json.dumps(pobierz_siechnice.fetch_snapshot(
-        _FakeClient(), days=1, today=date(2026, 10, 13), log=lambda *_: None)))
+    snapshot = json.loads(_raw(_snapshot(days=1, start=date(2026, 10, 13))))
 
     stops, days = siechnice.feed_from_snapshot(snapshot, log=lambda *_: None)
 
@@ -399,8 +383,7 @@ def test_update_bez_kopii_nie_dokleja_niczego(tmp_path):
 def test_update_dokleja_kopie_z_pliku(tmp_path):
     db_path = _wroclaw_db(tmp_path)
     snapshot_path = tmp_path / "rozklad.json"
-    snapshot_path.write_text(json.dumps(pobierz_siechnice.fetch_snapshot(
-        _FakeClient(), today=date(2026, 10, 12), log=lambda *_: None)))
+    snapshot_path.write_bytes(_raw(_snapshot()))
 
     merged = siechnice.update(db_path, snapshot_path, log=lambda *_: None)
 
@@ -410,6 +393,146 @@ def test_update_dokleja_kopie_z_pliku(tmp_path):
         "SELECT count(*) FROM calendar WHERE service_id LIKE 'SIE:%'").fetchone()[0] == 7
     assert db.execute("SELECT count(*) FROM trips").fetchone()[0] == 7
     db.close()
+
+
+# --- sprawdzenie wgranego pliku -------------------------------------------
+
+def test_validate_snapshot_przyjmuje_pelny_tydzien():
+    assert siechnice.validate_snapshot(_raw(_snapshot()))["lines_by_stop"]["a"] == ["800+80"]
+
+
+def _broken(change):
+    snapshot = _snapshot()
+    change(snapshot)
+    return _raw(snapshot)
+
+
+@pytest.mark.parametrize("raw, fragment", [
+    (b"\x89PNG\r\n", "nie jest plik JSON"),
+    (b"[1, 2, 3]", "nie jest obiektem JSON"),
+    (_raw({"stops": []}), "Brak pól: lines_by_stop, days"),
+    (_broken(lambda s: s.update(stops=[])), "niepustą listą"),
+    (_broken(lambda s: s["stops"].append(["c", 3, "X", "17", 51])), "Zły słupek"),
+    (_broken(lambda s: s.update(lines_by_stop={"a": "800"})), "lines_by_stop"),
+    (_broken(lambda s: s["days"][0].update(date="wczoraj")), "Zła data"),
+    (_broken(lambda s: s["days"].append(s["days"][0])), "powtarza się"),
+    (_broken(lambda s: s["days"].pop()), "6 z 7 dni"),
+    (_broken(lambda s: s["days"][0]["departures_by_stop"].update(z=[])), "nieznanego słupka"),
+    (_broken(lambda s: s["days"][0]["departures_by_stop"]["a"][0].pop("index")),
+     "departure, trip_id i index"),
+    (_broken(lambda s: s.update(lines_by_stop={})), "ani jednego kursu"),
+])
+def test_validate_snapshot_odrzuca_zly_plik_z_powodem(raw, fragment):
+    with pytest.raises(siechnice.InvalidSnapshot, match=fragment):
+        siechnice.validate_snapshot(raw)
+
+
+def test_save_snapshot_zapisuje_tylko_dobry_plik(tmp_path):
+    path = tmp_path / "wolumen" / "rozklad.json"
+    siechnice.save_snapshot(_raw(_snapshot()), path)
+    good = path.read_bytes()
+
+    with pytest.raises(siechnice.InvalidSnapshot):
+        siechnice.save_snapshot(b"{}", path)
+
+    assert path.read_bytes() == good
+    assert [p.name for p in path.parent.iterdir()] == ["rozklad.json"]
+
+
+# --- wgranie przez ⚙ -------------------------------------------------------
+
+@pytest.fixture
+def upload(tmp_path, monkeypatch):
+    """Klient Flaska z kopią i bazą w tmp_path; przebudowa tylko zliczana."""
+    import app as app_module
+
+    monkeypatch.setattr(siechnice, "SNAPSHOT_PATH", tmp_path / "siechnice" / "rozklad.json")
+    monkeypatch.setattr(update_gtfs, "DB_PATH", tmp_path / "gtfs.sqlite")
+    monkeypatch.setattr(update_gtfs, "LOCK_PATH", tmp_path / "gtfs_update.lock")
+    rebuilds = []
+    monkeypatch.setattr(update_gtfs, "start_update_in_background",
+                        lambda: rebuilds.append(True))
+    monkeypatch.setenv("DEV_MODE", "1")
+
+    client = app_module.app.test_client()
+    client.rebuilds = rebuilds
+    client.snapshot_path = siechnice.SNAPSHOT_PATH
+    return client
+
+
+def _post(client, raw):
+    return client.post("/api/dev/siechnice",
+                       data={"file": (io.BytesIO(raw), "siechnice.json")},
+                       content_type="multipart/form-data")
+
+
+def test_wgranie_zapisuje_plik_i_odpala_przebudowe(upload):
+    response = _post(upload, _raw(_snapshot()))
+
+    assert response.status_code == 200
+    assert response.get_json()["uploaded_at"]
+    assert upload.snapshot_path.read_bytes() == _raw(_snapshot())
+    assert upload.rebuilds == [True]
+
+
+def test_zly_plik_odrzucony_z_komunikatem_bez_przebudowy(upload):
+    response = _post(upload, b"to nie jest rozklad")
+
+    assert response.status_code == 400
+    assert "JSON" in response.get_json()["error"]
+    assert not upload.snapshot_path.exists()
+    assert upload.rebuilds == []
+
+
+def test_bez_trybu_deweloperskiego_wgrania_nie_ma(upload, monkeypatch):
+    monkeypatch.setenv("DEV_MODE", "")
+
+    assert _post(upload, _raw(_snapshot())).status_code == 404
+    assert upload.get("/api/dev/siechnice").status_code == 404
+    assert not upload.snapshot_path.exists()
+    assert upload.rebuilds == []
+
+
+def test_stan_bez_wgranej_kopii(upload):
+    assert upload.get("/api/dev/siechnice").get_json() == {
+        "uploaded_at": None, "rebuilding": False, "in_database": False,
+    }
+
+
+def test_stan_mowi_czy_baza_ma_juz_wgrana_kopie(upload):
+    _post(upload, _raw(_snapshot()))
+    assert upload.get("/api/dev/siechnice").get_json()["in_database"] is False
+
+    update_gtfs.DB_PATH.write_bytes(b"")
+    later = upload.snapshot_path.stat().st_mtime + 1
+    os.utime(update_gtfs.DB_PATH, (later, later))
+
+    assert upload.get("/api/dev/siechnice").get_json()["in_database"] is True
+
+
+# --- jedna przebudowa naraz ------------------------------------------------
+
+def test_przebudowa_trzyma_blokade_a_druga_na_nia_czeka(tmp_path, monkeypatch):
+    monkeypatch.setattr(update_gtfs, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(update_gtfs, "LOCK_PATH", tmp_path / "gtfs_update.lock")
+    seen = []
+    monkeypatch.setattr(update_gtfs, "_run_update_locked",
+                        lambda: seen.append(update_gtfs.update_running()) or True)
+
+    assert update_gtfs.update_running() is False
+    assert update_gtfs.run_update() is True
+    assert seen == [True]
+    assert update_gtfs.update_running() is False
+
+
+def test_przebudowa_w_tle_wola_osobny_proces(monkeypatch):
+    calls = []
+    monkeypatch.setattr(update_gtfs.subprocess, "run",
+                        lambda *args, **kwargs: calls.append(args[0]))
+
+    update_gtfs.start_update_in_background().join(timeout=5)
+
+    assert calls and calls[0][-1].endswith("update_gtfs.py")
 
 
 # --- serwer nie odpytuje kiedyPrzyjedzie -----------------------------------
@@ -428,20 +551,4 @@ def test_modul_serwera_nie_ma_kodu_sieciowego():
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module.split(".")[0])
 
-    assert not imported & {"http", "urllib", "socket", "ssl", "requests",
-                           "pobierz_siechnice"}
-
-
-def test_skrypt_pobierania_nie_trafia_do_obrazu():
-    ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-
-    assert "pobierz_siechnice.py" in ignored
-
-
-def test_kopia_z_repo_daje_kursy_na_kazdy_dzien_tygodnia():
-    snapshot = json.loads(siechnice.REPO_SNAPSHOT_PATH.read_text(encoding="utf-8"))
-
-    _, days = siechnice.feed_from_snapshot(snapshot, log=lambda *_: None)
-
-    assert sorted(day.weekday() for day, _ in days) == list(range(7))
-    assert all(trips for _, trips in days)
+    assert not imported & {"http", "urllib", "socket", "ssl", "requests"}

@@ -58,8 +58,7 @@ Narodowej 234/3, Wrocław - firma wrocławska), z danymi wprost od organizatora,
 razem z pozycjami pojazdów w czasie rzeczywistym.
 
 To jedyne istniejące strukturalne źródło tych rozkładów. Jego API jest
-niedokumentowane, ale kompletne - kontrakt odtworzony z bundla aplikacji
-opisuje nagłówek [`pobierz_siechnice.py`](../pobierz_siechnice.py):
+niedokumentowane, ale kompletne - kontrakt odtworzony z bundla aplikacji:
 
 - `GET /stops` — 237 słupków z nazwami i współrzędnymi,
 - `GET /api/directions/<słupek>` — linie i kierunki na słupku,
@@ -82,18 +81,31 @@ dotrzymać.
 
 ## Tymczasowy plan: statyczna kopia ([issue #261](https://github.com/Metal-Pipe-Org/Metal-Planner/issues/261))
 
-Decyzja z października 2026: rozkład pobieramy **raz, ręcznie, lokalnie**, jako statyczną kopię jednego pełnego tygodnia - to te same publiczne dane, które gmina wykłada w PDF-ach - i serwer czyta już tylko ją. Zmienna `SIECHNICE_ENABLED` zniknęła razem z pobieraniem przy aktualizacji.
+Decyzja z października 2026: serwer korzysta wyłącznie ze statycznej kopii jednego pełnego tygodnia rozkładu - to te same publiczne dane, które gmina wykłada w PDF-ach. Zmienna `SIECHNICE_ENABLED` zniknęła razem z pobieraniem przy aktualizacji.
 
-Kopia to jeden plik w repo, `rozklady/siechnice.json`: surowe odpowiedzi API (słupki, linie na słupkach, odjazdy z każdego słupka na każdy z 7 dni), żeby całe przekształcenie w kursy żyło w jednym miejscu w kodzie (`siechnice.py`). Lokalnie aplikacja czyta go wprost z repo. W kontenerze plik jedzie w obrazie, a `docker/entrypoint.sh` przy każdym starcie kopiuje go na osobny wolumen `siechnice` (`/app/data/siechnice`, ścieżka w `SIECHNICE_ROZKLAD`), z którego czyta aplikacja - zwykłe wdrożenie (build + up) wystarcza, bez ręcznego wgrywania.
+**Ani dane, ani kod pobierania nie leżą w repo, a serwer nigdy nie odpytuje kiedyPrzyjedzie.** `siechnice.py` nie importuje niczego sieciowego (pilnuje tego test). Kopię przygotowuje się poza projektem i wgrywa przez aplikację.
 
-**Serwer nigdy nie odpytuje kiedyPrzyjedzie.** Cały kod sieciowy jest w osobnym skrypcie `pobierz_siechnice.py`, którego `.dockerignore` nie wpuszcza do obrazu - w kontenerze po prostu nie ma czym tego zrobić. `siechnice.py` nie importuje niczego sieciowego (pilnuje tego test).
+### Wgranie kopii
 
-Przy każdej aktualizacji bazy każdy dzień tygodnia z kopii dostaje regułę w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia - dzięki temu kopia nie wygasa po tygodniu, a komunikat „rozkładu jeszcze nie opublikowano" dalej liczy się z paczki Wrocławia. Święta jeżdżą wg dnia tygodnia - kopia ich nie zna. Bez pliku aplikacja działa po prostu bez Siechnic.
+W trybie deweloperskim (`DEV_MODE=1`) panel ⚙ ma sekcję „Rozkład Siechnic” z przyciskiem „Wgraj rozkład Siechnic”. Po wybraniu pliku:
 
-Odświeżenie kopii (np. po zmianie rozkładu przez gminę), na własnym komputerze:
+1. Serwer sprawdza format (niżej). Zły plik zostaje odrzucony z komunikatem, co jest nie tak, a poprzednia kopia zostaje nietknięta.
+2. Dobry plik ląduje w miejscu z `SIECHNICE_ROZKLAD` - w kontenerze na osobnym wolumenie `siechnice` (`/app/data/siechnice/rozklad.json`), lokalnie domyślnie w `data/siechnice/rozklad.json`. Zapis idzie przez plik obok i podmianę, więc przebudowa nigdy nie czyta połowy pliku.
+3. Od razu, w tle, rusza przebudowa bazy - ta sama, co w nocy (pobiera też paczkę Wrocławia, ok. minuty). Dwie przebudowy nigdy nie biegną naraz: kolejna czeka, aż poprzednia skończy. Sekcja w ⚙ pokazuje, że przebudowa trwa, i potem, czy baza ma już wgrany rozkład.
 
-1. `python pobierz_siechnice.py` - pobiera tydzień od dziś do `rozklady/siechnice.json` (ok. 1900 zapytań, wspólne tempo ~3 zapytania/s, własny `User-Agent`; ok. 10 minut). Lepiej wybrać tydzień bez świąt.
-2. Commit i PR jak przy każdej zmianie w repo. Po wdrożeniu nowy plik trafia na wolumen sam, przy starcie kontenera.
+Poza trybem deweloperskim tego wgrania w ogóle nie ma - ani sekcji, ani adresu na serwerze. Hasła nie ma celowo. Na pustym wolumenie Siechnic po prostu nie ma, a reszta aplikacji działa bez zmian. Wgrana kopia przeżywa restart i nowe wdrożenie, bo wolumen jest osobny od obrazu.
+
+### Format pliku
+
+JSON z trzema polami (inne pola są pomijane) - surowe odpowiedzi API, żeby całe przekształcenie w kursy żyło w jednym miejscu w kodzie (`siechnice.py`):
+
+1. `stops` - lista słupków `[designator, kod, nazwa, lon*1e6, lat*1e6, ...]` (współrzędne w mikrostopniach, najpierw długość) - tak jak `GET /stops`.
+2. `lines_by_stop` - `{designator: ["800+80", ...]}`: numery linii obsługujących słupek (z `GET /api/directions/<słupek>`).
+3. `days` - dokładnie siedem dni, po jednym na każdy dzień tygodnia: `{"date": "RRRR-MM-DD", "departures_by_stop": {designator: [{"departure": sekundy od północy, "trip_id": liczba, "index": pozycja słupka w kursie}, ...]}}` (z `GET /api/timetables/<słupek>?date=`). Odjazdy mogą być tylko ze słupków wymienionych w `stops`.
+
+Plik musi dać co najmniej jeden kurs. Lepiej wziąć tydzień bez świąt.
+
+Przy każdej aktualizacji bazy każdy dzień tygodnia z kopii dostaje regułę w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia - dzięki temu kopia nie wygasa po tygodniu, a komunikat „rozkładu jeszcze nie opublikowano" dalej liczy się z paczki Wrocławia. Święta jeżdżą wg dnia tygodnia - kopia ich nie zna.
 
 ## Co zrobić, żeby było legalnie i trwale
 

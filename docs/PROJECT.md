@@ -30,7 +30,7 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 2. Pobiera zip (~12 MB), parsuje pliki CSV (`stops`, `routes`, `trips`,
    `stop_times`, `calendar`, `shapes` — geometria tras po ulicach/torach…)
    i buduje `data/gtfs_new.sqlite`.
-3. Dokleja do niej rozkład gminy Siechnice (`siechnice.py`) ze statycznej kopii, jeśli plik leży na miejscu — patrz niżej.
+3. Dokleja do niej rozkład gminy Siechnice (`siechnice.py`) ze statycznej kopii, jeśli ktoś ją wgrał — patrz niżej.
 4. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
    aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
    wczorajsza baza zostaje nietknięta.
@@ -50,7 +50,7 @@ sklejają się z istniejącymi po **zgodnej nazwie i bliskości**, więc kurs
 z Siechnic wjeżdża na ten sam `stop_id` co tramwaj: przesiadka bez kary za
 przejście i jeden marker na mapie zamiast dwóch.
 
-Serwer **nie odpytuje** tego API (`robots.txt` to `Disallow: /`, nie ma regulaminu ani zgody na ponowne wykorzystanie). Rozkład pobrano raz, ręcznie i lokalnie (`python pobierz_siechnice.py` — tego skryptu nie ma w obrazie Dockera), jako statyczną kopię jednego pełnego tygodnia w `rozklady/siechnice.json` w repo. W kontenerze entrypoint przy każdym starcie kopiuje ten plik z obrazu na osobny wolumen, z którego czyta aplikacja. Aktualizacja bazy dokleja ją co noc: każdy dzień tygodnia z kopii dostaje własny `service_id` z regułą w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia. Święta jeżdżą wg dnia tygodnia. Bez pliku baza ma same dane Wrocławia, a awaria tego kroku nie przerywa aktualizacji. Rozpoznanie źródeł, powody i wzór pisma do gminy o eksport GTFS: [SIECHNICE_DANE.md](SIECHNICE_DANE.md).
+Serwer **nie odpytuje** tego API (`robots.txt` to `Disallow: /`, nie ma regulaminu ani zgody na ponowne wykorzystanie), a w repo nie ma ani danych, ani kodu pobierania. Statyczną kopię jednego pełnego tygodnia wgrywa się w trybie deweloperskim (⚙ → „Wgraj rozkład Siechnic”): serwer sprawdza format, zapisuje plik na osobnym wolumenie (`SIECHNICE_ROZKLAD`) i od razu przebudowuje bazę w tle. Aktualizacja bazy dokleja kopię też co noc: każdy dzień tygodnia dostaje własny `service_id` z regułą w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia. Święta jeżdżą wg dnia tygodnia. Bez pliku baza ma same dane Wrocławia, a awaria tego kroku nie przerywa aktualizacji. Wszystkie przebudowy (start, noc, wgranie) dzielą jedną blokadę plikową (`data/gtfs_update.lock`), więc nigdy nie biegną dwie naraz. Format pliku, rozpoznanie źródeł, powody i wzór pisma do gminy o eksport GTFS: [SIECHNICE_DANE.md](SIECHNICE_DANE.md).
 
 Ma trzy punkty wejścia: wywołanie ręczne (albo z crona), start serwera
 i codzienny harmonogram. Ten ostatni to `start_daily_scheduler()` — wątek
