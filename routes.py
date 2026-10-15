@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import abort, jsonify, render_template, request
+from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
 import config
@@ -408,9 +409,14 @@ def init_routes(app):
             abort(404)
 
         if request.method == "POST":
-            if (request.content_length or 0) > SIECHNICE_MAX_BYTES:
+            # Limit tylko na tej trasie, nie na całej aplikacji. Werkzeug pilnuje go
+            # przy czytaniu strumienia, więc nie obejdzie go ani zaniżony
+            # Content-Length, ani kodowanie chunked.
+            request.max_content_length = SIECHNICE_MAX_BYTES
+            try:
+                upload = request.files.get("file")
+            except RequestEntityTooLarge:
                 return jsonify({"error": "Plik jest za duży jak na tydzień rozkładu."}), 413
-            upload = request.files.get("file")
             if upload is None:
                 return jsonify({"error": "Nie wybrano pliku."}), 400
             reason = siechnice.save_snapshot(upload.read(), siechnice.SNAPSHOT_PATH)

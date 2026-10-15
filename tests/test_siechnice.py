@@ -482,6 +482,33 @@ def test_zly_plik_odrzucony_z_komunikatem_bez_przebudowy(upload):
     assert upload.rebuilds == []
 
 
+def _za_duze_wgranie(client, monkeypatch, **kwargs):
+    import routes
+
+    monkeypatch.setattr(routes, "SIECHNICE_MAX_BYTES", 1024)
+    body = (b'--b\r\nContent-Disposition: form-data; name="file"; filename="x.json"\r\n\r\n'
+            + b"x" * 5000 + b"\r\n--b--\r\n")
+    return client.post("/api/dev/siechnice", input_stream=io.BytesIO(body),
+                       content_type="multipart/form-data; boundary=b", **kwargs)
+
+
+def test_za_duzy_plik_bez_naglowka_dlugosci_odrzucony(upload, monkeypatch):
+    response = _za_duze_wgranie(upload, monkeypatch)
+
+    assert response.status_code == 413
+    assert "za duży" in response.get_json()["error"]
+    assert not upload.snapshot_path.exists()
+    assert upload.rebuilds == []
+
+
+def test_za_duzy_plik_z_klamliwym_naglowkiem_odrzucony(upload, monkeypatch):
+    response = _za_duze_wgranie(upload, monkeypatch, headers={"Content-Length": "100"})
+
+    assert response.status_code == 413
+    assert not upload.snapshot_path.exists()
+    assert upload.rebuilds == []
+
+
 def test_bez_trybu_deweloperskiego_wgrania_nie_ma(upload, monkeypatch):
     monkeypatch.setenv("DEV_MODE", "")
 
