@@ -12,6 +12,7 @@ szybszy niż tramwaj - ktoś może chcieć jechać rowerem dlatego, że woli row
 Kanał GBFS operatora jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
+import http.client
 from datetime import date, datetime, time
 
 import bikes
@@ -603,3 +604,15 @@ def test_odsiew_rodzaju_dotyczy_wsiadania_nie_oddawania(monkeypatch):
 
     assert [place["id"] for place in places] == ["B"]
     assert [ride["id"] for ride in places[0]["rides"]] == ["A"]
+
+
+def test_przerwane_pobieranie_rowerow_to_503_a_nie_500(monkeypatch):
+    from app import app
+
+    def przerwij():
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(bikes, "stations", przerwij)
+
+    response = app.test_client().get("/api/bikes")
+    assert response.status_code == 503

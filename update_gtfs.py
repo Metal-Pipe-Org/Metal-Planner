@@ -17,6 +17,7 @@ Baza jest budowana obok jako gtfs_new.sqlite i podmieniana atomowo
 """
 
 import csv
+import fcntl
 import io
 import os
 import re
@@ -44,6 +45,13 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 DB_PATH = DATA_DIR / "gtfs.sqlite"
 NEW_DB_PATH = DATA_DIR / "gtfs_new.sqlite"
 ZIP_PATH = DATA_DIR / "gtfs_download.zip"
+
+# Przebudowę odpalają niezależnie: entrypoint, start serwera, nocny
+# harmonogram i wgranie rozkładu Siechnic - każda z innego procesu, a obie
+# piszą do tego samego gtfs_new.sqlite. Blokada plikowa (flock) działa między
+# procesami i znika sama, gdy proces padnie, więc nie zostaje po niej
+# zawieszony "trwa przebudowa".
+LOCK_PATH = DATA_DIR / "gtfs_update.lock"
 
 # Po ilu godzinach od ostatniej podmiany start serwera ma pobrać rozkład
 # na nowo. Chroni przed pobieraniem 12 MB po każdym zapisie pliku: reloader
@@ -291,12 +299,13 @@ def build_database(zip_path, db_path):
 
 
 def _merge_siechnice(db_path):
-    """Dokleja rozkład gminy Siechnice do świeżo zbudowanej bazy.
+    """Dokleja rozkład gminy Siechnice ze statycznej kopii do świeżo
+    zbudowanej bazy (patrz siechnice.py).
 
-    Awaria tego kroku nie przerywa aktualizacji: to osobne, cudze API bez
-    żadnej gwarancji dostępności (patrz siechnice.py), a rozkład Wrocławia -
-    właściwy przedmiot tej aktualizacji - jest już w bazie i ma wjechać na
-    miejsce niezależnie od tego, czy Siechnice akurat odpowiadają.
+    Awaria tego kroku nie przerywa aktualizacji: kopię wgrywa się ręcznie,
+    osobno od kodu, a rozkład Wrocławia - właściwy przedmiot tej
+    aktualizacji - jest już w bazie i ma wjechać na miejsce niezależnie od
+    tego, czy plik z Siechnicami da się przeczytać.
     """
     try:
         siechnice.update(db_path)
@@ -306,9 +315,19 @@ def _merge_siechnice(db_path):
 
 
 def run_update():
-    """Pełne przejście: pobranie, budowa, atomowa podmiana. True = udało się."""
-    started = time.monotonic()
+    """Pełne przejście: pobranie, budowa, atomowa podmiana. True = udało się.
+
+    Gdy inna przebudowa właśnie trwa, czeka na jej koniec zamiast ją pomijać:
+    tamta mogła przeczytać wgrany rozkład Siechnic, zanim przyszedł nowszy.
+    """
     DATA_DIR.mkdir(exist_ok=True)
+    with open(LOCK_PATH, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _run_update_locked()
+
+
+def _run_update_locked():
+    started = time.monotonic()
     try:
         download(find_current_feed_url(), ZIP_PATH)
         build_database(ZIP_PATH, NEW_DB_PATH)
@@ -431,6 +450,32 @@ def _run_update_subprocess():
     albo "BŁĄD aktualizacji:".
     """
     subprocess.run([sys.executable, str(Path(__file__).resolve())], check=False)
+
+
+def update_running():
+    """Czy jakiś proces właśnie przebudowuje bazę (patrz LOCK_PATH)."""
+    if not LOCK_PATH.exists():
+        return False
+    with open(LOCK_PATH) as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        return False
+
+
+def start_update_in_background():
+    """Przebudowa w tle, bez czekania na nią - np. po wgraniu rozkładu Siechnic.
+
+    Osobny proces, jak w harmonogramie (patrz _run_update_subprocess), a wątek
+    tylko po to, żeby na niego zaczekać i nie zostawić zombie.
+    """
+    thread = threading.Thread(
+        target=_run_update_subprocess, name="gtfs-update-upload", daemon=True
+    )
+    thread.start()
+    return thread
 
 
 def _daily_loop(hour):

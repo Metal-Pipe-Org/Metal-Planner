@@ -3622,6 +3622,7 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
             legs[0]["dep_sec"] = start_sec = rides[0]["dep_sec"] - legs[0]["_sec"]
         journeys.append(_summarize_journey(legs, rides, arrival, dep_sec,
                                            start_sec))
+        _drop_private(legs)
 
     return journeys
 
