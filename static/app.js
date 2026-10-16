@@ -5324,7 +5324,7 @@ function locateOnce(onPoint, onError) {
         position => onPoint({lat: position.coords.latitude,
                              lon: position.coords.longitude}),
         error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
-        {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
+        GEO_OPTIONS,
     );
 }
 
