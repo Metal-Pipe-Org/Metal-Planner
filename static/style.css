@@ -1746,6 +1746,10 @@ body.routes-off .results-body { display: none; }
 }
 
 .timetable-tip.leaflet-tooltip-top::before { border-top-color: var(--surface); }
+/* Przy krawędzi okna dymek otwiera się po drugiej stronie kropki. */
+.timetable-tip.leaflet-tooltip-bottom::before { border-bottom-color: var(--surface); }
+.timetable-tip.leaflet-tooltip-left::before { border-left-color: var(--surface); }
+.timetable-tip.leaflet-tooltip-right::before { border-right-color: var(--surface); }
 
 /* Etykietka przy drugim końcu przejazdu rowerem: godzina i odległość, nic
    więcej. Wisi na stałe tak długo, jak kursor stoi na kropce, z której ten
@@ -3029,14 +3033,24 @@ ul.tt-legend {
 /* Leaflet daje dymkowi nowrap i zero miejsca na zawijanie, więc długi opis
    auta wychodził poza ekran telefonu. Szerokość "do treści", ale nie większa
    niż okno bez marginesów; położenie koryguje hak na L.Tooltip w app.js.
-   Strzałka jedzie za kropką o --tip-shift, gdy dymek został przesunięty. */
+   Strzałka jedzie za kropką o --tip-shift, gdy dymek został przesunięty
+   wzdłuż kropki. */
 .leaflet-tooltip {
     width: max-content;
     max-width: calc(100vw - 16px);
     white-space: normal;
 }
 
+/* Etykietka przejazdu rowerem to jedna linijka niezależnie od kolejności
+   reguł w pliku - zawinięta godzina z odległością rozjeżdża się na mapie. */
+.leaflet-tooltip.bike-ride-label { white-space: nowrap; }
+
 .leaflet-tooltip-top::before,
 .leaflet-tooltip-bottom::before {
     margin-left: calc(-6px - var(--tip-shift, 0px));
+}
+
+.leaflet-tooltip-left::before,
+.leaflet-tooltip-right::before {
+    margin-top: calc(-6px - var(--tip-shift, 0px));
 }
