@@ -2877,8 +2877,8 @@ function timetableLinesHtml(data, mapSec) {
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
             // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
-            (d.trip ? `<span class="tt-live" data-trip="${esc(d.trip)}"`
-                      + ` data-stop="${esc(d.trip_stop)}">${boardLiveHtml(d.trip, d.trip_stop)}</span>` : '')
+            (d.trip ? `<span class="tt-live" data-trip="${escAttr(d.trip)}"`
+                      + ` data-stop="${escAttr(d.trip_stop)}">${boardLiveHtml(d.trip, d.trip_stop)}</span>` : '')
             + '</span>' +
         routeButtonHtml(d, 'trasa') + '</li>',
     ).join('');
