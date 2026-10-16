@@ -276,10 +276,13 @@ function escClass(value) {
 
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
+// `cable` to Polinka (zgłoszenie #165) - granat Politechniki, która ją prowadzi.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
+                     cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
+                    cable: 'Kolej linowa',
                     bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
 
 /** Autko do wiersza "jedziesz autem" na osi trasy. Bierze `currentColor`, tak
@@ -304,6 +307,8 @@ const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
 // zwykły słupek MPK, zanim jeszcze ktoś najedzie kursorem na nazwę.
 const TRAIN_STYLE = {radius: 5, weight: 1, color: '#1b5e20',
                      fillColor: '#2e7d32', fillOpacity: 0.85};
+// Stacja Polinki (#165) - jak stacja kolejowa, w kolorze Polinki.
+const CABLE_STYLE = {...TRAIN_STYLE, color: '#000d1f', fillColor: '#002147'};
 // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
 const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
                    fillColor: '#90a4ae', fillOpacity: 0.25};
@@ -327,7 +332,8 @@ function styleFor(name) {
         if (name === sel.end) return ENDPOINT_STYLE.end;
     }
     if (baseDimmed) return DIM_STYLE;
-    return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
+    const kind = stopKind.get(name);
+    return kind === 'train' ? TRAIN_STYLE : kind === 'cable' ? CABLE_STYLE : BASE_STYLE;
 }
 
 function setBaseDim(dim) {
@@ -810,7 +816,8 @@ const stopsReady = fetch('/api/stops')
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
             // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
-            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP` : s.name);
+            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP`
+                : s.kind === 'cable' ? `${s.name} · kolej linowa` : s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
             m.on('click', e => {
@@ -2823,7 +2830,11 @@ function timetableLinesHtml(data, mapSec) {
         const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
             + '|' + (d.flow || '');
         if (!groups.has(key)) groups.set(key, {d, secs: []});
-        groups.get(key).secs.push(d.sec);
+        const group = groups.get(key);
+        group.secs.push(d.sec);
+        // Pierwszy w grupie bywa wierszem dorobionym z mapy (spóźniony kurs,
+        // przyjazd) - „i" bierzemy z któregokolwiek odjazdu z serwera.
+        if (d.info && !group.d.info) group.d = {...group.d, info: d.info};
     }
     const rows = [];
     for (const {d, secs} of groups.values()) {
@@ -2855,7 +2866,12 @@ function timetableLinesHtml(data, mapSec) {
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
     const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
-        `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
+        // „i" za plakietką, w tej samej komórce siatki: za kierunkiem ucinałby
+        // go wielokropek, a osobny element przesunąłby kolumny wiersza.
+        (d.info
+            ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
+              + `${infoHtml(d.info)}</span>`
+            : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
         `<span class="tip-dir">${esc(d.headsign)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
@@ -3673,6 +3689,13 @@ function openJourney(index) {
     renderVehicles();
 }
 
+/** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
+    przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
+function infoHtml(text) {
+    return text ? `<span class="info info-inline" tabindex="0" role="button"`
+        + ` aria-label="${escAttr(text)}" data-tip="${escAttr(text)}">i</span>` : '';
+}
+
 function badgeHtml(leg) {
     // Pojazd, w którym się już siedzi (start z pokładu, patrz
     // onboard.mark_journeys), ma plakietkę z obwódką - na karcie propozycji
@@ -3954,7 +3977,7 @@ function detailHtml(journey) {
             rows.push(stopRow(leg.to_time, leg.to, 'last'));
             return;
         }
-        const stopWord = leg.mode === 'train'
+        const stopWord = leg.mode === 'train' || leg.mode === 'cable'
             ? plural(leg.stops_count, 'stacja', 'stacje', 'stacji')
             : plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków');
         const ile = `${leg.stops_count} ${stopWord} · ${leg.minutes} min`;
@@ -3972,6 +3995,7 @@ function detailHtml(journey) {
             // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
             // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
+            infoHtml(leg.info) +
             // Etap, w którym się już siedzi (patrz onboard.mark_journeys),
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
@@ -4134,6 +4158,8 @@ function scrollToSelected() {
 
 resultsBox.addEventListener('click', event => {
     if (routeClick(event)) return;
+    // „i" pokazuje dymek (showInfoTip) - nie zwija przy okazji karty.
+    if (event.target.closest('.info')) return;
 
     // Rozwinięcie przystanków po drodze to nie klik w kartę - ta by się
     // przy okazji zwinęła (patrz selectJourney).

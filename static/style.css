@@ -7,6 +7,7 @@
     --tram: #c62828;
     --bus: #1565c0;
     --train: #2e7d33;
+    --cable: #002147;                /* Polinka - granat Politechniki (#165) */
     --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
     --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
@@ -1007,6 +1008,7 @@ body.routes-off .results-body { display: none; }
 .badge.tram { background: var(--tram); }
 .badge.bus { background: var(--bus); }
 .badge.train { background: var(--train); }
+.badge.cable { background: var(--cable); }
 .badge.bike { background: var(--bike); }
 .badge.car { background: var(--car); }
 
@@ -1128,6 +1130,7 @@ body.routes-off .results-body { display: none; }
 .tl-ride.tram .tl-dot { background: var(--tram); }
 .tl-ride.bus .tl-dot { background: var(--bus); }
 .tl-ride.train .tl-dot { background: var(--train); }
+.tl-ride.cable .tl-dot { background: var(--cable); }
 .tl-ride.bike .tl-dot { background: var(--bike); }
 .tl-ride.car .tl-dot { background: var(--car); }
 
@@ -1227,6 +1230,7 @@ body.routes-off .results-body { display: none; }
 .tl-via.tram .tl-dot { background: var(--tram); color: var(--tram); }
 .tl-via.bus .tl-dot { background: var(--bus); color: var(--bus); }
 .tl-via.train .tl-dot { background: var(--train); color: var(--train); }
+.tl-via.cable .tl-dot { background: var(--cable); color: var(--cable); }
 
 .tl-via .tl-dot::before {
     content: "";
@@ -1285,6 +1289,7 @@ body.routes-off .results-body { display: none; }
 .line-badge.tram { color: var(--tram); border-color: var(--tram); }
 .line-badge.bus { color: var(--bus); border-color: var(--bus); }
 .line-badge.train { color: var(--train); border-color: var(--train); }
+.line-badge.cable { color: var(--cable); border-color: var(--cable); }
 .line-badge.other { color: var(--other); border-color: var(--other); }
 .line-badge.bike { color: var(--bike); border-color: var(--bike); }
 
@@ -1300,6 +1305,7 @@ body.routes-off .results-body { display: none; }
 .line-badge.solid.tram { background: var(--tram); }
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.train { background: var(--train); }
+.line-badge.solid.cable { background: var(--cable); }
 .line-badge.solid.car { background: var(--car); }
 .line-badge.solid.other { background: var(--other); }
 .line-badge.solid.bike { background: var(--bike); }
@@ -1325,6 +1331,7 @@ body.routes-off .results-body { display: none; }
 .vehicle-marker.tram { background: var(--tram); }
 .vehicle-marker.bus { background: var(--bus); }
 .vehicle-marker.train { background: var(--train); }
+.vehicle-marker.cable { background: var(--cable); }
 .vehicle-marker.other { background: var(--other); }
 
 /* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
@@ -1414,6 +1421,7 @@ body.routes-off .results-body { display: none; }
 .line-chip.tram { color: var(--tram); }
 .line-chip.bus { color: var(--bus); }
 .line-chip.train { color: var(--train); }
+.line-chip.cable { color: var(--cable); }
 .line-chip.other { color: var(--other); }
 .line-chip.bike { color: var(--bike); }
 
@@ -1425,6 +1433,8 @@ body.routes-off .results-body { display: none; }
 .line-cluster .line-chip.bus:hover { background: var(--bus); }
 .line-chip.picked.train,
 .line-cluster .line-chip.train:hover { background: var(--train); }
+.line-chip.picked.cable,
+.line-cluster .line-chip.cable:hover { background: var(--cable); }
 .line-chip.picked.other,
 .line-cluster .line-chip.other:hover { background: var(--other); }
 
@@ -1441,6 +1451,7 @@ body.routes-off .results-body { display: none; }
 .flow-tip-line.tram { color: var(--tram); }
 .flow-tip-line.bus { color: var(--bus); }
 .flow-tip-line.train { color: var(--train); }
+.flow-tip-line.cable { color: var(--cable); }
 .flow-tip-line.other { color: var(--other); }
 
 .flow-tip-row {
@@ -1577,6 +1588,7 @@ body.routes-off .results-body { display: none; }
 .line-cluster .line-chip-slot:hover .line-chip.tram { background: var(--tram); }
 .line-cluster .line-chip-slot:hover .line-chip.bus { background: var(--bus); }
 .line-cluster .line-chip-slot:hover .line-chip.train { background: var(--train); }
+.line-cluster .line-chip-slot:hover .line-chip.cable { background: var(--cable); }
 .line-cluster .line-chip-slot:hover .line-chip.other { background: var(--other); }
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 
@@ -2203,6 +2215,17 @@ body:not(.dev-mode) .dev-only { display: none; }
     color: var(--ink-faint);
     font: italic 700 10.5px/1 Georgia, serif;
     cursor: help;
+}
+.tt-badge-info { display: inline-flex; align-items: center; }
+
+/* „i" w treści (oś trasy, tablica odjazdów) - w wierszu, nie na prawym brzegu. */
+.info.info-inline {
+    float: none;
+    width: 14px;
+    height: 14px;
+    margin: 0 0 0 6px;
+    vertical-align: middle;
+    font-size: 9.5px;
 }
 .info:hover,
 .info:focus-visible { color: var(--ink); outline: none; }

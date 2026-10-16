@@ -71,6 +71,22 @@ wywołane z `app.py` (uruchomienie lokalne). Lokalna dodatkowo pomija bazę
 młodszą niż `GTFS_MAX_AGE_HOURS` (12 h) — reloader Flaska restartuje serwer
 po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
 
+#### Trzecie źródło — `polinka.py` (wpisane ręcznie)
+
+Polinki — kolei gondolowej Politechniki Wrocławskiej nad Odrą (zgłoszenie
+#165) — nie ma w żadnym rozkładzie, a PWr publikuje tylko godziny otwarcia
+(pwr.edu.pl/polinka). Moduł trzyma je ręcznie, z datą sprawdzenia
+(`UPDATED`): pn–pt 7:00–18:00, przerwa 13:30–14:00, weekendy i święta
+nieczynna (święta ruchome liczone z daty Wielkanocy). Rozkładu w ścisłym
+sensie też nie ma — dwie kabiny jeżdżą wahadłowo — więc przejazdy są
+ostrożne: odjazd co 5 min w obie strony, jazda 3 min. `gtfs.load_day` dokleja
+stacje i przejazdy tuż po kolei, przed budowaniem miejsc, więc przejścia
+piesze do przystanków obok powstają same. Etykieta „Kolejka Polinka" daje
+plakietkę „Polinka" w rodzaju `cable` (granat PWr). Godziny otwarcia i data
+sprawdzenia danych są pod ikonką „i" (`polinka.INFO`) przy Polince na osi
+trasy i w tablicy odjazdów — bez notki na wierzchu. Stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w
+podpowiedziach nazw. Do trybu rozkładów Polinka nie trafia.
+
 ### 2. Backend — Flask
 
 - **`gtfs.py`** — dostęp do SQLite. Przy pierwszym zapytaniu danego dnia
