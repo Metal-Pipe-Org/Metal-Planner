@@ -165,6 +165,19 @@ def _stuknij(page, punkt):
     page.touchscreen.tap(punkt["x"], punkt["y"])
 
 
+def _najedz(page, punkt):
+    """Kursor na punkt - ale dopiero, gdy Leaflet znowu słucha ruchu myszy.
+    Płótno przepuszcza najechanie raz na 32 ms, a ruch w tym oknie gubi
+    bez śladu (bez ostatniego ruchu na końcu), więc ruch tuż po poprzednim
+    bywa cichy i dymek zostaje po zjechaniu kursora z linii."""
+    page.wait_for_function("""() => {
+        const renderers = new Set();
+        window.plannerBridge.map.eachLayer(l => l._renderer && renderers.add(l._renderer));
+        return [...renderers].every(r => !r._mouseHoverThrottled);
+    }""", timeout=2000)
+    page.mouse.move(punkt["x"], punkt["y"])
+
+
 def _tablica_przeszla(page, przed):
     """Na telefonie tablica odjazdów kropki nie wisi w dymku, tylko w okienku
     nad zakładkami - stuknięta kropka podmienia jego treść."""
@@ -287,11 +300,11 @@ def test_na_komputerze_dalej_wskazuje_kursor(przegladarka, adres):
     marginesem kursora, a klik obok nie wskazuje ich jak stuknięcie."""
     context, page, bledy = _wyszukaj(przegladarka, adres, KOMPUTER)
     punkt = _szukaj(page, odl=2)
-    page.mouse.move(punkt["x"], punkt["y"])
+    _najedz(page, punkt)
     page.wait_for_selector(DYMEK_LINII, timeout=2000)
     # Palcem wskazałoby linię tak daleko - kursorem już nie.
     daleko = _szukaj(page)
-    page.mouse.move(daleko["x"], daleko["y"])
+    _najedz(page, daleko)
     page.wait_for_selector(DYMEK_LINII, state="detached", timeout=2000)
     page.mouse.click(daleko["x"], daleko["y"])
     page.wait_for_timeout(300)
@@ -299,7 +312,7 @@ def test_na_komputerze_dalej_wskazuje_kursor(przegladarka, adres):
     # To samo przy kropce przesiadki: palec by ją trafił, kursor nie.
     obok = _szukaj(page, tryb="kropka", rodzaj="przesiadka", odl=OBOK_PX)
     przed = page.inner_text(TABLICA)
-    page.mouse.move(obok["x"], obok["y"])
+    _najedz(page, obok)
     page.mouse.click(obok["x"], obok["y"])
     page.wait_for_timeout(500)
     assert not page.is_visible(DYMEK_TABLICY)
