@@ -1536,6 +1536,22 @@ checks.tryb_wzgledny_mowi_o_rozjezdzie = (() => {
 })();
 
 
+/* Zgaszony 🚗 zdejmuje z listy propozycje z Traficarem (zgłoszenie #163) -
+   składa je serwer, więc zgaszenie idzie w zapytaniu. Zapalony nie dokłada
+   nic: odpowiedź jest taka jak dotąd. */
+checks.auto_gaszone_leci_do_serwera = (() => {
+    app.setCarsOn(true);
+    const zapalone = app.queryParams().toString();
+    app.setCarsOn(false);
+    const zgaszone = app.queryParams().toString();
+    app.setCarsOn(true);
+    return {
+        ok: !zapalone.includes('traficar=') && zgaszone.includes('traficar=0'),
+        zapalone, zgaszone,
+    };
+})();
+
+
 /* Próg trybu względnego (suwak w ⚙, #231) leci razem z wyborem pojazdu. */
 checks.prog_trybu_wzglednego_leci_do_serwera = (() => {
     document.getElementById('onboard-slack').value = '5';

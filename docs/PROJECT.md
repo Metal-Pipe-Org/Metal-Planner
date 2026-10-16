@@ -288,7 +288,10 @@ narysowanej mapie zawężają się do niej — pojazdy do linii z tej mapy, auta
 i rowery do tych, do których mapa dowozi (punkty 15 i 16 kontraktu). Rower to
 wybór PASAŻERA („mam konto w WRM" albo nie), a nie strojenie algorytmu,
 dlatego stoi tu, a nie pod ⚙: włączony 🚲 albo ⚡ dokłada też do listy
-propozycje z rowerem (`bikes=1` w `/api/flow`). Stan przycisków przeżywa
+propozycje z rowerem (`bikes=1` w `/api/flow`), a wsiada się w nich tylko
+tam, gdzie stoi rower włączonego rodzaju. Lista mówi o tym samym, co mapa
+(zgłoszenie #163), więc zgaszony 🚗 zdejmuje z niej propozycje kończące się
+Traficarem (`traficar=0`). Stan przycisków przeżywa
 odświeżenie strony (`localStorage`), a ich zmiana przelicza gotowy wynik bez
 ruszania kadru — relacja się nie zmieniła.
 
@@ -672,7 +675,8 @@ Ile kropek stoi na mapie, rozstrzyga reguła z punktu 16 kontraktu: najpierw
 stacje (o której jest się przy rowerze, o której w celu, ile przesiadek —
 zbiór Pareto i kolejne poziomy, osobny suwak „Ile stacji z rowerem"), potem
 przejazdy na każdej stacji osobno. Rodzaj roweru (zwykły, elektryczny) to
-odsiew miejsc, nie zmiana wyceny.
+odsiew miejsc, nie zmiana wyceny — ten sam na mapie i przy stacji wsiadania
+w propozycjach (`bikes.ma_rodzaj`).
 
 ### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
 

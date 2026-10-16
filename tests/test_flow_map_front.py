@@ -597,6 +597,12 @@ def test_relative_mode_threshold_only_goes_with_a_vehicle(front):
     _check(front, "prog_trybu_wzglednego_leci_do_serwera")
 
 
+def test_cars_off_is_sent_to_the_server(front):
+    """Zgłoszenie #163: zgaszony 🚗 to lista bez propozycji z Traficarem -
+    składa je serwer, więc zgaszenie idzie w zapytaniu."""
+    _check(front, "auto_gaszone_leci_do_serwera")
+
+
 def test_bike_kinds_are_switches_sent_to_the_server(front):
     """Zgłoszenie #147: rowery elektryczne i zwykłe to dwa przełączniki pod
     zębatką, oba domyślnie włączone - ich stan idzie w zapytaniu, bo odsiew
