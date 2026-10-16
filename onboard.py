@@ -78,8 +78,18 @@ def _line_of(day, trip):
     return (num or label), timetables.MODE_OF_LABEL.get(kind, "other")
 
 
+def _digits(text):
+    return "".join(c for c in text if c.isdigit())
+
+
 def _matches(day, trip, num, mode, headsign):
     """Czy ten kurs jest tym, o którym mówi pasażer.
+
+    Pociąg rozpoznajemy po samych cyfrach numeru (zgłoszenie #167): na
+    bilecie i tablicy stoi „64402", a w rozkładzie „KD 64402" - przewoźnik
+    nic tu nie rozstrzyga, nie trafia nawet do porównania. Numer bywa
+    w ciągu doby wspólny dla dwóch przewoźników (IC 1130 i WKD 1130), a wtedy
+    kurs rozstrzyga kierunek - front bez niego niczego nie wysyła.
 
     Kierunek porównujemy luźno (bez wielkości liter i białych znaków) i tylko
     wtedy, gdy pytający go podał: napis z czoła pojazdu bywa skrócony, a i tak
@@ -87,9 +97,12 @@ def _matches(day, trip, num, mode, headsign):
     krawędzi, więc linia mija go tylko w jedną stronę.
     """
     trip_num, trip_mode = _line_of(day, trip)
-    if trip_num.casefold() != num.casefold():
-        return False
     if mode and trip_mode != mode:
+        return False
+    if trip_mode == "train":
+        if not _digits(num) or _digits(trip_num) != _digits(num):
+            return False
+    elif trip_num.casefold() != num.casefold():
         return False
     if headsign:
         return day.trip_info[trip][1].strip().casefold() == headsign.strip().casefold()
@@ -267,6 +280,63 @@ def mark_journeys(journeys, ride):
     return journeys
 
 
+# Ile pociągów najwyżej w podpowiedziach numeru (patrz trains).
+TRAIN_SUGGESTIONS = 8
+
+
+def trains(day, query, limit=TRAIN_SUGGESTIONS):
+    """Pociągi dnia, których numer zaczyna się od wpisanych cyfr - podpowiedzi
+    w polu „linia" (zgłoszenie #167). Wszystkie pociągi doby, nie tylko te
+    przez Wrocław: siedzący w pociągu może jechać skądkolwiek.
+
+    Z serwera, nie w stronie jak lista linii: pociągów jest ok. 7 tys.
+    dziennie, a lista zależy od daty - pół megabajta, z którego pasażer
+    potrzebuje jednej pozycji.
+    """
+    wanted = _digits(query or "")
+    if len(wanted) < 2:
+        return []
+    found = {}
+    for trip, (label, headsign) in day.trip_info.items():
+        if not label.startswith("Pociąg "):
+            continue
+        number = _digits(label)
+        if number.startswith(wanted):
+            found.setdefault((number, label, headsign), None)
+    out = [{"num": number, "label": label.partition(" ")[2], "headsign": headsign}
+           for number, label, headsign in sorted(found, key=lambda k: (len(k[0]), k))]
+    return out[:limit]
+
+
+def _train_directions(num, day):
+    """Kierunki pociągu dla wyboru „jestem w pojeździe" - ten sam kształt, co
+    directions dla linii. Kierunek jest zwykle jeden (stacja docelowa), a
+    stacje biorą się z jego przebiegu w dniu (pkp.augment_day) - tylko te,
+    które umiemy postawić na mapie, bo tylko z nich da się wystartować."""
+    wanted = _digits(num or "")
+    if not wanted:
+        return {"error": "Podaj numer pociągu."}
+    grouped = {}
+    for trip, stops in day.pkp_trip_stops.items():
+        label, headsign = day.trip_info.get(trip, ("", ""))
+        if _digits(label) != wanted:
+            continue
+        entry = grouped.setdefault(headsign.strip().casefold(), {
+            "headsign": headsign, "trips": 0, "stops": [], "label": label})
+        entry["trips"] += 1
+        if len(stops) > len(entry["stops"]):
+            entry["stops"] = [{"id": s, "name": day.stop_names[s]} for s, _, _ in stops]
+    if not grouped:
+        return {"error": f"Pociąg {wanted} nie jedzie tego dnia."}
+    out = []
+    for entry in sorted(grouped.values(), key=lambda d: (-d["trips"], d["headsign"])):
+        out.append({"headsign": entry["headsign"],
+                    "from": entry["stops"][0]["name"], "to": entry["stops"][-1]["name"],
+                    "trips": entry["trips"], "stops": entry["stops"]})
+    label = next(iter(grouped.values()))["label"]
+    return {"num": wanted, "mode": "train", "label": label, "directions": out}
+
+
 def directions(num, day, mode=None):
     """Kierunki linii pod wybór "jestem w pojeździe": co pisze na czole
     pojazdu i jakie przystanki ma jeszcze przed sobą.
@@ -284,6 +354,16 @@ def directions(num, day, mode=None):
     wszystkie warianty kierunku - to liczba kursów jadących tam dzisiaj, a nie
     liczba kursów jednego wariantu.
     """
+    if mode == "train":
+        # Brak bazy to ten sam komunikat, co przy podpowiedziach pociągów
+        # (/api/onboard/trains) - bez treści wyjątku, bo ta idzie do klienta.
+        try:
+            loaded = gtfs.load_day(day)
+        except FileNotFoundError:
+            return {"error": "Nie udało się wczytać danych rozkładu."}
+        data = _train_directions(num, loaded)
+        return data if "error" in data else {**data, "date": day.isoformat()}
+
     data = timetables.line_timetable(num, day, mode, geometry=False)
     if "error" in data:
         return data

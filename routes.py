@@ -325,6 +325,16 @@ def init_routes(app):
             request.args.get("mode") or None,
         ))
 
+    @app.route("/api/onboard/trains")
+    def api_onboard_trains():
+        """Podpowiedzi numeru pociągu w polu „linia" (zgłoszenie #167) -
+        pociągi wybranego dnia, których numer zaczyna się od wpisanych cyfr."""
+        try:
+            day = gtfs.load_day(_day_arg())
+        except FileNotFoundError:
+            return jsonify({"error": "Nie udało się wczytać danych rozkładu."}), 503
+        return jsonify({"trains": onboard.trains(day, request.args.get("q", ""))})
+
     @app.route("/api/train_delays")
     def api_train_delays():
         """Opóźnienia pociągów z pokazanych tras (zgłoszenie #71, patrz

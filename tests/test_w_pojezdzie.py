@@ -407,3 +407,67 @@ def test_petla_koncowa_poza_rozkladem_nie_kasuje_kursu(install_day):
                               density=planner.MAX_MAP_DENSITY)
     assert wynik["onboard"]["late_sec"] == 600
     assert wynik["journeys"] and wynik["journeys"][0]["arrival"] == "01:05"
+
+
+# ------------------------------------------------- pociągi (zgłoszenie #167)
+
+
+def _dzien_z_pociagiem():
+    """Pociąg KD 64402 z A przez B do C, i autobus 644 przez B - żeby było
+    widać, że numer pociągu nie łapie linii o tych samych cyfrach."""
+    day = make_day([
+        {"trip_id": "PKP:1:1", "label": "Pociąg KD 64402", "headsign": "C",
+         "stops": [("A", 600, 600), ("B", 1200, 1260), ("C", 2400, 2400)]},
+        {"trip_id": "autobus", "label": "Autobus 644", "headsign": "C",
+         "stops": [("B", 1260, 1260), ("C", 3000, 3000)]},
+    ])
+    day.pkp_trip_stops["PKP:1:1"] = [("A", 600, 600), ("B", 1200, 1260),
+                                     ("C", 2400, 2400)]
+    return day
+
+
+def test_pociag_rozpoznaje_sie_po_samych_cyfrach():
+    """Na bilecie stoi „64402", w rozkładzie „KD 64402" - oba trafiają."""
+    for numer in ("64402", "KD 64402", "kd64402"):
+        kurs = onboard.find_ride(_dzien_z_pociagiem(), numer, "train", "B", 1260)
+        assert kurs["trip"] == "PKP:1:1", numer
+        assert kurs["mode"] == "train"
+    assert "error" in onboard.find_ride(_dzien_z_pociagiem(), "6440", "train", "B", 1260)
+
+
+def test_podpowiedzi_pociagow_po_poczatku_numeru():
+    day = _dzien_z_pociagiem()
+    assert onboard.trains(day, "6") == []          # za mało cyfr
+    assert onboard.trains(day, "644") == [
+        {"num": "64402", "label": "KD 64402", "headsign": "C"}]
+    assert onboard.trains(day, "645") == []
+
+
+def test_kierunek_i_stacje_pociagu():
+    """Kierunek pociągu to jego stacja docelowa, a stacje - cały przebieg."""
+    wynik = onboard._train_directions("64402", _dzien_z_pociagiem())
+    assert wynik["mode"] == "train" and wynik["num"] == "64402"
+    [kierunek] = wynik["directions"]
+    assert kierunek["headsign"] == "C"
+    assert [s["id"] for s in kierunek["stops"]] == ["A", "B", "C"]
+    assert "error" in onboard._train_directions("11111", _dzien_z_pociagiem())
+
+
+def test_brak_bazy_pociagow_nie_wypuszcza_tresci_wyjatku(monkeypatch):
+    """Bez data/gtfs.sqlite podpowiedzi i kierunki pociągu mówią, że nie ma
+    danych - ale bez treści wyjątku (ścieżki pliku), bo ta idzie do klienta."""
+    import gtfs
+    from app import app
+
+    def bez_bazy(day):
+        raise FileNotFoundError("/sekretna/sciezka/gtfs.sqlite")
+
+    monkeypatch.setattr(gtfs, "load_day", bez_bazy)
+    client = app.test_client()
+
+    podpowiedzi = client.get("/api/onboard/trains?q=644")
+    assert podpowiedzi.status_code == 503
+    kierunki = client.get("/api/onboard?num=64402&mode=train")
+    assert "error" in kierunki.get_json()
+    for odpowiedz in (podpowiedzi, kierunki):
+        assert "sekretna" not in odpowiedz.get_data(as_text=True)
