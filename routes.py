@@ -322,8 +322,8 @@ def init_routes(app):
         when = _day_arg()
         try:
             day = gtfs.load_day(when)
-        except FileNotFoundError as e:
-            return jsonify({"error": str(e)}), 503
+        except FileNotFoundError:
+            return jsonify({"error": "Nie udało się wczytać danych rozkładu."}), 503
         return jsonify({"delays": pkp_live.delays(day, trips, when)})
 
     @app.route("/api/stop_board")
