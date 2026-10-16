@@ -168,7 +168,6 @@
           tam, gdzie akurat było miejsce. Instalacja i ustawienia zostają
           wyżej: nie są warstwami, tylko rzeczami o samej aplikacji.
         #}
-        <div class="layer-bar" role="group" aria-label="Warstwy na mapie">
             {# Rodzaj roweru to osobny wybór, nie ranking (zgłoszenie #147):
                kto chce elektryka, nie weźmie zwykłego. Oba zgaszone znaczą
                dokładnie to, co dawniej zgaszony jeden przycisk „Rowery”.
@@ -179,6 +178,8 @@
                kursorem i opis dla czytnika ekranu, oba pełnym zdaniem. Rower
                dostaje przez to dwa RÓŻNE znaki: dwa takie same byłyby bez
                podpisów nie do odróżnienia. #}
+        <div class="app-tools">
+        <div class="layer-bar" role="group" aria-label="Warstwy na mapie">
             <button id="vehicles-toggle" class="icon-button layer-button"
                     title="Autobusy i tramwaje na żywo"
                     aria-label="Pokaż autobusy i tramwaje na żywo"
@@ -199,6 +200,25 @@
                     title="Rowery miejskie elektryczne (WRM)"
                     aria-label="Pokaż elektryczne rowery miejskie"
                     aria-pressed="false">⚡</button>
+        </div>
+
+        {#
+          Moje miejsca: trzy przyciski „jedź tam stąd". Pusty (+, przerywana
+          ramka) otwiera okno, w którym przypisuje się mu miejsce i ikonę;
+          przypisany wpisuje miejsce w „Dokąd", a obecną pozycję z GPS
+          w „Skąd" i od razu szuka. Zmienia się je przytrzymaniem (albo
+          prawym przyciskiem myszy). Treść przycisków składa app.js - tu
+          tylko miejsce.
+
+          Stoją w rzędzie obok warstw, za kreską - nie są warstwą, ale
+          też są „przyciskiem do mapy". Na telefonie w widoku mapy schodzą
+          jak warstwy na samą mapę: kolumna przy LEWEJ krawędzi (phone.css),
+          a w zakładkach z listą znikają razem z warstwami (#257).
+        #}
+        {% if not data_error %}
+        <span class="tools-sep" aria-hidden="true"></span>
+        <div class="places-bar" id="places-bar" role="group" aria-label="Moje miejsca"></div>
+        {% endif %}
         </div>
     </header>
 
@@ -284,11 +304,12 @@
         <button type="button" id="ob-summary" class="onboard-summary" hidden
                 aria-controls="onboard-fields" aria-expanded="true"></button>
 
-        {# Rozpoznany kurs nie może jeszcze być przy tym przystanku (#231).
-           Ostrzeżenie, nie pytanie: mapa i tak jest liczona, a wybór pojazdu
-           poprawia się przez „zmień”. Wygląda jak pytanie o przystanek
-           przy GPS, więc dzieli z nim styl; nie ma na co odpowiadać, więc
-           zostaje tylko mały „×” w rogu. #}
+        {# Tryb względny (#231): rozpoznany kurs jest według rozkładu przy
+           przystanku wyraźnie nie teraz, więc jedzie na mapie od teraz.
+           Komunikat, nie pytanie: mapa i tak jest liczona, a wybór pojazdu
+           poprawia się przez „zmień”. Kształt dzieli z pytaniem o przystanek
+           przy GPS, ale jest żółty - mówi o czymś, co nie zgadza się
+           z rozkładem. Nie ma na co odpowiadać, więc zostaje tylko „×”. #}
         <div class="locate-offer" id="ob-warn" role="status" hidden>
             <button type="button" class="icon-button" id="ob-warn-close"
                     aria-label="Zamknij">×</button>
@@ -542,6 +563,72 @@
     </p>
 
 </dialog>
+
+{% if not data_error %}
+{#
+  Okno jednego z „moich miejsc" (pasek .places-bar). Miejscem jest przystanek
+  z podpowiedzi albo punkt - wpisane współrzędne, obecna pozycja (◎) albo
+  klik w mapę - czyli dokładnie to, czym może być cel wyszukiwania.
+#}
+<dialog id="place-dialog" class="card" aria-labelledby="place-title">
+
+    <header class="dev-head">
+        <h2 id="place-title">Moje miejsce</h2>
+        <form method="dialog">
+            <button class="icon-button" title="Zamknij" aria-label="Zamknij">✕</button>
+        </form>
+    </header>
+
+    <form id="place-form" class="place-form" novalidate>
+        <fieldset class="place-icons">
+            <legend>Ikona</legend>
+            {% for icon, label in [('🏠', 'Dom'), ('💼', 'Praca'), ('🎓', 'Uczelnia'),
+                                   ('🏫', 'Szkoła'), ('🛒', 'Zakupy'), ('🏋️', 'Siłownia'),
+                                   ('❤️', 'Bliscy'), ('☕', 'Kawa'), ('🌳', 'Park'),
+                                   ('⭐', 'Ulubione')] %}
+            <label class="place-icon" title="{{ label }}">
+                <input type="radio" name="place-icon" value="{{ icon }}" aria-label="{{ label }}">
+                <span aria-hidden="true">{{ icon }}</span>
+            </label>
+            {% endfor %}
+        </fieldset>
+
+        <label class="place-label" for="place-where">Miejsce</label>
+        <div class="ac-field place-field">
+            <input type="text" id="place-where" class="with-action" autocomplete="off"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false"
+                   aria-controls="place-where-list"
+                   placeholder="Przystanek albo 51.1093, 17.0386">
+            <button type="button" id="place-locate" class="icon-button in-field"
+                    title="Tu, gdzie teraz jestem"
+                    aria-label="Ustaw miejsce na mojej lokalizacji">◎</button>
+            <ul class="ac-list" id="place-where-list" role="listbox" hidden
+                aria-label="Podpowiedzi przystanków"></ul>
+        </div>
+        <button type="button" id="place-pick" class="button place-pick">Wskaż na mapie</button>
+
+        <p class="place-msg" id="place-msg" role="status" hidden></p>
+        <p class="field-hint">
+            Przytrzymaj przycisk miejsca (albo kliknij go prawym przyciskiem
+            myszy), żeby je później zmienić.
+        </p>
+
+        <div class="place-actions">
+            <button type="button" id="place-remove" class="button">Usuń</button>
+            <button type="submit" class="button primary">Zapisz</button>
+        </div>
+    </form>
+
+</dialog>
+
+{# Wskazywanie miejsca na mapie: okno chowa się, żeby mapę było widać,
+   a ten pasek mówi, na co mapa teraz czeka. #}
+<div id="place-pick-hint" class="toast" role="status" hidden>
+    <span id="place-pick-text">Kliknij miejsce na mapie</span>
+    <button type="button" id="place-pick-cancel" class="toast-close icon-button"
+            aria-label="Anuluj wskazywanie">✕</button>
+</div>
+{% endif %}
 
 <div id="dev-panel" class="card hidden">
 
@@ -939,6 +1026,21 @@
                   data-tip="Lista proponuje przesiadkę jako pierwszą dopiero, gdy oszczędza co najmniej tyle minut względem jazdy tym samym pojazdem.">i</span>
         </label>
         <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
+    </div>
+
+    </details>
+
+    {# Tryb względny przy starcie z pokładu (#231, patrz onboard.find_ride). #}
+    <details class="dev-fold dev-only" id="fold-onboard">
+    <summary>Jestem w pojeździe <span class="dev-badge">DEV</span></summary>
+
+    <div class="field">
+        <label for="onboard-slack">
+            Tryb względny od <output id="onboard-slack-value">3</output> min
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Gdy kurs jest według rozkładu przy wybranym przystanku o więcej minut wcześniej albo później niż teraz, pojazd jedzie na mapie od teraz, a reszta zostaje przy rozkładzie. Do tylu minut liczymy wprost z rozkładu.">i</span>
+        </label>
+        <input type="range" id="onboard-slack" min="0" max="15" step="1" value="3">
     </div>
 
     </details>

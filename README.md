@@ -42,16 +42,19 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
    każde, którego nie bije inne naraz w godzinie dojścia, zniżce z programu
    „Ogarniam" i szacowanym przyjeździe do celu. Najechanie na auto pokazuje
    strefę, w której da się je oddać. Na liście propozycji może też stanąć
-   trasa kończąca się autem.
+   trasa kończąca się autem — zgaszony 🚗 zdejmuje ją z listy.
 8. **Rower miejski (WRM).** Przyciski 🚲 (zwykłe) i ⚡ (elektryczne) dokładają
    na mapę stacje i rowery luzem, z których przejazd prowadzi do czegoś, co
    mapa rysuje; przejazdy widać pod kursorem. Te same przyciski dokładają
-   propozycje z rowerem do listy.
+   propozycje z rowerem do listy — tylko z wsiadaniem tam, gdzie stoi rower
+   włączonego rodzaju.
 9. **Pojazdy na żywo.** Przycisk ◉ pokazuje autobusy i tramwaje w ruchu —
    przy narysowanej mapie tylko linie z tej mapy.
 10. **Kolej.** Z kluczem `PKP_API_KEY` w wynikach pojawiają się pociągi PKP,
     w tej samej wyszukiwarce co tramwaje i autobusy.
-11. **Aplikacja (PWA).** Na telefonie „Dodaj do ekranu głównego", na pulpicie
+11. **Polinka.** Kolej gondolowa Politechniki nad Odrą jest w wyszukiwarce
+    i na mapie, z ręcznie wpisanymi godzinami (PWr nie publikuje rozkładu).
+12. **Aplikacja (PWA).** Na telefonie „Dodaj do ekranu głównego", na pulpicie
     ikona ⤓ w nagłówku. Raz obejrzana okolica mapy działa bez internetu;
     samo wyszukiwanie wymaga sieci. Instalację przeglądarki proponują tylko
     po HTTPS albo na `localhost`.

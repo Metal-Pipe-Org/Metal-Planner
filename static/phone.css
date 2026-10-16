@@ -5,7 +5,8 @@
 
    Ekran mapy, od góry:
    - panel: karta wyszukiwania, po wyszukaniu zwinięta do jednej linijki;
-   - kolumna warstw przy prawej krawędzi, tuż pod panelem;
+   - kolumna warstw przy prawej krawędzi, tuż pod panelem, a moich miejsc
+     przy lewej;
    - dok: pasek z czasem podróży i okienko z rozkładem, jedno nad drugim;
    - zakładki Mapa / Trasy / Rozkład.
    Zakładki „Trasy" i „Rozkład" to ten sam panel na cały ekran. */
@@ -109,9 +110,37 @@ body.view-map .layer-button {
 
 body.view-map .layer-button:not(.active) { background: var(--surface); }
 
+/* Moje miejsca to samo lustrzanie: kolumna przy LEWEJ krawędzi, na tej samej
+   wysokości co warstwy. Brak miejsca liczy phone.js osobno (places-row /
+   places-off), bo kolumna miejsc jest krótsza od warstw. */
+body.view-map .places-bar {
+    position: fixed;
+    top: calc(var(--panel-bottom, 0px) + 8px);
+    left: 8px;
+    flex-direction: column;
+}
+
+body.view-map.places-row .places-bar { flex-direction: row; }
+body.view-map.places-off .places-bar { display: none; }
+
+body.view-map .place-button {
+    width: 44px;
+    height: 44px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+
+/* Na szerokim ekranie rząd warstw i miejsc to jeden element paska; tu oba
+   wychodzą na mapę albo znikają, a pusty rząd dokładałby paskowi z nazwą
+   odstęp - i inną wysokość niż na komputerze (#257). */
+.app-tools { display: contents; }
+.tools-sep { display: none; }
+
 /* Zakładki z listą nie pokazują mapy - warstw nie ma tam na czym pokazać.
-   Zostawione w pasku z nazwą dokładałyby mu drugi rząd (#257). */
-body.view-list .layer-bar { display: none; }
+   Zostawione w pasku z nazwą dokładałyby mu drugi rząd (#257). Moje miejsca
+   znikają razem z nimi: „jedź tam stąd" i tak kończy się na mapie. */
+body.view-list .layer-bar,
+body.view-list .places-bar { display: none; }
 
 /* --------------------------------------------- karta wyszukiwania --- */
 

@@ -534,7 +534,7 @@ const INJECTION = `
     get resultsBox() { return resultsBox; },
     flowHitsAt, corridorOptions, pickFromCluster, handleFlowHover, clearFlowHover,
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
-    legLayers, detailHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
+    legLayers, detailHtml, summaryHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
     waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
     timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
     keepWithinHorizon, recentFirst,
@@ -562,7 +562,7 @@ const INJECTION = `
     suggestionHtml, placeTimeHeadline,
     // Rower jest odtąd wyborem pasażera („mam konto w WRM"), więc na mapie
     // pojawia się dopiero po zapaleniu warstwy - testy muszą to zrobić same.
-    setBikesOn, setBikeKind, setCarsOn,
+    setBikesOn, setBikeKind, setCarsOn, warnOnboardRide,
     nodePoint, dotOpts, seedStartPanel,
     prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
     pickEndpoint,

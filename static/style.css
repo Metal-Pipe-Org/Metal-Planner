@@ -7,6 +7,7 @@
     --tram: #c62828;
     --bus: #1565c0;
     --train: #2e7d33;
+    --cable: #002147;                /* Polinka - granat Politechniki (#165) */
     --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
     --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
@@ -260,6 +261,73 @@ body.panel-hidden #sidebar {
     gap: 6px;
 }
 
+/* Warstwy i moje miejsca w jednym rzędzie, rozdzielone kreską. Przy komplecie
+   (z 🅿) to osiem przycisków - w panelu stałej szerokości mieszczą się
+   z zapasem kilkunastu pikseli. Gdy kolejny przycisk go zje, zamiast zawijać
+   rząd albo wystawać, przyciski kurczą się równo, najwyżej do 30 px; dopóki
+   miejsca jest dość, zostają pełne 36 px. (Na telefonie rzędu nie ma - patrz
+   phone.css.) Pilnuje tego test
+   test_pasek_przyciskow_w_jednym_rzedzie (tests/test_uklad_telefonu.py). */
+.app-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.app-tools .layer-bar,
+.app-tools .places-bar { min-width: 0; }
+
+.app-tools .icon-button {
+    flex-shrink: 1;
+    min-width: 30px;
+}
+
+.tools-sep {
+    flex: none;
+    align-self: stretch;
+    width: 1px;
+    margin: 4px 3px;
+    background: var(--line);
+}
+
+.places-bar {
+    display: flex;
+    gap: 6px;
+}
+
+/* Moje miejsca rozkładają wyszukiwanie tras - w rozkładach nie mają czego
+   wypełnić. */
+body.mode-timetable .places-bar,
+body.mode-timetable .tools-sep { display: none; }
+
+/* Pusty: „+" w przerywanej ramce - miejsce, które czeka na przypisanie.
+   Przypisany: ikona miejsca w pełnej ramce. Przytrzymanie zmienia miejsce,
+   więc palec nie może przy tym zaznaczać tekstu ani wołać menu iPhone'a. */
+.place-button {
+    border: 1.5px dashed var(--ink-faint);
+    background: transparent;
+    font-size: 18px;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.place-button.set {
+    border-style: solid;
+    border-color: var(--ink-soft);
+    background: var(--surface-alt);
+}
+
+/* Czekanie na GPS - jak ◎ w polu startu. */
+.place-button:disabled {
+    cursor: progress;
+    animation: locate-pulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .place-button:disabled { animation: none; opacity: 0.5; }
+}
+
 /* Miasto w jednej linii z nazwą, a nie pod nią - o wiersz mniej wysokości.
    Przed nazwą ikona aplikacji, ta sama co na ekranie telefonu. */
 .brand {
@@ -340,6 +408,100 @@ body.panel-hidden #sidebar {
     font-size: 12px;
     color: var(--ink-faint);
 }
+
+/* -------------------------------------------------------- moje miejsce --- */
+
+/* Bez przewijania w sobie (inaczej niż #about): lista podpowiedzi wychodzi
+   pod pole i przycięłaby się na dolnej krawędzi okna. */
+#place-dialog {
+    width: min(400px, calc(100vw - 32px));
+    overflow: visible;
+    border: none;
+    color: var(--ink);
+    font-size: 14px;
+}
+
+#place-dialog::backdrop { background: rgba(16, 32, 48, 0.35); }
+#place-dialog .dev-head form { margin: 0; }
+
+.place-icons {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin: 0 0 12px;
+    padding: 0;
+    border: 0;
+}
+
+.place-icons legend,
+.place-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-soft);
+}
+
+.place-icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    font-size: 20px;
+    cursor: pointer;
+}
+
+/* Sam radio jest niewidoczny, ale zostaje w formularzu i w kolejce Tab. */
+.place-icon input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.place-icon:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.place-icon:has(input:focus-visible) { outline: 2px solid var(--accent); }
+
+.place-pick {
+    width: 100%;
+    margin-top: 6px;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+}
+
+.place-pick:hover { background: #e8edf3; }
+
+.place-msg {
+    margin: 8px 0 0;
+    color: #8c2b23;
+    font-size: 12.5px;
+}
+
+.place-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+#place-remove {
+    margin-right: auto;
+    background: none;
+    color: #8c2b23;
+}
+
+#place-remove[hidden] { display: none; }
+
+/* .toast ma display: flex, który bije domyślne [hidden]. */
+#place-pick-hint[hidden] { display: none; }
 
 .search-card { flex: 0 0 auto; }
 
@@ -554,7 +716,8 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
     gap: 6px;
 }
 
-.endpoint-fields input {
+.endpoint-fields input,
+.place-field input {
     width: 100%;
     height: 40px;
     padding: 0 12px;
@@ -566,6 +729,7 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 }
 
 .endpoint-fields input:focus,
+.place-field input:focus,
 .time-field input:focus {
     outline: none;
     border-color: var(--accent);
@@ -575,7 +739,8 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 
 /* Miejsce na przycisk w polu (◎ „moja lokalizacja"), żeby wpisana nazwa
    nie wjeżdżała pod niego. */
-.endpoint-fields input.with-action { padding-right: 42px; }
+.endpoint-fields input.with-action,
+.place-field input.with-action { padding-right: 42px; }
 
 /* Własna lista podpowiedzi nazw przystanków (zamiast <datalist>). */
 .ac-field {
@@ -657,6 +822,14 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
    całą kolumnę po prawej i pod nim zostaje pusty pas. Dlatego w HTML stoi
    PRZED tekstem - float działa tylko na to, co idzie po nim. */
 #ob-warn { display: block; padding: 8px 12px; }
+
+/* Tryb względny (#231): pojazd nie jedzie według rozkładu. Żółty, a nie
+   niebieski jak pytanie o przystanek przy GPS - to nie propozycja, tylko
+   uwaga, że godziny tego pojazdu nie zgadzają się z tablicą. */
+#ob-warn {
+    background: #fff4d6;
+    border-left: 3px solid #f2b705;
+}
 #ob-warn[hidden] { display: none; }
 #ob-warn-text { white-space: pre-line; }
 
@@ -1009,8 +1182,30 @@ body.routes-off #results .notice.loading { display: none; }
 .badge.tram { background: var(--tram); }
 .badge.bus { background: var(--bus); }
 .badge.train { background: var(--train); }
+.badge.cable { background: var(--cable); }
 .badge.bike { background: var(--bike); }
 .badge.car { background: var(--car); }
+
+/* Peron i tor pociągu (zgłoszenie #271) - dopisek przy nazwie stacji,
+   ciszej niż sama nazwa: nazwę się czyta, peron się sprawdza. */
+.platform {
+    margin-left: 6px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.tip-dir .platform { display: block; margin-left: 0; }
+
+/* Pojazd, w którym się już siedzi (zgłoszenie #224): obwódka w kolorze
+   akcentu, odsunięta od plakietki paskiem tła - ten sam akcent, co
+   „jedziesz tym pojazdem" i przystanek wysiadki na osi trasy. Margines, bo
+   obwódka rysuje się poza plakietką i weszłaby na sąsiednią strzałkę. */
+.badge.current {
+    margin: 0 4px;
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
 
 /* Przełącznik „jadę też rowerem miejskim". Stoi w karcie wyszukiwania,
    a nie w Ustawieniach Developerskich ⚙, bo to wybór PASAŻERA (mam konto w WRM
@@ -1121,6 +1316,7 @@ body.routes-off #results .notice.loading { display: none; }
 .tl-ride.tram .tl-dot { background: var(--tram); }
 .tl-ride.bus .tl-dot { background: var(--bus); }
 .tl-ride.train .tl-dot { background: var(--train); }
+.tl-ride.cable .tl-dot { background: var(--cable); }
 .tl-ride.bike .tl-dot { background: var(--bike); }
 .tl-ride.car .tl-dot { background: var(--car); }
 
@@ -1220,6 +1416,7 @@ body.routes-off #results .notice.loading { display: none; }
 .tl-via.tram .tl-dot { background: var(--tram); color: var(--tram); }
 .tl-via.bus .tl-dot { background: var(--bus); color: var(--bus); }
 .tl-via.train .tl-dot { background: var(--train); color: var(--train); }
+.tl-via.cable .tl-dot { background: var(--cable); color: var(--cable); }
 
 .tl-via .tl-dot::before {
     content: "";
@@ -1278,6 +1475,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-badge.tram { color: var(--tram); border-color: var(--tram); }
 .line-badge.bus { color: var(--bus); border-color: var(--bus); }
 .line-badge.train { color: var(--train); border-color: var(--train); }
+.line-badge.cable { color: var(--cable); border-color: var(--cable); }
 .line-badge.other { color: var(--other); border-color: var(--other); }
 .line-badge.bike { color: var(--bike); border-color: var(--bike); }
 
@@ -1293,6 +1491,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-badge.solid.tram { background: var(--tram); }
 .line-badge.solid.bus { background: var(--bus); }
 .line-badge.solid.train { background: var(--train); }
+.line-badge.solid.cable { background: var(--cable); }
 .line-badge.solid.car { background: var(--car); }
 .line-badge.solid.other { background: var(--other); }
 .line-badge.solid.bike { background: var(--bike); }
@@ -1318,6 +1517,7 @@ body.routes-off #results .notice.loading { display: none; }
 .vehicle-marker.tram { background: var(--tram); }
 .vehicle-marker.bus { background: var(--bus); }
 .vehicle-marker.train { background: var(--train); }
+.vehicle-marker.cable { background: var(--cable); }
 .vehicle-marker.other { background: var(--other); }
 
 /* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
@@ -1407,6 +1607,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-chip.tram { color: var(--tram); }
 .line-chip.bus { color: var(--bus); }
 .line-chip.train { color: var(--train); }
+.line-chip.cable { color: var(--cable); }
 .line-chip.other { color: var(--other); }
 .line-chip.bike { color: var(--bike); }
 
@@ -1418,6 +1619,8 @@ body.routes-off #results .notice.loading { display: none; }
 .line-cluster .line-chip.bus:hover { background: var(--bus); }
 .line-chip.picked.train,
 .line-cluster .line-chip.train:hover { background: var(--train); }
+.line-chip.picked.cable,
+.line-cluster .line-chip.cable:hover { background: var(--cable); }
 .line-chip.picked.other,
 .line-cluster .line-chip.other:hover { background: var(--other); }
 
@@ -1434,6 +1637,7 @@ body.routes-off #results .notice.loading { display: none; }
 .flow-tip-line.tram { color: var(--tram); }
 .flow-tip-line.bus { color: var(--bus); }
 .flow-tip-line.train { color: var(--train); }
+.flow-tip-line.cable { color: var(--cable); }
 .flow-tip-line.other { color: var(--other); }
 
 .flow-tip-row {
@@ -1570,6 +1774,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-cluster .line-chip-slot:hover .line-chip.tram { background: var(--tram); }
 .line-cluster .line-chip-slot:hover .line-chip.bus { background: var(--bus); }
 .line-cluster .line-chip-slot:hover .line-chip.train { background: var(--train); }
+.line-cluster .line-chip-slot:hover .line-chip.cable { background: var(--cable); }
 .line-cluster .line-chip-slot:hover .line-chip.other { background: var(--other); }
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 
@@ -2208,6 +2413,17 @@ body:not(.dev-mode) .dev-only { display: none; }
     color: var(--ink-faint);
     font: italic 700 10.5px/1 Georgia, serif;
     cursor: help;
+}
+.tt-badge-info { display: inline-flex; align-items: center; }
+
+/* „i" w treści (oś trasy, tablica odjazdów) - w wierszu, nie na prawym brzegu. */
+.info.info-inline {
+    float: none;
+    width: 14px;
+    height: 14px;
+    margin: 0 0 0 6px;
+    vertical-align: middle;
+    font-size: 9.5px;
 }
 .info:hover,
 .info:focus-visible { color: var(--ink); outline: none; }

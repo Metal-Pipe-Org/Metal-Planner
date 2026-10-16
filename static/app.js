@@ -275,10 +275,13 @@ function escClass(value) {
 
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
+// `cable` to Polinka (zgłoszenie #165) - granat Politechniki, która ją prowadzi.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
+                     cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
+                    cable: 'Kolej linowa',
                     bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
 
 /** Autko do wiersza "jedziesz autem" na osi trasy. Bierze `currentColor`, tak
@@ -303,6 +306,8 @@ const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
 // zwykły słupek MPK, zanim jeszcze ktoś najedzie kursorem na nazwę.
 const TRAIN_STYLE = {radius: 5, weight: 1, color: '#1b5e20',
                      fillColor: '#2e7d32', fillOpacity: 0.85};
+// Stacja Polinki (#165) - jak stacja kolejowa, w kolorze Polinki.
+const CABLE_STYLE = {...TRAIN_STYLE, color: '#000d1f', fillColor: '#002147'};
 // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
 const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
                    fillColor: '#90a4ae', fillOpacity: 0.25};
@@ -326,7 +331,8 @@ function styleFor(name) {
         if (name === sel.end) return ENDPOINT_STYLE.end;
     }
     if (baseDimmed) return DIM_STYLE;
-    return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
+    const kind = stopKind.get(name);
+    return kind === 'train' ? TRAIN_STYLE : kind === 'cable' ? CABLE_STYLE : BASE_STYLE;
 }
 
 function setBaseDim(dim) {
@@ -490,8 +496,10 @@ if (vehiclesToggle) {
 // odpowiedzi na zadane pytanie. Bez mapy nie ma pytania, więc zostaje samo
 // „co gdzie stoi" i warstwa bierze cały miejski feed (/api/cars, /api/bikes).
 //
-// Włącznik NIGDY nie rusza propozycji tras ani samego wachlarza - dokłada
-// i zdejmuje wyłącznie kropki na mapie.
+// Włącznik NIGDY nie rusza samego wachlarza - na mapie dokłada i zdejmuje
+// wyłącznie kropki. Rusza za to listę propozycji: zgaszony 🚗 zabiera z niej
+// trasy kończące się autem, a 🚲 i ⚡ - trasy z rowerem swojego rodzaju
+// (zgłoszenie #163). Lista ma mówić o tym samym, co widać na mapie.
 
 const CARS_REFRESH_MS = 20000;    // tyle deklaruje feed Traficara (CARS_TTL_SEC)
 const BIKES_REFRESH_MS = 60000;   // tyle deklaruje kanał WRM (`ttl`)
@@ -631,6 +639,7 @@ function setCarsOn(on) {
     saveUiState({carsOn: on});
     paintLayerButton(carsToggle, on);
     refreshCarLayer();
+    replanInPlace();
 }
 
 /** Jeden rodzaj roweru. Warstwa świeci, gdy świeci choć jeden - więc
@@ -638,7 +647,7 @@ function setCarsOn(on) {
 
     Zmienia nie tylko mapę, ale i sam wynik z serwera: ten włącznik mówi też
     „mam konto w WRM", a rodzaj rozstrzyga, które miejsca w ogóle są
-    kandydatami (patrz bikes.map_places). */
+    kandydatami - na mapie i w propozycjach z rowerem (patrz bikes.ma_rodzaj). */
 function setBikeKind(kind, on) {
     if (kind === 'electric') {
         bikeElectricOn = on;
@@ -651,7 +660,7 @@ function setBikeKind(kind, on) {
     saveUiState({bikesOn});
     paintBikeButtons();
     refreshBikeLayer();
-    replanForBikes();
+    replanInPlace();
 }
 
 /** Rower w całości - oba rodzaje naraz. */
@@ -662,7 +671,7 @@ function setBikesOn(on) {
     bikesOn = on;
     paintBikeButtons();
     refreshBikeLayer();
-    replanForBikes();
+    replanInPlace();
 }
 
 if (carsToggle) {
@@ -809,7 +818,8 @@ const stopsReady = fetch('/api/stops')
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
             // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
-            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP` : s.name);
+            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP`
+                : s.kind === 'cable' ? `${s.name} · kolej linowa` : s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
             m.on('click', e => {
@@ -837,6 +847,8 @@ const stopsReady = fetch('/api/stops')
     kasował (#154). Z tego samego powodu ruszamy wyłącznie pole, które klik
     uzupełnia - drugiego nie przepisujemy z `sel`. */
 function pickEndpoint(value) {
+    // Okno „mojego miejsca" czeka na wskazanie - ten klik jest dla niego.
+    if (placePickTook(value)) return;
     if (selectedJourney !== null) { deselectJourney(); return; }
     const hasStart = startInput.value.trim() !== '';
     const hasEnd = endInput.value.trim() !== '';
@@ -2832,7 +2844,11 @@ function timetableLinesHtml(data, mapSec) {
         const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
             + '|' + (d.flow || '');
         if (!groups.has(key)) groups.set(key, {d, secs: []});
-        groups.get(key).secs.push(d.sec);
+        const group = groups.get(key);
+        group.secs.push(d.sec);
+        // Pierwszy w grupie bywa wierszem dorobionym z mapy (spóźniony kurs,
+        // przyjazd) - „i" bierzemy z któregokolwiek odjazdu z serwera.
+        if (d.info && !group.d.info) group.d = {...group.d, info: d.info};
     }
     const rows = [];
     for (const {d, secs} of groups.values()) {
@@ -2864,8 +2880,13 @@ function timetableLinesHtml(data, mapSec) {
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
     const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
-        `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
-        `<span class="tip-dir">${esc(d.headsign)}</span>` +
+        // „i" za plakietką, w tej samej komórce siatki: za kierunkiem ucinałby
+        // go wielokropek, a osobny element przesunąłby kolumny wiersza.
+        (d.info
+            ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
+              + `${infoHtml(d.info)}</span>`
+            : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
+        `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
@@ -3682,8 +3703,42 @@ function openJourney(index) {
     renderVehicles();
 }
 
+/** Peron i tor pociągu (zgłoszenie #271): „peron 2, tor 4" - tak, jak piszą
+    tablice PKP. Z rozkładu planowego PLK (patrz pkp.augment_day), więc bez
+    dzisiejszych zmian. Pusty napis, gdy rozkład nie podaje żadnego.
+
+    Stoi tam, gdzie się go szuka: na osi trasy przy stacji wsiadania
+    i wysiadania (nie przy mijanych - tam nic się nie robi) i w tablicy
+    odjazdów stacji. „BUS" (komunikacja zastępcza według PLK) idzie
+    dosłownie, jako „peron BUS". */
+function platformText(p) {
+    if (!p) return '';
+    return [p.platform && `peron ${p.platform}`, p.track && `tor ${p.track}`]
+        .filter(Boolean).join(', ');
+}
+
+function platformHtml(p) {
+    const text = platformText(p);
+    return text ? `<span class="platform">${esc(text)}</span>` : '';
+}
+
+/** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
+    przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
+function infoHtml(text) {
+    return text ? `<span class="info info-inline" tabindex="0" role="button"`
+        + ` aria-label="${escAttr(text)}" data-tip="${escAttr(text)}">i</span>` : '';
+}
+
 function badgeHtml(leg) {
-    return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
+    // Pojazd, w którym się już siedzi (start z pokładu, patrz
+    // onboard.mark_journeys), ma plakietkę z obwódką - na karcie propozycji
+    // „4 › D" nie mówi inaczej, czy w 4 trzeba dopiero wsiąść, czy jedzie się
+    // nią dalej (zgłoszenie #224).
+    if (leg.onboard) {
+        return `<span class="badge ${leg.mode} current" title="${escAttr(leg.line)}`
+             + ` — jedziesz tym pojazdem">${esc(leg.num)}</span>`;
+    }
+    return `<span class="badge ${leg.mode}" title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
 }
 
 // Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
@@ -3851,9 +3906,10 @@ function toggleVia(button) {
 
 function detailHtml(journey) {
     const rows = [];
-    const stopRow = (time, name, cls) =>
+    const stopRow = (time, name, cls, platform) =>
         `<li class="tl-stop ${cls}"><span class="tl-time">${esc(time)}</span>` +
-        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}</span></li>`;
+        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
+        `${platformHtml(platform)}</span></li>`;
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -3955,7 +4011,7 @@ function detailHtml(journey) {
             rows.push(stopRow(leg.to_time, leg.to, 'last'));
             return;
         }
-        const stopWord = leg.mode === 'train'
+        const stopWord = leg.mode === 'train' || leg.mode === 'cable'
             ? plural(leg.stops_count, 'stacja', 'stacje', 'stacji')
             : plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków');
         const ile = `${leg.stops_count} ${stopWord} · ${leg.minutes} min`;
@@ -3964,7 +4020,8 @@ function detailHtml(journey) {
         // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
         const via = leg.via || [];
         const viaOn = via.length > 0 && viaOpen(leg);
-        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
+        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
+                          leg.from_platform));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
@@ -3973,6 +4030,7 @@ function detailHtml(journey) {
             // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
             // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
+            infoHtml(leg.info) +
             // Etap, w którym się już siedzi (patrz onboard.mark_journeys),
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
@@ -4000,13 +4058,14 @@ function detailHtml(journey) {
         const next = journey.legs[i + 1];
         if (!next || next.kind === 'walk') {
             rows.push(stopRow(leg.to_time, leg.to,
-                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`));
+                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`,
+                              leg.to_platform));
         } else if (leg.onboard) {
             // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
             // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
             // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
             // całej osi - to jest ten moment, w którym trzeba wstać.
-            rows.push(stopRow(leg.to_time, leg.to, 'exit'));
+            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform));
         }
     });
 
@@ -4074,7 +4133,7 @@ function renderJourneys() {
                 || leg.kind === 'bike' || leg.kind === 'drive')
             .map(leg => leg.kind === 'walk'
                 ? `pieszo ${leg.minutes} min`
-                : leg.line).join(', ');
+                : leg.onboard ? `${leg.line} (obecny pojazd)` : leg.line).join(', ');
         // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
         // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
         // czyta się pierwszą, a nie dopiero w rozwinięciu karty.
@@ -4135,6 +4194,8 @@ function scrollToSelected() {
 
 resultsBox.addEventListener('click', event => {
     if (routeClick(event)) return;
+    // „i" pokazuje dymek (showInfoTip) - nie zwija przy okazji karty.
+    if (event.target.closest('.info')) return;
 
     // Rozwinięcie przystanków po drodze to nie klik w kartę - ta by się
     // przy okazji zwinęła (patrz selectJourney).
@@ -4287,13 +4348,13 @@ function obNote(text) {
     obMsg.hidden = !text;
 }
 
-// Rozpoznany kurs nie pasuje do "jadę nim teraz" (#231), a mapa i tak liczy
-// od niego - nic poza tym ostrzeżeniem tego nie zdradza. Dwa przypadki (patrz
-// onboard.find_ride): `not_yet` - według rozkładu nie wyjechał jeszcze nawet
-// z poprzedniego przystanku, najczęściej pomyłka w linii, kierunku albo
-// przystanku; `late` - według rozkładu minął już przystanek, czyli jest
-// spóźniony, a godziny na mapie są liczone od jego rozkładu, nie od teraz.
-// Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
+// Tryb względny (#231, patrz onboard.find_ride): rozpoznany kurs jest według
+// rozkładu przy przystanku wyraźnie nie teraz, więc mapa liczy go od teraz -
+// przesuniętego o `late_sec`, z resztą pojazdów przy rozkładzie. Nic poza tym
+// komunikatem tego nie zdradza, a to ważne w obie strony: spóźnienie
+// tłumaczy, czemu godziny tego pojazdu nie zgadzają się z tablicą, a kurs
+// dopiero przed nami to najczęściej pomyłka w linii, kierunku albo
+// przystanku. Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
 const obWarn = $('ob-warn');
 
 function hideObWarn() {
@@ -4301,13 +4362,29 @@ function hideObWarn() {
 }
 
 function warnOnboardRide(kurs) {
-    if (!kurs || !(kurs.not_yet || kurs.late)) { hideObWarn(); return; }
+    if (!kurs || !kurs.late_sec) { hideObWarn(); return; }
     const przystanek = esc(prettyStopName(kurs.stop_name));
-    const godzina = `<b>${esc(kurs.at)}</b>`;
+    const rozklad = `<b>${esc(kurs.at_sched)}</b>`;
+    const ile = `${Math.round(Math.abs(kurs.late_sec) / 60)} min`;
+    // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
+    // polem celu. Pełne zdanie zostaje w dymku i dla czytnika ekranu.
+    const [ikona, fakt, ikona2, rada, pelne] = kurs.late_sec > 0
+        // Bez nazwy przystanku: „(JAGODNO (P+R) 21:01)" czytało się jak kierunek.
+        ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (rozkład ${rozklad})`,
+           '⏩', 'Godziny pojazdu przesunięte',
+           `${kurs.num} jedzie prawdopodobnie ok. ${ile} po rozkładzie — według rozkładu był `
+           + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `
+           + `Godziny tego pojazdu na mapie są przesunięte o ${ile}.`]
+        : ['⚠️', `${esc(kurs.num)} na ${przystanek} dopiero o ${rozklad} (za ${ile})`,
+           '🔎', 'Sprawdź linię i przystanek',
+           `Najbliższy kurs ${kurs.num} jest według rozkładu na przystanku `
+           + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at_sched}, za `
+           + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię i przystanek.`];
     $('ob-warn-text').innerHTML =
-        `${esc(kurs.num)} według rozkładu ${kurs.late ? 'była' : 'będzie'} `
-        + `na przystanku ${przystanek} o ${godzina}.`
-        + `\nGodziny na mapie liczą się od ${godzina}, a nie od teraz.`;
+        `<span aria-hidden="true">${ikona}</span> ${fakt}`
+        + `\n<span aria-hidden="true">${ikona2}</span> ${rada}`;
+    obWarn.title = pelne;
+    obWarn.setAttribute('aria-label', pelne);
     obWarn.hidden = false;
 }
 
@@ -4492,6 +4569,10 @@ function queryParams() {
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
     if (bikesOn) params.set('bikes', '1');
+    // Auto odwrotnie: propozycje z Traficarem są domyślnie, a zgaszony 🚗
+    // zdejmuje je z listy (zgłoszenie #163) - jak przy `routes`, prosi się
+    // tylko o ich brak.
+    if (!carsOn) params.set('traficar', '0');
     const poklad = onboardOn ? onboardPick() : null;
     if (poklad) {
         // Start z pokładu pojazdu (patrz onboard.py): zamiast miejsca jedzie
@@ -4502,6 +4583,9 @@ function queryParams() {
         if (poklad.mode) params.set('onboard_mode', poklad.mode);
         if (poklad.headsign) params.set('onboard_headsign', poklad.headsign);
         params.set('onboard_stop', poklad.stop);
+        // Od jakiego rozjazdu z rozkładem pojazd jedzie „od teraz" (tryb
+        // względny, zgłoszenie #231) - suwak w ⚙, patrz onboard.find_ride.
+        params.set('onboard_slack_sec', (Number($('onboard-slack').value) * 60).toFixed(0));
     } else if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
@@ -4823,13 +4907,16 @@ function showBusy(busy) {
     document.body.classList.toggle('more-busy', moreBusy);
 }
 
-/** Rower zmienia ODPOWIEDŹ, nie tylko wygląd mapy: rowerowych propozycji nie
-    ma w ostatniej odpowiedzi serwera, więc po przełączeniu warstwy trzeba je
-    doliczyć. Tą samą drogą co suwaki w ⚙ (bez kadrowania), a nie przez nowe
-    wyszukiwanie - relacja się nie zmieniła, więc kadr ma zostać na miejscu
-    i nie ma po co znowu odgrywać dźwięku znalezienia trasy. */
-function replanForBikes() {
-    if (!lastFlow || !startInput.value || !endInput.value) return;
+/** Rower i auto zmieniają ODPOWIEDŹ, nie tylko wygląd mapy: propozycje
+    z rowerem i z Traficarem składa serwer (patrz queryParams), więc po
+    przełączeniu warstwy trzeba je doliczyć albo zdjąć. Tą samą drogą co
+    suwaki w ⚙ (bez kadrowania), a nie przez nowe wyszukiwanie - relacja się
+    nie zmieniła, więc kadr ma zostać na miejscu i nie ma po co znowu
+    odgrywać dźwięku znalezienia trasy. Start z pokładu nie ma pola „skąd",
+    więc o komplecie pytania mówi tam wybór pojazdu (patrz onboardReady). */
+function replanInPlace() {
+    if (!lastFlow || !endInput.value) return;
+    if (onboardOn ? !onboardReady() : !startInput.value) return;
     loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
@@ -5266,6 +5353,266 @@ $('clear').addEventListener('click', () => {
     forgetLastSearch();
 });
 
+// ----------------------------------------------------------- moje miejsca ----
+//
+// Trzy przyciski „jedź tam stąd" (pasek .places-bar, patrz index.html).
+// Miejsce to to samo, co cel wyszukiwania: nazwa przystanku (kanoniczna, jak
+// w `sel`) albo punkt {lat, lon}. Zapisane tylko w tej przeglądarce, osobnym
+// kluczem - „Przywróć domyślne" w ⚙ ich nie kasuje, bo to nie ustawienie.
+const MY_PLACES_KEY = 'metal-planner:my-places';
+const MY_PLACES_COUNT = 3;
+const placesBar = $('places-bar');
+const placeDialog = $('place-dialog');
+const placeWhere = $('place-where');
+const placeMsg = $('place-msg');
+const placePickHint = $('place-pick-hint');
+
+let myPlaces = loadMyPlaces();
+let placeSlot = null;      // które miejsce jest w oknie
+let placeDraft = null;     // punkt z ◎ albo z mapy - pole pokazuje go jako tekst
+let placePicking = false;  // okno schowane, czeka na klik w mapę
+let placeLongPress = false;
+
+function loadMyPlaces() {
+    let saved = [];
+    try {
+        saved = JSON.parse(localStorage.getItem(MY_PLACES_KEY)) || [];
+    } catch {
+        // localStorage niedostępny albo zepsuty JSON - przyciski zaczynają puste
+    }
+    return Array.from({length: MY_PLACES_COUNT}, (_, i) => {
+        const p = saved[i];
+        return p && p.icon && (typeof p.place === 'string' || isPoint(p.place)) ? p : null;
+    });
+}
+
+function saveMyPlaces() {
+    try {
+        localStorage.setItem(MY_PLACES_KEY, JSON.stringify(myPlaces));
+    } catch {
+        // localStorage niedostępny - miejsce działa do odświeżenia strony
+    }
+}
+
+function renderPlaces() {
+    placesBar.replaceChildren(...myPlaces.map((p, i) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'icon-button place-button' + (p ? ' set' : '');
+        button.dataset.slot = i;
+        button.textContent = p ? p.icon : '+';
+        const label = p ? `Jedź stąd do: ${displayValue(p.place)}`
+            : `Moje miejsce ${i + 1} — przypisz miejsce`;
+        button.setAttribute('aria-label', label);
+        button.title = p ? `${label}\nPrzytrzymaj, żeby zmienić` : label;
+        return button;
+    }));
+}
+
+function showPlaceMsg(text) {
+    placeMsg.textContent = text || '';
+    placeMsg.hidden = !text;
+}
+
+function setPlaceDraft(point) {
+    placeDraft = point;
+    placeWhere.value = displayValue(point);
+    showPlaceMsg('');
+}
+
+function openPlaceDialog(slot) {
+    if (placeDialog.open) return;
+    placeSlot = slot;
+    const p = myPlaces[slot];
+    $('place-title').textContent = `Moje miejsce ${slot + 1}`;
+    for (const radio of placeDialog.querySelectorAll('[name="place-icon"]')) {
+        radio.checked = !!p && radio.value === p.icon;
+    }
+    placeDraft = p && isPoint(p.place) ? p.place : null;
+    placeWhere.value = p ? displayValue(p.place) : '';
+    $('place-remove').hidden = !p;
+    showPlaceMsg('');
+    placeDialog.showModal();
+}
+
+/** „51.1093, 17.0386", „(51.1093, 17.0386)" albo z przecinkami dziesiętnymi
+    „51,1093 17,0386" - wpisane ręcznie albo skopiowane z pola „Skąd". */
+function parsePoint(text) {
+    const m = text.trim().match(
+        /^\(?\s*(-?\d{1,2}(?:[.,]\d+)?)\s*(?:[,;]\s*|\s+)(-?\d{1,3}(?:[.,]\d+)?)\s*\)?$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1].replace(',', '.'));
+    const lon = parseFloat(m[2].replace(',', '.'));
+    return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? {lat, lon} : null;
+}
+
+/** Co jest teraz w polu okna: punkt ze szkicu, gdy pole wciąż go pokazuje,
+    inaczej przystanek z listy albo wpisane współrzędne. */
+function placeFromField() {
+    const text = placeWhere.value.trim();
+    if (placeDraft && text === displayValue(placeDraft)) return placeDraft;
+    if (STOP_KIND.has(text)) return rawStopName(text);
+    return parsePoint(text);
+}
+
+function savePlace() {
+    const icon = placeDialog.querySelector('[name="place-icon"]:checked');
+    const place = placeFromField();
+    if (!icon) { showPlaceMsg('Wybierz ikonę.'); return; }
+    if (!place) {
+        showPlaceMsg(placeWhere.value.trim()
+            ? 'Nie znam takiego przystanku — wybierz go z podpowiedzi, wpisz współrzędne albo wskaż miejsce na mapie.'
+            : 'Wybierz miejsce.');
+        placeWhere.focus();
+        return;
+    }
+    myPlaces[placeSlot] = {icon: icon.value, place};
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+}
+
+/** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
+function locateOnce(onPoint, onError) {
+    if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
+    navigator.geolocation.getCurrentPosition(
+        position => onPoint({lat: position.coords.latitude,
+                             lon: position.coords.longitude}),
+        error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
+        GEO_OPTIONS,
+    );
+}
+
+/** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
+    od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
+function goToPlace(slot, button) {
+    const {place} = myPlaces[slot];
+    if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
+    hideRecallOffer();
+    hideLocateOffer();
+    showLocateMsg('');
+    const previous = [sel.start, sel.end];
+    sel.end = place;
+    endInput.value = displayValue(place);
+    updatePointMarker('end', place);
+    restyle(...previous, sel.end);
+    button.disabled = true;               // GPS potrafi mielić kilka sekund
+    locateOnce(point => {
+        button.disabled = false;
+        const before = sel.start;
+        sel.start = point;
+        startInput.value = displayValue(point);
+        updatePointMarker('start', point);
+        restyle(before);
+        offerNearestStop(point);
+        search();
+    }, message => {
+        button.disabled = false;
+        showLocateMsg(message);
+        if (startInput.value) search();
+    });
+}
+
+/** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
+function placePickTook(value) {
+    if (!placePicking) return false;
+    stopPlacePick();
+    // Słupek to przystanek z nazwą, nie punkt - pole dostaje wtedy nazwę.
+    if (isPoint(value)) setPlaceDraft(value);
+    else { placeDraft = null; placeWhere.value = displayValue(value); showPlaceMsg(''); }
+    placeDialog.showModal();
+    return true;
+}
+
+function stopPlacePick() {
+    placePicking = false;
+    placePickHint.hidden = true;
+}
+
+placesBar.addEventListener('click', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
+    if (placeLongPress) { placeLongPress = false; return; }
+    const slot = Number(button.dataset.slot);
+    if (myPlaces[slot]) goToPlace(slot, button);
+    else openPlaceDialog(slot);
+});
+
+// Zmiana przypisanego miejsca: prawy przycisk myszy albo przytrzymanie palca
+// (iPhone nie zgłasza przytrzymania jako contextmenu, więc liczymy je sami).
+placesBar.addEventListener('contextmenu', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    event.preventDefault();
+    // Android zgłasza przytrzymanie palca także tak - okno ma się otworzyć
+    // raz, a puszczenie palca nie może potem „kliknąć".
+    clearTimeout(placePressTimer);
+    if (placeLongPress) return;           // przytrzymanie było pierwsze
+    placeLongPress = true;
+    openPlaceDialog(Number(button.dataset.slot));
+});
+
+let placePressTimer = null;
+placesBar.addEventListener('pointerdown', event => {
+    const button = event.target.closest('.place-button');
+    placeLongPress = false;
+    if (!button || event.button !== 0) return;
+    placePressTimer = setTimeout(() => {
+        placeLongPress = true;
+        openPlaceDialog(Number(button.dataset.slot));
+    }, 600);
+});
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+    placesBar.addEventListener(type, () => clearTimeout(placePressTimer));
+}
+
+attachAutocomplete(placeWhere, () => { placeDraft = null; showPlaceMsg(''); },
+                   {suggest: suggestRecentFirst('end'), onEnter: savePlace});
+placeWhere.addEventListener('input', () => showPlaceMsg(''));
+
+$('place-form').addEventListener('submit', event => {
+    event.preventDefault();
+    savePlace();
+});
+
+$('place-remove').addEventListener('click', () => {
+    myPlaces[placeSlot] = null;
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+});
+
+const placeLocate = $('place-locate');
+if (!navigator.geolocation) placeLocate.hidden = true;
+placeLocate.addEventListener('click', () => {
+    placeLocate.disabled = true;
+    locateOnce(point => {
+        placeLocate.disabled = false;
+        setPlaceDraft(point);
+    }, message => {
+        placeLocate.disabled = false;
+        showPlaceMsg(message);
+    });
+});
+
+$('place-pick').addEventListener('click', () => {
+    placeDialog.close();
+    placePicking = true;
+    $('place-pick-text').textContent = `Kliknij na mapie: moje miejsce ${placeSlot + 1}`;
+    placePickHint.hidden = false;
+    setView('map');            // na telefonie z listy tras mapy nie widać
+});
+
+$('place-pick-cancel').addEventListener('click', () => {
+    stopPlacePick();
+    placeDialog.showModal();
+});
+
+placeDialog.addEventListener('close', () => { placeLongPress = false; });
+
+renderPlaces();
+
 // Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
@@ -5278,7 +5625,7 @@ $('clear').addEventListener('click', () => {
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
 const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
                         'walk-pace', 'bike-kmh', 'bike-overhead',
-                        'car-kmh', 'car-overhead'];
+                        'car-kmh', 'car-overhead', 'onboard-slack'];
 
 // To, co z tego klucza widać w ⚙ także bez DEV_MODE (patrz visiblePrefs).
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
@@ -5333,7 +5680,9 @@ function liveSlider(inputId, valueId, resetsMore) {
         saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
-            if (!startInput.value || !endInput.value) return;
+            // Start z pokładu nie ma pola „skąd" - o komplecie pytania mówi
+            // tam wybór pojazdu (patrz onboardReady).
+            if (!endInput.value || (onboardOn ? !onboardReady() : !startInput.value)) return;
             loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
         }, 200);
     });
@@ -5348,6 +5697,7 @@ liveSlider('bike-kmh', 'bike-kmh-value');
 liveSlider('bike-overhead', 'bike-overhead-value');
 liveSlider('car-kmh', 'car-kmh-value');
 liveSlider('car-overhead', 'car-overhead-value');
+liveSlider('onboard-slack', 'onboard-slack-value');
 
 function showWalkPace() {
     $('walk-pace-value').textContent = WALK_PACE_LABELS[$('walk-pace').value];
@@ -5414,8 +5764,8 @@ routesOn.addEventListener('change', () => {
     saveDevPref('routes-on', routesOn.checked);
     showRoutes(routesOn.checked);
     // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
-    // tak jak propozycje z rowerem (patrz replanForBikes).
-    if (routesOn.checked) replanForBikes();
+    // tak jak propozycje z rowerem (patrz replanInPlace).
+    if (routesOn.checked) replanInPlace();
 });
 
 // Gest „pociągnij w dół, żeby odświeżyć" (opcja w „Wyglądzie aplikacji”) - overscroll-behavior
@@ -5869,7 +6219,7 @@ bindDotOpts();
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
-    'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
+    'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
     'fold-layout', 'fold-siechnice', 'fold-version',
@@ -6058,6 +6408,11 @@ $('dev-reset').addEventListener('click', () => {
 
 function suspendPlanner() {
     plannerSuspended = true;
+    // Wskazywanie „mojego miejsca" czeka na klik w mapę, a w rozkładach klik
+    // znaczy co innego (patrz map.on('click'), timetableTook) - pasek
+    // „Kliknij na mapie" wisiałby nad rozkładem, nic nie robiąc. Wejście
+    // w rozkłady to porzucenie okna miejsca, więc anuluje się po cichu.
+    stopPlacePick();
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }

@@ -14,6 +14,7 @@ from math import sqrt
 import bikes
 import gtfs
 import onboard
+import polinka
 import traficar
 
 # Przesiadka na DOKŁADNIE tym samym słupku - bez marszu, więc nie wycenia się
@@ -164,6 +165,9 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             "num": num,
             "mode": mode,
             "headsign": headsign,
+            **({"platform": platform}
+               if (platform := _platform(day, trip, _stop_id)) else {}),
+            **_info(trip),
         })
 
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
@@ -587,6 +591,17 @@ def _drop_private(legs):
     return legs
 
 
+def _platform(day, trip, stop):
+    """Peron i tor pociągu przy stacji (zgłoszenie #271) - {"platform",
+    "track"} z tym, co rozkład PLK podaje, albo None. Tylko kolej je ma
+    (patrz pkp.augment_day); peron jest planowy, nie z dzisiejszej zmiany."""
+    found = day.pkp_platforms.get((trip, stop))
+    if not found:
+        return None
+    platform, track = found
+    return {k: v for k, v in (("platform", platform), ("track", track)) if v}
+
+
 def _via_stops(day, rows):
     """Przystanki MIJANE w czasie przejazdu (zgłoszenie #169) - bez wsiadania
     i wysiadania, które etap ma już w `from`/`to`. Front wypisuje je w osi
@@ -606,6 +621,22 @@ def _via_stops(day, rows):
             item["lat"], item["lon"] = _round_path([coords])[0]
         via.append(item)
     return via
+
+
+def _platform_fields(day, trip, board_stop, exit_stop):
+    """`from_platform`/`to_platform` etapu - tylko te, które są (#271)."""
+    out = {}
+    for key, stop in (("from_platform", board_stop), ("to_platform", exit_stop)):
+        platform = _platform(day, trip, stop)
+        if platform:
+            out[key] = platform
+    return out
+
+
+def _info(trip):
+    """Treść „i" przy etapie albo odjeździe - dziś tylko Polinka (#165):
+    godziny otwarcia i data sprawdzenia danych."""
+    return {"info": polinka.INFO} if trip.startswith(polinka.ID_PREFIX) else {}
 
 
 def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
@@ -639,6 +670,8 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "stops_count": max(len(path_rows) - 1, 1),
         "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
+        **_platform_fields(day, trip, board_stop, exit_stop),
+        **_info(trip),
         # Publiczny odpowiednik `_trip`: przycisk "trasa" otwiera rozkład linii
         # na wariancie tego kursu - sam headsign nie odróżni zjazdów do
         # zajezdni z dwóch pętli (#270).
@@ -880,7 +913,8 @@ def _traficar_journeys(day, journey, dep_sec, deadline, dest, end_name, geo_db):
     return journeys
 
 
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train",
+                 "Kolejka": "cable"}
 
 
 def _line_parts(label):
@@ -1901,7 +1935,8 @@ def plan_flow_stages(start_query, end_query, when=None,
                      bike_electric=True, bike_regular=True,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
-                     with_journeys=True, live_refreshed=None):
+                     with_journeys=True, use_cars=True,
+                     live_refreshed=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Odpowiedź powstaje ETAPAMI, w kolejności, w jakiej da się je policzyć
@@ -1948,7 +1983,8 @@ def plan_flow_stages(start_query, end_query, when=None,
     bike_electric/bike_regular - na jaki rodzaj roweru pasażer chce wsiąść
     (dwa przyciski w pasku warstw, patrz bikes.map_places). To odsiew MIEJSC, nie zmiana wyceny przejazdu: rower
     ma jedną prędkość niezależnie od rodzaju, więc odhaczenie jednego z nich
-    nie przesuwa na mapie żadnej godziny.
+    nie przesuwa na mapie żadnej godziny. Ten sam odsiew dotyczy stacji
+    wsiadania w propozycjach z rowerem (zgłoszenie #163).
     journey_limit to ile propozycji tras SZUKAĆ (suwak w UI, patrz
     DEFAULT_JOURNEY_LIMIT/MIN_JOURNEY_LIMIT/MAX_JOURNEY_LIMIT) - wyższa
     wartość nie zmyśla nieistniejących wariantów, tylko każe
@@ -1961,6 +1997,11 @@ def plan_flow_stages(start_query, end_query, when=None,
     stojaków jest żywy, a nie rozkładowy. Wyłączone zmienia dokładnie zero
     rzeczy w reszcie odpowiedzi - rower niczego tu nie przestawia, tylko
     dopisuje.
+
+    use_cars False - na liście nie ma propozycji kończących się Traficarem
+    (zgaszony przycisk 🚗 w pasku warstw, zgłoszenie #163). Auta przy mapie
+    (`cars`) zostają w odpowiedzi - pokazuje je albo chowa sam front - a reszta
+    listy jest ta sama, bo auto niczego w niej nie przestawia, tylko dopisuje.
 
     in_vehicle to start Z POKŁADU pojazdu (w API: parametry `onboard_*`,
     patrz onboard.py): {"num", "mode", "headsign", "stop"} - czym pasażer
@@ -2014,12 +2055,22 @@ def plan_flow_stages(start_query, end_query, when=None,
     # dopiero on mówi, gdzie i kiedy zaczyna się podróż (patrz onboard.py).
     ride = None
     if in_vehicle:
+        slack = in_vehicle.get("slack_sec")
         ride = onboard.find_ride(day, in_vehicle.get("num"),
                                  in_vehicle.get("mode"), in_vehicle.get("stop"),
-                                 asked_sec, in_vehicle.get("headsign"))
+                                 asked_sec, in_vehicle.get("headsign"),
+                                 onboard.OFF_SCHEDULE_SLACK_SEC if slack is None
+                                 else max(0, slack))
         if "error" in ride:
             yield "error", ride
             return
+        # Tryb względny (zgłoszenie #231): pojazd jedzie nie o swojej porze,
+        # więc w dniu tego zapytania jedzie dalej od teraz, a cała reszta
+        # zostaje przy rozkładzie. Kurs zmienia przy tym identyfikator - to
+        # on, a nie rozkładowy, jest od tej chwili „naszym" (patrz seated).
+        if ride["late_sec"]:
+            day, ride["trip"] = gtfs.with_shifted_trip(
+                day, ride["trip"], ride["stop"], ride["late_sec"])
 
     ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point,
                               ride)
@@ -2276,7 +2327,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # liście zaczyna się wysiadką, a nie wsiadaniem.
             **({"onboard": {k: ride[k] for k in
                             ("num", "mode", "line", "headsign", "stop_name", "at",
-                             "not_yet", "late")}}
+                             "late_sec", "at_sched")}}
                if ride else {}),
             "deadline": _fmt_time(deadline),
             # Cały zakres czasowy mapy w sekundach, tą samą miarą co kawałki:
@@ -2336,7 +2387,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                 found, bike_stations = _bike_journeys(
                     day, source_stops, target_stops, report_dep_sec, deadline, earliest,
                     profile, geo_db, start_point, end_point, start_name, end_name,
-                    (bike_mps, bike_overhead))
+                    (bike_mps, bike_overhead), (bike_electric, bike_regular))
                 if ride:
                     onboard.count_exit(found, ride)
                 journeys, bike_shown = _merge_journeys(journeys, found, gain_sec)
@@ -2348,7 +2399,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # jest tam świadoma (pierwszy = proponowany).
             with_car = (_traficar_journeys(day, best_journey, dep_sec, deadline,
                                            end_point_ll, end_name, geo_db)
-                        if with_journeys else [])
+                        if with_journeys and use_cars else [])
             if ride:
                 onboard.count_exit(with_car, ride)
             if with_car:
@@ -3500,6 +3551,8 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
                                 for s in stops[1:-1]]),
         "path": _round_path(path),
         "trip": seg["trip_id"],
+        **_platform_fields(day, seg["trip_id"], from_stop, to_stop),
+        **_info(seg["trip_id"]),
     }
 
 
@@ -3810,18 +3863,23 @@ def _profile_best(day, profile, stop, arr_t):
 
 
 def _bike_boardings(day, grid, stations, earliest, dep_sec, deadline, origin,
-                    bike_model):
+                    bike_model, kinds=(True, True)):
     """Dla każdej stacji: najwcześniejszy moment, w którym można przy niej
     stanąć - i skąd się tam przyszło.
 
     Dwie drogi, obie przez DOJŚCIE (bo stacja stoi obok przystanku, nie na
     nim): wprost z punktu startu albo z dowolnego słupka, do którego dowozi
     komunikacja. Ta druga jest całym sekretem „roweru w środku trasy".
+
+    `kinds` to (elektryczny, zwykły) - przyciski ⚡ i 🚲 w pasku warstw. Ten
+    sam odsiew co na mapie (bikes.ma_rodzaj): stacja, przy której nie stoi ani
+    jeden rower włączonego rodzaju, nie jest miejscem wsiadania. Zwrotu to nie
+    dotyczy - oddać można na każdej stacji (zgłoszenie #163).
     """
     boardings = []
     floor_sec = bikes.ride_time_sec(bikes.MIN_RIDE_M, *bike_model)
     for station in stations:
-        if not station["renting"] or station["bikes"] <= 0:
+        if not station["renting"] or not bikes.ma_rodzaj(station, *kinds):
             continue
         best_t, source = INF, None
         if origin is not None:
@@ -4116,7 +4174,7 @@ def _bike_journey(day, candidate, source_stops, target_stops, dep_sec, deadline,
 
 def _bike_journeys(day, source_stops, target_stops, dep_sec, deadline, earliest,
                    profile, geo_db, start_point, end_point, start_name, end_name,
-                   bike_model, limit=BIKE_JOURNEY_LIMIT):
+                   bike_model, kinds=(True, True), limit=BIKE_JOURNEY_LIMIT):
     """Propozycje tras z rowerem miejskim - albo pusta lista.
 
     Zwraca (propozycje, liczba_stacji). Pusta lista jest odpowiedzią
@@ -4128,7 +4186,8 @@ def _bike_journeys(day, source_stops, target_stops, dep_sec, deadline, earliest,
     odróżnić "policzone i nic z tego" od "nie było czego liczyć".
 
     `bike_model` to (prędkość w linii prostej, narzut) pytającego - ten sam,
-    którym liczy mapa (patrz bikes.ride_time_sec).
+    którym liczy mapa (patrz bikes.ride_time_sec). `kinds` - na jaki rodzaj
+    roweru pasażer chce wsiąść (patrz _bike_boardings).
     """
     stations = bikes.stations_quiet()
     if not stations:
@@ -4139,7 +4198,7 @@ def _bike_journeys(day, source_stops, target_stops, dep_sec, deadline, earliest,
     grid = _stop_grid(day)
 
     boardings = _bike_boardings(day, grid, stations, earliest, dep_sec,
-                                deadline, origin, bike_model)
+                                deadline, origin, bike_model, kinds)
     if not boardings:
         return [], len(stations)
     alightings = _bike_alightings(day, grid, stations, profile, target_stops, dest)

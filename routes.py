@@ -15,6 +15,7 @@ import gtfs
 import naming
 import onboard
 import pkp
+import polinka
 import siechnice
 import timetables
 import traficar
@@ -137,6 +138,9 @@ def _onboard_arg():
     tylko zawęża wybór kursu. `onboard_stop` to identyfikator słupka z
     /api/onboard, a nie nazwa: pasażer jedzie jedną krawędzią przystanku,
     a nie całym placem, i tylko na niej otworzą się drzwi.
+
+    `onboard_slack_sec` to próg trybu względnego z ⚙ (zgłoszenie #231, patrz
+    onboard.find_ride); bez niego obowiązuje domyślny.
     """
     num = (request.args.get("onboard_num") or "").strip()
     stop = (request.args.get("onboard_stop") or "").strip()
@@ -147,6 +151,7 @@ def _onboard_arg():
         "mode": request.args.get("onboard_mode") or None,
         "headsign": request.args.get("onboard_headsign") or None,
         "stop": stop,
+        "slack_sec": _float_arg("onboard_slack_sec"),
     }
 
 
@@ -187,6 +192,9 @@ def init_routes(app):
             {"name": name, "kind": "train" if name in train_only else "stop"}
             for name in sorted(gtfs_names | pkp_names)
         ]
+        # Stacje Polinki (zgłoszenie #165) - do podpowiedzi jak każdy słupek.
+        stops += [{"name": s["name"], "kind": "cable"} for s in polinka.stations_geo()]
+        stops.sort(key=lambda s: s["name"])
 
         return render_template(
             "index.html",
@@ -234,6 +242,8 @@ def init_routes(app):
         # miejsce, gdzie PKP i MPK są traktowane inaczej - bo tylko to
         # naprawdę je różni (markery), nie samo wyszukiwanie tras.
         stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
+        # Stacje Polinki (zgłoszenie #165) - własny rodzaj, własny kolor.
+        stops += [{**s, "kind": "cable"} for s in polinka.stations_geo()]
         # Nazwa miejsca dopiero na całej liście: DWORZEC GŁÓWNY i stacja
         # Wrocław Główny to jedno miejsce, więc i jeden podpis na mapie.
         return jsonify(gtfs.with_place_names(stops))
@@ -420,6 +430,10 @@ def init_routes(app):
             # wchodzi do odpowiedzi tylko wtedy, gdy front o nią poprosi
             # (przełącznik 🚲 w karcie wyszukiwania).
             use_bikes=request.args.get("bikes") == "1",
+            # Propozycje kończące się Traficarem - zgaszony przycisk 🚗 w pasku
+            # warstw wysyła "0" i znikają z listy (zgłoszenie #163). Brak
+            # parametru znaczy, że są, tak jak dotąd.
+            use_cars=request.args.get("traficar", "1") == "1",
             # Start z pokładu pojazdu (patrz onboard.py): zamiast "skąd" jedzie
             # linia, kierunek i NASTĘPNY przystanek. Bez numeru linii nie ma
             # o czym mówić, więc reszta parametrów jest wtedy ignorowana -

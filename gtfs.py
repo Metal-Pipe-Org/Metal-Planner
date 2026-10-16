@@ -10,11 +10,12 @@ import math
 import re
 import sqlite3
 import sys
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right, insort
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import naming
+import polinka
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "gtfs.sqlite"
 
@@ -36,6 +37,12 @@ PREV_DAY_SEC = 24 * 3600
 # przesiadki po trip_id - egzemplarz z doby D-1 dostaje więc własny
 # identyfikator. Prefiks nie występuje w identyfikatorach GTFS.
 PREV_DAY_PREFIX = "~"
+# Kurs przesunięty w czasie wobec rozkładu - pojazd, w którym siedzi pasażer
+# startujący z pokładu, gdy jedzie wyraźnie nie o swojej porze (zgłoszenie
+# #231, patrz with_shifted_trip). Identyfikator "@<sekundy>@<kurs>" niesie
+# samo przesunięcie, więc każde sięgnięcie do bazy umie je odkręcić bez
+# pytania dnia o cokolwiek. Znak nie występuje w identyfikatorach GTFS ani PKP.
+SHIFT_PREFIX = "@"
 
 # Duże węzły przesiadkowe bywają w GTFS rozbite na kilka nazwanych peronów
 # kierunkowych ("PL. GRUNWALDZKI W/t", "... Z/a", ...) - dla pasażera to
@@ -532,7 +539,7 @@ class DayData:
         "stops_by_alias_key", "alias_display_name",
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
-        "pkp_stations", "deps_by_stop", "_reach", "walk_mps", "_paced",
+        "pkp_stations", "pkp_platforms", "deps_by_stop", "_reach", "walk_mps", "_paced",
         "_searches", "_points",
     )
 
@@ -587,6 +594,10 @@ class DayData:
         # takie rozwinięcie nigdy przypadkiem nie złapało przystanku MPK
         # o zbieżnym przedrostku nazwy.
         self.pkp_stations = []
+        # (trip_id "PKP:...", stop_id) -> (peron, tor) z rozkładu planowego
+        # PLK (zgłoszenie #271, patrz pkp.augment_day). Tylko tam, gdzie
+        # rozkład choć jedno z nich podaje.
+        self.pkp_platforms = {}
 
 
 def _connect():
@@ -714,6 +725,9 @@ def load_day(day):
     # do 2026-08-31 - nie należała do żadnego miejsca i musiała mieć własny,
     # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
     pkp.augment_day(data, day)
+    # Polinka (zgłoszenie #165) z tego samego powodu w tym samym miejscu:
+    # jej stacje mają dostać przejścia piesze jak każdy słupek.
+    polinka.augment_day(data, day)
 
     # Indeksy nazw dopiero TERAZ, gdy w dniu są już obie sieci - jednym
     # przebiegiem po wszystkich słupkach, zamiast raz tutaj i drugi raz
@@ -1310,13 +1324,28 @@ def _simplify(points):
     return kept
 
 
+def shifted_trip(trip_id):
+    """Kurs przesunięty w czasie (patrz with_shifted_trip) -> (kurs, o ile
+    sekund jedzie później niż w rozkładzie); każdy inny -> (on sam, 0)."""
+    if not trip_id.startswith(SHIFT_PREFIX):
+        return trip_id, 0
+    shift, _, trip = trip_id[len(SHIFT_PREFIX):].partition(SHIFT_PREFIX)
+    return trip, int(shift)
+
+
 def db_trip(trip_id):
     """Identyfikator kursu z DayData -> (trip_id w bazie, przesunięcie sekund).
 
     Egzemplarz z doby D-1 nosi prefiks i czasy przesunięte o -24 h wobec
     tego, co leży w bazie (patrz load_day) - każde sięgnięcie z powrotem do
-    SQLite musi to odkręcić.
+    SQLite musi to odkręcić. Tak samo kurs przesunięty względem rozkładu
+    (patrz with_shifted_trip), tylko w drugą stronę: jedzie PÓŹNIEJ niż
+    w bazie o tyle, ile mówi jego identyfikator.
     """
+    trip_id, late = shifted_trip(trip_id)
+    if late:
+        raw, shift = db_trip(trip_id)
+        return raw, shift - late
     if trip_id.startswith(PREV_DAY_PREFIX):
         return trip_id[len(PREV_DAY_PREFIX):], PREV_DAY_SEC
     return trip_id, 0
@@ -1336,6 +1365,109 @@ def trip_conns(data, trip_id):
             index.setdefault(conn[4], []).append(i)
         data.conns_by_trip = index
     return data.conns_by_trip.get(trip_id, ())
+
+
+class _ShiftedTripIndex:
+    """Indeks kurs -> połączenia (patrz trip_conns) dla dnia z przesuniętym
+    kursem (with_shifted_trip), przeliczany z indeksu dnia bazowego dopiero
+    wtedy, gdy ktoś o dany kurs zapyta.
+
+    Wstawienie kilkunastu połączeń przesuwa pozycje wszystkich za nimi, a
+    przebudowanie całego indeksu to przejście po całej dobie (~50 ms na
+    Wrocławiu) - przy każdym takim zapytaniu od nowa. Pytań o kursy jest za to
+    garstka, a każde przelicza się dwoma przeszukaniami binarnymi.
+    """
+
+    __slots__ = ("base", "removed", "inserted_at", "own")
+
+    def __init__(self, base, removed, inserted_at, own):
+        self.base = base                # indeks dnia bazowego
+        self.removed = removed          # usunięte pozycje bazowe, rosnąco
+        self.inserted_at = inserted_at  # gdzie weszły nowe, w układzie po usunięciu
+        self.own = own                  # {kurs: [pozycje]} wstawionego i usuniętego
+
+    def _moved(self, i):
+        i -= bisect_left(self.removed, i)
+        return i + bisect_right(self.inserted_at, i)
+
+    def get(self, trip_id, default=()):
+        if trip_id in self.own:
+            return self.own[trip_id]
+        idxs = self.base.get(trip_id)
+        if idxs is None:
+            return default
+        return [self._moved(i) for i in idxs]
+
+
+def with_shifted_trip(day, trip_id, from_stop, late_sec):
+    """Dzień, w którym kurs `trip_id` jedzie od słupka `from_stop` o
+    `late_sec` sekund później niż w rozkładzie (ujemne - wcześniej) - zwraca
+    (dzień, identyfikator przesuniętego kursu).
+
+    To pojazd, w którym siedzi pasażer startujący z pokładu, gdy nie jedzie
+    o swojej porze (zgłoszenie #231, patrz onboard.find_ride): wszystkie inne
+    pojazdy zostają przy rozkładzie, a ten jeden jedzie dalej tak, jak jedzie
+    naprawdę - z tymi samymi odstępami między przystankami, tylko od teraz.
+    Rozkładowy egzemplarz tego kursu znika z dnia: to ten sam pojazd, więc
+    przesiadka w niego „o czasie" kilka przystanków dalej byłaby przesiadką
+    w pojazd, którego tam wtedy nie będzie.
+
+    Gdy od `from_stop` kurs nie ma już żadnego odjazdu (pętla końcowa),
+    przesuwać nie ma czego - wraca dzień bez zmian i ten sam kurs.
+
+    Kopia płytka, jak w with_point: dotykamy tylko tego, co się zmienia.
+    Tablica połączeń jest tu jednak inna (kurs zmienia w niej miejsce), więc
+    jest kopiowana - to ~1 ms, w przeciwieństwie do przebudowy indeksów,
+    których dlatego nie budujemy od nowa (patrz _ShiftedTripIndex).
+    """
+    new_id = f"{SHIFT_PREFIX}{late_sec}{SHIFT_PREFIX}{trip_id}"
+    removed = sorted(trip_conns(day, trip_id))
+    deps_by_stop(day)                       # bazowy indeks odjazdów - patrz niżej
+
+    tail, started = [], False
+    for i in removed:
+        dep, arr, from_s, to_s, _trip = day.conns[i]
+        started = started or from_s == from_stop
+        if started:
+            tail.append((dep + late_sec, arr + late_sec, from_s, to_s, new_id))
+    # Na pętli końcowej (onboard._by_arrival) kurs nie ma już odjazdu - nie
+    # ma czego przesuwać, a usunięcie zabrałoby z dnia cały kurs i nie
+    # wstawiło nic w zamian. Pasażer i tak tylko wysiada, więc dzień zostaje
+    # taki, jaki był.
+    if not tail:
+        return day, trip_id
+
+    data = copy.copy(day)
+    data.conns = list(day.conns)
+    data.dep_times = list(day.dep_times)
+    for i in reversed(removed):
+        del data.conns[i]
+        del data.dep_times[i]
+    own, inserted_at = [], []
+    for j, conn in enumerate(tail):
+        at = bisect_right(data.dep_times, conn[0])
+        data.dep_times.insert(at, conn[0])
+        data.conns.insert(at, conn)
+        own.append(at)
+        inserted_at.append(at - j)
+    data.conns_by_trip = _ShiftedTripIndex(day.conns_by_trip, removed,
+                                           inserted_at, {new_id: own, trip_id: []})
+
+    data.deps_by_stop = dict(day.deps_by_stop)
+    for stop in {day.conns[i][2] for i in removed}:
+        data.deps_by_stop[stop] = [d for d in data.deps_by_stop[stop]
+                                   if d[1] != trip_id]
+    for dep, _arr, from_s, _to_s, _trip in tail:
+        deps = data.deps_by_stop[from_s] = list(data.deps_by_stop.get(from_s, ()))
+        insort(deps, (dep, new_id))
+
+    data.trip_info = {**day.trip_info, new_id: day.trip_info[trip_id]}
+    if trip_id in day.trip_shape:
+        data.trip_shape = {**day.trip_shape, new_id: day.trip_shape[trip_id]}
+    data._searches = {}       # inne połączenia, inne wyszukiwania
+    data._paced = {}          # tempa liczy się z dnia bazowego (patrz with_pace)
+    data._points = {}         # punkt z mapy na tym dniu nie może trafić do bazowego
+    return data, new_id
 
 
 def deps_by_stop(data):
@@ -1417,10 +1549,26 @@ def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None, data
     daje dostęp do sekwencji przystanków dociągniętej przy budowie dnia, bez
     drugiego zapytania do żadnej bazy. Bez `data` (stare wywołania, testy)
     kurs kolejowy po prostu nie ma tu czego zwrócić - patrz pkp.trip_path.
+
+    Kurs przesunięty względem rozkładu (patrz with_shifted_trip) to przebieg
+    swojego kursu, tylko z godzinami przesuniętymi o tyle samo - i tak go
+    liczymy, także gdy jest pociągiem.
     """
+    inner, late = shifted_trip(trip_id)
+    if late:
+        return [(stop_id, arrival_sec + late, departure_sec + late)
+                for stop_id, arrival_sec, departure_sec in trip_path(
+                    inner, board_stop, board_dep - late, exit_stop,
+                    exit_arr - late, db, data)]
+
     if trip_id.startswith("PKP:"):
         import pkp
         return pkp.trip_path(data, trip_id, board_stop, board_dep, exit_stop, exit_arr)
+    if trip_id.startswith(polinka.ID_PREFIX):
+        rows = polinka.trip_rows(trip_id)
+        ok = (rows[0][0], rows[0][2], rows[-1][0], rows[-1][1]) == (
+            board_stop, board_dep, exit_stop, exit_arr)
+        return rows if ok else []
 
     trip_id, shift = db_trip(trip_id)
     own_db = db is None
