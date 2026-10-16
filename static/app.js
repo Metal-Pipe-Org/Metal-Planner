@@ -1073,15 +1073,22 @@ function locateStart(onFail = () => {}) {
     showLocateMsg('');
     hideLocateOffer();
     locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
+    // Odpowiedź GPS-a może przyjść po tym, jak pasażer sam ruszył „Skąd"
+    // (wpisał, wybrał podpowiedź, wyczyścił, kliknął mapę) - jego ręka wygrywa.
+    const startBefore = sel.start;
+    const textBefore = startInput.value;
+    const stale = () => sel.start !== startBefore || startInput.value !== textBefore;
     const finish = () => { locateButton.disabled = false; };
     navigator.geolocation.getCurrentPosition(
         position => {
             finish();
+            if (stale()) return;
             useMyLocation({lat: position.coords.latitude,
                            lon: position.coords.longitude});
         },
         error => {
             finish();
+            if (stale()) return;
             showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
             onFail();
         },

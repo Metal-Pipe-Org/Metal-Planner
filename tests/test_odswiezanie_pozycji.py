@@ -299,3 +299,35 @@ def test_zmiana_startu_na_przystanek_gasi_odswiezanie(przegladarka, adres):
     assert zapytania == []
     context.close()
     assert not bledy
+
+
+OPOZNIONY_GPS_JS = """() => {
+    navigator.geolocation.getCurrentPosition = (ok, fail) => {
+        window.__gps = {ok, fail};
+    };
+}"""
+
+
+@pytest.mark.parametrize("wynik", ["pozycja", "blad"])
+def test_spozniony_gps_nie_nadpisuje_startu_wpisanego_w_miedzyczasie(
+        przegladarka, adres, wynik):
+    context, page, bledy = _otworz(przegladarka, adres)
+    page.evaluate(OPOZNIONY_GPS_JS)
+    page.evaluate(USTAW_JS, ["time", "03:33"])
+    _wybierz(page, "#end", TRASA[1])
+    page.wait_for_function("window.__gps")
+    _wybierz(page, "#start", TRASA[0])
+    page.wait_for_selector("body:not(.searching) .journey", state="attached",
+                           timeout=20000)
+    if wynik == "pozycja":
+        page.evaluate("window.__gps.ok({coords: {latitude: 51.1, longitude: 17.03}})")
+    else:
+        page.evaluate("window.__gps.fail({code: 1})")
+    page.wait_for_timeout(500)
+    assert page.input_value("#start") == TRASA[0]
+    assert page.input_value("#time") == "03:33"
+    assert not page.is_visible("#locate-offer")
+    assert not page.is_visible("#locate-msg")
+    assert page.is_enabled("#locate")
+    context.close()
+    assert not bledy
