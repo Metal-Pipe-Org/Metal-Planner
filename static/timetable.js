@@ -31,6 +31,7 @@ const $ = id => document.getElementById(id);
 const queryInput = $('tt-query');
 const dateInput = $('tt-date');
 const timeInput = $('tt-time');
+const timeField = $('tt-time-field');
 const clearButton = $('tt-clear');
 const resultsBox = $('tt-results');
 if (!queryInput || !resultsBox) return;
@@ -410,6 +411,9 @@ function reset() {
 function syncField() {
     const filled = !!queryInput.value.trim();
     clearButton.hidden = !filled;
+    // Rozkład linii nie używa godziny (patrz retime), więc zostaje w nim sama
+    // data; pusty wpis albo przystanek przywracają pełne pole.
+    timeField.classList.toggle('date-only', filled && !!data && kind === 'line');
 }
 
 function fail(message, suggestions) {

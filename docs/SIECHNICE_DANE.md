@@ -58,8 +58,7 @@ Narodowej 234/3, Wrocław - firma wrocławska), z danymi wprost od organizatora,
 razem z pozycjami pojazdów w czasie rzeczywistym.
 
 To jedyne istniejące strukturalne źródło tych rozkładów. Jego API jest
-niedokumentowane, ale kompletne - kontrakt odtworzony z bundla aplikacji
-opisuje nagłówek [`siechnice.py`](../siechnice.py):
+niedokumentowane, ale kompletne - kontrakt odtworzony z bundla aplikacji:
 
 - `GET /stops` — 237 słupków z nazwami i współrzędnymi,
 - `GET /api/directions/<słupek>` — linie i kierunki na słupku,
@@ -72,7 +71,7 @@ Z `trip_id` + `index` odtwarza się kompletne kursy - to dokładnie tyle
 informacji, ile ma GTFS. **Nie trzeba tykać PDF-ów ani OSM-a**, wbrew temu, co
 zakładała pierwsza diagnoza w issue.
 
-## Dlaczego mimo to jest domyślnie wyłączone
+## Dlaczego serwer go nie odpytuje
 
 `https://siechnice.kiedyprzyjedzie.pl/robots.txt` to `User-agent: * / Disallow: /`.
 Regulaminu nie ma (`kiedyprzyjedzie.pl/regulamin` → 404), dokumentacji API nie
@@ -80,8 +79,33 @@ ma, deklaracji o ponownym wykorzystaniu danych nie ma. To najgorszy możliwy
 zestaw: zgody nikt nie udzielił i nie ma nawet warunków, których dałoby się
 dotrzymać.
 
-Dlatego `siechnice.py` pobiera cokolwiek tylko po jawnym `SIECHNICE_ENABLED=on`,
-z wymuszoną przerwą między zapytaniami i własnym `User-Agent`.
+## Tymczasowy plan: statyczna kopia ([issue #261](https://github.com/Metal-Pipe-Org/Metal-Planner/issues/261))
+
+Decyzja z października 2026: serwer korzysta wyłącznie ze statycznej kopii jednego pełnego tygodnia rozkładu - to te same publiczne dane, które gmina wykłada w PDF-ach. Zmienna `SIECHNICE_ENABLED` zniknęła razem z pobieraniem przy aktualizacji.
+
+**Ani dane, ani kod pobierania nie leżą w repo, a serwer nigdy nie odpytuje kiedyPrzyjedzie.** `siechnice.py` nie importuje niczego sieciowego (pilnuje tego test). Kopię przygotowuje się poza projektem i wgrywa przez aplikację.
+
+### Wgranie kopii
+
+W trybie deweloperskim (`DEV_MODE=1`) panel ⚙ ma sekcję „Rozkład Siechnic” z przyciskiem „Wgraj rozkład Siechnic”. Po wybraniu pliku:
+
+1. Serwer sprawdza format (niżej). Zły plik zostaje odrzucony z komunikatem, co jest nie tak, a poprzednia kopia zostaje nietknięta.
+2. Dobry plik ląduje w miejscu z `SIECHNICE_ROZKLAD` - na serwerze w folderze `siechnice` obok `docker-compose.yml` (`./siechnice/rozklad.json`, w kontenerze `/app/data/siechnice/rozklad.json`; Docker zakłada go przy pierwszym starcie), lokalnie domyślnie w `data/siechnice/rozklad.json`. Zapis idzie przez plik obok i podmianę, więc przebudowa nigdy nie czyta połowy pliku.
+3. Od razu, w tle, rusza przebudowa bazy - ta sama, co w nocy (pobiera też paczkę Wrocławia, ok. minuty). Dwie przebudowy nigdy nie biegną naraz: kolejna czeka, aż poprzednia skończy. Sekcja w ⚙ pokazuje, że przebudowa trwa, i potem, czy baza ma już wgrany rozkład.
+
+Poza trybem deweloperskim tego wgrania w ogóle nie ma - ani sekcji, ani adresu na serwerze. Hasła nie ma celowo. Gdy folder jest pusty, Siechnic po prostu nie ma, a reszta aplikacji działa bez zmian. Wgrana kopia przeżywa restart i nowe wdrożenie, bo folder leży na serwerze, poza obrazem.
+
+### Format pliku
+
+JSON z trzema polami (inne pola są pomijane) - surowe odpowiedzi API, żeby całe przekształcenie w kursy żyło w jednym miejscu w kodzie (`siechnice.py`):
+
+1. `stops` - lista słupków `[designator, kod, nazwa, lon*1e6, lat*1e6, ...]` (współrzędne w mikrostopniach, najpierw długość) - tak jak `GET /stops`.
+2. `lines_by_stop` - `{designator: ["800+80", ...]}`: numery linii obsługujących słupek (z `GET /api/directions/<słupek>`).
+3. `days` - dokładnie siedem dni, po jednym na każdy dzień tygodnia: `{"date": "RRRR-MM-DD", "departures_by_stop": {designator: [{"departure": sekundy od północy, "trip_id": liczba, "index": pozycja słupka w kursie}, ...]}}` (z `GET /api/timetables/<słupek>?date=`). Odjazdy mogą być tylko ze słupków wymienionych w `stops`.
+
+Plik musi dać co najmniej jeden kurs. Lepiej wziąć tydzień bez świąt.
+
+Przy każdej aktualizacji bazy każdy dzień tygodnia z kopii dostaje regułę w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia - dzięki temu kopia nie wygasa po tygodniu, a komunikat „rozkładu jeszcze nie opublikowano" dalej liczy się z paczki Wrocławia. Święta jeżdżą wg dnia tygodnia - kopia ich nie zna.
 
 ## Co zrobić, żeby było legalnie i trwale
 

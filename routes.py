@@ -1,11 +1,13 @@
 import hashlib
+import http.client
 import json
 import math
 from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from flask import Response, jsonify, render_template, request
+from flask import Response, abort, jsonify, render_template, request
+from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
 import config
@@ -13,8 +15,10 @@ import gtfs
 import naming
 import onboard
 import pkp
+import siechnice
 import timetables
 import traficar
+import update_gtfs
 import vehicles
 import warmup
 from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
@@ -24,6 +28,11 @@ from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
 # jest już na ekranie, więc to czekanie nikogo nie blokuje, ale wątek serwera
 # trzyma. Ponad timeouty feedów (10 s, patrz traficar._fetch).
 LIVE_REFRESH_WAIT_SEC = 20
+
+# Tydzień rozkładu Siechnic to ~3 MB; sufit tylko po to, żeby przypadkowo
+# wybrany duży plik nie lądował cały w pamięci workera.
+SIECHNICE_MAX_BYTES = 30 * 1024 * 1024
+
 
 def _frontend_digest(app):
     """Odcisk zawartości frontu - wersja cache'ów service workera.
@@ -271,7 +280,7 @@ def init_routes(app):
         warstw, bez związku z wyszukiwaniem (patrz api_cars)."""
         try:
             return jsonify({"stations": bikes.stations(), "free": bikes.free_bikes()})
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             return jsonify({"error": f"Nie udało się pobrać rowerów: {e}"}), 503
 
     @app.route("/api/plan")
@@ -429,3 +438,39 @@ def init_routes(app):
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",
         )
+
+    @app.route("/api/dev/siechnice", methods=["GET", "POST"])
+    def api_dev_siechnice():
+        """Wgranie kopii rozkładu Siechnic (⚙ → „Wgraj rozkład Siechnic”).
+
+        Tylko w trybie deweloperskim - poza nim endpointu po prostu nie ma.
+        POST zapisuje plik do folderu ./siechnice i od razu odpala przebudowę bazy w tle;
+        GET mówi, czy przebudowa trwa i czy obecna baza ma już wgrany plik.
+        """
+        if not config.dev_mode():
+            abort(404)
+
+        if request.method == "POST":
+            # Limit tylko na tej trasie, nie na całej aplikacji. Werkzeug pilnuje go
+            # przy czytaniu strumienia, więc nie obejdzie go ani zaniżony
+            # Content-Length, ani kodowanie chunked.
+            request.max_content_length = SIECHNICE_MAX_BYTES
+            try:
+                upload = request.files.get("file")
+            except RequestEntityTooLarge:
+                return jsonify({"error": "Plik jest za duży jak na tydzień rozkładu."}), 413
+            if upload is None:
+                return jsonify({"error": "Nie wybrano pliku."}), 400
+            reason = siechnice.save_snapshot(upload.read(), siechnice.SNAPSHOT_PATH)
+            if reason:
+                return jsonify({"error": reason}), 400
+            update_gtfs.start_update_in_background()
+
+        path = siechnice.SNAPSHOT_PATH
+        uploaded = path.stat().st_mtime if path.exists() else None
+        built = update_gtfs.DB_PATH.stat().st_mtime if update_gtfs.DB_PATH.exists() else None
+        return jsonify({
+            "uploaded_at": uploaded and datetime.fromtimestamp(uploaded).isoformat(timespec="seconds"),
+            "rebuilding": update_gtfs.update_running(),
+            "in_database": bool(uploaded and built and built >= uploaded),
+        })

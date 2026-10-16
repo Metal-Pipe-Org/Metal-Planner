@@ -594,6 +594,16 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 
 .icon-button.in-field:hover { background: #e8edf3; }
 
+/* ◎ świeci, gdy pozycja odświeża się sama (#267) - jak inne włączone przyciski. */
+.icon-button.in-field.active,
+.icon-button.in-field.active:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+/* Drugi ◎ dla zwiniętej karty na telefonie - gdzie indziej go nie ma (phone.css). */
+.locate-peek { display: none; }
+
 /* Czekanie na GPS: przycisk pulsuje i nie przyjmuje kolejnych kliknięć. */
 .icon-button.in-field:disabled {
     cursor: default;
@@ -2458,54 +2468,67 @@ body.mode-timetable .time-headline { display: none; }
     border-color: #263238;
 }
 
-/* Dzień i godzina - ta sama ramka, co pole czasu wyszukiwarki (.time-field):
-   surowy <input type="date"> na tle karty wyglądał jak nie z tej aplikacji.
-   Zawija się na wąskim ekranie, bo dwie pary etykieta-pole nie mieszczą się
-   w jednym wierszu telefonu. */
-.tt-when {
+/* Pole szukania (z ✕ czyszczącym w środku), a pod nim czas -
+   ten sam .time-field, co w wyszukiwarce, na całą szerokość karty. Lista
+   podpowiedzi kotwiczy się do .tt-top, więc ma szerokość całego wiersza. */
+.tt-top {
+    position: relative;
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 14px;
-    margin-top: 10px;
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--surface-alt);
-    color: var(--ink-soft);
-    font-size: 12.5px;
+    flex-direction: column;
+    gap: 8px;
 }
 
-.tt-when-part {
+.tt-query-row {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-.tt-when input {
-    flex: 0 0 auto;
-    padding: 0;
-    border: none;
-    background: none;
-    font: inherit;
-    font-size: 14px;
-    color: var(--ink);
+.tt-query-row .tt-field { flex: 1 1 0; min-width: 0; }
+
+.tt-time-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
 }
 
-.tt-when input:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: 4px;
+.tt-time-row .time-field { flex: 1 1 0; min-width: 0; }
+
+.tt-top .ac-list { top: 48px; }
+
+/* Wysokość pola szukania (44 px) - także w rozkładzie linii, gdzie w ramce
+   została sama data. Godzina i data stoją obok siebie w jednej ramce, bez
+   rozwijania; rozkład linii nie ma godziny, więc zostaje w nim sama data,
+   bez „teraz". */
+.tt-top .time-field {
+    position: relative;
+    box-sizing: border-box;
+    min-height: 44px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
 }
+
+.time-field.date-only .tt-hour-row { display: none; }
 
 /* "Zamknij rozkład" - patrz index.html: pokazuje się TYLKO w widoku mapy na
-   telefonie, gdzie karta rozkładu jest jedyną rzeczą nad mapą. Stoi w miejscu
-   podpowiedzi (ta w tym widoku i tak jest schowana), więc karta nie rośnie. */
+   telefonie, gdzie karta rozkładu jest jedyną rzeczą nad mapą. Mały niebieski
+   ✕ stoi z prawej strony wiersza czasu (jak „Szukaj" w wyszukiwarce), więc
+   karta nie rośnie. */
 .tt-close { display: none; }
 
-/* Kółko ładowania siedzi w wierszu daty - przycisku "Pokaż" nie ma, więc nie
-   ma go gdzie postawić, a szukanie musi być widoczne. */
-.tt-spinner { display: none; margin-left: auto; color: var(--ink-faint); }
+/* Kółko ładowania siedzi w ramce czasu, przy prawej krawędzi - przycisku
+   "Pokaż" nie ma, więc nie ma go gdzie postawić, a szukanie musi być widoczne. */
+.tt-spinner {
+    display: none;
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    margin-top: -7.5px;
+    color: var(--ink-faint);
+}
 body.tt-searching .tt-spinner { display: inline-block; }
 
 /* --- wyniki -------------------------------------------------------------- */
