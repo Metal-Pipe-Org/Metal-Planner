@@ -9,7 +9,10 @@ DATA_DIR=/app/data
 # Bind mount przychodzi z hosta z prawami hosta i Docker ich nie rusza, więc
 # świeży ./data należy do roota. Wchodzimy jako root tylko po to, żeby ustawić
 # właściciela, i od razu schodzimy na resztę życia kontenera do zwykłego
-# użytkownika - serwer nie działa z uprawnieniami roota.
+# użytkownika - serwer nie działa z uprawnieniami roota. To samo dotyczy
+# ./siechnice (podmontowanego pod $DATA_DIR/siechnice, patrz
+# docker-compose.yml): Docker zakłada brakujący folder jako root, a aplikacja
+# musi do niego zapisać wgrany rozkład - chown -R obejmuje i jego.
 if [ "$(id -u)" = "0" ]; then
     mkdir -p "$DATA_DIR"
     chown -R "$APP_USER:$APP_USER" "$DATA_DIR"

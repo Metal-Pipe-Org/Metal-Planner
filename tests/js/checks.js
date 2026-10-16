@@ -1709,6 +1709,23 @@ checks.peron_przy_wsiadaniu_i_wysiadaniu = (() => {
     };
 })();
 
+/* Pojazd, w którym się już siedzi (zgłoszenie #224): na karcie propozycji
+   jego plakietka ma obwódkę, a każda inna plakietka - nie. „134 › 5" bez
+   tego nie mówi, czy w 134 się wsiada, czy jedzie się nią dalej. */
+checks.obecny_pojazd_na_karcie = (() => {
+    const siedzac = [{...VIA_LEGS[0], onboard: true}, VIA_LEGS[1], VIA_LEGS[2]];
+    const zwykle = app.summaryHtml(VIA_LEGS);
+    const zPokladu = app.summaryHtml(siedzac);
+    const wyroznione = html => html.match(/class="badge [^"]* current"[^>]*>[^<]*</g) || [];
+    return {
+        ok: wyroznione(zwykle).length === 0
+            && wyroznione(zPokladu).length === 1
+            && wyroznione(zPokladu)[0].endsWith('>134<')
+            && wyroznione(zPokladu)[0].includes('jedziesz tym pojazdem'),
+        zwykle: wyroznione(zwykle), zPokladu: wyroznione(zPokladu),
+    };
+})();
+
 
 /* Zegar przy pociągu w tablicy odjazdów (#71): zielony o czasie, czerwony
    spóźniony, a bez danych - nic. */

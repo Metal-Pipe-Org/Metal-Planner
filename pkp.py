@@ -56,7 +56,7 @@ przyjazd w górę - plan może być pesymistyczny co do sekund, nigdy optymistyc
 
 WŁĄCZANIE. Jak przy PKP_API_KEY (patrz config.py): brak klucza wyłącza tę
 funkcję po cichu (i update_pkp.py w ogóle nie buduje bazy), tak samo jak
-Siechnice bez SIECHNICE_ENABLED. Brak samej bazy (klucz jest, ale
+Siechnice bez pliku z kopią rozkładu. Brak samej bazy (klucz jest, ale
 update_pkp.py jeszcze nie zdążył jej zbudować) też nie jest błędem -
 augment_day() wtedy po prostu nic nie dokleja.
 """

@@ -629,6 +629,12 @@ def test_train_delay_shows_in_the_timeline(front):
     _check(front, "opoznienie_pociagu_w_osi")
 
 
+def test_current_vehicle_badge_stands_out_on_the_card(front):
+    """Zgłoszenie #224: przy starcie z pokładu plakietka pojazdu, w którym się
+    siedzi, ma na karcie propozycji obwódkę - i tylko ona."""
+    _check(front, "obecny_pojazd_na_karcie")
+
+
 def test_stops_along_the_way_stand_on_the_map(front):
     """#169: wybrana trasa ma na mapie obwódkę na każdym mijanym przystanku,
     z nazwą i godziną pod kursorem - zawsze, niezależnie od opcji listy."""

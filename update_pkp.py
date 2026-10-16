@@ -49,7 +49,7 @@ docker/entrypoint.sh, przed startem gunicorna.
 
 Bez PKP_API_KEY (patrz config.py) cały ten moduł jest wyłączony po cichu -
 brak klucza to nie błąd, tylko brak konfiguracji (tak samo jak Siechnice bez
-SIECHNICE_ENABLED w update_gtfs.py), więc entrypoint/harmonogram mogą wołać
+pliku z kopią rozkładu w update_gtfs.py), więc entrypoint/harmonogram mogą wołać
 funkcje tego pliku bezwarunkowo.
 """
 
