@@ -1749,6 +1749,25 @@ checks.przystanki_po_drodze_w_osi = (() => {
     };
 })();
 
+/* Peron i tor pociągu (zgłoszenie #271) stoją przy nazwie stacji wsiadania
+   i wysiadania - nie przy mijanych, gdzie nic się nie robi. */
+checks.peron_przy_wsiadaniu_i_wysiadaniu = (() => {
+    const pociag = {...VIA_LEGS[0], mode: 'train', line: 'Pociąg IC 5412',
+                    num: 'IC 5412', from_platform: {platform: '2', track: '4'},
+                    to_platform: {platform: 'BUS'},
+                    via: [{name: 'Oława', t: '15:32', platform: {platform: '9'}}]};
+    const html = app.detailHtml({departure: '15:15', arrival: '15:40', legs: [pociag]});
+    const perony = html.match(/<span class="platform">[^<]*</g) || [];
+    return {
+        ok: perony.length === 2
+            && perony[0].endsWith('>peron 2, tor 4<')
+            && perony[1].endsWith('>peron BUS<')
+            && /Sosnowiecka<span class="platform">/.test(html)
+            && !html.includes('peron 9'),
+        perony,
+    };
+})();
+
 /* Pojazd, w którym się już siedzi (zgłoszenie #224): na karcie propozycji
    jego plakietka ma obwódkę, a każda inna plakietka - nie. „134 › 5" bez
    tego nie mówi, czy w 134 się wsiada, czy jedzie się nią dalej. */

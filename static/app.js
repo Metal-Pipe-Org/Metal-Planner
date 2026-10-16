@@ -848,6 +848,8 @@ const stopsReady = fetch('/api/stops')
     kasował (#154). Z tego samego powodu ruszamy wyłącznie pole, które klik
     uzupełnia - drugiego nie przepisujemy z `sel`. */
 function pickEndpoint(value) {
+    // Okno „mojego miejsca" czeka na wskazanie - ten klik jest dla niego.
+    if (placePickTook(value)) return;
     if (selectedJourney !== null) { deselectJourney(); return; }
     const hasStart = startInput.value.trim() !== '';
     const hasEnd = endInput.value.trim() !== '';
@@ -2875,7 +2877,7 @@ function timetableLinesHtml(data, mapSec) {
             ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
               + `${infoHtml(d.info)}</span>`
             : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
-        `<span class="tip-dir">${esc(d.headsign)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
@@ -3692,6 +3694,25 @@ function openJourney(index) {
     renderVehicles();
 }
 
+/** Peron i tor pociągu (zgłoszenie #271): „peron 2, tor 4" - tak, jak piszą
+    tablice PKP. Z rozkładu planowego PLK (patrz pkp.augment_day), więc bez
+    dzisiejszych zmian. Pusty napis, gdy rozkład nie podaje żadnego.
+
+    Stoi tam, gdzie się go szuka: na osi trasy przy stacji wsiadania
+    i wysiadania (nie przy mijanych - tam nic się nie robi) i w tablicy
+    odjazdów stacji. „BUS" (komunikacja zastępcza według PLK) idzie
+    dosłownie, jako „peron BUS". */
+function platformText(p) {
+    if (!p) return '';
+    return [p.platform && `peron ${p.platform}`, p.track && `tor ${p.track}`]
+        .filter(Boolean).join(', ');
+}
+
+function platformHtml(p) {
+    const text = platformText(p);
+    return text ? `<span class="platform">${esc(text)}</span>` : '';
+}
+
 /** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
     przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
 function infoHtml(text) {
@@ -3880,9 +3901,10 @@ function toggleVia(button) {
 
 function detailHtml(journey) {
     const rows = [];
-    const stopRow = (time, name, cls) =>
+    const stopRow = (time, name, cls, platform) =>
         `<li class="tl-stop ${cls}"><span class="tl-time">${esc(time)}</span>` +
-        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}</span></li>`;
+        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
+        `${platformHtml(platform)}</span></li>`;
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -3993,7 +4015,8 @@ function detailHtml(journey) {
         // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
         const via = leg.via || [];
         const viaOn = via.length > 0 && viaOpen(leg);
-        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
+        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
+                          leg.from_platform));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
@@ -4030,13 +4053,14 @@ function detailHtml(journey) {
         const next = journey.legs[i + 1];
         if (!next || next.kind === 'walk') {
             rows.push(stopRow(leg.to_time, leg.to,
-                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`));
+                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`,
+                              leg.to_platform));
         } else if (leg.onboard) {
             // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
             // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
             // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
             // całej osi - to jest ten moment, w którym trzeba wstać.
-            rows.push(stopRow(leg.to_time, leg.to, 'exit'));
+            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform));
         }
     });
 
@@ -5244,6 +5268,266 @@ $('clear').addEventListener('click', () => {
     forgetLastSearch();
 });
 
+// ----------------------------------------------------------- moje miejsca ----
+//
+// Trzy przyciski „jedź tam stąd" (pasek .places-bar, patrz index.html).
+// Miejsce to to samo, co cel wyszukiwania: nazwa przystanku (kanoniczna, jak
+// w `sel`) albo punkt {lat, lon}. Zapisane tylko w tej przeglądarce, osobnym
+// kluczem - „Przywróć domyślne" w ⚙ ich nie kasuje, bo to nie ustawienie.
+const MY_PLACES_KEY = 'metal-planner:my-places';
+const MY_PLACES_COUNT = 3;
+const placesBar = $('places-bar');
+const placeDialog = $('place-dialog');
+const placeWhere = $('place-where');
+const placeMsg = $('place-msg');
+const placePickHint = $('place-pick-hint');
+
+let myPlaces = loadMyPlaces();
+let placeSlot = null;      // które miejsce jest w oknie
+let placeDraft = null;     // punkt z ◎ albo z mapy - pole pokazuje go jako tekst
+let placePicking = false;  // okno schowane, czeka na klik w mapę
+let placeLongPress = false;
+
+function loadMyPlaces() {
+    let saved = [];
+    try {
+        saved = JSON.parse(localStorage.getItem(MY_PLACES_KEY)) || [];
+    } catch {
+        // localStorage niedostępny albo zepsuty JSON - przyciski zaczynają puste
+    }
+    return Array.from({length: MY_PLACES_COUNT}, (_, i) => {
+        const p = saved[i];
+        return p && p.icon && (typeof p.place === 'string' || isPoint(p.place)) ? p : null;
+    });
+}
+
+function saveMyPlaces() {
+    try {
+        localStorage.setItem(MY_PLACES_KEY, JSON.stringify(myPlaces));
+    } catch {
+        // localStorage niedostępny - miejsce działa do odświeżenia strony
+    }
+}
+
+function renderPlaces() {
+    placesBar.replaceChildren(...myPlaces.map((p, i) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'icon-button place-button' + (p ? ' set' : '');
+        button.dataset.slot = i;
+        button.textContent = p ? p.icon : '+';
+        const label = p ? `Jedź stąd do: ${displayValue(p.place)}`
+            : `Moje miejsce ${i + 1} — przypisz miejsce`;
+        button.setAttribute('aria-label', label);
+        button.title = p ? `${label}\nPrzytrzymaj, żeby zmienić` : label;
+        return button;
+    }));
+}
+
+function showPlaceMsg(text) {
+    placeMsg.textContent = text || '';
+    placeMsg.hidden = !text;
+}
+
+function setPlaceDraft(point) {
+    placeDraft = point;
+    placeWhere.value = displayValue(point);
+    showPlaceMsg('');
+}
+
+function openPlaceDialog(slot) {
+    if (placeDialog.open) return;
+    placeSlot = slot;
+    const p = myPlaces[slot];
+    $('place-title').textContent = `Moje miejsce ${slot + 1}`;
+    for (const radio of placeDialog.querySelectorAll('[name="place-icon"]')) {
+        radio.checked = !!p && radio.value === p.icon;
+    }
+    placeDraft = p && isPoint(p.place) ? p.place : null;
+    placeWhere.value = p ? displayValue(p.place) : '';
+    $('place-remove').hidden = !p;
+    showPlaceMsg('');
+    placeDialog.showModal();
+}
+
+/** „51.1093, 17.0386", „(51.1093, 17.0386)" albo z przecinkami dziesiętnymi
+    „51,1093 17,0386" - wpisane ręcznie albo skopiowane z pola „Skąd". */
+function parsePoint(text) {
+    const m = text.trim().match(
+        /^\(?\s*(-?\d{1,2}(?:[.,]\d+)?)\s*(?:[,;]\s*|\s+)(-?\d{1,3}(?:[.,]\d+)?)\s*\)?$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1].replace(',', '.'));
+    const lon = parseFloat(m[2].replace(',', '.'));
+    return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? {lat, lon} : null;
+}
+
+/** Co jest teraz w polu okna: punkt ze szkicu, gdy pole wciąż go pokazuje,
+    inaczej przystanek z listy albo wpisane współrzędne. */
+function placeFromField() {
+    const text = placeWhere.value.trim();
+    if (placeDraft && text === displayValue(placeDraft)) return placeDraft;
+    if (STOP_KIND.has(text)) return rawStopName(text);
+    return parsePoint(text);
+}
+
+function savePlace() {
+    const icon = placeDialog.querySelector('[name="place-icon"]:checked');
+    const place = placeFromField();
+    if (!icon) { showPlaceMsg('Wybierz ikonę.'); return; }
+    if (!place) {
+        showPlaceMsg(placeWhere.value.trim()
+            ? 'Nie znam takiego przystanku — wybierz go z podpowiedzi, wpisz współrzędne albo wskaż miejsce na mapie.'
+            : 'Wybierz miejsce.');
+        placeWhere.focus();
+        return;
+    }
+    myPlaces[placeSlot] = {icon: icon.value, place};
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+}
+
+/** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
+function locateOnce(onPoint, onError) {
+    if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
+    navigator.geolocation.getCurrentPosition(
+        position => onPoint({lat: position.coords.latitude,
+                             lon: position.coords.longitude}),
+        error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
+        GEO_OPTIONS,
+    );
+}
+
+/** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
+    od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
+function goToPlace(slot, button) {
+    const {place} = myPlaces[slot];
+    if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
+    hideRecallOffer();
+    hideLocateOffer();
+    showLocateMsg('');
+    const previous = [sel.start, sel.end];
+    sel.end = place;
+    endInput.value = displayValue(place);
+    updatePointMarker('end', place);
+    restyle(...previous, sel.end);
+    button.disabled = true;               // GPS potrafi mielić kilka sekund
+    locateOnce(point => {
+        button.disabled = false;
+        const before = sel.start;
+        sel.start = point;
+        startInput.value = displayValue(point);
+        updatePointMarker('start', point);
+        restyle(before);
+        offerNearestStop(point);
+        search();
+    }, message => {
+        button.disabled = false;
+        showLocateMsg(message);
+        if (startInput.value) search();
+    });
+}
+
+/** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
+function placePickTook(value) {
+    if (!placePicking) return false;
+    stopPlacePick();
+    // Słupek to przystanek z nazwą, nie punkt - pole dostaje wtedy nazwę.
+    if (isPoint(value)) setPlaceDraft(value);
+    else { placeDraft = null; placeWhere.value = displayValue(value); showPlaceMsg(''); }
+    placeDialog.showModal();
+    return true;
+}
+
+function stopPlacePick() {
+    placePicking = false;
+    placePickHint.hidden = true;
+}
+
+placesBar.addEventListener('click', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
+    if (placeLongPress) { placeLongPress = false; return; }
+    const slot = Number(button.dataset.slot);
+    if (myPlaces[slot]) goToPlace(slot, button);
+    else openPlaceDialog(slot);
+});
+
+// Zmiana przypisanego miejsca: prawy przycisk myszy albo przytrzymanie palca
+// (iPhone nie zgłasza przytrzymania jako contextmenu, więc liczymy je sami).
+placesBar.addEventListener('contextmenu', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    event.preventDefault();
+    // Android zgłasza przytrzymanie palca także tak - okno ma się otworzyć
+    // raz, a puszczenie palca nie może potem „kliknąć".
+    clearTimeout(placePressTimer);
+    if (placeLongPress) return;           // przytrzymanie było pierwsze
+    placeLongPress = true;
+    openPlaceDialog(Number(button.dataset.slot));
+});
+
+let placePressTimer = null;
+placesBar.addEventListener('pointerdown', event => {
+    const button = event.target.closest('.place-button');
+    placeLongPress = false;
+    if (!button || event.button !== 0) return;
+    placePressTimer = setTimeout(() => {
+        placeLongPress = true;
+        openPlaceDialog(Number(button.dataset.slot));
+    }, 600);
+});
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+    placesBar.addEventListener(type, () => clearTimeout(placePressTimer));
+}
+
+attachAutocomplete(placeWhere, () => { placeDraft = null; showPlaceMsg(''); },
+                   {suggest: suggestRecentFirst('end'), onEnter: savePlace});
+placeWhere.addEventListener('input', () => showPlaceMsg(''));
+
+$('place-form').addEventListener('submit', event => {
+    event.preventDefault();
+    savePlace();
+});
+
+$('place-remove').addEventListener('click', () => {
+    myPlaces[placeSlot] = null;
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+});
+
+const placeLocate = $('place-locate');
+if (!navigator.geolocation) placeLocate.hidden = true;
+placeLocate.addEventListener('click', () => {
+    placeLocate.disabled = true;
+    locateOnce(point => {
+        placeLocate.disabled = false;
+        setPlaceDraft(point);
+    }, message => {
+        placeLocate.disabled = false;
+        showPlaceMsg(message);
+    });
+});
+
+$('place-pick').addEventListener('click', () => {
+    placeDialog.close();
+    placePicking = true;
+    $('place-pick-text').textContent = `Kliknij na mapie: moje miejsce ${placeSlot + 1}`;
+    placePickHint.hidden = false;
+    setView('map');            // na telefonie z listy tras mapy nie widać
+});
+
+$('place-pick-cancel').addEventListener('click', () => {
+    stopPlacePick();
+    placeDialog.showModal();
+});
+
+placeDialog.addEventListener('close', () => { placeLongPress = false; });
+
+renderPlaces();
+
 // Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
@@ -6042,6 +6326,11 @@ $('dev-reset').addEventListener('click', () => {
 
 function suspendPlanner() {
     plannerSuspended = true;
+    // Wskazywanie „mojego miejsca" czeka na klik w mapę, a w rozkładach klik
+    // znaczy co innego (patrz map.on('click'), timetableTook) - pasek
+    // „Kliknij na mapie" wisiałby nad rozkładem, nic nie robiąc. Wejście
+    // w rozkłady to porzucenie okna miejsca, więc anuluje się po cichu.
+    stopPlacePick();
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }

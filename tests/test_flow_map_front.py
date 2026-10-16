@@ -634,6 +634,12 @@ def test_stops_along_the_way_unfold_in_the_timeline(front):
     _check(front, "przystanki_po_drodze_w_osi")
 
 
+def test_platform_and_track_stand_by_boarding_and_alighting(front):
+    """#271: peron i tor pociągu przy stacji wsiadania i wysiadania, obok
+    nazwy - przy stacjach mijanych nie."""
+    _check(front, "peron_przy_wsiadaniu_i_wysiadaniu")
+
+
 def test_current_vehicle_badge_stands_out_on_the_card(front):
     """Zgłoszenie #224: przy starcie z pokładu plakietka pojazdu, w którym się
     siedzi, ma na karcie propozycji obwódkę - i tylko ona."""
