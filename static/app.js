@@ -215,6 +215,12 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 // start/end: nazwa przystanku (string) ALBO dowolny punkt mapy ({lat, lon}) -
 // obie strony niezależnie, dowolna kombinacja.
 let sel = {start: null, end: null};
+// Start ustawiony przez ◎ - ten sam obiekt, nie osobna flaga: każde inne
+// ustawienie startu (klik w mapę, wpisanie, zamiana) wstawia INNY obiekt, więc
+// samo `sel.start === hereStart` mówi, że start to wciąż „moja pozycja".
+let hereStart = null;
+let autoRefreshTimer = null;
+let autoRefreshOn = false;   // ◎ świeci - patrz syncAutoRefresh
 let journeys = [];
 let selectedJourney = null;   // indeks pozycji z listy albo null
 let requestToken = 0;         // odsiewa odpowiedzi na nieaktualne zapytania
@@ -358,6 +364,9 @@ const POINT_STYLE = {
 };
 
 function updatePointMarker(slot, value) {
+    // Każda zmiana startu przechodzi tędy - tu wiadomo, czy odświeżanie
+    // pozycji ma jeszcze o co pytać.
+    if (slot === 'start') syncAutoRefresh();
     if (pointMarkers[slot]) {
         map.removeLayer(pointMarkers[slot]);
         pointMarkers[slot] = null;
@@ -950,7 +959,10 @@ function focusEnd() {
 function useMyLocation(point) {
     const previous = sel.start;
     hideRecallOffer();
-    sel.start = point;
+    sel.start = hereStart = point;
+    // Pozycja „teraz" bez godziny „teraz" liczyłaby trasę z miejsca, w którym
+    // ktoś stoi, na chwilę, w której już go tam nie ma (#267).
+    if (locateSetsTime.checked) setTimeNow();
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
@@ -959,12 +971,107 @@ function useMyLocation(point) {
     else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
 }
 
+// ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
+// z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
+const locateSetsTime = $('locate-sets-time');
+
+const locatePeek = $('locate-peek');
+const AUTO_REFRESH_MS = 30000;
+const GEO_OPTIONS = {enableHighAccuracy: true, timeout: 10000, maximumAge: 0};
+
+const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onboardOn;
+
+/** Jeden zegar na całą funkcję: chodzi, dopóki ◎ świeci, start to wciąż
+    „moja pozycja" i karta jest widoczna. Odświeżanie ma sens tylko przy takim
+    starcie, więc jego utrata gasi też sam przycisk. */
+function syncAutoRefresh() {
+    if (!hereIsStart()) autoRefreshOn = false;
+    const hint = autoRefreshOn ? 'Wyłącz odświeżanie'
+        : hereIsStart() ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
+    const label = autoRefreshOn
+        ? 'Wyłącz odświeżanie mojej lokalizacji'
+        : hereIsStart() ? 'Odświeżaj moją lokalizację co 30 sekund'
+                        : 'Ustaw start na mojej lokalizacji';
+    // Drugi ◎ siedzi w zwiniętej karcie telefonu (patrz phone.css) i pokazuje
+    // to samo, co pierwszy - tylko przy starcie z mojej pozycji.
+    document.body.classList.toggle('here-start', hereIsStart());
+    for (const button of [locateButton, locatePeek]) {
+        button.classList.toggle('active', autoRefreshOn);
+        button.setAttribute('aria-pressed', String(autoRefreshOn));
+        button.title = hint;
+        button.setAttribute('aria-label', label);
+    }
+    const run = autoRefreshOn && !document.hidden;
+    if (run && !autoRefreshTimer) {
+        autoRefreshTimer = setInterval(refreshHere, AUTO_REFRESH_MS);
+    } else if (!run && autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+}
+
+function toggleAutoRefresh() {
+    autoRefreshOn = !autoRefreshOn;
+    syncAutoRefresh();
+    if (autoRefreshOn) refreshHere();
+}
+
+/** Ta sama propozycja po odświeżeniu: godziny i linie, bez numeru z listy -
+    lista po nowym przeliczeniu ma inną kolejność i długość. */
+const journeySignature = j => [j.departure, j.arrival, ...j.legs
+    .filter(leg => leg.kind === 'ride').map(leg => leg.line)].join('|');
+
+/** Ciche odświeżenie: nowa pozycja, godzina „teraz" i to samo przeliczenie co
+    suwaki w ⚙ (bez kadrowania, bez dźwięku, bez zwijania formularza). Wybrana
+    propozycja zostaje, jeśli nowy wynik wciąż ją zawiera. */
+function refreshHere() {
+    if (!hereIsStart()) return;
+    // Kółko wyszukiwania świeci się przy ręcznym szukaniu, a pole godziny w
+    // trakcie wpisywania nie ma się zmieniać pod palcem.
+    if (document.body.classList.contains('searching')
+            || [$('time'), $('date')].includes(document.activeElement)) return;
+    const asked = sel.start;
+    navigator.geolocation.getCurrentPosition(position => {
+        // Start mógł się zmienić, gdy GPS mielił.
+        if (sel.start !== asked) return;
+        sel.start = hereStart = {lat: position.coords.latitude,
+                                 lon: position.coords.longitude};
+        startInput.value = displayValue(sel.start);
+        updatePointMarker('start', sel.start);
+        if (locateSetsTime.checked) setTimeNow();
+        if (!endInput.value) return;
+        const kept = selectedJourney === null ? null
+            : journeySignature(journeys[selectedJourney]);
+        loadPlan(++requestToken, false).then(found => {
+            if (!found || kept === null) return;
+            const index = journeys.findIndex(j => journeySignature(j) === kept);
+            if (index < 0) return;
+            selectedJourney = index;
+            drawJourney(index, true);
+            renderJourneys();
+            renderVehicles();
+        // Chwilowy brak sieci w tle nie jest błędem, o którym trzeba krzyczeć -
+        // poprzedni wynik zostaje na ekranie, a następny obrót zegara spróbuje znów.
+        }).catch(() => {});
+    // Brak sygnału w tle: wynik zostaje, zegar próbuje za 30 s.
+    }, () => {}, GEO_OPTIONS);
+}
+
+document.addEventListener('visibilitychange', syncAutoRefresh);
+locatePeek.addEventListener('click', toggleAutoRefresh);
+
 // Brak API (stara przeglądarka albo strona po http) - przycisk, który i tak
 // nic by nie zrobił, lepiej schować.
 if (!navigator.geolocation) {
     locateButton.hidden = true;
 } else {
     locateButton.addEventListener('click', () => {
+        // Drugie kliknięcie, gdy start już jest moją pozycją, nie pyta GPS-a o
+        // start, tylko przełącza odświeżanie - pierwsze ma zostać zwykłym ◎.
+        if (hereIsStart()) {
+            toggleAutoRefresh();
+            return;
+        }
         showLocateMsg('');
         hideLocateOffer();
         locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
@@ -982,7 +1089,7 @@ if (!navigator.geolocation) {
             // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
             // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
             // pozycję sprzed kilkuset metrów.
-            {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
+            GEO_OPTIONS,
         );
     });
 }
@@ -4999,11 +5106,15 @@ $('swap').addEventListener('click', () => {
 
 // „teraz" to CHWILA, nie sama godzina: przy dacie zostawionej na innym dniu
 // sama godzina opisywałaby 17:40 w przyszły wtorek, a nie ten moment.
-$('time-now').addEventListener('click', () => {
+function setTimeNow() {
     const now = new Date();
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+$('time-now').addEventListener('click', () => {
+    setTimeNow();
     if (startInput.value && endInput.value) search();
 });
 
@@ -5044,7 +5155,7 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open'];
+                        'via-open', 'locate-sets-time'];
 
 function storedDevPrefs() {
     try {
@@ -5209,6 +5320,11 @@ zoneButton.checked = loadDevPrefs()['zone-button'] === true;
 zoneButton.addEventListener('change', () => {
     saveDevPref('zone-button', zoneButton.checked);
     refreshZoneLayer();
+});
+
+locateSetsTime.checked = loadDevPrefs()['locate-sets-time'] !== false;
+locateSetsTime.addEventListener('change', () => {
+    saveDevPref('locate-sets-time', locateSetsTime.checked);
 });
 
 startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
@@ -5630,7 +5746,7 @@ const DEV_FOLD_IDS = [
     'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
-    'fold-layout', 'fold-version',
+    'fold-layout', 'fold-siechnice', 'fold-version',
 ];
 
 function bindDevFolds() {
@@ -5653,7 +5769,8 @@ bindDevFolds();
 function markChangedSettings() {
     for (const fold of devPanel.querySelectorAll('.dev-fold')) {
         let changed = 0;
-        for (const input of fold.querySelectorAll('input')) {
+        // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
+        for (const input of fold.querySelectorAll('input:not([type=file])')) {
             const differs = input.type === 'checkbox'
                 ? input.checked !== input.defaultChecked
                 : Number(input.value) !== Number(input.defaultValue);
@@ -5668,6 +5785,82 @@ function markChangedSettings() {
 devPanel.addEventListener('input', markChangedSettings);
 devPanel.addEventListener('change', markChangedSettings);
 markChangedSettings();
+
+// --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
+//
+// Plik idzie na serwer, ten go sprawdza, zapisuje i sam odpala przebudowę
+// bazy w tle. Przebudowa trwa około minuty (pobiera też paczkę Wrocławia),
+// więc dopytujemy o jej stan, zamiast kazać zgadywać, kiedy odświeżyć.
+const SIECHNICE_POLL_MS = 3000;
+// Przebudowa startuje w osobnym procesie, więc pierwsze dopytanie może ją
+// jeszcze minąć. Gdy po tym czasie nie trwa i bazy nie ma, to się nie udała.
+const SIECHNICE_START_GRACE_MS = 20000;
+
+function setSiechniceStatus(text, state) {
+    const el = $('siechnice-status');
+    el.textContent = text;
+    el.className = state ? `field-hint ${state}` : 'field-hint';
+}
+
+function describeSiechnice(status) {
+    if (!status.uploaded_at) {
+        setSiechniceStatus('Nic nie wgrano — w bazie nie ma Siechnic.');
+    } else if (status.rebuilding) {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at}. Przebudowa bazy w toku…`, 'warn');
+    } else if (status.in_database) {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at} — jest w bazie.`, 'ok');
+    } else {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at}, ale baza jeszcze go nie ma.`, 'warn');
+    }
+}
+
+async function fetchSiechniceStatus(init) {
+    const response = await fetch('/api/dev/siechnice', init);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+    return body;
+}
+
+async function followSiechniceRebuild() {
+    const started = Date.now();
+    let sawRebuild = false;
+    for (;;) {
+        await new Promise(resolve => setTimeout(resolve, SIECHNICE_POLL_MS));
+        const status = await fetchSiechniceStatus();
+        if (status.in_database && !status.rebuilding) {
+            setSiechniceStatus('Gotowe — baza przebudowana z wgranym rozkładem.', 'ok');
+            return;
+        }
+        sawRebuild = sawRebuild || status.rebuilding;
+        if (!status.rebuilding && (sawRebuild || Date.now() - started > SIECHNICE_START_GRACE_MS)) {
+            setSiechniceStatus('Plik zapisany, ale przebudowa bazy się nie udała — '
+                + 'szczegóły w logach serwera. Wejdzie przy nocnej aktualizacji.', 'bad');
+            return;
+        }
+        setSiechniceStatus('Przyjęto. Przebudowa bazy w toku…', 'warn');
+    }
+}
+
+if (devMode) {
+    const input = $('siechnice-file');
+    input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        // Ten sam plik wybrany drugi raz ma znów wywołać change.
+        input.value = '';
+        setSiechniceStatus(`Wysyłam ${file.name}…`);
+        try {
+            await fetchSiechniceStatus({method: 'POST', body: form});
+            setSiechniceStatus('Przyjęto. Przebudowa bazy w toku…', 'warn');
+            await followSiechniceRebuild();
+        } catch (e) {
+            setSiechniceStatus(`Nie wgrano: ${e.message}`, 'bad');
+        }
+    });
+    fetchSiechniceStatus().then(describeSiechnice).catch(() => {});
+}
 
 // Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
 // na <body>: panele przewijają się w sobie i przycięłyby go na krawędzi. Klik
