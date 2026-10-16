@@ -21,6 +21,20 @@
     });
 }
 
+// Odrzucone wcześniej ukrywa zasłonę już przed pierwszym rysowaniem (skrypt
+// w <head>), więc tu zostaje tylko zapamiętanie nowego odrzucenia.
+{
+    const cover = document.getElementById('rotate-cover');
+    document.getElementById('rotate-cover-dismiss').addEventListener('click', () => {
+        cover.remove();
+        try {
+            localStorage.setItem('metal-planner:rotate-cover-dismissed', '1');
+        } catch (error) {
+            // localStorage niedostępny - zasłona pokaże się znowu przy następnej wizycie
+        }
+    });
+}
+
 const phoneLayout = (() => {
     const query = window.matchMedia(document.getElementById('phone-css').media);
     const sidebar = document.getElementById('sidebar');

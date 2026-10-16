@@ -215,6 +215,12 @@ if (startInput) {   // brak tych pól = brak bazy rozkładów (panel pokazuje b�
 // start/end: nazwa przystanku (string) ALBO dowolny punkt mapy ({lat, lon}) -
 // obie strony niezależnie, dowolna kombinacja.
 let sel = {start: null, end: null};
+// Start ustawiony przez ◎ - ten sam obiekt, nie osobna flaga: każde inne
+// ustawienie startu (klik w mapę, wpisanie, zamiana) wstawia INNY obiekt, więc
+// samo `sel.start === hereStart` mówi, że start to wciąż „moja pozycja".
+let hereStart = null;
+let autoRefreshTimer = null;
+let autoRefreshOn = false;   // ◎ świeci - patrz syncAutoRefresh
 let journeys = [];
 let selectedJourney = null;   // indeks pozycji z listy albo null
 let requestToken = 0;         // odsiewa odpowiedzi na nieaktualne zapytania
@@ -270,10 +276,13 @@ function escClass(value) {
 
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
+// `cable` to Polinka (zgłoszenie #165) - granat Politechniki, która ją prowadzi.
 const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
+                     cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
+                    cable: 'Kolej linowa',
                     bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
 
 /** Autko do wiersza "jedziesz autem" na osi trasy. Bierze `currentColor`, tak
@@ -298,6 +307,8 @@ const BASE_STYLE = {radius: 4, weight: 1, color: '#1565c0',
 // zwykły słupek MPK, zanim jeszcze ktoś najedzie kursorem na nazwę.
 const TRAIN_STYLE = {radius: 5, weight: 1, color: '#1b5e20',
                      fillColor: '#2e7d32', fillOpacity: 0.85};
+// Stacja Polinki (#165) - jak stacja kolejowa, w kolorze Polinki.
+const CABLE_STYLE = {...TRAIN_STYLE, color: '#000d1f', fillColor: '#002147'};
 // Gdy pokazujemy przepływy, zwykłe przystanki schodzą na dalszy plan.
 const DIM_STYLE = {radius: 2.5, weight: 0, color: '#90a4ae',
                    fillColor: '#90a4ae', fillOpacity: 0.25};
@@ -321,7 +332,8 @@ function styleFor(name) {
         if (name === sel.end) return ENDPOINT_STYLE.end;
     }
     if (baseDimmed) return DIM_STYLE;
-    return stopKind.get(name) === 'train' ? TRAIN_STYLE : BASE_STYLE;
+    const kind = stopKind.get(name);
+    return kind === 'train' ? TRAIN_STYLE : kind === 'cable' ? CABLE_STYLE : BASE_STYLE;
 }
 
 function setBaseDim(dim) {
@@ -352,6 +364,9 @@ const POINT_STYLE = {
 };
 
 function updatePointMarker(slot, value) {
+    // Każda zmiana startu przechodzi tędy - tu wiadomo, czy odświeżanie
+    // pozycji ma jeszcze o co pytać.
+    if (slot === 'start') syncAutoRefresh();
     if (pointMarkers[slot]) {
         map.removeLayer(pointMarkers[slot]);
         pointMarkers[slot] = null;
@@ -482,8 +497,10 @@ if (vehiclesToggle) {
 // odpowiedzi na zadane pytanie. Bez mapy nie ma pytania, więc zostaje samo
 // „co gdzie stoi" i warstwa bierze cały miejski feed (/api/cars, /api/bikes).
 //
-// Włącznik NIGDY nie rusza propozycji tras ani samego wachlarza - dokłada
-// i zdejmuje wyłącznie kropki na mapie.
+// Włącznik NIGDY nie rusza samego wachlarza - na mapie dokłada i zdejmuje
+// wyłącznie kropki. Rusza za to listę propozycji: zgaszony 🚗 zabiera z niej
+// trasy kończące się autem, a 🚲 i ⚡ - trasy z rowerem swojego rodzaju
+// (zgłoszenie #163). Lista ma mówić o tym samym, co widać na mapie.
 
 const CARS_REFRESH_MS = 20000;    // tyle deklaruje feed Traficara (CARS_TTL_SEC)
 const BIKES_REFRESH_MS = 60000;   // tyle deklaruje kanał WRM (`ttl`)
@@ -623,6 +640,7 @@ function setCarsOn(on) {
     saveUiState({carsOn: on});
     paintLayerButton(carsToggle, on);
     refreshCarLayer();
+    replanInPlace();
 }
 
 /** Jeden rodzaj roweru. Warstwa świeci, gdy świeci choć jeden - więc
@@ -630,7 +648,7 @@ function setCarsOn(on) {
 
     Zmienia nie tylko mapę, ale i sam wynik z serwera: ten włącznik mówi też
     „mam konto w WRM", a rodzaj rozstrzyga, które miejsca w ogóle są
-    kandydatami (patrz bikes.map_places). */
+    kandydatami - na mapie i w propozycjach z rowerem (patrz bikes.ma_rodzaj). */
 function setBikeKind(kind, on) {
     if (kind === 'electric') {
         bikeElectricOn = on;
@@ -643,7 +661,7 @@ function setBikeKind(kind, on) {
     saveUiState({bikesOn});
     paintBikeButtons();
     refreshBikeLayer();
-    replanForBikes();
+    replanInPlace();
 }
 
 /** Rower w całości - oba rodzaje naraz. */
@@ -654,7 +672,7 @@ function setBikesOn(on) {
     bikesOn = on;
     paintBikeButtons();
     refreshBikeLayer();
-    replanForBikes();
+    replanInPlace();
 }
 
 if (carsToggle) {
@@ -801,7 +819,8 @@ const stopsReady = fetch('/api/stops')
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
             // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
-            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP` : s.name);
+            m.bindTooltip(s.kind === 'train' ? `${s.name} PKP`
+                : s.kind === 'cable' ? `${s.name} · kolej linowa` : s.name);
             // Zatrzymujemy zdarzenie - inaczej klik w słupek dobiłby też do
             // map.on('click') i nadpisał wybór punktem.
             m.on('click', e => {
@@ -945,7 +964,10 @@ function focusEnd() {
 function useMyLocation(point) {
     const previous = sel.start;
     hideRecallOffer();
-    sel.start = point;
+    sel.start = hereStart = point;
+    // Pozycja „teraz" bez godziny „teraz" liczyłaby trasę z miejsca, w którym
+    // ktoś stoi, na chwilę, w której już go tam nie ma (#267).
+    if (locateSetsTime.checked) setTimeNow();
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
@@ -954,12 +976,107 @@ function useMyLocation(point) {
     else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
 }
 
+// ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
+// z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
+const locateSetsTime = $('locate-sets-time');
+
+const locatePeek = $('locate-peek');
+const AUTO_REFRESH_MS = 30000;
+const GEO_OPTIONS = {enableHighAccuracy: true, timeout: 10000, maximumAge: 0};
+
+const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onboardOn;
+
+/** Jeden zegar na całą funkcję: chodzi, dopóki ◎ świeci, start to wciąż
+    „moja pozycja" i karta jest widoczna. Odświeżanie ma sens tylko przy takim
+    starcie, więc jego utrata gasi też sam przycisk. */
+function syncAutoRefresh() {
+    if (!hereIsStart()) autoRefreshOn = false;
+    const hint = autoRefreshOn ? 'Wyłącz odświeżanie'
+        : hereIsStart() ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
+    const label = autoRefreshOn
+        ? 'Wyłącz odświeżanie mojej lokalizacji'
+        : hereIsStart() ? 'Odświeżaj moją lokalizację co 30 sekund'
+                        : 'Ustaw start na mojej lokalizacji';
+    // Drugi ◎ siedzi w zwiniętej karcie telefonu (patrz phone.css) i pokazuje
+    // to samo, co pierwszy - tylko przy starcie z mojej pozycji.
+    document.body.classList.toggle('here-start', hereIsStart());
+    for (const button of [locateButton, locatePeek]) {
+        button.classList.toggle('active', autoRefreshOn);
+        button.setAttribute('aria-pressed', String(autoRefreshOn));
+        button.title = hint;
+        button.setAttribute('aria-label', label);
+    }
+    const run = autoRefreshOn && !document.hidden;
+    if (run && !autoRefreshTimer) {
+        autoRefreshTimer = setInterval(refreshHere, AUTO_REFRESH_MS);
+    } else if (!run && autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+}
+
+function toggleAutoRefresh() {
+    autoRefreshOn = !autoRefreshOn;
+    syncAutoRefresh();
+    if (autoRefreshOn) refreshHere();
+}
+
+/** Ta sama propozycja po odświeżeniu: godziny i linie, bez numeru z listy -
+    lista po nowym przeliczeniu ma inną kolejność i długość. */
+const journeySignature = j => [j.departure, j.arrival, ...j.legs
+    .filter(leg => leg.kind === 'ride').map(leg => leg.line)].join('|');
+
+/** Ciche odświeżenie: nowa pozycja, godzina „teraz" i to samo przeliczenie co
+    suwaki w ⚙ (bez kadrowania, bez dźwięku, bez zwijania formularza). Wybrana
+    propozycja zostaje, jeśli nowy wynik wciąż ją zawiera. */
+function refreshHere() {
+    if (!hereIsStart()) return;
+    // Kółko wyszukiwania świeci się przy ręcznym szukaniu, a pole godziny w
+    // trakcie wpisywania nie ma się zmieniać pod palcem.
+    if (document.body.classList.contains('searching')
+            || [$('time'), $('date')].includes(document.activeElement)) return;
+    const asked = sel.start;
+    navigator.geolocation.getCurrentPosition(position => {
+        // Start mógł się zmienić, gdy GPS mielił.
+        if (sel.start !== asked) return;
+        sel.start = hereStart = {lat: position.coords.latitude,
+                                 lon: position.coords.longitude};
+        startInput.value = displayValue(sel.start);
+        updatePointMarker('start', sel.start);
+        if (locateSetsTime.checked) setTimeNow();
+        if (!endInput.value) return;
+        const kept = selectedJourney === null ? null
+            : journeySignature(journeys[selectedJourney]);
+        loadPlan(++requestToken, false).then(found => {
+            if (!found || kept === null) return;
+            const index = journeys.findIndex(j => journeySignature(j) === kept);
+            if (index < 0) return;
+            selectedJourney = index;
+            drawJourney(index, true);
+            renderJourneys();
+            renderVehicles();
+        // Chwilowy brak sieci w tle nie jest błędem, o którym trzeba krzyczeć -
+        // poprzedni wynik zostaje na ekranie, a następny obrót zegara spróbuje znów.
+        }).catch(() => {});
+    // Brak sygnału w tle: wynik zostaje, zegar próbuje za 30 s.
+    }, () => {}, GEO_OPTIONS);
+}
+
+document.addEventListener('visibilitychange', syncAutoRefresh);
+locatePeek.addEventListener('click', toggleAutoRefresh);
+
 // Brak API (stara przeglądarka albo strona po http) - przycisk, który i tak
 // nic by nie zrobił, lepiej schować.
 if (!navigator.geolocation) {
     locateButton.hidden = true;
 } else {
     locateButton.addEventListener('click', () => {
+        // Drugie kliknięcie, gdy start już jest moją pozycją, nie pyta GPS-a o
+        // start, tylko przełącza odświeżanie - pierwsze ma zostać zwykłym ◎.
+        if (hereIsStart()) {
+            toggleAutoRefresh();
+            return;
+        }
         showLocateMsg('');
         hideLocateOffer();
         locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
@@ -977,7 +1094,7 @@ if (!navigator.geolocation) {
             // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
             // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
             // pozycję sprzed kilkuset metrów.
-            {enableHighAccuracy: true, timeout: 10000, maximumAge: 0},
+            GEO_OPTIONS,
         );
     });
 }
@@ -2718,7 +2835,11 @@ function timetableLinesHtml(data, mapSec) {
         const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
             + '|' + (d.flow || '');
         if (!groups.has(key)) groups.set(key, {d, secs: []});
-        groups.get(key).secs.push(d.sec);
+        const group = groups.get(key);
+        group.secs.push(d.sec);
+        // Pierwszy w grupie bywa wierszem dorobionym z mapy (spóźniony kurs,
+        // przyjazd) - „i" bierzemy z któregokolwiek odjazdu z serwera.
+        if (d.info && !group.d.info) group.d = {...group.d, info: d.info};
     }
     const rows = [];
     for (const {d, secs} of groups.values()) {
@@ -2750,8 +2871,13 @@ function timetableLinesHtml(data, mapSec) {
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
     const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
-        `<span class="badge ${esc(d.mode)}">${esc(d.num)}</span>` +
-        `<span class="tip-dir">${esc(d.headsign)}</span>` +
+        // „i" za plakietką, w tej samej komórce siatki: za kierunkiem ucinałby
+        // go wielokropek, a osobny element przesunąłby kolumny wiersza.
+        (d.info
+            ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
+              + `${infoHtml(d.info)}</span>`
+            : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
+        `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
@@ -3568,8 +3694,42 @@ function openJourney(index) {
     renderVehicles();
 }
 
+/** Peron i tor pociągu (zgłoszenie #271): „peron 2, tor 4" - tak, jak piszą
+    tablice PKP. Z rozkładu planowego PLK (patrz pkp.augment_day), więc bez
+    dzisiejszych zmian. Pusty napis, gdy rozkład nie podaje żadnego.
+
+    Stoi tam, gdzie się go szuka: na osi trasy przy stacji wsiadania
+    i wysiadania (nie przy mijanych - tam nic się nie robi) i w tablicy
+    odjazdów stacji. „BUS" (komunikacja zastępcza według PLK) idzie
+    dosłownie, jako „peron BUS". */
+function platformText(p) {
+    if (!p) return '';
+    return [p.platform && `peron ${p.platform}`, p.track && `tor ${p.track}`]
+        .filter(Boolean).join(', ');
+}
+
+function platformHtml(p) {
+    const text = platformText(p);
+    return text ? `<span class="platform">${esc(text)}</span>` : '';
+}
+
+/** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
+    przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
+function infoHtml(text) {
+    return text ? `<span class="info info-inline" tabindex="0" role="button"`
+        + ` aria-label="${escAttr(text)}" data-tip="${escAttr(text)}">i</span>` : '';
+}
+
 function badgeHtml(leg) {
-    return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
+    // Pojazd, w którym się już siedzi (start z pokładu, patrz
+    // onboard.mark_journeys), ma plakietkę z obwódką - na karcie propozycji
+    // „4 › D" nie mówi inaczej, czy w 4 trzeba dopiero wsiąść, czy jedzie się
+    // nią dalej (zgłoszenie #224).
+    if (leg.onboard) {
+        return `<span class="badge ${leg.mode} current" title="${escAttr(leg.line)}`
+             + ` — jedziesz tym pojazdem">${esc(leg.num)}</span>`;
+    }
+    return `<span class="badge ${leg.mode}" title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
 }
 
 // Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
@@ -3737,9 +3897,10 @@ function toggleVia(button) {
 
 function detailHtml(journey) {
     const rows = [];
-    const stopRow = (time, name, cls) =>
+    const stopRow = (time, name, cls, platform) =>
         `<li class="tl-stop ${cls}"><span class="tl-time">${esc(time)}</span>` +
-        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}</span></li>`;
+        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
+        `${platformHtml(platform)}</span></li>`;
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -3841,7 +4002,7 @@ function detailHtml(journey) {
             rows.push(stopRow(leg.to_time, leg.to, 'last'));
             return;
         }
-        const stopWord = leg.mode === 'train'
+        const stopWord = leg.mode === 'train' || leg.mode === 'cable'
             ? plural(leg.stops_count, 'stacja', 'stacje', 'stacji')
             : plural(leg.stops_count, 'przystanek', 'przystanki', 'przystanków');
         const ile = `${leg.stops_count} ${stopWord} · ${leg.minutes} min`;
@@ -3850,7 +4011,8 @@ function detailHtml(journey) {
         // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
         const via = leg.via || [];
         const viaOn = via.length > 0 && viaOpen(leg);
-        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
+        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
+                          leg.from_platform));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
@@ -3859,6 +4021,7 @@ function detailHtml(journey) {
             // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
             // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
+            infoHtml(leg.info) +
             // Etap, w którym się już siedzi (patrz onboard.mark_journeys),
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
@@ -3886,13 +4049,14 @@ function detailHtml(journey) {
         const next = journey.legs[i + 1];
         if (!next || next.kind === 'walk') {
             rows.push(stopRow(leg.to_time, leg.to,
-                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`));
+                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`,
+                              leg.to_platform));
         } else if (leg.onboard) {
             // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
             // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
             // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
             // całej osi - to jest ten moment, w którym trzeba wstać.
-            rows.push(stopRow(leg.to_time, leg.to, 'exit'));
+            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform));
         }
     });
 
@@ -3960,7 +4124,7 @@ function renderJourneys() {
                 || leg.kind === 'bike' || leg.kind === 'drive')
             .map(leg => leg.kind === 'walk'
                 ? `pieszo ${leg.minutes} min`
-                : leg.line).join(', ');
+                : leg.onboard ? `${leg.line} (obecny pojazd)` : leg.line).join(', ');
         // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
         // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
         // czyta się pierwszą, a nie dopiero w rozwinięciu karty.
@@ -4021,6 +4185,8 @@ function scrollToSelected() {
 
 resultsBox.addEventListener('click', event => {
     if (routeClick(event)) return;
+    // „i" pokazuje dymek (showInfoTip) - nie zwija przy okazji karty.
+    if (event.target.closest('.info')) return;
 
     // Rozwinięcie przystanków po drodze to nie klik w kartę - ta by się
     // przy okazji zwinęła (patrz selectJourney).
@@ -4378,6 +4544,10 @@ function queryParams() {
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
     if (bikesOn) params.set('bikes', '1');
+    // Auto odwrotnie: propozycje z Traficarem są domyślnie, a zgaszony 🚗
+    // zdejmuje je z listy (zgłoszenie #163) - jak przy `routes`, prosi się
+    // tylko o ich brak.
+    if (!carsOn) params.set('traficar', '0');
     const poklad = onboardOn ? onboardPick() : null;
     if (poklad) {
         // Start z pokładu pojazdu (patrz onboard.py): zamiast miejsca jedzie
@@ -4553,13 +4723,16 @@ function loadPlan(token, refit) {
         });
 }
 
-/** Rower zmienia ODPOWIEDŹ, nie tylko wygląd mapy: rowerowych propozycji nie
-    ma w ostatniej odpowiedzi serwera, więc po przełączeniu warstwy trzeba je
-    doliczyć. Tą samą drogą co suwaki w ⚙ (bez kadrowania), a nie przez nowe
-    wyszukiwanie - relacja się nie zmieniła, więc kadr ma zostać na miejscu
-    i nie ma po co znowu odgrywać dźwięku znalezienia trasy. */
-function replanForBikes() {
-    if (!lastFlow || !startInput.value || !endInput.value) return;
+/** Rower i auto zmieniają ODPOWIEDŹ, nie tylko wygląd mapy: propozycje
+    z rowerem i z Traficarem składa serwer (patrz queryParams), więc po
+    przełączeniu warstwy trzeba je doliczyć albo zdjąć. Tą samą drogą co
+    suwaki w ⚙ (bez kadrowania), a nie przez nowe wyszukiwanie - relacja się
+    nie zmieniła, więc kadr ma zostać na miejscu i nie ma po co znowu
+    odgrywać dźwięku znalezienia trasy. Start z pokładu nie ma pola „skąd",
+    więc o komplecie pytania mówi tam wybór pojazdu (patrz onboardReady). */
+function replanInPlace() {
+    if (!lastFlow || !endInput.value) return;
+    if (onboardOn ? !onboardReady() : !startInput.value) return;
     loadPlan(requestToken, false)
         .catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
@@ -4975,11 +5148,15 @@ $('swap').addEventListener('click', () => {
 
 // „teraz" to CHWILA, nie sama godzina: przy dacie zostawionej na innym dniu
 // sama godzina opisywałaby 17:40 w przyszły wtorek, a nie ten moment.
-$('time-now').addEventListener('click', () => {
+function setTimeNow() {
     const now = new Date();
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+$('time-now').addEventListener('click', () => {
+    setTimeNow();
     if (startInput.value && endInput.value) search();
 });
 
@@ -5280,7 +5457,7 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open'];
+                        'via-open', 'locate-sets-time'];
 
 function storedDevPrefs() {
     try {
@@ -5413,8 +5590,8 @@ routesOn.addEventListener('change', () => {
     saveDevPref('routes-on', routesOn.checked);
     showRoutes(routesOn.checked);
     // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
-    // tak jak propozycje z rowerem (patrz replanForBikes).
-    if (routesOn.checked) replanForBikes();
+    // tak jak propozycje z rowerem (patrz replanInPlace).
+    if (routesOn.checked) replanInPlace();
 });
 
 // Gest „pociągnij w dół, żeby odświeżyć" (opcja w „Wyglądzie aplikacji”) - overscroll-behavior
@@ -5445,6 +5622,11 @@ zoneButton.checked = loadDevPrefs()['zone-button'] === true;
 zoneButton.addEventListener('change', () => {
     saveDevPref('zone-button', zoneButton.checked);
     refreshZoneLayer();
+});
+
+locateSetsTime.checked = loadDevPrefs()['locate-sets-time'] !== false;
+locateSetsTime.addEventListener('change', () => {
+    saveDevPref('locate-sets-time', locateSetsTime.checked);
 });
 
 startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
@@ -5866,7 +6048,7 @@ const DEV_FOLD_IDS = [
     'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
-    'fold-layout', 'fold-version',
+    'fold-layout', 'fold-siechnice', 'fold-version',
 ];
 
 function bindDevFolds() {
@@ -5889,7 +6071,8 @@ bindDevFolds();
 function markChangedSettings() {
     for (const fold of devPanel.querySelectorAll('.dev-fold')) {
         let changed = 0;
-        for (const input of fold.querySelectorAll('input')) {
+        // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
+        for (const input of fold.querySelectorAll('input:not([type=file])')) {
             const differs = input.type === 'checkbox'
                 ? input.checked !== input.defaultChecked
                 : Number(input.value) !== Number(input.defaultValue);
@@ -5904,6 +6087,82 @@ function markChangedSettings() {
 devPanel.addEventListener('input', markChangedSettings);
 devPanel.addEventListener('change', markChangedSettings);
 markChangedSettings();
+
+// --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
+//
+// Plik idzie na serwer, ten go sprawdza, zapisuje i sam odpala przebudowę
+// bazy w tle. Przebudowa trwa około minuty (pobiera też paczkę Wrocławia),
+// więc dopytujemy o jej stan, zamiast kazać zgadywać, kiedy odświeżyć.
+const SIECHNICE_POLL_MS = 3000;
+// Przebudowa startuje w osobnym procesie, więc pierwsze dopytanie może ją
+// jeszcze minąć. Gdy po tym czasie nie trwa i bazy nie ma, to się nie udała.
+const SIECHNICE_START_GRACE_MS = 20000;
+
+function setSiechniceStatus(text, state) {
+    const el = $('siechnice-status');
+    el.textContent = text;
+    el.className = state ? `field-hint ${state}` : 'field-hint';
+}
+
+function describeSiechnice(status) {
+    if (!status.uploaded_at) {
+        setSiechniceStatus('Nic nie wgrano — w bazie nie ma Siechnic.');
+    } else if (status.rebuilding) {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at}. Przebudowa bazy w toku…`, 'warn');
+    } else if (status.in_database) {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at} — jest w bazie.`, 'ok');
+    } else {
+        setSiechniceStatus(`Wgrany ${status.uploaded_at}, ale baza jeszcze go nie ma.`, 'warn');
+    }
+}
+
+async function fetchSiechniceStatus(init) {
+    const response = await fetch('/api/dev/siechnice', init);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+    return body;
+}
+
+async function followSiechniceRebuild() {
+    const started = Date.now();
+    let sawRebuild = false;
+    for (;;) {
+        await new Promise(resolve => setTimeout(resolve, SIECHNICE_POLL_MS));
+        const status = await fetchSiechniceStatus();
+        if (status.in_database && !status.rebuilding) {
+            setSiechniceStatus('Gotowe — baza przebudowana z wgranym rozkładem.', 'ok');
+            return;
+        }
+        sawRebuild = sawRebuild || status.rebuilding;
+        if (!status.rebuilding && (sawRebuild || Date.now() - started > SIECHNICE_START_GRACE_MS)) {
+            setSiechniceStatus('Plik zapisany, ale przebudowa bazy się nie udała — '
+                + 'szczegóły w logach serwera. Wejdzie przy nocnej aktualizacji.', 'bad');
+            return;
+        }
+        setSiechniceStatus('Przyjęto. Przebudowa bazy w toku…', 'warn');
+    }
+}
+
+if (devMode) {
+    const input = $('siechnice-file');
+    input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        // Ten sam plik wybrany drugi raz ma znów wywołać change.
+        input.value = '';
+        setSiechniceStatus(`Wysyłam ${file.name}…`);
+        try {
+            await fetchSiechniceStatus({method: 'POST', body: form});
+            setSiechniceStatus('Przyjęto. Przebudowa bazy w toku…', 'warn');
+            await followSiechniceRebuild();
+        } catch (e) {
+            setSiechniceStatus(`Nie wgrano: ${e.message}`, 'bad');
+        }
+    });
+    fetchSiechniceStatus().then(describeSiechnice).catch(() => {});
+}
 
 // Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
 // na <body>: panele przewijają się w sobie i przycięłyby go na krawędzi. Klik

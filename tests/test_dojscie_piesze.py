@@ -450,3 +450,13 @@ def test_a_point_too_far_from_everything_is_an_honest_error():
     daleko = _o_metrow(day.stop_coords["OBOK"], 5 * gtfs.WALK_M)
     z_punktem, punkt = gtfs.with_point(day, daleko[0], daleko[1], "start")
     assert z_punktem.siblings[punkt] == {}
+
+
+def test_a_proposal_opened_by_a_walk_leaks_no_working_fields(install_day):
+    """Etap otwierający trasę czyta własne `_sec`, żeby policzyć godzinę
+    wyjścia - po tym pole robocze nie może wyjść do klienta."""
+    install_day(_day_z_dwoma_dojsciami())
+    flow = planner.plan_flow("", "CEL", when=WHEN, start_point=A)
+    legs = [leg for journey in flow["journeys"] for leg in journey["legs"]]
+    assert legs[0]["kind"] == "walk", "scenariusz miał otwierać się dojściem"
+    assert not [key for leg in legs for key in leg if key.startswith("_")]

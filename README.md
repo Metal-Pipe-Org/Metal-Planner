@@ -42,16 +42,19 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
    każde, którego nie bije inne naraz w godzinie dojścia, zniżce z programu
    „Ogarniam" i szacowanym przyjeździe do celu. Najechanie na auto pokazuje
    strefę, w której da się je oddać. Na liście propozycji może też stanąć
-   trasa kończąca się autem.
+   trasa kończąca się autem — zgaszony 🚗 zdejmuje ją z listy.
 8. **Rower miejski (WRM).** Przyciski 🚲 (zwykłe) i ⚡ (elektryczne) dokładają
    na mapę stacje i rowery luzem, z których przejazd prowadzi do czegoś, co
    mapa rysuje; przejazdy widać pod kursorem. Te same przyciski dokładają
-   propozycje z rowerem do listy.
+   propozycje z rowerem do listy — tylko z wsiadaniem tam, gdzie stoi rower
+   włączonego rodzaju.
 9. **Pojazdy na żywo.** Przycisk ◉ pokazuje autobusy i tramwaje w ruchu —
    przy narysowanej mapie tylko linie z tej mapy.
 10. **Kolej.** Z kluczem `PKP_API_KEY` w wynikach pojawiają się pociągi PKP,
     w tej samej wyszukiwarce co tramwaje i autobusy.
-11. **Aplikacja (PWA).** Na telefonie „Dodaj do ekranu głównego", na pulpicie
+11. **Polinka.** Kolej gondolowa Politechniki nad Odrą jest w wyszukiwarce
+    i na mapie, z ręcznie wpisanymi godzinami (PWr nie publikuje rozkładu).
+12. **Aplikacja (PWA).** Na telefonie „Dodaj do ekranu głównego", na pulpicie
     ikona ⤓ w nagłówku. Raz obejrzana okolica mapy działa bez internetu;
     samo wyszukiwanie wymaga sieci. Instalację przeglądarki proponują tylko
     po HTTPS albo na `localhost`.
@@ -109,10 +112,9 @@ albo z `data/.env` (zmienne ze środowiska przebijają plik). Najważniejsze:
 | `PKP_API_KEY` | brak | klucz PKP PLK OpenData; bez niego nie ma pociągów |
 | `GTFS_AUTO_UPDATE_HOUR` | w compose 3 | godzina codziennej aktualizacji rozkładu; pusta wyłącza |
 | `GTFS_UPDATE_ON_START` | `on` | odświeżanie rozkładu przy starcie serwera |
-| `SIECHNICE_ENABLED` | `off` | autobusy gminy Siechnice (niżej) |
 | `WRM_ENABLED` | `on` | rower miejski |
 | `TRAFICAR` | `1` | auta Traficara; `0` wyłącza |
-| `DEV_MODE` | wyłączony | `1` pokazuje sekcje DEV w ⚙ i dokłada w „O aplikacji” linki zespołu; lokalnie i na serwerze testowym |
+| `DEV_MODE` | wyłączony | `1` pokazuje sekcje DEV w ⚙ (w tym wgranie rozkładu Siechnic) i dokłada w „O aplikacji” linki zespołu; lokalnie i na serwerze testowym |
 
 Pozostałe (rozkład PKP, procesy i wątki serwera, strefa czasowa) opisują
 komentarze w `docker-compose.yml`.
@@ -125,10 +127,7 @@ komentarze w `docker-compose.yml`.
     i przy każdym starcie, w tle, bez przerwy w działaniu. Nieudane pobranie
     zostawia poprzednią bazę.
 17. **Kolej** — PKP PLK OpenData, tylko z `PKP_API_KEY`.
-18. **Autobusy gminy Siechnice** — nie ma ich w żadnych otwartych danych;
-    umiemy je złożyć z API kiedyPrzyjedzie, ale to jest **domyślnie
-    wyłączone**, bo serwis nie zgadza się na ponowne użycie danych. Szczegóły
-    i wzór pisma do gminy: [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
+18. **Autobusy gminy Siechnice** — nie ma ich w żadnych otwartych danych, a serwer nie odpytuje jedynego źródła (kiedyPrzyjedzie). Statyczną kopię tygodnia rozkładu wgrywa się w trybie deweloperskim (⚙ → „Wgraj rozkład Siechnic”); trafia do folderu `siechnice` obok `docker-compose.yml` i baza od razu się przebudowuje. Bez wgranej kopii Siechnic po prostu nie ma. Format pliku i wzór pisma do gminy: [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md).
 19. **Rower miejski** — kanał GBFS operatora (nextbike, licencja CC0-1.0).
 20. **Traficar** — [fioletowe.live](https://fioletowe.live/), strona trzecia
     republikująca API Traficara; może zniknąć bez ostrzeżenia.

@@ -585,6 +585,12 @@ def test_debug_says_why_a_bike_or_car_is_on_the_map(front):
     _check(front, "debug_mowi_dlaczego")
 
 
+def test_cars_off_is_sent_to_the_server(front):
+    """Zgłoszenie #163: zgaszony 🚗 to lista bez propozycji z Traficarem -
+    składa je serwer, więc zgaszenie idzie w zapytaniu."""
+    _check(front, "auto_gaszone_leci_do_serwera")
+
+
 def test_bike_kinds_are_switches_sent_to_the_server(front):
     """Zgłoszenie #147: rowery elektryczne i zwykłe to dwa przełączniki pod
     zębatką, oba domyślnie włączone - ich stan idzie w zapytaniu, bo odsiew
@@ -609,6 +615,18 @@ def test_stops_along_the_way_unfold_in_the_timeline(front):
     a wysiadaniem, z godzinami; domyślnie zwinięte, a opcja „Zawsze pokazuj
     przystanki po drodze" z ⚙ rozwija je od razu."""
     _check(front, "przystanki_po_drodze_w_osi")
+
+
+def test_platform_and_track_stand_by_boarding_and_alighting(front):
+    """#271: peron i tor pociągu przy stacji wsiadania i wysiadania, obok
+    nazwy - przy stacjach mijanych nie."""
+    _check(front, "peron_przy_wsiadaniu_i_wysiadaniu")
+
+
+def test_current_vehicle_badge_stands_out_on_the_card(front):
+    """Zgłoszenie #224: przy starcie z pokładu plakietka pojazdu, w którym się
+    siedzi, ma na karcie propozycji obwódkę - i tylko ona."""
+    _check(front, "obecny_pojazd_na_karcie")
 
 
 def test_stops_along_the_way_stand_on_the_map(front):

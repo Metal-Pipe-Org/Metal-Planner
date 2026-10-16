@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 USER_FOLDS = {"fold-map", "fold-assumptions", "fold-layout"}
 DEV_FOLDS = {"fold-window", "fold-time", "fold-places", "fold-vehicles",
-             "fold-debug", "look-section", "fold-version",
+             "fold-debug", "look-section", "fold-siechnice", "fold-version",
              "fold-transfer"}
 
 
@@ -56,7 +56,8 @@ def test_podzial_sekcji_niezaleznie_od_trybu(dev_mode):
     ("fold-assumptions", ["walk-pace", "bike-kmh", "bike-overhead",
                           "car-kmh", "car-overhead"]),
     ("fold-layout", ["bikes-merged", "no-pull-refresh",
-                     "start-mode-switch", "routes-on", "via-open"]),
+                     "start-mode-switch", "routes-on", "via-open",
+                     "locate-sets-time"]),
 ])
 def test_ustawienia_uzytkownika(fold, inputs):
     _, body = _folds(_index(dev_mode=False))[fold]

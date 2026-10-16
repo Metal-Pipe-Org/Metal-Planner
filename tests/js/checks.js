@@ -1510,6 +1510,22 @@ checks.auta_dostawczaki_leca_do_serwera = (() => {
 })();
 
 
+/* Zgaszony 🚗 zdejmuje z listy propozycje z Traficarem (zgłoszenie #163) -
+   składa je serwer, więc zgaszenie idzie w zapytaniu. Zapalony nie dokłada
+   nic: odpowiedź jest taka jak dotąd. */
+checks.auto_gaszone_leci_do_serwera = (() => {
+    app.setCarsOn(true);
+    const zapalone = app.queryParams().toString();
+    app.setCarsOn(false);
+    const zgaszone = app.queryParams().toString();
+    app.setCarsOn(true);
+    return {
+        ok: !zapalone.includes('traficar=') && zgaszone.includes('traficar=0'),
+        zapalone, zgaszone,
+    };
+})();
+
+
 /* Rodzaj roweru to dwa PRZYCISKI W PASKU warstw (zgłoszenie #147) - ich stan
    idzie w zapytaniu, bo odsiew miejsc robi serwer. Zgaszenie obu gasi rower
    w całości, więc zapytanie przestaje o niego prosić. */
@@ -1689,6 +1705,43 @@ checks.przystanki_po_drodze_w_osi = (() => {
         wiersze: wiersze(zwiniete), przelaczniki: przelaczniki(zwiniete), kolejnosc,
     };
 })();
+
+/* Peron i tor pociągu (zgłoszenie #271) stoją przy nazwie stacji wsiadania
+   i wysiadania - nie przy mijanych, gdzie nic się nie robi. */
+checks.peron_przy_wsiadaniu_i_wysiadaniu = (() => {
+    const pociag = {...VIA_LEGS[0], mode: 'train', line: 'Pociąg IC 5412',
+                    num: 'IC 5412', from_platform: {platform: '2', track: '4'},
+                    to_platform: {platform: 'BUS'},
+                    via: [{name: 'Oława', t: '15:32', platform: {platform: '9'}}]};
+    const html = app.detailHtml({departure: '15:15', arrival: '15:40', legs: [pociag]});
+    const perony = html.match(/<span class="platform">[^<]*</g) || [];
+    return {
+        ok: perony.length === 2
+            && perony[0].endsWith('>peron 2, tor 4<')
+            && perony[1].endsWith('>peron BUS<')
+            && /Sosnowiecka<span class="platform">/.test(html)
+            && !html.includes('peron 9'),
+        perony,
+    };
+})();
+
+/* Pojazd, w którym się już siedzi (zgłoszenie #224): na karcie propozycji
+   jego plakietka ma obwódkę, a każda inna plakietka - nie. „134 › 5" bez
+   tego nie mówi, czy w 134 się wsiada, czy jedzie się nią dalej. */
+checks.obecny_pojazd_na_karcie = (() => {
+    const siedzac = [{...VIA_LEGS[0], onboard: true}, VIA_LEGS[1], VIA_LEGS[2]];
+    const zwykle = app.summaryHtml(VIA_LEGS);
+    const zPokladu = app.summaryHtml(siedzac);
+    const wyroznione = html => html.match(/class="badge [^"]* current"[^>]*>[^<]*</g) || [];
+    return {
+        ok: wyroznione(zwykle).length === 0
+            && wyroznione(zPokladu).length === 1
+            && wyroznione(zPokladu)[0].endsWith('>134<')
+            && wyroznione(zPokladu)[0].includes('jedziesz tym pojazdem'),
+        zwykle: wyroznione(zwykle), zPokladu: wyroznione(zPokladu),
+    };
+})();
+
 
 checks.przystanki_po_drodze_na_mapie = (() => {
     const kropki = dotsOf(app.legLayers(VIA_LEGS, {preview: false}));

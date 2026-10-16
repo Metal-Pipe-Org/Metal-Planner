@@ -49,7 +49,7 @@ docker/entrypoint.sh, przed startem gunicorna.
 
 Bez PKP_API_KEY (patrz config.py) cały ten moduł jest wyłączony po cichu -
 brak klucza to nie błąd, tylko brak konfiguracji (tak samo jak Siechnice bez
-SIECHNICE_ENABLED w update_gtfs.py), więc entrypoint/harmonogram mogą wołać
+pliku z kopią rozkładu w update_gtfs.py), więc entrypoint/harmonogram mogą wołać
 funkcje tego pliku bezwarunkowo.
 """
 
@@ -109,7 +109,13 @@ CREATE TABLE stops (
     station_id     INTEGER NOT NULL,
     order_number   INTEGER NOT NULL,
     arrival_time   TEXT,
-    departure_time TEXT
+    departure_time TEXT,
+    -- Peron i tor z rozkładu planowego (zgłoszenie #271) - tekst, bo PLK
+    -- pisze je różnie ("2", "IV", "1a"); NULL, gdy rozkład ich nie podaje.
+    arrival_platform   TEXT,
+    arrival_track      TEXT,
+    departure_platform TEXT,
+    departure_track    TEXT
 );
 CREATE TABLE operating_dates (
     schedule_id INTEGER NOT NULL,
@@ -194,8 +200,11 @@ def build_database(data, db_path):
                 yield (
                     r["scheduleId"], r["orderId"], s["stationId"], s["orderNumber"],
                     s.get("arrivalTime"), s.get("departureTime"),
+                    s.get("arrivalPlatform") or None, s.get("arrivalTrack") or None,
+                    s.get("departurePlatform") or None, s.get("departureTrack") or None,
                 )
-    n = batched_insert(db, "INSERT INTO stops VALUES (?, ?, ?, ?, ?, ?)", stop_rows())
+    n = batched_insert(db, "INSERT INTO stops VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       stop_rows())
     print(f"  stops: {n}")
 
     def date_rows():
