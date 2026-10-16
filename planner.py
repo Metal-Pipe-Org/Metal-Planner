@@ -14,6 +14,7 @@ from math import sqrt
 import bikes
 import gtfs
 import onboard
+import polinka
 import traficar
 
 # Przesiadka na DOKŁADNIE tym samym słupku - bez marszu, więc nie wycenia się
@@ -166,6 +167,7 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             "headsign": headsign,
             **({"platform": platform}
                if (platform := _platform(day, trip, _stop_id)) else {}),
+            **_info(trip),
         })
 
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
@@ -631,6 +633,12 @@ def _platform_fields(day, trip, board_stop, exit_stop):
     return out
 
 
+def _info(trip):
+    """Treść „i" przy etapie albo odjeździe - dziś tylko Polinka (#165):
+    godziny otwarcia i data sprawdzenia danych."""
+    return {"info": polinka.INFO} if trip.startswith(polinka.ID_PREFIX) else {}
+
+
 def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
     """Etap przejazdu jednym kursem, od wsiadania do wysiadania.
 
@@ -663,6 +671,7 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
         **_platform_fields(day, trip, board_stop, exit_stop),
+        **_info(trip),
         # Publiczny odpowiednik `_trip`: przycisk "trasa" otwiera rozkład linii
         # na wariancie tego kursu - sam headsign nie odróżni zjazdów do
         # zajezdni z dwóch pętli (#270).
@@ -904,7 +913,8 @@ def _traficar_journeys(day, journey, dep_sec, deadline, dest, end_name, geo_db):
     return journeys
 
 
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train",
+                 "Kolejka": "cable"}
 
 
 def _line_parts(label):
@@ -3460,6 +3470,7 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
         "path": _round_path(path),
         "trip": seg["trip_id"],
         **_platform_fields(day, seg["trip_id"], from_stop, to_stop),
+        **_info(seg["trip_id"]),
     }
 
 
@@ -3647,6 +3658,7 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
             legs[0]["dep_sec"] = start_sec = rides[0]["dep_sec"] - legs[0]["_sec"]
         journeys.append(_summarize_journey(legs, rides, arrival, dep_sec,
                                            start_sec))
+        _drop_private(legs)
 
     return journeys
 

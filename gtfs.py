@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import naming
+import polinka
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "gtfs.sqlite"
 
@@ -709,6 +710,9 @@ def load_day(day):
     # do 2026-08-31 - nie należała do żadnego miejsca i musiała mieć własny,
     # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
     pkp.augment_day(data, day)
+    # Polinka (zgłoszenie #165) z tego samego powodu w tym samym miejscu:
+    # jej stacje mają dostać przejścia piesze jak każdy słupek.
+    polinka.augment_day(data, day)
 
     # Indeksy nazw dopiero TERAZ, gdy w dniu są już obie sieci - jednym
     # przebiegiem po wszystkich słupkach, zamiast raz tutaj i drugi raz
@@ -1405,6 +1409,11 @@ def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None, data
     if trip_id.startswith("PKP:"):
         import pkp
         return pkp.trip_path(data, trip_id, board_stop, board_dep, exit_stop, exit_arr)
+    if trip_id.startswith(polinka.ID_PREFIX):
+        rows = polinka.trip_rows(trip_id)
+        ok = (rows[0][0], rows[0][2], rows[-1][0], rows[-1][1]) == (
+            board_stop, board_dep, exit_stop, exit_arr)
+        return rows if ok else []
 
     trip_id, shift = db_trip(trip_id)
     own_db = db is None

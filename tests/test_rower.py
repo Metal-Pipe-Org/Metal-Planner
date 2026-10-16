@@ -16,6 +16,7 @@ Cztery rzeczy, które muszą być prawdą:
 """
 
 import datetime
+import http.client
 
 import bikes
 import planner
@@ -417,3 +418,15 @@ def test_wylacznik_srodowiskowy(monkeypatch):
     assert bikes.stations() == []
     monkeypatch.setenv("WRM_ENABLED", "on")
     assert bikes.enabled()
+
+
+def test_przerwane_pobieranie_kanalu_nie_rzuca(monkeypatch):
+    """IncompleteRead to HTTPException, nie OSError - bez osobnej obsługi
+    przerwane pobranie wywalało całe wyszukiwanie."""
+    def przerwane(*args, **kwargs):
+        raise http.client.IncompleteRead(b"czesc")
+    monkeypatch.setattr(bikes, "_fetch", przerwane)
+    monkeypatch.setattr(bikes, "enabled", lambda: True)
+    monkeypatch.setattr(bikes, "_cache", {})
+
+    assert bikes.stations_quiet() == []
