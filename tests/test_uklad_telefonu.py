@@ -19,10 +19,11 @@ z pustego zakładka „Mapa" wychodzi sama, a z wybranym zostaje na mapie
 z „Zamknij rozkład". Telefon w poziomie nie jest wspierany: zamiast układu
 widać zasłonę „Obróć telefon pionowo", a tablet i komputer jej nie widzą.
 
-Osobno pasek przycisków pod nazwą aplikacji (warstwy i moje miejsca) - także
-na szerokim ekranie, bo tam stoi w panelu stałej szerokości i każdy kolejny
-przycisk zjada jego zapas. Mierzony przy komplecie (z 🅿), w rzędzie, czyli
-na telefonie w zakładce „Trasy".
+Osobno rząd przycisków pod nazwą aplikacji (warstwy i moje miejsca) na
+komputerze - stoi tam w panelu stałej szerokości i każdy kolejny przycisk
+zjada jego zapas. Mierzony przy komplecie (z 🅿). Na telefonie warstwy i moje
+miejsca stoją w kolumnach na mapie (sprawdza je test nachodzenia nakładek),
+a w zakładkach z listą ich nie ma (#257).
 
 Trasa jest liczona na prawdziwej bazie rozkładów (o 12:00, żeby zawsze coś
 jechało); żywe źródła - pojazdy, auta, rowery - dostają puste listy, żeby
@@ -278,12 +279,10 @@ def test_wybrany_rozklad_zostaje_na_mapie(przebieg):
     assert p["wciaz_rozklad"] and p["zamknij"], p
 
 
-EKRANY = {"komputer": (1280, 800), **TELEFONY}
-
-# Pasek przycisków pod nazwą aplikacji: wszystkie w jednym rzędzie i w środku
-# paska (bez wjeżdżania w jego wewnętrzny margines). Kolumny na mapie
-# telefonu (position: fixed) to inny układ - tu liczy się sam rząd.
-PASEK_JS = """async () => {
+# Rząd przycisków pod nazwą aplikacji na komputerze: wszystkie w jednym rzędzie
+# i w środku paska (bez wjeżdżania w jego wewnętrzny margines). Na telefonie
+# rzędu nie ma - warstwy i miejsca stoją na mapie albo znikają (#257).
+RZAD_JS = """async () => {
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     const EPS = 0.5;
     const bar = document.querySelector('.app-bar');
@@ -309,15 +308,12 @@ PASEK_JS = """async () => {
 }"""
 
 
-@pytest.mark.parametrize("ekran", list(EKRANY), ids=list(EKRANY))
-def test_pasek_przyciskow_w_jednym_rzedzie(ekran, adres, przegladarka):
+def test_pasek_przyciskow_w_jednym_rzedzie(adres, przegladarka):
     """Komplet: pięć warstw (z 🅿, który dokłada się przy zapalonych autach
-    i włączonym przycisku strefy) i trzy moje miejsca."""
-    width, height = EKRANY[ekran]
-    telefon = ekran != "komputer"
-    context = przegladarka.new_context(
-        viewport={"width": width, "height": height}, device_scale_factor=2,
-        is_mobile=telefon, has_touch=telefon, locale="pl-PL", service_workers="block")
+    i włączonym przycisku strefy) i trzy moje miejsca - w panelu stałej
+    szerokości, więc każdy kolejny przycisk zjada zapas rzędu."""
+    context = przegladarka.new_context(viewport={"width": 1280, "height": 800},
+                                       locale="pl-PL", service_workers="block")
     page = context.new_page()
     for wzor, odpowiedz in PUSTE_ZRODLA.items():
         page.route(wzor, _odpowiedz(odpowiedz))
@@ -331,9 +327,7 @@ def test_pasek_przyciskow_w_jednym_rzedzie(ekran, adres, przegladarka):
         const cars = document.getElementById('cars-toggle');
         if (!cars.classList.contains('active')) cars.click();
     }""")
-    if page.is_visible("#view-tabs"):
-        page.click('#view-tabs [data-view="list"]')
-    pasek = page.evaluate(PASEK_JS)
+    pasek = page.evaluate(RZAD_JS)
     context.close()
     assert pasek["count"] == 8, pasek
     assert not pasek["problems"], pasek["problems"]
