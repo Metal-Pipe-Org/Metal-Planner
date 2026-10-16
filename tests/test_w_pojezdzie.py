@@ -451,3 +451,23 @@ def test_kierunek_i_stacje_pociagu():
     assert kierunek["headsign"] == "C"
     assert [s["id"] for s in kierunek["stops"]] == ["A", "B", "C"]
     assert "error" in onboard._train_directions("11111", _dzien_z_pociagiem())
+
+
+def test_brak_bazy_pociagow_nie_wypuszcza_tresci_wyjatku(monkeypatch):
+    """Bez data/gtfs.sqlite podpowiedzi i kierunki pociągu mówią, że nie ma
+    danych - ale bez treści wyjątku (ścieżki pliku), bo ta idzie do klienta."""
+    import gtfs
+    from app import app
+
+    def bez_bazy(day):
+        raise FileNotFoundError("/sekretna/sciezka/gtfs.sqlite")
+
+    monkeypatch.setattr(gtfs, "load_day", bez_bazy)
+    client = app.test_client()
+
+    podpowiedzi = client.get("/api/onboard/trains?q=644")
+    assert podpowiedzi.status_code == 503
+    kierunki = client.get("/api/onboard?num=64402&mode=train")
+    assert "error" in kierunki.get_json()
+    for odpowiedz in (podpowiedzi, kierunki):
+        assert "sekretna" not in odpowiedz.get_data(as_text=True)

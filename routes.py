@@ -322,8 +322,8 @@ def init_routes(app):
         pociągi wybranego dnia, których numer zaczyna się od wpisanych cyfr."""
         try:
             day = gtfs.load_day(_day_arg())
-        except FileNotFoundError as e:
-            return jsonify({"error": str(e)}), 503
+        except FileNotFoundError:
+            return jsonify({"error": "Nie udało się wczytać danych rozkładu."}), 503
         return jsonify({"trains": onboard.trains(day, request.args.get("q", ""))})
 
     @app.route("/api/stop_board")

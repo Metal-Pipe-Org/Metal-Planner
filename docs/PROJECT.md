@@ -866,7 +866,10 @@ rozstrzyga wybrany wiersz podpowiedzi („113" bywa i autobusem), a bez wyboru
 Kierunek to stacja docelowa, a lista stacji to przebieg pociągu z dnia
 (`onboard._train_directions`, tylko stacje ze współrzędnymi). `find_ride`
 porównuje u pociągu same cyfry numeru, więc „64402" i „KD 64402" trafiają
-w ten sam kurs; tryb względny działa tak samo jak dla autobusu.
+w ten sam kurs; tryb względny działa tak samo jak dla autobusu. Numer bywa
+w ciągu doby wspólny dla dwóch przewoźników (IC 1130 i WKD 1130) — wtedy kurs
+rozstrzyga wybrany kierunek, a wpisany przewoźnik („KD 602") zawęża tylko
+listę podpowiedzi, w rozpoznaniu kursu go nie ma.
 
 Czego ten tryb świadomie NIE robi: nie szuka w kolejnych dobach (pytanie
 dotyczy tego przejazdu, a on kończy się dzisiaj) i nie zapamiętuje się między

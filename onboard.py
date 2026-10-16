@@ -87,7 +87,9 @@ def _matches(day, trip, num, mode, headsign):
 
     Pociąg rozpoznajemy po samych cyfrach numeru (zgłoszenie #167): na
     bilecie i tablicy stoi „64402", a w rozkładzie „KD 64402" - przewoźnik
-    nic tu nie rozstrzyga, numer jest w ciągu doby unikalny.
+    nic tu nie rozstrzyga, nie trafia nawet do porównania. Numer bywa
+    w ciągu doby wspólny dla dwóch przewoźników (IC 1130 i WKD 1130), a wtedy
+    kurs rozstrzyga kierunek - front bez niego niczego nie wysyła.
 
     Kierunek porównujemy luźno (bez wielkości liter i białych znaków) i tylko
     wtedy, gdy pytający go podał: napis z czoła pojazdu bywa skrócony, a i tak
@@ -353,7 +355,13 @@ def directions(num, day, mode=None):
     liczba kursów jednego wariantu.
     """
     if mode == "train":
-        data = _train_directions(num, gtfs.load_day(day))
+        # Brak bazy to ten sam komunikat, co przy podpowiedziach pociągów
+        # (/api/onboard/trains) - bez treści wyjątku, bo ta idzie do klienta.
+        try:
+            loaded = gtfs.load_day(day)
+        except FileNotFoundError:
+            return {"error": "Nie udało się wczytać danych rozkładu."}
+        data = _train_directions(num, loaded)
         return data if "error" in data else {**data, "date": day.isoformat()}
 
     data = timetables.line_timetable(num, day, mode, geometry=False)

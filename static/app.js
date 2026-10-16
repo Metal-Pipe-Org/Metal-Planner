@@ -4529,7 +4529,7 @@ if (obLineInput) {
         render: item => item.label
             ? `<span class="badge train">${esc(item.label)}</span>`
               + `<span class="ac-kind">→ ${esc(item.headsign)}</span>`
-            : `<span class="badge ${esc(item.mode)}">${esc(item.name)}</span>`
+            : `<span class="badge ${escClass(item.mode)}">${esc(item.name)}</span>`
               + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
         onEnter: () => loadDirections(),
     });
