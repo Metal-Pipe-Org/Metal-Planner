@@ -2022,11 +2022,21 @@ def plan_flow(start_query, end_query, when=None,
     # dopiero on mówi, gdzie i kiedy zaczyna się podróż (patrz onboard.py).
     ride = None
     if in_vehicle:
+        slack = in_vehicle.get("slack_sec")
         ride = onboard.find_ride(day, in_vehicle.get("num"),
                                  in_vehicle.get("mode"), in_vehicle.get("stop"),
-                                 asked_sec, in_vehicle.get("headsign"))
+                                 asked_sec, in_vehicle.get("headsign"),
+                                 onboard.OFF_SCHEDULE_SLACK_SEC if slack is None
+                                 else max(0, slack))
         if "error" in ride:
             return ride
+        # Tryb względny (zgłoszenie #231): pojazd jedzie nie o swojej porze,
+        # więc w dniu tego zapytania jedzie dalej od teraz, a cała reszta
+        # zostaje przy rozkładzie. Kurs zmienia przy tym identyfikator - to
+        # on, a nie rozkładowy, jest od tej chwili „naszym" (patrz seated).
+        if ride["late_sec"]:
+            day, ride["trip"] = gtfs.with_shifted_trip(
+                day, ride["trip"], ride["stop"], ride["late_sec"])
 
     ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point,
                               ride)
@@ -2435,7 +2445,7 @@ def plan_flow(start_query, end_query, when=None,
         # liście zaczyna się wysiadką, a nie wsiadaniem.
         **({"onboard": {k: ride[k] for k in
                         ("num", "mode", "line", "headsign", "stop_name", "at",
-                         "not_yet", "late")}}
+                         "late_sec", "at_sched")}}
            if ride else {}),
         # Stan warstwy rowerowej - tylko gdy o nią pytano (i jest lista, do
         # której rower dokłada propozycje). Front ma po czym

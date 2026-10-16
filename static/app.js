@@ -4337,13 +4337,13 @@ function obNote(text) {
     obMsg.hidden = !text;
 }
 
-// Rozpoznany kurs nie pasuje do "jadę nim teraz" (#231), a mapa i tak liczy
-// od niego - nic poza tym ostrzeżeniem tego nie zdradza. Dwa przypadki (patrz
-// onboard.find_ride): `not_yet` - według rozkładu nie wyjechał jeszcze nawet
-// z poprzedniego przystanku, najczęściej pomyłka w linii, kierunku albo
-// przystanku; `late` - według rozkładu minął już przystanek, czyli jest
-// spóźniony, a godziny na mapie są liczone od jego rozkładu, nie od teraz.
-// Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
+// Tryb względny (#231, patrz onboard.find_ride): rozpoznany kurs jest według
+// rozkładu przy przystanku wyraźnie nie teraz, więc mapa liczy go od teraz -
+// przesuniętego o `late_sec`, z resztą pojazdów przy rozkładzie. Nic poza tym
+// komunikatem tego nie zdradza, a to ważne w obie strony: spóźnienie
+// tłumaczy, czemu godziny tego pojazdu nie zgadzają się z tablicą, a kurs
+// dopiero przed nami to najczęściej pomyłka w linii, kierunku albo
+// przystanku. Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
 const obWarn = $('ob-warn');
 
 function hideObWarn() {
@@ -4351,13 +4351,29 @@ function hideObWarn() {
 }
 
 function warnOnboardRide(kurs) {
-    if (!kurs || !(kurs.not_yet || kurs.late)) { hideObWarn(); return; }
+    if (!kurs || !kurs.late_sec) { hideObWarn(); return; }
     const przystanek = esc(prettyStopName(kurs.stop_name));
-    const godzina = `<b>${esc(kurs.at)}</b>`;
+    const rozklad = `<b>${esc(kurs.at_sched)}</b>`;
+    const ile = `${Math.round(Math.abs(kurs.late_sec) / 60)} min`;
+    // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
+    // polem celu. Pełne zdanie zostaje w dymku i dla czytnika ekranu.
+    const [ikona, fakt, ikona2, rada, pelne] = kurs.late_sec > 0
+        // Bez nazwy przystanku: „(JAGODNO (P+R) 21:01)" czytało się jak kierunek.
+        ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (rozkład ${rozklad})`,
+           '⏩', 'Godziny pojazdu przesunięte',
+           `${kurs.num} jedzie prawdopodobnie ok. ${ile} po rozkładzie — według rozkładu był `
+           + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `
+           + `Godziny tego pojazdu na mapie są przesunięte o ${ile}.`]
+        : ['⚠️', `${esc(kurs.num)} na ${przystanek} dopiero o ${rozklad} (za ${ile})`,
+           '🔎', 'Sprawdź linię i przystanek',
+           `Najbliższy kurs ${kurs.num} jest według rozkładu na przystanku `
+           + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at_sched}, za `
+           + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię i przystanek.`];
     $('ob-warn-text').innerHTML =
-        `${esc(kurs.num)} według rozkładu ${kurs.late ? 'była' : 'będzie'} `
-        + `na przystanku ${przystanek} o ${godzina}.`
-        + `\nGodziny na mapie liczą się od ${godzina}, a nie od teraz.`;
+        `<span aria-hidden="true">${ikona}</span> ${fakt}`
+        + `\n<span aria-hidden="true">${ikona2}</span> ${rada}`;
+    obWarn.title = pelne;
+    obWarn.setAttribute('aria-label', pelne);
     obWarn.hidden = false;
 }
 
@@ -4556,6 +4572,9 @@ function queryParams() {
         if (poklad.mode) params.set('onboard_mode', poklad.mode);
         if (poklad.headsign) params.set('onboard_headsign', poklad.headsign);
         params.set('onboard_stop', poklad.stop);
+        // Od jakiego rozjazdu z rozkładem pojazd jedzie „od teraz" (tryb
+        // względny, zgłoszenie #231) - suwak w ⚙, patrz onboard.find_ride.
+        params.set('onboard_slack_sec', (Number($('onboard-slack').value) * 60).toFixed(0));
     } else if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
@@ -5189,7 +5208,7 @@ $('clear').addEventListener('click', () => {
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
 const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
                         'walk-pace', 'bike-kmh', 'bike-overhead',
-                        'car-kmh', 'car-overhead'];
+                        'car-kmh', 'car-overhead', 'onboard-slack'];
 
 // To, co z tego klucza widać w ⚙ także bez DEV_MODE (patrz visiblePrefs).
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
@@ -5244,7 +5263,9 @@ function liveSlider(inputId, valueId, resetsMore) {
         saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
-            if (!startInput.value || !endInput.value) return;
+            // Start z pokładu nie ma pola „skąd" - o komplecie pytania mówi
+            // tam wybór pojazdu (patrz onboardReady).
+            if (!endInput.value || (onboardOn ? !onboardReady() : !startInput.value)) return;
             loadPlan(requestToken, false)
                 .catch(() => showError('Nie udało się połączyć z serwerem.'));
         }, 200);
@@ -5260,6 +5281,7 @@ liveSlider('bike-kmh', 'bike-kmh-value');
 liveSlider('bike-overhead', 'bike-overhead-value');
 liveSlider('car-kmh', 'car-kmh-value');
 liveSlider('car-overhead', 'car-overhead-value');
+liveSlider('onboard-slack', 'onboard-slack-value');
 
 function showWalkPace() {
     $('walk-pace-value').textContent = WALK_PACE_LABELS[$('walk-pace').value];
@@ -5783,7 +5805,7 @@ bindDotOpts();
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
-    'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
+    'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
     'fold-layout', 'fold-siechnice', 'fold-version',
