@@ -3674,7 +3674,15 @@ function openJourney(index) {
 }
 
 function badgeHtml(leg) {
-    return `<span class="badge ${leg.mode}" title="${esc(leg.line)}">${esc(leg.num)}</span>`;
+    // Pojazd, w którym się już siedzi (start z pokładu, patrz
+    // onboard.mark_journeys), ma plakietkę z obwódką - na karcie propozycji
+    // „4 › D" nie mówi inaczej, czy w 4 trzeba dopiero wsiąść, czy jedzie się
+    // nią dalej (zgłoszenie #224).
+    if (leg.onboard) {
+        return `<span class="badge ${leg.mode} current" title="${escAttr(leg.line)}`
+             + ` — jedziesz tym pojazdem">${esc(leg.num)}</span>`;
+    }
+    return `<span class="badge ${leg.mode}" title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
 }
 
 // Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
@@ -4065,7 +4073,7 @@ function renderJourneys() {
                 || leg.kind === 'bike' || leg.kind === 'drive')
             .map(leg => leg.kind === 'walk'
                 ? `pieszo ${leg.minutes} min`
-                : leg.line).join(', ');
+                : leg.onboard ? `${leg.line} (obecny pojazd)` : leg.line).join(', ');
         // Podróż kończąca się autem ma szacowany ostatni etap, więc i jej
         // łączny czas jest szacunkiem - "ok." stoi przy tej liczbie, którą
         // czyta się pierwszą, a nie dopiero w rozwinięciu karty.
