@@ -13,6 +13,7 @@ import gtfs
 import naming
 import onboard
 import pkp
+import pkp_live
 import polinka
 import siechnice
 import timetables
@@ -315,6 +316,19 @@ def init_routes(app):
             _day_arg(),
             request.args.get("mode") or None,
         ))
+
+    @app.route("/api/train_delays")
+    def api_train_delays():
+        """Opóźnienia pociągów z pokazanych tras (zgłoszenie #71, patrz
+        pkp_live.py) - front pyta o nie osobno, PO narysowaniu wyniku, więc
+        lista tras nigdy na nie nie czeka."""
+        trips = [t for t in request.args.get("trips", "").split(",") if t]
+        when = _day_arg()
+        try:
+            day = gtfs.load_day(when)
+        except FileNotFoundError:
+            return jsonify({"error": "Nie udało się wczytać danych rozkładu."}), 503
+        return jsonify({"delays": pkp_live.delays(day, trips, when)})
 
     @app.route("/api/stop_board")
     def api_stop_board():
