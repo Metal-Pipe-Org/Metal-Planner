@@ -171,6 +171,8 @@ const L = {
     }),
     divIcon: options => ({...options}),
     tooltip: options => layerBase({kind: 'tooltip', options: {...(options || {})}}),
+    // app.js dopina się do ustawiania dymków Leafleta; tu nic ich nie ustawia.
+    Tooltip: {prototype: {_setPosition() {}}},
     layerGroup: layers => layerBase({
         kind: 'group', layers: (layers || []).slice(),
         // Front szuka po warstwach grupy kropki startowej (seedStartPanel).

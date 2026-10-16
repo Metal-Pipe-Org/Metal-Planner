@@ -22,6 +22,88 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 const $ = id => document.getElementById(id);
 
+// Każdy dymek na mapie (auto, rower, przystanek, pojazd) wychodził poza okno,
+// gdy kropka stała przy brzegu - Leaflet ustawia go przy kropce i niczego nie
+// pilnuje. Jedno miejsce na wszystkie, tak jak robią to biblioteki dymków
+// (Floating UI): gdy dymek nie mieści się po swojej stronie kropki, otwiera
+// się po przeciwnej (strzałka przechodzi razem z nim), a wzdłuż kropki tylko
+// się przesuwa, ze strzałką (CSS) dalej wskazującą kropkę. Przesunięcie w osi
+// otwierania oderwałoby strzałkę od kropki, więc go nie ma.
+const TOOLTIP_MARGIN = 8;
+const TOOLTIP_ARROW = 6;
+const TOOLTIP_SIDES = {
+    top: {flip: 'bottom', across: ['left', 'right'], away: [0, -1]},
+    bottom: {flip: 'top', across: ['left', 'right'], away: [0, 1]},
+    left: {flip: 'right', across: ['top', 'bottom'], away: [-1, 0]},
+    right: {flip: 'left', across: ['top', 'bottom'], away: [1, 0]},
+};
+const setTooltipPosition = L.Tooltip.prototype._setPosition;
+
+function tooltipVertical(side) {
+    return side === 'top' || side === 'bottom';
+}
+
+function tooltipOverflow(box, side) {
+    const [lo, hi, size] = tooltipVertical(side)
+        ? [box.top, box.bottom, window.innerHeight]
+        : [box.left, box.right, window.innerWidth];
+    return Math.max(0, TOOLTIP_MARGIN - lo) + Math.max(0, hi - size + TOOLTIP_MARGIN);
+}
+
+L.Tooltip.prototype._setPosition = function (pos) {
+    const el = this._container;
+    el.style.translate = '';
+    el.style.removeProperty('--tip-shift');
+    setTooltipPosition.call(this, pos);
+    let side = Object.keys(TOOLTIP_SIDES).find(s => el.classList.contains(`leaflet-tooltip-${s}`));
+    if (!side) return;
+    // Jeden odczyt układu na ścieżce bez odbicia - dymek przepływów jest
+    // przestawiany przy każdym ruchu myszy.
+    let box = el.getBoundingClientRect();
+    let overflow = tooltipOverflow(box, side);
+    if (overflow) {
+        // Odsunięcie od kropki (offset) po zmianie strony musi iść w drugą
+        // stronę, inaczej strzałka wjeżdża za kropkę.
+        const {direction, offset} = this.options;
+        const o = L.point(offset);
+        const gap = Math.abs(tooltipVertical(side) ? o.y : o.x);
+        const placeOn = s => {
+            const [ax, ay] = TOOLTIP_SIDES[s].away;
+            this.options.direction = s;
+            this.options.offset = [ax * gap, ay * gap];
+            setTooltipPosition.call(this, pos);
+            this.options.direction = direction;
+            this.options.offset = offset;
+        };
+        let best = side, last = side;
+        for (const s of [TOOLTIP_SIDES[side].flip, ...TOOLTIP_SIDES[side].across]) {
+            placeOn(s);
+            last = s;
+            const sOverflow = tooltipOverflow(el.getBoundingClientRect(), s);
+            if (sOverflow < overflow) [best, overflow] = [s, sOverflow];
+            if (!overflow) break;
+        }
+        if (best !== last) {
+            if (best === side) setTooltipPosition.call(this, pos);
+            else placeOn(best);
+        }
+        side = best;
+        box = el.getBoundingClientRect();
+    }
+    const vertical = tooltipVertical(side);
+    const [lo, hi, size, length] = vertical
+        ? [box.left, box.right, window.innerWidth, box.width]
+        : [box.top, box.bottom, window.innerHeight, box.height];
+    const shift = Math.max(TOOLTIP_MARGIN - lo, Math.min(0, size - TOOLTIP_MARGIN - hi));
+    if (!shift) return;
+    el.style.translate = vertical ? `${shift}px 0` : `0 ${shift}px`;
+    // Kropka tuż przy samej krawędzi bywa poza zasięgiem dymka - strzałka
+    // staje wtedy na jego rogu zamiast wystawać poza ramkę.
+    const reach = Math.max(0, length / 2 - TOOLTIP_ARROW - el.clientLeft
+        - parseFloat(getComputedStyle(el).borderTopLeftRadius));
+    el.style.setProperty('--tip-shift', `${Math.max(-reach, Math.min(reach, shift))}px`);
+};
+
 // Stan paneli (schowany/rozwinięty) i ostatnie wyszukiwanie zapisujemy
 // w localStorage pod wspólnym kluczem - przeżywa odświeżenie strony i nowe
 // wizyty. Jeden mały odczyt/zapis JSON-a na zmianę, nie warto osobnych kluczy
