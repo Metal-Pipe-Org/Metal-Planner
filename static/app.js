@@ -43,8 +43,7 @@ function tooltipVertical(side) {
     return side === 'top' || side === 'bottom';
 }
 
-function tooltipOverflow(el, side) {
-    const box = el.getBoundingClientRect();
+function tooltipOverflow(box, side) {
     const [lo, hi, size] = tooltipVertical(side)
         ? [box.top, box.bottom, window.innerHeight]
         : [box.left, box.right, window.innerWidth];
@@ -58,7 +57,10 @@ L.Tooltip.prototype._setPosition = function (pos) {
     setTooltipPosition.call(this, pos);
     let side = Object.keys(TOOLTIP_SIDES).find(s => el.classList.contains(`leaflet-tooltip-${s}`));
     if (!side) return;
-    let overflow = tooltipOverflow(el, side);
+    // Jeden odczyt układu na ścieżce bez odbicia - dymek przepływów jest
+    // przestawiany przy każdym ruchu myszy.
+    let box = el.getBoundingClientRect();
+    let overflow = tooltipOverflow(box, side);
     if (overflow) {
         // Odsunięcie od kropki (offset) po zmianie strony musi iść w drugą
         // stronę, inaczej strzałka wjeżdża za kropkę.
@@ -77,7 +79,7 @@ L.Tooltip.prototype._setPosition = function (pos) {
         for (const s of [TOOLTIP_SIDES[side].flip, ...TOOLTIP_SIDES[side].across]) {
             placeOn(s);
             last = s;
-            const sOverflow = tooltipOverflow(el, s);
+            const sOverflow = tooltipOverflow(el.getBoundingClientRect(), s);
             if (sOverflow < overflow) [best, overflow] = [s, sOverflow];
             if (!overflow) break;
         }
@@ -86,8 +88,8 @@ L.Tooltip.prototype._setPosition = function (pos) {
             else placeOn(best);
         }
         side = best;
+        box = el.getBoundingClientRect();
     }
-    const box = el.getBoundingClientRect();
     const vertical = tooltipVertical(side);
     const [lo, hi, size, length] = vertical
         ? [box.left, box.right, window.innerWidth, box.width]
