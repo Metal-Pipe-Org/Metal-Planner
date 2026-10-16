@@ -20,18 +20,20 @@ północy (25:10 to kurs "dzisiejszy", tak samo jak w rozkładzie na słupku).
 """
 
 import gtfs
+import polinka
 
 # route_type z GTFS -> rodzaj używany przez front (kolor linii, etykieta).
 # Ten sam podział, co planner._line_parts, tylko liczony z typu trasy, a nie
 # z etykiety tekstowej - tu mamy surowy wiersz z bazy.
 MODE_OF_TYPE = {0: "tram", 3: "bus"}
 MODE_LABEL = {"tram": "Tramwaj", "bus": "Autobus", "train": "Pociąg",
-              "other": "Linia"}
+              "cable": "Kolejka", "other": "Linia"}
 # Odwrotność: etykieta kursu z DayData ("Tramwaj 17") niesie rodzaj słowem.
 # "Pociąg" bierze się z pkp.augment_day, nie z routes.route_type - kolej nie
 # przechodzi przez GTFS, więc MODE_OF_TYPE wyżej nigdy jej nie zobaczy
 # (ten sam słownik, co planner.MODE_OF_LABEL - i z tego samego powodu).
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train",
+                 "Kolejka": "cable"}
 
 
 def _mode_of(route_type):
@@ -274,6 +276,8 @@ def _trip_rows(db, trip, data):
     """
     if trip.startswith("PKP:"):
         return list(data.pkp_trip_stops.get(trip, ()))
+    if trip.startswith(polinka.ID_PREFIX):
+        return polinka.trip_rows(trip)
 
     raw_trip, shift = gtfs.db_trip(trip)
     return [

@@ -16,6 +16,7 @@ Cztery rzeczy, które muszą być prawdą:
 """
 
 import datetime
+import http.client
 
 import bikes
 import planner
@@ -263,6 +264,25 @@ def test_propozycja_niesie_stan_obu_stojakow(install_day, install_stations):
     assert przejazd["to"] == "Stacja przy P"
 
 
+def test_rodzaj_roweru_odsiewa_stacje_wsiadania(install_day, install_stations):
+    """Zgłoszenie #163: przyciski 🚲 i ⚡ odsiewają też propozycje, nie tylko
+    kropki na mapie. Przy M stoją same elektryki - przy zgaszonym ⚡ nie ma
+    tam na czym wsiąść, przy zgaszonym 🚲 jak najbardziej. Stacja zwrotu
+    żadnego roweru mieć nie musi."""
+    install_day(_siec_z_luka())
+    install_stations([{**STACJA_M, "electric": STACJA_M["bikes"]},
+                      {**STACJA_P, "bikes": 0}])
+
+    def rower(electric, regular):
+        return _propozycja_z_rowerem(planner.plan_flow(
+            "S", "E", when=WHEN, use_bikes=True,
+            bike_electric=electric, bike_regular=regular))
+
+    assert rower(True, True) is not None
+    assert rower(True, False) is not None
+    assert rower(False, True) is None
+
+
 # --------------------------------------------- rower nie psuje reszty aplikacji ----
 
 def test_bez_wlacznika_odpowiedz_jest_identyczna(install_day, install_stations):
@@ -417,3 +437,15 @@ def test_wylacznik_srodowiskowy(monkeypatch):
     assert bikes.stations() == []
     monkeypatch.setenv("WRM_ENABLED", "on")
     assert bikes.enabled()
+
+
+def test_przerwane_pobieranie_kanalu_nie_rzuca(monkeypatch):
+    """IncompleteRead to HTTPException, nie OSError - bez osobnej obsługi
+    przerwane pobranie wywalało całe wyszukiwanie."""
+    def przerwane(*args, **kwargs):
+        raise http.client.IncompleteRead(b"czesc")
+    monkeypatch.setattr(bikes, "_fetch", przerwane)
+    monkeypatch.setattr(bikes, "enabled", lambda: True)
+    monkeypatch.setattr(bikes, "_cache", {})
+
+    assert bikes.stations_quiet() == []

@@ -71,6 +71,9 @@ instance/
 data/*
 !data/.env.example
 
+# Wgrany rozklad Siechnic (folder montowany w docker-compose.yml)
+/siechnice/
+
 # =========================
 # Logs
 # =========================

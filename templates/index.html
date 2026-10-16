@@ -10,6 +10,20 @@
       Zabezpieczenie dla Safari, które user-scalable=no ignoruje - phone.js.
     #}
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    {#
+      Odrzucenie zasłony „Obróć telefon" (phone.js) sprawdzamy przed pierwszym
+      rysowaniem: gdyby robił to dopiero phone.js na końcu body, zasłona
+      mignęłaby komuś, kto już ją odrzucił.
+    #}
+    <script>
+        try {
+            if (localStorage.getItem('metal-planner:rotate-cover-dismissed') === '1') {
+                document.documentElement.classList.add('rotate-cover-dismissed');
+            }
+        } catch (error) {
+            // localStorage niedostępny - zasłona pokaże się znowu
+        }
+    </script>
     <title>Metal Planner — Wrocław</title>
     <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu.">
 
@@ -42,13 +56,34 @@
       - phone.js czyta ją z tego atrybutu, więc arkusz i skrypt nie mogą się
       rozjechać. Drugi warunek to telefon obrócony poziomo: ekran szeroki, ale
       niski i dotykowy - ma zostać układem telefonu, a nie przeskakiwać na
-      komputerowy.
+      komputerowy. Nad nim i tak leży zasłona „Obróć telefon pionowo"
+      (#rotate-cover).
     #}
     <link rel="stylesheet" id="phone-css"
           media="(max-width: 760px), (pointer: coarse) and (max-height: 500px)"
           href="{{ url_for('static', filename='phone.css') }}">
 </head>
 <body{% if dev_mode %} class="dev-mode"{% endif %}>
+
+{#
+  Telefon w poziomie nie jest wspierany: na niskim ekranie formularz wchodził
+  na zakładki, a mapy zostawał pasek. Zainstalowana aplikacja na Androidzie
+  trzyma pion sama (orientation w manifeście), ale przeglądarka i iPhone
+  obracają stronę zawsze - tam zostaje ta zasłona. Pokazuje ją phone.css,
+  tylko na niskim ekranie dotykowym, więc tablet i laptop jej nie widzą.
+  „Pokaż mimo to" usuwa ją na stałe w tej przeglądarce (phone.js).
+
+  Ikona: „screen_rotation" z Material Symbols (Google), licencja Apache 2.0,
+  https://github.com/google/material-design-icons
+#}
+<div id="rotate-cover" class="rotate-cover" hidden>
+    <svg class="rotate-cover-icon" viewBox="0 -960 960 960" width="48" height="48" aria-hidden="true">
+        <path fill="currentColor" d="M516-191 191-516q-18-20-18-46t18-46l166-165q18-20 44.99-20 26.99 0 47.01 20l325 325q19 19 19 46t-19 46L608-191q-18 20-44.99 20-26.99 0-47.01-20Zm46-39 172-172-331-332-172 172 331 332ZM478 1q-98.51 0-185.58-37.5-87.07-37.5-152.24-103Q75-205 37.5-292.18T0-478h60q0 80 28.5 151.5t78.5 127Q217-144 285.5-109T433-66L303-196l43-43L574-11q-23 7-47.48 9.5Q502.04 1 478 1Zm422-479q0-80-28-151.5T794.5-757Q745-813 677-848.5T530-892l128 128-43 43-228-228q23-6 45.5-8.5T478-960q100 0 187.5 38t153 103.5Q884-753 922-665.5T960-478h-60Zm-417-4Z"/>
+    </svg>
+    <p class="rotate-cover-title">Obróć telefon pionowo</p>
+    <p class="rotate-cover-text">Poziom nie jest wspierany i może nie działać dobrze.</p>
+    <button type="button" id="rotate-cover-dismiss" class="button rotate-cover-dismiss">Pokaż mimo to</button>
+</div>
 
 {#
   21:37 - ekran z metalową rurą (static/rura.js). Poza blokiem data_error:
@@ -174,6 +209,13 @@
     {% else %}
 
     <div class="card search-card">
+
+        {# Drugi ◎ tylko dla zwiniętej karty na telefonie (patrz phone.css):
+           formularz z pierwszym jest wtedy schowany, a odświeżanie pozycji
+           (#267) ma się dać przełączyć bez rozwijania. Stan i podpis ustawia
+           syncAutoRefresh w app.js. #}
+        <button type="button" id="locate-peek" class="icon-button locate-peek"
+                title="Odświeżaj co 30 s" aria-label="Odświeżaj moją lokalizację co 30 sekund">◎</button>
 
         {#
           Skąd zaczyna się podróż. Domyślnie ze STOJĄCEGO MIEJSCA — przystanku
@@ -360,51 +402,60 @@
           widać na liście podpowiedzi (plakietka linii / znaczek przystanku),
           czyli tam, gdzie faktycznie potrzebny.
         #}
-        <div class="ac-field tt-field">
-            <input type="text" id="tt-query" class="with-action" autocomplete="off"
-                   role="combobox" aria-label="Numer linii albo nazwa przystanku"
-                   aria-autocomplete="list" aria-expanded="false"
-                   aria-controls="tt-query-list"
-                   placeholder="Linia albo przystanek — np. 17, Katedra">
-            <button id="tt-clear" class="icon-button in-field" title="Wyczyść"
-                    aria-label="Wyczyść rozkład" hidden>&#10005;</button>
+        <div class="tt-top">
+            <div class="tt-query-row">
+                <div class="ac-field tt-field">
+                    <input type="text" id="tt-query" class="with-action" autocomplete="off"
+                           role="combobox" aria-label="Numer linii albo nazwa przystanku"
+                           aria-autocomplete="list" aria-expanded="false"
+                           aria-controls="tt-query-list"
+                           placeholder="Linia albo przystanek">
+                    <button id="tt-clear" class="icon-button in-field" title="Wyczyść"
+                            aria-label="Wyczyść rozkład" hidden>&#10005;</button>
+                </div>
+            </div>
+
+            {# Lista poza polem, żeby miała szerokość całego wiersza, a nie tylko wąskiego pola obok czasu. #}
             <ul class="ac-list" id="tt-query-list" role="listbox" hidden
                 aria-label="Podpowiedzi linii i przystanków"></ul>
+
+            {#
+              Dzień i godzina w TEJ SAMEJ ramce, co czas wyszukiwarki
+              (.time-field), w osobnym wierszu pod polem szukania. Data stoi
+              obok godziny, bez rozwijania - na całą szerokość karty jest na
+              nią miejsce. Godzina nie odpytuje serwera - odpowiedź niesie
+              całą dobę, więc jest punktem odniesienia tablicy przystanku: od
+              niej lecą odjazdy i na niej stoi kurs rysowany na mapie. Rozkład
+              linii godziny nie używa, więc zostaje w nim sam dzień (klasa
+              `date-only`, ustawia ją timetable.js).
+            #}
+            <div class="tt-time-row">
+                <div class="time-field" id="tt-time-field">
+                    <div class="time-row tt-hour-row">
+                        <span>Odjazd</span>
+                        <input type="text" id="tt-time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
+                               maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
+                        <button type="button" id="tt-now" class="time-now-button">teraz</button>
+                    </div>
+                    <div class="time-row tt-date-part">
+                        <span>Data</span>
+                        <input type="date" id="tt-date" value="{{ form_date }}">
+                    </div>
+                    <span class="spinner tt-spinner" aria-hidden="true"></span>
+                </div>
+
+                {# Wyjście z rozkładów BEZ opuszczania mapy - tylko tam, gdzie nic
+                   innego tego nie umie: telefon, widok mapy. Zakładka „Trasy"
+                   też zamyka ten tryb, ale przy okazji zabiera z mapy na listę,
+                   a tu patrzy się właśnie na mapę. W widoku listy przycisku nie
+                   ma (pod listą stoją zakładki), na szerokim ekranie też nie
+                   (jest ◷). #}
+                <button type="button" id="tt-close" class="icon-button tt-close"
+                        title="Zamknij rozkład" aria-label="Zamknij rozkład">&#10005;</button>
+            </div>
         </div>
 
         <script id="line-names" type="application/json">{{ lines|tojson }}</script>
-
-        {#
-          Dzień i godzina w jednym polu, w takiej samej ramce, co czas
-          wyszukiwarki. Godzina nie odpytuje serwera - odpowiedź niesie całą
-          dobę, więc jest punktem odniesienia dla obu rozkładów naraz: od niej
-          lecą odjazdy tablicy i na niej otwiera się rozkład linii.
-        #}
-        <div class="tt-when">
-            <span class="tt-when-part">
-                <label for="tt-date">Dzień</label>
-                <input type="date" id="tt-date" value="{{ form_date }}">
-            </span>
-            <span class="tt-when-part">
-                <label for="tt-time">Godzina</label>
-                <input type="text" id="tt-time" inputmode="numeric"
-                       pattern="[0-9]{2}:[0-9]{2}" maxlength="5" size="5"
-                       placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
-                <button type="button" id="tt-now" class="time-now-button">teraz</button>
-            </span>
-            <span class="spinner tt-spinner" aria-hidden="true"></span>
-        </div>
-
-        {#
-          Wyjście z rozkładów BEZ opuszczania mapy - tylko tam, gdzie nic
-          innego tego nie umie: telefon, widok mapy. Zakładka „Trasy" też
-          zamyka ten tryb, ale przy okazji zabiera z mapy na listę, a tu
-          patrzy się właśnie na mapę. W widoku listy przycisku nie ma (pod
-          listą stoją zakładki), na szerokim ekranie też nie (jest ◷).
-        #}
-        <button type="button" id="tt-close" class="button tt-close">
-            &#10005; Zamknij rozkład
-        </button>
 
     </div>
 
@@ -614,6 +665,12 @@
 
         <label class="dev-check">
             <input type="checkbox" id="via-open"> Zawsze pokazuj przystanki po drodze
+        </label>
+
+        <label class="dev-check">
+            <input type="checkbox" id="locate-sets-time" checked> ◎ ustawia godzinę na teraz
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Wyłączone — ◎ ustawia tylko start, a godzina i data zostają, jakie były (także przy odświeżaniu pozycji co 30 s).">i</span>
         </label>
 
     </details>
@@ -836,6 +893,24 @@
         <label class="dev-check">
             <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
         </label>
+
+    </details>
+
+    {#
+      Rozkładu Siechnic nie ma w repo ani serwer go nie pobiera - kopię
+      tygodnia wgrywa się stąd (patrz siechnice.validate_snapshot). Nie jest
+      ustawieniem: nic tu nie trafia do pamięci przeglądarki.
+    #}
+    <details class="dev-fold dev-only" id="fold-siechnice">
+    <summary>Rozkład Siechnic <span class="dev-badge">DEV</span></summary>
+
+    <div class="field">
+        <div class="sw-row">
+            <label class="button" for="siechnice-file">Wgraj rozkład Siechnic</label>
+            <input type="file" id="siechnice-file" accept=".json,application/json" hidden>
+        </div>
+        <p class="field-hint" id="siechnice-status" role="status"></p>
+    </div>
 
     </details>
 

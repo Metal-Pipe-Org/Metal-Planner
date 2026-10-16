@@ -30,8 +30,7 @@ Uruchamiany ręcznie albo z crona (nie przez Flaska). Kolejno:
 2. Pobiera zip (~12 MB), parsuje pliki CSV (`stops`, `routes`, `trips`,
    `stop_times`, `calendar`, `shapes` — geometria tras po ulicach/torach…)
    i buduje `data/gtfs_new.sqlite`.
-3. Dokleja do niej rozkład gminy Siechnice (`siechnice.py`), jeśli jest
-   włączony — patrz niżej.
+3. Dokleja do niej rozkład gminy Siechnice (`siechnice.py`) ze statycznej kopii, jeśli ktoś ją wgrał — patrz niżej.
 4. Atomowo podmienia bazę (`os.replace`) na `data/gtfs.sqlite` — działająca
    aplikacja nigdy nie widzi wpół zapisanego pliku, a gdy pobieranie padnie,
    wczorajsza baza zostaje nietknięta.
@@ -51,15 +50,7 @@ sklejają się z istniejącymi po **zgodnej nazwie i bliskości**, więc kurs
 z Siechnic wjeżdża na ten sam `stop_id` co tramwaj: przesiadka bez kary za
 przejście i jeden marker na mapie zamiast dwóch.
 
-Każda pobrana data dostaje własny `service_id` i wpis w `calendar_dates`
-(`exception_type=1`), bo API oddaje rozkład per konkretny dzień — kalendarz
-odtworzony z reguły tygodniowej byłby zgadywaniem.
-
-Całość jest **domyślnie wyłączona** (`SIECHNICE_ENABLED=on` włącza):
-`robots.txt` tego serwisu to `Disallow: /` i nie ma tam regulaminu ani zgody
-na ponowne wykorzystanie. Awaria tego kroku nie przerywa aktualizacji —
-rozkład Wrocławia wjeżdża na miejsce niezależnie. Rozpoznanie źródeł, powody
-i wzór pisma do gminy o eksport GTFS: [SIECHNICE_DANE.md](SIECHNICE_DANE.md).
+Serwer **nie odpytuje** tego API (`robots.txt` to `Disallow: /`, nie ma regulaminu ani zgody na ponowne wykorzystanie), a w repo nie ma ani danych, ani kodu pobierania. Statyczną kopię jednego pełnego tygodnia wgrywa się w trybie deweloperskim (⚙ → „Wgraj rozkład Siechnic”): serwer sprawdza format, zapisuje plik w folderze `siechnice` obok `docker-compose.yml` (w kontenerze ścieżka z `SIECHNICE_ROZKLAD`) i od razu przebudowuje bazę w tle. Aktualizacja bazy dokleja kopię też co noc: każdy dzień tygodnia dostaje własny `service_id` z regułą w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia. Święta jeżdżą wg dnia tygodnia. Bez pliku baza ma same dane Wrocławia, a awaria tego kroku nie przerywa aktualizacji. Wszystkie przebudowy (start, noc, wgranie) dzielą jedną blokadę plikową (`data/gtfs_update.lock`), więc nigdy nie biegną dwie naraz. Format pliku, rozpoznanie źródeł, powody i wzór pisma do gminy o eksport GTFS: [SIECHNICE_DANE.md](SIECHNICE_DANE.md).
 
 Ma trzy punkty wejścia: wywołanie ręczne (albo z crona), start serwera
 i codzienny harmonogram. Ten ostatni to `start_daily_scheduler()` — wątek
@@ -79,6 +70,22 @@ rozkład wchodzi bez restartu. Dwie ścieżki, bo dwa punkty wejścia:
 wywołane z `app.py` (uruchomienie lokalne). Lokalna dodatkowo pomija bazę
 młodszą niż `GTFS_MAX_AGE_HOURS` (12 h) — reloader Flaska restartuje serwer
 po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
+
+#### Trzecie źródło — `polinka.py` (wpisane ręcznie)
+
+Polinki — kolei gondolowej Politechniki Wrocławskiej nad Odrą (zgłoszenie
+#165) — nie ma w żadnym rozkładzie, a PWr publikuje tylko godziny otwarcia
+(pwr.edu.pl/polinka). Moduł trzyma je ręcznie, z datą sprawdzenia
+(`UPDATED`): pn–pt 7:00–18:00, przerwa 13:30–14:00, weekendy i święta
+nieczynna (święta ruchome liczone z daty Wielkanocy). Rozkładu w ścisłym
+sensie też nie ma — dwie kabiny jeżdżą wahadłowo — więc przejazdy są
+ostrożne: odjazd co 5 min w obie strony, jazda 3 min. `gtfs.load_day` dokleja
+stacje i przejazdy tuż po kolei, przed budowaniem miejsc, więc przejścia
+piesze do przystanków obok powstają same. Etykieta „Kolejka Polinka" daje
+plakietkę „Polinka" w rodzaju `cable` (granat PWr). Godziny otwarcia i data
+sprawdzenia danych są pod ikonką „i" (`polinka.INFO`) przy Polince na osi
+trasy i w tablicy odjazdów — bez notki na wierzchu. Stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w
+podpowiedziach nazw. Do trybu rozkładów Polinka nie trafia.
 
 ### 2. Backend — Flask
 
@@ -164,6 +171,29 @@ o zapamiętaną przez przeglądarkę (#236). Przeglądarki dają pozycję **tylk
 `localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
 chowa.
 
+◎ ustawia też godzinę i datę na „teraz" (jak przycisk „teraz"): pozycja z GPS-a
+bez godziny „teraz" liczyłaby trasę z miejsca, w którym ktoś stoi, na chwilę,
+w której już go tam nie ma (#267). Da się to wyłączyć w ⚙ („Wygląd aplikacji",
+„◎ ustawia godzinę na teraz", domyślnie włączone, pamiętane w `dev-prefs`) —
+wtedy ◎ ustawia sam start, a godzina i data zostają, jakie były; dotyczy to też
+odświeżania poniżej, które wtedy odświeża tylko pozycję. Drugie kliknięcie ◎, gdy start już jest
+moją pozycją, nie pyta o start, tylko przełącza **odświeżanie co 30 s**:
+włączone zapala ◎ (styl aktywnych przycisków, podpis „Wyłącz odświeżanie"),
+wyłączone wraca do zwykłego wyglądu („Odświeżaj co 30 s"). Włączenie odświeża
+od razu. Na telefonie, gdy po wyszukaniu karta jest zwinięta do jednej linijki,
+a start pochodzi z ◎, drugi ◎ stoi w tej linijce, na prawo od godziny (karta
+nie rośnie): ten sam stan świecenia i ten sam podpis, bez rozwijania formularza.
+Przy innym starcie zwinięta karta wygląda jak dawniej, a na komputerze tego
+przycisku nie ma. Stan nie jest pamiętany — po odświeżeniu strony nie ma pozycji, więc
+nie ma czego odświeżać. Co 30 s aplikacja czyta pozycję od nowa, ustawia „teraz" (przy włączonej opcji z ⚙)
+i przelicza tą samą drogą co suwaki w ⚙ — bez kadrowania, bez dźwięku, bez
+zwijania formularza i bez kółka wyszukiwania. Wybrana propozycja zostaje, jeśli
+nowy wynik wciąż ją zawiera (te same godziny i linie). Odświeżanie gaśnie, gdy
+start przestaje być „moją pozycją" (klik w mapę, wpisanie, zamiana, ✕), a
+zegar pauzuje, gdy karta jest ukryta (wznawia się po powrocie); tick pomija
+się też w trakcie ręcznego szukania i edycji pola godziny. Brak sygnału w tle
+jest cichy: zostaje poprzedni wynik.
+
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
 - na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;
@@ -233,9 +263,8 @@ a nie z ostatniego kliknięcia — w rozkłady wchodzi się także spoza paska
 (klik w słupek), a nie wyjście z nich; wychodzi się dopiero „Trasami",
 które przywracają wachlarz propozycji bez ponownego szukania. A że „Trasy"
 przy okazji zabierają z mapy na listę, karta rozkładu dostaje w tym jednym
-widoku (telefon + mapa) przycisk **„✕ Zamknij rozkład"** — to samo wyjście
-z trybu, tyle że zostawia na ekranie mapę, na którą się właśnie patrzyło.
-Stoi w miejscu podpowiedzi, która w widoku mapy i tak jest schowana. Klasy `view-map`/`view-list` na
+widoku (telefon + mapa) mały niebieski przycisk **✕ „Zamknij rozkład"** na prawym końcu wiersza z czasem — to samo wyjście
+z trybu, tyle że zostawia na ekranie mapę, na którą się właśnie patrzyło. Klasy `view-map`/`view-list` na
 `<body>` na szerokim ekranie nie robią nic — tam widać oba widoki naraz.
 Kadr mapy liczy się zawsze pod widok mapy, także gdy patrzymy na listę: to
 ten kadr zobaczymy po przełączeniu zakładki.
@@ -259,7 +288,10 @@ narysowanej mapie zawężają się do niej — pojazdy do linii z tej mapy, auta
 i rowery do tych, do których mapa dowozi (punkty 15 i 16 kontraktu). Rower to
 wybór PASAŻERA („mam konto w WRM" albo nie), a nie strojenie algorytmu,
 dlatego stoi tu, a nie pod ⚙: włączony 🚲 albo ⚡ dokłada też do listy
-propozycje z rowerem (`bikes=1` w `/api/flow`). Stan przycisków przeżywa
+propozycje z rowerem (`bikes=1` w `/api/flow`), a wsiada się w nich tylko
+tam, gdzie stoi rower włączonego rodzaju. Lista mówi o tym samym, co mapa
+(zgłoszenie #163), więc zgaszony 🚗 zdejmuje z niej propozycje kończące się
+Traficarem (`traficar=0`). Stan przycisków przeżywa
 odświeżenie strony (`localStorage`), a ich zmiana przelicza gotowy wynik bez
 ruszania kadru — relacja się nie zmieniła.
 
@@ -290,7 +322,7 @@ i przeładowuje stronę.
 Obok wyszukiwarki połączeń panel ma drugi tryb, przełączany przyciskiem
 **◷ Rozkłady** tuż obok ← (chowania panelu); na telefonie jest to trzecia
 zakładka na dole, „Rozkład", obok „Mapy" i „Tras". W widoku mapy karta
-rozkładu ma przycisk **„✕ Zamknij rozkład"** — wychodzi z trybu bez
+rozkładu ma mały niebieski przycisk **✕ „Zamknij rozkład"** przy czasie — wychodzi z trybu bez
 schodzenia z mapy. Oba tryby zajmują to samo miejsce — wejście w rozkłady
 chowa okienko wyszukiwania, wyjście przywraca je razem z tym, co było
 narysowane na mapie, bez ponownego szukania.
@@ -300,10 +332,7 @@ przystanek. Rodzaj widać na liście podpowiedzi — linie mają plakietkę
 w kolorze pojazdu, przystanki znaczek słupka — czyli tam, gdzie faktycznie
 jest potrzebny, a nie w przełączniku ustawianym przed wpisaniem czegokolwiek.
 
-Pod polem stoi **dzień i godzina**. Godzina jest jedna na oba rozkłady
-i nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko
-przesuwa to, od czego zaczyna się tablica, i to, który kurs linii jest
-„ten najbliższy".
+Pod polem stoi **czas** — ta sama ramka co w wyszukiwarce, na całą szerokość karty: „Odjazd", godzina i „teraz", a obok nich — bez rozwijania — data. Godzina nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko przesuwa to, od czego zaczyna się tablica przystanku, i kurs rysowany na mapie. Rozkład linii godziny nie używa, więc po wczytaniu linii w ramce zostaje sama **data**, bez godziny i „teraz"; pusty wpis albo przystanek przywracają pełne pole.
 
 **Linia** odpowiada na „którędy jedzie": wybór wariantu i lista jego
 przystanków, z przebiegiem na mapie. Kierunki podstawowe stoją obok siebie,
@@ -646,7 +675,8 @@ Ile kropek stoi na mapie, rozstrzyga reguła z punktu 16 kontraktu: najpierw
 stacje (o której jest się przy rowerze, o której w celu, ile przesiadek —
 zbiór Pareto i kolejne poziomy, osobny suwak „Ile stacji z rowerem"), potem
 przejazdy na każdej stacji osobno. Rodzaj roweru (zwykły, elektryczny) to
-odsiew miejsc, nie zmiana wyceny.
+odsiew miejsc, nie zmiana wyceny — ten sam na mapie i przy stacji wsiadania
+w propozycjach (`bikes.ma_rodzaj`).
 
 ### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
 
