@@ -2641,7 +2641,6 @@ function tapRank(layer) {
     }
     if (layer.tapRank) return layer.tapRank;
     if (layer instanceof L.CircleMarker) return TAP_RANK.stop;
-    if (layer instanceof L.Polyline) return TAP_RANK.line;
     return TAP_RANK.shared;
 }
 
@@ -2669,10 +2668,6 @@ function tapCandidates(at) {
             const reach = rank === TAP_RANK.background ? size : Math.max(size, TAP_TARGET_PX / 2);
             const d = at.distanceTo(map.latLngToContainerPoint(layer.getLatLng()));
             if (d <= reach) found.push({rank, away: Math.max(0, d - size), layer: target});
-        } else if (layer instanceof L.Polyline) {
-            if (layer instanceof L.Polygon) return;
-            const d = polylineDistancePx(at, layer.getLatLngs()) - layer.options.weight / 2;
-            if (d <= FLOW_TAP_SLACK_PX) found.push({rank, away: Math.max(0, d), layer: target});
         } else if (layer.roster) {
             // Grupka to kilka celów naraz - każdy numer wskazuje swoją linię.
             for (const slot of layer.getElement().querySelectorAll('.line-chip-slot')) {
