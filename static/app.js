@@ -2889,7 +2889,11 @@ function timetableLinesHtml(data, mapSec) {
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
-            `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
+            `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
+            // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
+            (d.trip ? `<span class="tt-live" data-trip="${escAttr(d.trip)}"`
+                      + ` data-stop="${escAttr(d.trip_stop)}">${boardLiveHtml(d.trip, d.trip_stop)}</span>` : '')
+            + '</span>' +
         routeButtonHtml(d, 'trasa') + '</li>',
     ).join('');
     return head + `<ul class="tt-rows tt-lines${flows ? ' has-flow' : ''}">${html}</ul>`;
@@ -3042,6 +3046,63 @@ function keepWithinHorizon(data, deadline) {
 function emitTimetable(dot, html) {
     if (dot.getTooltip()) dot.setTooltipContent(html);
     if (timetableTarget === dot) showSidePanel(html);
+    fillBoardDelays();
+}
+
+// ------------------------------- opóźnienia pociągów w tablicy odjazdów (#71) --
+//
+// Przy odjeździe pociągu mały zegar: zielony, gdy PLK wie, że jedzie o czasie,
+// czerwony, gdy jest spóźniony (minuty w dymku). Tablica rysuje się od razu
+// z rozkładu, a zegary dochodzą, gdy przyjdzie odpowiedź - jak na osi trasy
+// (loadTrainDelays). Serwer pilnuje limitów zapytań do PLK (pkp_live.py), więc
+// tu tylko pamiętamy odpowiedzi przez minutę, żeby każde najechanie na kropkę
+// nie pytało od nowa.
+const BOARD_DELAYS_TTL_MS = 60000;
+const boardDelays = new Map();     // kurs -> {at, stops: {stacja: {arr, dep}} | null}
+const boardPending = new Set();
+const CLOCK_ICON = '<svg viewBox="0 0 12 12" aria-hidden="true">'
+    + '<circle cx="6" cy="6" r="4.75"/><path d="M6 3.4V6l1.8 1.2"/></svg>';
+
+function boardLiveHtml(trip, stop) {
+    const known = boardDelays.get(trip);
+    const at = known && known.stops && known.stops[stop];
+    const late = at ? at.dep : null;
+    if (typeof late !== 'number') return '';
+    return late > 0
+        ? `<span class="tt-clock late" title="Spóźniony ${late} min">${CLOCK_ICON}</span>`
+        : `<span class="tt-clock ontime" title="O czasie">${CLOCK_ICON}</span>`;
+}
+
+function fillBoardDelays() {
+    const slots = [...document.querySelectorAll('.tt-live[data-trip]')];
+    const now = Date.now();
+    const missing = new Set();
+    for (const slot of slots) {
+        const known = boardDelays.get(slot.dataset.trip);
+        if (known && now - known.at < BOARD_DELAYS_TTL_MS) {
+            slot.innerHTML = boardLiveHtml(slot.dataset.trip, slot.dataset.stop);
+        } else if (!boardPending.has(slot.dataset.trip)) {
+            missing.add(slot.dataset.trip);
+        }
+    }
+    const trips = [...missing].slice(0, 10);
+    if (!trips.length) return;
+    trips.forEach(trip => boardPending.add(trip));
+    fetch('/api/train_delays?' + new URLSearchParams({trips: trips.join(','), date: $('date').value}))
+        .then(r => r.json())
+        .then(data => {
+            const at = Date.now();
+            for (const trip of trips) boardDelays.set(trip, {at, stops: (data.delays || {})[trip] || null});
+        })
+        .catch(() => {})
+        .finally(() => {
+            trips.forEach(trip => boardPending.delete(trip));
+            for (const slot of document.querySelectorAll('.tt-live[data-trip]')) {
+                if (trips.includes(slot.dataset.trip)) {
+                    slot.innerHTML = boardLiveHtml(slot.dataset.trip, slot.dataset.stop);
+                }
+            }
+        });
 }
 
 // Kropka, której tablicę pokazujemy teraz - patrz emitTimetable.
@@ -3906,10 +3967,20 @@ function toggleVia(button) {
 
 function detailHtml(journey) {
     const rows = [];
-    const stopRow = (time, name, cls, platform) =>
-        `<li class="tl-stop ${cls}"><span class="tl-time">${esc(time)}</span>` +
+    // `late` - opóźnienie pociągu przy tej stacji w minutach (#71, patrz
+    // loadTrainDelays): planowa godzina przekreślona, pod nią rzeczywista.
+    // Zero albo mniej to „o czasie" - ale tylko gdy PLK ten czas zna; bez
+    // danych (`late` null/undefined) nie mówimy nic, bo nie wiemy.
+    const stopRow = (time, name, cls, platform, late) =>
+        `<li class="tl-stop ${cls}">` +
+        (late > 0
+            ? `<span class="tl-time late"><s>${esc(time)}</s>${esc(addMinutes(time, late))}</span>`
+            : `<span class="tl-time">${esc(time)}</span>`) +
         `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
-        `${platformHtml(platform)}</span></li>`;
+        `${platformHtml(platform)}` +
+        (late > 0 ? `<span class="delay">+${late} min</span>`
+            : typeof late === 'number' ? '<span class="ontime">o czasie</span>' : '') +
+        `</span></li>`;
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -4020,8 +4091,11 @@ function detailHtml(journey) {
         // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
         const via = leg.via || [];
         const viaOn = via.length > 0 && viaOpen(leg);
+        const late = trainDelays[leg.trip] || {};
+        const depLate = (late[leg.from] || {}).dep;
+        const arrLate = (late[leg.to] || {}).arr;
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
-                          leg.from_platform));
+                          leg.from_platform, depLate));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
@@ -4059,13 +4133,19 @@ function detailHtml(journey) {
         if (!next || next.kind === 'walk') {
             rows.push(stopRow(leg.to_time, leg.to,
                               `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`,
-                              leg.to_platform));
+                              leg.to_platform, arrLate));
         } else if (leg.onboard) {
             // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
             // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
             // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
             // całej osi - to jest ten moment, w którym trzeba wstać.
-            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform));
+            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform, arrLate));
+        }
+        const missed = missedTransfer(journey.legs, i, arrLate);
+        if (missed) {
+            rows.push(`<li class="tl-warn">⚠️ Przez opóźnienie ${esc(leg.num)} `
+                + `(+${arrLate} min) możesz nie zdążyć na ${esc(missed.num)} `
+                + `o ${esc(missed.from_time)}</li>`);
         }
     });
 
@@ -4705,6 +4785,57 @@ function showWaitNotice(data) {
     if (html) resultsBox.insertAdjacentHTML('afterbegin', html);
 }
 
+// ---------------------------------------- opóźnienia pociągów na żywo (#71) --
+//
+// Trasy liczą się z rozkładu i tak zostaje: opóźnienia przychodzą PO
+// narysowaniu wyniku, osobnym zapytaniem, i tylko dopisują się na osi trasy
+// (patrz detailHtml). Serwer pyta PLK pociąg po pociągu i pilnuje własnych
+// limitów (pkp_live.py) - gdy ich zabraknie, opóźnień po prostu nie ma.
+let trainDelays = {};      // kurs -> {stacja: {arr, dep}} (minuty)
+let delaysToken = 0;       // odsiewa odpowiedź na listę, której już nie ma
+
+function loadTrainDelays() {
+    trainDelays = {};
+    const mine = ++delaysToken;
+    const trips = [...new Set(journeys.flatMap(j => j.legs)
+        .filter(leg => leg.kind === 'ride' && leg.mode === 'train'
+            && String(leg.trip || '').startsWith('PKP:'))
+        .map(leg => leg.trip))];
+    if (!trips.length) return;
+    fetch('/api/train_delays?' + new URLSearchParams({
+        trips: trips.join(','), date: $('date').value,
+    }))
+        .then(r => r.json())
+        .then(data => {
+            if (mine !== delaysToken || !data.delays) return;
+            trainDelays = data.delays;
+            if (Object.keys(trainDelays).length) renderJourneys();
+        })
+        .catch(() => {});      // bez opóźnień trasa jest ta sama, co z rozkładu
+}
+
+/** "15:15" + 7 -> "15:22" (przez północ też). */
+function addMinutes(hhmm, minutes) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const total = ((h * 60 + m + minutes) % 1440 + 1440) % 1440;
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Następny przejazd, na który przez opóźnienie `late` (min) etapu `i` się
+    nie zdąży - albo null. Ta sama minuta zapasu co w planerze
+    (TRANSFER_SEC) plus przejścia pieszo po drodze. */
+function missedTransfer(legs, i, late) {
+    if (!(late > 0)) return null;
+    let walkSec = 0;
+    for (const next of legs.slice(i + 1)) {
+        if (next.kind === 'walk') { walkSec += (next.minutes || 0) * 60; continue; }
+        if (next.kind !== 'ride') return null;
+        const ready = legs[i].arr_sec + late * 60 + walkSec + 60;
+        return ready > next.dep_sec ? next : null;
+    }
+    return null;
+}
+
 /** Mapa z listą - z kompletnej odpowiedzi albo z jej etapu "map", który ma
     już wszystko poza autami i rowerami. Wydzielona z loadPlan, żeby dało się
     ją uruchomić bez sieci (patrz tests/js/harness.js).
@@ -4759,6 +4890,7 @@ function renderList(data) {
     } else {
         renderJourneys();
     }
+    loadTrainDelays();
     showWaitNotice(data);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
