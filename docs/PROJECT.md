@@ -928,9 +928,14 @@ Jak mapa wybiera, co narysować (wartości podróży, tolerancja, reguła numer�
   to gwarancja.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
 - Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
-  bo CSA widzi jedną tablicę połączeń (patrz historia commitów `pkp.py`) - ale bez
-  opóźnień na żywo (API ma je w `/operations`, ale wyszukiwarka czyta tylko
-  rozkład planowy z `/schedules`). Z tego samego rozkładu idą peron i tor
+  bo CSA widzi jedną tablicę połączeń (patrz historia commitów `pkp.py`) - ale liczone
+  z rozkładu planowego (`/schedules`). Opóźnienia na żywo (zgłoszenie #71,
+  `pkp_live.py`) tylko dopisują się na osi trasy, PO narysowaniu wyniku:
+  pytamy `/operations/train/…` pociąg po pociągu (cały kraj to 6 stron po
+  ~4,8 MB, za dużo na limit API 500/h), z buforem 60 s na pociąg i własnymi
+  sufitami 400 zapytań/h i 4000/dobę; po ich wyczerpaniu opóźnień nie ma.
+  Trasy przez opóźnienie się nie przeliczają — oś ostrzega tylko, gdy
+  przepada przesiadka. Z rozkładu planowego idą też peron i tor
   (zgłoszenie #271): na osi trasy przy stacji wsiadania i wysiadania i w
   tablicy odjazdów stacji — planowe, bez dzisiejszych zmian; „BUS" (według
   PLK komunikacja zastępcza) idzie dosłownie. Wymaga skonfigurowanego `PKP_API_KEY` —

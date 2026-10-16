@@ -1786,6 +1786,50 @@ checks.obecny_pojazd_na_karcie = (() => {
 })();
 
 
+/* Zegar przy pociągu w tablicy odjazdów (#71): zielony o czasie, czerwony
+   spóźniony, a bez danych - nic. */
+checks.zegar_opoznienia_w_tablicy = (() => {
+    const at = Date.now();
+    app.boardDelays.set('PKP:1', {at, stops: {'Wrocław Główny': {arr: null, dep: 0}}});
+    app.boardDelays.set('PKP:2', {at, stops: {'Wrocław Główny': {arr: null, dep: 9}}});
+    app.boardDelays.set('PKP:3', {at, stops: null});
+    const [naCzas, spozniony, brak, nieznany] = ['PKP:1', 'PKP:2', 'PKP:3', 'PKP:4']
+        .map(trip => app.boardLiveHtml(trip, 'Wrocław Główny'));
+    app.boardDelays.clear();
+    return {
+        ok: naCzas.includes('tt-clock ontime') && spozniony.includes('tt-clock late')
+            && spozniony.includes('Spóźniony 9 min') && brak === '' && nieznany === '',
+        naCzas, spozniony,
+    };
+})();
+
+
+/* Opóźnienie pociągu (zgłoszenie #71): przy stacji wysiadania planowa
+   godzina przekreślona, rzeczywista i „+7 min", a gdy przez nie nie zdąży
+   się na następny przejazd - ostrzeżenie w osi. */
+checks.opoznienie_pociagu_w_osi = (() => {
+    const pociag = {...VIA_LEGS[0], mode: 'train', num: 'KD 1', trip: 'PKP:1:1',
+                    to: 'Bardzka', to_time: '16:06', arr_sec: 57960, via: []};
+    const legs = [pociag, VIA_LEGS[1], {...VIA_LEGS[2], dep_sec: 58500}];
+    app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 7, dep: 7}}};
+    const html = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 1, dep: 1}}};
+    const lekko = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 0, dep: 0}}};
+    const naCzas = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    app.trainDelays = {};
+    const bezDanych = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    return {
+        ok: html.includes('<s>16:06</s>16:13') && html.includes('+7 min')
+            && html.includes('tl-warn') && html.includes('nie zdążyć na 5')
+            && !lekko.includes('tl-warn')
+            && naCzas.includes('o czasie') && !naCzas.includes('class="delay"')
+            && !bezDanych.includes('o czasie'),
+        html: html.slice(0, 300),
+    };
+})();
+
+
 checks.przystanki_po_drodze_na_mapie = (() => {
     const kropki = dotsOf(app.legLayers(VIA_LEGS, {preview: false}));
     const podglad = dotsOf(app.legLayers(VIA_LEGS, {preview: true}));

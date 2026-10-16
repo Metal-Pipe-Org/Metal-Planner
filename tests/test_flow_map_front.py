@@ -640,6 +640,18 @@ def test_platform_and_track_stand_by_boarding_and_alighting(front):
     _check(front, "peron_przy_wsiadaniu_i_wysiadaniu")
 
 
+def test_train_delay_clock_in_departures_board(front):
+    """#71: w tablicy odjazdów zegar przy pociągu - zielony o czasie,
+    czerwony spóźniony, bez danych żaden."""
+    _check(front, "zegar_opoznienia_w_tablicy")
+
+
+def test_train_delay_shows_in_the_timeline(front):
+    """#71: opóźnienie pociągu na osi trasy i ostrzeżenie, gdy przez nie
+    przepada przesiadka."""
+    _check(front, "opoznienie_pociagu_w_osi")
+
+
 def test_current_vehicle_badge_stands_out_on_the_card(front):
     """Zgłoszenie #224: przy starcie z pokładu plakietka pojazdu, w którym się
     siedzi, ma na karcie propozycji obwódkę - i tylko ona."""
