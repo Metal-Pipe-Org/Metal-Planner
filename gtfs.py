@@ -525,7 +525,7 @@ class DayData:
         "stops_by_alias_key", "alias_display_name",
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
-        "pkp_stations", "deps_by_stop", "_reach", "walk_mps", "_paced",
+        "pkp_stations", "pkp_platforms", "deps_by_stop", "_reach", "walk_mps", "_paced",
         "_searches",
     )
 
@@ -579,6 +579,10 @@ class DayData:
         # takie rozwinięcie nigdy przypadkiem nie złapało przystanku MPK
         # o zbieżnym przedrostku nazwy.
         self.pkp_stations = []
+        # (trip_id "PKP:...", stop_id) -> (peron, tor) z rozkładu planowego
+        # PLK (zgłoszenie #271, patrz pkp.augment_day). Tylko tam, gdzie
+        # rozkład choć jedno z nich podaje.
+        self.pkp_platforms = {}
 
 
 def _connect():

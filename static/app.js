@@ -2875,7 +2875,7 @@ function timetableLinesHtml(data, mapSec) {
             ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
               + `${infoHtml(d.info)}</span>`
             : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
-        `<span class="tip-dir">${esc(d.headsign)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
@@ -3692,6 +3692,25 @@ function openJourney(index) {
     renderVehicles();
 }
 
+/** Peron i tor pociągu (zgłoszenie #271): „peron 2, tor 4" - tak, jak piszą
+    tablice PKP. Z rozkładu planowego PLK (patrz pkp.augment_day), więc bez
+    dzisiejszych zmian. Pusty napis, gdy rozkład nie podaje żadnego.
+
+    Stoi tam, gdzie się go szuka: na osi trasy przy stacji wsiadania
+    i wysiadania (nie przy mijanych - tam nic się nie robi) i w tablicy
+    odjazdów stacji. „BUS" (komunikacja zastępcza według PLK) idzie
+    dosłownie, jako „peron BUS". */
+function platformText(p) {
+    if (!p) return '';
+    return [p.platform && `peron ${p.platform}`, p.track && `tor ${p.track}`]
+        .filter(Boolean).join(', ');
+}
+
+function platformHtml(p) {
+    const text = platformText(p);
+    return text ? `<span class="platform">${esc(text)}</span>` : '';
+}
+
 /** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
     przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
 function infoHtml(text) {
@@ -3876,9 +3895,10 @@ function toggleVia(button) {
 
 function detailHtml(journey) {
     const rows = [];
-    const stopRow = (time, name, cls) =>
+    const stopRow = (time, name, cls, platform) =>
         `<li class="tl-stop ${cls}"><span class="tl-time">${esc(time)}</span>` +
-        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}</span></li>`;
+        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
+        `${platformHtml(platform)}</span></li>`;
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -3989,7 +4009,8 @@ function detailHtml(journey) {
         // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
         const via = leg.via || [];
         const viaOn = via.length > 0 && viaOpen(leg);
-        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
+        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
+                          leg.from_platform));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
@@ -4026,13 +4047,14 @@ function detailHtml(journey) {
         const next = journey.legs[i + 1];
         if (!next || next.kind === 'walk') {
             rows.push(stopRow(leg.to_time, leg.to,
-                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`));
+                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`,
+                              leg.to_platform));
         } else if (leg.onboard) {
             // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
             // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
             // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
             // całej osi - to jest ten moment, w którym trzeba wstać.
-            rows.push(stopRow(leg.to_time, leg.to, 'exit'));
+            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform));
         }
     });
 

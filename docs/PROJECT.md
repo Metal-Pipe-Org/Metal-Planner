@@ -907,7 +907,10 @@ Jak mapa wybiera, co narysować (wartości podróży, tolerancja, reguła numer�
 - Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
   bo CSA widzi jedną tablicę połączeń (patrz historia commitów `pkp.py`) - ale bez
   opóźnień na żywo (API ma je w `/operations`, ale wyszukiwarka czyta tylko
-  rozkład planowy z `/schedules`). Wymaga skonfigurowanego `PKP_API_KEY` —
+  rozkład planowy z `/schedules`). Z tego samego rozkładu idą peron i tor
+  (zgłoszenie #271): na osi trasy przy stacji wsiadania i wysiadania i w
+  tablicy odjazdów stacji — planowe, bez dzisiejszych zmian; „BUS" (według
+  PLK komunikacja zastępcza) idzie dosłownie. Wymaga skonfigurowanego `PKP_API_KEY` —
   bez klucza ta część wyników po prostu nie dochodzi. Stacje mają markery na
   mapie (geokodowanie DWOMA źródłami - wyłącznie mapa PLK i portal
   pasażera, oba oficjalne/PKP-owe, na wyraźną prośbę użytkownika - patrz
