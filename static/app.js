@@ -5975,6 +5975,11 @@ $('dev-reset').addEventListener('click', () => {
 
 function suspendPlanner() {
     plannerSuspended = true;
+    // Wskazywanie „mojego miejsca" czeka na klik w mapę, a w rozkładach klik
+    // znaczy co innego (patrz map.on('click'), timetableTook) - pasek
+    // „Kliknij na mapie" wisiałby nad rozkładem, nic nie robiąc. Wejście
+    // w rozkłady to porzucenie okna miejsca, więc anuluje się po cichu.
+    stopPlacePick();
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
