@@ -288,7 +288,10 @@ narysowanej mapie zawężają się do niej — pojazdy do linii z tej mapy, auta
 i rowery do tych, do których mapa dowozi (punkty 15 i 16 kontraktu). Rower to
 wybór PASAŻERA („mam konto w WRM" albo nie), a nie strojenie algorytmu,
 dlatego stoi tu, a nie pod ⚙: włączony 🚲 albo ⚡ dokłada też do listy
-propozycje z rowerem (`bikes=1` w `/api/flow`). Stan przycisków przeżywa
+propozycje z rowerem (`bikes=1` w `/api/flow`), a wsiada się w nich tylko
+tam, gdzie stoi rower włączonego rodzaju. Lista mówi o tym samym, co mapa
+(zgłoszenie #163), więc zgaszony 🚗 zdejmuje z niej propozycje kończące się
+Traficarem (`traficar=0`). Stan przycisków przeżywa
 odświeżenie strony (`localStorage`), a ich zmiana przelicza gotowy wynik bez
 ruszania kadru — relacja się nie zmieniła.
 
@@ -672,7 +675,8 @@ Ile kropek stoi na mapie, rozstrzyga reguła z punktu 16 kontraktu: najpierw
 stacje (o której jest się przy rowerze, o której w celu, ile przesiadek —
 zbiór Pareto i kolejne poziomy, osobny suwak „Ile stacji z rowerem"), potem
 przejazdy na każdej stacji osobno. Rodzaj roweru (zwykły, elektryczny) to
-odsiew miejsc, nie zmiana wyceny.
+odsiew miejsc, nie zmiana wyceny — ten sam na mapie i przy stacji wsiadania
+w propozycjach (`bikes.ma_rodzaj`).
 
 ### Rower miejski w trasie (`bikes.py` + sekcja ROWER MIEJSKI w `planner.py`)
 
@@ -804,31 +808,39 @@ siedzi, jest jednym z pojazdów podróży (wysiadka i przesiadka to dwa), a
 godzina wyjścia nie jest wartością — pasażer już jedzie, więc każda podróż
 wychodzi o tej samej sekundzie i rozstrzyga sam przyjazd.
 
-Zostają więc dwie rzeczy do zrobienia:
+Zostają więc trzy rzeczy do zrobienia:
 
 1. **Rozpoznanie kursu** (`find_ride`) — z trójki linia + kierunek + przystanek
    ten kurs, który z tego słupka rusza najbliżej godziny pytania — w przód
    ALBO WSTECZ (zgłoszenie #231): kurs, który według rozkładu minął przystanek
    5 min temu, gdy następny jest za pół godziny, to najpewniej spóźniony
-   pojazd, w którym pasażer siedzi. Spóźnienia nie znamy (danych na żywo
-   ten wybór nie używa), więc mapa liczy się od takiego kursu według jego
-   rozkładu, jakby jechał o czasie. Idzie
+   pojazd, w którym pasażer siedzi. Idzie
    indeksem odjazdów dnia (`gtfs.departures_between`), więc kosztuje
    przeszukanie binarne; kurs KOŃCZĄCY bieg na wskazanym przystanku odjazdu nie
    ma wcale, więc „jadę na pętlę, co dalej" znajduje się osobną, wolniejszą
    drogą — po przyjeździe, w oknie połączeń. Nierozpoznany kurs to komunikat
    („linia X nie przejeżdża już dziś przez Y"), a nie pusta lista: pomyłka
-   w którymś z trzech pól ma wyglądać jak pomyłka. Gdy rozkładowa godzina
-   kursu przy wskazanym przystanku odjeżdża od godziny pytania o więcej niż
-   3 min (`OFF_SCHEDULE_SLACK_SEC`, ten sam zapas w obie strony — do tylu
-   kurs uchodzi za punktualny), nad polem celu staje ostrzeżenie: dla kursu
-   przyszłego (`not_yet`) „134 według rozkładu będzie na przystanku …
-   o 16:28. Godziny na mapie liczą się od 16:28, a nie od teraz.", dla
-   przeszłego (`late`) „134 według rozkładu była na przystanku … o 15:55.
-   Godziny na mapie liczą się od 15:55, a nie od teraz."
-   Oba ostrzeżenia to nie pytania: mały „×" w rogu tylko je chowa, znikają też samo przy zmianie linii, kierunku albo przystanku,
+   w którymś z trzech pól ma wyglądać jak pomyłka.
+2. **Tryb względny** (zgłoszenie #231). Pasażer jest w pojeździe TERAZ, więc
+   gdy rozkładowa godzina kursu przy wskazanym przystanku odjeżdża od godziny
+   pytania o więcej niż 3 min (`OFF_SCHEDULE_SLACK_SEC`, ten sam zapas w obie
+   strony; suwak w ⚙, sekcja „Jestem w pojeździe"), pojazd jedzie od teraz:
+   cały jego dalszy kurs przesuwa się o różnicę (`late_sec`), z tymi samymi
+   odstępami między przystankami, a wszystkie inne pojazdy zostają przy
+   rozkładzie. Plan dostaje na to kopię dnia z tym jednym kursem przesuniętym
+   (`gtfs.with_shifted_trip`). Rozkładowy egzemplarz kursu z niej znika: to
+   ten sam pojazd, a przesiadka w niego „o czasie" dalej na trasie byłaby
+   przesiadką w pojazd, którego tam wtedy nie będzie. Indeksów dnia kopia nie
+   buduje od nowa (`gtfs._ShiftedTripIndex`), więc kosztuje pojedyncze
+   milisekundy. Nad polem celu staje wtedy żółty komunikat z dwóch krótkich
+   linijek z ikonami — fakt i co z nim zrobić: przy spóźnieniu „🕒 134
+   prawdopodobnie spóźniony ~12 min (rozkład 15:48) / ⏩ Godziny pojazdu przesunięte", przy
+   kursie, który według rozkładu dopiero przyjedzie, „⚠️ 134 na Karwińska
+   dopiero o 16:28 (za 28 min) / 🔎 Sprawdź linię i przystanek". Pełne zdanie
+   jest w dymku i dla czytnika ekranu. To nie pytanie: mały „×" w rogu tylko
+   je chowa, znika też samo przy zmianie linii, kierunku albo przystanku,
    a wybór pojazdu poprawia się przez „zmień".
-2. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
+3. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
    samym słupku, więc przypadki są dokładnie dwa: pierwszy etap jedzie NASZYM
    kursem (siedzimy dalej, wysiadka `stops` przystanków dalej) albo czymkolwiek
    innym (wysiadka na najbliższym przystanku, `stops` = 0). „Nasz kurs"

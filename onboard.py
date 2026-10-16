@@ -27,6 +27,13 @@ Rozpoznanie idzie po trzech rzeczach, bo dokładnie tyle widzi pasażer
 w pojeździe: numer linii, kierunek z czoła pojazdu i nazwa następnego
 przystanku (zapowiedź albo tablica). Z tego wychodzi jeden konkretny kurs
 rozkładu: ten, który z tego słupka rusza najbliżej godziny pytania.
+
+Pasażer jest w pojeździe TERAZ - więc gdy rozpoznany kurs jest według
+rozkładu przy przystanku wyraźnie wcześniej albo później, pojazd jedzie po
+prostu nie o swojej porze, a liczenie od rozkładu przesunęłoby całą mapę
+o tę różnicę (zgłoszenie #231). Wtedy kurs jedzie dalej od teraz, z tymi
+samymi odstępami między przystankami, a wszystko inne zostaje przy
+rozkładzie (tryb względny, patrz gtfs.with_shifted_trip).
 """
 
 from bisect import bisect_left, bisect_right
@@ -50,7 +57,10 @@ LONGEST_HOP_SEC = 40 * 60
 # Rozjazd z rozkładem, o którym nie ma co mówić - w obie strony tak samo
 # (zgłoszenie #231). Do 3 minut kurs uchodzi w komunikacji miejskiej za
 # punktualny, a pojazd, w którym się siedzi, i tak jest przy następnym
-# przystanku za chwilę albo przed chwilą według rozkładu.
+# przystanku za chwilę albo przed chwilą według rozkładu - liczymy więc
+# z rozkładu. Większy rozjazd włącza tryb względny (patrz find_ride). Próg
+# da się zmienić w ⚙ (sekcja „Jestem w pojeździe"); to jest jego domyślna
+# wartość.
 OFF_SCHEDULE_SLACK_SEC = 3 * 60
 
 
@@ -123,7 +133,8 @@ def _by_arrival(day, num, mode, stop_id, lo, hi, headsign, latest=False):
     return best
 
 
-def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
+def find_ride(day, num, mode, stop_id, from_sec, headsign=None,
+              slack_sec=OFF_SCHEDULE_SLACK_SEC):
     """Którym kursem jedzie pasażer - {"error"} albo opis startu z pokładu.
 
     `stop_id` to NASTĘPNY przystanek pojazdu (słupek, nie miejsce): stamtąd
@@ -139,9 +150,16 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
     Kursem jest ten NAJBLIŻSZY godziny pytania - w przód albo wstecz
     (zgłoszenie #231). Kurs, który według rozkładu minął przystanek pięć minut
     temu, a następny jest za pół godziny, to najpewniej spóźniony pojazd,
-    w którym pasażer siedzi. Spóźnienia nie znamy (dane na żywo są poza
-    rozkładem), więc mapa liczy się od tego kursu według rozkładu, a front
-    mówi, że godziny na niej są przesunięte.
+    w którym pasażer siedzi.
+
+    Gdy jego rozkładowa godzina przy przystanku odjeżdża od godziny pytania
+    o więcej niż `slack_sec`, wchodzi TRYB WZGLĘDNY: pasażer jest w nim teraz,
+    więc kurs jedzie od teraz, przesunięty o `late_sec` (ujemne - jedzie przed
+    rozkładem). Plan dostaje wtedy dzień z tym jednym kursem przesuniętym
+    (gtfs.with_shifted_trip), a front mówi o tym żółtym komunikatem - bo
+    rozjazd tej wielkości to także częsta pomyłka w linii, kierunku albo
+    przystanku. Spóźnienia na żywo ten wybór nie zna; zgaduje je z tego, że
+    pasażer w tym pojeździe siedzi.
     """
     num = " ".join((num or "").split())
     if not num:
@@ -165,6 +183,7 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
 
     trip, at_sec, dep_sec = found
     trip_num, trip_mode = _line_of(day, trip)
+    late_sec = from_sec - at_sec if abs(from_sec - at_sec) > slack_sec else 0
     return {
         "trip": trip,
         "stop": stop_id,
@@ -173,15 +192,16 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
         "mode": trip_mode,
         "line": day.trip_info[trip][0],
         "headsign": day.trip_info[trip][1],
-        # Sekunda na osi doby rozkładowej - stąd rusza całe wyszukiwanie.
-        "sec": dep_sec,
-        "at": _hhmm(at_sec),
-        # Mapa liczy się od rozkładowej godziny kursu przy przystanku, nie od
-        # teraz. Gdy ta godzina odjeżdża od teraz o więcej niż zapas - w przód
-        # (`not_yet`) albo wstecz (`late`) - front ma to powiedzieć, bo godziny
-        # na mapie są przez to przesunięte (zgłoszenie #231).
-        "not_yet": not past and at_sec - from_sec > OFF_SCHEDULE_SLACK_SEC,
-        "late": past and from_sec - at_sec > OFF_SCHEDULE_SLACK_SEC,
+        # Sekunda na osi doby - stąd rusza całe wyszukiwanie. W trybie
+        # względnym już przesunięta: pojazd jest przy przystanku teraz.
+        "sec": dep_sec + late_sec,
+        "at": _hhmm(at_sec + late_sec),
+        # Tryb względny (zgłoszenie #231): o ile pojazd jedzie po rozkładzie
+        # (ujemne - przed nim), 0 gdy liczymy wprost z rozkładu. Rozkładowa
+        # godzina przy przystanku idzie obok, bo to ją pasażer może sprawdzić
+        # na tablicy i po niej poznać pomyłkę w linii albo przystanku.
+        "late_sec": late_sec,
+        "at_sched": _hhmm(at_sec),
     }
 
 

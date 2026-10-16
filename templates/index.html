@@ -284,11 +284,12 @@
         <button type="button" id="ob-summary" class="onboard-summary" hidden
                 aria-controls="onboard-fields" aria-expanded="true"></button>
 
-        {# Rozpoznany kurs nie może jeszcze być przy tym przystanku (#231).
-           Ostrzeżenie, nie pytanie: mapa i tak jest liczona, a wybór pojazdu
-           poprawia się przez „zmień”. Wygląda jak pytanie o przystanek
-           przy GPS, więc dzieli z nim styl; nie ma na co odpowiadać, więc
-           zostaje tylko mały „×” w rogu. #}
+        {# Tryb względny (#231): rozpoznany kurs jest według rozkładu przy
+           przystanku wyraźnie nie teraz, więc jedzie na mapie od teraz.
+           Komunikat, nie pytanie: mapa i tak jest liczona, a wybór pojazdu
+           poprawia się przez „zmień”. Kształt dzieli z pytaniem o przystanek
+           przy GPS, ale jest żółty - mówi o czymś, co nie zgadza się
+           z rozkładem. Nie ma na co odpowiadać, więc zostaje tylko „×”. #}
         <div class="locate-offer" id="ob-warn" role="status" hidden>
             <button type="button" class="icon-button" id="ob-warn-close"
                     aria-label="Zamknij">×</button>
@@ -939,6 +940,21 @@
                   data-tip="Lista proponuje przesiadkę jako pierwszą dopiero, gdy oszczędza co najmniej tyle minut względem jazdy tym samym pojazdem.">i</span>
         </label>
         <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
+    </div>
+
+    </details>
+
+    {# Tryb względny przy starcie z pokładu (#231, patrz onboard.find_ride). #}
+    <details class="dev-fold dev-only" id="fold-onboard">
+    <summary>Jestem w pojeździe <span class="dev-badge">DEV</span></summary>
+
+    <div class="field">
+        <label for="onboard-slack">
+            Tryb względny od <output id="onboard-slack-value">3</output> min
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Gdy kurs jest według rozkładu przy wybranym przystanku o więcej minut wcześniej albo później niż teraz, pojazd jedzie na mapie od teraz, a reszta zostaje przy rozkładzie. Do tylu minut liczymy wprost z rozkładu.">i</span>
+        </label>
+        <input type="range" id="onboard-slack" min="0" max="15" step="1" value="3">
     </div>
 
     </details>
