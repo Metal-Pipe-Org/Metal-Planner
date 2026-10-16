@@ -1034,8 +1034,10 @@ function refreshHere() {
         if (!endInput.value) return;
         const kept = selectedJourney === null ? null
             : journeySignature(journeys[selectedJourney]);
-        loadPlan(++requestToken, false).then(found => {
-            if (!found || kept === null) return;
+        // Wybór wraca zaraz po etapie z mapą i listą, nie po ostatnim etapie:
+        // rowery i auta potrafią dojść dużo później.
+        loadPlan('quiet', () => {
+            if (kept === null) return;
             const index = journeys.findIndex(j => journeySignature(j) === kept);
             if (index < 0) return;
             selectedJourney = index;
@@ -4731,8 +4733,9 @@ let planRun = null;
     rysuje się, gdy tylko przyjdzie. `kind` mówi, kto pyta: 'search' - nowe
     wyszukiwanie (kadruje, gra rurę, zwija formularz na telefonie), 'more' -
     „Pokaż więcej", 'quiet' - suwaki i przełączniki. Kończy się, gdy dojdzie
-    ostatni etap albo gdy zastąpi je następne zapytanie. */
-function loadPlan(kind) {
+    ostatni etap albo gdy zastąpi je następne zapytanie. `onMapped` woła się
+    po narysowaniu mapy z listą - tylko gdy to zapytanie wciąż jest aktualne. */
+function loadPlan(kind, onMapped) {
     const prev = planRun;
     if (prev) prev.abort.abort();
     const run = planRun = {
@@ -4746,6 +4749,7 @@ function loadPlan(kind) {
         search: kind === 'search' ? {found: false, mapped: false}
             : prev && prev.search && !prev.search.mapped ? prev.search : null,
         acc: {},
+        onMapped,
     };
     showBusy(run.busy);
     return Promise.all([fetch('/api/flow?' + queryParams(), {signal: run.abort.signal}),
@@ -4781,6 +4785,7 @@ function applyStage(run, data) {
         keepLive(run.acc, lastFlow);
         renderPlan(run.acc, !!search);
         if (search) search.mapped = true;
+        if (run.onMapped) run.onMapped();
     } else if (lastFlow === run.acc) {
         renderLive(run.acc);
     }
