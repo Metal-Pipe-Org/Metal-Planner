@@ -87,9 +87,9 @@ def _wlacz_odswiezanie(page):
 
 
 def _z_trasa_od_pozycji(page):
-    """Cel wpisany, potem ◎ - szukanie rusza samo, start to „moja pozycja"."""
+    """Cel wpisany przy pustym „Skąd" robi to samo co ◎ (#275) - szukanie
+    rusza samo, start to „moja pozycja"."""
     _wybierz(page, "#end", TRASA[1])
-    page.click("#locate")
     page.wait_for_selector("#locate-offer", state="visible")
     page.wait_for_selector("body:not(.searching) .journey", state="attached",
                            timeout=20000)
@@ -244,8 +244,9 @@ def test_zwinieta_karta_ma_wlasne_kolko_tylko_przy_mojej_pozycji(przegladarka, a
     context, page, bledy = _otworz(przegladarka, adres)
     zapytania = []
     page.on("request", lambda r: zapytania.append(r.url) if "/api/flow" in r.url else None)
-    _wybierz(page, "#end", TRASA[1])
+    # Start przed celem: cel przy pustym „Skąd" sam by użył ◎ (#275).
     _wybierz(page, "#start", TRASA[0])
+    _wybierz(page, "#end", TRASA[1])
     page.wait_for_selector(".search-summary", state="visible", timeout=20000)
     assert not page.is_visible("#locate-peek")
 
@@ -296,5 +297,37 @@ def test_zmiana_startu_na_przystanek_gasi_odswiezanie(przegladarka, adres):
     page.clock.run_for(90000)
     page.wait_for_timeout(500)
     assert zapytania == []
+    context.close()
+    assert not bledy
+
+
+OPOZNIONY_GPS_JS = """() => {
+    navigator.geolocation.getCurrentPosition = (ok, fail) => {
+        window.__gps = {ok, fail};
+    };
+}"""
+
+
+@pytest.mark.parametrize("wynik", ["pozycja", "blad"])
+def test_spozniony_gps_nie_nadpisuje_startu_wpisanego_w_miedzyczasie(
+        przegladarka, adres, wynik):
+    context, page, bledy = _otworz(przegladarka, adres)
+    page.evaluate(OPOZNIONY_GPS_JS)
+    page.evaluate(USTAW_JS, ["time", "03:33"])
+    _wybierz(page, "#end", TRASA[1])
+    page.wait_for_function("window.__gps")
+    _wybierz(page, "#start", TRASA[0])
+    page.wait_for_selector("body:not(.searching) .journey", state="attached",
+                           timeout=20000)
+    if wynik == "pozycja":
+        page.evaluate("window.__gps.ok({coords: {latitude: 51.1, longitude: 17.03}})")
+    else:
+        page.evaluate("window.__gps.fail({code: 1})")
+    page.wait_for_timeout(500)
+    assert page.input_value("#start") == TRASA[0]
+    assert page.input_value("#time") == "03:33"
+    assert not page.is_visible("#locate-offer")
+    assert not page.is_visible("#locate-msg")
+    assert page.is_enabled("#locate")
     context.close()
     assert not bledy
