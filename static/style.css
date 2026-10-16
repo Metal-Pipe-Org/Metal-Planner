@@ -3023,3 +3023,20 @@ ul.tt-legend {
     cursor: pointer;
 }
 .rura-button:disabled { opacity: 0.7; cursor: default; }
+
+/* ------------------------------ dymki na mapie mieszczą się w oknie --- */
+
+/* Leaflet daje dymkowi nowrap i zero miejsca na zawijanie, więc długi opis
+   auta wychodził poza ekran telefonu. Szerokość "do treści", ale nie większa
+   niż okno bez marginesów; położenie koryguje hak na L.Tooltip w app.js.
+   Strzałka jedzie za kropką o --tip-shift, gdy dymek został przesunięty. */
+.leaflet-tooltip {
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    white-space: normal;
+}
+
+.leaflet-tooltip-top::before,
+.leaflet-tooltip-bottom::before {
+    margin-left: calc(-6px - var(--tip-shift, 0px));
+}

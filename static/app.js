@@ -22,6 +22,27 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 const $ = id => document.getElementById(id);
 
+// Każdy dymek na mapie (auto, rower, przystanek, pojazd) wychodził poza okno,
+// gdy kropka stała przy brzegu - Leaflet centruje go nad kropką i niczego nie
+// pilnuje. Jedno miejsce na wszystkie: po każdym ustawieniu dymka przesuwamy
+// go o tyle, by mieścił się w oknie, a strzałkę (CSS) zostawiamy pod kropką.
+const TOOLTIP_MARGIN = 8;
+const setTooltipPosition = L.Tooltip.prototype._setPosition;
+L.Tooltip.prototype._setPosition = function (pos) {
+    setTooltipPosition.call(this, pos);
+    const el = this._container;
+    el.style.translate = '';
+    el.style.removeProperty('--tip-shift');
+    const box = el.getBoundingClientRect();
+    const dx = Math.max(TOOLTIP_MARGIN - box.left,
+        Math.min(0, window.innerWidth - TOOLTIP_MARGIN - box.right));
+    const dy = Math.max(TOOLTIP_MARGIN - box.top,
+        Math.min(0, window.innerHeight - TOOLTIP_MARGIN - box.bottom));
+    if (!dx && !dy) return;
+    el.style.translate = `${dx}px ${dy}px`;
+    el.style.setProperty('--tip-shift', `${dx}px`);
+};
+
 // Stan paneli (schowany/rozwinięty) i ostatnie wyszukiwanie zapisujemy
 // w localStorage pod wspólnym kluczem - przeżywa odświeżenie strony i nowe
 // wizyty. Jeden mały odczyt/zapis JSON-a na zmianę, nie warto osobnych kluczy
