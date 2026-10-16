@@ -146,6 +146,7 @@ wspólnego korytarza leżą jedna na drugiej. Czytelność robią NUMERY:
   jedna linia — na CAŁEJ swojej narysowanej długości, nie tylko kawałek pod
   kursorem — a podpowiedź podaje jej numer wprost. Żeby wskazać inną,
   najeżdża się na jej numer w grupce.
+- **Na telefonie kursorem jest stuknięcie.** Stuknięcie w linię albo w numer w grupce wskazuje ją tak samo jak najechanie, a palec nie musi trafić w samą kreskę: liczy się pas kilkunastu pikseli wokół niej. Każda kropka i każdy znak na mapie ma cel wielkości palca (ok. 44 px), a gdy jedno stuknięcie sięga kilku rzeczy, wygrywa ważniejsza: start i cel, przesiadki, auta i rowery, przystanki, pojazdy na żywo, numery w grupkach, linie — przy równej randze ta bliżej palca. Kropka zawsze wygrywa z linią. Przygaszone słupki miasta pod narysowaną mapą są tłem: nie mają powiększonego celu i ustępują linii. Stuknięcie w pustą mapę, gdy jakaś linia jest wskazana, gasi ją jak zjechanie kursorem. Przytrzymanie palcem na mapie nie zaznacza napisów.
 
 ## 10. Mapa mówi, ile to trwa i o której się tam będzie
 

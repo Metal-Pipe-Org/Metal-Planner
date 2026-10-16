@@ -254,6 +254,8 @@ zerowy kontener i policzył bezsensowny kadr); po prostu jej nie widać. Po znal
 mapę, bo tam wybiera się nową relację. Zakładki zastępują ☰ (dwa mechanizmy
 chowania panelu naraz tylko by myliły).
 
+**Mapa pod palcem (#274).** Na dotyku stuknięcia nie rozstrzyga Leaflet (on daje klik temu, co leży dokładnie pod punktem i jest narysowane na wierzchu), tylko `tapMap` w app.js: zbiera wszystko w zasięgu palca — kropki z celem 44 px, znaki DOM (pojazdy, numery w grupkach) powiększone do 44 px, linie z marginesem `FLOW_TAP_SLACK_PX` — i wybiera według `TAP_RANK` (start i cel, przesiadki, auta/rowery/Traficar, przystanki, pojazdy na żywo, numery, linie; przygaszone słupki miasta są tłem za liniami, bez powiększenia), a przy równej randze bliższe. Zwycięzca dostaje to samo co od Leafleta — najechanie i klik (`map._fireDOMEvent`) — więc robi to, co robił. Rangę niesie warstwa (`tapRank`, przy słupkach miasta liczona ze stylu, `tapVia` przy nieinteraktywnej kropce celu). Czy wskazuje palec, rozstrzyga ostatnie `pointerdown`, a nie szerokość ekranu; udawane zdarzenia myszy po stuknięciu nie dochodzą wtedy do Leafleta wcale. Mysz idzie dalej starą drogą. `#map` ma wyłączone zaznaczanie tekstu i menu przytrzymania (`-webkit-touch-callout`), żeby przytrzymanie nie wyciągało „Kopiuj / Przetłumacz".
+
 Trzecia zakładka, „Rozkład", to ta sama lista w **drugim trybie panelu**
 (rozkłady jazdy — patrz niżej) — na telefonie jedyne wejście w ten tryb, bo
 pływające ◷ jest tam schowane razem z ☰. Zakładek jest więc trzy, a stanu
