@@ -360,6 +360,7 @@ function updatePointMarker(slot, value) {
         pointMarkers[slot] = L.circleMarker(
             [value.lat, value.lon], POINT_STYLE[slot],
         ).addTo(map);
+        pointMarkers[slot].tapRank = TAP_RANK.endpoint;
     }
 }
 
@@ -438,9 +439,10 @@ function renderVehicles() {
     const only = vehiclesFilter();
     for (const v of lastVehicles) {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
-        L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
+        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
             .bindTooltip(vehicleTooltipHtml(v))
             .addTo(vehiclesLayer);
+        marker.tapRank = TAP_RANK.vehicle;
     }
 }
 
@@ -533,12 +535,14 @@ function cityBikeMarkers(stations, free) {
         .filter(s => s.renting)
         .map(s => ({...s, loose: false}))
         .concat(free.map(b => ({...b, loose: true, bikes: 1})));
-    return places.map(place => L.circleMarker(
-        [place.lat, place.lon], bikeStyle(place, true),
-    ).bindTooltip(
-        `<b>${esc(place.name || 'Rower luzem')}</b><br>${bikeCountText(place)}`,
-        {direction: 'top', offset: [0, -4], opacity: 1},
-    ));
+    return places.map(place => {
+        const dot = L.circleMarker([place.lat, place.lon], bikeStyle(place, true)).bindTooltip(
+            `<b>${esc(place.name || 'Rower luzem')}</b><br>${bikeCountText(place)}`,
+            {direction: 'top', offset: [0, -4], opacity: 1},
+        );
+        dot.tapRank = TAP_RANK.shared;
+        return dot;
+    });
 }
 
 function loadCityCars() {
@@ -755,10 +759,12 @@ function hideCarZone() {
 /** Kropka auta z dymkiem i strefą pod kursorem - wspólne dla warstwy miasta
     i mapy przepływów. */
 function carMarker(car, tooltipHtml) {
-    return L.circleMarker([car.lat, car.lon], carStyle(car))
+    const dot = L.circleMarker([car.lat, car.lon], carStyle(car))
         .bindTooltip(tooltipHtml, {direction: 'top', offset: [0, -4], opacity: 1})
         .on('mouseover', () => showCarZone(car))
         .on('mouseout', hideCarZone);
+    dot.tapRank = TAP_RANK.shared;
+    return dot;
 }
 
 /** Jeden przycisk rowerów zamiast dwóch (opcja w „Wyglądzie aplikacji”): ⚡ znika, a 🚲
@@ -798,6 +804,7 @@ const stopsReady = fetch('/api/stops')
             stopKind.set(s.name, s.kind);
             cityStops.push({name: s.place || s.name, lat: s.lat, lon: s.lon});
             const m = L.circleMarker([s.lat, s.lon], styleFor(s.name));
+            m.cityStop = s.name;   // ranga stuknięcia zależy od stylu (patrz tapRank)
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
             // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
@@ -861,7 +868,6 @@ function timetableTook(stopName) {
 
 map.on('click', e => {
     if (document.body.classList.contains('mode-timetable')) return;
-    if (touchInput && tapFlow(e)) return;
     pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
 });
 
@@ -2001,20 +2007,19 @@ function clusterMarker(at, roster, weight, times) {
     return marker;
 }
 
-/** Numer w grupce wskazuje się najechaniem: kursor nad numerem podświetla
-    DOKŁADNIE tę linię. Bez tego grupka mówiłaby, co tędy jedzie, ale nie
-    dałaby tego wskazać. Klik robi to samo co najechanie, bo na telefonie
-    najechania nie ma - jest tylko stuknięcie (#274). Klik jest przy tym
-    wygaszany, żeby nie dobił do map.on('click') i nie ustawił punktu trasy. */
+/** Numer w grupce wskazuje się WYŁĄCZNIE najechaniem: kursor nad numerem
+    podświetla DOKŁADNIE tę linię. Bez tego grupka mówiłaby, co tędy jedzie,
+    ale nie dałaby tego wskazać. Klik nie robi tu nic - jest tylko wygaszany,
+    żeby nie dobił do map.on('click') i nie ustawił punktu trasy. Palcem
+    numer wskazuje stuknięcie (tapMap). */
 function bindCluster(marker) {
     const el = marker.getElement();
     if (!el) return;
-    const pick = ev => {
+    L.DomEvent.on(el, 'mouseover', ev => {
         const slot = ev.target.closest && ev.target.closest('.line-chip-slot');
         if (slot) pickFromCluster(marker, Number(slot.dataset.i));
-    };
-    L.DomEvent.on(el, 'mouseover', pick);
-    L.DomEvent.on(el, 'click', ev => { L.DomEvent.stop(ev); pick(ev); });
+    });
+    L.DomEvent.on(el, 'click', ev => L.DomEvent.stop(ev));
 }
 
 let flowDimmed = false;
@@ -2330,10 +2335,6 @@ function setFlowPick(options, at, index, containerPoint) {
 }
 
 function handleFlowHover(e) {
-    // Po stuknięciu przeglądarka dosyła udawany ruch myszy - w miejscu palca,
-    // ale z wąskim marginesem kursora. Linię pod palcem wskazuje stuknięcie
-    // (tapFlow), a ten ruch gasiłby ją albo wskazywał inną.
-    if (touchInput) return;
     // Nad grupką numerów rządzi grupka (patrz bindCluster): kursor jest wtedy
     // kilka pikseli obok samej linii, więc szukanie po geometrii zgasiłoby
     // dopiero co wskazany numer.
@@ -2577,32 +2578,156 @@ function placeStopNames() {
 // otwiera się z listy obok.
 
 map.on('mousemove', handleFlowHover);
-map.on('mouseout', () => { if (!touchInput) clearFlowHover(); });
+map.on('mouseout', clearFlowHover);
 
-// Palcem nie da się najechać, więc na telefonie najechanie na linię robi
-// stuknięcie (#274): wskazuje linię pod palcem tak, jak kursor - z tym samym
-// podświetleniem i dymkiem. Stuknięcie obok linii, gdy jakaś jest wskazana,
-// odpowiada zjechaniu z niej kursorem i tylko ją gasi - dopiero następne
-// stuknięcie w pustą mapę działa jak zwykły klik (pickEndpoint).
-// Czy to palec, mówi ostatnie pointerdown, a nie szerokość ekranu: laptop
-// z ekranem dotykowym ma i mysz, i palec.
+// --- stuknięcie palcem: kto je dostaje (#274) ------------------------------
+//
+// Leaflet daje klik temu, co leży DOKŁADNIE pod punktem i jest narysowane na
+// wierzchu. Pod kursorem to działa, pod palcem nie: palec trafia kilkanaście
+// pikseli obok, kropki mają po kilka pikseli, a co jest na wierzchu, zależy
+// od kolejności rysowania - linia potrafiła zabrać stuknięcie przesiadce,
+// która na niej leży. Na dotyku stuknięcie rozstrzyga więc tapMap: każda
+// kropka i każdy znak ma cel ok. 44 px (tyle, ile palec), a gdy jedno
+// stuknięcie sięga kilku rzeczy, wygrywa ważniejsza - kolejność niżej -
+// a przy równej randze ta bliżej palca. Zwycięzca dostaje dokładnie to, co
+// dostałby od Leafleta: najechanie i klik, więc robi to samo co dotąd.
+//
+// Udawane zdarzenia myszy, które przeglądarka dosyła po stuknięciu, nie
+// dochodzą do Leafleta wcale: inaczej trafiałyby dalej po staremu, obok
+// rozstrzygnięcia. Czy to palec, mówi ostatnie pointerdown, a nie szerokość
+// ekranu: laptop z ekranem dotykowym ma i mysz, i palec. Mysz nie przechodzi
+// tędy nigdy.
+const TAP_RANK = {
+    endpoint: 1,     // start i cel
+    transfer: 2,     // przesiadki (kropki z tablicą odjazdów)
+    shared: 3,       // auta, rowery, Traficar
+    stop: 4,         // przystanki
+    vehicle: 5,      // pojazdy na żywo
+    number: 6,       // numery w grupkach
+    line: 7,         // linie
+    // Słupki miasta przygaszone pod narysowaną mapą to tło (styleFor): nie
+    // dostają powiększonego celu ani pierwszeństwa przed linią, inaczej
+    // przy gęstej siatce przystanków w linię nie dałoby się stuknąć wcale.
+    background: 8,
+};
+const TAP_TARGET_PX = 44;
+
 let touchInput = false;
+let tapHovered = null;   // co dostało ostatnie "najechanie" palcem
 $('map').addEventListener('pointerdown', e => {
     touchInput = e.pointerType !== 'mouse';
 }, true);
 $('map').addEventListener('pointermove', e => {
     if (e.pointerType === 'mouse') touchInput = false;
 }, true);
+for (const type of ['mouseover', 'mouseout', 'mousemove', 'mousedown', 'mouseup', 'click']) {
+    $('map').addEventListener(type, e => {
+        if (!touchInput || e.target.closest('.leaflet-control-container')) return;
+        e.stopImmediatePropagation();
+        if (type !== 'click') return;
+        if (!map.dragging.moved()) tapMap(e);
+        // Klik zatrzymany na mapie nie dochodzi też do dokumentu, a tam
+        // wiszą okienka zamykane kliknięciem obok (dymek paska z czasem).
+        $('map').parentNode.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    }, true);
+}
 
-function tapFlow(e) {
-    const hits = flowHits.length ? flowHitsAt(e.containerPoint, FLOW_TAP_SLACK_PX) : [];
-    if (hits.length) {
-        setFlowPick(corridorOptions(hits), e.latlng, undefined, e.containerPoint);
-        return true;
+function tapRank(layer) {
+    if (layer.cityStop !== undefined) {
+        const style = styleFor(layer.cityStop);
+        if (style === DIM_STYLE) return TAP_RANK.background;
+        if (style === ENDPOINT_STYLE.start || style === ENDPOINT_STYLE.end) return TAP_RANK.endpoint;
+        return TAP_RANK.stop;
     }
-    if (!flowPick) return false;
-    clearFlowHover();
-    return true;
+    if (layer.tapRank) return layer.tapRank;
+    if (layer instanceof L.CircleMarker) return TAP_RANK.stop;
+    if (layer instanceof L.Polyline) return TAP_RANK.line;
+    return TAP_RANK.shared;
+}
+
+/** Odległość punktu od prostokąta, null - gdy poza celem palca wokół niego. */
+function tapBoxAway(at, rect, origin) {
+    const box = {left: rect.left - origin.left, right: rect.right - origin.left,
+                 top: rect.top - origin.top, bottom: rect.bottom - origin.top};
+    const dx = Math.max(box.left - at.x, 0, at.x - box.right);
+    const dy = Math.max(box.top - at.y, 0, at.y - box.bottom);
+    const growX = Math.max(0, (TAP_TARGET_PX - (box.right - box.left)) / 2);
+    const growY = Math.max(0, (TAP_TARGET_PX - (box.bottom - box.top)) / 2);
+    return dx <= growX && dy <= growY ? Math.hypot(dx, dy) : null;
+}
+
+/** Wszystko, czego sięga stuknięcie w `at`: {rank, away, ...co trafione}. */
+function tapCandidates(at) {
+    const origin = map.getContainer().getBoundingClientRect();
+    const found = [];
+    map.eachLayer(layer => {
+        if (!layer.tapVia && layer.options.interactive === false) return;
+        const rank = tapRank(layer);
+        const target = layer.tapVia || layer;
+        if (layer instanceof L.CircleMarker) {
+            const size = layer.getRadius() + (layer.options.stroke === false ? 0 : layer.options.weight / 2);
+            const reach = rank === TAP_RANK.background ? size : Math.max(size, TAP_TARGET_PX / 2);
+            const d = at.distanceTo(map.latLngToContainerPoint(layer.getLatLng()));
+            if (d <= reach) found.push({rank, away: Math.max(0, d - size), layer: target});
+        } else if (layer instanceof L.Polyline) {
+            if (layer instanceof L.Polygon) return;
+            const d = polylineDistancePx(at, layer.getLatLngs()) - layer.options.weight / 2;
+            if (d <= FLOW_TAP_SLACK_PX) found.push({rank, away: Math.max(0, d), layer: target});
+        } else if (layer.roster) {
+            // Grupka to kilka celów naraz - każdy numer wskazuje swoją linię.
+            for (const slot of layer.getElement().querySelectorAll('.line-chip-slot')) {
+                const away = tapBoxAway(at, slot.getBoundingClientRect(), origin);
+                if (away !== null) {
+                    found.push({rank: TAP_RANK.number, away, cluster: layer,
+                                index: Number(slot.dataset.i)});
+                }
+            }
+        } else if (layer instanceof L.Marker && layer.getElement()) {
+            const away = tapBoxAway(at, layer.getElement().getBoundingClientRect(), origin);
+            if (away !== null) found.push({rank, away, layer: target});
+        }
+    });
+    // Linie mapy przepływów są nieinteraktywne (patrz drawFlow) - ich
+    // trafienie liczy się tak samo jak pod kursorem, z szerszym marginesem.
+    const hits = flowHits.length ? flowHitsAt(at, FLOW_TAP_SLACK_PX) : [];
+    if (hits.length) {
+        found.push({rank: TAP_RANK.line,
+                    away: Math.max(0, hits[0].dist - hits[0].weight / 2), hits});
+    }
+    return found;
+}
+
+/** Stuknięcie robi to, co kursor: najechanie na zwycięzcę i klik w niego.
+    Zjechanie z poprzedniego zwycięzcy idzie przed wszystkim innym - to ono
+    zamyka jego dymek, jak zejście kursora. Stuknięcie w pustą mapę, gdy
+    wskazana jest linia, tylko ją gasi (jak zjechanie z niej kursorem) - nie
+    stawia przy okazji punktu trasy. */
+function tapMap(e) {
+    const at = map.mouseEventToContainerPoint(e);
+    const best = tapCandidates(at).sort((a, b) => a.rank - b.rank || a.away - b.away)[0];
+    const mouse = type => new MouseEvent(type, {clientX: e.clientX, clientY: e.clientY});
+    if (tapHovered && !(best && best.layer === tapHovered)) {
+        map._fireDOMEvent(mouse('mouseout'), 'mouseout', [tapHovered]);
+        tapHovered = null;
+    }
+    if (best && best.hits) {
+        setFlowPick(corridorOptions(best.hits), map.containerPointToLatLng(at), undefined, at);
+        return;
+    }
+    if (best && best.cluster) {
+        pickFromCluster(best.cluster, best.index);
+        return;
+    }
+    if (!best) {
+        if (flowPick) clearFlowHover();
+        else map._fireDOMEvent(mouse('click'), 'click');
+        return;
+    }
+    if (best.layer !== tapHovered) {
+        map._fireDOMEvent(mouse('mouseover'), 'mouseover', [best.layer]);
+        tapHovered = best.layer;
+    }
+    map._fireDOMEvent(mouse('click'), 'click', [best.layer]);
 }
 
 // Prawy przycisk myszy NIE ROBI TU NIC (usunięte 2026-08-15). Przechodził
@@ -3047,6 +3172,7 @@ function stopDot(point, where, sec, style) {
         ...(isStart ? ENDPOINT_STYLE.start : {}),
     });
     dot.isStart = isStart;
+    dot.tapRank = isStart ? TAP_RANK.endpoint : TAP_RANK.transfer;
     // Czym ta kropka jest - żeby dało się ją "najechać" bez kursora.
     dot.where = where;
     dot.sec = sec;
@@ -3155,7 +3281,13 @@ function endpointDot(name, style) {
     const poles = !isPoint(name) && markersByName.get(name);
     if (!poles) return null;
     const center = L.latLngBounds(poles.map(m => m.getLatLng())).getCenter();
-    return L.circleMarker(center, {...style, interactive: false});
+    const dot = L.circleMarker(center, {...style, interactive: false});
+    // Sama kropka kursora nie łapie - pod nią leżą słupki tego przystanku.
+    // Palec, który w nią trafi, dostaje to samo co słupek, ale z rangą celu:
+    // inaczej zabrałaby go linia albo przesiadka leżąca obok.
+    dot.tapVia = poles[0];
+    dot.tapRank = TAP_RANK.endpoint;
+    return dot;
 }
 
 /** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
@@ -3296,6 +3428,7 @@ function flowBikeMarkers(places, live) {
                                    bikeStyle(place, live))
             .bindTooltip(bikeTooltipHtml(place, live),
                          {direction: 'top', offset: [0, -4], opacity: 1});
+        dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
             if (!dotOpts.bikeRides) clearBikeRides();
@@ -3391,9 +3524,11 @@ function bikeRideLayers(place, labels) {
         layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
                                BIKE_RIDE_STYLE));
         if (!labels) continue;
-        layers.push(L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
+        const target = L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
             .bindTooltip(bikeRideTooltipHtml(ride),
-                         {direction: 'top', offset: [0, -4], opacity: 1}));
+                         {direction: 'top', offset: [0, -4], opacity: 1});
+        target.tapRank = TAP_RANK.shared;
+        layers.push(target);
         // Etykietka wisi na własnym, niewidzialnym uchwycie przezroczystym
         // dla kursora: leży dokładnie na kropce wyżej, a to ona ma łapać
         // najechanie.
