@@ -822,6 +822,14 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
    całą kolumnę po prawej i pod nim zostaje pusty pas. Dlatego w HTML stoi
    PRZED tekstem - float działa tylko na to, co idzie po nim. */
 #ob-warn { display: block; padding: 8px 12px; }
+
+/* Tryb względny (#231): pojazd nie jedzie według rozkładu. Żółty, a nie
+   niebieski jak pytanie o przystanek przy GPS - to nie propozycja, tylko
+   uwaga, że godziny tego pojazdu nie zgadzają się z tablicą. */
+#ob-warn {
+    background: #fff4d6;
+    border-left: 3px solid #f2b705;
+}
 #ob-warn[hidden] { display: none; }
 #ob-warn-text { white-space: pre-line; }
 

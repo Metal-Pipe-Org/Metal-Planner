@@ -1510,6 +1510,32 @@ checks.auta_dostawczaki_leca_do_serwera = (() => {
 })();
 
 
+/* Tryb względny przy starcie z pokładu (zgłoszenie #231): pojazd spóźniony
+   i pojazd, który według rozkładu dopiero przyjedzie, to dwa różne zdania -
+   pierwsze tłumaczy przesunięte godziny, drugie każe sprawdzić wybór.
+   Kurs o czasie (late_sec = 0) nie mówi nic. */
+checks.tryb_wzgledny_mowi_o_rozjezdzie = (() => {
+    const warn = document.getElementById('ob-warn');
+    const text = document.getElementById('ob-warn-text');
+    const kurs = {num: '134', stop_name: 'Karwińska', at: '16:00'};
+    app.warnOnboardRide({...kurs, late_sec: 720, at_sched: '15:48'});
+    const spozniony = text.innerHTML, widacSpozniony = !warn.hidden;
+    app.warnOnboardRide({...kurs, late_sec: -1680, at_sched: '16:28'});
+    const przed = text.innerHTML, widacPrzed = !warn.hidden;
+    app.warnOnboardRide({...kurs, late_sec: 0, at_sched: '16:00'});
+    const naCzas = !warn.hidden;
+    return {
+        ok: widacSpozniony && widacPrzed && !naCzas
+            && spozniony.includes('prawdopodobnie spóźniony ~12 min (rozkład <b>15:48</b>)')
+            && !spozniony.includes('Karwińska')
+            && spozniony.includes('przesunięte')
+            && przed.includes('dopiero o <b>16:28</b>') && przed.includes('za 28 min')
+            && przed.includes('Sprawdź linię'),
+        spozniony, przed, naCzas,
+    };
+})();
+
+
 /* Zgaszony 🚗 zdejmuje z listy propozycje z Traficarem (zgłoszenie #163) -
    składa je serwer, więc zgaszenie idzie w zapytaniu. Zapalony nie dokłada
    nic: odpowiedź jest taka jak dotąd. */
@@ -1523,6 +1549,14 @@ checks.auto_gaszone_leci_do_serwera = (() => {
         ok: !zapalone.includes('traficar=') && zgaszone.includes('traficar=0'),
         zapalone, zgaszone,
     };
+})();
+
+
+/* Próg trybu względnego (suwak w ⚙, #231) leci razem z wyborem pojazdu. */
+checks.prog_trybu_wzglednego_leci_do_serwera = (() => {
+    document.getElementById('onboard-slack').value = '5';
+    const zwykle = app.queryParams().toString();
+    return {ok: !zwykle.includes('onboard_slack_sec'), zwykle};
 })();
 
 
