@@ -1,10 +1,12 @@
 import hashlib
 import http.client
+import json
 import math
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
-from flask import abort, jsonify, render_template, request
+from flask import Response, abort, jsonify, render_template, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
@@ -20,8 +22,14 @@ import timetables
 import traficar
 import update_gtfs
 import vehicles
-from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow, plan_route,
-                     stop_timetable)
+import warmup
+from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
+                     plan_route, stop_timetable)
+
+# Ile najwyżej ostatni etap wyszukiwania czeka na świeże rowery i auta - wynik
+# jest już na ekranie, więc to czekanie nikogo nie blokuje, ale wątek serwera
+# trzyma. Ponad timeouty feedów (10 s, patrz traficar._fetch).
+LIVE_REFRESH_WAIT_SEC = 20
 
 # Tydzień rozkładu Siechnic to ~3 MB; sufit tylko po to, żeby przypadkowo
 # wybrany duży plik nie lądował cały w pamięci workera.
@@ -374,7 +382,40 @@ def init_routes(app):
         # doklejone wprost do tablicy połączeń, którą wczytuje gtfs.load_day
         # (wołane z wnętrza plan_flow), więc dla tego endpointu to zwykłe
         # wyszukiwanie MPK, tylko z szerszą siecią pod spodem.
-        return jsonify(plan_flow(
+        #
+        # Odpowiedź idzie ETAPAMI, po jednej linijce JSON na etap (NDJSON,
+        # zgłoszenie #229, patrz planner.plan_flow_stages): pasek z najszybszą
+        # trasą jest na ekranie po ułamku sekundy, mapa z listą po nim,
+        # a rowery i auta na końcu. Parametry czytamy od razu - generator biegnie już po wyjściu
+        # z tej funkcji, gdzie `request` nie ma.
+        #
+        # Na rowery i auta wyszukiwanie nie czeka (patrz warmup.py): liczy na
+        # tym, co jest w pamięci, a gdy to było stare, po wysłaniu wyniku
+        # czeka na świeże i - jeśli coś zmieniły - dosyła je ostatnim etapem.
+        # Strona przerywa odczyt, gdy pyta już o co innego; serwer kończy
+        # wtedy przy najbliższej granicy etapów, na nieudanym zapisie.
+        stages = _flow_stages()
+
+        def stream():
+            with warmup.no_waiting() as search:
+                def refreshed():
+                    if not search.stale:
+                        return False
+                    warmup.wait_for_refreshes(LIVE_REFRESH_WAIT_SEC)
+                    return True
+                for stage, delta in stages(live_refreshed=refreshed):
+                    yield json.dumps({"stage": stage, **delta},
+                                     ensure_ascii=False, separators=(",", ":")) + "\n"
+
+        # X-Accel-Buffering: nginx przed serwerem trzymałby inaczej wszystkie
+        # etapy do końca odpowiedzi i całe stopniowanie by znikło.
+        return Response(stream(), mimetype="application/x-ndjson",
+                        headers={"X-Accel-Buffering": "no",
+                                 "Cache-Control": "no-store"})
+
+    def _flow_stages():
+        return partial(
+            plan_flow_stages,
             request.args.get("start", ""),
             request.args.get("end", ""),
             _parse_when(request.args.get("time"),request.args.get("date")),
@@ -424,7 +465,7 @@ def init_routes(app):
             # Propozycje tras wyłączone pod zębatką - "0" i serwer ich nie
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",
-        ))
+        )
 
     @app.route("/api/dev/siechnice", methods=["GET", "POST"])
     def api_dev_siechnice():

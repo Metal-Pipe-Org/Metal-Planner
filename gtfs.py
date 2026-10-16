@@ -116,6 +116,14 @@ _REACH_CACHE_MAX = 16
 # relację jeszcze raz i liczyły wszystkie okna od zera (zgłoszenie #171).
 _SEARCHES_CACHE_MAX = 16
 
+# Kopie dnia z punktem z mapy (with_point), trzymane na dniu, z którego
+# powstały. Bez tego każde zapytanie o relację z punktu - „pokaż więcej",
+# suwak, przełącznik - dostawało świeżą kopię z pustą pamięcią wyszukiwań
+# i liczyło wszystkie okna od zera (zgłoszenie #229). Mało, bo każda kopia
+# niesie własną pamięć wyszukiwań: punkt startu i punkt celu to dwie kopie
+# jedna na drugiej.
+_POINTS_CACHE_MAX = 4
+
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
 # polskiej klawiatury pisze "Glowny", "Zabia") - ł/ż nie rozkłada się przez
 # unicodedata.normalize, więc jawna tabela zamiast NFKD.
@@ -532,7 +540,7 @@ class DayData:
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
         "pkp_stations", "pkp_platforms", "deps_by_stop", "_reach", "walk_mps", "_paced",
-        "_searches",
+        "_searches", "_points",
     )
 
     def __init__(self):
@@ -564,6 +572,7 @@ class DayData:
         self.deps_by_stop = None     # słupek -> odjazdy (leniwie, patrz stop_departures)
         self._reach = {}             # pamięć podręczna walk_reach (patrz wyżej)
         self._searches = {}          # pamięć wyszukiwań mapy (patrz wyżej)
+        self._points = {}            # kopie dnia z punktem z mapy (patrz wyżej)
         # Tempo marszu, którym policzono `siblings` - domyślne; inne tempa to
         # osobne kopie dnia (patrz with_pace), trzymane w `_paced`.
         self.walk_mps = WALK_SPEED_MPS
@@ -818,6 +827,12 @@ def with_point(day, lat, lon, side):
     go płytko i wymieniamy tylko te słowniki, które dotykamy. Tablica
     połączeń - jedyna duża rzecz - zostaje wspólna.
     """
+    key = (lat, lon, side)
+    stop_id = f"__punkt__{side}"
+    cached = day._points.get(key)
+    if cached is not None:
+        return cached, stop_id
+
     data = copy.copy(day)
     data.stop_coords = dict(day.stop_coords)
     data.stop_names = dict(day.stop_names)
@@ -825,8 +840,8 @@ def with_point(day, lat, lon, side):
     data._reach = {}          # inny zestaw słupków, więc cache dojść nie pasuje
     data._searches = {}       # jw. - inne przejścia, inne wyszukiwania
     data._paced = {}          # jw. - tempa liczy się z dnia bazowego (patrz with_pace)
+    data._points = {}
 
-    stop_id = f"__punkt__{side}"
     data.stop_coords[stop_id] = (lat, lon)
     data.stop_names[stop_id] = f"Wybrany punkt ({lat:.4f}, {lon:.4f})"
 
@@ -842,6 +857,10 @@ def with_point(day, lat, lon, side):
         # pytają właśnie o tę drugą stronę.
         data.siblings[other] = {**day.siblings.get(other, {}), stop_id: sec}
     data.siblings[stop_id] = edges
+
+    if len(day._points) >= _POINTS_CACHE_MAX:
+        day._points.clear()
+    day._points[key] = data
     return data, stop_id
 
 
@@ -871,6 +890,7 @@ def with_pace(day, pace):
     paced._reach = {}
     paced._searches = {}
     paced._paced = {}
+    paced._points = {}
     paced.siblings = {
         stop: {
             other: (walk_time_sec(_haversine_m(*coords[stop], *coords[other]), mps)
@@ -1446,6 +1466,7 @@ def with_shifted_trip(day, trip_id, from_stop, late_sec):
         data.trip_shape = {**day.trip_shape, new_id: day.trip_shape[trip_id]}
     data._searches = {}       # inne połączenia, inne wyszukiwania
     data._paced = {}          # tempa liczy się z dnia bazowego (patrz with_pace)
+    data._points = {}         # punkt z mapy na tym dniu nie może trafić do bazowego
     return data, new_id
 
 

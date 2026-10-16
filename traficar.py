@@ -41,6 +41,7 @@ import time
 import urllib.request
 
 import gtfs
+import warmup
 
 ZONE_ID = 3          # Wrocław (GET /api/v1/zones)
 API = "https://fioletowe.live/api/v1"
@@ -191,7 +192,22 @@ def car_list():
 
     Błąd sieci przy pustym cache'u -> TraficarDataError; przy niepustym -
     stare dane zamiast wyjątku (auto "zestarzeje się" zamiast zniknąć).
+    Z wyszukiwania (warmup.no_waiting) nie czeka: stare auta wracają od
+    razu, a świeże pobierają się w tle (zgłoszenie #229). Przed pierwszym
+    pobraniem - TraficarDataError, tak jak przy awarii.
     """
+    if time.monotonic() - _cars_cache["at"] >= CARS_TTL_SEC:
+        if warmup.waiting_allowed():
+            refresh_cars()
+        else:
+            warmup.refresh_in_background("traficar-cars", refresh_cars)
+            if not _cars_cache["generation"]:
+                raise TraficarDataError("Dane Traficar z fioletowe.live jeszcze się pobierają")
+    return _cars_cache["cars"]
+
+
+def refresh_cars():
+    """Pobiera auta, gdy w pamięci są starsze niż CARS_TTL_SEC."""
     if time.monotonic() - _cars_cache["at"] >= CARS_TTL_SEC:
         try:
             data = _fetch(f"{API}/cars?zoneId={ZONE_ID}")
@@ -220,7 +236,6 @@ def car_list():
                 raise TraficarDataError(
                     "Nie udało się pobrać danych Traficar z fioletowe.live"
                 ) from e
-    return _cars_cache["cars"]
 
 
 def zone():
@@ -238,7 +253,18 @@ def zone():
 
     Wziąć auto można spod każdego miejsca, w którym stoi - strefa mówi tylko,
     gdzie da się je ZOSTAWIĆ. Stąd pytanie o nią pada o cel, nie o auto.
+    Z wyszukiwania nie czeka, jak car_list.
     """
+    if time.monotonic() - _zone_cache["at"] >= ZONE_TTL_SEC:
+        if warmup.waiting_allowed():
+            refresh_zone()
+        else:
+            warmup.refresh_in_background("traficar-zone", refresh_zone)
+    return _zone_cache["zone"]
+
+
+def refresh_zone():
+    """Pobiera strefę, gdy w pamięci jest starsza niż ZONE_TTL_SEC."""
     if time.monotonic() - _zone_cache["at"] >= ZONE_TTL_SEC:
         try:
             data = _fetch(f"{API}/zones/{ZONE_ID}/shapes")
@@ -252,7 +278,6 @@ def zone():
             _zone_cache["at"] = time.monotonic()
         except (OSError, ValueError, KeyError, TypeError):
             pass
-    return _zone_cache["zone"]
 
 
 def _in_ring(lat, lon, ring):

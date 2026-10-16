@@ -659,6 +659,13 @@ def test_stops_along_the_way_stand_on_the_map(front):
     _check(front, "przystanki_po_drodze_na_mapie")
 
 
+def test_search_stages_show_the_bar_first_and_keep_cars(front):
+    """#229: pierwszy etap wyszukiwania to sam pasek „Najszybciej…" - bez mapy
+    i bez aut poprzedniej relacji. Gęstsza mapa tej samej relacji przychodzi
+    bez aut, a te, które są na ekranie, zostają do etapu z nowymi."""
+    _check(front, "etapy_pasek_najpierw_auta_bez_przerwy")
+
+
 # ------------------------------------------- przystanki linii (#252, #253) -
 
 def test_far_away_the_map_has_no_line_stops_until_a_line_is_pointed(front):

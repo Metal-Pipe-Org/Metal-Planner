@@ -96,6 +96,10 @@ const phoneLayout = (() => {
 
         const collapse = on => document.body.classList.toggle('search-collapsed', on);
 
+        const busy = document.createElement('span');
+        busy.className = 'spinner search-summary-busy';
+        busy.setAttribute('aria-hidden', 'true');
+
         const part = (cls, text) => {
             const span = document.createElement('span');
             span.className = cls;
@@ -103,7 +107,9 @@ const phoneLayout = (() => {
             return span;
         };
 
-        document.addEventListener('planner:search', () => {
+        // Zwija się przy pierwszym wyniku, nie przy samym kliknięciu
+        // „Szukaj": przy błędzie formularz zostaje do poprawki.
+        document.addEventListener('planner:found', () => {
             const onboard = document.body.classList.contains('start-onboard');
             const from = onboard
                 ? 'linia ' + document.getElementById('ob-line').value.trim()
@@ -113,6 +119,9 @@ const phoneLayout = (() => {
                 part('search-summary-arrow', '→'),
                 part('search-summary-to', document.getElementById('end').value),
                 part('search-summary-time', document.getElementById('time').value),
+                // Kółko na końcu linijki, za godziną: kolejne etapy wyniku
+                // jeszcze się liczą (patrz setSearching w app.js).
+                busy,
             );
             // Klawiatura telefonu zostałaby nad mapą, przypięta do pola,
             // którego już nie widać.

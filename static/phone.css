@@ -228,6 +228,18 @@ body.search-collapsed .search-summary {
     font-variant-numeric: tabular-nums;
 }
 
+/* Kółko w zwiniętej linijce: pierwszy wynik już jest, a kolejne etapy
+   (mapa, auta, rowery) jeszcze dochodzą. Na prawym końcu, tam gdzie
+   w rozwiniętym formularzu kręci się „Szukaj" - to to samo kółko, a godzina
+   i nazwy zostają na swoich miejscach. */
+.search-summary .search-summary-busy {
+    display: none;
+    width: 14px;
+    height: 14px;
+    color: var(--ink-faint);
+}
+body.searching .search-summary .search-summary-busy { display: inline-block; }
+
 /* ------------------------------------------------------------ rozkłady --- */
 
 /* W trybie rozkładów widok mapy pokazuje samą kartę rozkładu - tak jak

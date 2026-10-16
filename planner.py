@@ -939,7 +939,7 @@ def _round_path(coords):
 # ta sama liczba minut dawała raz pustą mapę, raz nieczytelny gąszcz.
 # Domyślna wartość jest poniżej mediany dawnych map (3,5 przy oknie 125%,
 # 5-15 min) - wybór użytkownika, pomiar w historii commitów, 2026-09-13.
-DEFAULT_MAP_DENSITY = 2.5    # km różnych korytarzy na km boku kadru (km/√km²)
+DEFAULT_MAP_DENSITY = 2      # km różnych korytarzy na km boku kadru (km/√km²)
 MIN_MAP_DENSITY = 0.5
 MAX_MAP_DENSITY = 15.0       # sufit suwaka pod zębatką - pilnowany tutaj
 
@@ -1924,15 +1924,47 @@ def _summarize_journey(legs, rides, arrival, dep_sec, start_sec=None):
     }
 
 
-def plan_flow(start_query, end_query, when=None,
-              start_point=None, end_point=None, density=None, more=None,
-              car_count=None, journey_limit=None, transfer_gain_sec=None,
-              use_bikes=False, bike_count=None, car_vans=False,
-              bike_electric=True, bike_regular=True,
-              in_vehicle=None, walk_pace=None, bike_kmh=None,
-              bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
-              with_journeys=True, use_cars=True):
+def plan_flow(*args, **kwargs):
+    """Cała odpowiedź naraz - wszystkie etapy plan_flow_stages sklejone
+    w jeden słownik, tak jak wyglądała, zanim wyniki zaczęły przychodzić
+    etapami (zgłoszenie #229)."""
+    result = {}
+    for _, delta in plan_flow_stages(*args, **kwargs):
+        result.update(delta)
+    return result
+
+
+def plan_flow_stages(start_query, end_query, when=None,
+                     start_point=None, end_point=None, density=None, more=None,
+                     car_count=None, journey_limit=None, transfer_gain_sec=None,
+                     use_bikes=False, bike_count=None, car_vans=False,
+                     bike_electric=True, bike_regular=True,
+                     in_vehicle=None, walk_pace=None, bike_kmh=None,
+                     bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
+                     with_journeys=True, use_cars=True,
+                     live_refreshed=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
+
+    Odpowiedź powstaje ETAPAMI, w kolejności, w jakiej da się je policzyć
+    (zgłoszenie #229) - generator oddaje pary (nazwa etapu, pola). Każdy etap
+    dopisuje swoje pola do poprzednich, a późniejszy nadpisuje te same pola
+    nowszą wersją; po ostatnim słownik jest dokładnie tym, co oddaje
+    plan_flow:
+
+      - "fastest" - tylko to, czego potrzebuje pasek nad mapą: kiedy i którą
+        trasą najszybciej. Skan, który ją wyznacza, i tak idzie pierwszy, bo
+        daje skalę mapie. Mapy ani listy z niego nie ma - pokazują się
+        dopiero z mapą przepływów;
+      - "map" - mapa i lista propozycji z niej przeczytana. Aut i rowerów
+        przy mapie w tym etapie nie ma: zależą od tego, co mapa rysuje, więc
+        liczą się po niej. Strona zostawia do tego czasu te, które już
+        pokazuje (patrz app.js keepLive);
+      - "extras" - auta i rowery przy mapie oraz propozycje z rowerem
+        i autem, na danych na żywo, które akurat są w pamięci;
+      - "fresh" - to samo jeszcze raz, gdy `live_refreshed()` powie, że te
+        dane były stare i właśnie się odświeżyły. Tylko gdy coś zmieniło.
+
+    Błąd jest jedynym etapem ("error").
 
     Na mapie są podróże, które są w czymś najlepsze - o której w celu,
     o której trzeba wyjść i iloma pojazdami (mapa z wartości podróży,
@@ -2020,7 +2052,8 @@ def plan_flow(start_query, end_query, when=None,
     try:
         day = gtfs.with_pace(gtfs.load_day(when.date()), walk_pace)
     except FileNotFoundError as e:
-        return {"error": str(e)}
+        yield "error", {"error": str(e)}
+        return
 
     asked_sec = when.hour * 3600 + when.minute * 60 + when.second
 
@@ -2035,7 +2068,8 @@ def plan_flow(start_query, end_query, when=None,
                                  onboard.OFF_SCHEDULE_SLACK_SEC if slack is None
                                  else max(0, slack))
         if "error" in ride:
-            return ride
+            yield "error", ride
+            return
         # Tryb względny (zgłoszenie #231): pojazd jedzie nie o swojej porze,
         # więc w dniu tego zapytania jedzie dalej od teraz, a cała reszta
         # zostaje przy rozkładzie. Kurs zmienia przy tym identyfikator - to
@@ -2047,7 +2081,8 @@ def plan_flow(start_query, end_query, when=None,
     ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point,
                               ride)
     if "error" in ends:
-        return ends
+        yield "error", ends
+        return
     day = ends["day"]          # z punktem z mapy dołożonym jako słupek
     start_name, source_stops = ends["start"], ends["source_stops"]
     end_name, target_stops = ends["end"], ends["target_stops"]
@@ -2098,7 +2133,8 @@ def plan_flow(start_query, end_query, when=None,
             day, source_stops, target_stops, dep_sec)
 
     if best_stop is None:
-        return _no_connection(start_name, end_name, asked_sec, when)
+        yield "error", _no_connection(start_name, end_name, asked_sec, when)
+        return
 
     # Godzina, którą odpowiedź RAPORTUJE - z pytania. Mapa przesuwa niżej
     # `dep_sec`, od którego się RYSUJE, ale "za ile tam będziesz" i punkt
@@ -2145,6 +2181,20 @@ def plan_flow(start_query, end_query, when=None,
         # kadr relacji, a z nim gęstość, do której dobiera się próg.
         best_legs = _reconstruct(day, best_journey, best_stop, geo_db)
         fastest = _fastest_summary(best_legs, best_arr, dep_sec)
+
+        yield "fastest", {
+            "best_arrival": _fmt_time(best_arr),
+            "best_sec": best_arr - report_dep_sec,
+            # Godzina wyszukania - dymek paska mówi, od kiedy liczy się "za ile".
+            "departure": _fmt_time(report_dep_sec),
+            "fastest": fastest,
+            # Kiedy ta trasa RUSZA - czekanie ma być widoczne, nie schowane
+            # (punkt 13).
+            "starts": _fmt_time(best_dep),
+            # Sama jazda, od odjazdu pierwszego pojazdu do celu - bez czekania,
+            # które siedzi w `best_sec`. Pasek dopisuje ją tylko na życzenie.
+            "ride_sec": best_arr - best_dep,
+        }
 
         # Kadr relacji - z niego gęstość mapy (punkt 2).
         frame_km2 = _frame_km2(day, best_legs, [*source_stops, *target_stops])
@@ -2198,13 +2248,13 @@ def plan_flow(start_query, end_query, when=None,
             seg_list, nodes = _finalize_segments(
                 day, kept, ranges, geo_db, earliest, profile[2], deadline,
                 source_stops, why_of, late=(best_arr, late_arrival))
-            journeys = []
+            map_journeys = []
             if with_journeys:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
                                                 target_set, dep_sec, start_reach)
-                journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
-                                               limit=journey_limit,
-                                               gain_sec=gain_sec, ride=ride)
+                map_journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
+                                                   limit=journey_limit,
+                                                   gain_sec=gain_sec, ride=ride)
         else:
             # Zabezpieczenie: _scan już udowodnił, że połączenie istnieje
             # (best_stop nie jest None), więc jeśli mapa i tak nie wybrała
@@ -2221,7 +2271,7 @@ def plan_flow(start_query, end_query, when=None,
             # proponowaną jako najlepsza przy obecnym progu.
             warianty = _variants(day, best_legs, gain_sec, geo_db)
             degraded = True
-            journeys = []
+            map_journeys = []
             seg_list = []
             nodes = []
             narysowane = set()
@@ -2233,7 +2283,7 @@ def plan_flow(start_query, end_query, when=None,
                 # najwcześniejszym możliwym i dalej wyznacza okno mapy.
                 arrival = _arrival_of(wariant) or best_arr
                 if with_journeys:
-                    journeys.append(_summarize_journey(
+                    map_journeys.append(_summarize_journey(
                         wariant, rides, arrival, dep_sec))
                 # Jaśniej rysujemy wariant proponowany - tak jak wszędzie
                 # indziej na tej mapie jasność znaczy "lepsza opcja".
@@ -2258,13 +2308,63 @@ def plan_flow(start_query, end_query, when=None,
                 _drop_private(wariant)
 
         if ride:
-            onboard.count_exit(journeys, ride)
+            onboard.count_exit(map_journeys, ride)
+            onboard.mark_journeys(map_journeys, ride)
 
-        # Rower dokładamy PO obu gałęziach, bo obie zostawiają tę samą rzecz:
-        # listę propozycji. Także po trybie awaryjnym - to właśnie tam, gdzie
-        # z rozkładu nie składa się prawie nic, skrót rowerem bywa jedyną
-        # sensowną odpowiedzią.
-        #
+        yield "map", {
+            "start": start_name,
+            "end": end_name,
+            "departure": _fmt_time(report_dep_sec),
+            # Ta sama godzina w sekundach doby rozkładowej. Od niej - a nie od
+            # tego, o której MAPA sądzi, że pasażer stanie na danej kropce - liczy
+            # swoje godziny dymek przesiadki (zgłoszenie #143, patrz app.js
+            # timetableAnchor).
+            "departure_sec": report_dep_sec,
+            "starts_sec": best_dep,
+            # Czekanie liczone od PYTANIA, przez granicę doby: po zejściu na
+            # kolejny dzień `dep_sec` jest już zerem tamtej doby, więc sama
+            # różnica pokazywałaby kilka minut zamiast prawie doby.
+            "waits_sec": max(0, day_offset * 24 * 3600 + best_dep - asked_sec),
+            # `day_offset` 0 to dzień z pytania.
+            "day_offset": day_offset,
+            # Rozpoznany kurs, w którym siedzi pasażer - tylko przy starcie
+            # z pokładu (patrz onboard.py). Front pisze z tego nagłówek "jedziesz
+            # linią X w stronę Y" i ma po czym poznać, że KAŻDA propozycja na
+            # liście zaczyna się wysiadką, a nie wsiadaniem.
+            **({"onboard": {k: ride[k] for k in
+                            ("num", "mode", "line", "headsign", "stop_name", "at",
+                             "late_sec", "at_sched")}}
+               if ride else {}),
+            "deadline": _fmt_time(deadline),
+            # Cały zakres czasowy mapy w sekundach, tą samą miarą co kawałki:
+            # od najszybszego możliwego dojazdu do najpóźniejszego, jaki mapa
+            # jeszcze rysuje (deadline). "Najszybciej X, pokazane do Y".
+            "limit_sec": deadline - report_dep_sec,
+            # Horyzont mapy na osi doby. Odjazd późniejszy nie należy do ŻADNEGO
+            # rysowanego wariantu - to warunek konieczny, liczony z best_arr
+            # (skan CSA), więc nie zależy od szacowanych przyjazdów kawałków.
+            "deadline_sec": deadline,
+            # Z czego ta mapa wyszła (punkt 2): docelowa gęstość z suwaka i ile
+            # razy kliknięto "pokaż więcej". `at_ceiling` - nie ma już podróży do
+            # wybaczenia, więc kolejne kliknięcie nie miałoby czego dołożyć.
+            "density": density,
+            "more": more,
+            "at_ceiling": at_ceiling,
+            # Od kiedy mapa się RYSUJE: godzina z pytania, a przy odsiewie
+            # krążenia - najpóźniejszy wyjazd. Lewy kraniec zakresu w pasku.
+            "map_from": _fmt_time(dep_sec),
+            "segments": seg_list,
+            # Węzły przesiadkowe: po jednym na miejsce, z liniami, w które MAPA
+            # pozwala tu wsiąść (patrz _transfer_nodes).
+            "nodes": nodes,
+            "journeys": map_journeys,
+            # True tylko w trybie awaryjnym (patrz gałąź else wyżej): mapa jest
+            # wtedy jedną trasą z jasnościami wpisanymi na sztywno, a nie
+            # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
+            # niż zwykle - i nie brać rzadkiej mapy za "tędy nic nie jedzie".
+            "degraded": degraded,
+        }
+
         # Warunek na dobę: stan stojaków jest sprzed minuty i tyle jest wart -
         # mówi, ile rowerów stoi TERAZ, a nie ile będzie stało we wtorek. Na
         # pytanie o inny dzień (także ten, na który wyszukiwarka sama zeszła,
@@ -2273,200 +2373,166 @@ def plan_flow(start_query, end_query, when=None,
         # zgadywaniem podanym jako fakt. `live` w odpowiedzi mówi to wprost,
         # żeby zero propozycji z tego powodu nie wyglądało jak zero z powodu
         # milczącego kanału operatora.
-        bike_shown, bike_stations = 0, 0
         bikes_live = (use_bikes and with_journeys and day_offset == 0
                       and when.date() == date.today())
-        if bikes_live:
-            # Rower spod startu liczy się od godziny z pytania, nie od
-            # początku mapy: czekanie na późniejszy wyjazd opłaca się tylko
-            # komunikacji, a rowerem można ruszyć od razu.
-            found, bike_stations = _bike_journeys(
-                day, source_stops, target_stops, report_dep_sec, deadline, earliest,
-                profile, geo_db, start_point, end_point, start_name, end_name,
-                (bike_mps, bike_overhead), (bike_electric, bike_regular))
+
+        def extras():
+            """Wszystko, co stoi na danych na żywo (rowery WRM, auta
+            Traficara), dołożone do gotowej mapy i jej listy. Osobno, bo
+            liczy się drugi raz, gdy te dane się odświeżą."""
+            journeys = map_journeys
+            # Rower dokładamy PO obu gałęziach, bo obie zostawiają tę samą
+            # rzecz: listę propozycji. Także po trybie awaryjnym - to właśnie
+            # tam, gdzie z rozkładu nie składa się prawie nic, skrót rowerem
+            # bywa jedyną sensowną odpowiedzią.
+            bike_shown, bike_stations = 0, 0
+            if bikes_live:
+                # Rower spod startu liczy się od godziny z pytania, nie od
+                # początku mapy: czekanie na późniejszy wyjazd opłaca się tylko
+                # komunikacji, a rowerem można ruszyć od razu.
+                found, bike_stations = _bike_journeys(
+                    day, source_stops, target_stops, report_dep_sec, deadline, earliest,
+                    profile, geo_db, start_point, end_point, start_name, end_name,
+                    (bike_mps, bike_overhead), (bike_electric, bike_regular))
+                if ride:
+                    onboard.count_exit(found, ride)
+                journeys, bike_shown = _merge_journeys(journeys, found, gain_sec)
+
+            # Dodatkowe propozycje kończące się Traficarem (patrz
+            # _traficar_journeys). Dokładane po wszystkim i osobno, bo powstają
+            # poza mapą przepływów - w trybie awaryjnym po prostu na końcu
+            # listy, żeby nie przestawić dwóch wariantów, których kolejność
+            # jest tam świadoma (pierwszy = proponowany).
+            with_car = (_traficar_journeys(day, best_journey, dep_sec, deadline,
+                                           end_point_ll, end_name, geo_db)
+                        if with_journeys and use_cars else [])
             if ride:
-                onboard.count_exit(found, ride)
-            journeys, bike_shown = _merge_journeys(journeys, found, gain_sec)
+                onboard.count_exit(with_car, ride)
+            if with_car:
+                journeys = (journeys + with_car) if degraded else sorted(
+                    journeys + with_car, key=lambda j: _journey_key(j, gain_sec))
 
-        # Dodatkowe propozycje kończące się Traficarem (patrz
-        # _traficar_journeys). Dokładane po wszystkim i osobno, bo powstają
-        # poza mapą przepływów - w trybie awaryjnym po prostu na końcu listy,
-        # żeby nie przestawić dwóch wariantów, których kolejność jest tam
-        # świadoma (pierwszy = proponowany).
-        with_car = (_traficar_journeys(day, best_journey, dep_sec, deadline,
-                                       end_point_ll, end_name, geo_db)
-                    if with_journeys and use_cars else [])
-        if ride:
-            onboard.count_exit(with_car, ride)
-        if with_car:
-            journeys = (journeys + with_car) if degraded else sorted(
-                journeys + with_car, key=lambda j: _journey_key(j, gain_sec))
-
-        # Auta car-sharingu stojące przy narysowanej mapie (patrz
-        # traficar.map_cars). Nie są kursem i nie mają na mapie linii - są
-        # miejscem, do którego mapa dowozi, z godziną dotarcia, odległością
-        # celu w linii prostej i szacowanym przyjazdem autem (punkt 15
-        # kontraktu; szacunek - zgłoszenie #150).
-        #
-        # Zasięg to to, co mapa RYSUJE, plus sam start: do auta stojącego pod
-        # nosem idzie się od razu, bez wsiadania w cokolwiek. Marsz liczy się
-        # od miejsca, w którym się JEST, więc dalej jest to jedno przejście
-        # (punkt 14), a nie łańcuch "dojdź na przystanek, potem do auta".
-        #
-        # Warunek na dobę ten sam, co przy rowerze: auta stoją tam, gdzie
-        # stoją TERAZ. Przy pytaniu o inny dzień (także ten, na który
-        # wyszukiwarka sama zeszła) nie pokazujemy ich wcale - pokazanie
-        # byłoby zgadywaniem podanym jako fakt.
-        #
-        # W trybie awaryjnym (kept puste) aut nie ma wcale: godziny ze skanu
-        # znają pół miasta, a tu ma być to, co widać na ekranie - i akurat
-        # tam mapa nie jest wachlarzem, tylko jedną trasą (patrz gałąź else
-        # wyżej). Auto przy przystanku, którego nikt nie narysował, mówiłoby
-        # o mapie coś, czego na niej nie ma.
-        cars, bike_places = [], []
-        cars_dest_in_zone = None
-        # Przy "dowolnej stacji w mieście" po którejkolwiek stronie aut
-        # i rowerów nie ma wcale - decyzja użytkownika: to podróż koleją między
-        # miastami, a auto czy rower przy którejś ze stacji nie jest na nią
-        # odpowiedzią ("WROCŁAW -" -> "WARSZAWA -" pokazywało auta przy
-        # Nadodrzu i Kuźnikach).
-        if kept and not (gtfs.is_city_group(day, source_stops)
-                         or gtfs.is_city_group(day, target_set)):
-            # Na starcie jest się od godziny z pytania, nie od początku mapy -
-            # do auta czy roweru pod nosem idzie się od razu (tak samo jak
-            # przy propozycjach z rowerem wyżej).
-            reach = dict.fromkeys(source_stops, report_dep_sec)
-            for stop, at in _drawn_reach(kept, ranges).items():
-                if at < reach.get(stop, INF):
-                    reach[stop] = at
-            if day_offset == 0 and when.date() == date.today():
-                # Ile z nich: suwak razy to samo "pokaż więcej", co przy
-                # liniach - a auta, których nic nie bije, zostają i tak.
-                cars = traficar.map_choice(
-                    traficar.map_cars(day, reach, end_point_ll, car_mps,
-                                      car_overhead),
-                    car_count * (1 + more), car_vans,
-                    min_level=more)
-                # Czy przy celu da się auto zostawić (zgłoszenie #157). Auta
-                # zostają na mapie tak czy inaczej - to ostrzeżenie w dymku,
-                # nie odsiew: wziąć auto i oddać je na granicy strefy dalej
-                # bywa sensownym wyborem, tylko trzeba o tym wiedzieć.
-                if cars:
-                    cars_dest_in_zone = traficar.can_end_at(*end_point_ll)
-
-            # Rower miejski na mapie (punkt 16, patrz bikes.map_places).
-            # Inaczej niż auto: z roweru się JEDZIE, więc przejazd ocenia się
-            # w całej podróży - dojazd do roweru i dalsza droga po nim idą
-            # tym, co mapa RYSUJE, rundami po liczbie pojazdów. Nie skanem
-            # wstecz po całym dniu: ten zna pół miasta i uznałby za sensowny
-            # przejazd na przystanek, z którego mapa nie rysuje ani jednego
-            # odjazdu. Oba przebiegi są leniwe - bez kandydatów na rower nie
-            # odpala się żaden.
+            # Auta car-sharingu stojące przy narysowanej mapie (patrz
+            # traficar.map_cars). Nie są kursem i nie mają na mapie linii - są
+            # miejscem, do którego mapa dowozi, z godziną dotarcia, odległością
+            # celu w linii prostej i szacowanym przyjazdem autem (punkt 15
+            # kontraktu; szacunek - zgłoszenie #150).
             #
-            # Kropki zostają także przy pytaniu o inny dzień - stacje stoją
-            # tam zawsze, a zniknięcie ich z mapy mówiłoby nieprawdę. Nieznany
-            # jest wtedy sam STAN stojaka i `bikes_live` mówi to wprost, żeby
-            # front nie podał zgadywania jako liczby rowerów.
-            runs = _drawn_runs(day, kept, ranges)
-            bike_places = bikes.map_places(
-                day,
-                lambda: _drawn_arrivals(day, runs, source_stops, report_dep_sec),
-                lambda: _drawn_onward(day, runs, target_set),
-                target_set, bike_count * (1 + more),
-                live=day_offset == 0 and when.date() == date.today(),
-                min_level=more, electric=bike_electric, regular=bike_regular,
-                ride_mps=bike_mps, overhead_sec=bike_overhead)
+            # Zasięg to to, co mapa RYSUJE, plus sam start: do auta stojącego
+            # pod nosem idzie się od razu, bez wsiadania w cokolwiek. Marsz
+            # liczy się od miejsca, w którym się JEST, więc dalej jest to jedno
+            # przejście (punkt 14), a nie łańcuch "dojdź na przystanek, potem
+            # do auta".
+            #
+            # Warunek na dobę ten sam, co przy rowerze: auta stoją tam, gdzie
+            # stoją TERAZ. Przy pytaniu o inny dzień (także ten, na który
+            # wyszukiwarka sama zeszła) nie pokazujemy ich wcale - pokazanie
+            # byłoby zgadywaniem podanym jako fakt.
+            #
+            # W trybie awaryjnym (kept puste) aut nie ma wcale: godziny ze
+            # skanu znają pół miasta, a tu ma być to, co widać na ekranie -
+            # i akurat tam mapa nie jest wachlarzem, tylko jedną trasą (patrz
+            # gałąź else wyżej). Auto przy przystanku, którego nikt nie
+            # narysował, mówiłoby o mapie coś, czego na niej nie ma.
+            cars, bike_places = [], []
+            cars_dest_in_zone = None
+            # Przy "dowolnej stacji w mieście" po którejkolwiek stronie aut
+            # i rowerów nie ma wcale - decyzja użytkownika: to podróż koleją
+            # między miastami, a auto czy rower przy którejś ze stacji nie jest
+            # na nią odpowiedzią ("WROCŁAW -" -> "WARSZAWA -" pokazywało auta
+            # przy Nadodrzu i Kuźnikach).
+            if kept and not (gtfs.is_city_group(day, source_stops)
+                             or gtfs.is_city_group(day, target_set)):
+                # Na starcie jest się od godziny z pytania, nie od początku
+                # mapy - do auta czy roweru pod nosem idzie się od razu (tak
+                # samo jak przy propozycjach z rowerem wyżej).
+                reach = dict.fromkeys(source_stops, report_dep_sec)
+                for stop, at in _drawn_reach(kept, ranges).items():
+                    if at < reach.get(stop, INF):
+                        reach[stop] = at
+                if day_offset == 0 and when.date() == date.today():
+                    # Ile z nich: suwak razy to samo "pokaż więcej", co przy
+                    # liniach - a auta, których nic nie bije, zostają i tak.
+                    cars = traficar.map_choice(
+                        traficar.map_cars(day, reach, end_point_ll, car_mps,
+                                          car_overhead),
+                        car_count * (1 + more), car_vans,
+                        min_level=more)
+                    # Czy przy celu da się auto zostawić (zgłoszenie #157).
+                    # Auta zostają na mapie tak czy inaczej - to ostrzeżenie
+                    # w dymku, nie odsiew: wziąć auto i oddać je na granicy
+                    # strefy dalej bywa sensownym wyborem, tylko trzeba o tym
+                    # wiedzieć.
+                    if cars:
+                        cars_dest_in_zone = traficar.can_end_at(*end_point_ll)
+
+                # Rower miejski na mapie (punkt 16, patrz bikes.map_places).
+                # Inaczej niż auto: z roweru się JEDZIE, więc przejazd ocenia
+                # się w całej podróży - dojazd do roweru i dalsza droga po nim
+                # idą tym, co mapa RYSUJE, rundami po liczbie pojazdów. Nie
+                # skanem wstecz po całym dniu: ten zna pół miasta i uznałby za
+                # sensowny przejazd na przystanek, z którego mapa nie rysuje
+                # ani jednego odjazdu. Oba przebiegi są leniwe - bez kandydatów
+                # na rower nie odpala się żaden.
+                #
+                # Kropki zostają także przy pytaniu o inny dzień - stacje stoją
+                # tam zawsze, a zniknięcie ich z mapy mówiłoby nieprawdę.
+                # Nieznany jest wtedy sam STAN stojaka i `bike_places_live`
+                # mówi to wprost, żeby front nie podał zgadywania jako liczby
+                # rowerów.
+                runs = _drawn_runs(day, kept, ranges)
+                bike_places = bikes.map_places(
+                    day,
+                    lambda: _drawn_arrivals(day, runs, source_stops, report_dep_sec),
+                    lambda: _drawn_onward(day, runs, target_set),
+                    target_set, bike_count * (1 + more),
+                    live=day_offset == 0 and when.date() == date.today(),
+                    min_level=more, electric=bike_electric, regular=bike_regular,
+                    ride_mps=bike_mps, overhead_sec=bike_overhead)
+
+            # Wysiadka dopisuje się na samym końcu, po rowerze i po
+            # Traficarze: dotyczy KAŻDEJ propozycji, bez względu na to, który
+            # algorytm ją złożył, a pytanie jest zawsze to samo - gdzie
+            # opuścić pojazd, w którym się siedzi.
+            if ride:
+                onboard.mark_journeys(journeys, ride)
+
+            return {
+                "journeys": journeys,
+                # Wolne auta car-sharingu w zasięgu tej mapy (patrz
+                # traficar.map_cars).
+                "cars": cars,
+                # Czy cel leży w strefie oddawania aut; None, gdy aut nie ma
+                # albo strefy nie znamy (patrz traficar.can_end_at).
+                "cars_dest_in_zone": cars_dest_in_zone,
+                # Rowery miejskie w zasięgu tej mapy, każdy z listą przejazdów,
+                # które jeszcze mieszczą się w oknie (patrz bikes.map_places).
+                # Przejazdów mapa NIE rysuje - front pokazuje je po najechaniu.
+                "bike_places": bike_places,
+                # Czy liczby rowerów pochodzą z tej chwili. Przy pytaniu o inny
+                # dzień kropki stacji zostają, ale stan stojaka jest nieznany -
+                # front ma to napisać, a nie pokazać wczorajszą liczbę jako
+                # dzisiejszą.
+                "bike_places_live": day_offset == 0 and when.date() == date.today(),
+                # Stan warstwy rowerowej - tylko gdy o nią pytano (i jest
+                # lista, do której rower dokłada propozycje). Front ma po czym
+                # odróżnić "policzone, rower nic tu nie daje" od "kanał
+                # operatora nie odpowiedział" (patrz bikes.stations_quiet):
+                # w obu przypadkach lista wygląda tak samo, a to zupełnie różne
+                # odpowiedzi.
+                **({"bikes": {"journeys": bike_shown, "stations": bike_stations,
+                              "live": bikes_live}}
+                   if use_bikes and with_journeys else {}),
+            }
+
+        live = extras()
+        yield "extras", live
+        if live_refreshed is not None and live_refreshed():
+            fresh = extras()
+            if fresh != live:
+                yield "fresh", fresh
     finally:
         geo_db.close()
-
-    # Wysiadka dopisuje się na samym końcu, po rowerze i po Traficarze: dotyczy
-    # KAŻDEJ propozycji, bez względu na to, który algorytm ją złożył, a pytanie
-    # jest zawsze to samo - gdzie opuścić pojazd, w którym się siedzi.
-    if ride:
-        onboard.mark_journeys(journeys, ride)
-
-    return {
-        "start": start_name,
-        "end": end_name,
-        "departure": _fmt_time(report_dep_sec),
-        # Ta sama godzina w sekundach doby rozkładowej. Od niej - a nie od
-        # tego, o której MAPA sądzi, że pasażer stanie na danej kropce - liczy
-        # swoje godziny dymek przesiadki (zgłoszenie #143, patrz app.js
-        # timetableAnchor).
-        "departure_sec": report_dep_sec,
-        "best_arrival": _fmt_time(best_arr),
-        "deadline": _fmt_time(deadline),
-        # Cały zakres czasowy mapy w sekundach, tą samą miarą co kawałki:
-        # od najszybszego możliwego dojazdu do najpóźniejszego, jaki mapa
-        # jeszcze rysuje (deadline). "Najszybciej X, pokazane do Y".
-        "best_sec": best_arr - report_dep_sec,
-        "limit_sec": deadline - report_dep_sec,
-        # Horyzont mapy na osi doby. Odjazd późniejszy nie należy do ŻADNEGO
-        # rysowanego wariantu - to warunek konieczny, liczony z best_arr
-        # (skan CSA), więc nie zależy od szacowanych przyjazdów kawałków.
-        "deadline_sec": deadline,
-        # Z czego ta mapa wyszła (punkt 2): docelowa gęstość z suwaka i ile
-        # razy kliknięto "pokaż więcej". `at_ceiling` - nie ma już podróży do
-        # wybaczenia, więc kolejne kliknięcie nie miałoby czego dołożyć.
-        "density": density,
-        "more": more,
-        "at_ceiling": at_ceiling,
-        "fastest": fastest,
-        # Kiedy ta trasa RUSZA i za ile dni - czekanie ma być widoczne, nie
-        # schowane (punkt 13). `day_offset` 0 to dzień z pytania.
-        "starts": _fmt_time(best_dep),
-        "starts_sec": best_dep,
-        # Sama jazda, od odjazdu pierwszego pojazdu do celu - bez czekania,
-        # które siedzi w `best_sec`. Pasek dopisuje ją tylko na życzenie.
-        "ride_sec": best_arr - best_dep,
-        # Od kiedy mapa się RYSUJE: godzina z pytania, a przy odsiewie
-        # krążenia - najpóźniejszy wyjazd. Lewy kraniec zakresu w pasku.
-        "map_from": _fmt_time(dep_sec),
-        # Czekanie liczone od PYTANIA, przez granicę doby: po zejściu na
-        # kolejny dzień `dep_sec` jest już zerem tamtej doby, więc sama
-        # różnica pokazywałaby kilka minut zamiast prawie doby.
-        "waits_sec": max(0, day_offset * 24 * 3600 + best_dep - asked_sec),
-        "day_offset": day_offset,
-        "segments": seg_list,
-        # Węzły przesiadkowe: po jednym na miejsce, z liniami, w które MAPA
-        # pozwala tu wsiąść (patrz _transfer_nodes).
-        "nodes": nodes,
-        # Wolne auta car-sharingu w zasięgu tej mapy (patrz traficar.map_cars).
-        "cars": cars,
-        # Czy cel leży w strefie oddawania aut; None, gdy aut nie ma albo
-        # strefy nie znamy (patrz traficar.can_end_at).
-        "cars_dest_in_zone": cars_dest_in_zone,
-        # Rowery miejskie w zasięgu tej mapy, każdy z listą przejazdów, które
-        # jeszcze mieszczą się w oknie (patrz bikes.map_places). Przejazdów
-        # mapa NIE rysuje - front pokazuje je po najechaniu.
-        "bike_places": bike_places,
-        # Czy liczby rowerów pochodzą z tej chwili. Przy pytaniu o inny dzień
-        # kropki stacji zostają, ale stan stojaka jest nieznany - front ma to
-        # napisać, a nie pokazać wczorajszą liczbę jako dzisiejszą.
-        "bike_places_live": day_offset == 0 and when.date() == date.today(),
-        "journeys": journeys,
-        # Rozpoznany kurs, w którym siedzi pasażer - tylko przy starcie
-        # z pokładu (patrz onboard.py). Front pisze z tego nagłówek "jedziesz
-        # linią X w stronę Y" i ma po czym poznać, że KAŻDA propozycja na
-        # liście zaczyna się wysiadką, a nie wsiadaniem.
-        **({"onboard": {k: ride[k] for k in
-                        ("num", "mode", "line", "headsign", "stop_name", "at",
-                         "late_sec", "at_sched")}}
-           if ride else {}),
-        # Stan warstwy rowerowej - tylko gdy o nią pytano (i jest lista, do
-        # której rower dokłada propozycje). Front ma po czym
-        # odróżnić "policzone, rower nic tu nie daje" od "kanał operatora nie
-        # odpowiedział" (patrz bikes.stations_quiet): w obu przypadkach lista
-        # wygląda tak samo, a to zupełnie różne odpowiedzi.
-        **({"bikes": {"journeys": bike_shown, "stations": bike_stations,
-                      "live": bikes_live}}
-           if use_bikes and with_journeys else {}),
-        # True tylko w trybie awaryjnym (patrz gałąź else wyżej): mapa jest
-        # wtedy jedną trasą z jasnościami wpisanymi na sztywno, a nie
-        # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
-        # niż zwykle - i nie brać rzadkiej mapy za "tędy nic nie jedzie".
-        "degraded": degraded,
-    }
 
 
 def _fastest_summary(legs, arrival, dep_sec):
