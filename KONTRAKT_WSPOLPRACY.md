@@ -20,6 +20,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 10. Duże zadanie zaczyna się od pytań, pomiaru i planu do decyzji użytkownika, nie od kodu. Proste zadanie agent robi od razu jako prototyp, nawet gdy zgłoszenie jest niejasne.
 11. Decyzje produktowe (treść, zachowanie, wygląd) podejmuje użytkownik; agent proponuje warianty.
 12. Kod zmieniają tylko agenci, każdy w swoim worktree. Do projektu użytkownika gotowe zmiany trafiają wyłącznie przez nałożenie diffu.
+25. Gospodaruję limitem użytkownika. Za dnia, gdy pracujemy razem, praca w tle ma tylko nadążać: następna sprawa jest gotowa, gdy bieżąca się kończy, ale limit nie idzie na zapas spraw na później. Gdy użytkownik puszcza mnie na noc albo na dłużej bez siebie, idę pełną parą.
 
 ## Projekt użytkownika i git
 
