@@ -48,7 +48,8 @@ kolejne słupki kursu.
 Słupki wspólne z Wrocławiem (Bardzka, Sucha, Iwiny — tamtędy jadą 800/810)
 sklejają się z istniejącymi po **zgodnej nazwie i bliskości** albo — bez
 względu na nazwę — gdy stoją **w tym samym punkcie** (do 10 m; gmina
-podpisuje wrocławskie słupki po swojemu, np. „Park Wschodni NŻ”), więc kurs
+podpisuje wrocławskie słupki po swojemu, np. „Park Wschodni NŻ”; dalsze
+pary wskazuje ręcznie `SAME_STOP_BY_HAND`), więc kurs
 z Siechnic wjeżdża na ten sam `stop_id` co tramwaj i nosi jego nazwę:
 przesiadka bez kary za przejście i jeden marker na mapie zamiast dwóch.
 

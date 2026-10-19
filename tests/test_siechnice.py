@@ -199,6 +199,18 @@ def test_match_existing_stops_nie_laczy_innej_nazwy_kilkanascie_metrow_dalej():
     assert siechnice.match_existing_stops(stops, existing) == {}
 
 
+def test_match_existing_stops_laczy_przystanek_wskazany_recznie():
+    # 21 m to za daleko na ten sam punkt, ale to ten sam przystanek (#348).
+    stops = [{"designator": "42619:82126", "name": "Komuny Paryskiej (szkoła) NŻ",
+              "lat": 51.102459, "lon": 17.044876}]
+    existing = [
+        ("6063", "Komuny Paryskiej (Szkoła)", 51.10257931, 17.04464708),
+        ("1487", "Komuny Paryskiej", 51.10225484, 17.04662154),
+    ]
+
+    assert siechnice.match_existing_stops(stops, existing) == {"42619:82126": "6063"}
+
+
 # --- wiersze GTFS ----------------------------------------------------------
 
 WINDOW = ("20261001", "20261031")

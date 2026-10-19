@@ -72,6 +72,14 @@ SAME_STOP_MAX_M = 200
 # zacząłby zlewać przystanki, które naprawdę są różne.
 SAME_POINT_MAX_M = 10
 
+# Nazwa z Siechnic -> nazwa wrocławska, gdy to ten sam przystanek, a położenie
+# tego nie rozstrzyga. Po nazwie, nie po designatorze: tylko jedną kopię
+# widzieliśmy, więc nie wiadomo, czy designatory przetrwają kolejne wgranie.
+SAME_STOP_BY_HAND = {
+    # 21 m w danych, ponad SAME_POINT_MAX_M - rozstrzygnięte ręcznie w #348.
+    "Komuny Paryskiej (szkoła) NŻ": "Komuny Paryskiej (Szkoła)",
+}
+
 _DIACRITIC_MAP = str.maketrans({
     "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
     "ó": "o", "ś": "s", "ź": "z", "ż": "z",
@@ -225,7 +233,7 @@ def match_existing_stops(stops, existing_rows, max_distance_m=SAME_STOP_MAX_M):
 
     matched = {}
     for stop in stops:
-        name = normalize_name(stop["name"])
+        name = normalize_name(SAME_STOP_BY_HAND.get(stop["name"], stop["name"]))
         best_dist = None
         for stop_id, other_name, lat, lon in existing:
             dist = haversine_m(stop["lat"], stop["lon"], lat, lon)
