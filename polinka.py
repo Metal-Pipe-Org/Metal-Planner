@@ -120,6 +120,19 @@ def augment_day(data, day):
         data.stop_coords[stop_id] = (lat, lon)
 
 
+def reachable(day, stops):
+    """Czy któryś ze słupków stoi o jedno dojście od stacji. Dojazd do
+    przeprawy idzie tylko przez takie słupki, więc gdy żadnego nie ma, nie ma
+    i przeprawy - a mapa nie czeka na liczenie dojazdów (map_crossings jest
+    wołane przed jej wysłaniem)."""
+    # Tu, a nie na górze: gtfs ciągnie ten moduł.
+    import gtfs
+
+    coords = [day.stop_coords[s] for s in stops if s in day.stop_coords]
+    return any(gtfs._haversine_m(lat, lon, slat, slon) <= gtfs.WALK_M
+               for _, lat, lon in STATIONS.values() for slat, slon in coords)
+
+
 def map_crossings(day, service_day, arrivals, onward, target_set):
     """Przeprawy Polinką na mapie przepływów - po jednej na kierunek, który
     przeszedł regułę sensu - w kształcie narysowanego kawałka

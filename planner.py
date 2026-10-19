@@ -2332,7 +2332,11 @@ def plan_flow_stages(start_query, end_query, when=None,
         # przestawia - dokłada się do niej jako przeprawa, tą samą regułą co
         # rower. Rozkładu nie ma, stan na żywo też nie, więc idzie razem
         # z mapą, a nie z danymi na żywo. Rysuje się jak każdy kawałek.
-        if on_map:
+        # Dojazd do stacji idzie przez start albo przez słupek, na którym coś
+        # narysowanego wysadza - gdy żaden nie stoi obok Polinki, przeprawy
+        # nie ma i drogiego liczenia dojazdów nie robimy.
+        if on_map and polinka.reachable(day, {*source_stops, *(
+                conn[3] for run in drawn_runs() for conn in run)}):
             seg_list = seg_list + polinka.map_crossings(
                 day, when.date() + timedelta(days=day_offset), drawn_arrivals,
                 drawn_onward, target_set)

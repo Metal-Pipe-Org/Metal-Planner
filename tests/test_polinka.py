@@ -18,8 +18,6 @@ from tests.gtfs_builder import make_day
 
 WW, NG = polinka.ID_PREFIX + "WW", polinka.ID_PREFIX + "NG"
 WTOREK = date(2026, 10, 13)
-_, *WW_LL = polinka.STATIONS[WW]
-_, *NG_LL = polinka.STATIONS[NG]
 
 
 def test_wielkanoc_i_swieta_ruchome():
@@ -82,6 +80,16 @@ def _dzien_przy_stacjach():
 def _przeprawy(arrive, onward, targets, dzien=WTOREK):
     return polinka.map_crossings(_dzien_przy_stacjach(), dzien, lambda: arrive,
                                  lambda: onward, targets)
+
+
+def test_bez_slupka_obok_stacji_przeprawy_nie_liczy_sie_wcale():
+    """Mapa, która nie przechodzi koło Polinki, nie czeka na liczenie
+    dojazdów do niej - wystarczy spojrzeć, czy coś stoi obok stacji."""
+    day = _dzien_przy_stacjach()
+    day.stop_coords["D"] = (51.0500, 17.0000)   # kilka kilometrów dalej
+
+    assert not polinka.reachable(day, {"D"})
+    assert polinka.reachable(day, {"D", "H"})
 
 
 def test_przeprawa_prowadzi_do_celu_pieszo():
