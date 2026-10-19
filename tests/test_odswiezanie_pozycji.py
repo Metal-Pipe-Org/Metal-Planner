@@ -313,7 +313,7 @@ def test_spozniony_gps_nie_nadpisuje_startu_wpisanego_w_miedzyczasie(
         przegladarka, adres, wynik):
     context, page, bledy = _otworz(przegladarka, adres)
     page.evaluate(OPOZNIONY_GPS_JS)
-    page.evaluate(USTAW_JS, ["time", "03:33"])
+    page.fill("#time", "03:33")      # wpisana przez pasażera, a nie ustawiona przez stronę
     _wybierz(page, "#end", TRASA[1])
     page.wait_for_function("window.__gps")
     _wybierz(page, "#start", TRASA[0])
