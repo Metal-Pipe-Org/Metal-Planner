@@ -8,7 +8,7 @@ kabiny kursują wahadłowo przez cały czas otwarcia. Wszystko, co tu stoi, jest
 więc przepisane ręcznie i ma datę (UPDATED) - do sprawdzenia na stronie PWr
 przy każdej zmianie.
 
-KURSY. Bez rozkładu liczymy ostrożnie (zasada 2 w docs/PRINCIPLES.md - szacunek
+KURSY. Bez rozkładu liczymy ostrożnie (zasada 3 w docs/PRINCIPLES.md - szacunek
 myli się w bezpieczną stronę): odjazd co HEADWAY_SEC w obie strony, przejazd
 RIDE_SEC. PWr podaje „poniżej trzech minut" i do 370 osób na godzinę w każdą
 stronę przy kabinie na 15 osób, więc naprawdę jedzie częściej - ale na odjazd

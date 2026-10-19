@@ -1938,6 +1938,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                      start_point=None, end_point=None, density=None, more=None,
                      car_count=None, journey_limit=None, transfer_gain_sec=None,
                      use_bikes=False, bike_count=None, car_vans=False,
+                     new_map=False,
                      bike_electric=True, bike_regular=True,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
@@ -1986,6 +1987,8 @@ def plan_flow_stages(start_query, end_query, when=None,
     tak samo jak gęstość. bike_count - to samo dla przejazdów rowerem (osobny
     suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_vans - czy
     pokazać też dostawczaki, wybierane osobno od osobówek.
+    new_map - przełącznik eksperymentu "nowa mapa" (⚙); na razie niczego nie
+    zmienia, dalsze zmiany gałęzią się po nim.
     bike_electric/bike_regular - na jaki rodzaj roweru pasażer chce wsiąść
     (dwa przyciski w pasku warstw, patrz bikes.map_places). To odsiew MIEJSC, nie zmiana wyceny przejazdu: rower
     ma jedną prędkość niezależnie od rodzaju, więc odhaczenie jednego z nich

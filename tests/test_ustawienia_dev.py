@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 USER_FOLDS = {"fold-map", "fold-assumptions", "fold-layout"}
 DEV_FOLDS = {"fold-window", "fold-time", "fold-places", "fold-vehicles",
              "fold-debug", "look-section", "fold-siechnice", "fold-version",
-             "fold-transfer", "fold-onboard"}
+             "fold-transfer", "fold-onboard", "fold-experiments"}
 
 
 def _index(dev_mode):
