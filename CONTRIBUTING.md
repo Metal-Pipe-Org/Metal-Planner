@@ -21,10 +21,10 @@ Wspólny sposób pracy na GitHubie: branche, pull requesty, review Claude'a, iss
 
 8. `Closes #12` (albo `Fixes`, `Resolves`) w opisie PR-a znaczy „ten PR załatwia issue”: po merge'u issue zamyka się samo. `Refs #12` (albo `Ref`, `Related to`, `Part of`, `Dotyczy`) to luźniejszy związek — issue dostaje label, ale zamyka je człowiek. Gołe `#12` niczego nie oznacza, więc można pisać o innych issues bez obaw.
 9. Zaraz po otwarciu pod PR-em pojawia się jednolinijkowa zapowiedź, że Claude go czyta, a po kilku minutach review: werdykt, podsumowanie, uwagi do kodu. Zapowiedź zwija się, gdy review już stoi. Dostajesz ping na GitHubie i na Discordzie.
-10. PR otwarty w konflikcie dostaje review Claude'a dopiero przy pierwszym pushu, który konflikt usuwa.
-11. Review leci raz na PR. Po większych poprawkach albo gdy się nie udało, napisz `@claude` w komentarzu pod PR-em. Gdy przyjdzie nowe review, starsze review i informacje o nieudanych review zwijają się same: widać z nich tylko werdykt, resztę rozwija się kliknięciem „Starsza ocena — rozwiń”. Informacja, że PR zmienia workflow review, zwija się wtedy w całości. Nieudane ponowne review niczego nie zwija.
-12. Przeczytaj review Claude'a, popraw, co trzeba, i dopiero wtedy poproś o review w panelu bocznym („Reviewers”). Reviewer dostaje ping na Discordzie.
-13. Gdy merge czegoś do `main` wpędzi Twój PR w konflikt, dostajesz ping na Discordzie — raz, nie po każdym kolejnym merge'u; szkiców to nie dotyczy. Jeśli PR czekał na review, prośby o review zdejmują się same: rozwiąż konflikt i poproś o review ponownie.
+10. PR otwarty w konflikcie z gałęzią bazową od razu wraca do draftu (prośby o review się zdejmują) i nie dostaje review. Rozwiąż konflikt i oznacz PR jako gotowy („Ready for review”) — wtedy przychodzi review Claude'a.
+11. Review leci przy otwarciu PR-a i przy każdym wyjściu z draftu. Gdy się nie udało, napisz `@claude` w komentarzu pod PR-em. Gdy przyjdzie nowe review, starsze review i informacje o nieudanych review zwijają się same: widać z nich tylko werdykt, resztę rozwija się kliknięciem „Starsza ocena — rozwiń”. Informacja, że PR zmienia workflow review, zwija się wtedy w całości. Nieudane ponowne review niczego nie zwija.
+12. Gotowy PR nie dostaje pushy: każda zmiana — poprawki po review Claude'a i po review ludzi, rozwiązanie konfliktu — idzie wyłącznie przez draft. Przed pushem przestaw PR na draft („Convert to draft”); push do gotowego PR-a automat i tak przestawi, zostawiając komentarz i zdejmując prośby o review. Wyjątek to push, który tylko dociąga gałąź bazową („Update branch”, merge bazy bez własnych poprawek, rebase) — zmiany PR-a zostają te same, więc PR zostaje gotowy. Po poprawkach oznacz PR jako gotowy — to uruchamia ponowne review Claude'a. Przeczytaj je i dopiero wtedy poproś o review w panelu bocznym („Reviewers”). Reviewer dostaje ping na Discordzie.
+13. Gdy merge czegoś do `main` wpędzi Twój PR w konflikt, dostajesz ping na Discordzie — raz, nie po każdym kolejnym merge'u; draftów też to dotyczy. Gotowy PR wraca przy tym do draftu, a jeśli czekał na review, prośby o review zdejmują się same: rozwiąż konflikt, oznacz PR jako gotowy i po review Claude'a poproś o review ponownie.
 14. Kto pilnuje których plików, wyznacza `.github/CODEOWNERS` — to jedyne źródło prawdy. Gdy PR dotyka pliku z ownerem, GitHub sam dodaje go do reviewerów.
 15. PR merguje jego autor. Można używać automerge.
 
@@ -69,12 +69,12 @@ Zanim uznasz ciszę za błąd, sprawdź tę listę. Każdy punkt to zamierzone z
 
 36. **Draft PR nie dostaje review.** Review przychodzi po „Ready for review”. Wcześniej tylko na wyraźne `@claude`.
 37. **PR do brancha innego niż `main` i `stable` nie dostaje review.** Dostanie je tylko po `@claude` albo po ręcznym biegu.
-38. **PR otwarty w konflikcie z bazą dostaje review dopiero przy pierwszym pushu, który ten konflikt usuwa.** Przy konflikcie GitHub w ogóle nie uruchamia automatów PR-a, więc w Actions nie ma nawet śladu biegu.
+38. **PR w konflikcie z bazą nie dostaje review.** Przy konflikcie GitHub w ogóle nie uruchamia automatów PR-a, więc w Actions nie ma nawet śladu biegu review. PR wraca wtedy do draftu, a review przychodzi po rozwiązaniu konfliktu i „Ready for review”.
 39. **PR z forka nie dostaje review.** Kod spoza repo nie trafia do Claude'a razem z sekretami.
 40. **PR, który zmienia sam workflow review, nie dostaje review przy otwarciu.** Akcja Claude'a działa tylko z workflow takim jak na `main`. Pod PR-em pojawia się o tym informacja — napisz `@claude`, a review ruszy.
 41. **`@claude` działa tylko we własnym tekście i tylko od osoby z prawem zapisu.** Wołanie przepisane w cytacie albo od kogoś bez zapisu jest pomijane bez komentarza.
 42. **Zmiana workflow na branchu nie działa dla `@claude` ani ręcznego biegu, aż trafi na `main`.** Te wyzwalacze zawsze czytają wersję z `main`.
-43. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie tylko wtedy, gdy automat wysyła ją sam — dziś robią to review Claude'a, koniec pracy Claude'a nad issue, codzienne podsumowanie, przypomnienie, zamknięcie po ciszy i wstrzymanie review przy konflikcie.
+43. **To, co robią automaty, nie trafia na Discorda samo.** Wiadomość idzie tylko wtedy, gdy automat wysyła ją sam — dziś robią to review Claude'a, koniec pracy Claude'a nad issue, codzienne podsumowanie, przypomnienie, zamknięcie po ciszy i wstrzymanie review przy konflikcie. Przestawienie PR-a na draft przez automat zostawia tylko komentarz pod PR-em; o konflikcie po merge'u do `main` przychodzi dodatkowo ping.
 44. **Ręczny ratunek:** Actions → „Claude - oceń PR” → Run workflow → numer PR-a robi review od nowa w każdym z powyższych przypadków poza forkiem.
 
-Aktualizacja: 12-10-2026
+Aktualizacja: 19-10-2026
