@@ -2467,8 +2467,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # między miastami, a auto czy rower przy którejś ze stacji nie jest
             # na nią odpowiedzią ("WROCŁAW -" -> "WARSZAWA -" pokazywało auta
             # przy Nadodrzu i Kuźnikach).
-            if kept and not (gtfs.is_city_group(day, source_stops)
-                             or gtfs.is_city_group(day, target_set)):
+            if on_map:
                 # Na starcie jest się od godziny z pytania, nie od początku
                 # mapy - do auta czy roweru pod nosem idzie się od razu (tak
                 # samo jak przy propozycjach z rowerem wyżej).
