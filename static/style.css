@@ -2461,17 +2461,6 @@ body:not(.dev-mode) .dev-only { display: none; }
     font: italic 700 10.5px/1 Georgia, serif;
     cursor: help;
 }
-.tt-badge-info { display: inline-flex; align-items: center; }
-
-/* „i" w treści (oś trasy, tablica odjazdów) - w wierszu, nie na prawym brzegu. */
-.info.info-inline {
-    float: none;
-    width: 14px;
-    height: 14px;
-    margin: 0 0 0 6px;
-    vertical-align: middle;
-    font-size: 9.5px;
-}
 .info:hover,
 .info:focus-visible { color: var(--ink); outline: none; }
 
