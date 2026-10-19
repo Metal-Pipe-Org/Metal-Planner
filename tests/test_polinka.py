@@ -88,13 +88,26 @@ def test_przeprawa_prowadzi_do_celu_pieszo():
     """Mapa dowozi pod Na Grobli, a z Wybrzeża dochodzi się do celu."""
     przeprawy = _przeprawy({"H": [(10 * 3600, 0)]}, {}, {"K"})
 
-    assert [(p["from"], p["to"]) for p in przeprawy] == [
-        (polinka.STATIONS[NG][0], polinka.STATIONS[WW][0])]
-    opcja, = przeprawy[0]["options"]
-    assert opcja["off"] - opcja["at"] == polinka.RIDE_SEC
-    assert opcja["at"] > 10 * 3600 and opcja["arrival"] > opcja["off"]
-    assert opcja["vehicles"] == 0
-    assert przeprawy[0]["info"] == polinka.INFO
+    przeprawa, = przeprawy
+    # Kawałek jak każdy narysowany: plakietka „Polinka" w kolorze Polinki.
+    assert (przeprawa["num"], przeprawa["kind"]) == ("Polinka", "cable")
+    assert przeprawa["stops_n"] == [polinka.STATIONS[NG][0], polinka.STATIONS[WW][0]]
+    (_, _, wsiada), (_, _, wysiada) = przeprawa["stops_t"]
+    assert wysiada - wsiada == polinka.RIDE_SEC
+    assert wsiada > 10 * 3600 and przeprawa["arrive"] > wysiada
+    # Dymek jak przy aucie: przyjazd do celu i czas przeprawy (bez godzin samej
+    # przeprawy), a pod nimi godziny otwarcia, bilet i data danych - nigdzie
+    # indziej ich nie widać.
+    assert przeprawa["tip"]["title"] == "Polinka"
+    jazda, = przeprawa["tip"]["rides"]
+    assert (jazda["from"], jazda["to"]) == ("Na Grobli", "Wybrzeże Wyspiańskiego")
+    assert (jazda["sec"], jazda["arrival"]) == (polinka.RIDE_SEC, przeprawa["arrive"])
+    # Jak „jesteś przy nim" przy aucie: o której przy stacji i skąd pieszo.
+    assert jazda["walk_from"] == "Hydropolis"
+    assert jazda["at"] == 10 * 3600 + jazda["walk_sec"] <= wsiada
+    notatki = " ".join(przeprawa["tip"]["lines"])
+    assert "7:00–18:00" in notatki and "13:30–14:00" in notatki
+    assert "nie MPK" in notatki and f"{polinka.UPDATED:%d.%m.%Y}" in notatki
 
 
 def test_przeprawa_prowadzi_do_narysowanego_odjazdu():
@@ -102,8 +115,7 @@ def test_przeprawa_prowadzi_do_narysowanego_odjazdu():
     przeprawy = _przeprawy({"H": [(10 * 3600, 0)]},
                            {"K": [(10 * 3600 + 20 * 60, 11 * 3600, 1)]}, {"Z"})
 
-    opcja, = przeprawy[0]["options"]
-    assert (opcja["arrival"], opcja["vehicles"]) == (11 * 3600, 1)
+    assert przeprawy[0]["arrive"] == 11 * 3600
 
 
 def test_przeprawa_bez_dalszej_drogi_nie_istnieje():
@@ -127,8 +139,7 @@ def test_w_dzien_bez_kursowania_przepraw_nie_ma():
 def test_w_przerwie_czeka_sie_na_otwarcie():
     przeprawy = _przeprawy({"H": [(13 * 3600 + 29 * 60, 0)]}, {}, {"K"})
 
-    opcja, = przeprawy[0]["options"]
-    assert opcja["at"] == polinka.BREAK_SEC[1]
+    assert przeprawy[0]["stops_t"][0][2] == polinka.BREAK_SEC[1]
 
 
 # ----------------------------------------------- cała mapa (plan_flow) ----
@@ -156,13 +167,12 @@ def test_polinka_jako_skrot_obok_komunikacji(install_day):
     wynik = planner.plan_flow("Hydropolis", "Politechnika",
                               datetime(2026, 10, 19, 10, 0))
 
-    assert {s["num"] for s in wynik["segments"]} == {"146"}
+    assert sorted(s["num"] for s in wynik["segments"]) == ["146", "Polinka"]
     assert [r["num"] for j in wynik["journeys"] for r in j["legs"]
             if r["kind"] == "ride"] == ["146"]
-    przeprawa, = wynik["polinka"]
-    assert przeprawa["to"] == polinka.STATIONS[WW][0]
-    opcja, = przeprawa["options"]
-    assert opcja["vehicles"] == 0 and opcja["arrival"] < 10 * 3600 + 1920
+    przeprawa, = [s for s in wynik["segments"] if s["num"] == "Polinka"]
+    assert przeprawa["stops_n"][-1] == polinka.STATIONS[WW][0]
+    assert przeprawa["arrive"] < 10 * 3600 + 1920
 
 
 def test_polinka_nie_jezdzi_w_sobote(install_day):
@@ -170,7 +180,7 @@ def test_polinka_nie_jezdzi_w_sobote(install_day):
     wynik = planner.plan_flow("Hydropolis", "Politechnika",
                               datetime(2026, 10, 17, 10, 0))
 
-    assert wynik["segments"] and wynik["polinka"] == []
+    assert {s["num"] for s in wynik["segments"]} == {"146"}
 
 
 def _dzien_ze_zrzutu():
@@ -206,4 +216,4 @@ def test_zrzut_z_364_polinka_nie_jest_jedyna_opcja(install_day):
     assert {s["num"] for s in wynik["segments"]} == {"4", "810+81"}
     assert all(leg.get("mode") != "cable"
                for j in wynik["journeys"] for leg in j["legs"])
-    assert wynik["journeys"] and wynik["polinka"] == []
+    assert wynik["journeys"]

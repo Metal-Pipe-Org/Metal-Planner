@@ -2331,10 +2331,11 @@ def plan_flow_stages(start_query, end_query, when=None,
         # Polinka (zgłoszenie #364) nie jest kursem i niczego w mapie nie
         # przestawia - dokłada się do niej jako przeprawa, tą samą regułą co
         # rower. Rozkładu nie ma, stan na żywo też nie, więc idzie razem
-        # z mapą, a nie z danymi na żywo.
-        crossings = (polinka.map_crossings(
-            day, when.date() + timedelta(days=day_offset), drawn_arrivals,
-            drawn_onward, target_set) if on_map else [])
+        # z mapą, a nie z danymi na żywo. Rysuje się jak każdy kawałek.
+        if on_map:
+            seg_list = seg_list + polinka.map_crossings(
+                day, when.date() + timedelta(days=day_offset), drawn_arrivals,
+                drawn_onward, target_set)
 
         yield "map", {
             "start": start_name,
@@ -2382,9 +2383,6 @@ def plan_flow_stages(start_query, end_query, when=None,
             # Węzły przesiadkowe: po jednym na miejsce, z liniami, w które MAPA
             # pozwala tu wsiąść (patrz _transfer_nodes).
             "nodes": nodes,
-            # Przeprawy Polinką, które przeszły regułę sensu (patrz
-            # polinka.map_crossings) - front rysuje je kreską przerywaną.
-            "polinka": crossings,
             "journeys": map_journeys,
             # True tylko w trybie awaryjnym (patrz gałąź else wyżej): mapa jest
             # wtedy jedną trasą z jasnościami wpisanymi na sztywno, a nie

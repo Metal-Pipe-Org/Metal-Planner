@@ -46,17 +46,20 @@ STATIONS = {
     ID_PREFIX + "NG": ("Polinka (Na Grobli)", 51.1059580, 17.0533566),
 }
 
-# Treść dymka przy przeprawie na mapie: godziny otwarcia i data sprawdzenia
-# danych - jedyne miejsce, gdzie pasażer je zobaczy.
-INFO = (f"Godziny otwarcia: pn–pt 7:00–18:00, przerwa 13:30–14:00; "
-        f"w weekendy i święta nieczynna. Rozkładu nie ma — kabiny kursują "
-        f"w kółko, przeprawa trwa ok. 3 min. Osobny bilet, nie MPK. "
-        f"Dane wpisane ręcznie, stan na {UPDATED:%d.%m.%Y}.")
-
 OPEN_SEC = 7 * 3600
 CLOSE_SEC = 18 * 3600
 BREAK_SEC = (13 * 3600 + 30 * 60, 14 * 3600)
 RIDE_SEC = 3 * 60
+
+# Dymek przeprawy na mapie: to, czego pasażer nie zobaczy nigdzie indziej -
+# godziny otwarcia, bilet i data sprawdzenia danych. Wiersz po wierszu, jak
+# dodatkowe informacje w dymku auta (app.js: carTooltipHtml).
+NOTES = [
+    "Czynna pn–pt 7:00–18:00, przerwa 13:30–14:00",
+    "W weekendy i święta nieczynna",
+    "Osobny bilet, nie MPK",
+    f"Godziny wpisane ręcznie, stan na {UPDATED:%d.%m.%Y}",
+]
 
 
 def _easter(year):
@@ -118,9 +121,14 @@ def augment_day(data, day):
 
 
 def map_crossings(day, service_day, arrivals, onward, target_set):
-    """Przeprawy Polinką na mapie przepływów: [{from, to, path, info,
-    options: [{at, off, arrival, vehicles}, ...]}, ...] - po jednej na
-    kierunek, który przeszedł regułę sensu.
+    """Przeprawy Polinką na mapie przepływów - po jednej na kierunek, który
+    przeszedł regułę sensu - w kształcie narysowanego kawałka
+    (planner._finalize_segments), więc front rysuje je jak każdą linię:
+    plakietka „Polinka", kolor Polinki, godziny pod kursorem. Kawałek niesie
+    przeprawę, po której najwcześniej jest się w celu, a w `tip` - własny
+    dymek: każdy pokazany kierunek z godziną przy stacji, czasem przeprawy
+    i przyjazdem do celu (bez godzin samej przeprawy) i NOTES (patrz app.js:
+    segTipHtml).
 
     Ta sama reguła i te same dane co przy rowerze (bikes.map_places):
     `arrivals()` mówi, o której mapa dowozi w pobliże stacji,
@@ -128,9 +136,6 @@ def map_crossings(day, service_day, arrivals, onward, target_set):
     jest się wtedy w celu. Przeprawa, do której mapa nie dowozi albo po której
     nie ma w co wsiąść ani jak dojść do celu, nie istnieje. Inaczej niż przy
     rowerze niczego się tu nie wybiera - kierunki są dwa.
-
-    W opcji `at` to godzina wsiadania do kabiny, `off` - wysiadania, `arrival`
-    - w celu, `vehicles` - ile pojazdów poza samą Polinką.
     """
     if not runs_on(service_day):
         return []
@@ -141,7 +146,7 @@ def map_crossings(day, service_day, arrivals, onward, target_set):
     reach_cells = bikes._cells(day, reach)
     ahead = onward()
     ahead_cells = bikes._cells(day, set(ahead) | set(target_set))
-    out = []
+    out, rides = [], []
     for from_id, to_id in ((a, b) for a in STATIONS for b in STATIONS if a != b):
         from_name, from_lat, from_lon = STATIONS[from_id]
         to_name, to_lat, to_lon = STATIONS[to_id]
@@ -154,16 +159,37 @@ def map_crossings(day, service_day, arrivals, onward, target_set):
                                   {"lat": to_lat, "lon": to_lon}, day.walk_mps)
         options = bikes._journeys(before, RIDE_SEC, after)
         if options:
+            best = min(options, key=lambda o: (o["arrival"], o["bike_at"]))
+            ends = [[round(from_lat, 5), round(from_lon, 5)],
+                    [round(to_lat, 5), round(to_lon, 5)]]
             out.append({
-                "from": from_name,
-                "to": to_name,
-                "path": [[from_lat, from_lon], [to_lat, to_lon]],
-                "info": INFO,
-                "options": [{"at": o["bike_at"], "off": o["bike_at"] + RIDE_SEC,
-                             "arrival": o["arrival"], "vehicles": o["vehicles"]}
-                            for o in options],
+                "path": ends,
+                "num": "Polinka",
+                "kind": "cable",
+                "w": 1.0,
+                "stops_t": [[*ends[0], best["bike_at"]],
+                            [*ends[1], best["bike_at"] + RIDE_SEC]],
+                "stops_n": [from_name, to_name],
+                "arrive": best["arrival"],
             })
+            # O której jest się przy stacji i skąd się do niej dochodzi - jak
+            # „jesteś przy nim" w dymku auta (bikes._arrival_at, to samo co
+            # przy kropce roweru).
+            near = bikes._arrival_at(day, reach_cells, reach,
+                                     {"lat": from_lat, "lon": from_lon})
+            rides.append({"from": _side(from_name), "to": _side(to_name),
+                          "at": near["at"], "walk_sec": near["walk_sec"],
+                          "walk_from": near["from"], "sec": RIDE_SEC,
+                          "arrival": best["arrival"]})
+    tip = {"title": "Polinka", "rides": rides, "lines": NOTES}
+    for seg in out:
+        seg["tip"] = tip
     return out
+
+
+def _side(name):
+    """„Polinka (Na Grobli)" -> „Na Grobli" - strona rzeki, krótko do dymka."""
+    return name.partition("(")[2].rstrip(")")
 
 
 def stations_geo():
