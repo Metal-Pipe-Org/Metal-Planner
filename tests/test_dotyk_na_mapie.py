@@ -319,3 +319,55 @@ def test_na_komputerze_dalej_wskazuje_kursor(przegladarka, adres):
     assert page.inner_text(TABLICA) == przed
     context.close()
     assert not bledy
+
+
+def _na_pustej_mapie(przegladarka, adres, ekran):
+    context = przegladarka.new_context(locale="pl-PL", service_workers="block", **ekran)
+    page = context.new_page()
+    bledy = []
+    page.on("pageerror", lambda e: bledy.append(str(e)))
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector("#start")
+    page.wait_for_timeout(1500)       # słupki dochodzą z /api/stops
+    return context, page, bledy
+
+
+# Start postawiony punktem 3 px od środka przystanku ze słupkiem - tak go
+# widać na dużym oddaleniu, gdy przykrywa przystanek. Zwraca środek przystanku
+# w pikselach strony.
+USTAW_START_NA_PRZYSTANKU = """() => {
+    const {map} = window.plannerBridge;
+    let stop = null;
+    map.eachLayer(l => {
+        if (!stop && l instanceof L.CircleMarker && l.options.interactive !== false
+            && l.options.fillColor === '#42a5f5') stop = l;
+    });
+    map.setView(stop.getLatLng(), 18, {animate: false});
+    const at = map.latLngToContainerPoint(stop.getLatLng());
+    map.fire('click', {latlng: map.containerPointToLatLng(L.point(at.x + 3, at.y))});
+    const box = document.getElementById('map').getBoundingClientRect();
+    return {x: box.left + at.x, y: box.top + at.y};
+}"""
+
+
+@pytest.mark.parametrize("ekran,jak", [(TELEFON, "stuknij"), (KOMPUTER, "kliknij")])
+def test_start_bez_tablicy_nie_lapie_kliku(przegladarka, adres, ekran, jak):
+    """#363: start wskazany punktem na mapie nie ma tablicy odjazdów, więc
+    niczego nie otwiera i nie zasłania tego, co leży pod nim. Klik albo
+    stuknięcie przechodzi do przystanku pod startem - wcześniej start
+    połykał je jako najważniejszy cel."""
+    context, page, bledy = _na_pustej_mapie(przegladarka, adres, ekran)
+    punkt = page.evaluate(USTAW_START_NA_PRZYSTANKU)
+    assert page.input_value("#end") == ""
+    page.wait_for_timeout(600)
+    if jak == "kliknij":
+        page.mouse.click(punkt["x"], punkt["y"])
+    else:
+        page.touchscreen.tap(punkt["x"], punkt["y"])
+    page.wait_for_function("() => document.getElementById('end').value !== ''", timeout=3000)
+    assert "(" not in page.input_value("#end")      # przystanek, a nie punkt z mapy
+    context.close()
+    assert not bledy
