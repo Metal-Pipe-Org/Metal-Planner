@@ -5,11 +5,6 @@ powrocie z tła i przy kliknięciu zapisanego miejsca. Ręcznie wpisana zostaje.
 Zegar w teście jest podstawiony (page.clock) - „po godzinie" trwa ułamek sekundy.
 """
 
-import datetime
-
-import pytest
-
-import gtfs
 from test_odswiezanie_pozycji import (DATA_JS, TERAZ_JS, UKRYJ_JS, _minuty_temu,
                                       _otworz)
 from test_uklad_telefonu import (PUSTE_ZRODLA, TRASA, _odpowiedz, _wybierz,  # noqa: F401
