@@ -31,8 +31,7 @@ MODE_LABEL = {"tram": "Tramwaj", "bus": "Autobus", "train": "Pociąg",
 # "Pociąg" bierze się z pkp.augment_day, nie z routes.route_type - kolej nie
 # przechodzi przez GTFS, więc MODE_OF_TYPE wyżej nigdy jej nie zobaczy
 # (ten sam słownik, co planner.MODE_OF_LABEL - i z tego samego powodu).
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train",
-                 "Kolejka": "cable"}
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
 
 
 def _mode_of(route_type):
