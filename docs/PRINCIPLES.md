@@ -34,3 +34,11 @@ Gdzie odczytać nie ma z czego — marsz, rower, auto — szacunek wygląda na
 szacunek i myli się zawsze w bezpieczną stronę. Godziny przejazdu rowerem
 i dojazdu autem są domyślnie schowane; obok stoi odległość, która mówi to
 samo, nie udając rozkładu.
+
+## 3. Mechanizmy są tak proste, jak się da
+
+Każdy algorytm i mechanizm aplikacji ma być najprostszy, jaki działa: jedna ogólna reguła, którą da się wytłumaczyć jednym zdaniem i przewidzieć bez czytania kodu. Tak działa każde dobre oprogramowanie — prosty mechanizm łatwo zrozumieć, sprawdzić i zmienić, a stos wyjątków w końcu przestaje być zrozumiały nawet dla autora.
+
+Gdy reguła w jakiejś sytuacji daje mniej, niż się spodziewamy — na przykład pustą tablicę albo brak kropki — to jest jej wynik i tak zostaje. Jeśli wynik jest naprawdę zły, zmienia się regułę dla wszystkich przypadków naraz, a nie łata ten jeden.
+
+Zakazane: osobne ścieżki dla rzadkich sytuacji, zastępcze treści „żeby nie było pusto” i warunki dopisywane pod pojedynczy przykład.
