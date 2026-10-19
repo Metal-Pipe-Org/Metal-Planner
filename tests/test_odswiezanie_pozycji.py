@@ -1,7 +1,7 @@
-"""Pozycja ustawia godzinę „teraz" i da się ją odświeżać co 30 s (zgłoszenie #267).
+"""Pozycję da się odświeżać co 30 s (zgłoszenie #267).
 
-◎ nie tylko wpisuje start, ale też godzinę i datę „teraz" - tak jak przycisk
-„teraz". Drugie kliknięcie ◎, gdy start już jest moją pozycją, włącza (i
+◎ wpisuje sam start i nie dotyka godziny ani daty: nieruszana jest „teraz" przy
+każdym szukaniu, wpisana ręcznie zostaje. Drugie kliknięcie ◎, gdy start już jest moją pozycją, włącza (i
 gasi) odświeżanie: co 30 s ◎ czyta pozycję od nowa, ustawia „teraz" i
 przelicza trasę. Włączone ◎ świeci.
 Zegar w teście jest podstawiony (page.clock), więc nikt nie czeka pół minuty.
@@ -95,51 +95,33 @@ def _z_trasa_od_pozycji(page):
                            timeout=20000)
 
 
-def test_moja_pozycja_ustawia_godzine_teraz(przegladarka, adres):
+def test_moja_pozycja_nie_rusza_recznej_godziny_i_daty(przegladarka, adres):
     context, page, bledy = _otworz(przegladarka, adres)
-    page.evaluate(USTAW_JS, ["time", "03:33"])
-    page.evaluate(USTAW_JS, ["date", "2030-01-02"])
-    page.click("#locate")
-    page.wait_for_selector("#locate-offer", state="visible")
-    assert _minuty_temu(page, page.input_value("#time"))
-    assert page.input_value("#date") == page.evaluate(DATA_JS)
-    context.close()
-    assert not bledy
-
-
-def test_opcja_godziny_domyslnie_wlaczona(przegladarka, adres):
-    context, page, bledy = _otworz(przegladarka, adres)
-    assert page.is_checked("#locate-sets-time")
-    context.close()
-    assert not bledy
-
-
-def test_wylaczona_opcja_zostawia_godzine_i_date(przegladarka, adres):
-    context, page, bledy = _otworz(przegladarka, adres)
-    page.evaluate("document.getElementById('locate-sets-time').click()")
-    page.evaluate(USTAW_JS, ["time", "03:33"])
-    page.evaluate(USTAW_JS, ["date", "2030-01-02"])
+    page.fill("#time", "03:33")
+    page.evaluate("""() => { const d = document.getElementById('date');
+        d.value = '2030-01-02'; d.dispatchEvent(new Event('input')); }""")
     page.click("#locate")
     page.wait_for_selector("#locate-offer", state="visible")
     assert page.input_value("#start")
     assert page.input_value("#time") == "03:33"
     assert page.input_value("#date") == "2030-01-02"
 
-    # Odświeżanie przy wyłączonej opcji rusza tylko pozycję.
+    # Odświeżanie też odświeża tylko pozycję.
     _przelacz_odswiezanie(page)
     page.clock.run_for(30000)
     page.wait_for_timeout(500)
     assert page.input_value("#time") == "03:33"
+    assert page.input_value("#date") == "2030-01-02"
     context.close()
     assert not bledy
 
 
-def test_opcja_godziny_jest_pamietana(przegladarka, adres):
+def test_moja_pozycja_z_celem_szuka_od_teraz_gdy_godziny_nie_wpisano(przegladarka, adres):
     context, page, bledy = _otworz(przegladarka, adres)
-    page.evaluate("document.getElementById('locate-sets-time').click()")
-    page.reload()
-    page.wait_for_selector("#start")
-    assert not page.is_checked("#locate-sets-time")
+    page.evaluate(USTAW_JS, ["time", "03:33"])
+    _z_trasa_od_pozycji(page)
+    assert _minuty_temu(page, page.input_value("#time"))
+    assert page.input_value("#date") == page.evaluate(DATA_JS)
     context.close()
     assert not bledy
 

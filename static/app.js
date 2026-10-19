@@ -1058,9 +1058,6 @@ function useMyLocation(point) {
     const previous = sel.start;
     hideRecallOffer();
     sel.start = hereStart = point;
-    // Pozycja „teraz" bez godziny „teraz" liczyłaby trasę z miejsca, w którym
-    // ktoś stoi, na chwilę, w której już go tam nie ma (#267).
-    if (locateSetsTime.checked) setTimeNow();
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
@@ -1069,9 +1066,8 @@ function useMyLocation(point) {
     else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
 }
 
-// ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
-// z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
-const locateSetsTime = $('locate-sets-time');
+// Pozycja nie dotyka godziny: nieruszana jest „teraz" przy każdym szukaniu
+// (patrz queryParams, #267), a wpisanej ręcznie nikt nie ma kasować po cichu.
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
@@ -1136,7 +1132,6 @@ function refreshHere() {
                                  lon: position.coords.longitude};
         startInput.value = displayValue(sel.start);
         updatePointMarker('start', sel.start);
-        if (locateSetsTime.checked) setTimeNow();
         if (!endInput.value) return;
         const kept = selectedJourney === null ? null
             : journeySignature(journeys[selectedJourney]);
@@ -6138,7 +6133,7 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open', 'locate-sets-time'];
+                        'via-open'];
 
 function storedDevPrefs() {
     try {
@@ -6303,11 +6298,6 @@ zoneButton.checked = loadDevPrefs()['zone-button'] === true;
 zoneButton.addEventListener('change', () => {
     saveDevPref('zone-button', zoneButton.checked);
     refreshZoneLayer();
-});
-
-locateSetsTime.checked = loadDevPrefs()['locate-sets-time'] !== false;
-locateSetsTime.addEventListener('change', () => {
-    saveDevPref('locate-sets-time', locateSetsTime.checked);
 });
 
 startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
