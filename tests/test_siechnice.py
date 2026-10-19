@@ -10,11 +10,13 @@ import io
 import json
 import os
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+import gtfs
+import planner
 import siechnice
 import update_gtfs
 
@@ -179,6 +181,24 @@ def test_match_existing_stops_wybiera_najblizszy_z_imiennikow():
     assert siechnice.match_existing_stops(stops, existing) == {"d1": "near"}
 
 
+def test_match_existing_stops_laczy_slupek_w_tym_samym_punkcie_mimo_innej_nazwy():
+    # Zgłoszenie #348: gmina podpisuje wrocławski słupek po swojemu, ale
+    # współrzędne ma z niego.
+    stops = [{"designator": "d1", "name": "Karwińska NŻ", "lat": 51.082567, "lon": 17.076436}]
+    existing = [("5739", "Karwińska (Dawna Pralnia)", 51.08256801, 17.07643686)]
+
+    assert siechnice.match_existing_stops(stops, existing) == {"d1": "5739"}
+
+
+def test_match_existing_stops_nie_laczy_innej_nazwy_kilkanascie_metrow_dalej():
+    # Dwa różne wrocławskie przystanki potrafią stać 13,6 m od siebie (GAJ
+    # pętla i Morwowa) - inna nazwa na takim dystansie to inny przystanek.
+    stops = [{"designator": "d1", "name": "Morwowa", "lat": 51.0, "lon": 17.0}]
+    existing = [("1", "GAJ pętla", 51.000122, 17.0)]   # ~13,6 m na północ
+
+    assert siechnice.match_existing_stops(stops, existing) == {}
+
+
 # --- wiersze GTFS ----------------------------------------------------------
 
 WINDOW = ("20261001", "20261031")
@@ -328,6 +348,37 @@ def test_merge_into_nie_rusza_danych_wroclawskich(tmp_path):
         "SELECT count(*) FROM stop_times WHERE trip_id = 't1'").fetchone()[0] == 1
     assert db.execute("SELECT count(*) FROM calendar WHERE service_id = 's1'").fetchone()[0] == 1
     db.close()
+
+
+def test_tablica_wspolnego_slupka_zna_tramwaj_i_autobus_gminy(tmp_path, monkeypatch):
+    # Zgłoszenie #348: "Karwińska NŻ" z Siechnic stoi na wrocławskim słupku
+    # "Karwińska (Dawna Pralnia)". Były z tego dwa miejsca w jednym punkcie,
+    # a tablica pod kropką autobusu nie znała tramwaju, który tam staje.
+    db_path = _wroclaw_db(tmp_path)
+    db = sqlite3.connect(db_path)
+    db.execute("INSERT INTO stops VALUES ('5739', 'Karwińska (Dawna Pralnia)', 51.08256801, 17.07643686)")
+    db.execute("INSERT INTO stops VALUES ('1011', 'Na Niskich Łąkach', 51.0990, 17.0560)")
+    db.execute("INSERT INTO routes VALUES ('r5', '5', 'tramwaj', 0)")
+    db.execute("INSERT INTO trips VALUES ('t5', 'r5', 's1', 'KSIĘŻE MAŁE', '')")
+    db.execute("INSERT INTO stop_times VALUES ('t5', 0, '1011', 53400, 53400)")
+    db.execute("INSERT INTO stop_times VALUES ('t5', 1, '5739', 54000, 54000)")
+    db.execute("INSERT INTO stops VALUES ('26', 'KSIĘŻE MAŁE', 51.0700, 17.0900)")
+    db.execute("INSERT INTO stop_times VALUES ('t5', 2, '26', 54300, 54300)")
+    db.commit()
+    db.close()
+    stops = [
+        {"designator": "k", "name": "Karwińska NŻ", "lat": 51.082567, "lon": 17.076436},
+        {"designator": "z", "name": "Siechnice - Zacisze", "lat": 51.03, "lon": 17.14},
+    ]
+    trips = [{"trip_id": 1, "line": "810+81", "stops": [("k", 54300), ("z", 55500)]}]
+    siechnice.merge_into(db_path, stops, [(date(2026, 10, 5), trips)], log=lambda *_: None)
+
+    monkeypatch.setattr(gtfs, "DB_PATH", db_path)
+    monkeypatch.setattr(gtfs, "_day_cache", {})
+    board = planner.stop_timetable("Karwińska (Dawna Pralnia)", datetime(2026, 10, 5, 14, 30))
+
+    assert board["stop"] == "Karwińska (Dawna Pralnia)"
+    assert [d["num"] for d in board["departures"]] == ["5", "810+81"]
 
 
 # --- statyczna kopia -------------------------------------------------------
