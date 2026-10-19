@@ -6699,7 +6699,7 @@ const DEV_FOLD_IDS = [
     'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
-    'fold-layout', 'fold-siechnice', 'fold-version',
+    'fold-layout', 'fold-siechnice', 'fold-experiments', 'fold-version',
 ];
 
 function bindDevFolds() {
