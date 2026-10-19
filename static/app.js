@@ -1556,6 +1556,7 @@ let flowEndDots = null;     // kropki startu i celu (patrz endDots)
 let flowCarLayer = null;    // auta car-sharingu w zasięgu (patrz flowCarMarkers)
 let flowBikeLayer = null;   // rowery miejskie w zasięgu (patrz flowBikeMarkers)
 let flowBikeRideLayer = null;   // strzałki przejazdów - domyślnie tylko pod kursorem
+let flowPolinkaLayer = null;    // przeprawa Polinką (patrz polinkaLayers)
 let flowLineStopLayer = null;   // przystanki linii wskazanej kursorem (patrz showLineHighlight)
 let flowStopsLayer = null;      // przystanki narysowanych linii przy dużym przybliżeniu
 let stopNameLayer = null;       // nazwy przystanków przy dużym przybliżeniu (placeStopNames)
@@ -1573,6 +1574,7 @@ function clearFlow(cityLayers = true) {
     if (flowEndDots) { map.removeLayer(flowEndDots); flowEndDots = null; }
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
+    if (flowPolinkaLayer) { map.removeLayer(flowPolinkaLayer); flowPolinkaLayer = null; }
     clearBikeRides();
     hoveredStopDot = null;
     flowParts = [];
@@ -1646,6 +1648,8 @@ function drawFlow(flow, refit) {
 
     // Kolejność: blade tło -> białe otoczki -> jaskrawe korytarze.
     flowLayer = L.layerGroup([...faint, ...casings, ...bright]).addTo(map);
+    if (flowPolinkaLayer) map.removeLayer(flowPolinkaLayer);
+    flowPolinkaLayer = L.layerGroup(polinkaLayers(flow.polinka)).addTo(map);
     // Osobna warstwa, dodana PO korytarzach: kropka ma łapać kursor przed
     // linią, na której leży.
     // Rowery pod autami i pod kropkami: stacja bywa dokładnie przy węźle, a
@@ -1673,6 +1677,27 @@ function drawFlow(flow, refit) {
 
     const points = flow.segments.flatMap(s => s.path);
     fitTo([...points, ...endpointPoints()]);   // start i cel zawsze w kadrze
+}
+
+/** Przeprawa Polinką (planner: polinka.map_crossings) - kreska przerywana
+    w kolorze Polinki, bo przeprawa nie jest kursem, tylko przejściem jak
+    rower. Oba kierunki leżą na tej samej kresce, więc jest jedna, a dymek
+    mówi o każdym kierunku, który przeszedł regułę. */
+function polinkaLayers(crossings) {
+    if (!crossings || !crossings.length) return [];
+    const rows = ['<b>Polinka</b> — przeprawa, nie kurs'];
+    for (const c of crossings) {
+        for (const o of c.options) {
+            rows.push(`${esc(c.from)} → ${esc(c.to)}: ` +
+                      `${fmtClock(o.at)}–${fmtClock(o.off)}, w celu ${fmtClock(o.arrival)}`);
+        }
+    }
+    rows.push(esc(crossings[0].info));
+    const line = L.polyline(crossings[0].path.map(p => L.latLng(p)), {
+        color: LINE_COLORS.cable, weight: 4, opacity: 0.9, dashArray: '8,7',
+    }).bindTooltip(rows.join('<br>'), {sticky: true, opacity: 1});
+    line.tapRank = TAP_RANK.shared;
+    return [line];
 }
 
 // --- pasek nad mapą: ile w ogóle trwa ta podróż ----------------------------
@@ -2910,6 +2935,12 @@ function tapCandidates(at) {
         } else if (layer instanceof L.Marker && layer.getElement()) {
             const away = tapBoxAway(at, layer.getElement().getBoundingClientRect(), origin);
             if (away !== null) found.push({rank, away, layer: target});
+        } else if (layer instanceof L.Polyline && layer.tapRank) {
+            // Kreska z własnym dymkiem (przeprawa Polinką, patrz polinkaLayers).
+            const near = layer.closestLayerPoint(map.containerPointToLayerPoint(at));
+            if (near && near.distance <= TAP_TARGET_PX / 2) {
+                found.push({rank, away: near.distance, layer: target});
+            }
         }
     });
     // Linie mapy przepływów są nieinteraktywne (patrz drawFlow) - ich

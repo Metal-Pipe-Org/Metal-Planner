@@ -73,19 +73,9 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
 
 #### Trzecie źródło — `polinka.py` (wpisane ręcznie)
 
-Polinki — kolei gondolowej Politechniki Wrocławskiej nad Odrą (zgłoszenie
-#165) — nie ma w żadnym rozkładzie, a PWr publikuje tylko godziny otwarcia
-(pwr.edu.pl/polinka). Moduł trzyma je ręcznie, z datą sprawdzenia
-(`UPDATED`): pn–pt 7:00–18:00, przerwa 13:30–14:00, weekendy i święta
-nieczynna (święta ruchome liczone z daty Wielkanocy). Rozkładu w ścisłym
-sensie też nie ma — dwie kabiny jeżdżą wahadłowo — więc przejazdy są
-ostrożne: odjazd co 5 min w obie strony, jazda 3 min. `gtfs.load_day` dokleja
-stacje i przejazdy tuż po kolei, przed budowaniem miejsc, więc przejścia
-piesze do przystanków obok powstają same. Etykieta „Kolejka Polinka" daje
-plakietkę „Polinka" w rodzaju `cable` (granat PWr). Godziny otwarcia i data
-sprawdzenia danych są pod ikonką „i" (`polinka.INFO`) przy Polince na osi
-trasy i w tablicy odjazdów — bez notki na wierzchu. Stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w
-podpowiedziach nazw. Do trybu rozkładów Polinka nie trafia.
+Polinki — kolei gondolowej Politechniki Wrocławskiej nad Odrą (zgłoszenie #165) — nie ma w żadnym rozkładzie, a PWr publikuje tylko godziny otwarcia (pwr.edu.pl/polinka). Moduł trzyma je ręcznie, z datą sprawdzenia (`UPDATED`): pn–pt 7:00–18:00, przerwa 13:30–14:00, weekendy i święta nieczynna (święta ruchome liczone z daty Wielkanocy). `gtfs.load_day` dokleja tylko stacje, tuż po kolei, przed budowaniem miejsc, więc przejścia piesze do przystanków obok powstają same; stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w podpowiedziach nazw.
+
+Od zgłoszenia #364 Polinka nie jest kursem: w wyszukiwaniu jej nie ma, więc nie pojawia się na liście propozycji, w pasku z najszybszą trasą ani w tablicach odjazdów. Jako kurs z wymyślonym rozkładem wygrywała o minutę i zostawała na mapie jedyną trasą, a staje z powodu pogody i jeździ na osobny bilet. Jest przeprawą — przejściem o innym tempie, jak rower: kabiny jeżdżą w kółko, więc nie czeka się na odjazd, a przeprawa trwa 3 min w godzinach otwarcia (przed otwarciem i w przerwie czeka się na otwarcie, `polinka.boarding_at`). Dokłada się na gotową mapę tą samą regułą sensu co rower (`polinka.map_crossings`, na `_drawn_arrivals`/`_drawn_onward` i funkcjach z `bikes.py`): kierunek zostaje, gdy mapa dowozi w pobliże stacji, a po drugiej stronie zdąży się wsiąść w coś, co mapa rysuje, albo dojść do celu. Bez przełącznika — zawsze. Liczy się razem z mapą (etap `map`, pole `polinka`), bo nie zależy od danych na żywo. Front rysuje ją jedną kreską przerywaną w kolorze Polinki (`polinkaLayers`); dymek podaje godziny przeprawy i przyjazdu do celu dla każdego kierunku oraz godziny otwarcia z datą sprawdzenia (`polinka.INFO`).
 
 ### 2. Backend — Flask
 

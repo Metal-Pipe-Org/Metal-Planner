@@ -52,8 +52,7 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
    przy narysowanej mapie tylko linie z tej mapy.
 10. **Kolej.** Z kluczem `PKP_API_KEY` w wynikach pojawiają się pociągi PKP,
     w tej samej wyszukiwarce co tramwaje i autobusy.
-11. **Polinka.** Kolej gondolowa Politechniki nad Odrą jest w wyszukiwarce
-    i na mapie, z ręcznie wpisanymi godzinami (PWr nie publikuje rozkładu).
+11. **Polinka.** Kolej gondolowa Politechniki nad Odrą jest na mapie przeprawą przez rzekę, nie kursem: 3 minuty w godzinach otwarcia, wpisanych ręcznie (PWr nie publikuje rozkładu). Pokazuje się kreską przerywaną obok komunikacji tylko wtedy, gdy po drugiej stronie da się wsiąść w coś, co mapa rysuje, albo dojść do celu — nigdy nie jest jedyną opcją.
 12. **Aplikacja (PWA).** Na telefonie „Dodaj do ekranu głównego", na pulpicie
     ikona ⤓ w nagłówku. Raz obejrzana okolica mapy działa bez internetu;
     samo wyszukiwanie wymaga sieci. Instalację przeglądarki proponują tylko
