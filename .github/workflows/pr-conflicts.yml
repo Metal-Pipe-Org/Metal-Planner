@@ -1,12 +1,14 @@
-name: "PR-y: wstrzymanie recenzji przy konflikcie"
+name: "PR-y: ping przy nowym konflikcie z main"
 
 # Przy PR-ze w konflikcie z bazą GitHub nie uruchamia automatów PR-a — także
 # discord.yml dla wystawionej recenzji. Zatwierdzenie takiego PR-a przechodziło
-# więc po cichu (#245). Konflikt powstaje zwykle wtedy, gdy coś wjeżdża na
-# `main`, więc po każdym pushu do `main` sprawdzamy otwarte PR-y z prośbą
-# o recenzję. Te w konflikcie dostają ping autora na Discordzie, a prośby
-# o recenzję są zdejmowane: recenzent nie traci czasu na PR, który i tak się
-# jeszcze zmieni, a autor po rozwiązaniu konfliktu prosi o recenzję od nowa.
+# więc po cichu (#245), a zatwierdzony PR mógł utknąć w konflikcie bez wiedzy
+# autora. Konflikt powstaje zwykle wtedy, gdy coś wjeżdża na `main`, więc po
+# każdym pushu do `main` sprawdzamy wszystkie otwarte PR-y poza szkicami.
+# Autor dostaje ping na Discordzie tylko wtedy, gdy ten push wpędził jego PR
+# w konflikt — raz na konflikt. Czekające prośby o recenzję są przy tym
+# zdejmowane: recenzent nie traci czasu na PR, który i tak się jeszcze
+# zmieni, a autor po rozwiązaniu konfliktu prosi o recenzję od nowa.
 #
 # Logika siedzi w `.github/scripts/conflicts.sh`; z `DRY_RUN=1` da się ją
 # puścić na prawdziwych PR-ach tokenem tylko do odczytu.
@@ -14,8 +16,8 @@ on:
   push:
     branches: [main]
 
-# Dwa merge'e chwilę po sobie: drugi bieg czeka na pierwszy, zamiast drugi raz
-# pingować o PR, z którego pierwszy właśnie zdejmuje prośby.
+# Dwa merge'e chwilę po sobie: każdy bieg ocenia tylko swój push, więc nie
+# pingują podwójnie, ale po kolei wiadomości idą w kolejności merge'y.
 concurrency:
   group: pr-conflicts
   cancel-in-progress: false
@@ -23,11 +25,11 @@ concurrency:
 permissions:
   # Zdjęcie próśb o recenzję.
   pull-requests: write
-  # Tylko na skrypty z `main`.
+  # Skrypty z `main`, historia i głowy PR-ów do liczenia konfliktów.
   contents: read
 
 jobs:
-  hold-reviews:
+  ping-conflicts:
     if: github.repository == 'Metal-Pipe-Org/Metal-Planner'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -37,23 +39,31 @@ jobs:
       REPO: ${{ github.repository }}
 
     steps:
-      - name: Pobierz skrypty z main
+      # Pełna historia, bo konflikt liczymy od wspólnego przodka PR-a i `main`.
+      # Drzewo robocze tylko ze skryptami: kodu z PR-ów nigdy nie wypakowujemy,
+      # `merge-tree` czyta same obiekty. Repo jest publiczne, więc głowy PR-ów
+      # skrypt dociąga bez zapisanego tokena.
+      - name: Pobierz skrypty i historię main
         uses: actions/checkout@v6
         with:
           ref: main
           path: .discord
+          fetch-depth: 0
           sparse-checkout: .github/scripts
           persist-credentials: false
 
-      - name: Wstrzymaj recenzję PR-ów w konflikcie
+      - name: Pinguj o nowe konflikty
         # Prośby zdejmujemy naszym tokenem, a takich zdarzeń GitHub nie
         # przekazuje do discord.yml — na Discorda wysyłamy stąd.
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          GIT_REPO: .discord
         run: |
           set -euo pipefail
           source .discord/.github/scripts/discord.sh
           source .discord/.github/scripts/conflicts.sh
 
-          hold_conflicting_reviews
+          ping_new_conflicts

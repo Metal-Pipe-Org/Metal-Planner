@@ -19,6 +19,12 @@ z pustego zakładka „Mapa" wychodzi sama, a z wybranym zostaje na mapie
 z „Zamknij rozkład". Telefon w poziomie nie jest wspierany: zamiast układu
 widać zasłonę „Obróć telefon pionowo", a tablet i komputer jej nie widzą.
 
+Osobno rząd przycisków pod nazwą aplikacji (warstwy i moje miejsca) na
+komputerze - stoi tam w panelu stałej szerokości i każdy kolejny przycisk
+zjada jego zapas. Mierzony przy komplecie (z 🅿). Na telefonie warstwy i moje
+miejsca stoją w kolumnach na mapie (sprawdza je test nachodzenia nakładek),
+a w zakładkach z listą ich nie ma (#257).
+
 Trasa jest liczona na prawdziwej bazie rozkładów (o 12:00, żeby zawsze coś
 jechało); żywe źródła - pojazdy, auta, rowery - dostają puste listy, żeby
 wynik nie zależał od internetu. Leaflet i tak idzie z sieci.
@@ -91,7 +97,7 @@ UKLAD_JS = """async (mapView) => {
     }
 
     if (mapView) {
-        const overlays = ['#sidebar', '.layer-bar', '#time-headline', '#flow-panel',
+        const overlays = ['#sidebar', '.layer-bar', '.places-bar', '#time-headline', '#flow-panel',
                           '#tt-results', '#view-tabs']
             .map(sel => document.querySelector(sel)).filter(el => visible(el) && !el.hidden);
         for (let i = 0; i < overlays.length; i++) {
@@ -196,7 +202,10 @@ def przebieg(request, adres, przegladarka):
     page.fill("#time", "12:00")
     _wybierz(page, "#start", TRASA[0])
     _wybierz(page, "#end", TRASA[1])
-    if not page.is_disabled("#search") and page.is_visible("#search"):
+    # Wybór celu z podpowiedzi sam odpala wyszukiwanie - wtedy „Szukaj" kręci
+    # się aż do końca, a formularz zwija się przy pierwszym wyniku.
+    if not page.evaluate("document.body.classList.contains('searching')") \
+            and page.is_visible("#search"):
         page.click("#search")
     page.wait_for_selector("#time-headline:not([hidden])", timeout=20000)
     page.wait_for_timeout(1500)       # tablica przystanku startowego dochodzi osobno
@@ -271,6 +280,60 @@ def test_wybrany_rozklad_zostaje_na_mapie(przebieg):
     „Zamknij rozkład"."""
     p = przebieg["z_wybranego"]
     assert p["wciaz_rozklad"] and p["zamknij"], p
+
+
+# Rząd przycisków pod nazwą aplikacji na komputerze: wszystkie w jednym rzędzie
+# i w środku paska (bez wjeżdżania w jego wewnętrzny margines). Na telefonie
+# rzędu nie ma - warstwy i miejsca stoją na mapie albo znikają (#257).
+RZAD_JS = """async () => {
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const EPS = 0.5;
+    const bar = document.querySelector('.app-bar');
+    const box = bar.getBoundingClientRect();
+    const s = getComputedStyle(bar);
+    const left = box.left + parseFloat(s.paddingLeft);
+    const right = box.right - parseFloat(s.paddingRight);
+    const buttons = [...document.querySelectorAll('.app-tools button')]
+        .filter(b => b.getClientRects().length);
+    const problems = [];
+    const tops = new Set(buttons.map(b => Math.round(b.getBoundingClientRect().top)));
+    if (tops.size !== 1) problems.push('przyciski w ' + tops.size + ' rzędach');
+    for (const b of buttons) {
+        const r = b.getBoundingClientRect();
+        const name = b.id || b.getAttribute('aria-label');
+        if (r.left < left - EPS || r.right > right + EPS) {
+            problems.push(name + ' wychodzi poza pasek o '
+                          + Math.round(Math.max(left - r.left, r.right - right)) + ' px');
+        }
+        if (r.width < 30 - EPS) problems.push(name + ' ma tylko ' + Math.round(r.width) + ' px');
+    }
+    return {count: buttons.length, problems};
+}"""
+
+
+def test_pasek_przyciskow_w_jednym_rzedzie(adres, przegladarka):
+    """Komplet: pięć warstw (z 🅿, który dokłada się przy zapalonych autach
+    i włączonym przycisku strefy) i trzy moje miejsca - w panelu stałej
+    szerokości, więc każdy kolejny przycisk zjada zapas rzędu."""
+    context = przegladarka.new_context(viewport={"width": 1280, "height": 800},
+                                       locale="pl-PL", service_workers="block")
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector(".place-button")
+    page.evaluate("""() => {
+        const zone = document.getElementById('zone-button');
+        zone.checked = true;
+        zone.dispatchEvent(new Event('change'));
+        const cars = document.getElementById('cars-toggle');
+        if (!cars.classList.contains('active')) cars.click();
+    }""")
+    pasek = page.evaluate(RZAD_JS)
+    context.close()
+    assert pasek["count"] == 8, pasek
+    assert not pasek["problems"], pasek["problems"]
 
 
 def test_bez_bledow_javascriptu(przebieg):

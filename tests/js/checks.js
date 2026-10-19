@@ -831,28 +831,38 @@ checks.okienko_startuje_od_przystanku_startowego = (() => {
     ];
     const bezFlagi = nodes.map(n => ({...n, start: undefined}));
 
+    // Nowa relacja: poprzednia mapa zdjęta (clearFlow), nowa rysowana.
     app.dotOpts.tipPanel = false;
-    app.flowPanel.hidden = true;
+    app.clearFlow();
     app.drawFlow({...FLOW_FIXTURE, nodes}, false);
     const przyWylaczonym = app.flowPanel.hidden;
 
     app.dotOpts.tipPanel = true;
+    app.clearFlow();
     app.drawFlow({...FLOW_FIXTURE, nodes}, false);
     const przyWlaczonym = app.flowPanel.hidden;
     const tresc = String(app.flowPanelBody.innerHTML || '');
 
+    // Przerysowanie tej samej relacji (suwak, „Pokaż więcej", kolejny etap
+    // wyszukiwania) zostawia w okienku to, co w nim jest (#229).
+    app.flowPanelBody.innerHTML = 'tablica innego przystanku';
+    app.drawFlow({...FLOW_FIXTURE, nodes}, false);
+    const poPrzerysowaniu = String(app.flowPanelBody.innerHTML);
+
     // Odpowiedź bez oznaczonego startu nie ma czego pokazać - okienko milczy.
-    app.flowPanel.hidden = true;
+    app.clearFlow();
     app.drawFlow({...FLOW_FIXTURE, nodes: bezFlagi}, false);
     const bezStartu = app.flowPanel.hidden;
 
     app.dotOpts.tipPanel = bylPanel;
     return {
         ok: przyWylaczonym === true && przyWlaczonym === false
-            && tresc.length > 0 && bezStartu === true,
+            && tresc.length > 0 && bezStartu === true
+            && poPrzerysowaniu === 'tablica innego przystanku',
         przy_wylaczonym_schowane: przyWylaczonym,
         przy_wlaczonym_schowane: przyWlaczonym,
         bez_startu_schowane: bezStartu,
+        po_przerysowaniu: poPrzerysowaniu.slice(0, 60),
         tresc: tresc.slice(0, 60),
     };
 })();
@@ -1510,6 +1520,41 @@ checks.auta_dostawczaki_leca_do_serwera = (() => {
 })();
 
 
+/* Tryb względny przy starcie z pokładu (zgłoszenie #231): pojazd spóźniony
+   i pojazd, który według rozkładu dopiero przyjedzie, to dwa różne zdania -
+   pierwsze tłumaczy przesunięte godziny, drugie każe sprawdzić wybór.
+   Kurs o czasie (late_sec = 0) nie mówi nic. */
+checks.tryb_wzgledny_mowi_o_rozjezdzie = (() => {
+    const warn = document.getElementById('ob-warn');
+    const text = document.getElementById('ob-warn-text');
+    const kurs = {num: '134', stop_name: 'Karwińska', at: '16:00'};
+    app.warnOnboardRide({...kurs, late_sec: 720, at_sched: '15:48'});
+    const spozniony = text.innerHTML, widacSpozniony = !warn.hidden;
+    app.warnOnboardRide({...kurs, late_sec: -1680, at_sched: '16:28'});
+    const przed = text.innerHTML, widacPrzed = !warn.hidden;
+    app.warnOnboardRide({...kurs, late_sec: 0, at_sched: '16:00'});
+    const naCzas = !warn.hidden;
+    return {
+        ok: widacSpozniony && widacPrzed && !naCzas
+            && spozniony.includes('prawdopodobnie spóźniony ~12 min (rozkład <b>15:48</b>)')
+            && !spozniony.includes('Karwińska')
+            && spozniony.includes('przesunięte')
+            && przed.includes('dopiero o <b>16:28</b>') && przed.includes('za 28 min')
+            && przed.includes('Sprawdź linię'),
+        spozniony, przed, naCzas,
+    };
+})();
+
+
+/* Numer pociągu w polu „linia" (#167): sam albo z przewoźnikiem - oba
+   to pociąg; za krótki albo z czymś po cyfrach - nie. */
+checks.numer_pociagu_z_przewoznikiem_i_bez = (() => {
+    const tryby = ['60221', 'KD 60221', 'kd60221', '12', 'KD 602x', '']
+        .map(num => app.obLineMode(num));
+    return {ok: tryby.join(',') === 'train,train,train,,,', tryby};
+})();
+
+
 /* Zgaszony 🚗 zdejmuje z listy propozycje z Traficarem (zgłoszenie #163) -
    składa je serwer, więc zgaszenie idzie w zapytaniu. Zapalony nie dokłada
    nic: odpowiedź jest taka jak dotąd. */
@@ -1523,6 +1568,14 @@ checks.auto_gaszone_leci_do_serwera = (() => {
         ok: !zapalone.includes('traficar=') && zgaszone.includes('traficar=0'),
         zapalone, zgaszone,
     };
+})();
+
+
+/* Próg trybu względnego (suwak w ⚙, #231) leci razem z wyborem pojazdu. */
+checks.prog_trybu_wzglednego_leci_do_serwera = (() => {
+    document.getElementById('onboard-slack').value = '5';
+    const zwykle = app.queryParams().toString();
+    return {ok: !zwykle.includes('onboard_slack_sec'), zwykle};
 })();
 
 
@@ -1706,6 +1759,25 @@ checks.przystanki_po_drodze_w_osi = (() => {
     };
 })();
 
+/* Peron i tor pociągu (zgłoszenie #271) stoją przy nazwie stacji wsiadania
+   i wysiadania - nie przy mijanych, gdzie nic się nie robi. */
+checks.peron_przy_wsiadaniu_i_wysiadaniu = (() => {
+    const pociag = {...VIA_LEGS[0], mode: 'train', line: 'Pociąg IC 5412',
+                    num: 'IC 5412', from_platform: {platform: '2', track: '4'},
+                    to_platform: {platform: 'BUS'},
+                    via: [{name: 'Oława', t: '15:32', platform: {platform: '9'}}]};
+    const html = app.detailHtml({departure: '15:15', arrival: '15:40', legs: [pociag]});
+    const perony = html.match(/<span class="platform">[^<]*</g) || [];
+    return {
+        ok: perony.length === 2
+            && perony[0].endsWith('>peron 2, tor 4<')
+            && perony[1].endsWith('>peron BUS<')
+            && /Sosnowiecka<span class="platform">/.test(html)
+            && !html.includes('peron 9'),
+        perony,
+    };
+})();
+
 /* Pojazd, w którym się już siedzi (zgłoszenie #224): na karcie propozycji
    jego plakietka ma obwódkę, a każda inna plakietka - nie. „134 › 5" bez
    tego nie mówi, czy w 134 się wsiada, czy jedzie się nią dalej. */
@@ -1720,6 +1792,50 @@ checks.obecny_pojazd_na_karcie = (() => {
             && wyroznione(zPokladu)[0].endsWith('>134<')
             && wyroznione(zPokladu)[0].includes('jedziesz tym pojazdem'),
         zwykle: wyroznione(zwykle), zPokladu: wyroznione(zPokladu),
+    };
+})();
+
+
+/* Zegar przy pociągu w tablicy odjazdów (#71): zielony o czasie, czerwony
+   spóźniony, a bez danych - nic. */
+checks.zegar_opoznienia_w_tablicy = (() => {
+    const at = Date.now();
+    app.boardDelays.set('PKP:1', {at, stops: {'Wrocław Główny': {arr: null, dep: 0}}});
+    app.boardDelays.set('PKP:2', {at, stops: {'Wrocław Główny': {arr: null, dep: 9}}});
+    app.boardDelays.set('PKP:3', {at, stops: null});
+    const [naCzas, spozniony, brak, nieznany] = ['PKP:1', 'PKP:2', 'PKP:3', 'PKP:4']
+        .map(trip => app.boardLiveHtml(trip, 'Wrocław Główny'));
+    app.boardDelays.clear();
+    return {
+        ok: naCzas.includes('tt-clock ontime') && spozniony.includes('tt-clock late')
+            && spozniony.includes('Spóźniony 9 min') && brak === '' && nieznany === '',
+        naCzas, spozniony,
+    };
+})();
+
+
+/* Opóźnienie pociągu (zgłoszenie #71): przy stacji wysiadania planowa
+   godzina przekreślona, rzeczywista i „+7 min", a gdy przez nie nie zdąży
+   się na następny przejazd - ostrzeżenie w osi. */
+checks.opoznienie_pociagu_w_osi = (() => {
+    const pociag = {...VIA_LEGS[0], mode: 'train', num: 'KD 1', trip: 'PKP:1:1',
+                    to: 'Bardzka', to_time: '16:06', arr_sec: 57960, via: []};
+    const legs = [pociag, VIA_LEGS[1], {...VIA_LEGS[2], dep_sec: 58500}];
+    app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 7, dep: 7}}};
+    const html = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 1, dep: 1}}};
+    const lekko = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    app.trainDelays = {'PKP:1:1': {Bardzka: {arr: 0, dep: 0}}};
+    const naCzas = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    app.trainDelays = {};
+    const bezDanych = app.detailHtml({departure: '15:53', arrival: '16:16', legs});
+    return {
+        ok: html.includes('<s>16:06</s>16:13') && html.includes('+7 min')
+            && html.includes('tl-warn') && html.includes('nie zdążyć na 5')
+            && !lekko.includes('tl-warn')
+            && naCzas.includes('o czasie') && !naCzas.includes('class="delay"')
+            && !bezDanych.includes('o czasie'),
+        html: html.slice(0, 300),
     };
 })();
 
@@ -1937,6 +2053,57 @@ checks.mikser_wyszukiwanie_przed_nagraniem_gra_po_pobraniu = (() => {
     return {ok: przedPobraniem === 0 && poPobraniu === 1
                 && audioLog.zagrane === start.elementy,
             przedPobraniem, poPobraniu};
+})();
+
+/* Etapy wyszukiwania (zgłoszenie #229). Pierwszy to sam pasek - poprzednia
+   mapa schodzi, a nowej i listy jeszcze nie ma. Przy przerysowaniu tej samej
+   relacji („Pokaż więcej", suwaki) auta nie znikają razem ze starą mapą:
+   zostają, aż przyjdzie etap z nowymi, i wtedy podmieniają się naraz. */
+checks.etapy_pasek_najpierw_auta_bez_przerwy = (() => {
+    const pasek = () => document.getElementById('time-headline').innerHTML;
+    const auto = (plate, lat) => ({
+        lat, lon: 17.02, plate, model: 'Renault Clio', where: '', fuel: 80,
+        range: 300, ogarniam: [], at: 56100, walk_sec: 420, walk_m: 300,
+        from: 'Kamienna', to_dest_m: 2744,
+    });
+    const {cars, cars_dest_in_zone, bike_places, bike_places_live, ...bezAut} = FLOW_FIXTURE;
+    const fastest = {best_arrival: FLOW_FIXTURE.best_arrival, best_sec: FLOW_FIXTURE.best_sec,
+                     fastest: FLOW_FIXTURE.fastest, starts: FLOW_FIXTURE.starts,
+                     ride_sec: FLOW_FIXTURE.ride_sec};
+    const znaczniki = () => (app.flowCarLayer ? app.flowCarLayer.getLayers().length : 0);
+
+    app.renderPlan({...FLOW_FIXTURE, cars: [auto('A', 51.09)]}, false);
+
+    // Nowe wyszukiwanie: pierwszy etap to sam pasek.
+    const szukanie = {search: {found: false, mapped: false}, acc: {}};
+    app.applyStage(szukanie, {stage: 'fastest', ...fastest});
+    const poPierwszym = {mapa: !!app.flowLayer, auta: znaczniki(),
+                         pasek: pasek().includes('headline-best'),
+                         zakres: pasek().includes('headline-limit')};
+    app.applyStage(szukanie, {stage: 'map', ...bezAut, more: 0});
+    const poMapie = {mapa: !!app.flowLayer, auta: znaczniki()};
+    app.applyStage(szukanie, {stage: 'extras', cars: [auto('A', 51.09)],
+                              cars_dest_in_zone: null, bike_places: [], bike_places_live: true});
+    const poAutach = znaczniki();
+
+    // „Pokaż więcej": gęstsza mapa przychodzi bez aut - stare zostają.
+    const wiecej = {search: null, acc: {}};
+    app.applyStage(wiecej, {stage: 'fastest', ...fastest});
+    app.applyStage(wiecej, {stage: 'map', ...bezAut, more: 1});
+    const poGestszejMapie = znaczniki();
+    app.applyStage(wiecej, {stage: 'extras', cars: [auto('A', 51.09), auto('B', 51.1)],
+                            cars_dest_in_zone: null, bike_places: [], bike_places_live: true});
+    const poNowychAutach = znaczniki();
+
+    app.clearFlow();
+    app.drawFlow(FLOW_FIXTURE, false);   // stan z fixture'a wraca na miejsce
+    return {
+        ok: !poPierwszym.mapa && poPierwszym.auta === 0 && poPierwszym.pasek
+            && !poPierwszym.zakres
+            && poMapie.mapa && poMapie.auta === 0 && poAutach === 1
+            && poGestszejMapie === 1 && poNowychAutach === 2,
+        poPierwszym, poMapie, poAutach, poGestszejMapie, poNowychAutach,
+    };
 })();
 
 JSON.stringify(checks);

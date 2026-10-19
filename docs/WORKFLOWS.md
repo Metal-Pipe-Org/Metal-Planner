@@ -15,7 +15,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `issue-triage.yml` | Etykieta `external` dla autorów spoza zespołu. |
 | `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. Zablokowanych nie rusza. |
 | `discord.yml` | Kanał repo na Discordzie z prawdziwymi pingami. |
-| `pr-conflicts.yml` | Po pushu do `main`: otwarte PR-y z prośbą o recenzję, które mają konflikt z `main`, tracą prośby o recenzję, a autor dostaje ping na Discordzie. Logika w `.github/scripts/conflicts.sh`. |
+| `pr-conflicts.yml` | Po pushu do `main`: autor otwartego PR-a (poza szkicami), który ten push wpędził w konflikt z `main`, dostaje ping na Discordzie — raz na konflikt, nie po każdym kolejnym merge'u. Czekające prośby o recenzję takiego PR-a są zdejmowane. Logika w `.github/scripts/conflicts.sh`. |
 | `daily-digest.yml` | Co rano na Discordzie: postęp z wczoraj po karcie na osobę, potem karta „Ogólnie” z tym, co do zrobienia, i liczbami. |
 | `tests.yml` | Testy, odpalane wyłącznie ręcznie. |
 
@@ -30,7 +30,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
    (`GITHUB_TOKEN`), GitHub innym workflow w ogóle nie mówi. Każdy nowy ważny
    komentarz albo akcja bota musi więc sama wysłać wiadomość przez
    `.github/scripts/discord.sh` — tak jak robią to dziś ocena Claude'a, solver,
-   stale, zapasowe zamykanie i wstrzymanie recenzji przy konflikcie. Zasługa
+   stale, zapasowe zamykanie i ping o nowy konflikt z `main`. Zasługa
    za zgłoszenie zamknięte naszym tokenem nie idzie na bota: od wyłączenia
    automatycznego zamykania w ustawieniach repo (#228) zamyka je zapasowy
    krok, a GitHub nie zapisuje wtedy PR-a jako zamykającego. Wiadomość

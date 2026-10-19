@@ -194,6 +194,8 @@ zegar pauzuje, gdy karta jest ukryta (wznawia się po powrocie); tick pomija
 się też w trakcie ręcznego szukania i edycji pola godziny. Brak sygnału w tle
 jest cichy: zostaje poprzedni wynik.
 
+Cel wybrany przy **pustym** „skąd” znaczy „jadę stąd” (#275): aplikacja sama robi to samo co ◎ — pyta o pozycję, w razie czego „Stoisz na przystanku…?”, i od razu szuka. Gdy lokalizacji nie ma (odmowa, brak sygnału, brak API), zostaje zwykły komunikat ◎, a kursor przechodzi do „skąd”. Gotowego startu nic nie nadpisuje, a w trybie z pokładu pojazdu tego nie ma.
+
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
 - na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;
@@ -251,6 +253,8 @@ kadrować także wtedy, gdy patrzymy na listę (przy `display: none` dostałby
 zerowy kontener i policzył bezsensowny kadr); po prostu jej nie widać. Po znalezieniu połączeń widok przeskakuje na listę, a ✕ wraca na
 mapę, bo tam wybiera się nową relację. Zakładki zastępują ☰ (dwa mechanizmy
 chowania panelu naraz tylko by myliły).
+
+**Mapa pod palcem (#274).** Na dotyku stuknięcia nie rozstrzyga Leaflet (on daje klik temu, co leży dokładnie pod punktem i jest narysowane na wierzchu), tylko `tapMap` w app.js: zbiera wszystko w zasięgu palca — kropki z celem 44 px, znaki DOM (pojazdy, numery w grupkach) powiększone do 44 px, linie z marginesem `FLOW_TAP_SLACK_PX` — i wybiera według `TAP_RANK` (start i cel, przesiadki, auta/rowery/Traficar, przystanki, pojazdy na żywo, numery, linie; przygaszone słupki miasta są tłem za liniami, bez powiększenia), a przy równej randze bliższe. Zwycięzca dostaje to samo co od Leafleta — najechanie i klik (`map._fireDOMEvent`) — więc robi to, co robił. Rangę niesie warstwa (`tapRank`, przy słupkach miasta liczona ze stylu, `tapVia` przy nieinteraktywnej kropce celu). Czy wskazuje palec, rozstrzyga ostatnie `pointerdown`, a nie szerokość ekranu; udawane zdarzenia myszy po stuknięciu nie dochodzą wtedy do Leafleta wcale. Mysz idzie dalej starą drogą. `#map` ma wyłączone zaznaczanie tekstu i menu przytrzymania (`-webkit-touch-callout`), żeby przytrzymanie nie wyciągało „Kopiuj / Przetłumacz".
 
 Trzecia zakładka, „Rozkład", to ta sama lista w **drugim trybie panelu**
 (rozkłady jazdy — patrz niżej) — na telefonie jedyne wejście w ten tryb, bo
@@ -808,31 +812,39 @@ siedzi, jest jednym z pojazdów podróży (wysiadka i przesiadka to dwa), a
 godzina wyjścia nie jest wartością — pasażer już jedzie, więc każda podróż
 wychodzi o tej samej sekundzie i rozstrzyga sam przyjazd.
 
-Zostają więc dwie rzeczy do zrobienia:
+Zostają więc trzy rzeczy do zrobienia:
 
 1. **Rozpoznanie kursu** (`find_ride`) — z trójki linia + kierunek + przystanek
    ten kurs, który z tego słupka rusza najbliżej godziny pytania — w przód
    ALBO WSTECZ (zgłoszenie #231): kurs, który według rozkładu minął przystanek
    5 min temu, gdy następny jest za pół godziny, to najpewniej spóźniony
-   pojazd, w którym pasażer siedzi. Spóźnienia nie znamy (danych na żywo
-   ten wybór nie używa), więc mapa liczy się od takiego kursu według jego
-   rozkładu, jakby jechał o czasie. Idzie
+   pojazd, w którym pasażer siedzi. Idzie
    indeksem odjazdów dnia (`gtfs.departures_between`), więc kosztuje
    przeszukanie binarne; kurs KOŃCZĄCY bieg na wskazanym przystanku odjazdu nie
    ma wcale, więc „jadę na pętlę, co dalej" znajduje się osobną, wolniejszą
    drogą — po przyjeździe, w oknie połączeń. Nierozpoznany kurs to komunikat
    („linia X nie przejeżdża już dziś przez Y"), a nie pusta lista: pomyłka
-   w którymś z trzech pól ma wyglądać jak pomyłka. Gdy rozkładowa godzina
-   kursu przy wskazanym przystanku odjeżdża od godziny pytania o więcej niż
-   3 min (`OFF_SCHEDULE_SLACK_SEC`, ten sam zapas w obie strony — do tylu
-   kurs uchodzi za punktualny), nad polem celu staje ostrzeżenie: dla kursu
-   przyszłego (`not_yet`) „134 według rozkładu będzie na przystanku …
-   o 16:28. Godziny na mapie liczą się od 16:28, a nie od teraz.", dla
-   przeszłego (`late`) „134 według rozkładu była na przystanku … o 15:55.
-   Godziny na mapie liczą się od 15:55, a nie od teraz."
-   Oba ostrzeżenia to nie pytania: mały „×" w rogu tylko je chowa, znikają też samo przy zmianie linii, kierunku albo przystanku,
+   w którymś z trzech pól ma wyglądać jak pomyłka.
+2. **Tryb względny** (zgłoszenie #231). Pasażer jest w pojeździe TERAZ, więc
+   gdy rozkładowa godzina kursu przy wskazanym przystanku odjeżdża od godziny
+   pytania o więcej niż 3 min (`OFF_SCHEDULE_SLACK_SEC`, ten sam zapas w obie
+   strony; suwak w ⚙, sekcja „Jestem w pojeździe"), pojazd jedzie od teraz:
+   cały jego dalszy kurs przesuwa się o różnicę (`late_sec`), z tymi samymi
+   odstępami między przystankami, a wszystkie inne pojazdy zostają przy
+   rozkładzie. Plan dostaje na to kopię dnia z tym jednym kursem przesuniętym
+   (`gtfs.with_shifted_trip`). Rozkładowy egzemplarz kursu z niej znika: to
+   ten sam pojazd, a przesiadka w niego „o czasie" dalej na trasie byłaby
+   przesiadką w pojazd, którego tam wtedy nie będzie. Indeksów dnia kopia nie
+   buduje od nowa (`gtfs._ShiftedTripIndex`), więc kosztuje pojedyncze
+   milisekundy. Nad polem celu staje wtedy żółty komunikat z dwóch krótkich
+   linijek z ikonami — fakt i co z nim zrobić: przy spóźnieniu „🕒 134
+   prawdopodobnie spóźniony ~12 min (rozkład 15:48) / ⏩ Godziny pojazdu przesunięte", przy
+   kursie, który według rozkładu dopiero przyjedzie, „⚠️ 134 na Karwińska
+   dopiero o 16:28 (za 28 min) / 🔎 Sprawdź linię i przystanek". Pełne zdanie
+   jest w dymku i dla czytnika ekranu. To nie pytanie: mały „×" w rogu tylko
+   je chowa, znika też samo przy zmianie linii, kierunku albo przystanku,
    a wybór pojazdu poprawia się przez „zmień".
-2. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
+3. **Opis wysiadki** (`mark_journeys`) — każda propozycja zaczyna się na tym
    samym słupku, więc przypadki są dokładnie dwa: pierwszy etap jedzie NASZYM
    kursem (siedzimy dalej, wysiadka `stops` przystanków dalej) albo czymkolwiek
    innym (wysiadka na najbliższym przystanku, `stops` = 0). „Nasz kurs"
@@ -847,6 +859,21 @@ tym pojazdem" i wyróżniony przystanek wysiadania. Nad listą stoi nagłówek �
 w stronę BARTOSZOWICE — najbliższy przystanek Świeradowska o 13:29": pomyłka
 w kierunku albo przystanku daje przecież wyniki wyglądające równie sensownie,
 tylko dla kogoś innego, więc musi być gdzie sprawdzić, co serwer rozpoznał.
+
+**Pociągi** (zgłoszenie #167) wybiera się w tym samym polu co linię — po
+numerze, bo tylko on stoi na bilecie i tablicy. Podpowiedzi idą z serwera
+(`/api/onboard/trains`, `onboard.trains`): wszystkie pociągi wybranego dnia,
+których numer zaczyna się od wpisanych cyfr (od dwóch) — pełna lista to ok.
+7 tys. pozycji, za dużo, żeby jechała w stronie jak lista linii. O rodzaju
+rozstrzyga wybrany wiersz podpowiedzi („113" bywa i autobusem), a bez wyboru
+— linia z rozkładu albo, gdy jej nie ma, same cyfry (co najmniej trzy).
+Kierunek to stacja docelowa, a lista stacji to przebieg pociągu z dnia
+(`onboard._train_directions`, tylko stacje ze współrzędnymi). `find_ride`
+porównuje u pociągu same cyfry numeru, więc „64402" i „KD 64402" trafiają
+w ten sam kurs; tryb względny działa tak samo jak dla autobusu. Numer bywa
+w ciągu doby wspólny dla dwóch przewoźników (IC 1130 i WKD 1130) — wtedy kurs
+rozstrzyga wybrany kierunek, a wpisany przewoźnik („KD 602") zawęża tylko
+listę podpowiedzi, w rozpoznaniu kursu go nie ma.
 
 Czego ten tryb świadomie NIE robi: nie szuka w kolejnych dobach (pytanie
 dotyczy tego przejazdu, a on kończy się dzisiaj) i nie zapamiętuje się między
@@ -907,9 +934,17 @@ Jak mapa wybiera, co narysować (wartości podróży, tolerancja, reguła numer�
   to gwarancja.
 - Kafelki mapy i biblioteka Leaflet ładowane z internetu (CDN).
 - Połączenia kolejowe (`pkp.py`) obejmują przesiadki - między pociągami też,
-  bo CSA widzi jedną tablicę połączeń (patrz historia commitów `pkp.py`) - ale bez
-  opóźnień na żywo (API ma je w `/operations`, ale wyszukiwarka czyta tylko
-  rozkład planowy z `/schedules`). Wymaga skonfigurowanego `PKP_API_KEY` —
+  bo CSA widzi jedną tablicę połączeń (patrz historia commitów `pkp.py`) - ale liczone
+  z rozkładu planowego (`/schedules`). Opóźnienia na żywo (zgłoszenie #71,
+  `pkp_live.py`) tylko dopisują się na osi trasy, PO narysowaniu wyniku:
+  pytamy `/operations/train/…` pociąg po pociągu (cały kraj to 6 stron po
+  ~4,8 MB, za dużo na limit API 500/h), z buforem 60 s na pociąg i własnymi
+  sufitami 400 zapytań/h i 4000/dobę; po ich wyczerpaniu opóźnień nie ma.
+  Trasy przez opóźnienie się nie przeliczają — oś ostrzega tylko, gdy
+  przepada przesiadka. Z rozkładu planowego idą też peron i tor
+  (zgłoszenie #271): na osi trasy przy stacji wsiadania i wysiadania i w
+  tablicy odjazdów stacji — planowe, bez dzisiejszych zmian; „BUS" (według
+  PLK komunikacja zastępcza) idzie dosłownie. Wymaga skonfigurowanego `PKP_API_KEY` —
   bez klucza ta część wyników po prostu nie dochodzi. Stacje mają markery na
   mapie (geokodowanie DWOMA źródłami - wyłącznie mapa PLK i portal
   pasażera, oba oficjalne/PKP-owe, na wyraźną prośbę użytkownika - patrz

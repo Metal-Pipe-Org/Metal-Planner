@@ -8,6 +8,7 @@ from flask import Flask
 import config  # noqa: F401
 import update_gtfs
 import update_pkp
+import warmup
 from routes import init_routes
 
 # Python nie zna tego rozszerzenia, a manifest podany jako octet-stream bywa
@@ -43,6 +44,9 @@ if __name__ == "__main__":
         # zawsze, tak samo jak update_gtfs powyżej.
         update_pkp.refresh_on_start()
         update_pkp.start_daily_scheduler()
+        # Rozkład dnia i dane na żywo gotowe, zanim ktoś zapyta (patrz
+        # warmup.py) - w kontenerze to samo robi gunicorn.conf.py.
+        warmup.start()
 
     # Domyślnie 5001, bo 5000 na macOS zajmuje AirPlay Receiver.
     app.run(debug=True, port=int(os.environ.get("PORT", 5001)))

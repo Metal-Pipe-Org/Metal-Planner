@@ -51,3 +51,11 @@ def on_starting(server):
     """
     update_gtfs.start_daily_scheduler()
     update_pkp.start_daily_scheduler()  # no-op bez PKP_API_KEY - patrz update_pkp.py
+
+
+def post_worker_init(worker):
+    """Worker, zaraz po wczytaniu aplikacji - tu, a nie w on_starting, bo
+    rozgrzewka ma żyć w procesie, który odpowiada na zapytania: wątek
+    w masterze nie przechodzi przez fork do workerów (patrz warmup.py)."""
+    import warmup
+    warmup.start()

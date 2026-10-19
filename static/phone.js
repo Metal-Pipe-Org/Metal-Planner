@@ -49,7 +49,13 @@ const phoneLayout = (() => {
     // rozwinięty formularz na małym telefonie albo karta rozkładu zostawiają
     // za mało miejsca na cztery przyciski w pionie. Wtedy kolumna kładzie się
     // w rząd, a gdy i na rząd brakuje miejsca - znika, póki panel nie zmaleje.
+    //
+    // Moje miejsca stoją tak samo, tylko przy lewej krawędzi, i mieszczą się
+    // osobno: kolumna trzech jest niższa od kolumny warstw. Położone w rząd
+    // nie mogą przy tym wjechać na rząd warstw z prawej - wtedy znikają one,
+    // a nie warstwy.
     const layerBar = document.querySelector('.layer-bar');
+    const placesBar = document.querySelector('.places-bar');
     function placeLayers() {
         const panelBottom = sidebar.getBoundingClientRect().bottom;
         document.documentElement.style.setProperty('--panel-bottom', panelBottom + 'px');
@@ -57,13 +63,19 @@ const phoneLayout = (() => {
         const floor = dockBox && dockBox.height ? dockBox.top
             : tabs ? tabs.getBoundingClientRect().top : window.innerHeight;
         const free = floor - panelBottom - 16;
-        document.body.classList.remove('layers-row', 'layers-off');
-        const column = layerBar.getBoundingClientRect();
-        if (free >= column.height) return;
-        document.body.classList.add('layers-row');
+        document.body.classList.remove('layers-row', 'layers-off', 'places-row', 'places-off');
         if (free < layerBar.getBoundingClientRect().height) {
-            document.body.classList.add('layers-off');
+            document.body.classList.add('layers-row');
+            if (free < layerBar.getBoundingClientRect().height) {
+                document.body.classList.add('layers-off');
+            }
         }
+        if (!placesBar || free >= placesBar.getBoundingClientRect().height) return;
+        document.body.classList.add('places-row');
+        const places = placesBar.getBoundingClientRect();
+        const layers = layerBar.getBoundingClientRect();
+        const clash = layers.height && places.right + 8 > layers.left;
+        if (free < places.height || clash) document.body.classList.add('places-off');
     }
     const watch = new ResizeObserver(placeLayers);
     watch.observe(sidebar);
@@ -84,6 +96,10 @@ const phoneLayout = (() => {
 
         const collapse = on => document.body.classList.toggle('search-collapsed', on);
 
+        const busy = document.createElement('span');
+        busy.className = 'spinner search-summary-busy';
+        busy.setAttribute('aria-hidden', 'true');
+
         const part = (cls, text) => {
             const span = document.createElement('span');
             span.className = cls;
@@ -91,7 +107,9 @@ const phoneLayout = (() => {
             return span;
         };
 
-        document.addEventListener('planner:search', () => {
+        // Zwija się przy pierwszym wyniku, nie przy samym kliknięciu
+        // „Szukaj": przy błędzie formularz zostaje do poprawki.
+        document.addEventListener('planner:found', () => {
             const onboard = document.body.classList.contains('start-onboard');
             const from = onboard
                 ? 'linia ' + document.getElementById('ob-line').value.trim()
@@ -101,6 +119,9 @@ const phoneLayout = (() => {
                 part('search-summary-arrow', '→'),
                 part('search-summary-to', document.getElementById('end').value),
                 part('search-summary-time', document.getElementById('time').value),
+                // Kółko na końcu linijki, za godziną: kolejne etapy wyniku
+                // jeszcze się liczą (patrz setSearching w app.js).
+                busy,
             );
             // Klawiatura telefonu zostałaby nad mapą, przypięta do pola,
             // którego już nie widać.

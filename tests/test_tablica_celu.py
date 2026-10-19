@@ -249,18 +249,31 @@ def przebieg(request, adres, przegladarka):
     page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
     page.route("**/static/app.js*", _z_haczykiem)
     mapy = []
-    page.on("response", lambda r: "/api/flow" in r.url and mapy.append(r))
+
+    def _zapisz_mape(route):
+        odpowiedz = route.fetch()
+        mapy.append(odpowiedz.text())
+        route.fulfill(response=odpowiedz)
+    page.route("**/api/flow*", _zapisz_mape)
 
     page.goto(adres)
     page.wait_for_selector("#start")
     page.fill("#time", "12:00")
+    # Przy domyślnej gęstości 2 ta trasa nie ma przystanku z samą wysiadką -
+    # przy 2,5 (dawnej domyślnej) ma go: Pl. Orląt Lwowskich.
+    page.evaluate("document.getElementById('density').value = '2.5'")
     _wybierz(page, "#start", TRASA[0])
     _wybierz(page, "#end", TRASA[1])
-    if not page.is_disabled("#search") and page.is_visible("#search"):
+    if not page.evaluate("document.body.classList.contains('searching')") \
+            and page.is_visible("#search"):
         page.click("#search")
     page.wait_for_selector("#time-headline:not([hidden])", timeout=20000)
     page.wait_for_selector("#flow-panel-body .tt-lines", timeout=10000)
-    flow = mapy[-1].json()
+    # Odpowiedź przychodzi etapami (NDJSON) - mapa to ich złożenie.
+    flow = {}
+    for linijka in mapy[-1].splitlines():
+        if linijka.strip():
+            flow.update(json.loads(linijka))
     kropki = page.evaluate(KROPKI_JS)
     # Kadr na trasę przesuwa mapę z animacją - współrzędne kropki liczone
     # w jej trakcie trafiają obok, a dotknięcie w trakcie Leaflet połyka.

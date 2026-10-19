@@ -27,6 +27,13 @@ Rozpoznanie idzie po trzech rzeczach, bo dokładnie tyle widzi pasażer
 w pojeździe: numer linii, kierunek z czoła pojazdu i nazwa następnego
 przystanku (zapowiedź albo tablica). Z tego wychodzi jeden konkretny kurs
 rozkładu: ten, który z tego słupka rusza najbliżej godziny pytania.
+
+Pasażer jest w pojeździe TERAZ - więc gdy rozpoznany kurs jest według
+rozkładu przy przystanku wyraźnie wcześniej albo później, pojazd jedzie po
+prostu nie o swojej porze, a liczenie od rozkładu przesunęłoby całą mapę
+o tę różnicę (zgłoszenie #231). Wtedy kurs jedzie dalej od teraz, z tymi
+samymi odstępami między przystankami, a wszystko inne zostaje przy
+rozkładzie (tryb względny, patrz gtfs.with_shifted_trip).
 """
 
 from bisect import bisect_left, bisect_right
@@ -50,7 +57,10 @@ LONGEST_HOP_SEC = 40 * 60
 # Rozjazd z rozkładem, o którym nie ma co mówić - w obie strony tak samo
 # (zgłoszenie #231). Do 3 minut kurs uchodzi w komunikacji miejskiej za
 # punktualny, a pojazd, w którym się siedzi, i tak jest przy następnym
-# przystanku za chwilę albo przed chwilą według rozkładu.
+# przystanku za chwilę albo przed chwilą według rozkładu - liczymy więc
+# z rozkładu. Większy rozjazd włącza tryb względny (patrz find_ride). Próg
+# da się zmienić w ⚙ (sekcja „Jestem w pojeździe"); to jest jego domyślna
+# wartość.
 OFF_SCHEDULE_SLACK_SEC = 3 * 60
 
 
@@ -68,8 +78,18 @@ def _line_of(day, trip):
     return (num or label), timetables.MODE_OF_LABEL.get(kind, "other")
 
 
+def _digits(text):
+    return "".join(c for c in text if c.isdigit())
+
+
 def _matches(day, trip, num, mode, headsign):
     """Czy ten kurs jest tym, o którym mówi pasażer.
+
+    Pociąg rozpoznajemy po samych cyfrach numeru (zgłoszenie #167): na
+    bilecie i tablicy stoi „64402", a w rozkładzie „KD 64402" - przewoźnik
+    nic tu nie rozstrzyga, nie trafia nawet do porównania. Numer bywa
+    w ciągu doby wspólny dla dwóch przewoźników (IC 1130 i WKD 1130), a wtedy
+    kurs rozstrzyga kierunek - front bez niego niczego nie wysyła.
 
     Kierunek porównujemy luźno (bez wielkości liter i białych znaków) i tylko
     wtedy, gdy pytający go podał: napis z czoła pojazdu bywa skrócony, a i tak
@@ -77,9 +97,12 @@ def _matches(day, trip, num, mode, headsign):
     krawędzi, więc linia mija go tylko w jedną stronę.
     """
     trip_num, trip_mode = _line_of(day, trip)
-    if trip_num.casefold() != num.casefold():
-        return False
     if mode and trip_mode != mode:
+        return False
+    if trip_mode == "train":
+        if not _digits(num) or _digits(trip_num) != _digits(num):
+            return False
+    elif trip_num.casefold() != num.casefold():
         return False
     if headsign:
         return day.trip_info[trip][1].strip().casefold() == headsign.strip().casefold()
@@ -123,7 +146,8 @@ def _by_arrival(day, num, mode, stop_id, lo, hi, headsign, latest=False):
     return best
 
 
-def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
+def find_ride(day, num, mode, stop_id, from_sec, headsign=None,
+              slack_sec=OFF_SCHEDULE_SLACK_SEC):
     """Którym kursem jedzie pasażer - {"error"} albo opis startu z pokładu.
 
     `stop_id` to NASTĘPNY przystanek pojazdu (słupek, nie miejsce): stamtąd
@@ -139,9 +163,16 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
     Kursem jest ten NAJBLIŻSZY godziny pytania - w przód albo wstecz
     (zgłoszenie #231). Kurs, który według rozkładu minął przystanek pięć minut
     temu, a następny jest za pół godziny, to najpewniej spóźniony pojazd,
-    w którym pasażer siedzi. Spóźnienia nie znamy (dane na żywo są poza
-    rozkładem), więc mapa liczy się od tego kursu według rozkładu, a front
-    mówi, że godziny na niej są przesunięte.
+    w którym pasażer siedzi.
+
+    Gdy jego rozkładowa godzina przy przystanku odjeżdża od godziny pytania
+    o więcej niż `slack_sec`, wchodzi TRYB WZGLĘDNY: pasażer jest w nim teraz,
+    więc kurs jedzie od teraz, przesunięty o `late_sec` (ujemne - jedzie przed
+    rozkładem). Plan dostaje wtedy dzień z tym jednym kursem przesuniętym
+    (gtfs.with_shifted_trip), a front mówi o tym żółtym komunikatem - bo
+    rozjazd tej wielkości to także częsta pomyłka w linii, kierunku albo
+    przystanku. Spóźnienia na żywo ten wybór nie zna; zgaduje je z tego, że
+    pasażer w tym pojeździe siedzi.
     """
     num = " ".join((num or "").split())
     if not num:
@@ -165,6 +196,7 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
 
     trip, at_sec, dep_sec = found
     trip_num, trip_mode = _line_of(day, trip)
+    late_sec = from_sec - at_sec if abs(from_sec - at_sec) > slack_sec else 0
     return {
         "trip": trip,
         "stop": stop_id,
@@ -173,15 +205,16 @@ def find_ride(day, num, mode, stop_id, from_sec, headsign=None):
         "mode": trip_mode,
         "line": day.trip_info[trip][0],
         "headsign": day.trip_info[trip][1],
-        # Sekunda na osi doby rozkładowej - stąd rusza całe wyszukiwanie.
-        "sec": dep_sec,
-        "at": _hhmm(at_sec),
-        # Mapa liczy się od rozkładowej godziny kursu przy przystanku, nie od
-        # teraz. Gdy ta godzina odjeżdża od teraz o więcej niż zapas - w przód
-        # (`not_yet`) albo wstecz (`late`) - front ma to powiedzieć, bo godziny
-        # na mapie są przez to przesunięte (zgłoszenie #231).
-        "not_yet": not past and at_sec - from_sec > OFF_SCHEDULE_SLACK_SEC,
-        "late": past and from_sec - at_sec > OFF_SCHEDULE_SLACK_SEC,
+        # Sekunda na osi doby - stąd rusza całe wyszukiwanie. W trybie
+        # względnym już przesunięta: pojazd jest przy przystanku teraz.
+        "sec": dep_sec + late_sec,
+        "at": _hhmm(at_sec + late_sec),
+        # Tryb względny (zgłoszenie #231): o ile pojazd jedzie po rozkładzie
+        # (ujemne - przed nim), 0 gdy liczymy wprost z rozkładu. Rozkładowa
+        # godzina przy przystanku idzie obok, bo to ją pasażer może sprawdzić
+        # na tablicy i po niej poznać pomyłkę w linii albo przystanku.
+        "late_sec": late_sec,
+        "at_sched": _hhmm(at_sec),
     }
 
 
@@ -247,6 +280,63 @@ def mark_journeys(journeys, ride):
     return journeys
 
 
+# Ile pociągów najwyżej w podpowiedziach numeru (patrz trains).
+TRAIN_SUGGESTIONS = 8
+
+
+def trains(day, query, limit=TRAIN_SUGGESTIONS):
+    """Pociągi dnia, których numer zaczyna się od wpisanych cyfr - podpowiedzi
+    w polu „linia" (zgłoszenie #167). Wszystkie pociągi doby, nie tylko te
+    przez Wrocław: siedzący w pociągu może jechać skądkolwiek.
+
+    Z serwera, nie w stronie jak lista linii: pociągów jest ok. 7 tys.
+    dziennie, a lista zależy od daty - pół megabajta, z którego pasażer
+    potrzebuje jednej pozycji.
+    """
+    wanted = _digits(query or "")
+    if len(wanted) < 2:
+        return []
+    found = {}
+    for trip, (label, headsign) in day.trip_info.items():
+        if not label.startswith("Pociąg "):
+            continue
+        number = _digits(label)
+        if number.startswith(wanted):
+            found.setdefault((number, label, headsign), None)
+    out = [{"num": number, "label": label.partition(" ")[2], "headsign": headsign}
+           for number, label, headsign in sorted(found, key=lambda k: (len(k[0]), k))]
+    return out[:limit]
+
+
+def _train_directions(num, day):
+    """Kierunki pociągu dla wyboru „jestem w pojeździe" - ten sam kształt, co
+    directions dla linii. Kierunek jest zwykle jeden (stacja docelowa), a
+    stacje biorą się z jego przebiegu w dniu (pkp.augment_day) - tylko te,
+    które umiemy postawić na mapie, bo tylko z nich da się wystartować."""
+    wanted = _digits(num or "")
+    if not wanted:
+        return {"error": "Podaj numer pociągu."}
+    grouped = {}
+    for trip, stops in day.pkp_trip_stops.items():
+        label, headsign = day.trip_info.get(trip, ("", ""))
+        if _digits(label) != wanted:
+            continue
+        entry = grouped.setdefault(headsign.strip().casefold(), {
+            "headsign": headsign, "trips": 0, "stops": [], "label": label})
+        entry["trips"] += 1
+        if len(stops) > len(entry["stops"]):
+            entry["stops"] = [{"id": s, "name": day.stop_names[s]} for s, _, _ in stops]
+    if not grouped:
+        return {"error": f"Pociąg {wanted} nie jedzie tego dnia."}
+    out = []
+    for entry in sorted(grouped.values(), key=lambda d: (-d["trips"], d["headsign"])):
+        out.append({"headsign": entry["headsign"],
+                    "from": entry["stops"][0]["name"], "to": entry["stops"][-1]["name"],
+                    "trips": entry["trips"], "stops": entry["stops"]})
+    label = next(iter(grouped.values()))["label"]
+    return {"num": wanted, "mode": "train", "label": label, "directions": out}
+
+
 def directions(num, day, mode=None):
     """Kierunki linii pod wybór "jestem w pojeździe": co pisze na czole
     pojazdu i jakie przystanki ma jeszcze przed sobą.
@@ -264,6 +354,16 @@ def directions(num, day, mode=None):
     wszystkie warianty kierunku - to liczba kursów jadących tam dzisiaj, a nie
     liczba kursów jednego wariantu.
     """
+    if mode == "train":
+        # Brak bazy to ten sam komunikat, co przy podpowiedziach pociągów
+        # (/api/onboard/trains) - bez treści wyjątku, bo ta idzie do klienta.
+        try:
+            loaded = gtfs.load_day(day)
+        except FileNotFoundError:
+            return {"error": "Nie udało się wczytać danych rozkładu."}
+        data = _train_directions(num, loaded)
+        return data if "error" in data else {**data, "date": day.isoformat()}
+
     data = timetables.line_timetable(num, day, mode, geometry=False)
     if "error" in data:
         return data

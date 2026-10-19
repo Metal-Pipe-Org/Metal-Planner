@@ -22,6 +22,88 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 const $ = id => document.getElementById(id);
 
+// Każdy dymek na mapie (auto, rower, przystanek, pojazd) wychodził poza okno,
+// gdy kropka stała przy brzegu - Leaflet ustawia go przy kropce i niczego nie
+// pilnuje. Jedno miejsce na wszystkie, tak jak robią to biblioteki dymków
+// (Floating UI): gdy dymek nie mieści się po swojej stronie kropki, otwiera
+// się po przeciwnej (strzałka przechodzi razem z nim), a wzdłuż kropki tylko
+// się przesuwa, ze strzałką (CSS) dalej wskazującą kropkę. Przesunięcie w osi
+// otwierania oderwałoby strzałkę od kropki, więc go nie ma.
+const TOOLTIP_MARGIN = 8;
+const TOOLTIP_ARROW = 6;
+const TOOLTIP_SIDES = {
+    top: {flip: 'bottom', across: ['left', 'right'], away: [0, -1]},
+    bottom: {flip: 'top', across: ['left', 'right'], away: [0, 1]},
+    left: {flip: 'right', across: ['top', 'bottom'], away: [-1, 0]},
+    right: {flip: 'left', across: ['top', 'bottom'], away: [1, 0]},
+};
+const setTooltipPosition = L.Tooltip.prototype._setPosition;
+
+function tooltipVertical(side) {
+    return side === 'top' || side === 'bottom';
+}
+
+function tooltipOverflow(box, side) {
+    const [lo, hi, size] = tooltipVertical(side)
+        ? [box.top, box.bottom, window.innerHeight]
+        : [box.left, box.right, window.innerWidth];
+    return Math.max(0, TOOLTIP_MARGIN - lo) + Math.max(0, hi - size + TOOLTIP_MARGIN);
+}
+
+L.Tooltip.prototype._setPosition = function (pos) {
+    const el = this._container;
+    el.style.translate = '';
+    el.style.removeProperty('--tip-shift');
+    setTooltipPosition.call(this, pos);
+    let side = Object.keys(TOOLTIP_SIDES).find(s => el.classList.contains(`leaflet-tooltip-${s}`));
+    if (!side) return;
+    // Jeden odczyt układu na ścieżce bez odbicia - dymek przepływów jest
+    // przestawiany przy każdym ruchu myszy.
+    let box = el.getBoundingClientRect();
+    let overflow = tooltipOverflow(box, side);
+    if (overflow) {
+        // Odsunięcie od kropki (offset) po zmianie strony musi iść w drugą
+        // stronę, inaczej strzałka wjeżdża za kropkę.
+        const {direction, offset} = this.options;
+        const o = L.point(offset);
+        const gap = Math.abs(tooltipVertical(side) ? o.y : o.x);
+        const placeOn = s => {
+            const [ax, ay] = TOOLTIP_SIDES[s].away;
+            this.options.direction = s;
+            this.options.offset = [ax * gap, ay * gap];
+            setTooltipPosition.call(this, pos);
+            this.options.direction = direction;
+            this.options.offset = offset;
+        };
+        let best = side, last = side;
+        for (const s of [TOOLTIP_SIDES[side].flip, ...TOOLTIP_SIDES[side].across]) {
+            placeOn(s);
+            last = s;
+            const sOverflow = tooltipOverflow(el.getBoundingClientRect(), s);
+            if (sOverflow < overflow) [best, overflow] = [s, sOverflow];
+            if (!overflow) break;
+        }
+        if (best !== last) {
+            if (best === side) setTooltipPosition.call(this, pos);
+            else placeOn(best);
+        }
+        side = best;
+        box = el.getBoundingClientRect();
+    }
+    const vertical = tooltipVertical(side);
+    const [lo, hi, size, length] = vertical
+        ? [box.left, box.right, window.innerWidth, box.width]
+        : [box.top, box.bottom, window.innerHeight, box.height];
+    const shift = Math.max(TOOLTIP_MARGIN - lo, Math.min(0, size - TOOLTIP_MARGIN - hi));
+    if (!shift) return;
+    el.style.translate = vertical ? `${shift}px 0` : `0 ${shift}px`;
+    // Kropka tuż przy samej krawędzi bywa poza zasięgiem dymka - strzałka
+    // staje wtedy na jego rogu zamiast wystawać poza ramkę.
+    const reach = Math.max(0, length / 2 - TOOLTIP_ARROW - el.clientLeft
+        - parseFloat(getComputedStyle(el).borderTopLeftRadius));
+    el.style.setProperty('--tip-shift', `${Math.max(-reach, Math.min(reach, shift))}px`);
+};
+
 // Stan paneli (schowany/rozwinięty) i ostatnie wyszukiwanie zapisujemy
 // w localStorage pod wspólnym kluczem - przeżywa odświeżenie strony i nowe
 // wizyty. Jeden mały odczyt/zapis JSON-a na zmianę, nie warto osobnych kluczy
@@ -223,7 +305,6 @@ let autoRefreshTimer = null;
 let autoRefreshOn = false;   // ◎ świeci - patrz syncAutoRefresh
 let journeys = [];
 let selectedJourney = null;   // indeks pozycji z listy albo null
-let requestToken = 0;         // odsiewa odpowiedzi na nieaktualne zapytania
 let resultsCollapsed = !!uiState.resultsCollapsed; // ukrywa samą listę propozycji (nie cały panel)
 
 const isPoint = v => v !== null && typeof v === 'object';
@@ -375,6 +456,7 @@ function updatePointMarker(slot, value) {
         pointMarkers[slot] = L.circleMarker(
             [value.lat, value.lon], POINT_STYLE[slot],
         ).addTo(map);
+        pointMarkers[slot].tapRank = TAP_RANK.endpoint;
     }
 }
 
@@ -453,9 +535,10 @@ function renderVehicles() {
     const only = vehiclesFilter();
     for (const v of lastVehicles) {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
-        L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
+        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
             .bindTooltip(vehicleTooltipHtml(v))
             .addTo(vehiclesLayer);
+        marker.tapRank = TAP_RANK.vehicle;
     }
 }
 
@@ -550,12 +633,14 @@ function cityBikeMarkers(stations, free) {
         .filter(s => s.renting)
         .map(s => ({...s, loose: false}))
         .concat(free.map(b => ({...b, loose: true, bikes: 1})));
-    return places.map(place => L.circleMarker(
-        [place.lat, place.lon], bikeStyle(place, true),
-    ).bindTooltip(
-        `<b>${esc(place.name || 'Rower luzem')}</b><br>${bikeCountText(place)}`,
-        {direction: 'top', offset: [0, -4], opacity: 1},
-    ));
+    return places.map(place => {
+        const dot = L.circleMarker([place.lat, place.lon], bikeStyle(place, true)).bindTooltip(
+            `<b>${esc(place.name || 'Rower luzem')}</b><br>${bikeCountText(place)}`,
+            {direction: 'top', offset: [0, -4], opacity: 1},
+        );
+        dot.tapRank = TAP_RANK.shared;
+        return dot;
+    });
 }
 
 function loadCityCars() {
@@ -773,10 +858,12 @@ function hideCarZone() {
 /** Kropka auta z dymkiem i strefą pod kursorem - wspólne dla warstwy miasta
     i mapy przepływów. */
 function carMarker(car, tooltipHtml) {
-    return L.circleMarker([car.lat, car.lon], carStyle(car))
+    const dot = L.circleMarker([car.lat, car.lon], carStyle(car))
         .bindTooltip(tooltipHtml, {direction: 'top', offset: [0, -4], opacity: 1})
         .on('mouseover', () => showCarZone(car))
         .on('mouseout', hideCarZone);
+    dot.tapRank = TAP_RANK.shared;
+    return dot;
 }
 
 /** Jeden przycisk rowerów zamiast dwóch (opcja w „Wyglądzie aplikacji”): ⚡ znika, a 🚲
@@ -816,6 +903,7 @@ const stopsReady = fetch('/api/stops')
             stopKind.set(s.name, s.kind);
             cityStops.push({name: s.place || s.name, lat: s.lat, lon: s.lon});
             const m = L.circleMarker([s.lat, s.lon], styleFor(s.name));
+            m.cityStop = s.name;   // ranga stuknięcia zależy od stylu (patrz tapRank)
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
             // (patrz STOP_KIND/attachAutocomplete), nie jedzie nigdzie jako
             // wyszukiwana nazwa - można doklejać "PKP" wprost do tekstu.
@@ -848,6 +936,8 @@ const stopsReady = fetch('/api/stops')
     kasował (#154). Z tego samego powodu ruszamy wyłącznie pole, które klik
     uzupełnia - drugiego nie przepisujemy z `sel`. */
 function pickEndpoint(value) {
+    // Okno „mojego miejsca" czeka na wskazanie - ten klik jest dla niego.
+    if (placePickTook(value)) return;
     if (selectedJourney !== null) { deselectJourney(); return; }
     const hasStart = startInput.value.trim() !== '';
     const hasEnd = endInput.value.trim() !== '';
@@ -1045,8 +1135,10 @@ function refreshHere() {
         if (!endInput.value) return;
         const kept = selectedJourney === null ? null
             : journeySignature(journeys[selectedJourney]);
-        loadPlan(++requestToken, false).then(found => {
-            if (!found || kept === null) return;
+        // Wybór wraca zaraz po etapie z mapą i listą, nie po ostatnim etapie:
+        // rowery i auta potrafią dojść dużo później.
+        loadPlan('quiet', () => {
+            if (kept === null) return;
             const index = journeys.findIndex(j => journeySignature(j) === kept);
             if (index < 0) return;
             selectedJourney = index;
@@ -1075,26 +1167,46 @@ if (!navigator.geolocation) {
             toggleAutoRefresh();
             return;
         }
-        showLocateMsg('');
-        hideLocateOffer();
-        locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
-        const finish = () => { locateButton.disabled = false; };
-        navigator.geolocation.getCurrentPosition(
-            position => {
-                finish();
-                useMyLocation({lat: position.coords.latitude,
-                               lon: position.coords.longitude});
-            },
-            error => {
-                finish();
-                showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
-            },
-            // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
-            // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
-            // pozycję sprzed kilkuset metrów.
-            GEO_OPTIONS,
-        );
+        locateStart();
     });
+}
+
+function locateStart(onFail = () => {}) {
+    showLocateMsg('');
+    hideLocateOffer();
+    locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
+    // Odpowiedź GPS-a może przyjść po tym, jak pasażer sam ruszył „Skąd"
+    // (wpisał, wybrał podpowiedź, wyczyścił, kliknął mapę) - jego ręka wygrywa.
+    const startBefore = sel.start;
+    const textBefore = startInput.value;
+    const stale = () => sel.start !== startBefore || startInput.value !== textBefore;
+    const finish = () => { locateButton.disabled = false; };
+    navigator.geolocation.getCurrentPosition(
+        position => {
+            finish();
+            if (stale()) return;
+            useMyLocation({lat: position.coords.latitude,
+                           lon: position.coords.longitude});
+        },
+        error => {
+            finish();
+            if (stale()) return;
+            showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
+            onFail();
+        },
+        // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
+        // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
+        // pozycję sprzed kilkuset metrów.
+        GEO_OPTIONS,
+    );
+}
+
+/** Cel gotowy przy pustym starcie (#275): jedzie się stąd, czyli to samo co
+    ◎ - łącznie z „Stoisz na przystanku…?" i szukaniem. Bez lokalizacji
+    kursor idzie do „Skąd", bo bez startu nie ma czego szukać. */
+function startFromHere() {
+    if (navigator.geolocation) locateStart(() => startInput.focus());
+    else startInput.focus();
 }
 
 // ---------------------------------------------------- kadrowanie widoku ----
@@ -1431,6 +1543,9 @@ let flowParts = [];       // {layer, opacity, weight} - do przygaszania pod wybr
 let flowHits = [];        // {seg, layer, casing, weight, latlngs} - kursor nad korytarzem
 let flowLabelLayer = null;
 let lastFlow = null;      // ostatnia odpowiedź /api/flow - do przerysowania bez zapytania
+// To, o czym mówi pasek nad mapą: zwykle lastFlow, a w pierwszym etapie
+// wyszukiwania sama najszybsza trasa, zanim jest jakakolwiek mapa.
+let headlineFlow = null;
 // Warstwy "czasu na mapie" - zadeklarowane razem z resztą warstw wachlarza,
 // zanim cokolwiek zdąży je sprzątnąć (clearFlow leci niżej, ale wywołuje się
 // też przy starcie).
@@ -1448,7 +1563,10 @@ let hoveredLineStop = null;     // kropka przystanku linii pod kursorem
 let flowLineStops = null;       // {flow, stops} - przystanki całego wachlarza (patrz flowStopsOf)
 let clusterBoxes = [];          // gdzie stoją grupki numerów - nazwy im ustępują
 
-function clearFlow() {
+/** `cityLayers` false: mapa nowej relacji jest już w drodze, więc auta
+    i rowery nie wracają na tę chwilę do całego miasta - zeszłyby zaraz
+    znowu, przy mapie. */
+function clearFlow(cityLayers = true) {
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }
@@ -1460,11 +1578,13 @@ function clearFlow() {
     flowParts = [];
     flowHits = [];
     lastFlow = null;
+    headlineFlow = null;
     clearFlowHover();
     hideSidePanel();
     timetableTarget = null;
     renderTimeHeadline();
     setBaseDim(false);
+    if (!cityLayers) return;
     // Zdjęta mapa = nie ma już pytania, na które odpowiadały tamte auta
     // i rowery. Włączona warstwa wraca wtedy do miejskiego feedu.
     refreshCarLayer();
@@ -1490,6 +1610,7 @@ function drawFlow(flow, refit) {
     flowParts = [];                              // wszystkich słupków tam i z powrotem
     flowHits = [];                               // - stare warstwy z podświetlenia i tak znikają
     lastFlow = flow;
+    headlineFlow = flow;
     clearFlowHover();
     setBaseDim(true);                            // to przy każdym ruchu suwaka za dużo
     const faint = [], casings = [], bright = [];
@@ -1541,7 +1662,10 @@ function drawFlow(flow, refit) {
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
-    seedStartPanel();
+    // Okienko w rogu otwiera się samo przy nowej relacji. Przy przerysowaniu
+    // tej samej (suwaki, „Pokaż więcej", kolejne etapy wyszukiwania) zostaje
+    // to, co user w nim zostawił - także zamknięte.
+    if (refit || !timetableTarget) seedStartPanel();
     // Nowa mapa = inny zestaw linii, więc i inne pojazdy dotyczą tego, co
     // widać (patrz vehiclesFilter). Przy zgaszonej warstwie to nic nie kosztuje.
     renderVehicles();
@@ -1564,7 +1688,7 @@ function drawFlow(flow, refit) {
 
 function showFastest() {
     hideFastest();
-    const fastest = lastFlow && lastFlow.fastest;
+    const fastest = headlineFlow && headlineFlow.fastest;
     if (!fastest || !fastest.legs || !fastest.legs.length) return;
     const halos = [], cores = [];
     for (const leg of fastest.legs) {
@@ -1607,22 +1731,13 @@ const MAX_MAP_MORE = 3;
 let mapMore = 0;                   // ile razy kliknięto "pokaż więcej"
 let moreBusy = false;              // klik w locie - drugi klik ma poczekać
 
+/** Gęstsza mapa dorysowuje się na tę, która już jest - bez kadrowania i bez
+    gubienia wybranej trasy (patrz renderPlan). Przycisk kręci się, aż
+    dojdą wszystkie etapy, a bez kółka klik wyglądał na zignorowany. */
 function showMore() {
     if (moreBusy) return;
-    moreBusy = true;
     mapMore += 1;
-    // To samo kółko co przy „Szukaj" - gęstsza mapa liczy się tak samo długo,
-    // a bez niego klik wyglądał na zignorowany.
-    setSearching(true);
-    const token = requestToken;
-    // Kadru NIE przestawiamy: gęstsza mapa dokłada linie, nie zmienia tego,
-    // na co user patrzy.
-    loadPlan(token, false)
-        .catch(() => showError('Nie udało się połączyć z serwerem.'))
-        .finally(() => {
-            moreBusy = false;
-            if (token === requestToken) setSearching(false);
-        });
+    loadPlan('more').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
@@ -1679,7 +1794,7 @@ function renderTimeHeadline() {
     const el = $('time-headline');
     if (!el) return;
     hideHeadlineTip();
-    const flow = lastFlow;
+    const flow = headlineFlow;
     if (!timeOpts.headline || !flow || typeof flow.best_sec !== 'number') {
         el.hidden = true;
         el.innerHTML = '';
@@ -1694,10 +1809,13 @@ function renderTimeHeadline() {
     // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
     // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
     // z wartości podróży wie to dopiero po szerszym szukaniu.
-    const more = flow.more < MAX_MAP_MORE
+    // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - zakresu mapy
+    // i przycisku jeszcze nie ma.
+    const mapped = typeof flow.limit_sec === 'number';
+    const more = mapped && flow.more < MAX_MAP_MORE
         ? '<button type="button" class="headline-more" data-tip="'
           + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
-          + '">Pokaż więcej</button>'
+          + '"><span class="spinner" aria-hidden="true"></span>Pokaż więcej</button>'
         : '';
     // Sama jazda to osobna liczba na życzenie.
     const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
@@ -1730,15 +1848,17 @@ function renderTimeHeadline() {
         + '</span>'
         // Zakres mapy i jego przycisk to jedna całość: zawinięty pasek przenosi
         // je razem, a nie zostawia samotnego przycisku w drugiej linijce.
-        + '<span class="headline-map">'
-        + '<span class="headline-sep" aria-hidden="true"'
-        + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
-        + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
-                                  + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
-                                  + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
-               `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
-        + more
-        + '</span>';
+        + (mapped
+            ? '<span class="headline-map">'
+              + '<span class="headline-sep" aria-hidden="true"'
+              + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
+              + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
+                                        + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
+                                        + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
+                     `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
+              + more
+              + '</span>'
+            : '');
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
@@ -2120,7 +2240,8 @@ function clusterMarker(at, roster, weight, times) {
 /** Numer w grupce wskazuje się WYŁĄCZNIE najechaniem: kursor nad numerem
     podświetla DOKŁADNIE tę linię. Bez tego grupka mówiłaby, co tędy jedzie,
     ale nie dałaby tego wskazać. Klik nie robi tu nic - jest tylko wygaszany,
-    żeby nie dobił do map.on('click') i nie ustawił punktu trasy. */
+    żeby nie dobił do map.on('click') i nie ustawił punktu trasy. Palcem
+    numer wskazuje stuknięcie (tapMap). */
 function bindCluster(marker) {
     const el = marker.getElement();
     if (!el) return;
@@ -2178,6 +2299,10 @@ let flowPick = null;      // {key, index, options} - wskazana linia korytarza
 let flowPickAt = null;    // gdzie stoi kursor - do przerysowania po przełączeniu
 let flowPickPoint = null; // ...to samo w pikselach ekranu - do rzutu na linię
 const FLOW_HIT_SLACK_PX = 5;   // margines poza grubością linii, na niecelny kursor
+// Palec zasłania to, w co celuje, i trafia o kilkanaście pikseli obok - przy
+// marginesie kursora w cienką linię nie dało się stuknąć wcale (#274). Razem
+// z grubością linii pas do stuknięcia ma ok. 40 px, tyle co zwykły przycisk.
+const FLOW_TAP_SLACK_PX = 16;
 const HALO_EXTRA_PX = 6;       // o tyle otoczka podświetlenia szersza od linii
 const HIGHLIGHT_EXTRA_PX = 2;  // o tyle sama linia grubsza pod kursorem
 
@@ -2206,9 +2331,10 @@ function polylineDistancePx(containerPoint, latlngs) {
     współrzędnych), a dokładny pomiar odległości dopiero dla reszty. Margines
     ramki liczy się z aktualnego powiększenia, żeby przy widoku całego miasta,
     gdzie kilka pikseli to ponad sto metrów, nic nie wypadło przedwcześnie. */
-function flowHitsAt(containerPoint) {
+function flowHitsAt(containerPoint, slack = FLOW_HIT_SLACK_PX) {
+    const reach = 11 + slack;
     const here = map.containerPointToLatLng(containerPoint);
-    const away = map.containerPointToLatLng(L.point(containerPoint.x + 16, containerPoint.y + 16));
+    const away = map.containerPointToLatLng(L.point(containerPoint.x + reach, containerPoint.y + reach));
     const padLat = Math.abs(away.lat - here.lat);
     const padLng = Math.abs(away.lng - here.lng);
     const hits = [];
@@ -2217,7 +2343,7 @@ function flowHitsAt(containerPoint) {
             || here.lng < h.box.getWest() - padLng || here.lng > h.box.getEast() + padLng) {
             continue;
         }
-        const tol = h.weight / 2 + FLOW_HIT_SLACK_PX;
+        const tol = h.weight / 2 + slack;
         const dist = polylineDistancePx(containerPoint, h.latlngs);
         if (dist <= tol) hits.push({...h, dist});
     }
@@ -2678,10 +2804,156 @@ function placeStopNames() {
 
 // Klik w narysowany kurs NIE OTWIERA ŻADNEJ PROPOZYCJI (usunięte 2026-08-16).
 // Mapa przepływów tylko pokazuje wachlarz, a wskazywanie konkretnej linii jest
-// wyłącznie pod kursorem (hover). Propozycje otwiera się z listy obok.
+// wyłącznie pod kursorem (hover), a na telefonie stuknięciem. Propozycje
+// otwiera się z listy obok.
 
 map.on('mousemove', handleFlowHover);
 map.on('mouseout', clearFlowHover);
+
+// --- stuknięcie palcem: kto je dostaje (#274) ------------------------------
+//
+// Leaflet daje klik temu, co leży DOKŁADNIE pod punktem i jest narysowane na
+// wierzchu. Pod kursorem to działa, pod palcem nie: palec trafia kilkanaście
+// pikseli obok, kropki mają po kilka pikseli, a co jest na wierzchu, zależy
+// od kolejności rysowania - linia potrafiła zabrać stuknięcie przesiadce,
+// która na niej leży. Na dotyku stuknięcie rozstrzyga więc tapMap: każda
+// kropka i każdy znak ma cel ok. 44 px (tyle, ile palec), a gdy jedno
+// stuknięcie sięga kilku rzeczy, wygrywa ważniejsza - kolejność niżej -
+// a przy równej randze ta bliżej palca. Zwycięzca dostaje dokładnie to, co
+// dostałby od Leafleta: najechanie i klik, więc robi to samo co dotąd.
+//
+// Udawane zdarzenia myszy, które przeglądarka dosyła po stuknięciu, nie
+// dochodzą do Leafleta wcale: inaczej trafiałyby dalej po staremu, obok
+// rozstrzygnięcia. Czy to palec, mówi ostatnie pointerdown, a nie szerokość
+// ekranu: laptop z ekranem dotykowym ma i mysz, i palec. Mysz nie przechodzi
+// tędy nigdy.
+const TAP_RANK = {
+    endpoint: 1,     // start i cel
+    transfer: 2,     // przesiadki (kropki z tablicą odjazdów)
+    shared: 3,       // auta, rowery, Traficar
+    stop: 4,         // przystanki
+    vehicle: 5,      // pojazdy na żywo
+    number: 6,       // numery w grupkach
+    line: 7,         // linie
+    // Słupki miasta przygaszone pod narysowaną mapą to tło (styleFor): nie
+    // dostają powiększonego celu ani pierwszeństwa przed linią, inaczej
+    // przy gęstej siatce przystanków w linię nie dałoby się stuknąć wcale.
+    background: 8,
+};
+const TAP_TARGET_PX = 44;
+
+let touchInput = false;
+let tapHovered = null;   // co dostało ostatnie "najechanie" palcem
+$('map').addEventListener('pointerdown', e => {
+    touchInput = e.pointerType !== 'mouse';
+}, true);
+$('map').addEventListener('pointermove', e => {
+    if (e.pointerType === 'mouse') touchInput = false;
+}, true);
+for (const type of ['mouseover', 'mouseout', 'mousemove', 'mousedown', 'mouseup', 'click']) {
+    $('map').addEventListener(type, e => {
+        if (!touchInput || e.target.closest('.leaflet-control-container')) return;
+        e.stopImmediatePropagation();
+        if (type !== 'click') return;
+        if (!map.dragging.moved()) tapMap(e);
+        // Klik zatrzymany na mapie nie dochodzi też do dokumentu, a tam
+        // wiszą okienka zamykane kliknięciem obok (dymek paska z czasem).
+        $('map').parentNode.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    }, true);
+}
+
+function tapRank(layer) {
+    if (layer.cityStop !== undefined) {
+        const style = styleFor(layer.cityStop);
+        if (style === DIM_STYLE) return TAP_RANK.background;
+        if (style === ENDPOINT_STYLE.start || style === ENDPOINT_STYLE.end) return TAP_RANK.endpoint;
+        return TAP_RANK.stop;
+    }
+    if (layer.tapRank) return layer.tapRank;
+    if (layer instanceof L.CircleMarker) return TAP_RANK.stop;
+    return TAP_RANK.shared;
+}
+
+/** Odległość punktu od prostokąta, null - gdy poza celem palca wokół niego. */
+function tapBoxAway(at, rect, origin) {
+    const box = {left: rect.left - origin.left, right: rect.right - origin.left,
+                 top: rect.top - origin.top, bottom: rect.bottom - origin.top};
+    const dx = Math.max(box.left - at.x, 0, at.x - box.right);
+    const dy = Math.max(box.top - at.y, 0, at.y - box.bottom);
+    const growX = Math.max(0, (TAP_TARGET_PX - (box.right - box.left)) / 2);
+    const growY = Math.max(0, (TAP_TARGET_PX - (box.bottom - box.top)) / 2);
+    return dx <= growX && dy <= growY ? Math.hypot(dx, dy) : null;
+}
+
+/** Wszystko, czego sięga stuknięcie w `at`: {rank, away, ...co trafione}. */
+function tapCandidates(at) {
+    const origin = map.getContainer().getBoundingClientRect();
+    const found = [];
+    map.eachLayer(layer => {
+        if (!layer.tapVia && layer.options.interactive === false) return;
+        const rank = tapRank(layer);
+        const target = layer.tapVia || layer;
+        if (layer instanceof L.CircleMarker) {
+            const size = layer.getRadius() + (layer.options.stroke === false ? 0 : layer.options.weight / 2);
+            const reach = rank === TAP_RANK.background ? size : Math.max(size, TAP_TARGET_PX / 2);
+            const d = at.distanceTo(map.latLngToContainerPoint(layer.getLatLng()));
+            if (d <= reach) found.push({rank, away: Math.max(0, d - size), layer: target});
+        } else if (layer.roster) {
+            // Grupka to kilka celów naraz - każdy numer wskazuje swoją linię.
+            for (const slot of layer.getElement().querySelectorAll('.line-chip-slot')) {
+                const away = tapBoxAway(at, slot.getBoundingClientRect(), origin);
+                if (away !== null) {
+                    found.push({rank: TAP_RANK.number, away, cluster: layer,
+                                index: Number(slot.dataset.i)});
+                }
+            }
+        } else if (layer instanceof L.Marker && layer.getElement()) {
+            const away = tapBoxAway(at, layer.getElement().getBoundingClientRect(), origin);
+            if (away !== null) found.push({rank, away, layer: target});
+        }
+    });
+    // Linie mapy przepływów są nieinteraktywne (patrz drawFlow) - ich
+    // trafienie liczy się tak samo jak pod kursorem, z szerszym marginesem.
+    const hits = flowHits.length ? flowHitsAt(at, FLOW_TAP_SLACK_PX) : [];
+    if (hits.length) {
+        found.push({rank: TAP_RANK.line,
+                    away: Math.max(0, hits[0].dist - hits[0].weight / 2), hits});
+    }
+    return found;
+}
+
+/** Stuknięcie robi to, co kursor: najechanie na zwycięzcę i klik w niego.
+    Zjechanie z poprzedniego zwycięzcy idzie przed wszystkim innym - to ono
+    zamyka jego dymek, jak zejście kursora. Stuknięcie w pustą mapę, gdy
+    wskazana jest linia, tylko ją gasi (jak zjechanie z niej kursorem) - nie
+    stawia przy okazji punktu trasy. */
+function tapMap(e) {
+    const at = map.mouseEventToContainerPoint(e);
+    const best = tapCandidates(at).sort((a, b) => a.rank - b.rank || a.away - b.away)[0];
+    const mouse = type => new MouseEvent(type, {clientX: e.clientX, clientY: e.clientY});
+    if (tapHovered && !(best && best.layer === tapHovered)) {
+        map._fireDOMEvent(mouse('mouseout'), 'mouseout', [tapHovered]);
+        tapHovered = null;
+    }
+    if (best && best.hits) {
+        setFlowPick(corridorOptions(best.hits), map.containerPointToLatLng(at), undefined, at);
+        return;
+    }
+    if (best && best.cluster) {
+        pickFromCluster(best.cluster, best.index);
+        return;
+    }
+    if (!best) {
+        if (flowPick) clearFlowHover();
+        else map._fireDOMEvent(mouse('click'), 'click');
+        return;
+    }
+    if (best.layer !== tapHovered) {
+        map._fireDOMEvent(mouse('mouseover'), 'mouseover', [best.layer]);
+        tapHovered = best.layer;
+    }
+    map._fireDOMEvent(mouse('click'), 'click', [best.layer]);
+}
 
 // Prawy przycisk myszy NIE ROBI TU NIC (usunięte 2026-08-15). Przechodził
 // kiedyś na następną linię korytarza, ale wybieranie linii jest już w grupce
@@ -2875,10 +3147,14 @@ function timetableLinesHtml(data, mapSec) {
             ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
               + `${infoHtml(d.info)}</span>`
             : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
-        `<span class="tip-dir">${esc(d.headsign)}</span>` +
+        `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
-            `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) + '</span>' +
+            `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
+            // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
+            (d.trip ? `<span class="tt-live" data-trip="${escAttr(d.trip)}"`
+                      + ` data-stop="${escAttr(d.trip_stop)}">${boardLiveHtml(d.trip, d.trip_stop)}</span>` : '')
+            + '</span>' +
         routeButtonHtml(d, 'trasa') + '</li>',
     ).join('');
     return head + `<ul class="tt-rows tt-lines${flows ? ' has-flow' : ''}">${html}</ul>`;
@@ -3031,6 +3307,63 @@ function keepWithinHorizon(data, deadline) {
 function emitTimetable(dot, html) {
     if (dot.getTooltip()) dot.setTooltipContent(html);
     if (timetableTarget === dot) showSidePanel(html);
+    fillBoardDelays();
+}
+
+// ------------------------------- opóźnienia pociągów w tablicy odjazdów (#71) --
+//
+// Przy odjeździe pociągu mały zegar: zielony, gdy PLK wie, że jedzie o czasie,
+// czerwony, gdy jest spóźniony (minuty w dymku). Tablica rysuje się od razu
+// z rozkładu, a zegary dochodzą, gdy przyjdzie odpowiedź - jak na osi trasy
+// (loadTrainDelays). Serwer pilnuje limitów zapytań do PLK (pkp_live.py), więc
+// tu tylko pamiętamy odpowiedzi przez minutę, żeby każde najechanie na kropkę
+// nie pytało od nowa.
+const BOARD_DELAYS_TTL_MS = 60000;
+const boardDelays = new Map();     // kurs -> {at, stops: {stacja: {arr, dep}} | null}
+const boardPending = new Set();
+const CLOCK_ICON = '<svg viewBox="0 0 12 12" aria-hidden="true">'
+    + '<circle cx="6" cy="6" r="4.75"/><path d="M6 3.4V6l1.8 1.2"/></svg>';
+
+function boardLiveHtml(trip, stop) {
+    const known = boardDelays.get(trip);
+    const at = known && known.stops && known.stops[stop];
+    const late = at ? at.dep : null;
+    if (typeof late !== 'number') return '';
+    return late > 0
+        ? `<span class="tt-clock late" title="Spóźniony ${late} min">${CLOCK_ICON}</span>`
+        : `<span class="tt-clock ontime" title="O czasie">${CLOCK_ICON}</span>`;
+}
+
+function fillBoardDelays() {
+    const slots = [...document.querySelectorAll('.tt-live[data-trip]')];
+    const now = Date.now();
+    const missing = new Set();
+    for (const slot of slots) {
+        const known = boardDelays.get(slot.dataset.trip);
+        if (known && now - known.at < BOARD_DELAYS_TTL_MS) {
+            slot.innerHTML = boardLiveHtml(slot.dataset.trip, slot.dataset.stop);
+        } else if (!boardPending.has(slot.dataset.trip)) {
+            missing.add(slot.dataset.trip);
+        }
+    }
+    const trips = [...missing].slice(0, 10);
+    if (!trips.length) return;
+    trips.forEach(trip => boardPending.add(trip));
+    fetch('/api/train_delays?' + new URLSearchParams({trips: trips.join(','), date: $('date').value}))
+        .then(r => r.json())
+        .then(data => {
+            const at = Date.now();
+            for (const trip of trips) boardDelays.set(trip, {at, stops: (data.delays || {})[trip] || null});
+        })
+        .catch(() => {})
+        .finally(() => {
+            trips.forEach(trip => boardPending.delete(trip));
+            for (const slot of document.querySelectorAll('.tt-live[data-trip]')) {
+                if (trips.includes(slot.dataset.trip)) {
+                    slot.innerHTML = boardLiveHtml(slot.dataset.trip, slot.dataset.stop);
+                }
+            }
+        });
 }
 
 // Kropka, której tablicę pokazujemy teraz - patrz emitTimetable.
@@ -3134,6 +3467,7 @@ function stopDot(point, where, sec, style) {
         ...(isStart ? ENDPOINT_STYLE.start : where.end ? ENDPOINT_STYLE.end : {}),
     });
     dot.isStart = isStart;
+    dot.tapRank = isStart ? TAP_RANK.endpoint : TAP_RANK.transfer;
     // Czym ta kropka jest - żeby dało się ją "najechać" bez kursora.
     dot.where = where;
     dot.sec = sec;
@@ -3255,7 +3589,13 @@ function endpointDot(name, style) {
     const poles = !isPoint(name) && markersByName.get(name);
     if (!poles) return null;
     const center = L.latLngBounds(poles.map(m => m.getLatLng())).getCenter();
-    return L.circleMarker(center, {...style, interactive: false});
+    const dot = L.circleMarker(center, {...style, interactive: false});
+    // Sama kropka kursora nie łapie - pod nią leżą słupki tego przystanku.
+    // Palec, który w nią trafi, dostaje to samo co słupek, ale z rangą celu:
+    // inaczej zabrałaby go linia albo przesiadka leżąca obok.
+    dot.tapVia = poles[0];
+    dot.tapRank = TAP_RANK.endpoint;
+    return dot;
 }
 
 /** Gdzie postawić kropkę węzła. Obie współrzędne liczy backend (patrz
@@ -3396,6 +3736,7 @@ function flowBikeMarkers(places, live) {
                                    bikeStyle(place, live))
             .bindTooltip(bikeTooltipHtml(place, live),
                          {direction: 'top', offset: [0, -4], opacity: 1});
+        dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
             if (!dotOpts.bikeRides) clearBikeRides();
@@ -3491,9 +3832,11 @@ function bikeRideLayers(place, labels) {
         layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
                                BIKE_RIDE_STYLE));
         if (!labels) continue;
-        layers.push(L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
+        const target = L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
             .bindTooltip(bikeRideTooltipHtml(ride),
-                         {direction: 'top', offset: [0, -4], opacity: 1}));
+                         {direction: 'top', offset: [0, -4], opacity: 1});
+        target.tapRank = TAP_RANK.shared;
+        layers.push(target);
         // Etykietka wisi na własnym, niewidzialnym uchwycie przezroczystym
         // dla kursora: leży dokładnie na kropce wyżej, a to ona ma łapać
         // najechanie.
@@ -3705,6 +4048,25 @@ function openJourney(index) {
     renderVehicles();
 }
 
+/** Peron i tor pociągu (zgłoszenie #271): „peron 2, tor 4" - tak, jak piszą
+    tablice PKP. Z rozkładu planowego PLK (patrz pkp.augment_day), więc bez
+    dzisiejszych zmian. Pusty napis, gdy rozkład nie podaje żadnego.
+
+    Stoi tam, gdzie się go szuka: na osi trasy przy stacji wsiadania
+    i wysiadania (nie przy mijanych - tam nic się nie robi) i w tablicy
+    odjazdów stacji. „BUS" (komunikacja zastępcza według PLK) idzie
+    dosłownie, jako „peron BUS". */
+function platformText(p) {
+    if (!p) return '';
+    return [p.platform && `peron ${p.platform}`, p.track && `tor ${p.track}`]
+        .filter(Boolean).join(', ');
+}
+
+function platformHtml(p) {
+    const text = platformText(p);
+    return text ? `<span class="platform">${esc(text)}</span>` : '';
+}
+
 /** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
     przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
 function infoHtml(text) {
@@ -3843,8 +4205,12 @@ function summaryHtml(legs) {
     Zlanie ich w jedno („wysiądź: X, za N przystanków") czytałoby się przy
     N = 0 jak polecenie wyskoczenia w biegu. */
 function exitText(exit) {
-    const ile = `${exit.stops} ${plural(exit.stops, 'przystanek', 'przystanki', 'przystanków')}`;
-    if (!exit.stops) return ['Wysiądź na najbliższym przystanku', exit.stop];
+    // Z pociągu wysiada się na stacji (#167) - pasażer liczy stacje, nie przystanki.
+    const train = lastFlow && lastFlow.onboard && lastFlow.onboard.mode === 'train';
+    const ile = `${exit.stops} ${train
+        ? plural(exit.stops, 'stację', 'stacje', 'stacji')
+        : plural(exit.stops, 'przystanek', 'przystanki', 'przystanków')}`;
+    if (!exit.stops) return [`Wysiądź na najbliższ${train ? 'ej stacji' : 'ym przystanku'}`, exit.stop];
     if (!exit.transfer) return [`Dojedziesz tym pojazdem — wysiadka za ${ile}`, exit.stop];
     return [`Wysiądź za ${ile}`, exit.stop];
 }
@@ -3889,9 +4255,20 @@ function toggleVia(button) {
 
 function detailHtml(journey) {
     const rows = [];
-    const stopRow = (time, name, cls) =>
-        `<li class="tl-stop ${cls}"><span class="tl-time">${esc(time)}</span>` +
-        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}</span></li>`;
+    // `late` - opóźnienie pociągu przy tej stacji w minutach (#71, patrz
+    // loadTrainDelays): planowa godzina przekreślona, pod nią rzeczywista.
+    // Zero albo mniej to „o czasie" - ale tylko gdy PLK ten czas zna; bez
+    // danych (`late` null/undefined) nie mówimy nic, bo nie wiemy.
+    const stopRow = (time, name, cls, platform, late) =>
+        `<li class="tl-stop ${cls}">` +
+        (late > 0
+            ? `<span class="tl-time late"><s>${esc(time)}</s>${esc(addMinutes(time, late))}</span>`
+            : `<span class="tl-time">${esc(time)}</span>`) +
+        `<span class="tl-dot"></span><span class="tl-name">${esc(name)}` +
+        `${platformHtml(platform)}` +
+        (late > 0 ? `<span class="delay">+${late} min</span>`
+            : typeof late === 'number' ? '<span class="ontime">o czasie</span>' : '') +
+        `</span></li>`;
 
     journey.legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -4002,7 +4379,11 @@ function detailHtml(journey) {
         // przystanek nie ma czego rozwijać i zostaje zwykłym napisem.
         const via = leg.via || [];
         const viaOn = via.length > 0 && viaOpen(leg);
-        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : ''));
+        const late = trainDelays[leg.trip] || {};
+        const depLate = (late[leg.from] || {}).dep;
+        const arrLate = (late[leg.to] || {}).arr;
+        rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
+                          leg.from_platform, depLate));
         rows.push(
             `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
@@ -4039,13 +4420,20 @@ function detailHtml(journey) {
         const next = journey.legs[i + 1];
         if (!next || next.kind === 'walk') {
             rows.push(stopRow(leg.to_time, leg.to,
-                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`));
+                              `${next ? '' : 'last'}${leg.onboard ? ' exit' : ''}`,
+                              leg.to_platform, arrLate));
         } else if (leg.onboard) {
             // Przesiadka z naszego pojazdu w inny NA TYM SAMYM słupku: wiersz
             // wysiadania normalnie się nie pojawia (byłby ten sam przystanek
             // dwa razy pod rząd), a akurat tu jest najważniejszym wierszem
             // całej osi - to jest ten moment, w którym trzeba wstać.
-            rows.push(stopRow(leg.to_time, leg.to, 'exit'));
+            rows.push(stopRow(leg.to_time, leg.to, 'exit', leg.to_platform, arrLate));
+        }
+        const missed = missedTransfer(journey.legs, i, arrLate);
+        if (missed) {
+            rows.push(`<li class="tl-warn">⚠️ Przez opóźnienie ${esc(leg.num)} `
+                + `(+${arrLate} min) możesz nie zdążyć na ${esc(missed.num)} `
+                + `o ${esc(missed.from_time)}</li>`);
         }
     });
 
@@ -4265,6 +4653,12 @@ let obToken = 0;           // odsiewa odpowiedzi na nieaktualną już linię
 // linii sama z siebie pokazuje pola z powrotem.
 let obCollapsed = false;
 let obLineAuto = null;     // uchwyt podpowiedzi linii (patrz attachAutocomplete)
+// Rodzaj wybrany z podpowiedzi - numer „113" bywa i autobusem, i pociągiem,
+// więc o rodzaju rozstrzyga wybrany wiersz, a nie sam napis (#167).
+let obPickedMode = null;
+// Pociągi pod wpisane cyfry, z serwera (#167, patrz onboard.trains) -
+// klucz to data i cyfry, bo lista pociągów zależy od dnia.
+const obTrainCache = new Map();
 
 /** Co pojedzie do serwera jako `onboard_*` - albo null, gdy wybór jest jeszcze
     niekompletny. Kierunek jedzie razem z numerem i przystankiem, bo słupek
@@ -4275,7 +4669,52 @@ function onboardPick() {
     const kierunek = obDirection();
     const stop = obStopSelect.value;
     if (!num || !kierunek || !stop) return null;
-    return {num, mode: LINE_MODE_OF.get(num) || '', headsign: kierunek.headsign, stop};
+    return {num, mode: obLineMode(num), headsign: kierunek.headsign, stop};
+}
+
+// Numer pociągu tak, jak się go wpisuje: sam („60221") albo z przewoźnikiem
+// („KD 60221", „kd60221") - przewoźnik to litery przed cyframi (#167).
+const TRAIN_NUMBER = /^([a-ząćęłńóśźż]*)\s*(\d+)$/i;
+
+/** Rodzaj wpisanej linii: wybrany z podpowiedzi, a bez wyboru - linia
+    z rozkładu albo, gdy takiej nie ma, a jest numer pociągu (co najmniej
+    trzy cyfry, z przewoźnikiem albo bez), pociąg (zgłoszenie #167). */
+function obLineMode(num) {
+    if (obPickedMode) return obPickedMode;
+    if (LINE_MODE_OF.has(num)) return LINE_MODE_OF.get(num);
+    const train = TRAIN_NUMBER.exec(num);
+    return train && train[2].length >= 3 ? 'train' : '';
+}
+
+const obTrainKey = query => `${$('date').value}|${query.replace(/\D/g, '')}`;
+
+/** Pociągi, których numer zaczyna się od wpisanych cyfr - z pamięci, a gdy
+    ich tam nie ma, dociągane z serwera; lista podpowiedzi przelicza się sama,
+    kiedy przyjdą. */
+function obTrainSuggestions(query) {
+    const train = TRAIN_NUMBER.exec(query.trim());
+    if (!train || train[2].length < 2) return [];
+    const [, carrier, digits] = train;
+    // Wpisany przewoźnik zawęża listę: „KD 602" bez pociągów PR 602…
+    const pick = list => list.filter(
+        item => item.label.toUpperCase().startsWith(carrier.toUpperCase()));
+    const key = obTrainKey(query);
+    const known = obTrainCache.get(key);
+    if (known) return pick(known);
+    obTrainCache.set(key, []);
+    fetch('/api/onboard/trains?' + new URLSearchParams({q: digits, date: $('date').value}))
+        .then(r => r.json())
+        .then(data => {
+            // Do pola idzie pełny numer z przewoźnikiem („KD 60221") - tak,
+            // jak stoi na plakietce i na tablicy; rozpoznanie i tak patrzy
+            // tylko na cyfry (onboard._matches).
+            obTrainCache.set(key, (data.trains || []).map(train => ({
+                name: train.label, mode: 'train', label: train.label,
+                headsign: train.headsign})));
+            if (obLineAuto && obLineInput.value.trim() === query.trim()) obLineAuto.refresh();
+        })
+        .catch(() => obTrainCache.delete(key));
+    return [];
 }
 
 const onboardReady = () => onboardOn && !!onboardPick();
@@ -4328,13 +4767,13 @@ function obNote(text) {
     obMsg.hidden = !text;
 }
 
-// Rozpoznany kurs nie pasuje do "jadę nim teraz" (#231), a mapa i tak liczy
-// od niego - nic poza tym ostrzeżeniem tego nie zdradza. Dwa przypadki (patrz
-// onboard.find_ride): `not_yet` - według rozkładu nie wyjechał jeszcze nawet
-// z poprzedniego przystanku, najczęściej pomyłka w linii, kierunku albo
-// przystanku; `late` - według rozkładu minął już przystanek, czyli jest
-// spóźniony, a godziny na mapie są liczone od jego rozkładu, nie od teraz.
-// Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
+// Tryb względny (#231, patrz onboard.find_ride): rozpoznany kurs jest według
+// rozkładu przy przystanku wyraźnie nie teraz, więc mapa liczy go od teraz -
+// przesuniętego o `late_sec`, z resztą pojazdów przy rozkładzie. Nic poza tym
+// komunikatem tego nie zdradza, a to ważne w obie strony: spóźnienie
+// tłumaczy, czemu godziny tego pojazdu nie zgadzają się z tablicą, a kurs
+// dopiero przed nami to najczęściej pomyłka w linii, kierunku albo
+// przystanku. Mapy nie wstrzymujemy: pasażer może wiedzieć lepiej.
 const obWarn = $('ob-warn');
 
 function hideObWarn() {
@@ -4342,13 +4781,29 @@ function hideObWarn() {
 }
 
 function warnOnboardRide(kurs) {
-    if (!kurs || !(kurs.not_yet || kurs.late)) { hideObWarn(); return; }
+    if (!kurs || !kurs.late_sec) { hideObWarn(); return; }
     const przystanek = esc(prettyStopName(kurs.stop_name));
-    const godzina = `<b>${esc(kurs.at)}</b>`;
+    const rozklad = `<b>${esc(kurs.at_sched)}</b>`;
+    const ile = `${Math.round(Math.abs(kurs.late_sec) / 60)} min`;
+    // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
+    // polem celu. Pełne zdanie zostaje w dymku i dla czytnika ekranu.
+    const [ikona, fakt, ikona2, rada, pelne] = kurs.late_sec > 0
+        // Bez nazwy przystanku: „(JAGODNO (P+R) 21:01)" czytało się jak kierunek.
+        ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (rozkład ${rozklad})`,
+           '⏩', 'Godziny pojazdu przesunięte',
+           `${kurs.num} jedzie prawdopodobnie ok. ${ile} po rozkładzie — według rozkładu był `
+           + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `
+           + `Godziny tego pojazdu na mapie są przesunięte o ${ile}.`]
+        : ['⚠️', `${esc(kurs.num)} na ${przystanek} dopiero o ${rozklad} (za ${ile})`,
+           '🔎', 'Sprawdź linię i przystanek',
+           `Najbliższy kurs ${kurs.num} jest według rozkładu na przystanku `
+           + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at_sched}, za `
+           + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię i przystanek.`];
     $('ob-warn-text').innerHTML =
-        `${esc(kurs.num)} według rozkładu ${kurs.late ? 'była' : 'będzie'} `
-        + `na przystanku ${przystanek} o ${godzina}.`
-        + `\nGodziny na mapie liczą się od ${godzina}, a nie od teraz.`;
+        `<span aria-hidden="true">${ikona}</span> ${fakt}`
+        + `\n<span aria-hidden="true">${ikona2}</span> ${rada}`;
+    obWarn.title = pelne;
+    obWarn.setAttribute('aria-label', pelne);
     obWarn.hidden = false;
 }
 
@@ -4390,7 +4845,7 @@ function loadDirections() {
     const mine = ++obToken;
     obNote('Szukam kierunków…');
     fetch('/api/onboard?' + new URLSearchParams({
-        num, mode: LINE_MODE_OF.get(num) || '', date: $('date').value,
+        num, mode: obLineMode(num), date: $('date').value,
     }))
         .then(r => r.json())
         .then(data => {
@@ -4433,14 +4888,27 @@ if (obLineInput) {
     // Podpowiedzi numerów linii - plakietka w kolorze pojazdu, tak samo jak
     // w trybie rozkładów (patrz timetable.js): numer JEST plakietką, więc
     // trafienia w nim nie podświetlamy.
-    obLineAuto = attachAutocomplete(obLineInput, () => loadDirections(), {
-        suggest: query => suggestionsFor(query, LINE_NUMBERS, null, OB_LINE_LIMIT)
-            .map(item => ({...item, mode: LINE_MODE_OF.get(item.name)})),
-        render: item =>
-            `<span class="badge ${esc(item.mode)}">${esc(item.name)}</span>`
-            + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
+    obLineAuto = attachAutocomplete(obLineInput, item => {
+        obPickedMode = item.mode || null;
+        loadDirections();
+    }, {
+        // Linie z rozkładu, a pod nimi pociągi dnia po numerze (#167) - to
+        // samo pole, bo pasażer pociągu też widzi przed sobą tylko numer.
+        suggest: query => [
+            ...suggestionsFor(query, LINE_NUMBERS, null, OB_LINE_LIMIT)
+                .map(item => ({...item, mode: LINE_MODE_OF.get(item.name)})),
+            ...obTrainSuggestions(query),
+        ].slice(0, OB_LINE_LIMIT),
+        render: item => item.label
+            ? `<span class="badge train">${esc(item.label)}</span>`
+              + `<span class="ac-kind">→ ${esc(item.headsign)}</span>`
+            : `<span class="badge ${escClass(item.mode)}">${esc(item.name)}</span>`
+              + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
         onEnter: () => loadDirections(),
     });
+    // Ręczne wpisywanie kasuje wybór z podpowiedzi - rodzaj ma wtedy wynikać
+    // z tego, co jest w polu (patrz obLineMode).
+    obLineInput.addEventListener('input', () => { obPickedMode = null; });
     // Wpisanie z ręki (bez wybrania podpowiedzi) też ma działać - linia to
     // dwa, trzy znaki, więc lista bywa szybsza do minięcia niż do trafienia.
     obLineInput.addEventListener('change', loadDirections);
@@ -4474,10 +4942,10 @@ if (obLineInput) {
 // ------------------------------------------------------------ wyszukiwanie ----
 
 function resetResults() {
-    // Nowy token porzuca zapytanie w locie: po ✕ nie ma dorysować się wynik
-    // relacji, której już nie ma na ekranie (a kółko musi zgasnąć od razu).
-    ++requestToken;
-    setSearching(false);
+    // Po ✕ nie ma dorysować się wynik relacji, której już nie ma na ekranie
+    // (a kółko musi zgasnąć od razu).
+    if (planRun) { planRun.abort.abort(); planRun = null; }
+    showBusy(new Set());
     journeys = [];
     selectedJourney = null;
     clearJourney();
@@ -4547,6 +5015,9 @@ function queryParams() {
         if (poklad.mode) params.set('onboard_mode', poklad.mode);
         if (poklad.headsign) params.set('onboard_headsign', poklad.headsign);
         params.set('onboard_stop', poklad.stop);
+        // Od jakiego rozjazdu z rozkładem pojazd jedzie „od teraz" (tryb
+        // względny, zgłoszenie #231) - suwak w ⚙, patrz onboard.find_ride.
+        params.set('onboard_slack_sec', (Number($('onboard-slack').value) * 60).toFixed(0));
     } else if (isPoint(sel.start)) {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
@@ -4666,18 +5137,99 @@ function showWaitNotice(data) {
     if (html) resultsBox.insertAdjacentHTML('afterbegin', html);
 }
 
-/** Cała reakcja na gotową odpowiedź /api/flow - wydzielona z loadPlan, żeby
-    dało się ją uruchomić bez sieci (patrz tests/js/harness.js). */
+// ---------------------------------------- opóźnienia pociągów na żywo (#71) --
+//
+// Trasy liczą się z rozkładu i tak zostaje: opóźnienia przychodzą PO
+// narysowaniu wyniku, osobnym zapytaniem, i tylko dopisują się na osi trasy
+// (patrz detailHtml). Serwer pyta PLK pociąg po pociągu i pilnuje własnych
+// limitów (pkp_live.py) - gdy ich zabraknie, opóźnień po prostu nie ma.
+let trainDelays = {};      // kurs -> {stacja: {arr, dep}} (minuty)
+let delaysToken = 0;       // odsiewa odpowiedź na listę, której już nie ma
+
+function loadTrainDelays() {
+    trainDelays = {};
+    const mine = ++delaysToken;
+    const trips = [...new Set(journeys.flatMap(j => j.legs)
+        .filter(leg => leg.kind === 'ride' && leg.mode === 'train'
+            && String(leg.trip || '').startsWith('PKP:'))
+        .map(leg => leg.trip))];
+    if (!trips.length) return;
+    fetch('/api/train_delays?' + new URLSearchParams({
+        trips: trips.join(','), date: $('date').value,
+    }))
+        .then(r => r.json())
+        .then(data => {
+            if (mine !== delaysToken || !data.delays) return;
+            trainDelays = data.delays;
+            if (Object.keys(trainDelays).length) renderJourneys();
+        })
+        .catch(() => {});      // bez opóźnień trasa jest ta sama, co z rozkładu
+}
+
+/** "15:15" + 7 -> "15:22" (przez północ też). */
+function addMinutes(hhmm, minutes) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const total = ((h * 60 + m + minutes) % 1440 + 1440) % 1440;
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Następny przejazd, na który przez opóźnienie `late` (min) etapu `i` się
+    nie zdąży - albo null. Ta sama minuta zapasu co w planerze
+    (TRANSFER_SEC) plus przejścia pieszo po drodze. */
+function missedTransfer(legs, i, late) {
+    if (!(late > 0)) return null;
+    let walkSec = 0;
+    for (const next of legs.slice(i + 1)) {
+        if (next.kind === 'walk') { walkSec += (next.minutes || 0) * 60; continue; }
+        if (next.kind !== 'ride') return null;
+        const ready = legs[i].arr_sec + late * 60 + walkSec + 60;
+        return ready > next.dep_sec ? next : null;
+    }
+    return null;
+}
+
+/** Mapa z listą - z kompletnej odpowiedzi albo z jej etapu "map", który ma
+    już wszystko poza autami i rowerami. Wydzielona z loadPlan, żeby dało się
+    ją uruchomić bez sieci (patrz tests/js/harness.js).
+
+    Wybrana trasa zostaje wybrana, jeśli nowa lista ją ma (ta sama trasa po
+    „Pokaż więcej", po suwaku) - inaczej przerysowanie zabierałoby ją spod
+    ręki. */
 function renderPlan(data, refit) {
     adoptNames(data);
     drawFlow(data, refit);
-
-    journeys = data.journeys;
-    selectedJourney = null;      // nowa lista = stary wybór nieaktualny
-    clearJourney();
-    clearPreview();
-    dimFlow(false);
+    pickJourneys(data.journeys);
     renderVehicles();            // nowa mapa - inne linie, inne pojazdy
+    renderList(data);
+    warnOnboardRide(data.onboard);
+}
+
+/** Tożsamość trasy na liście: te same przejazdy tymi samymi kursami i te
+    same przejścia. */
+function journeyKey(journey) {
+    return journey.legs.map(leg => [leg.kind, leg.line, leg.from, leg.to,
+                                    leg.from_time, leg.to_time].join('|')).join('/');
+}
+
+/** Podmienia listę, zostawiając wybór na tej samej trasie, o ile ona na niej
+    jest. Wybrana trasa leży wtedy na wierzchu nowej mapy, tak jak po
+    kliknięciu. */
+function pickJourneys(list) {
+    const chosen = selectedJourney === null ? null : journeyKey(journeys[selectedJourney]);
+    journeys = list;
+    clearPreview();
+    const index = chosen === null ? -1 : journeys.findIndex(j => journeyKey(j) === chosen);
+    if (index < 0) {
+        selectedJourney = null;
+        clearJourney();
+        dimFlow(false);
+        return;
+    }
+    selectedJourney = index;
+    if (journeyLayer) { map.removeLayer(journeyLayer); journeyLayer.addTo(map); }
+}
+
+function renderList(data) {
     if (!journeys.length) {
         // Pusta lista przy NIEPUSTEJ mapie to nie brak połączeń -
         // mapa pokazuje je tuż obok. Komunikat nie ma prawa temu
@@ -4690,26 +5242,153 @@ function renderPlan(data, refit) {
     } else {
         renderJourneys();
     }
+    loadTrainDelays();
     showWaitNotice(data);
-    warnOnboardRide(data.onboard);
     if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
 
-function loadPlan(token, refit) {
-    const params = queryParams();
-    return Promise.all([fetch('/api/flow?' + params).then(r => r.json()), stopsReady])
-        .then(([data]) => {
-            if (token !== requestToken) return false;
-            if (data.error) {
-                clearFlow();
-                hideObWarn();
-                showError(data.error, data.suggestions);
-                return false;
-            }
-            renderPlan(data, refit);
-            return true;      // znaleziono - patrz search() i playPipeDrop
+/** Pierwszy etap nowego wyszukiwania: sam pasek „Najszybciej…" (decyzja
+    użytkownika). Poprzednia relacja schodzi z mapy razem ze swoimi autami
+    i rowerami, a mapa i lista pokazują się dopiero z prawdziwą mapą
+    przepływów - do tego czasu lista mówi, że szuka. */
+function renderHeadlineOnly(data) {
+    clearFlow(false);
+    headlineFlow = data;
+    renderTimeHeadline();
+}
+
+// Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
+const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, bike_places: [],
+                     bike_places_live: false};
+
+/** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
+    zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
+    nowe - przerysowanie nie zostawia na chwilę mapy bez nich (decyzja
+    użytkownika). Nowa relacja startuje bez nich: poprzednie zeszły
+    z poprzednią mapą (patrz renderHeadlineOnly). */
+function keepLive(flow, shown) {
+    for (const [key, none] of Object.entries(LIVE_FIELDS)) {
+        if (!(key in flow)) flow[key] = shown ? shown[key] : none;
+    }
+}
+
+/** Auta, rowery i propozycje z nimi - dokładane do mapy, która już stoi:
+    linie, wybrana trasa i okienko w rogu zostają. Nowe propozycje idą na
+    koniec listy, żeby te, które już się czyta, nie skakały (decyzja
+    użytkownika: lista będzie jeszcze przebudowana, na razie ma po prostu
+    działać); znikają tylko te, których serwer już nie proponuje. */
+function renderLive(data) {
+    refreshBikeLayer();
+    refreshCarLayer();
+    // Auta i rowery mają leżeć pod kropkami i pod wybraną trasą, tak jak po
+    // drawFlow - kursor ma trafić najpierw w to, co opisuje całe miejsce.
+    for (const layer of [flowDotLayer, flowEndDots, journeyLayer]) {
+        if (layer && map.hasLayer(layer)) { map.removeLayer(layer); layer.addTo(map); }
+    }
+    const fresh = new Map(data.journeys.map(j => [journeyKey(j), j]));
+    const shown = journeys.map(journeyKey).filter(key => fresh.has(key));
+    const order = [...shown, ...[...fresh.keys()].filter(key => !shown.includes(key))];
+    pickJourneys(order.map(key => fresh.get(key)));
+    renderList(data);
+}
+
+// Wyszukiwanie w toku: {abort, busy, search, acc}. Jedno naraz - nowe
+// przerywa poprzednie, a serwer kończy przerwane na najbliższym etapie.
+let planRun = null;
+
+/** Zapytanie o mapę, czytane etapami (patrz routes.api_flow): każdy etap
+    rysuje się, gdy tylko przyjdzie. `kind` mówi, kto pyta: 'search' - nowe
+    wyszukiwanie (kadruje, gra rurę, zwija formularz na telefonie), 'more' -
+    „Pokaż więcej", 'quiet' - suwaki i przełączniki. Kończy się, gdy dojdzie
+    ostatni etap albo gdy zastąpi je następne zapytanie. `onMapped` woła się
+    po narysowaniu mapy z listą - tylko gdy to zapytanie wciąż jest aktualne. */
+function loadPlan(kind, onMapped) {
+    const prev = planRun;
+    if (prev) prev.abort.abort();
+    const run = planRun = {
+        abort: new AbortController(),
+        // Kółka przerwanego zapytania kręcą się dalej, aż skończy to, które
+        // je zastąpiło - suwak ruszony w trakcie wyszukiwania nie może
+        // zgasić „Szukaj", zanim cokolwiek się pokaże.
+        busy: new Set([...(prev ? prev.busy : []), kind]),
+        // Zapytanie, które przerwało wyszukiwanie przed dojściem mapy, samo
+        // jest tym wyszukiwaniem: nowa relacja ma się wykadrować i tak dalej.
+        search: kind === 'search' ? {found: false, mapped: false}
+            : prev && prev.search && !prev.search.mapped ? prev.search : null,
+        acc: {},
+        onMapped,
+    };
+    showBusy(run.busy);
+    return Promise.all([fetch('/api/flow?' + queryParams(), {signal: run.abort.signal}),
+                        stopsReady])
+        .then(([response]) => readLines(response, data => {
+            if (planRun === run) applyStage(run, data);
+        }))
+        .catch(error => {
+            if (!run.abort.signal.aborted) throw error;
+        })
+        .finally(() => {
+            if (planRun !== run) return;
+            planRun = null;
+            showBusy(new Set());
         });
+}
+
+function applyStage(run, data) {
+    if (data.error) {
+        clearFlow();
+        hideObWarn();
+        showError(data.error, data.suggestions);
+        return;
+    }
+    const {stage, ...delta} = data;
+    // Etapy dopisują się do jednej odpowiedzi; mapa trzyma do niej
+    // odwołanie (lastFlow), więc późniejsze etapy widzi od razu.
+    Object.assign(run.acc, delta);
+    const search = run.search && !run.search.mapped ? run.search : null;
+    if (stage === 'fastest') {
+        if (search) renderHeadlineOnly(run.acc);
+    } else if (stage === 'map') {
+        keepLive(run.acc, lastFlow);
+        renderPlan(run.acc, !!search);
+        if (search) search.mapped = true;
+        if (run.onMapped) run.onMapped();
+    } else if (lastFlow === run.acc) {
+        renderLive(run.acc);
+    }
+    if (search && !search.found) {
+        search.found = true;
+        // Formularz na telefonie zwija się dopiero przy wyniku - przy
+        // błędzie zostaje rozwinięty do poprawki (patrz phone.js).
+        document.dispatchEvent(new Event('planner:found'));
+        playPipeDrop();
+    }
+}
+
+/** Linijki NDJSON z odpowiedzi, każda zaraz po przyjściu. Odpowiedź bez
+    końca linii (błąd offline z service workera) to po prostu jedna linijka. */
+async function readLines(response, onLine) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+        const {done, value} = await reader.read();
+        buffer += decoder.decode(value, {stream: !done});
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) if (line.trim()) onLine(JSON.parse(line));
+        if (done) break;
+    }
+    if (buffer.trim()) onLine(JSON.parse(buffer));
+}
+
+/** Kółka w toku: „Szukaj" (i linijka zwiniętego formularza na telefonie)
+    przy wyszukiwaniu, „Pokaż więcej" przy dokładaniu mapy. */
+function showBusy(busy) {
+    setSearching(busy.has('search'));
+    moreBusy = busy.has('more');
+    document.body.classList.toggle('more-busy', moreBusy);
 }
 
 /** Rower i auto zmieniają ODPOWIEDŹ, nie tylko wygląd mapy: propozycje
@@ -4722,8 +5401,7 @@ function loadPlan(token, refit) {
 function replanInPlace() {
     if (!lastFlow || !endInput.value) return;
     if (onboardOn ? !onboardReady() : !startInput.value) return;
-    loadPlan(requestToken, false)
-        .catch(() => showError('Nie udało się połączyć z serwerem.'));
+    loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
@@ -4817,13 +5495,15 @@ $('recall-offer-no').addEventListener('click', () => {
 startInput.addEventListener('input', hideRecallOffer);
 endInput.addEventListener('input', hideRecallOffer);
 
-/** Kółko ładowania w dwóch miejscach naraz, bo w każdym widoku widać co
-    innego: w komunikacie pod kartą (szeroki ekran, zakładka „Trasy") i na
+/** Kółko ładowania w kilku miejscach naraz, bo w każdym widoku widać co
+    innego: w komunikacie pod kartą (szeroki ekran, zakładka „Trasy"), na
     przycisku „Szukaj" (telefon w widoku mapy - tam wyników nie widać, a
-    wyszukiwanie odpala się samo po drugim kliknięciu w mapę). */
+    wyszukiwanie odpala się samo po drugim kliknięciu w mapę) i w linijce
+    zwiniętego formularza na telefonie (patrz phone.css). Kręci się, aż
+    dojdzie ostatni etap - także wtedy, gdy pierwsze wyniki już widać.
+    Przycisk zostaje klikalny: nowe wyszukiwanie przerywa to w toku. */
 function setSearching(on) {
     document.body.classList.toggle('searching', on);
-    $('search').disabled = on;
     resultsBox.setAttribute('aria-busy', String(on));
 }
 
@@ -4836,15 +5516,11 @@ function search() {
     // linijki tak samo jak po wybraniu przystanku - inaczej trzy pola
     // zasłaniają wynik.
     if (onboardOn) { obCollapsed = true; syncOnboardView(); }
-    // Dla układu na telefonie: formularz zwija się wtedy do jednej linijki
-    // (patrz phone.js).
-    document.dispatchEvent(new Event('planner:search'));
     hideRecallOffer();
-    const token = ++requestToken;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
+    selectedJourney = null;
     clearJourney();
     clearPreview();
-    setSearching(true);
     resultsBox.innerHTML =
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
@@ -4853,16 +5529,9 @@ function search() {
     rememberPlace('end', endInput.value);
     // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
-    // zakładce „Trasy".
-    loadPlan(token, true)
-        // Rura spada tylko po WYSZUKANIU, nie po każdym przeliczeniu: suwaki
-        // w panelu ⚙ wołają loadPlan bezpośrednio i mają zostać ciche.
-        .then(found => { if (found) playPipeDrop(); })
-        .catch(() => showError('Nie udało się połączyć z serwerem.'))
-        // Kółko gasi tylko odpowiedź na AKTUALNE zapytanie - przy szybkiej
-        // zmianie relacji stare, odsiane zapytanie nie może udawać, że nowe
-        // już się doliczyło.
-        .finally(() => { if (token === requestToken) setSearching(false); });
+    // zakładce „Trasy". Rura spada przy pierwszym wyniku WYSZUKANIA, nie po
+    // każdym przeliczeniu (patrz applyStage).
+    loadPlan('search').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 $('search').addEventListener('click', search);
@@ -5109,7 +5778,9 @@ function attachAutocomplete(input, onPick, options = {}) {
     // Lista zamyka się sama (blur, Esc, wybór), ale bywa chowana razem z całym
     // polem - a wtedy nie ma komu jej zamknąć i wraca otwarta, gdy pole wróci
     // na ekran (patrz syncOnboardView: zwijanie kompletu w jedną linijkę).
-    return {close};
+    // `refresh` przelicza otwartą listę, gdy podpowiedzi doszły później
+    // (numery pociągów idą z serwera, patrz obTrainSuggestions).
+    return {close, refresh: () => { if (document.activeElement === input) open(); }};
 }
 
 // Wybór podpowiedzi kończy tryb "wybrany punkt" i - gdy relacja jest
@@ -5123,7 +5794,10 @@ attachAutocomplete(startInput, () => {
 attachAutocomplete(endInput, () => {
     if (isPoint(sel.end)) { sel.end = null; updatePointMarker('end', null); }
     if (startInput.value) search();
-}, {suggest: suggestRecentFirst('end')});
+    else if (!onboardOn) startFromHere();
+}, {suggest: suggestRecentFirst('end'),
+    onEnter: () => (endInput.value.trim() && !startInput.value.trim() && !onboardOn
+                    ? startFromHere() : search())});
 
 $('swap').addEventListener('click', () => {
     const previous = [sel.start, sel.end];
@@ -5168,6 +5842,266 @@ $('clear').addEventListener('click', () => {
     forgetLastSearch();
 });
 
+// ----------------------------------------------------------- moje miejsca ----
+//
+// Trzy przyciski „jedź tam stąd" (pasek .places-bar, patrz index.html).
+// Miejsce to to samo, co cel wyszukiwania: nazwa przystanku (kanoniczna, jak
+// w `sel`) albo punkt {lat, lon}. Zapisane tylko w tej przeglądarce, osobnym
+// kluczem - „Przywróć domyślne" w ⚙ ich nie kasuje, bo to nie ustawienie.
+const MY_PLACES_KEY = 'metal-planner:my-places';
+const MY_PLACES_COUNT = 3;
+const placesBar = $('places-bar');
+const placeDialog = $('place-dialog');
+const placeWhere = $('place-where');
+const placeMsg = $('place-msg');
+const placePickHint = $('place-pick-hint');
+
+let myPlaces = loadMyPlaces();
+let placeSlot = null;      // które miejsce jest w oknie
+let placeDraft = null;     // punkt z ◎ albo z mapy - pole pokazuje go jako tekst
+let placePicking = false;  // okno schowane, czeka na klik w mapę
+let placeLongPress = false;
+
+function loadMyPlaces() {
+    let saved = [];
+    try {
+        saved = JSON.parse(localStorage.getItem(MY_PLACES_KEY)) || [];
+    } catch {
+        // localStorage niedostępny albo zepsuty JSON - przyciski zaczynają puste
+    }
+    return Array.from({length: MY_PLACES_COUNT}, (_, i) => {
+        const p = saved[i];
+        return p && p.icon && (typeof p.place === 'string' || isPoint(p.place)) ? p : null;
+    });
+}
+
+function saveMyPlaces() {
+    try {
+        localStorage.setItem(MY_PLACES_KEY, JSON.stringify(myPlaces));
+    } catch {
+        // localStorage niedostępny - miejsce działa do odświeżenia strony
+    }
+}
+
+function renderPlaces() {
+    placesBar.replaceChildren(...myPlaces.map((p, i) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'icon-button place-button' + (p ? ' set' : '');
+        button.dataset.slot = i;
+        button.textContent = p ? p.icon : '+';
+        const label = p ? `Jedź stąd do: ${displayValue(p.place)}`
+            : `Moje miejsce ${i + 1} — przypisz miejsce`;
+        button.setAttribute('aria-label', label);
+        button.title = p ? `${label}\nPrzytrzymaj, żeby zmienić` : label;
+        return button;
+    }));
+}
+
+function showPlaceMsg(text) {
+    placeMsg.textContent = text || '';
+    placeMsg.hidden = !text;
+}
+
+function setPlaceDraft(point) {
+    placeDraft = point;
+    placeWhere.value = displayValue(point);
+    showPlaceMsg('');
+}
+
+function openPlaceDialog(slot) {
+    if (placeDialog.open) return;
+    placeSlot = slot;
+    const p = myPlaces[slot];
+    $('place-title').textContent = `Moje miejsce ${slot + 1}`;
+    for (const radio of placeDialog.querySelectorAll('[name="place-icon"]')) {
+        radio.checked = !!p && radio.value === p.icon;
+    }
+    placeDraft = p && isPoint(p.place) ? p.place : null;
+    placeWhere.value = p ? displayValue(p.place) : '';
+    $('place-remove').hidden = !p;
+    showPlaceMsg('');
+    placeDialog.showModal();
+}
+
+/** „51.1093, 17.0386", „(51.1093, 17.0386)" albo z przecinkami dziesiętnymi
+    „51,1093 17,0386" - wpisane ręcznie albo skopiowane z pola „Skąd". */
+function parsePoint(text) {
+    const m = text.trim().match(
+        /^\(?\s*(-?\d{1,2}(?:[.,]\d+)?)\s*(?:[,;]\s*|\s+)(-?\d{1,3}(?:[.,]\d+)?)\s*\)?$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1].replace(',', '.'));
+    const lon = parseFloat(m[2].replace(',', '.'));
+    return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? {lat, lon} : null;
+}
+
+/** Co jest teraz w polu okna: punkt ze szkicu, gdy pole wciąż go pokazuje,
+    inaczej przystanek z listy albo wpisane współrzędne. */
+function placeFromField() {
+    const text = placeWhere.value.trim();
+    if (placeDraft && text === displayValue(placeDraft)) return placeDraft;
+    if (STOP_KIND.has(text)) return rawStopName(text);
+    return parsePoint(text);
+}
+
+function savePlace() {
+    const icon = placeDialog.querySelector('[name="place-icon"]:checked');
+    const place = placeFromField();
+    if (!icon) { showPlaceMsg('Wybierz ikonę.'); return; }
+    if (!place) {
+        showPlaceMsg(placeWhere.value.trim()
+            ? 'Nie znam takiego przystanku — wybierz go z podpowiedzi, wpisz współrzędne albo wskaż miejsce na mapie.'
+            : 'Wybierz miejsce.');
+        placeWhere.focus();
+        return;
+    }
+    myPlaces[placeSlot] = {icon: icon.value, place};
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+}
+
+/** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
+function locateOnce(onPoint, onError) {
+    if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
+    navigator.geolocation.getCurrentPosition(
+        position => onPoint({lat: position.coords.latitude,
+                             lon: position.coords.longitude}),
+        error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
+        GEO_OPTIONS,
+    );
+}
+
+/** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
+    od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
+function goToPlace(slot, button) {
+    const {place} = myPlaces[slot];
+    if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
+    hideRecallOffer();
+    hideLocateOffer();
+    showLocateMsg('');
+    const previous = [sel.start, sel.end];
+    sel.end = place;
+    endInput.value = displayValue(place);
+    updatePointMarker('end', place);
+    restyle(...previous, sel.end);
+    button.disabled = true;               // GPS potrafi mielić kilka sekund
+    locateOnce(point => {
+        button.disabled = false;
+        const before = sel.start;
+        sel.start = point;
+        startInput.value = displayValue(point);
+        updatePointMarker('start', point);
+        restyle(before);
+        offerNearestStop(point);
+        search();
+    }, message => {
+        button.disabled = false;
+        showLocateMsg(message);
+        if (startInput.value) search();
+    });
+}
+
+/** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
+function placePickTook(value) {
+    if (!placePicking) return false;
+    stopPlacePick();
+    // Słupek to przystanek z nazwą, nie punkt - pole dostaje wtedy nazwę.
+    if (isPoint(value)) setPlaceDraft(value);
+    else { placeDraft = null; placeWhere.value = displayValue(value); showPlaceMsg(''); }
+    placeDialog.showModal();
+    return true;
+}
+
+function stopPlacePick() {
+    placePicking = false;
+    placePickHint.hidden = true;
+}
+
+placesBar.addEventListener('click', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
+    if (placeLongPress) { placeLongPress = false; return; }
+    const slot = Number(button.dataset.slot);
+    if (myPlaces[slot]) goToPlace(slot, button);
+    else openPlaceDialog(slot);
+});
+
+// Zmiana przypisanego miejsca: prawy przycisk myszy albo przytrzymanie palca
+// (iPhone nie zgłasza przytrzymania jako contextmenu, więc liczymy je sami).
+placesBar.addEventListener('contextmenu', event => {
+    const button = event.target.closest('.place-button');
+    if (!button) return;
+    event.preventDefault();
+    // Android zgłasza przytrzymanie palca także tak - okno ma się otworzyć
+    // raz, a puszczenie palca nie może potem „kliknąć".
+    clearTimeout(placePressTimer);
+    if (placeLongPress) return;           // przytrzymanie było pierwsze
+    placeLongPress = true;
+    openPlaceDialog(Number(button.dataset.slot));
+});
+
+let placePressTimer = null;
+placesBar.addEventListener('pointerdown', event => {
+    const button = event.target.closest('.place-button');
+    placeLongPress = false;
+    if (!button || event.button !== 0) return;
+    placePressTimer = setTimeout(() => {
+        placeLongPress = true;
+        openPlaceDialog(Number(button.dataset.slot));
+    }, 600);
+});
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+    placesBar.addEventListener(type, () => clearTimeout(placePressTimer));
+}
+
+attachAutocomplete(placeWhere, () => { placeDraft = null; showPlaceMsg(''); },
+                   {suggest: suggestRecentFirst('end'), onEnter: savePlace});
+placeWhere.addEventListener('input', () => showPlaceMsg(''));
+
+$('place-form').addEventListener('submit', event => {
+    event.preventDefault();
+    savePlace();
+});
+
+$('place-remove').addEventListener('click', () => {
+    myPlaces[placeSlot] = null;
+    saveMyPlaces();
+    renderPlaces();
+    placeDialog.close();
+});
+
+const placeLocate = $('place-locate');
+if (!navigator.geolocation) placeLocate.hidden = true;
+placeLocate.addEventListener('click', () => {
+    placeLocate.disabled = true;
+    locateOnce(point => {
+        placeLocate.disabled = false;
+        setPlaceDraft(point);
+    }, message => {
+        placeLocate.disabled = false;
+        showPlaceMsg(message);
+    });
+});
+
+$('place-pick').addEventListener('click', () => {
+    placeDialog.close();
+    placePicking = true;
+    $('place-pick-text').textContent = `Kliknij na mapie: moje miejsce ${placeSlot + 1}`;
+    placePickHint.hidden = false;
+    setView('map');            // na telefonie z listy tras mapy nie widać
+});
+
+$('place-pick-cancel').addEventListener('click', () => {
+    stopPlacePick();
+    placeDialog.showModal();
+});
+
+placeDialog.addEventListener('close', () => { placeLongPress = false; });
+
+renderPlaces();
+
 // Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
@@ -5180,7 +6114,7 @@ $('clear').addEventListener('click', () => {
 const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
 const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
                         'walk-pace', 'bike-kmh', 'bike-overhead',
-                        'car-kmh', 'car-overhead'];
+                        'car-kmh', 'car-overhead', 'onboard-slack'];
 
 // To, co z tego klucza widać w ⚙ także bez DEV_MODE (patrz visiblePrefs).
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
@@ -5235,9 +6169,10 @@ function liveSlider(inputId, valueId, resetsMore) {
         saveDevPref(inputId, input.value);
         clearTimeout(timer);
         timer = setTimeout(() => {
-            if (!startInput.value || !endInput.value) return;
-            loadPlan(requestToken, false)
-                .catch(() => showError('Nie udało się połączyć z serwerem.'));
+            // Start z pokładu nie ma pola „skąd" - o komplecie pytania mówi
+            // tam wybór pojazdu (patrz onboardReady).
+            if (!endInput.value || (onboardOn ? !onboardReady() : !startInput.value)) return;
+            loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
         }, 200);
     });
 }
@@ -5251,6 +6186,7 @@ liveSlider('bike-kmh', 'bike-kmh-value');
 liveSlider('bike-overhead', 'bike-overhead-value');
 liveSlider('car-kmh', 'car-kmh-value');
 liveSlider('car-overhead', 'car-overhead-value');
+liveSlider('onboard-slack', 'onboard-slack-value');
 
 function showWalkPace() {
     $('walk-pace-value').textContent = WALK_PACE_LABELS[$('walk-pace').value];
@@ -5271,8 +6207,7 @@ for (const [id, domyslnie] of [['car-vans', false]]) {
         saveDevPref(id, input.checked);
         if (id === 'car-vans' && !flowOnScreen()) refreshCarLayer();
         if (!startInput.value || !endInput.value) return;
-        loadPlan(requestToken, false)
-            .catch(() => showError('Nie udało się połączyć z serwerem.'));
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     });
 }
 
@@ -5296,9 +6231,8 @@ bikesMergedInput.addEventListener('change', () => {
 
 // Propozycje tras da się wyłączyć w całości (sekcja „Wygląd aplikacji") -
 // zostaje sama mapa, a serwer listy w ogóle nie składa (patrz queryParams).
-// Znika lista i jej nagłówek ze strzałką, ale nie komunikaty w tym samym
-// miejscu („Szukam połączeń…", błędy): te mówią o wyszukiwaniu, nie
-// o propozycjach. Na telefonie znika też zakładka „Trasy".
+// Znika lista, jej nagłówek ze strzałką i karta „Szukam połączeń…” (czeka
+// na listę), ale nie błędy w tym samym miejscu: te mówią o wyszukiwaniu. Na telefonie znika też zakładka „Trasy".
 const routesOn = $('routes-on');
 
 function showRoutes(on) {
@@ -5774,7 +6708,7 @@ bindDotOpts();
 // Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
 // pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
 const DEV_FOLD_IDS = [
-    'fold-map', 'fold-time', 'fold-window', 'fold-transfer',
+    'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
     'fold-layout', 'fold-siechnice', 'fold-version',
@@ -5963,6 +6897,11 @@ $('dev-reset').addEventListener('click', () => {
 
 function suspendPlanner() {
     plannerSuspended = true;
+    // Wskazywanie „mojego miejsca" czeka na klik w mapę, a w rozkładach klik
+    // znaczy co innego (patrz map.on('click'), timetableTook) - pasek
+    // „Kliknij na mapie" wisiałby nad rozkładem, nic nie robiąc. Wejście
+    // w rozkłady to porzucenie okna miejsca, więc anuluje się po cichu.
+    stopPlacePick();
     if (flowLayer) { map.removeLayer(flowLayer); flowLayer = null; }
     if (flowLabelLayer) { map.removeLayer(flowLabelLayer); flowLabelLayer = null; }
     if (flowDotLayer) { map.removeLayer(flowDotLayer); flowDotLayer = null; }

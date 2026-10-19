@@ -585,6 +585,23 @@ def test_debug_says_why_a_bike_or_car_is_on_the_map(front):
     _check(front, "debug_mowi_dlaczego")
 
 
+def test_relative_mode_notice_says_what_is_off(front):
+    """Zgłoszenie #231: żółty komunikat trybu względnego mówi o spóźnieniu
+    inaczej niż o kursie, który według rozkładu dopiero przyjedzie - a kurs
+    o czasie nie mówi nic."""
+    _check(front, "tryb_wzgledny_mowi_o_rozjezdzie")
+
+
+def test_train_number_with_or_without_carrier(front):
+    """#167: „60221" i „KD 60221" w polu linii to ten sam pociąg."""
+    _check(front, "numer_pociagu_z_przewoznikiem_i_bez")
+
+
+def test_relative_mode_threshold_only_goes_with_a_vehicle(front):
+    """Próg trybu względnego (⚙, #231) nie zaśmieca zwykłego wyszukiwania."""
+    _check(front, "prog_trybu_wzglednego_leci_do_serwera")
+
+
 def test_cars_off_is_sent_to_the_server(front):
     """Zgłoszenie #163: zgaszony 🚗 to lista bez propozycji z Traficarem -
     składa je serwer, więc zgaszenie idzie w zapytaniu."""
@@ -617,6 +634,24 @@ def test_stops_along_the_way_unfold_in_the_timeline(front):
     _check(front, "przystanki_po_drodze_w_osi")
 
 
+def test_platform_and_track_stand_by_boarding_and_alighting(front):
+    """#271: peron i tor pociągu przy stacji wsiadania i wysiadania, obok
+    nazwy - przy stacjach mijanych nie."""
+    _check(front, "peron_przy_wsiadaniu_i_wysiadaniu")
+
+
+def test_train_delay_clock_in_departures_board(front):
+    """#71: w tablicy odjazdów zegar przy pociągu - zielony o czasie,
+    czerwony spóźniony, bez danych żaden."""
+    _check(front, "zegar_opoznienia_w_tablicy")
+
+
+def test_train_delay_shows_in_the_timeline(front):
+    """#71: opóźnienie pociągu na osi trasy i ostrzeżenie, gdy przez nie
+    przepada przesiadka."""
+    _check(front, "opoznienie_pociagu_w_osi")
+
+
 def test_current_vehicle_badge_stands_out_on_the_card(front):
     """Zgłoszenie #224: przy starcie z pokładu plakietka pojazdu, w którym się
     siedzi, ma na karcie propozycji obwódkę - i tylko ona."""
@@ -627,6 +662,13 @@ def test_stops_along_the_way_stand_on_the_map(front):
     """#169: wybrana trasa ma na mapie obwódkę na każdym mijanym przystanku,
     z nazwą i godziną pod kursorem - zawsze, niezależnie od opcji listy."""
     _check(front, "przystanki_po_drodze_na_mapie")
+
+
+def test_search_stages_show_the_bar_first_and_keep_cars(front):
+    """#229: pierwszy etap wyszukiwania to sam pasek „Najszybciej…" - bez mapy
+    i bez aut poprzedniej relacji. Gęstsza mapa tej samej relacji przychodzi
+    bez aut, a te, które są na ekranie, zostają do etapu z nowymi."""
+    _check(front, "etapy_pasek_najpierw_auta_bez_przerwy")
 
 
 # ------------------------------------------- przystanki linii (#252, #253) -

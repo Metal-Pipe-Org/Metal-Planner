@@ -171,6 +171,8 @@ const L = {
     }),
     divIcon: options => ({...options}),
     tooltip: options => layerBase({kind: 'tooltip', options: {...(options || {})}}),
+    // app.js dopina się do ustawiania dymków Leafleta; tu nic ich nie ustawia.
+    Tooltip: {prototype: {_setPosition() {}}},
     layerGroup: layers => layerBase({
         kind: 'group', layers: (layers || []).slice(),
         // Front szuka po warstwach grupy kropki startowej (seedStartPanel).
@@ -369,6 +371,13 @@ const navigator = {geolocation: {getCurrentPosition() {}, watchPosition() {}},
 function thenable() { return {then: thenable, catch: thenable, finally: thenable}; }
 const fetch = url => (/\/static\/sounds\//.test(url) ? fetchRecording(url) : thenable());
 
+/* Każde zapytanie o mapę dostaje swój AbortController (patrz loadPlan) -
+   przy fetchu, który i tak nie odpowiada, wystarczy flaga. */
+class AbortController {
+    constructor() { this.signal = {aborted: false}; }
+    abort() { this.signal.aborted = true; }
+}
+
 /* Obietnica, która rozstrzyga się SYNCHRONICZNIE, gdy test każe: prawdziwy
    Promise oddałby callbacki dopiero po zakończeniu skryptu, czyli po tym,
    jak emulator wypisał już wyniki. Tyle, ile używa ładowanie nagrania. */
@@ -555,7 +564,9 @@ const INJECTION = `
     suggestionHtml, placeTimeHeadline,
     // Rower jest odtąd wyborem pasażera („mam konto w WRM"), więc na mapie
     // pojawia się dopiero po zapaleniu warstwy - testy muszą to zrobić same.
-    setBikesOn, setBikeKind, setCarsOn,
+    setBikesOn, setBikeKind, setCarsOn, warnOnboardRide, obLineMode,
+    missedTransfer, boardLiveHtml, boardDelays,
+    set trainDelays(v) { trainDelays = v; },
     nodePoint, dotOpts, seedStartPanel,
     prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
     pickEndpoint,
@@ -570,6 +581,9 @@ const INJECTION = `
     get flowBikeRideLayer() { return flowBikeRideLayer; },
     BIKE_STYLE, BIKE_UNKNOWN_STYLE,
     showMore, MAX_MAP_MORE,
+    // Etapy wyszukiwania podawane wprost, bez sieci (zgłoszenie #229).
+    applyStage,
+    get flowLayer() { return flowLayer; },
     get mapMore() { return mapMore; },
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },

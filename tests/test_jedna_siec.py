@@ -198,3 +198,52 @@ def test_a_rail_station_gets_no_transfers_of_its_own(kolej, tmp_path, monkeypatc
     day.stop_coords["MIEJSKI"] = (51.1101, 17.0301)   # ~15 m od Stacji A
     pkp.augment_day(day, date(2026, 8, 31))
     assert day.siblings == {}, "kolej dorobiła sobie własne przesiadki"
+
+
+def _baza_z_peronami(tmp_path):
+    """Ta sama mała baza, ale w schemacie z peronami i torami (#271). PLK
+    wpisuje je zwykle do pól odjazdu - także na stacji końcowej (C) - a na
+    stacji B tylko do przyjazdu."""
+    db_path = _kolejowa_baza(tmp_path, ("10:15:00", "10:16:00"))
+    db = sqlite3.connect(db_path)
+    for col in ("arrival_platform", "arrival_track",
+                "departure_platform", "departure_track"):
+        db.execute(f"ALTER TABLE stops ADD COLUMN {col} TEXT")
+    db.execute("UPDATE stops SET departure_platform = '2', departure_track = '4'"
+               " WHERE station_id = 1")
+    db.execute("UPDATE stops SET arrival_platform = '1a' WHERE station_id = 2")
+    db.execute("UPDATE stops SET departure_platform = 'BUS', departure_track = '10'"
+               " WHERE station_id = 3")
+    db.commit()
+    db.close()
+    return db_path
+
+
+def test_peron_i_tor_trafiaja_do_dnia(kolej, tmp_path, monkeypatch):
+    """Zgłoszenie #271: peron i tor z rozkładu PLK - z pól odjazdu, a gdy
+    ich nie ma, z przyjazdu. „BUS" zostaje dosłownie."""
+    monkeypatch.setattr(pkp, "DB_PATH", _baza_z_peronami(tmp_path))
+    day = gtfs.DayData()
+    pkp.augment_day(day, date(2026, 8, 31))
+    assert day.pkp_platforms == {
+        ("PKP:7:1", "PKP:1"): ("2", "4"),
+        ("PKP:7:1", "PKP:2"): ("1a", None),
+        ("PKP:7:1", "PKP:3"): ("BUS", "10"),
+    }
+    assert planner._platform_fields(day, "PKP:7:1", "PKP:1", "PKP:3") == {
+        "from_platform": {"platform": "2", "track": "4"},
+        "to_platform": {"platform": "BUS", "track": "10"},
+    }
+    assert planner._platform_fields(day, "PKP:7:1", "PKP:2", "PKP:3")[
+        "from_platform"] == {"platform": "1a"}
+
+
+def test_stara_baza_bez_peronow_dalej_dziala(kolej, tmp_path, monkeypatch):
+    """Baza zbudowana przed #271 nie ma kolumn z peronami, a przebudowuje się
+    raz na dobę - do tego czasu kolej działa jak dotąd, tylko bez peronów."""
+    monkeypatch.setattr(pkp, "DB_PATH",
+                        _kolejowa_baza(tmp_path, ("10:15:00", "10:16:00")))
+    day = gtfs.DayData()
+    pkp.augment_day(day, date(2026, 8, 31))
+    assert _kursy(day)
+    assert day.pkp_platforms == {}
