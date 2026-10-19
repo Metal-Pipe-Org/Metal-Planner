@@ -395,7 +395,7 @@ def test_the_map_anchors_such_a_course_at_the_nearer_stop(install_day):
     assert flow["segments"], "mapa pusta"
     blisko = planner._round_path([day.stop_coords["BLISKI"]])[0]
     assert all(seg["path"][0] == blisko for seg in flow["segments"])
-    assert [n["name"] for n in flow["nodes"]] == ["Skrajna"]
+    assert [n["name"] for n in flow["nodes"] if not n.get("end")] == ["Skrajna"]
 
 
 # ---- dojście musi ZDĄŻYĆ ------------------------------------------------

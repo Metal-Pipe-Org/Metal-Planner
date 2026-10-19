@@ -658,16 +658,17 @@ def test_the_node_hour_is_the_earliest_you_can_be_here(install_day):
     assert _node_named(planner.plan_flow("S", "T", WHEN), "X")["sec"] == 500
 
 
-def test_a_place_where_you_only_get_off_is_still_not_a_transfer(install_day):
-    """Dokładanie przyjazdów NIE rozsiewa kropek po mapie: miejsce, z którego
-    nie da się już nigdzie pojechać, nie jest przesiadką i kropki nie dostaje.
-    Zmienia się to, co mówi kropka, a nie to, gdzie stoi."""
+def test_a_place_where_you_only_get_off_has_a_dot_where_a_journey_ends(install_day):
+    """Miejsce, z którego nie da się już nigdzie pojechać, dostaje kropkę
+    tylko tam, gdzie kończy się ostatni przejazd podróży z mapy (zgłoszenie
+    #266) - tu jest to sam cel, z flagą `end` i samymi przyjazdami."""
     install_day(_three_flows_at_one_node_day())
     result = planner.plan_flow("S", "T", WHEN)
 
-    assert "T" not in [n["name"] for n in result["nodes"]]
-    # ...a węzeł, na którym da się wsiąść, zostaje - razem z przyjazdem.
-    assert {"S", "X"} == {n["name"] for n in result["nodes"]}
+    assert {"S", "X", "T"} == {n["name"] for n in result["nodes"]}
+    cel = _node_named(result, "T")
+    assert cel["end"] is True
+    assert {l["flow"] for l in cel["lines"]} == {"end"}
 
 
 def _passing_line_day():
