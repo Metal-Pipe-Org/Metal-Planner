@@ -445,3 +445,56 @@ def test_zaslone_mozna_odrzucic_na_stale(adres, przegladarka):
     context.close()
     assert (przed, po_kliknieciu, po_odswiezeniu) == (True, False, False)
     assert przy_starcie == "none", przy_starcie
+
+
+# Tablica odjazdów w doku na telefonie (#327): wiersze oddzielone kreską, a trzy
+# godziny mieszczą się w jednej linijce - kierunek ustępuje wielokropkiem. Wiersze
+# wstawiamy ręcznie, żeby wynik nie zależał od tego, co akurat jedzie.
+TABLICA_HTML = """<ul class="tt-rows tt-lines">
+<li><span class="badge bus">810+81</span><span class="tip-dir">Siechnice - Zacisze</span>
+<span class="tt-times"><span>18:53</span><span>19:23</span><span>19:53</span></span>
+<button type="button" class="tt-route" title="Cała trasa: Autobus 810">trasa</button></li>
+<li><span class="badge bus">112</span><span class="tip-dir">Zajezdnia TYSKA</span>
+<span class="tt-times"><span>19:23</span><span>19:50</span><span>20:10</span></span>
+<button type="button" class="tt-route" title="Cała trasa: Autobus 810">trasa</button></li></ul>"""
+
+TABLICA_JS = """() => [...document.querySelectorAll('#flow-panel .tt-rows li')].map(li => {
+    const top = sel => Math.round(li.querySelector(sel).getBoundingClientRect().top);
+    return {
+        kreska: getComputedStyle(li).borderBottomWidth,
+        godziny: new Set([...li.querySelectorAll('.tt-times > span')]
+            .map(s => Math.round(s.getBoundingClientRect().top))).size,
+        godziny_top: top('.tt-times > span'), kierunek_top: top('.tip-dir'),
+        trasa_top: top('.tt-route'),
+        trasa_szer: Math.round(li.querySelector('.tt-route').getBoundingClientRect().width),
+        trasa_dymek: li.querySelector('.tt-route').title,
+        trasa_nazwa: li.querySelector('.tt-route').textContent.trim(),
+        kierunek_szer: Math.round(li.querySelector('.tip-dir').getBoundingClientRect().width),
+    };
+})"""
+
+
+@pytest.mark.parametrize("szerokosc", [390])
+def test_tablica_na_telefonie_ma_kreski_i_trzy_godziny_w_rzedzie(adres, przegladarka, szerokosc):
+    context = przegladarka.new_context(
+        viewport={"width": szerokosc, "height": 844}, is_mobile=True, has_touch=True,
+        locale="pl-PL", service_workers="block")
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector("#start")
+    page.evaluate("""html => {
+        document.body.classList.add('search-collapsed');
+        document.getElementById('flow-panel-body').innerHTML = html;
+        document.getElementById('flow-panel').hidden = false;
+    }""", TABLICA_HTML)
+    wiersze = page.evaluate(TABLICA_JS)
+    context.close()
+    assert wiersze[0]["kreska"] == "1px", wiersze
+    for w in wiersze:
+        assert w["godziny"] == 1, w
+        assert w["godziny_top"] == w["kierunek_top"] == w["trasa_top"], w
+        assert w["trasa_szer"] < 30 and w["trasa_nazwa"] == "trasa", w
+        assert "trasa" in w["trasa_dymek"], w

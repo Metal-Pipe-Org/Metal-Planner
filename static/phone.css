@@ -329,10 +329,29 @@ body.dev-open #flow-panel {
    zawijają się pod siebie zamiast wypychać wiersz poza ekran. */
 #flow-panel:has(.tt-lines) { width: 100%; }
 #flow-panel .tt-rows.tt-lines {
-    grid-template-columns: minmax(34px, max-content) minmax(0, 9em) 1fr auto;
+    grid-template-columns: minmax(34px, max-content) minmax(3em, 1fr) minmax(0, max-content) auto;
+    column-gap: 5px;
 }
 #flow-panel .tt-rows.tt-lines.has-flow {
-    grid-template-columns: 15px minmax(34px, max-content) minmax(0, 9em) 1fr auto;
+    grid-template-columns: 15px minmax(34px, max-content) minmax(3em, 1fr) minmax(0, max-content) auto;
+}
+/* Kierunek oddaje miejsce godzinom (wielokropek), a nie odwrotnie: trzy
+   godziny w jednym rzędzie czyta się łatwiej niż kierunek w całości. Gdy
+   godziny i tak się zawiną, reszta wiersza trzyma się pierwszej linijki,
+   a kreska pod wierszem mówi, gdzie on się kończy. */
+#flow-panel .tt-rows.tt-lines li {
+    align-items: start;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--line);
+    line-height: 18px;
+}
+#flow-panel .tt-rows.tt-lines li:last-child { border-bottom: 0; }
+/* Na telefonie sama ikona: słowo zostaje w przycisku (nazwa dla czytnika
+   ekranu), ale nie zajmuje miejsca, które dostaje kierunek. */
+#flow-panel .tt-rows.tt-lines .tt-route {
+    gap: 0;
+    font-size: 0;
+    line-height: 16px;
 }
 #flow-panel .tt-times {
     flex-wrap: wrap;
