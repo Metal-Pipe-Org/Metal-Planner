@@ -121,6 +121,11 @@ body.view-map .places-bar {
 }
 
 body.view-map.places-row .places-bar { flex-direction: row; }
+
+/* Skróty idą za formularzem: w rozwiniętym leżą w rzędzie pod nim, a ze
+   zwiniętym znikają razem. */
+body.view-map:not(.search-collapsed) .places-bar { flex-direction: row; }
+body.view-map.search-collapsed .places-bar { display: none; }
 body.view-map.places-off .places-bar { display: none; }
 
 body.view-map .place-button {

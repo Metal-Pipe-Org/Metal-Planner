@@ -969,6 +969,9 @@ function timetableTook(stopName) {
 }
 
 map.on('click', e => {
+    // Leaflet nie wysyła click po przeciągnięciu, więc to jest czyste stuknięcie
+    // (phone.js zwija po nim rozwinięty formularz).
+    document.dispatchEvent(new Event('planner:map-tap'));
     if (document.body.classList.contains('mode-timetable')) return;
     pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
 });
@@ -2855,7 +2858,12 @@ for (const type of ['mouseover', 'mouseout', 'mousemove', 'mousedown', 'mouseup'
         if (!touchInput || e.target.closest('.leaflet-control-container')) return;
         e.stopImmediatePropagation();
         if (type !== 'click') return;
-        if (!map.dragging.moved()) tapMap(e);
+        if (!map.dragging.moved()) {
+            // Stuknięcie w linię albo kropkę nie dochodzi do map.on('click'),
+            // a też jest stuknięciem w mapę.
+            document.dispatchEvent(new Event('planner:map-tap'));
+            tapMap(e);
+        }
         // Klik zatrzymany na mapie nie dochodzi też do dokumentu, a tam
         // wiszą okienka zamykane kliknięciem obok (dymek paska z czasem).
         $('map').parentNode.dispatchEvent(new MouseEvent('click', {bubbles: true}));

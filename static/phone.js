@@ -95,6 +95,7 @@ const phoneLayout = (() => {
         card.prepend(summary);
 
         const collapse = on => document.body.classList.toggle('search-collapsed', on);
+        let hasResult = false;
 
         const busy = document.createElement('span');
         busy.className = 'spinner search-summary-busy';
@@ -126,11 +127,28 @@ const phoneLayout = (() => {
             // Klawiatura telefonu zostałaby nad mapą, przypięta do pola,
             // którego już nie widać.
             if (card.contains(document.activeElement)) document.activeElement.blur();
+            hasResult = true;
             collapse(true);
         });
         summary.addEventListener('click', () => collapse(false));
         // ✕ zaczyna nową relację, a tę wpisuje się w rozwiniętym formularzu.
-        document.getElementById('clear').addEventListener('click', () => collapse(false));
+        document.getElementById('clear').addEventListener('click', () => {
+            hasResult = false;
+            collapse(false);
+        });
+        // Rozwinięty formularz ustępuje mapie po stuknięciu w nią, ale tylko
+        // gdy jest już wynik, który mapa pokazuje - bez niego formularz
+        // jest jedyną rzeczą do zrobienia.
+        document.addEventListener('planner:map-tap', () => {
+            if (!query.matches || !hasResult) return;
+            if (card.contains(document.activeElement)) document.activeElement.blur();
+            collapse(true);
+        });
+        // Po powrocie z tła wynik jest stary, a godzina znów „teraz" (app.js):
+        // rozwinięty formularz pozwala odświeżyć trasę jednym „Szukaj".
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && query.matches && hasResult) collapse(false);
+        });
     }
 
     // Klucz dawnych ustawień tylko dla telefonu (zakładka „Trasy" - dziś
