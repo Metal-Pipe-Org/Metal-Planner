@@ -435,7 +435,9 @@ function restyle(...names) {
 
 // Markery klikniętych punktów (poza markersByName - nie są prawdziwym
 // przystankiem). Ten sam kolor co podświetlenie start/cel, ale przerywana
-// obwódka - łatwo odróżnić od słupka.
+// obwódka - łatwo odróżnić od słupka. Nieinteraktywne: punkt nie ma tablicy,
+// więc nie ma czego otwierać, a zasłaniałby przystanek pod sobą (#363) -
+// ani kursor, ani palec (tapCandidates pomija takie warstwy) go nie łapie.
 const pointMarkers = {start: null, end: null};
 const POINT_STYLE = {
     start: {radius: 9, weight: 3, dashArray: '2,4', color: '#1b5e20',
@@ -454,9 +456,8 @@ function updatePointMarker(slot, value) {
     }
     if (isPoint(value)) {
         pointMarkers[slot] = L.circleMarker(
-            [value.lat, value.lon], POINT_STYLE[slot],
+            [value.lat, value.lon], {...POINT_STYLE[slot], interactive: false},
         ).addTo(map);
-        pointMarkers[slot].tapRank = TAP_RANK.endpoint;
     }
 }
 
