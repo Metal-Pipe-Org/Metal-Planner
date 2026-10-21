@@ -1939,8 +1939,8 @@ const HEADLINE_GAP = 16;
 
 /** Dokąd z lewej i z prawej sięga to, na czym paskowi stawać nie wolno - ale
     tylko to, co leży na jego wysokości. Z lewej panel i pływające przyciski,
-    z prawej okienko z rozkładem i panel ⚙ (pasek wchodził na okienko, bo
-    omijał tylko lewą stronę). Mierzone, a nie wpisane liczbą: szerokość panelu
+    z prawej panel ⚙ (okienko z rozkładem pasku nie przeszkadza - samo staje
+    pod nim, patrz placeTimeHeadline). Mierzone, a nie wpisane liczbą: szerokość panelu
     zmienia suwak, a napis na przycisku trybu zmienia jego szerokość; wpisana
     liczba rozjeżdżała się z każdą taką zmianą. Schowany panel sam wyjeżdża
     poza ekran, więc przestaje być przeszkodą bez osobnej reguły. */
@@ -1956,9 +1956,8 @@ function headlineGuard(band) {
         if (box) left = Math.max(left, box.right + HEADLINE_GAP);
     }
     let right = window.innerWidth - HEADLINE_GAP;
-    for (const el of [flowPanel, devPanel]) {
-        if (!el || el.hidden || el.classList.contains('hidden')) continue;
-        const box = onBand(el);
+    if (devPanel && !devPanel.hidden && !devPanel.classList.contains('hidden')) {
+        const box = onBand(devPanel);
         if (box) right = Math.min(right, box.left - HEADLINE_GAP);
     }
     return {left, right};
@@ -1972,34 +1971,26 @@ function headlineGuard(band) {
     granica wygrywa - ale dopiero wtedy. */
 function placeTimeHeadline() {
     const el = $('time-headline');
+    if (flowPanel) flowPanel.style.top = '';
     if (!el || el.hidden) return;
     // Na telefonie pasek stoi w doku nad zakładkami - nie ma tam czego
     // omijać i całe ustawianie oddaje się arkuszowi (patrz phone.css).
     if (phoneLayout.active()) {
         el.style.maxWidth = '';
         el.style.left = '';
-        el.style.top = '';
         return;
     }
     el.style.maxWidth = '';
-    el.style.top = '';
-    let guard = headlineGuard(el.getBoundingClientRect());
-    // Pasek może zejść do dwóch linijek, ale zdanie o najszybszym dojeździe
-    // ma się nie łamać - ściśnięte obok okienka z rozkładem rozpadało się na
-    // słupek po słowie („wyjeżdżasz / o"). Gdy obok nie mieści się w całości,
-    // pasek schodzi pod okienko.
-    const best = el.querySelector('.headline-best');
-    const needed = best.getBoundingClientRect().width + 2 * HEADLINE_GAP;
-    if (guard.right - guard.left < needed && flowPanel && !flowPanel.hidden) {
-        el.style.top = flowPanel.getBoundingClientRect().bottom + HEADLINE_GAP + 'px';
-        guard = headlineGuard(el.getBoundingClientRect());
-    }
+    const guard = headlineGuard(el.getBoundingClientRect());
     el.style.maxWidth = (guard.right - guard.left) + 'px';
     // Szerokość po przycięciu: zawinięty pasek jest węższy, więc znów może
     // zmieścić się na środku.
     const width = el.getBoundingClientRect().width;
     const centred = (window.innerWidth - width) / 2;
     el.style.left = Math.max(guard.left, Math.min(centred, guard.right - width)) + 'px';
+    // Pasek ma pierwszeństwo w górnym rzędzie: okienko z rozkładem schodzi
+    // pod niego, a nie pasek pod okienko.
+    if (flowPanel) flowPanel.style.top = el.getBoundingClientRect().bottom + HEADLINE_GAP + 'px';
 }
 
 window.addEventListener('resize', placeTimeHeadline);
