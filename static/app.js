@@ -1667,7 +1667,7 @@ function drawFlow(flow, refit) {
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
     if (flowEndDots) map.removeLayer(flowEndDots);
-    flowEndDots = endDots(flow.nodes).addTo(map);
+    flowEndDots = endDots(flow).addTo(map);
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
@@ -3479,7 +3479,7 @@ function stopDot(point, where, sec, style) {
     const isStart = !!where.start;
     const dot = L.circleMarker(point, {
         ...(style || STOP_DOT_STYLE),
-        ...(isStart ? ENDPOINT_STYLE.start : {}),
+        ...(isStart ? ENDPOINT_STYLE.start : where.end ? ENDPOINT_STYLE.end : {}),
     });
     dot.isStart = isStart;
     dot.tapRank = isStart ? TAP_RANK.endpoint : TAP_RANK.transfer;
@@ -3561,27 +3561,40 @@ const flowDotStyle = (w = 1) => {
     po miejscu jest w rozkładzie (gtfs._build_places), więc front nie ma go
     z czego odtworzyć - i nie powinien zgadywać po odległości na ekranie. */
 function flowStopDots(nodes, deadline) {
-    return (nodes || []).map(n => stopDot(
+    // Cel stoi w endDots - ma zostać widać także pod wybraną trasą.
+    return (nodes || []).filter(n => !n.end).map(n => nodeDot(n, deadline));
+}
+
+function nodeDot(n, deadline) {
+    return stopDot(
         nodePoint(n),
         // `late` - spóźnione kursy z tego przystanku (#238, patrz withLate).
-        {name: n.name, lines: n.lines, deadline, start: n.start, late: n.late},
-        // Start nigdy nie blednie: to nie jest jedna z opcji, tylko miejsce,
-        // w którym stoisz.
-        n.sec, flowDotStyle(n.start ? 1 : n.w)));
+        {name: n.name, lines: n.lines, deadline, start: n.start, end: n.end, late: n.late},
+        // Start i cel nigdy nie blednieją: to nie są opcje, tylko miejsca,
+        // z którego i do którego się jedzie.
+        n.sec, flowDotStyle(n.start || n.end ? 1 : n.w));
 }
 
 /** Kropki startu i celu - po jednej w środku ich słupków, w miejsce ich
-    wszystkich (patrz styleFor). Cel węzłem nie jest: tu się tylko wysiada.
+    wszystkich (patrz styleFor). Cel to zwykła kropka węzła (nodeDot), tylko
+    czerwona: ta sama tablica, co na każdym innym przystanku mapy, z tym, czym
+    się tu przyjeżdża (zgłoszenie #266). Tablicę ma tylko jako węzeł celu: gdy
+    żadna podróż z mapy nie kończy się przejazdem do samego celu, węzła nie
+    ma i czerwona kropka jest samym znacznikiem, bez tablicy.
     Start ma kropkę z węzła wachlarza, ale tylko wtedy, gdy dotyka go któryś
     narysowany kawałek - gdy każda droga zaczyna się dojściem pieszym na inny
     przystanek, węzła startu nie ma i bez tej kropki start znikał z mapy
     (zgłoszenie #276). Taki start wygląda jak kliknięty punkt (POINT_STYLE):
     też jest miejscem, z którego się dopiero dochodzi do przystanku.
     Osobno od flowDotLayer, bo wybrana trasa chowa tamte kropki, a start
-    i cel mają zostać widać. */
-function endDots(nodes) {
-    const dots = [endpointDot(sel.end, ENDPOINT_STYLE.end)];
-    if (!(nodes || []).some(n => n.start)) {
+    i cel mają zostać widać. Cel z punktu na mapie ma tylko swój znacznik
+    (updatePointMarker) - to nie przystanek, więc i tablicy nie ma. */
+function endDots(flow) {
+    const nodes = flow.nodes || [];
+    const endNode = nodes.find(n => n.end);
+    const dots = [endNode ? nodeDot(endNode, flow.deadline_sec)
+        : endpointDot(sel.end, ENDPOINT_STYLE.end)];
+    if (!nodes.some(n => n.start)) {
         dots.push(endpointDot(sel.start, POINT_STYLE.start));
     }
     return L.layerGroup(dots.filter(Boolean));

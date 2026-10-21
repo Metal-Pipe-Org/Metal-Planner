@@ -1852,7 +1852,18 @@ def _value_map(day, source_stops, target_set, dep_sec, best_arr, frame_km2,
                        and VALUE_WINDOWS_SEC[-1] in searches
                        and tolerance(k + 1) is None),
         "why_of": why_of,
+        "chosen": chosen,
     }
+
+
+def _last_alights(day, chosen):
+    """Słupki, na których podróże z mapy kończą ostatni przejazd - tu się
+    wysiada i dochodzi do celu albo jest się już w nim (zgłoszenie #266).
+    Każdy wariant osobno: ta sama podróż innymi liniami bywa wysiadką gdzie
+    indziej."""
+    return {day.conns[max((alight for _board, alight in rides),
+                          key=lambda conn: day.conns[conn][1])][3]
+            for journey in chosen for _nums, rides in journey["kept"]}
 
 
 def _latest_departure(day, source_stops, target_stops, dep_sec, best_arr):
@@ -2238,7 +2249,8 @@ def plan_flow_stages(start_query, end_query, when=None,
 
             seg_list, nodes = _finalize_segments(
                 day, kept, ranges, geo_db, earliest, profile[2], deadline,
-                source_stops, why_of, late=(best_arr, late_arrival))
+                source_stops, why_of, late=(best_arr, late_arrival),
+                alights=_last_alights(day, chosen_map["chosen"]), target_stops=target_set)
             map_journeys = []
             if with_journeys:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
@@ -3051,7 +3063,7 @@ def _drawn_onward(day, runs, target_set):
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
                        board_value=None, deadline=None, source_stops=None,
-                       why_of=None, late=None):
+                       why_of=None, late=None, alights=None, target_stops=None):
     """Tnie każdy narysowany kurs na kawałki tam, gdzie zmienia się zestaw
     linii dzielących ten sam odcinek ulicy/torów (patrz
     _membership_boundaries) - kawałek niesie jeden skład korytarza na całej
@@ -3172,7 +3184,8 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
             item["why"] = why_of(label, stops_seq)
         seg_list.append(item)
     return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline,
-                                    source_stops, late=late)
+                                    source_stops, late=late, alights=alights,
+                                    target_stops=target_stops)
 
 
 def _rides_back(earliest, board, alight):
@@ -3258,7 +3271,7 @@ def _place_center(day, place_key, fallback_stop):
 
 
 def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
-                    source_stops=None, late=None):
+                    source_stops=None, late=None, alights=None, target_stops=None):
     """Węzły przesiadkowe mapy - to, na czym front stawia kropki z tablicą
     odjazdów.
 
@@ -3282,7 +3295,10 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     GDZIE w ogóle stoi kropka: tam, gdzie coś się ZACZYNA albo KOŃCZY - jakaś
     linia staje się stąd dostępna, albo mapa przestaje którąś dalej wieźć.
     Przystanek, przez który wszystko tylko przejeżdża, kropki nie dostaje,
-    choćby leżał na styku dwóch narysowanych kawałków.
+    choćby leżał na styku dwóch narysowanych kawałków. Kropkę ma też każde
+    miejsce z `alights` - tam podróż z mapy kończy ostatni przejazd, choćby
+    nie dało się tam już w nic wsiąść (zgłoszenie #266). Miejsce celu
+    (`target_stops`) dostaje `end`, jak start `start`.
 
     Czytane z KAŻDEGO przystanku kawałka, nie tylko z jego końców. Kawałek
     "Galeria Dominikańska -> Urząd Wojewódzki -> Katedra" przejeżdża przez
@@ -3325,6 +3341,8 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     # to nazwa jednego z jego słupków, więc zgadywanie po niej myliłoby się
     # dokładnie tam, gdzie plac ma słupki o różnych nazwach.
     start_places = {day.place_of.get(s, s) for s in (source_stops or ())}
+    end_places = {day.place_of.get(s, s) for s in (target_stops or ())}
+    alight_places = {day.place_of.get(s, s) for s in (alights or ())}
 
     # Każde dotknięcie przystanku przez narysowany kawałek: (miejsce, linia,
     # słupek, godzina, czy wiezie DALEJ, czy dowozi TU, czy to koniec kawałka).
@@ -3398,8 +3416,10 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
                 entry["arrive"] = arrive
             lines.append(entry)
         # Miejsce, w którym da się tylko wysiąść, nie jest przesiadką i nie
-        # dostaje kropki.
-        if not any(l["flow"] != "end" for l in lines):
+        # dostaje kropki - chyba że kończy się tu czyjś ostatni przejazd: wtedy
+        # to tu pasażer wysiada i to on pyta, o której tu będzie.
+        last_alight = key in alight_places
+        if not lines or (not last_alight and not any(l["flow"] != "end" for l in lines)):
             continue
         # ...a miejsce, przez które WSZYSTKO tylko przejeżdża, też nie: nic się
         # tu nie staje dostępne i nic nie przestaje, więc nie ma o czym
@@ -3414,7 +3434,7 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         # w miejscu, w którym nie da się zrobić nic (zgłoszone 2026-08-31).
         # Linia przecięta z powodu korytarza wychodzi tu jako "through" -
         # i tu dowozi, i dalej wiezie - więc sama z siebie kropki nie stawia.
-        if not any(l["flow"] != "through" for l in lines):
+        if not last_alight and not any(l["flow"] != "through" for l in lines):
             continue
         lat, lon = _round_path([day.stop_coords[node["stop"]]])[0]
         clat, clon = _place_center(day, key, node["stop"])
@@ -3434,6 +3454,8 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         }
         if key in start_places:
             entry["start"] = True     # tylko przy tym jednym - pole ma nie puchnąć
+        if key in end_places:
+            entry["end"] = True
         if late is not None:
             place_stops = day.stops_by_place.get(key, [node["stop"]])
             # Poprzedni kurs to ten sprzed chwili, w której da się tu w ogóle
