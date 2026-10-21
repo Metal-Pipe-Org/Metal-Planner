@@ -18,6 +18,17 @@
     --tabs-h: calc(57px + env(safe-area-inset-bottom, 0px));
 }
 
+/* Cała aplikacja to przypięte warstwy, więc dokument nie ma czego przewijać.
+   Bez tego iOS przy otwarciu klawiatury przewija sam dokument, żeby pokazać
+   pole, i po jej zamknięciu zostawia całą stronę przesuniętą (#329, #326):
+   pasek z nazwą pod notchem, kolumny przycisków wsunięte pod pasek. Przewijają
+   się tylko panele w środku (overflow-y: auto). */
+html, body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
 /* ------------------------------------------------------------ zakładki --- */
 
 #view-tabs { display: flex; }

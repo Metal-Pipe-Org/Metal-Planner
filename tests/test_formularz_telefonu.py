@@ -108,3 +108,36 @@ def test_skroty_znikaja_ze_zwinietym_formularzem_a_przy_rozwinietym_leza_w_rzedz
     telefon.click(".search-summary")
     assert telefon.is_visible(".places-bar")
     assert len(set(telefon.evaluate(rzad))) == 1
+
+
+POD_PASKIEM = """() => {
+    const top = s => document.querySelector(s).getBoundingClientRect().top;
+    const bottom = document.getElementById('sidebar').getBoundingClientRect().bottom;
+    return {bottom, layers: top('.layer-bar')};
+}"""
+
+
+def test_kolumna_warstw_stoi_pod_paskiem_w_trakcie_i_po_wyszukaniu(telefon):
+    # Klawiatura telefonu (#326): okno kurczy się pod wpisywaniem i wraca,
+    # a kolumny mają potem stać pod paskiem, nie pod nim.
+    telefon.fill("#time", "12:00")
+    _wybierz(telefon, "#start", TRASA[0])
+    telefon.focus("#end")
+    telefon.set_viewport_size({"width": 390, "height": 480})
+    _wybierz(telefon, "#end", TRASA[1])
+    telefon.set_viewport_size({"width": 390, "height": 844})
+    telefon.wait_for_function(ZWINIETY, timeout=20000)
+    for _ in range(8):
+        miary = telefon.evaluate(POD_PASKIEM)
+        assert miary["layers"] >= miary["bottom"], miary
+        telefon.wait_for_timeout(200)
+
+
+def test_dokument_na_telefonie_nie_przewija_sie_po_klawiaturze(telefon):
+    # #329: iOS przewija dokument pod pole i zostawia go przesuniętego.
+    telefon.evaluate("document.body.style.minHeight = '3000px'")
+    telefon.focus("#end")
+    telefon.evaluate("window.scrollTo(0, 120)")
+    telefon.evaluate("document.activeElement.blur()")
+    telefon.wait_for_function("window.scrollY === 0 && document.scrollingElement.scrollTop === 0")
+    assert telefon.evaluate("getComputedStyle(document.body).overflow") == "hidden"

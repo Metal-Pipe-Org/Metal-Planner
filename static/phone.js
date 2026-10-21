@@ -57,11 +57,15 @@ const phoneLayout = (() => {
     const layerBar = document.querySelector('.layer-bar');
     const placesBar = document.querySelector('.places-bar');
     function placeLayers() {
-        const panelBottom = sidebar.getBoundingClientRect().bottom;
+        // Z układu (offset*), nie z getBoundingClientRect: iOS po otwarciu
+        // klawiatury przesuwa widok i rect liczy od przesuniętego brzegu, a po
+        // zamknięciu nikt już nie woła przeliczenia, bo panel nie zmienił
+        // rozmiaru - kolumny zostawały wsunięte pod pasek (#326).
+        const panelBottom = sidebar.offsetTop + sidebar.offsetHeight;
         document.documentElement.style.setProperty('--panel-bottom', panelBottom + 'px');
         const dockBox = dock ? dock.getBoundingClientRect() : null;
-        const floor = dockBox && dockBox.height ? dockBox.top
-            : tabs ? tabs.getBoundingClientRect().top : window.innerHeight;
+        const floor = dockBox && dockBox.height ? dock.offsetTop
+            : tabs ? tabs.offsetTop : window.innerHeight;
         const free = floor - panelBottom - 16;
         document.body.classList.remove('layers-row', 'layers-off', 'places-row', 'places-off');
         if (free < layerBar.getBoundingClientRect().height) {
@@ -81,6 +85,18 @@ const phoneLayout = (() => {
     watch.observe(sidebar);
     if (dock) watch.observe(dock);
     window.addEventListener('resize', placeLayers);
+
+    // iOS po zamknięciu klawiatury potrafi zostawić stronę (a pod nią pasek
+    // z nazwą i kolumny) przesuniętą o to, co przewinął dla pola. Overflow
+    // w phone.css odbiera dokumentowi przewijanie, a to wraca do zera także
+    // to, co iOS przesunął mimo to.
+    const resetScroll = () => {
+        if (!query.matches) return;
+        if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+        placeLayers();
+    };
+    document.addEventListener('focusout', () => setTimeout(resetScroll, 100));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resetScroll);
 
     // Po wyszukaniu formularz niesie jedno zdanie ("skąd → dokąd, o której"),
     // a zajmuje ćwierć ekranu nad mapą. Zwija się więc do tego zdania,
