@@ -3,8 +3,8 @@
 Jak w Jakdojade: gdy start jest gotowy - podpowiedź wybrana myszą albo
 Enterem, „Stoisz na przystanku X? Tak" - a cel jest pusty, pisze się dalej
 w polu celu. Gdy cel już jest, start od razu szuka i kursora nikt nie
-przestawia. Sam ◎ kursora nie rusza: zostawia mapę do wskazania celu, a
-klawiatura telefonu by ją zasłoniła.
+przestawia. ◎ jest takim samym wyborem startu (zgłoszenie #319), więc też
+przenosi kursor; klik w mapę nie, bo zostawia mapę do wskazania celu.
 
 Ta sama przeglądarka i ten sam serwer co test układu telefonu - i tak samo
 pomija się bez playwright albo bez bazy rozkładów.
@@ -76,18 +76,34 @@ def test_wpisany_cel_zostaje_bez_kursora(przegladarka, adres, ekran):
     assert not bledy
 
 
-def test_moja_lokalizacja_i_tak_przenosi_do_celu(przegladarka, adres, ekran):
+def test_moja_lokalizacja_przenosi_do_celu(przegladarka, adres, ekran):
     slupek = next(s for s in gtfs.all_stops_geo() if s["name"] == TRASA[0])
     context, page, bledy = _otworz(
         przegladarka, adres, ekran, permissions=["geolocation"],
         geolocation={"latitude": slupek["lat"], "longitude": slupek["lon"]})
     page.click("#locate")
     page.wait_for_selector("#locate-offer", state="visible")
-    assert page.evaluate(FOKUS) != "end"
+    assert page.evaluate(FOKUS) == "end"
 
     page.click("#locate-offer-yes")
     assert TRASA[0] in page.input_value("#start")
     assert page.evaluate(FOKUS) == "end"
+    context.close()
+    assert not bledy
+
+
+def test_moja_lokalizacja_przy_wpisanym_celu_nie_rusza_kursora(przegladarka, adres, ekran):
+    slupek = next(s for s in gtfs.all_stops_geo() if s["name"] == TRASA[0])
+    context, page, bledy = _otworz(przegladarka, adres, ekran)
+    page.fill("#time", "12:00")
+    _wybierz(page, "#end", TRASA[1])
+    page.wait_for_selector("#locate-msg", state="visible")   # bez zgody: start zostaje pusty
+    context.grant_permissions(["geolocation"])
+    context.set_geolocation({"latitude": slupek["lat"], "longitude": slupek["lon"]})
+    page.evaluate("document.activeElement.blur()")
+    page.click("#locate")
+    page.wait_for_selector("#time-headline:not([hidden])", timeout=20000)
+    assert page.evaluate(FOKUS) != "end"
     context.close()
     assert not bledy
 

@@ -196,6 +196,8 @@ jest cichy: zostaje poprzedni wynik.
 
 Cel wybrany przy **pustym** „skąd” znaczy „jadę stąd” (#275): aplikacja sama robi to samo co ◎ — pyta o pozycję, w razie czego „Stoisz na przystanku…?”, i od razu szuka. Gdy lokalizacji nie ma (odmowa, brak sygnału, brak API), zostaje zwykły komunikat ◎, a kursor przechodzi do „skąd”. Gotowego startu nic nie nadpisuje, a w trybie z pokładu pojazdu tego nie ma.
 
+Druga strona tego samego (#319): ◎ jest takim samym wyborem startu jak podpowiedź, więc przy pustym „dokąd” też przenosi tam kursor (nie czekając na „Stoisz na przystanku…?”); przy wpisanym celu od razu szuka i kursora nie rusza. Klik w mapę kursora nie przenosi — zostawia mapę do wskazania celu. Przycisk „Moje miejsce” ma cel już ustawiony, więc kursor zostaje, gdzie był.
+
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
 - na mapie — przepływy, czyli cały wachlarz sensownych dojazdów naraz;

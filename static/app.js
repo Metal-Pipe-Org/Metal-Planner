@@ -1041,8 +1041,9 @@ startInput.addEventListener('input', hideLocateOffer);
 
 /** Gotowy start przy pustym celu: kursor sam przechodzi do „Dokąd" (#275),
     jak w Jakdojade. Wpisanego celu nie ruszamy - wtedy start od razu szuka.
-    Klik w mapę ani ◎ tego nie wołają: oba zostawiają mapę do wskazania celu,
-    a klawiatura telefonu zasłoniłaby jej pół (i pytanie „Stoisz na…"). */
+    Klik w mapę tego nie woła: zostawia mapę do wskazania celu, a klawiatura
+    telefonu zasłoniłaby jej pół (i pytanie „Stoisz na…"). ◎ woła, bo jest
+    wyborem startu jak podpowiedź (#319). */
 function focusEnd() {
     if (!endInput.value.trim()) endInput.focus();
 }
@@ -1060,8 +1061,12 @@ function useMyLocation(point) {
     updatePointMarker('start', point);
     restyle(previous, sel.start);
     offerNearestStop(point);
-    if (endInput.value) search();
-    else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
+    if (endInput.value) {
+        search();
+    } else {
+        map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
+        focusEnd();
+    }
 }
 
 // ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
