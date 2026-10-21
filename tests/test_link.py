@@ -220,6 +220,15 @@ def test_link_z_gps_nie_rusza_ostatniej_trasy(adres, otworz):
         f"localStorage.getItem('{KLUCZ_OSTATNIEJ}')")) == json.loads(ostatnia)
 
 
+def test_from_gps_bez_to_nie_zamienia_pozniejszego_szukania_w_linkowe(adres, otworz):
+    page = otworz(f"{adres}?from=gps", **POZYCJA)
+    page.wait_for_function("document.getElementById('start').value.startsWith('(')")
+    assert page.zapytania == []
+    _wybierz(page, "#end", TRASA[1])
+    page.wait_for_selector(".journey")
+    assert page.evaluate(f"localStorage.getItem('{KLUCZ_OSTATNIEJ}')") is not None
+
+
 def test_zapisane_miejsce_idzie_do_adresu_jak_kazdy_punkt(adres, otworz):
     dom = json.dumps([{"icon": "🏠", "place": {"lat": 51.1, "lon": 17.03}}])
     page = otworz(

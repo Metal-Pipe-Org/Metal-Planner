@@ -1054,7 +1054,7 @@ function focusEnd() {
 
 /** Przycisk ◎ - w przeciwieństwie do kliknięcia w mapę nadpisuje start, który
     już był (o to się prosi, klikając go), ale celu nie rusza. */
-function useMyLocation(point) {
+function useMyLocation(point, {fromLink = false} = {}) {
     const previous = sel.start;
     hideRecallOffer();
     sel.start = hereStart = point;
@@ -1062,7 +1062,7 @@ function useMyLocation(point) {
     updatePointMarker('start', point);
     restyle(previous, sel.start);
     offerNearestStop(point);
-    if (endInput.value) search();
+    if (endInput.value) search({fromLink});
     else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
 }
 
@@ -1171,7 +1171,7 @@ if (!navigator.geolocation) {
     });
 }
 
-function locateStart(onFail = () => {}) {
+function locateStart(onFail = () => {}, options = {}) {
     showLocateMsg('');
     hideLocateOffer();
     locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
@@ -1186,7 +1186,7 @@ function locateStart(onFail = () => {}) {
             finish();
             if (stale()) return;
             useMyLocation({lat: position.coords.latitude,
-                           lon: position.coords.longitude});
+                           lon: position.coords.longitude}, options);
         },
         error => {
             finish();
@@ -5523,7 +5523,11 @@ function setSearching(on) {
     resultsBox.setAttribute('aria-busy', String(on));
 }
 
-function search() {
+/** `fromLink`: to wyszukiwanie wywołał link (patrz applyLink). Idzie tylko
+    jako argument, nigdy jako stan modułu - inaczej wyszukiwanie, którego link
+    nie uruchomił (np. `from=gps` bez `to`), odziedziczyłoby je po późniejszym
+    ręcznym szukaniu. */
+function search({fromLink = false} = {}) {
     // Z pokładu pola "skąd" nie ma - kompletem jest linia, kierunek
     // i przystanek (patrz onboardReady).
     if (!endInput.value) return;
@@ -5533,8 +5537,6 @@ function search() {
     // zasłaniają wynik.
     if (onboardOn) { obCollapsed = true; syncOnboardView(); }
     hideRecallOffer();
-    const fromLink = linkSearch;
-    linkSearch = false;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     selectedJourney = null;
     clearJourney();
@@ -5564,8 +5566,6 @@ $('search').addEventListener('click', search);
 // Ten sam adres leży w pasku przeglądarki po każdym wyszukaniu (syncAddress),
 // więc kopiowanie z paska działa jak udostępnianie.
 // Czego link NIE niesie, a czemu: patrz linkParams.
-
-let linkSearch = false;     // szukamy z linku - patrz search()
 
 const POINT_PARAM = /^(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)$/;
 const pointParam = point => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`;
@@ -5674,13 +5674,12 @@ function applyLink() {
     // Puste pole zostaje puste: link nie szuka za pasażera ani nie sięga
     // po lokalizację bez `from=gps`.
     if (from === 'gps') {
-        linkSearch = true;     // szuka sam useMyLocation, gdy cel jest wpisany
-        if (navigator.geolocation) locateStart(() => { linkSearch = false; });
-        else { linkSearch = false; startInput.focus(); }
+        // Szuka sam useMyLocation, gdy cel jest wpisany.
+        if (navigator.geolocation) locateStart(undefined, {fromLink: true});
+        else startInput.focus();
         focusEnd();
     } else if (from && to) {
-        linkSearch = true;
-        search();
+        search({fromLink: true});
     } else if (to) startInput.focus();
     else focusEnd();
 }
