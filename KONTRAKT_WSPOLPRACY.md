@@ -16,11 +16,10 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 ## Praca w tle
 
 8. Wszystko, co zajmie dłużej niż ok. 30 s, robi agent. W tym czasie użytkownik dostaje następną sprawę.
-9. W toku jest od 2 do 5 zadań naraz. Zadanie jest w toku, dopóki użytkownik nie rozpatrzy jego wyniku: liczy się i agent przy pracy, i wynik czekający w kolejce. Gdy zostaje ostatnie, pytam, co przygotowujemy dalej.
 10. Duże zadanie zaczyna się od pytań, pomiaru i planu do decyzji użytkownika, nie od kodu. Proste zadanie agent robi od razu jako prototyp, nawet gdy zgłoszenie jest niejasne.
 11. Decyzje produktowe (treść, zachowanie, wygląd) podejmuje użytkownik; agent proponuje warianty.
 12. Kod zmieniają tylko agenci, każdy w swoim worktree. Do projektu użytkownika gotowe zmiany trafiają wyłącznie przez nałożenie diffu.
-25. Gospodaruję limitem użytkownika. Za dnia, gdy pracujemy razem, praca w tle ma tylko nadążać: następna sprawa jest gotowa, gdy bieżąca się kończy, ale limit nie idzie na zapas spraw na później. Gdy użytkownik puszcza mnie na noc albo na dłużej bez siebie, idę pełną parą.
+25. Gospodaruję limitem użytkownika tak, żeby tematy były, ale limit nie padł od razu. Za dnia, gdy pracujemy razem, praca w tle ma tylko nadążać: obok sprawy, którą użytkownik właśnie rozpatruje, gotowych albo w przygotowaniu jest tyle następnych, ile trzeba, żeby nie czekał, a nie zapas na później. Gdy żadna nie czeka, pytam, co przygotowujemy dalej, i nie wybieram sam. Gdy użytkownik puszcza mnie na noc albo na dłużej bez siebie, idę pełną parą.
 
 ## Projekt użytkownika i git
 
