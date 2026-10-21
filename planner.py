@@ -173,7 +173,6 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             # („DWORZEC GŁÓWNY"), a opóźnienia są pod nazwą stacji PKP.
             **({"trip": trip, "trip_stop": day.stop_names[_stop_id]}
                if trip.startswith("PKP:") else {}),
-            **_info(trip),
         })
 
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
@@ -639,12 +638,6 @@ def _platform_fields(day, trip, board_stop, exit_stop):
     return out
 
 
-def _info(trip):
-    """Treść „i" przy etapie albo odjeździe - dziś tylko Polinka (#165):
-    godziny otwarcia i data sprawdzenia danych."""
-    return {"info": polinka.INFO} if trip.startswith(polinka.ID_PREFIX) else {}
-
-
 def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
     """Etap przejazdu jednym kursem, od wsiadania do wysiadania.
 
@@ -677,7 +670,6 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
         **_platform_fields(day, trip, board_stop, exit_stop),
-        **_info(trip),
         # Publiczny odpowiednik `_trip`: przycisk "trasa" otwiera rozkład linii
         # na wariancie tego kursu - sam headsign nie odróżni zjazdów do
         # zajezdni z dwóch pętli (#270).
@@ -919,8 +911,7 @@ def _traficar_journeys(day, journey, dep_sec, deadline, dest, end_name, geo_db):
     return journeys
 
 
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train",
-                 "Kolejka": "cable"}
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
 
 
 def _line_parts(label):
@@ -2311,6 +2302,45 @@ def plan_flow_stages(start_query, end_query, when=None,
             onboard.count_exit(map_journeys, ride)
             onboard.mark_journeys(map_journeys, ride)
 
+        # Przejścia o innym tempie - Polinka tu, rower niżej - ocenia się na
+        # GOTOWEJ mapie: dojazd do nich i dalsza droga po nich idą tym, co
+        # mapa RYSUJE (patrz _drawn_arrivals, _drawn_onward). Oba
+        # przebiegi są leniwe i liczone raz na obie warstwy - bez kandydatów
+        # nie odpala się żaden. Warunki te same co przy autach i rowerach
+        # niżej: nie w trybie awaryjnym i nie przy "dowolnej stacji w mieście".
+        on_map = bool(kept) and not (gtfs.is_city_group(day, source_stops)
+                                     or gtfs.is_city_group(day, target_set))
+        drawn = {}
+
+        def drawn_arrivals():
+            if "arrivals" not in drawn:
+                drawn["arrivals"] = _drawn_arrivals(day, drawn_runs(), source_stops,
+                                                    report_dep_sec)
+            return drawn["arrivals"]
+
+        def drawn_onward():
+            if "onward" not in drawn:
+                drawn["onward"] = _drawn_onward(day, drawn_runs(), target_set)
+            return drawn["onward"]
+
+        def drawn_runs():
+            if "runs" not in drawn:
+                drawn["runs"] = _drawn_runs(day, kept, ranges)
+            return drawn["runs"]
+
+        # Polinka (zgłoszenie #364) nie jest kursem i niczego w mapie nie
+        # przestawia - dokłada się do niej jako przeprawa, tą samą regułą co
+        # rower. Rozkładu nie ma, stan na żywo też nie, więc idzie razem
+        # z mapą, a nie z danymi na żywo. Rysuje się jak każdy kawałek.
+        # Dojazd do stacji idzie przez start albo przez słupek, na którym coś
+        # narysowanego wysadza - gdy żaden nie stoi obok Polinki, przeprawy
+        # nie ma i drogiego liczenia dojazdów nie robimy.
+        if on_map and polinka.reachable(day, {*source_stops, *(
+                conn[3] for run in drawn_runs() for conn in run)}):
+            seg_list = seg_list + polinka.map_crossings(
+                day, when.date() + timedelta(days=day_offset), drawn_arrivals,
+                drawn_onward, target_set)
+
         yield "map", {
             "start": start_name,
             "end": end_name,
@@ -2441,8 +2471,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # między miastami, a auto czy rower przy którejś ze stacji nie jest
             # na nią odpowiedzią ("WROCŁAW -" -> "WARSZAWA -" pokazywało auta
             # przy Nadodrzu i Kuźnikach).
-            if kept and not (gtfs.is_city_group(day, source_stops)
-                             or gtfs.is_city_group(day, target_set)):
+            if on_map:
                 # Na starcie jest się od godziny z pytania, nie od początku
                 # mapy - do auta czy roweru pod nosem idzie się od razu (tak
                 # samo jak przy propozycjach z rowerem wyżej).
@@ -2480,12 +2509,8 @@ def plan_flow_stages(start_query, end_query, when=None,
                 # Nieznany jest wtedy sam STAN stojaka i `bike_places_live`
                 # mówi to wprost, żeby front nie podał zgadywania jako liczby
                 # rowerów.
-                runs = _drawn_runs(day, kept, ranges)
                 bike_places = bikes.map_places(
-                    day,
-                    lambda: _drawn_arrivals(day, runs, source_stops, report_dep_sec),
-                    lambda: _drawn_onward(day, runs, target_set),
-                    target_set, bike_count * (1 + more),
+                    day, drawn_arrivals, drawn_onward, target_set, bike_count * (1 + more),
                     live=day_offset == 0 and when.date() == date.today(),
                     min_level=more, electric=bike_electric, regular=bike_regular,
                     ride_mps=bike_mps, overhead_sec=bike_overhead)
@@ -3558,7 +3583,6 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
         "path": _round_path(path),
         "trip": seg["trip_id"],
         **_platform_fields(day, seg["trip_id"], from_stop, to_stop),
-        **_info(seg["trip_id"]),
     }
 
 

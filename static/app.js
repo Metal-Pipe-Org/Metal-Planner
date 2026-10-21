@@ -2375,6 +2375,7 @@ function brightestOption(options) {
 function flowPickHtml(when) {
     const options = flowPick.options;
     const sel = options[flowPick.index];
+    if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
     let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
@@ -2388,6 +2389,23 @@ function flowPickHtml(when) {
         html += segWhyHtml(sel.hit.seg.why);
     }
     return html;
+}
+
+/** Kawałek z własnym dymkiem (`tip`) - przeprawa Polinką, która rysuje się
+    jak linia, ale linią nie jest (planner: polinka.map_crossings). Dymek jest
+    zbudowany jak dymek auta (carTooltipHtml): nagłówek, przyjazd do celu
+    w tym samym zapisie, a pod nim to, co trzeba wiedzieć przed wyruszeniem. */
+function segTipHtml(tip) {
+    return [
+        `<b>${esc(tip.title)}</b>`,
+        ...tip.rides.flatMap(r => [
+            `${esc(r.from)} → ${esc(r.to)}:`,
+            `Jesteś przy niej ${fmtClock(r.at)} — ` +
+            `${fmtMins(r.walk_sec)} pieszo z „${esc(r.walk_from)}”`,
+            `U celu ok. ${fmtClock(r.arrival)} — ${fmtMins(r.sec)} przeprawy`,
+        ]),
+        ...tip.lines.map(esc),
+    ].join('<br>');
 }
 
 /** Debug: dlaczego kawałek jest na mapie z wartości podróży (pole `why`,
@@ -3111,9 +3129,6 @@ function timetableLinesHtml(data, mapSec) {
         if (!groups.has(key)) groups.set(key, {d, secs: []});
         const group = groups.get(key);
         group.secs.push(d.sec);
-        // Pierwszy w grupie bywa wierszem dorobionym z mapy (spóźniony kurs,
-        // przyjazd) - „i" bierzemy z któregokolwiek odjazdu z serwera.
-        if (d.info && !group.d.info) group.d = {...group.d, info: d.info};
     }
     const rows = [];
     for (const {d, secs} of groups.values()) {
@@ -3145,12 +3160,7 @@ function timetableLinesHtml(data, mapSec) {
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
     const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
-        // „i" za plakietką, w tej samej komórce siatki: za kierunkiem ucinałby
-        // go wielokropek, a osobny element przesunąłby kolumny wiersza.
-        (d.info
-            ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
-              + `${infoHtml(d.info)}</span>`
-            : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
+        `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
@@ -4058,13 +4068,6 @@ function platformHtml(p) {
     return text ? `<span class="platform">${esc(text)}</span>` : '';
 }
 
-/** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
-    przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
-function infoHtml(text) {
-    return text ? `<span class="info info-inline" tabindex="0" role="button"`
-        + ` aria-label="${escAttr(text)}" data-tip="${escAttr(text)}">i</span>` : '';
-}
-
 function badgeHtml(leg) {
     // Pojazd, w którym się już siedzi (start z pokładu, patrz
     // onboard.mark_journeys), ma plakietkę z obwódką - na karcie propozycji
@@ -4383,7 +4386,6 @@ function detailHtml(journey) {
             // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
             // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
-            infoHtml(leg.info) +
             // Etap, w którym się już siedzi (patrz onboard.mark_journeys),
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
@@ -4553,8 +4555,6 @@ function scrollToSelected() {
 
 resultsBox.addEventListener('click', event => {
     if (routeClick(event)) return;
-    // „i" pokazuje dymek (showInfoTip) - nie zwija przy okazji karty.
-    if (event.target.closest('.info')) return;
 
     // Rozwinięcie przystanków po drodze to nie klik w kartę - ta by się
     // przy okazji zwinęła (patrz selectJourney).
