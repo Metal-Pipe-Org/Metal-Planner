@@ -492,9 +492,27 @@ def test_tablica_na_telefonie_ma_kreski_i_trzy_godziny_w_rzedzie(adres, przeglad
     }""", TABLICA_HTML)
     wiersze = page.evaluate(TABLICA_JS)
     context.close()
-    assert wiersze[0]["kreska"] == "1px", wiersze
+    assert wiersze[0]["kreska"] == "1px" and wiersze[-1]["kreska"] == "0px", wiersze
     for w in wiersze:
         assert w["godziny"] == 1, w
         assert w["godziny_top"] == w["kierunek_top"] == w["trasa_top"], w
         assert w["trasa_szer"] < 30 and w["trasa_nazwa"] == "trasa", w
         assert "trasa" in w["trasa_dymek"], w
+
+
+def test_tablica_na_komputerze_tez_ma_kreski_miedzy_wierszami(adres, przegladarka):
+    context = przegladarka.new_context(viewport={"width": 1280, "height": 800},
+                                       locale="pl-PL", service_workers="block")
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector("#start")
+    page.evaluate("""html => {
+        document.getElementById('flow-panel-body').innerHTML = html;
+        document.getElementById('flow-panel').hidden = false;
+    }""", TABLICA_HTML)
+    wiersze = page.evaluate(TABLICA_JS)
+    context.close()
+    assert wiersze[0]["kreska"] == "1px" and wiersze[-1]["kreska"] == "0px", wiersze

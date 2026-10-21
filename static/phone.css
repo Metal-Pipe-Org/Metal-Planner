@@ -338,14 +338,12 @@ body.dev-open #flow-panel {
 /* Kierunek oddaje miejsce godzinom (wielokropek), a nie odwrotnie: trzy
    godziny w jednym rzędzie czyta się łatwiej niż kierunek w całości. Gdy
    godziny i tak się zawiną, reszta wiersza trzyma się pierwszej linijki,
-   a kreska pod wierszem mówi, gdzie on się kończy. */
+   a kreska pod wierszem (style.css) mówi, gdzie on się kończy. */
 #flow-panel .tt-rows.tt-lines li {
     align-items: start;
     padding: 5px 0;
-    border-bottom: 1px solid var(--line);
     line-height: 18px;
 }
-#flow-panel .tt-rows.tt-lines li:last-child { border-bottom: 0; }
 /* Na telefonie sama ikona: słowo zostaje w przycisku (nazwa dla czytnika
    ekranu), ale nie zajmuje miejsca, które dostaje kierunek. */
 #flow-panel .tt-rows.tt-lines .tt-route {

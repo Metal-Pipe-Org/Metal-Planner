@@ -2199,6 +2199,8 @@ body.more-busy .headline-more { cursor: progress; }
     grid-column: 1 / -1;
     grid-template-columns: subgrid;
 }
+.tt-rows.tt-lines li { border-bottom: 1px solid var(--line); }
+.tt-rows.tt-lines li:last-child { border-bottom: 0; }
 .tt-lines .tip-dir { max-width: 12em; }
 .timetable-tip:has(.tt-lines),
 #flow-panel:has(.tt-lines) {
