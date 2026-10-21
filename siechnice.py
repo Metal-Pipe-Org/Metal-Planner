@@ -61,6 +61,25 @@ ID_PREFIX = "SIE:"
 # przesiadkę bez kary za "przejście" i jeden marker na mapie zamiast dwóch.
 SAME_STOP_MAX_M = 200
 
+# Promień, w którym słupek z Siechnic JEST wrocławskim słupkiem, choćby nazwa
+# była inna. Gmina podpisuje wspólne słupki po swojemu ("Park Wschodni NŻ",
+# "Wrocław - Okólna", "Karwińska NŻ" przy "Karwińska (Dawna Pralnia)"), ale
+# współrzędne bierze z tego samego słupka - bez tego jeden przystanek był
+# dwoma miejscami, a tablica pod kropką autobusu nie znała tramwajów
+# (zgłoszenie #348). Skąd 10 m: wszystkie takie pary w kopii stoją do 7,4 m od
+# siebie, a następna jest dopiero o 20,8 m; dwa różne wrocławskie przystanki
+# potrafią stać 13,6 m od siebie (GAJ pętla i Morwowa), więc szerszy promień
+# zacząłby zlewać przystanki, które naprawdę są różne.
+SAME_POINT_MAX_M = 10
+
+# Nazwa z Siechnic -> nazwa wrocławska, gdy to ten sam przystanek, a położenie
+# tego nie rozstrzyga. Po nazwie, nie po designatorze: tylko jedną kopię
+# widzieliśmy, więc nie wiadomo, czy designatory przetrwają kolejne wgranie.
+SAME_STOP_BY_HAND = {
+    # 21 m w danych, ponad SAME_POINT_MAX_M - rozstrzygnięte ręcznie w #348.
+    "Komuny Paryskiej (szkoła) NŻ": "Komuny Paryskiej (Szkoła)",
+}
+
 _DIACRITIC_MAP = str.maketrans({
     "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
     "ó": "o", "ś": "s", "ź": "z", "ż": "z",
@@ -199,28 +218,28 @@ def build_trips(departures_by_stop, lines_by_stop):
 def match_existing_stops(stops, existing_rows, max_distance_m=SAME_STOP_MAX_M):
     """{designator: stop_id istniejącego słupka} dla tych, które już są w bazie.
 
-    Kryterium to zgodna nazwa znormalizowana ORAZ bliskość - sama nazwa nie
-    wystarcza, bo 'Kolejowa' czy 'Szkoła' powtarzają się w aglomeracji, a
-    sklejenie dwóch odległych słupków w jeden zrobiłoby z nich fałszywą
-    przesiadkę.
+    Ten sam słupek to ten, który stoi w tym samym punkcie (SAME_POINT_MAX_M),
+    jakkolwiek się nazywa - albo ten o zgodnej nazwie znormalizowanej, który
+    stoi blisko (`max_distance_m`). Sama nazwa nie wystarcza, bo 'Kolejowa'
+    czy 'Szkoła' powtarzają się w aglomeracji, a sklejenie dwóch odległych
+    słupków w jeden zrobiłoby z nich fałszywą przesiadkę. Z kilku pasujących
+    wygrywa najbliższy.
     """
-    by_name = {}
-    for stop_id, name, lat, lon in existing_rows:
-        if lat is None or lon is None:
-            continue
-        by_name.setdefault(normalize_name(name), []).append((stop_id, lat, lon))
+    existing = [
+        (stop_id, normalize_name(name), lat, lon)
+        for stop_id, name, lat, lon in existing_rows
+        if lat is not None and lon is not None
+    ]
 
     matched = {}
     for stop in stops:
-        candidates = by_name.get(normalize_name(stop["name"]))
-        if not candidates:
-            continue
-        best = min(
-            candidates,
-            key=lambda c: haversine_m(stop["lat"], stop["lon"], c[1], c[2]),
-        )
-        if haversine_m(stop["lat"], stop["lon"], best[1], best[2]) <= max_distance_m:
-            matched[stop["designator"]] = best[0]
+        name = normalize_name(SAME_STOP_BY_HAND.get(stop["name"], stop["name"]))
+        best_dist = None
+        for stop_id, other_name, lat, lon in existing:
+            dist = haversine_m(stop["lat"], stop["lon"], lat, lon)
+            same = dist <= SAME_POINT_MAX_M or (other_name == name and dist <= max_distance_m)
+            if same and (best_dist is None or dist < best_dist):
+                best_dist, matched[stop["designator"]] = dist, stop_id
     return matched
 
 
