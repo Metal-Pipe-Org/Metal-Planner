@@ -6968,7 +6968,7 @@ window.plannerBridge = {
     // tablice w jednym API to zaproszenie do sięgnięcia po złą.
     LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
     prettyStopName, rawStopName,
-    suspendPlanner, resumePlanner,
+    suspendPlanner, resumePlanner, setTimeNow,
 };
 
 }
