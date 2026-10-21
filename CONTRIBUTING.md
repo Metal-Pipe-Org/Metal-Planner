@@ -38,7 +38,7 @@ Wspólny sposób pracy na GitHubie: branche, pull requesty, review Claude'a, iss
 18. Claude bierze się tylko za zadania jasne i niewielkie. Przy niejasnym issue zamiast poprawki zadaje pytanie. Nie zmienia automatów, sekretów ani uprawnień — to zawsze robi człowiek.
 19. Koniec pracy Claude'a ogłasza ping na Discordzie, który prowadzi do komentarza z odpowiedzią. Issue, którym się zajmował, dostaje label `claude` — to sam znacznik, niczego nie uruchamia.
 20. Bycie assignee w issue znaczy, że nad nim pracujesz albo będziesz pracować. Gdy issue ma kilku assignees, ustalają między sobą, jak dzielą pracę, żeby nie robić tego samego dwa razy. **Nie pracujesz na issue, nie będąc przypisanym!**
-21. Gdy przestajesz pracować nad issue, a go nie zamykasz (np. zmiana planów), usuń się z jego assignees.
+21. Gdy chcesz pracować nad issue przypisz się do niego. Jeżeli kończysz pracę nad issue, a go nie zamykasz (np. zmiana planów), usuń się z jego assignees.
 22. „Zgłoś problem” w aplikacji (klik w ikonę → „O aplikacji”) otwiera nowe issue z wpisaną wersją, urządzeniem i adresem strony. Issues od osób spoza zespołu dostają label `external`. Żeby zgłosić, trzeba mieć konto na GitHubie.
 
 ### Labels
