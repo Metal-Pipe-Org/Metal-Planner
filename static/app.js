@@ -5040,6 +5040,7 @@ function adoptNames(data) {
     // już przygaszona, setBaseDim wychodzi od razu i stare podświetlenie
     // zostawało na mapie na zawsze.
     restyle(...previous, sel.start, sel.end);
+    syncAddress();
 }
 
 /** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
@@ -5308,6 +5309,7 @@ function loadPlan(kind, onMapped) {
         onMapped,
     };
     showBusy(run.busy);
+    syncAddress();
     return Promise.all([fetch('/api/flow?' + queryParams(), {signal: run.abort.signal}),
                         stopsReady])
         .then(([response]) => readLines(response, data => {
@@ -5531,6 +5533,8 @@ function search() {
     // zasłaniają wynik.
     if (onboardOn) { obCollapsed = true; syncOnboardView(); }
     hideRecallOffer();
+    const fromLink = linkSearch;
+    linkSearch = false;
     mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     selectedJourney = null;
     clearJourney();
@@ -5538,9 +5542,13 @@ function search() {
     resultsBox.innerHTML =
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
-    saveLastSearch();
-    if (!onboardOn) rememberPlace('start', startInput.value);
-    rememberPlace('end', endInput.value);
+    // Trasa z cudzego linku nie jest wyborem pasażera: nie wypiera jego
+    // ostatniej trasy ani nie trafia do jego podpowiedzi.
+    if (!fromLink) {
+        saveLastSearch();
+        if (!onboardOn) rememberPlace('start', startInput.value);
+        rememberPlace('end', endInput.value);
+    }
     // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
     // zakładce „Trasy". Rura spada przy pierwszym wyniku WYSZUKANIA, nie po
@@ -5549,6 +5557,135 @@ function search() {
 }
 
 $('search').addEventListener('click', search);
+
+// ------------------------------------------------------------------ link ----
+//
+// Wyszukiwanie jako zwykły tekst po „?": ?from=Katedra&to=Wojszyce&time=17:40.
+// Ten sam adres leży w pasku przeglądarki po każdym wyszukaniu (syncAddress),
+// więc kopiowanie z paska działa jak udostępnianie.
+// Czego link NIE niesie, a czemu: patrz linkParams.
+
+let linkSearch = false;     // szukamy z linku - patrz search()
+
+const POINT_PARAM = /^(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)$/;
+const pointParam = point => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`;
+
+function placeFromParam(text) {
+    const match = text.match(POINT_PARAM);
+    return match ? {lat: Number(match[1]), lon: Number(match[2])} : text;
+}
+
+const todayIso = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+         + `-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+/** Parametry linku dla tego, co jest teraz w formularzu.
+
+    Niesie: skąd i dokąd, godzinę i datę (tylko gdy wybrane ręcznie - „teraz"
+    u nadawcy znaczy „teraz" u odbiorcy). Nic więcej: ani filtrów, ani
+    ustawień z ⚙, ani startu z pokładu pojazdu (kurs, którym się jechało, odjechał).
+    Start z ◎ (też z zapisanego miejsca) to `from=gps`: odbiorca szuka ze SWOJEJ
+    pozycji, a pozycja nadawcy nie jest nikomu do udostępnienia. */
+function linkParams() {
+    const params = new URLSearchParams();
+    if (onboardOn || (!startInput.value && !endInput.value)) return params;
+    if (hereIsStart()) params.set('from', 'gps');
+    else if (startInput.value) {
+        params.set('from', isPoint(sel.start) ? pointParam(sel.start) : startInput.value);
+    }
+    if (endInput.value) {
+        params.set('to', isPoint(sel.end) ? pointParam(sel.end) : endInput.value);
+    }
+    if (timeChosen) {
+        params.set('time', $('time').value);
+        if ($('date').value !== todayIso()) params.set('date', $('date').value);
+    }
+    return params;
+}
+
+// Dwukropek i przecinek są w zapytaniu legalne, a "17%3A40" nie jest czytelne.
+const readableQuery = params => params.toString().replace(/%3A/gi, ':').replace(/%2C/gi, ',');
+
+function syncAddress() {
+    const params = linkParams();
+    const query = params ? readableQuery(params) : '';
+    history.replaceState(null, '', query ? '?' + query : location.pathname);
+}
+
+const SHARE_DONE_MS = 1500;
+let shareDoneTimer = null;
+
+/** Arkusz udostępniania tam, gdzie system go ma (telefony, Safari), a poza
+    tym schowek - z cichym potwierdzeniem na samej ikonie. */
+$('share').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (navigator.share) {
+        try {
+            await navigator.share({title: 'Metal Planner', url: location.href});
+            return;
+        } catch (error) {
+            if (error.name === 'AbortError') return;
+        }
+    }
+    try {
+        await navigator.clipboard.writeText(location.href);
+    } catch {
+        // schowek zablokowany (np. strona po http) - zostaje ręczne kopiowanie
+        window.prompt('Skopiuj link:', location.href);
+        return;
+    }
+    button.textContent = '✓';
+    button.title = 'Skopiowano';
+    clearTimeout(shareDoneTimer);
+    shareDoneTimer = setTimeout(() => {
+        button.textContent = '⤴';
+        button.title = 'Udostępnij link do tej trasy';
+    }, SHARE_DONE_MS);
+});
+
+/** Wchodząc z linku: formularz wypełnia się tak, jakby pasażer to wpisał,
+    a gdy są oba końce, od razu szuka. Brakujący koniec zostaje pusty z kursorem
+    w nim; jedynym wyjątkiem jest `from=gps` - lokalizacja odbiorcy. */
+function applyLink() {
+    const query = new URLSearchParams(location.search);
+    const from = query.get('from');
+    // Cel z lokalizacji nie istnieje, więc `to=gps` zostawia „Dokąd" puste.
+    const to = query.get('to') === 'gps' ? null : query.get('to');
+    if (!from && !to) return;
+    if (/^\d{1,2}:\d{2}$/.test(query.get('time'))) {
+        $('time').value = query.get('time').padStart(5, '0');
+        timeChosen = true;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(query.get('date'))) {
+        $('date').value = query.get('date');
+        timeChosen = true;
+        if (dayPanel.classList.contains('hidden')) dayToggle.click();
+    }
+    const fill = (side, text) => {
+        const place = placeFromParam(text);
+        if (isPoint(place)) { sel[side] = place; updatePointMarker(side, place); }
+        (side === 'start' ? startInput : endInput).value = displayValue(place);
+    };
+    if (from && from !== 'gps') fill('start', from);
+    if (to) fill('end', to);
+    restyle(sel.start, sel.end);
+    // Puste pole zostaje puste: link nie szuka za pasażera ani nie sięga
+    // po lokalizację bez `from=gps`.
+    if (from === 'gps') {
+        linkSearch = true;     // szuka sam useMyLocation, gdy cel jest wpisany
+        if (navigator.geolocation) locateStart(() => { linkSearch = false; });
+        else { linkSearch = false; startInput.focus(); }
+        focusEnd();
+    } else if (from && to) {
+        linkSearch = true;
+        search();
+    } else if (to) startInput.focus();
+    else focusEnd();
+}
+
+stopsReady.then(applyLink);
 stopsReady.then(restoreLastSearch);
 
 // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" - dalej
@@ -5861,6 +5998,7 @@ $('clear').addEventListener('click', () => {
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
     forgetLastSearch();
+    syncAddress();
 });
 
 // ----------------------------------------------------------- moje miejsca ----
