@@ -2259,6 +2259,95 @@ body.more-busy .headline-more { cursor: progress; }
 
 #flow-panel[hidden] { display: none; }
 
+/* Schemat obok mapy (eksperyment „nowa mapa”, #367) - prawa część ekranu,
+   pod okienkiem z rozkładem: mapa i schemat mają być widoczne naraz. Rysunek
+   przybliża się i przesuwa w oknie panelu, a cały panel zwija się do
+   nagłówka - tak jak lista propozycji. */
+.scheme-panel {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 890;
+    width: min(560px, 45vw);
+    max-width: calc(100vw - 32px);
+    padding: 6px 8px 8px;
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+
+.scheme-panel[hidden] { display: none; }
+
+/* Panel ⚙ sięga do dołu ekranu - jak okienko z rozkładem, schemat odsuwa się
+   w lewo, bo przełącznik eksperymentu siedzi właśnie w tym panelu. */
+body.dev-open .scheme-panel { right: 322px; }
+
+.scheme-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.scheme-head h2 {
+    margin: 0 auto 0 2px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.scheme-head .icon-button {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+}
+
+.scheme-viewport {
+    position: relative;
+    height: min(62vh, 640px);
+    margin-top: 6px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--sheet);
+    /* Gesty palcem należą do rysunku: przesuwanie i szczypanie. */
+    touch-action: none;
+    cursor: grab;
+}
+
+.scheme-panel.collapsed .scheme-viewport,
+.scheme-panel.collapsed #scheme-fit { display: none; }
+
+/* Kreski i napisy nie łapią myszy: pudełko pod kreską przejeżdżającej linii
+   ma dalej pokazywać swoją tablicę. */
+.scheme-box { fill: #d6eaf8; stroke: #7aa7cf; stroke-width: 1.5; cursor: pointer; }
+.scheme-box.bare { fill: none; stroke: #8a97a6; stroke-dasharray: 5 4; cursor: help; pointer-events: all; }
+.scheme-line { fill: none; stroke-width: 3; stroke-linejoin: round; pointer-events: none; }
+.scheme-name.bare { fill: #6b7785; stroke: none; font-weight: 500; }
+.scheme-name { pointer-events: none; text-anchor: middle; dominant-baseline: central;
+    font: 600 13px system-ui, sans-serif; paint-order: stroke; stroke-linejoin: round;
+    fill: #1c3550; stroke: #d6eaf8; stroke-width: 4px; }
+/* Plakietka z numerami jak grupka numerów na mapie (.line-cluster). */
+.scheme-badge { pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
+.scheme-badge rect { fill: #fff; stroke: rgba(0, 0, 0, 0.25); stroke-width: 1; }
+.scheme-num { text-anchor: middle; dominant-baseline: central; font: 700 11px system-ui, sans-serif; }
+
+#scheme-canvas svg {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+}
+
+.scheme-tip {
+    position: fixed;
+    z-index: 1100;
+    pointer-events: none;
+}
+
+.scheme-tip[hidden] { display: none; }
+
 /* Panel ⚙ ma 290 px plus marginesy - okienko odsuwa się o tyle w lewo zamiast
    chować się pod nim, bo jego własne przełączniki siedzą właśnie w tym panelu. */
 body.dev-open #flow-panel { right: 322px; }

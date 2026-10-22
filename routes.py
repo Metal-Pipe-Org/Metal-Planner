@@ -485,6 +485,9 @@ def init_routes(app):
             # Nowa mapa rośnie za przełącznikiem pod zębatką (sekcja DEV
             # "Eksperymenty"); stara zostaje domyślna.
             new_map=request.args.get("newmap") == "1",
+            # Chodzenie pieszo można wyłączyć (⚙ → Eksperymenty); bez
+            # parametru zostaje włączone.
+            walking=request.args.get("walking", "1") == "1",
             # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
             bike_count=_float_arg("bike_count"),
             # Na jaki rodzaj roweru pasażer chce wsiąść - dwa przyciski w pasku

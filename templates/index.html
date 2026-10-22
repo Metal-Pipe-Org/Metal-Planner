@@ -1072,6 +1072,19 @@
             <input type="checkbox" id="new-map"> Nowa mapa (eksperyment)
         </label>
 
+        <label class="dev-check">
+            <input type="checkbox" id="walking" checked> Chodzenie pieszo
+        </label>
+
+        {# Tymczasowo, do porównania układów schematu (#367). #}
+        <label class="dev-check" id="scheme-layout-row" hidden>
+            Układ schematu
+            <select id="scheme-layout">
+                <option value="dagre">dagre (krzywe)</option>
+                <option value="elk">ELK (kąty proste)</option>
+            </select>
+        </label>
+
         {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
         <label class="dev-check">
             <input type="checkbox" id="location-refresh"> Odświeżanie lokalizacji co 30 s
@@ -1092,6 +1105,28 @@
   i nachodziły na siebie.
 #}
 <div id="map-dock">
+
+    {#
+      Schemat blokowy znalezionych tras obok mapy - eksperyment „nowa mapa”
+      (⚙ → Eksperymenty, patrz renderScheme w app.js). Bez przełącznika
+      zostaje schowany i pusty.
+    #}
+    <div id="scheme-panel" class="scheme-panel" hidden>
+        <div class="scheme-head">
+            <h2>Schemat</h2>
+            <button id="scheme-fit" class="icon-button" type="button"
+                    title="Cały schemat w oknie" aria-label="Pokaż cały schemat">⤢</button>
+            <button id="scheme-toggle" class="icon-button" type="button"
+                    title="Ukryj schemat" aria-label="Ukryj schemat"
+                    aria-expanded="true">▾</button>
+        </div>
+        <div id="scheme-viewport" class="scheme-viewport">
+            <div id="scheme-canvas"></div>
+        </div>
+    </div>
+    {# Tablica odjazdów węzła schematu - poza panelem, żeby nie ucinał jej
+       brzeg okna z rysunkiem. #}
+    <div id="scheme-tip" class="timetable-tip scheme-tip" hidden></div>
 
     {#
       Pasek nad mapą: ile w ogóle trwa ta podróż (patrz renderTimeHeadline

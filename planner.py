@@ -1940,7 +1940,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                      start_point=None, end_point=None, density=None, more=None,
                      car_count=None, journey_limit=None, transfer_gain_sec=None,
                      use_bikes=False, bike_count=None, car_vans=False,
-                     new_map=False,
+                     new_map=False, walking=True,
                      bike_electric=True, bike_regular=True,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
@@ -1989,8 +1989,11 @@ def plan_flow_stages(start_query, end_query, when=None,
     tak samo jak gęstość. bike_count - to samo dla przejazdów rowerem (osobny
     suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_vans - czy
     pokazać też dostawczaki, wybierane osobno od osobówek.
-    new_map - przełącznik eksperymentu "nowa mapa" (⚙); na razie niczego nie
-    zmienia, dalsze zmiany gałęzią się po nim.
+    walking - False: bez chodzenia pieszo (patrz gtfs.without_walking), tylko
+    z przełącznika "Chodzenie pieszo" w ⚙ → Eksperymenty.
+    new_map - przełącznik eksperymentu "nowa mapa" (⚙); na razie dokłada do
+    etapu "map" tylko `scheme` - schemat blokowy decyzji (patrz _scheme),
+    dalsze zmiany gałęzią się po nim.
     bike_electric/bike_regular - na jaki rodzaj roweru pasażer chce wsiąść
     (dwa przyciski w pasku warstw, patrz bikes.map_places). To odsiew MIEJSC, nie zmiana wyceny przejazdu: rower
     ma jedną prędkość niezależnie od rodzaju, więc odhaczenie jednego z nich
@@ -2056,6 +2059,8 @@ def plan_flow_stages(start_query, end_query, when=None,
 
     try:
         day = gtfs.with_pace(gtfs.load_day(when.date()), walk_pace)
+        if not walking:
+            day = gtfs.without_walking(day)
     except FileNotFoundError as e:
         yield "error", {"error": str(e)}
         return
@@ -2124,6 +2129,8 @@ def plan_flow_stages(start_query, end_query, when=None,
         try:
             later = gtfs.with_pace(
                 gtfs.load_day(when.date() + timedelta(days=day_offset)), walk_pace)
+            if not walking:
+                later = gtfs.without_walking(later)
         except FileNotFoundError:
             break
         ends = _resolve_endpoints(later, start_query, end_query,
@@ -2255,12 +2262,19 @@ def plan_flow_stages(start_query, end_query, when=None,
                 source_stops, why_of, late=(best_arr, late_arrival),
                 alights=_last_alights(day, chosen_map["chosen"]), target_stops=target_set)
             map_journeys = []
-            if with_journeys:
+            if with_journeys or new_map:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
                                                 target_set, dep_sec, start_reach)
+            if with_journeys:
                 map_journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                    limit=journey_limit,
                                                    gain_sec=gain_sec, ride=ride)
+            if new_map:
+                scheme = _scheme_of_map(day, seg_list, nodes, target_set)
+                _scheme_times(scheme, map_journeys if with_journeys else
+                              _enumerate_journeys(day, graph, dep_sec, geo_db,
+                                                  limit=journey_limit, gain_sec=gain_sec,
+                                                  ride=ride))
         else:
             # Zabezpieczenie: _scan już udowodnił, że połączenie istnieje
             # (best_stop nie jest None), więc jeśli mapa i tak nie wybrała
@@ -2310,6 +2324,8 @@ def plan_flow_stages(start_query, end_query, when=None,
                         item["arrive"] = arrival
                     seg_list.append(item)
             seg_list.sort(key=lambda seg: seg["w"])   # blade pierwsze, jaskrawe na wierzchu
+            if new_map:
+                scheme = _scheme_of_legs(warianty)
             for wariant in warianty:
                 _drop_private(wariant)
 
@@ -2408,6 +2424,9 @@ def plan_flow_stages(start_query, end_query, when=None,
             # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
             # niż zwykle - i nie brać rzadkiej mapy za "tędy nic nie jedzie".
             "degraded": degraded,
+            # Schemat blokowy obok mapy - tylko w eksperymencie „nowa mapa”;
+            # bez niego odpowiedź zostaje co do bajtu taka jak dotąd.
+            **({"scheme": scheme} if new_map else {}),
         }
 
         # Warunek na dobę: stan stojaków jest sprzed minuty i tyle jest wart -
@@ -3798,6 +3817,230 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
         _drop_private(legs)
 
     return journeys
+
+
+# Schemat blokowy mapy (eksperyment „nowa mapa”, zgłoszenie #367): ta sama
+# mapa, tylko zdjęta z geografii. Węzły to te same kropki przesiadek co na
+# mapie (_transfer_nodes) plus start i cel; strzałka to jedna jazda - od
+# miejsca, w którym się wsiada, do miejsca, w którym mapa przestaje tę linię
+# wieźć. Przystanek, który linia tylko mija, nie tnie strzałki, nawet gdy stoi
+# na nim kropka: siedzi się w tym samym pojeździe (113 z Galerii
+# Dominikańskiej to jedna strzałka do celu, a nie trzy przesiadki po drodze).
+# Ten, kto dosiada się po drodze, dostaje własną strzałkę od swojego węzła.
+SCHEME_START, SCHEME_END = ("start",), ("end",)
+
+# Polinki schemat na razie nie pokazuje (decyzja użytkownika); rowery i auta
+# nie są kawałkami mapy, więc i tak tu nie trafiają.
+SCHEME_HIDDEN_KINDS = {"cable"}
+
+
+def _scheme(pieces, nodes, target_places=()):
+    """Graf schematu - ta sama mapa zdjęta z geografii, bez własnych decyzji.
+
+    Pudełka to kropki mapy (`nodes`), start i cel; do tego miejsce, w którym
+    narysowana linia naprawdę się zaczyna albo kończy, choć kropki tam nie ma
+    (tam mapa ją widocznie urywa). Linia idzie od pudełka do pudełka tak, jak
+    ją mapa rysuje (`pieces` = segmenty mapy), przez pudełka, które mija,
+    prosto (`chain` po obu stronach). Schemat NIE ocenia, czy linia dokądś
+    prowadzi: nic nie jest odcinane ani zgadywane, żadnych własnych przesiadek
+    - co mapa narysowała, to jest na schemacie.
+
+    Kawałki mapy tej samej linii, które się stykają (koniec jednego to początek
+    drugiego - szew korytarza), są jedną jazdą. Start to miejsce z węzła
+    `start`: przed nim linia się nie liczy; cel (`target_places`) kończy
+    jazdę. Jazdy Polinką (SCHEME_HIDDEN_KINDS) schemat ukrywa.
+
+    Linie między tymi samymi dwoma pudełkami to jedna strzałka, tak jak jedna
+    grupka numerków na mapie. `order` to niewidoczne krawędzie układu: pudełko,
+    do którego nic nie dochodzi, stoi pod startem, a to, z którego nic nie
+    wychodzi - nad celem. Pole `bare` węzła: miejsce bez kropki na mapie."""
+    target_places = set(target_places)
+    start_node = next((n for n in nodes if n.get("start")), None)
+    start_place = start_node["place"] if start_node else None
+    dots = {n["place"] for n in nodes}
+
+    def box_of(place):
+        if place == start_place:
+            return SCHEME_START
+        return SCHEME_END if place in target_places else place
+
+    shown = []
+    for piece in pieces:
+        if piece["kind"] in SCHEME_HIDDEN_KINDS:
+            continue
+        stops = piece["stops_n"]
+        places = [p for i, p in enumerate(stops) if i == 0 or p != stops[i - 1]]
+        if start_place in places:
+            places = places[places.index(start_place):]
+        for i, place in enumerate(places):
+            if i and place in target_places:
+                places = places[:i + 1]
+                break
+        if len(places) > 1:
+            shown.append({"line": (piece["kind"], piece["num"]), "places": places})
+
+    def follows(a, b):
+        """b jedzie dalej tam, gdzie a się kończy (a nie z powrotem)."""
+        return (a is not b and a["line"] == b["line"]
+                and a["places"][-1] == b["places"][0]
+                and not b["places"][1] == a["places"][-2])
+
+    runs = []     # (linia, [miejsca]) - kawałki sklejone na stykach
+
+    def extend(line, places, last, seen):
+        nexts = [q for q in shown if id(q) not in seen and follows(last, q)]
+        if not nexts:
+            runs.append((line, places))
+        for q in nexts:
+            extend(line, places + q["places"][1:], q, seen | {id(q)})
+
+    for piece in shown:
+        if not any(follows(q, piece) for q in shown):
+            extend(piece["line"], list(piece["places"]), piece, {id(piece)})
+
+    edges, bare = {}, set()
+    for line, places in runs:
+        last = len(places) - 1
+        marks = [i for i, p in enumerate(places)
+                 if i in (0, last) or p in dots or p == start_place or p in target_places]
+        bare.update(places[i] for i in (0, last)
+                    if places[i] not in dots and places[i] != start_place
+                    and places[i] not in target_places)
+        for i, j in zip(marks, marks[1:]):
+            a, b = box_of(places[i]), box_of(places[j])
+            if a == b:
+                continue
+            # Linia jedzie dalej przez pudełko, na którym odcinek się kończy
+            # albo od którego zaczyna.
+            chain = j < last or i > 0
+            edges.setdefault((a, b), {})
+            edges[(a, b)][line] = edges[(a, b)].get(line, False) or chain
+
+    boxes = {SCHEME_START, SCHEME_END}
+    for a, b in edges:
+        boxes.update((a, b))
+    order = ([SCHEME_START] + sorted(p for p in boxes if p not in (SCHEME_START, SCHEME_END))
+             + [SCHEME_END])
+    ids = {place: f"n{i}" for i, place in enumerate(order)}
+    has_in = {b for _, b in edges}
+    has_out = {a for a, _ in edges}
+    hints = [[SCHEME_START, p] for p in order
+             if p not in (SCHEME_START, SCHEME_END) and p not in has_in]
+    hints += [[p, SCHEME_END] for p in order
+              if p not in (SCHEME_START, SCHEME_END) and p not in has_out]
+    return {
+        "nodes": [{"id": ids[p],
+                   "role": "start" if p == SCHEME_START else "end" if p == SCHEME_END else "stop",
+                   **({"place": p} if p not in (SCHEME_START, SCHEME_END) else
+                      {"place": start_place} if p == SCHEME_START and start_place else {}),
+                   **({"bare": True} if p in bare else {})}
+                  for p in order],
+        "edges": [{"from": ids[a], "to": ids[b],
+                   "lines": [{"num": num, "kind": kind, **({"chain": True} if chain else {})}
+                             for (kind, num), chain in sorted(
+                                 lines.items(), key=lambda item: (item[0][0], len(item[0][1]), item[0][1]))]}
+                  for (a, b), lines in sorted(edges.items(), key=lambda item: (ids[item[0][0]], ids[item[0][1]]))],
+        "order": sorted([ids[a], ids[b]] for a, b in hints),
+    }
+
+
+def _scheme_of_map(day, seg_list, nodes, target_set):
+    """Schemat z tego, co mapa właśnie narysowała - patrz _scheme."""
+    return _scheme(seg_list, nodes,
+                   target_places={gtfs.place_name(day, s) for s in target_set})
+
+
+def _scheme_times(scheme, journeys):
+    """Godziny na schemacie - z podróży, które planista naprawdę znalazł (te
+    same, co lista i tablice węzłów), a nie z osobnego liczenia.
+
+    node["arrive_sec"] - najwcześniejsza godzina, o której którakolwiek z tych
+    podróży jest w węźle (na przystanku jedzie się przez niego tak samo jak się
+    w nim wysiada); cel ma najwcześniejszy przyjazd. line["arrive_sec"] na
+    strzałce do celu - przyjazd najlepszej podróży, która kończy się tą linią.
+    edge["fast"] - strzałki najszybszej podróży (najwcześniejszy przyjazd)."""
+    by_place = {n["place"]: n["id"] for n in scheme["nodes"] if "place" in n}
+    start = next((n["id"] for n in scheme["nodes"] if n["role"] == "start"), None)
+    end = next(n["id"] for n in scheme["nodes"] if n["role"] == "end")
+    arrive = {}
+    end_by_line = {}
+    best = None
+    for journey in journeys:
+        rides = [leg for leg in journey["legs"] if leg["kind"] == "ride"]
+        paths = []
+        for leg in rides:
+            seen = [(leg["from"], leg["dep_sec"])]
+            clock = leg["dep_sec"]
+            for stop in leg.get("via", ()):
+                hours, minutes = map(int, stop["t"].split(":"))
+                t = hours * 3600 + minutes * 60
+                while t < clock:
+                    t += 86400
+                clock = t
+                seen.append((stop["name"], t))
+            seen.append((leg["to"], leg["arr_sec"]))
+            for name, t in seen[1:]:
+                node = by_place.get(name)
+                if node is not None and node != start:
+                    arrive[node] = min(arrive.get(node, t), t)
+            path = [by_place[name] for name, _ in seen if name in by_place]
+            paths.append([node for i, node in enumerate(path) if i == 0 or node != path[i - 1]])
+        if not paths:
+            continue
+        # Cel to ostatnie miejsce ostatniej jazdy, gdy żaden węzeł nim nie jest.
+        if rides[-1]["to"] not in by_place:
+            paths[-1].append(end)
+            line = rides[-1]["num"]
+            key = (paths[-1][-2], end, line) if len(paths[-1]) > 1 else None
+            if key:
+                end_by_line[key] = min(end_by_line.get(key, journey["arrival_sec"]),
+                                       journey["arrival_sec"])
+        arrive[end] = min(arrive.get(end, journey["arrival_sec"]), journey["arrival_sec"])
+        if best is None or journey["arrival_sec"] < best[0]:
+            best = (journey["arrival_sec"], rides, paths)
+    fast = set()
+    if best is not None:
+        for ride_leg, path in zip(best[1], best[2]):
+            fast.update((a, b, ride_leg["num"]) for a, b in zip(path, path[1:]))
+    for node in scheme["nodes"]:
+        if node["id"] in arrive:
+            node["arrive_sec"] = arrive[node["id"]]
+    for edge in scheme["edges"]:
+        for line in edge["lines"]:
+            key = (edge["from"], edge["to"], line["num"])
+            if key in end_by_line:
+                line["arrive_sec"] = end_by_line[key]
+            if key in fast:
+                edge["fast"] = True
+
+
+def _scheme_of_legs(variants):
+    """Schemat w trybie awaryjnym mapy (węzłów wtedy nie ma): same jazdy
+    wariantów najszybszej trasy, jedna strzałka na jazdę, przejścia ukryte."""
+    edges, gaps = {}, set()
+    for legs in variants:
+        rides = [leg for leg in legs if leg["kind"] == "ride"
+                 and _line_parts(leg["line"])[1] not in SCHEME_HIDDEN_KINDS]
+        for i, leg in enumerate(rides):
+            a = SCHEME_START if i == 0 else leg["from"]
+            b = SCHEME_END if i == len(rides) - 1 else leg["to"]
+            edges.setdefault((a, b), set()).add(_line_parts(leg["line"])[::-1])
+            if i < len(rides) - 1 and leg["to"] != rides[i + 1]["from"]:
+                gaps.add((leg["to"], rides[i + 1]["from"]))
+    order = ([SCHEME_START] + sorted({p for e in list(edges) + list(gaps) for p in e}
+                                     - {SCHEME_START, SCHEME_END})
+             + [SCHEME_END])
+    ids = {place: f"n{i}" for i, place in enumerate(order)}
+    return {
+        "nodes": [{"id": ids[p], "role": ("start" if p == SCHEME_START else "end"
+                                          if p == SCHEME_END else "stop"),
+                   **({"place": p} if p not in (SCHEME_START, SCHEME_END) else {})}
+                  for p in order],
+        "edges": [{"from": ids[a], "to": ids[b],
+                   "lines": [{"num": num, "kind": kind} for kind, num in sorted(lines)]}
+                  for (a, b), lines in edges.items()],
+        "order": sorted([ids[a], ids[b]] for a, b in gaps),
+    }
 
 
 # ============================================================================
