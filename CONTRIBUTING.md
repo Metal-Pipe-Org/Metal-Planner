@@ -27,7 +27,7 @@ Wspólny sposób pracy na GitHubie: branche, pull requesty, review Claude'a, iss
 13. Gdy merge czegoś do `main` wpędzi Twój PR w konflikt, dostajesz ping na Discordzie — raz, nie po każdym kolejnym merge'u; szkiców to nie dotyczy. Jeśli PR czekał na review, prośby o review zdejmują się same: rozwiąż konflikt i poproś o review ponownie.
 14. Kto pilnuje których plików, wyznacza `.github/CODEOWNERS` — to jedyne źródło prawdy. Gdy PR dotyka pliku z ownerem, GitHub sam dodaje go do reviewerów.
 15. PR merguje jego autor. Można używać automerge.
-16. Stos PR-ów (PR, którego baza to branch innego PR-a; GitHub pokazuje wtedy „Stacked with #N”) mergujemy raz: czekamy, aż wszystkie PR-y w stosie będą gotowe, i mergujemy najwyższy — wciąga cały stos do `main`. Jeśli GitHub pokazuje „Rebase stack”, kliknij go przed merge'em. Auto-merge nie działa dla stosów.
+16. Stos PR-ów (PR, którego baza to branch innego PR-a; GitHub pokazuje wtedy „Stacked with #N”) mergujemy raz: czekamy, aż wszystkie PR-y w stosie będą gotowe, i mergujemy najwyższy — wciąga cały stos do `main`.
 
 ## Release
 
