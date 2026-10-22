@@ -181,14 +181,7 @@ zostawia mapę dokładnie taką, jaka była, zanim czas się na niej pojawił.
 
 ## 11. Mapa pokazuje, gdzie się przesiąść — i co się tu z każdą linią dzieje
 
-**Gdzie stoi kropka.** Tam, gdzie mapa widzi sensowne wysiadanie — nie na
-każdym mijanym przystanku. Miejsce, z którego mapa już nigdzie dalej nie
-wiezie, nie jest przesiadką i kropki nie dostaje, choćby coś tam przyjeżdżało.
-Tak samo miejsce, przez które wszystko tylko przejeżdża: skoro nic się tu nie
-staje dostępne ani nie przestaje, nie ma o czym decydować.
-**Jedna na MIEJSCE, nie na słupek:** plac z trzema peronami to jedna
-przesiadka, a grupowanie jest to samo, którym rozkład rozpoznaje miejsce —
-nie odległość na ekranie.
+**Gdzie stoi kropka.** Tam, gdzie mapa widzi sensowne wysiadanie — nie na każdym mijanym przystanku. Miejsce, przez które wszystko tylko przejeżdża, kropki nie dostaje: skoro nic się tu nie staje dostępne ani nie przestaje, nie ma o czym decydować. Miejsce, z którego mapa już nigdzie dalej nie wiezie, dostaje kropkę tylko wtedy, gdy kończy się w nim ostatni przejazd którejś narysowanej podróży — tam się wysiada i dochodzi do celu albo jest się już w nim. Cel, gdy jest przystankiem, ma taką samą kropkę i taką samą tablicę jak każdy inny przystanek mapy, tylko czerwoną; cel z punktu na mapie ma swój znacznik, bez tablicy. **Jedna na MIEJSCE, nie na słupek:** plac z trzema peronami to jedna przesiadka, a grupowanie jest to samo, którym rozkład rozpoznaje miejsce — nie odległość na ekranie.
 
 **Trzy rzeczy, nie jedna.** O każdej linii trzeba tu wiedzieć jedno z trzech —
 i to ma być widać, zanim się przeczyta godzinę:

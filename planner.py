@@ -173,7 +173,6 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             # („DWORZEC GŁÓWNY"), a opóźnienia są pod nazwą stacji PKP.
             **({"trip": trip, "trip_stop": day.stop_names[_stop_id]}
                if trip.startswith("PKP:") else {}),
-            **_info(trip),
         })
 
     return {"stop": name, "from_time": _fmt_time(from_sec), "departures": departures}
@@ -639,12 +638,6 @@ def _platform_fields(day, trip, board_stop, exit_stop):
     return out
 
 
-def _info(trip):
-    """Treść „i" przy etapie albo odjeździe - dziś tylko Polinka (#165):
-    godziny otwarcia i data sprawdzenia danych."""
-    return {"info": polinka.INFO} if trip.startswith(polinka.ID_PREFIX) else {}
-
-
 def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None):
     """Etap przejazdu jednym kursem, od wsiadania do wysiadania.
 
@@ -677,7 +670,6 @@ def _ride_leg(day, trip, board_stop, board_dep, exit_stop, exit_arr, geo_db=None
         "via": _via_stops(day, [(s, dep) for s, _, dep in path_rows[1:-1]]),
         "path": _round_path(coords),
         **_platform_fields(day, trip, board_stop, exit_stop),
-        **_info(trip),
         # Publiczny odpowiednik `_trip`: przycisk "trasa" otwiera rozkład linii
         # na wariancie tego kursu - sam headsign nie odróżni zjazdów do
         # zajezdni z dwóch pętli (#270).
@@ -919,8 +911,7 @@ def _traficar_journeys(day, journey, dep_sec, deadline, dest, end_name, geo_db):
     return journeys
 
 
-MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train",
-                 "Kolejka": "cable"}
+MODE_OF_LABEL = {"Tramwaj": "tram", "Autobus": "bus", "Pociąg": "train"}
 
 
 def _line_parts(label):
@@ -1861,7 +1852,18 @@ def _value_map(day, source_stops, target_set, dep_sec, best_arr, frame_km2,
                        and VALUE_WINDOWS_SEC[-1] in searches
                        and tolerance(k + 1) is None),
         "why_of": why_of,
+        "chosen": chosen,
     }
+
+
+def _last_alights(day, chosen):
+    """Słupki, na których podróże z mapy kończą ostatni przejazd - tu się
+    wysiada i dochodzi do celu albo jest się już w nim (zgłoszenie #266).
+    Każdy wariant osobno: ta sama podróż innymi liniami bywa wysiadką gdzie
+    indziej."""
+    return {day.conns[max((alight for _board, alight in rides),
+                          key=lambda conn: day.conns[conn][1])][3]
+            for journey in chosen for _nums, rides in journey["kept"]}
 
 
 def _latest_departure(day, source_stops, target_stops, dep_sec, best_arr):
@@ -2247,7 +2249,8 @@ def plan_flow_stages(start_query, end_query, when=None,
 
             seg_list, nodes = _finalize_segments(
                 day, kept, ranges, geo_db, earliest, profile[2], deadline,
-                source_stops, why_of, late=(best_arr, late_arrival))
+                source_stops, why_of, late=(best_arr, late_arrival),
+                alights=_last_alights(day, chosen_map["chosen"]), target_stops=target_set)
             map_journeys = []
             if with_journeys:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
@@ -2310,6 +2313,45 @@ def plan_flow_stages(start_query, end_query, when=None,
         if ride:
             onboard.count_exit(map_journeys, ride)
             onboard.mark_journeys(map_journeys, ride)
+
+        # Przejścia o innym tempie - Polinka tu, rower niżej - ocenia się na
+        # GOTOWEJ mapie: dojazd do nich i dalsza droga po nich idą tym, co
+        # mapa RYSUJE (patrz _drawn_arrivals, _drawn_onward). Oba
+        # przebiegi są leniwe i liczone raz na obie warstwy - bez kandydatów
+        # nie odpala się żaden. Warunki te same co przy autach i rowerach
+        # niżej: nie w trybie awaryjnym i nie przy "dowolnej stacji w mieście".
+        on_map = bool(kept) and not (gtfs.is_city_group(day, source_stops)
+                                     or gtfs.is_city_group(day, target_set))
+        drawn = {}
+
+        def drawn_arrivals():
+            if "arrivals" not in drawn:
+                drawn["arrivals"] = _drawn_arrivals(day, drawn_runs(), source_stops,
+                                                    report_dep_sec)
+            return drawn["arrivals"]
+
+        def drawn_onward():
+            if "onward" not in drawn:
+                drawn["onward"] = _drawn_onward(day, drawn_runs(), target_set)
+            return drawn["onward"]
+
+        def drawn_runs():
+            if "runs" not in drawn:
+                drawn["runs"] = _drawn_runs(day, kept, ranges)
+            return drawn["runs"]
+
+        # Polinka (zgłoszenie #364) nie jest kursem i niczego w mapie nie
+        # przestawia - dokłada się do niej jako przeprawa, tą samą regułą co
+        # rower. Rozkładu nie ma, stan na żywo też nie, więc idzie razem
+        # z mapą, a nie z danymi na żywo. Rysuje się jak każdy kawałek.
+        # Dojazd do stacji idzie przez start albo przez słupek, na którym coś
+        # narysowanego wysadza - gdy żaden nie stoi obok Polinki, przeprawy
+        # nie ma i drogiego liczenia dojazdów nie robimy.
+        if on_map and polinka.reachable(day, {*source_stops, *(
+                conn[3] for run in drawn_runs() for conn in run)}):
+            seg_list = seg_list + polinka.map_crossings(
+                day, when.date() + timedelta(days=day_offset), drawn_arrivals,
+                drawn_onward, target_set)
 
         yield "map", {
             "start": start_name,
@@ -2441,8 +2483,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # między miastami, a auto czy rower przy którejś ze stacji nie jest
             # na nią odpowiedzią ("WROCŁAW -" -> "WARSZAWA -" pokazywało auta
             # przy Nadodrzu i Kuźnikach).
-            if kept and not (gtfs.is_city_group(day, source_stops)
-                             or gtfs.is_city_group(day, target_set)):
+            if on_map:
                 # Na starcie jest się od godziny z pytania, nie od początku
                 # mapy - do auta czy roweru pod nosem idzie się od razu (tak
                 # samo jak przy propozycjach z rowerem wyżej).
@@ -2480,12 +2521,8 @@ def plan_flow_stages(start_query, end_query, when=None,
                 # Nieznany jest wtedy sam STAN stojaka i `bike_places_live`
                 # mówi to wprost, żeby front nie podał zgadywania jako liczby
                 # rowerów.
-                runs = _drawn_runs(day, kept, ranges)
                 bike_places = bikes.map_places(
-                    day,
-                    lambda: _drawn_arrivals(day, runs, source_stops, report_dep_sec),
-                    lambda: _drawn_onward(day, runs, target_set),
-                    target_set, bike_count * (1 + more),
+                    day, drawn_arrivals, drawn_onward, target_set, bike_count * (1 + more),
                     live=day_offset == 0 and when.date() == date.today(),
                     min_level=more, electric=bike_electric, regular=bike_regular,
                     ride_mps=bike_mps, overhead_sec=bike_overhead)
@@ -3026,7 +3063,7 @@ def _drawn_onward(day, runs, target_set):
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
                        board_value=None, deadline=None, source_stops=None,
-                       why_of=None, late=None):
+                       why_of=None, late=None, alights=None, target_stops=None):
     """Tnie każdy narysowany kurs na kawałki tam, gdzie zmienia się zestaw
     linii dzielących ten sam odcinek ulicy/torów (patrz
     _membership_boundaries) - kawałek niesie jeden skład korytarza na całej
@@ -3147,7 +3184,8 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
             item["why"] = why_of(label, stops_seq)
         seg_list.append(item)
     return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline,
-                                    source_stops, late=late)
+                                    source_stops, late=late, alights=alights,
+                                    target_stops=target_stops)
 
 
 def _rides_back(earliest, board, alight):
@@ -3233,7 +3271,7 @@ def _place_center(day, place_key, fallback_stop):
 
 
 def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
-                    source_stops=None, late=None):
+                    source_stops=None, late=None, alights=None, target_stops=None):
     """Węzły przesiadkowe mapy - to, na czym front stawia kropki z tablicą
     odjazdów.
 
@@ -3257,7 +3295,10 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     GDZIE w ogóle stoi kropka: tam, gdzie coś się ZACZYNA albo KOŃCZY - jakaś
     linia staje się stąd dostępna, albo mapa przestaje którąś dalej wieźć.
     Przystanek, przez który wszystko tylko przejeżdża, kropki nie dostaje,
-    choćby leżał na styku dwóch narysowanych kawałków.
+    choćby leżał na styku dwóch narysowanych kawałków. Kropkę ma też każde
+    miejsce z `alights` - tam podróż z mapy kończy ostatni przejazd, choćby
+    nie dało się tam już w nic wsiąść (zgłoszenie #266). Miejsce celu
+    (`target_stops`) dostaje `end`, jak start `start`.
 
     Czytane z KAŻDEGO przystanku kawałka, nie tylko z jego końców. Kawałek
     "Galeria Dominikańska -> Urząd Wojewódzki -> Katedra" przejeżdża przez
@@ -3300,6 +3341,8 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     # to nazwa jednego z jego słupków, więc zgadywanie po niej myliłoby się
     # dokładnie tam, gdzie plac ma słupki o różnych nazwach.
     start_places = {day.place_of.get(s, s) for s in (source_stops or ())}
+    end_places = {day.place_of.get(s, s) for s in (target_stops or ())}
+    alight_places = {day.place_of.get(s, s) for s in (alights or ())}
 
     # Każde dotknięcie przystanku przez narysowany kawałek: (miejsce, linia,
     # słupek, godzina, czy wiezie DALEJ, czy dowozi TU, czy to koniec kawałka).
@@ -3373,8 +3416,10 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
                 entry["arrive"] = arrive
             lines.append(entry)
         # Miejsce, w którym da się tylko wysiąść, nie jest przesiadką i nie
-        # dostaje kropki.
-        if not any(l["flow"] != "end" for l in lines):
+        # dostaje kropki - chyba że kończy się tu czyjś ostatni przejazd: wtedy
+        # to tu pasażer wysiada i to on pyta, o której tu będzie.
+        last_alight = key in alight_places
+        if not lines or (not last_alight and not any(l["flow"] != "end" for l in lines)):
             continue
         # ...a miejsce, przez które WSZYSTKO tylko przejeżdża, też nie: nic się
         # tu nie staje dostępne i nic nie przestaje, więc nie ma o czym
@@ -3389,7 +3434,7 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         # w miejscu, w którym nie da się zrobić nic (zgłoszone 2026-08-31).
         # Linia przecięta z powodu korytarza wychodzi tu jako "through" -
         # i tu dowozi, i dalej wiezie - więc sama z siebie kropki nie stawia.
-        if not any(l["flow"] != "through" for l in lines):
+        if not last_alight and not any(l["flow"] != "through" for l in lines):
             continue
         lat, lon = _round_path([day.stop_coords[node["stop"]]])[0]
         clat, clon = _place_center(day, key, node["stop"])
@@ -3409,6 +3454,8 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         }
         if key in start_places:
             entry["start"] = True     # tylko przy tym jednym - pole ma nie puchnąć
+        if key in end_places:
+            entry["end"] = True
         if late is not None:
             place_stops = day.stops_by_place.get(key, [node["stop"]])
             # Poprzedni kurs to ten sprzed chwili, w której da się tu w ogóle
@@ -3558,7 +3605,6 @@ def _segment_ride_leg(day, seg, board_pos, alight_pos, geo_db):
         "path": _round_path(path),
         "trip": seg["trip_id"],
         **_platform_fields(day, seg["trip_id"], from_stop, to_stop),
-        **_info(seg["trip_id"]),
     }
 
 

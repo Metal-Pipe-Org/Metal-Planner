@@ -1,0 +1,98 @@
+name: "PR-y: zmiany przez wersję roboczą"
+
+# Gotowy PR nie dostaje pushy (#349). Każda zmiana — poprawki po ocenie
+# Claude'a, po recenzji, rozwiązanie konfliktu — idzie przez wersję roboczą,
+# a oznaczenie PR-a jako gotowego („Ready for review") uruchamia ponowną ocenę
+# w claude-review-pr.yml. Tu pilnujemy dwóch wejść do wersji roboczej:
+#
+#  • push, który zmienia zmiany gotowego PR-a, przestawia go na wersję roboczą.
+#    Push, po którym PR wnosi do bazy to samo co przed nim (samo dociągnięcie
+#    bazy: „Update branch", merge bazy bez poprawek, rebase), zostawia PR
+#    gotowym, bo ocena nie miałaby czego oglądać. Rozstrzyga `same_changes`
+#    w drafts.sh,
+#  • PR otwarty, otwarty ponownie albo oznaczony jako gotowy, który ma konflikt
+#    z bazą, wraca do wersji roboczej. Przy konflikcie GitHub nie tworzy biegu
+#    `pull_request`, więc ocena i tak by nie ruszyła; autor rozwiązuje konflikt
+#    i oznacza PR jako gotowy jeszcze raz. Konflikt, który powstaje później,
+#    przez merge do `main`, łapie pr-conflicts.yml.
+#
+# `pull_request_target`, bo działa także przy PR-ze w konflikcie i przy PR-ach
+# z forków daje token z zapisem. Kodu z PR-a nie wypakowujemy: `merge-tree`
+# i `diff` czytają same obiekty, a skrypty bierzemy z `main`.
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize]
+    branches: [main]
+
+permissions:
+  # Przestawienie na wersję roboczą, zdjęcie próśb o recenzję i komentarz.
+  pull-requests: write
+  # Skrypty i historia bazy do liczenia konfliktu i porównania zmian.
+  contents: read
+
+jobs:
+  to-draft:
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && github.event.pull_request.draft == false
+    # Push zaraz po „Ready for review" nie może się minąć ze sprawdzeniem
+    # konfliktu tego samego PR-a — po kolei, bez ubijania.
+    concurrency:
+      group: pr-drafts-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      N: ${{ github.event.pull_request.number }}
+      BASE: ${{ github.event.pull_request.base.ref }}
+      GIT_REPO: .discord
+
+    steps:
+      - name: Pobierz skrypty i historię main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          # Pełna historia, bo konflikt i zmiany liczymy od wspólnego przodka
+          # PR-a i bazy.
+          fetch-depth: 0
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Pobierz bazę i czubek PR-a
+        run: |
+          git -C .discord fetch -q --no-tags origin \
+            "+refs/heads/$BASE:refs/remotes/base" "+refs/pull/$N/head:refs/remotes/pr/$N"
+
+      - name: Push do gotowego PR-a
+        if: github.event.action == 'synchronize'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/drafts.sh
+
+          # Stary czubek po force-pushu bywa już nie do pobrania; wtedy nie da
+          # się wykazać, że zmiany są te same, więc liczymy push jako zmianę.
+          if git -C .discord fetch -q --no-tags origin "$BEFORE" 2> /dev/null \
+              && same_changes refs/remotes/base "$BEFORE" "$AFTER"; then
+            echo "#$N: push nie zmienia zmian PR-a (samo dociągnięcie $BASE) — zostaje gotowy." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          to_draft "$N" "$DRAFT_ON_PUSH" || [ $? -eq 1 ]
+
+      - name: Konflikt z bazą przy otwarciu albo „Ready for review"
+        if: github.event.action != 'synchronize'
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/drafts.sh
+          source .discord/.github/scripts/conflicts.sh
+
+          if conflicts_with refs/remotes/base "refs/remotes/pr/$N"; then
+            to_draft "$N" "$DRAFT_ON_CONFLICT" || [ $? -eq 1 ]
+          fi
