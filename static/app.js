@@ -5792,7 +5792,7 @@ function schemeSvg(boxes, strands) {
             : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
               + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
               + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
-        return `<g class="scheme-stroke${extra}" data-lines="${esc(label)}">${strokes}</g>`;
+        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}">${strokes}</g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
         : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
