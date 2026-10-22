@@ -43,14 +43,6 @@ permissions:
   # Tylko na skrypt wysyłki na Discorda z `main`.
   contents: read
 
-env:
-  LABEL_STALE: "stale"
-  DAYS_QUIET: 14
-  DAYS_GRACE: 7
-  # Niewidoczny znacznik, po którym rozpoznajemy własne przypomnienie wśród
-  # innych komentarzy bota.
-  MARKER: "<!-- stale-ping -->"
-
 jobs:
   stale:
     runs-on: ubuntu-latest
@@ -101,7 +93,7 @@ jobs:
           while read -r n subs blocked labeled <&3; do
             if [ "$blocked" = true ]; then
               if [ "$labeled" = true ]; then
-                gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL_STALE"
+                remove_stale "$n"
                 echo "#$n: zablokowane — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
               fi
               continue
@@ -158,7 +150,7 @@ jobs:
                   "$(jq -r .html_url "$RUNNER_TEMP/issue.json")" "" "" "${who//@/}"
                 ;;
               unlabel)
-                gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL_STALE"
+                remove_stale "$n"
                 echo "#$n: ktoś odpisał — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
                 ;;
             esac

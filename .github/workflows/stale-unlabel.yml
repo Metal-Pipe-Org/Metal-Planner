@@ -32,12 +32,6 @@ permissions:
   issues: write
   contents: read
 
-env:
-  LABEL_STALE: "stale"
-  DAYS_QUIET: 14
-  DAYS_GRACE: 7
-  MARKER: "<!-- stale-ping -->"
-
 jobs:
   unlabel:
     if: >-

@@ -1,3 +1,10 @@
+LABEL_STALE="stale"
+DAYS_QUIET=14
+DAYS_GRACE=7
+# Niewidoczny znacznik, po którym rozpoznajemy własne przypomnienie wśród
+# innych komentarzy bota.
+MARKER="<!-- stale-ping -->"
+
 # Decyzja o zgłoszeniu po ciszy, wspólna dla biegu dziennego
 # (stale-issues.yml) i natychmiastowego zdejmowania etykiety
 # (stale-unlabel.yml). Wołający robi `source`; plik bierze z `main`.
@@ -34,4 +41,13 @@ stale_action() {
         elif now - $active >= $quiet * 86400 then "ping"
         elif $ping != null and $labeled then "unlabel"
         else "none" end'
+}
+
+# remove_stale NUMER — zdejmuje etykietę po świeżym odczycie. Migawka z
+# początku biegu bywa już nieaktualna (stale-unlabel.yml mógł ją zdjąć), a
+# `gh issue edit --remove-label` na brakującej etykiecie kończy się błędem.
+remove_stale() {
+  if [ "$(gh issue view "$1" --repo "$REPO" --json labels --jq "any(.labels[]; .name == \"$LABEL_STALE\")")" = true ]; then
+    gh issue edit "$1" --repo "$REPO" --remove-label "$LABEL_STALE"
+  fi
 }
