@@ -18,6 +18,17 @@
     --tabs-h: calc(57px + env(safe-area-inset-bottom, 0px));
 }
 
+/* Cała aplikacja to przypięte warstwy, więc dokument nie ma czego przewijać.
+   Bez tego iOS przy otwarciu klawiatury przewija sam dokument, żeby pokazać
+   pole, i po jej zamknięciu zostawia całą stronę przesuniętą (#329, #326):
+   pasek z nazwą pod notchem, kolumny przycisków wsunięte pod pasek. Przewijają
+   się tylko panele w środku (overflow-y: auto). */
+html, body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
 /* ------------------------------------------------------------ zakładki --- */
 
 #view-tabs { display: flex; }
@@ -121,6 +132,11 @@ body.view-map .places-bar {
 }
 
 body.view-map.places-row .places-bar { flex-direction: row; }
+
+/* Skróty idą za formularzem: w rozwiniętym leżą w rzędzie pod nim, a ze
+   zwiniętym znikają razem. */
+body.view-map:not(.search-collapsed) .places-bar { flex-direction: row; }
+body.view-map.search-collapsed .places-bar { display: none; }
 body.view-map.places-off .places-bar { display: none; }
 
 body.view-map .place-button {
@@ -329,10 +345,27 @@ body.dev-open #flow-panel {
    zawijają się pod siebie zamiast wypychać wiersz poza ekran. */
 #flow-panel:has(.tt-lines) { width: 100%; }
 #flow-panel .tt-rows.tt-lines {
-    grid-template-columns: minmax(34px, max-content) minmax(0, 9em) 1fr auto;
+    grid-template-columns: minmax(34px, max-content) minmax(3em, 1fr) minmax(0, max-content) auto;
+    column-gap: 5px;
 }
 #flow-panel .tt-rows.tt-lines.has-flow {
-    grid-template-columns: 15px minmax(34px, max-content) minmax(0, 9em) 1fr auto;
+    grid-template-columns: 15px minmax(34px, max-content) minmax(3em, 1fr) minmax(0, max-content) auto;
+}
+/* Kierunek oddaje miejsce godzinom (wielokropek), a nie odwrotnie: trzy
+   godziny w jednym rzędzie czyta się łatwiej niż kierunek w całości. Gdy
+   godziny i tak się zawiną, reszta wiersza trzyma się pierwszej linijki,
+   a kreska pod wierszem (style.css) mówi, gdzie on się kończy. */
+#flow-panel .tt-rows.tt-lines li {
+    align-items: start;
+    padding: 5px 0;
+    line-height: 18px;
+}
+/* Na telefonie sama ikona: słowo zostaje w przycisku (nazwa dla czytnika
+   ekranu), ale nie zajmuje miejsca, które dostaje kierunek. */
+#flow-panel .tt-rows.tt-lines .tt-route {
+    gap: 0;
+    font-size: 0;
+    line-height: 16px;
 }
 #flow-panel .tt-times {
     flex-wrap: wrap;

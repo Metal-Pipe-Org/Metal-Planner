@@ -1,14 +1,19 @@
-name: "PR-y: ping przy nowym konflikcie z main"
+name: "PR-y: nowy konflikt z main — ping i wersja robocza"
 
 # Przy PR-ze w konflikcie z bazą GitHub nie uruchamia automatów PR-a — także
 # discord.yml dla wystawionej recenzji. Zatwierdzenie takiego PR-a przechodziło
 # więc po cichu (#245), a zatwierdzony PR mógł utknąć w konflikcie bez wiedzy
 # autora. Konflikt powstaje zwykle wtedy, gdy coś wjeżdża na `main`, więc po
-# każdym pushu do `main` sprawdzamy wszystkie otwarte PR-y poza szkicami.
+# każdym pushu do `main` sprawdzamy wszystkie otwarte PR-y, także szkice.
 # Autor dostaje ping na Discordzie tylko wtedy, gdy ten push wpędził jego PR
 # w konflikt — raz na konflikt. Czekające prośby o recenzję są przy tym
 # zdejmowane: recenzent nie traci czasu na PR, który i tak się jeszcze
 # zmieni, a autor po rozwiązaniu konfliktu prosi o recenzję od nowa.
+#
+# Gotowy PR w konflikcie wraca do wersji roboczej (#349): rozwiązanie
+# konfliktu to zmiana jak każda inna, więc idzie przez wersję roboczą,
+# a wyjście z niej uruchamia ponowną ocenę Claude'a. PR otwarty od razu
+# w konflikcie, którego ten bieg nie zobaczy, przestawia pr-drafts.yml.
 #
 # Logika siedzi w `.github/scripts/conflicts.sh`; z `DRY_RUN=1` da się ją
 # puścić na prawdziwych PR-ach tokenem tylko do odczytu.
@@ -23,7 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # Zdjęcie próśb o recenzję.
+  # Zdjęcie próśb o recenzję i przestawienie na wersję roboczą.
   pull-requests: write
   # Skrypty z `main`, historia i głowy PR-ów do liczenia konfliktów.
   contents: read
@@ -64,6 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           source .discord/.github/scripts/discord.sh
+          source .discord/.github/scripts/drafts.sh
           source .discord/.github/scripts/conflicts.sh
 
           ping_new_conflicts

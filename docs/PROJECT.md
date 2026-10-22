@@ -46,9 +46,12 @@ z którego `siechnice.py` składa kompletne kursy: odjazdy o tym samym
 kolejne słupki kursu.
 
 Słupki wspólne z Wrocławiem (Bardzka, Sucha, Iwiny — tamtędy jadą 800/810)
-sklejają się z istniejącymi po **zgodnej nazwie i bliskości**, więc kurs
-z Siechnic wjeżdża na ten sam `stop_id` co tramwaj: przesiadka bez kary za
-przejście i jeden marker na mapie zamiast dwóch.
+sklejają się z istniejącymi po **zgodnej nazwie i bliskości** albo — bez
+względu na nazwę — gdy stoją **w tym samym punkcie** (do 10 m; gmina
+podpisuje wrocławskie słupki po swojemu, np. „Park Wschodni NŻ”; dalsze
+pary wskazuje ręcznie `SAME_STOP_BY_HAND`), więc kurs
+z Siechnic wjeżdża na ten sam `stop_id` co tramwaj i nosi jego nazwę:
+przesiadka bez kary za przejście i jeden marker na mapie zamiast dwóch.
 
 Serwer **nie odpytuje** tego API (`robots.txt` to `Disallow: /`, nie ma regulaminu ani zgody na ponowne wykorzystanie), a w repo nie ma ani danych, ani kodu pobierania. Statyczną kopię jednego pełnego tygodnia wgrywa się w trybie deweloperskim (⚙ → „Wgraj rozkład Siechnic”): serwer sprawdza format, zapisuje plik w folderze `siechnice` obok `docker-compose.yml` (w kontenerze ścieżka z `SIECHNICE_ROZKLAD`) i od razu przebudowuje bazę w tle. Aktualizacja bazy dokleja kopię też co noc: każdy dzień tygodnia dostaje własny `service_id` z regułą w `calendar` (kursy z poniedziałku jeżdżą w każdy poniedziałek), w oknie dat bieżącej paczki Wrocławia. Święta jeżdżą wg dnia tygodnia. Bez pliku baza ma same dane Wrocławia, a awaria tego kroku nie przerywa aktualizacji. Wszystkie przebudowy (start, noc, wgranie) dzielą jedną blokadę plikową (`data/gtfs_update.lock`), więc nigdy nie biegną dwie naraz. Format pliku, rozpoznanie źródeł, powody i wzór pisma do gminy o eksport GTFS: [SIECHNICE_DANE.md](SIECHNICE_DANE.md).
 
@@ -73,19 +76,9 @@ po każdym zapisie pliku. Wyłącznik obu: `GTFS_UPDATE_ON_START=off`.
 
 #### Trzecie źródło — `polinka.py` (wpisane ręcznie)
 
-Polinki — kolei gondolowej Politechniki Wrocławskiej nad Odrą (zgłoszenie
-#165) — nie ma w żadnym rozkładzie, a PWr publikuje tylko godziny otwarcia
-(pwr.edu.pl/polinka). Moduł trzyma je ręcznie, z datą sprawdzenia
-(`UPDATED`): pn–pt 7:00–18:00, przerwa 13:30–14:00, weekendy i święta
-nieczynna (święta ruchome liczone z daty Wielkanocy). Rozkładu w ścisłym
-sensie też nie ma — dwie kabiny jeżdżą wahadłowo — więc przejazdy są
-ostrożne: odjazd co 5 min w obie strony, jazda 3 min. `gtfs.load_day` dokleja
-stacje i przejazdy tuż po kolei, przed budowaniem miejsc, więc przejścia
-piesze do przystanków obok powstają same. Etykieta „Kolejka Polinka" daje
-plakietkę „Polinka" w rodzaju `cable` (granat PWr). Godziny otwarcia i data
-sprawdzenia danych są pod ikonką „i" (`polinka.INFO`) przy Polince na osi
-trasy i w tablicy odjazdów — bez notki na wierzchu. Stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w
-podpowiedziach nazw. Do trybu rozkładów Polinka nie trafia.
+Polinki — kolei gondolowej Politechniki Wrocławskiej nad Odrą (zgłoszenie #165) — nie ma w żadnym rozkładzie, a PWr publikuje tylko godziny otwarcia (pwr.edu.pl/polinka). Moduł trzyma je ręcznie, z datą sprawdzenia (`UPDATED`): pn–pt 7:00–18:00, przerwa 13:30–14:00, weekendy i święta nieczynna (święta ruchome liczone z daty Wielkanocy). `gtfs.load_day` dokleja tylko stacje, tuż po kolei, przed budowaniem miejsc, więc przejścia piesze do przystanków obok powstają same; stacje stoją na mapie (`/api/stops`, `kind: "cable"`) i w podpowiedziach nazw.
+
+Od zgłoszenia #364 Polinka nie jest kursem: w wyszukiwaniu jej nie ma, więc nie pojawia się na liście propozycji, w pasku z najszybszą trasą ani w tablicach odjazdów. Jako kurs z wymyślonym rozkładem wygrywała o minutę i zostawała na mapie jedyną trasą, a staje z powodu pogody i jeździ na osobny bilet. Jest przeprawą — przejściem o innym tempie, jak rower: kabiny jeżdżą w kółko, więc nie czeka się na odjazd, a przeprawa trwa 3 min w godzinach otwarcia (przed otwarciem i w przerwie czeka się na otwarcie, `polinka.boarding_at`). Dokłada się na gotową mapę tą samą regułą sensu co rower (`polinka.map_crossings`, na `_drawn_arrivals`/`_drawn_onward` i funkcjach z `bikes.py`): kierunek zostaje, gdy mapa dowozi w pobliże stacji, a po drugiej stronie zdąży się wsiąść w coś, co mapa rysuje, albo dojść do celu. Bez przełącznika — zawsze. Liczy się razem z mapą (etap `map`), bo nie zależy od danych na żywo. Każdy kierunek, który przeszedł regułę, trafia do `segments` jako zwykły narysowany kawałek (plakietka „Polinka”, rodzaj `cable`, godziny wsiadania i wysiadania w `stops_t`, przyjazd do celu w `arrive`), więc front rysuje go tak samo jak każdą linię. Dymek ma jednak własny (pole `tip`, `segTipHtml` w app.js), zbudowany jak dymek auta Traficara: nagłówek „Polinka”, przy każdym pokazanym kierunku godzina przy stacji z dojściem („jesteś przy niej”, jak przy aucie) oraz przyjazd do celu i czas przeprawy (bez godzin samej przeprawy), a pod tym godziny otwarcia, osobny bilet i data sprawdzenia danych (`polinka.NOTES`) — nigdzie indziej pasażer ich nie zobaczy.
 
 ### 2. Backend — Flask
 
@@ -193,6 +186,8 @@ się też w trakcie ręcznego szukania i edycji pola godziny. Brak sygnału w tl
 jest cichy: zostaje poprzedni wynik.
 
 Cel wybrany przy **pustym** „skąd” znaczy „jadę stąd” (#275): aplikacja sama robi to samo co ◎ — pyta o pozycję, w razie czego „Stoisz na przystanku…?”, i od razu szuka. Gdy lokalizacji nie ma (odmowa, brak sygnału, brak API), zostaje zwykły komunikat ◎, a kursor przechodzi do „skąd”. Gotowego startu nic nie nadpisuje, a w trybie z pokładu pojazdu tego nie ma.
+
+Druga strona tego samego (#319): ◎ jest takim samym wyborem startu jak podpowiedź, więc przy pustym „dokąd” też przenosi tam kursor (nie czekając na „Stoisz na przystanku…?”); przy wpisanym celu od razu szuka i kursora nie rusza. Klik w mapę kursora nie przenosi — zostawia mapę do wskazania celu. Przycisk „Moje miejsce” ma cel już ustawiony, więc kursor zostaje, gdzie był.
 
 Wynik ma **dwie warstwy tej samej odpowiedzi**:
 
@@ -881,6 +876,8 @@ przełącznik, nie wybór pojazdu).
 ### Mapa przepływów (`plan_flow`)
 
 Jak mapa wybiera, co narysować (wartości podróży, tolerancja, reguła numerów, próg z gęstości), opisuje krok po kroku [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md); co mapa obiecuje — [FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md).
+
+**Tablica przystanku docelowego** (zgłoszenie #266). Czerwona kropka celu jest zwykłą kropką przystanku mapy (`nodeDot` w app.js, węzeł z flagą `end` z `planner._transfer_nodes`): najechanie albo dotknięcie pokazuje tę samą tablicę co na każdej przesiadce — linie z mapy z ikonką „tu wysiadasz" i godziną przyjazdu, a obok to, co stąd dalej odjeżdża. Kropkę dostaje też każdy przystanek, na którym narysowana podróż kończy ostatni przejazd i dalej idzie pieszo do celu (`planner._last_alights`) — wcześniej miejsca, w których da się tylko wysiąść, kropek nie miały. Cel z punktu na mapie ma tylko swój znacznik, bez tablicy; kropki stoją na przystankach, z których się do niego dochodzi. Gdy żadna podróż nie dojeżdża do samego celu, węzła celu nie ma i czerwona kropka jest samym znacznikiem, bez tablicy — tak jak cel z punktu na mapie. Znana, przyjęta niedogodność: ikonka z lewej strony tablicy kropki (⇥ przyjazd, ↦ odjazd) stoi tylko przy liniach, którymi jedzie któraś podróż z bieżącej mapy; pozostałe linie przejeżdżające przez przystanek są na liście bez ikonki.
 
 ## Znane ograniczenia
 
