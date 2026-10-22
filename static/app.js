@@ -5379,16 +5379,20 @@ function schemeBoxes(scheme, strands, data) {
     zaczynające się i przejeżdżające - przejazd ma ten sam x z obu stron,
     żeby kreska szła przez pudełko prosto. Kolejność od lewej wg tego, gdzie
     linia dalej biegnie, żeby kreski się nie plątały. */
-function assignPorts(boxes, strands) {
+function assignPorts(boxes, strands, refine = false) {
     const center = id => boxes.get(id).x + boxes.get(id).w / 2;
+    // Po pierwszym przydziale znamy miejsca po drugiej stronie kresek, więc
+    // kolejność przy pudełku idzie za nimi, a nie za środkami pudełek: dwie
+    // kreski do tego samego pudełka też mają swoją kolejność.
+    const from = s => refine && s.xs !== undefined ? s.xs : center(s.from);
+    const to = s => refine && s.xt !== undefined ? s.xt : center(s.to);
     for (const [id, box] of boxes) {
         const items = [];
         for (const s of strands) {
             if (s.to === id) {
-                items.push({top: s, bottom: s.next, key: s.next
-                    ? (center(s.from) + center(s.next.to)) / 2 : center(s.from)});
+                items.push({top: s, bottom: s.next, key: s.next ? (from(s) + to(s.next)) / 2 : from(s)});
             } else if (s.from === id && !s.prev) {
-                items.push({top: null, bottom: s, key: center(s.to)});
+                items.push({top: null, bottom: s, key: to(s)});
             }
         }
         items.sort((a, b) => a.key - b.key);
@@ -5887,6 +5891,7 @@ function layoutDagre(lib, scheme, boxes, strands, seed = 0) {
         b.y = Math.round(node.y - b.h / 2);
     }
     assignPorts(boxes, strands);
+    for (let sweep = 0; sweep < 3; sweep++) assignPorts(boxes, strands, true);
     const {layerOf} = schemeLayers(boxes);
     for (const s of strands) {
         const src = boxes.get(s.from), dst = boxes.get(s.to);

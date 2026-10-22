@@ -363,10 +363,12 @@ window.dagre = {
         edge(a, b) { return this.edges.get(a + '>' + b); }
     }},
     layout(g) {
+        // Rząd z numeru węzła, nie z kolejności wstawiania: renderScheme
+        // wstawia węzły w różnej kolejności i podstawka nie ma się tym przejmować.
         const ids = [...g.nodes.keys()];
-        const rank = new Map(ids.map((id, i) => [id, i]));
-        ids.forEach((id, i) => Object.assign(g.nodes.get(id), {
-            x: g.nodes.get(id).width / 2 + (i % 2) * 90, y: i * 170 + 20}));
+        const rank = new Map(ids.map(id => [id, +id.slice(1)]));
+        ids.forEach(id => Object.assign(g.nodes.get(id), {
+            x: g.nodes.get(id).width / 2 + (rank.get(id) % 2) * 90, y: rank.get(id) * 170 + 20}));
         for (const e of g.edges.values()) {
             const a = g.nodes.get(e.a), b = g.nodes.get(e.b);
             e.points = [{x: a.x, y: a.y + 19}];
