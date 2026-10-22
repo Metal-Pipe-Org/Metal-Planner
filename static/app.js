@@ -5235,6 +5235,7 @@ const DAGRE_URL = 'https://cdn.jsdelivr.net/npm/@dagrejs/dagre@1.1.4/dist/dagre.
 let elkReady = null;
 let dagreReady = null;
 let lastSchemeData = null;
+let schemeLast = null;
 let schemeToken = 0;
 let schemeCollapsed = !!uiState.schemeCollapsed;
 // Przybliżenie i przesunięcie rysunku w panelu: rysunek po „Pokaż więcej”
@@ -5245,6 +5246,7 @@ const SCHEME_MAX_SCALE = 4;
 // Węzeł, którego tablica jest teraz w dymku (patrz showSchemeTip).
 let schemeTipOwner = null;
 
+const SCHEME_TRIALS = 24;     // ile układów dagre sprawdzamy (patrz layoutDagre)
 const SCHEME_BOX_H = 38;
 const SCHEME_LANE = 30;       // odstęp między sąsiednimi liniami przy pudełku
 const SCHEME_MARGIN = 28;
@@ -5390,9 +5392,27 @@ function assignPorts(boxes, strands) {
             }
         }
         items.sort((a, b) => a.key - b.key);
+        // Miejsca jak najbliżej tego, dokąd kreska dalej biegnie (a nie równo
+        // rozłożone na całą szerokość pudełka), z zachowaniem odstępu: kreski
+        // nie pętlą się w bok. Najmniejsze kwadraty przy zachowanej kolejności
+        // (izotoniczna regresja po odjęciu i * lane).
         const place = (list, set) => {
-            const first = box.x + (box.w - (list.length - 1) * box.lane) / 2;
-            list.forEach((item, i) => set(item, first + i * box.lane));
+            const q = list.map((item, i) => item.key - i * box.lane);
+            const blocks = [];
+            for (const value of q) {
+                blocks.push({sum: value, n: 1});
+                while (blocks.length > 1) {
+                    const last = blocks[blocks.length - 1], prev = blocks[blocks.length - 2];
+                    if (last.sum / last.n >= prev.sum / prev.n) break;
+                    blocks.splice(-2, 2, {sum: prev.sum + last.sum, n: prev.n + last.n});
+                }
+            }
+            const xs = blocks.flatMap(block => Array(block.n).fill(block.sum / block.n))
+                .map((value, i) => value + i * box.lane);
+            // Każde miejsce wciśnięte w pudełko, z zachowaniem odstępu.
+            const left = box.x + 10, right = box.x + box.w - 10, n = xs.length;
+            list.forEach((item, i) => set(item, Math.min(Math.max(xs[i], left + i * box.lane),
+                                                         right - (n - 1 - i) * box.lane)));
         };
         // Bez przejazdu przez pudełko wejścia i wyjścia nie muszą się
         // zgadzać co do x, więc każda strona rozkłada się sama, wyśrodkowana.
@@ -5528,19 +5548,42 @@ function curvePath(points) {
 
 /** Punkty kreski gęsto, do liczenia drogi po niej: krzywa jak w curvePath,
     łamana jak jest. */
-function strandSamples(s) {
+function strandSamples(s, steps = 24) {
     if (!s.curved) return s.points;
     const out = [s.points[0]];
     for (let i = 1; i < s.points.length; i++) {
         const [x0, y0] = s.points[i - 1], [x1, y1] = s.points[i];
         const mid = (y0 + y1) / 2;
-        for (let k = 1; k <= 24; k++) {
-            const t = k / 24, u = 1 - t;
+        for (let k = 1; k <= steps; k++) {
+            const t = k / steps, u = 1 - t;
             out.push([u * u * u * x0 + 3 * u * u * t * x0 + 3 * u * t * t * x1 + t * t * t * x1,
                       u * u * u * y0 + 3 * u * u * t * mid + 3 * u * t * t * mid + t * t * t * y1]);
         }
     }
     return out;
+}
+
+/** Ile razy kreski schematu się przecinają (zapisane tak, jak je rysujemy:
+    krzywe po odcinkach próbek). Przecięcia kresek połączonych przez pudełko
+    się nie liczą. To miara, po której wybieramy układ. */
+function schemeCrossings(strands) {
+    const polylines = strands.map(s => strandSamples(s, 8));
+    const orient = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+    let count = 0;
+    for (let i = 0; i < strands.length; i++) {
+        for (let j = i + 1; j < strands.length; j++) {
+            if (strands[i].next === strands[j] || strands[j].next === strands[i]) continue;
+            const p = polylines[i], q = polylines[j];
+            for (let a = 1; a < p.length; a++) {
+                for (let b = 1; b < q.length; b++) {
+                    const o1 = orient(p[a - 1], p[a], q[b - 1]), o2 = orient(p[a - 1], p[a], q[b]);
+                    const o3 = orient(q[b - 1], q[b], p[a - 1]), o4 = orient(q[b - 1], q[b], p[a]);
+                    if (o1 * o2 < 0 && o3 * o4 < 0) count++;
+                }
+            }
+        }
+    }
+    return count;
 }
 
 function pointAlong(samples, fraction) {
@@ -5734,7 +5777,9 @@ function renderScheme(data) {
             id: `e${i}`, sources: [e.from], targets: [e.to],
         })),
     };
-    const finish = () => {
+    const finish = (boxes, strands) => {
+        schemeLast = {boxes, strands};
+        window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
         canvas.innerHTML = schemeSvg(boxes, strands);
         panel.hidden = false;
@@ -5745,8 +5790,16 @@ function renderScheme(data) {
     if ($('scheme-layout').value === 'dagre') {
         loadDagre().then(lib => {
             if (mine !== schemeToken) return;
-            layoutDagre(lib, scheme, boxes, strands);
-            finish();
+            let best = null;
+            for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
+                const trialStrands = schemeStrands(scheme);
+                const trialBoxes = schemeBoxes(scheme, trialStrands, data);
+                layoutDagre(lib, scheme, trialBoxes, trialStrands, seed);
+                const crossings = schemeCrossings(trialStrands);
+                if (!best || crossings < best.crossings) best = {boxes: trialBoxes, strands: trialStrands, crossings};
+                if (!crossings) break;
+            }
+            finish(best.boxes, best.strands);
         });
         return;
     }
@@ -5768,7 +5821,7 @@ function renderScheme(data) {
             }
             assignPorts(boxes, strands);
             schemeRoutes(boxes, strands, hintX);
-            finish();
+            finish(boxes, strands);
         });
 }
 
@@ -5805,14 +5858,28 @@ function schemeMergeSiblings(strands) {
     do następnego pionowo, więc kreska przejeżdżająca przez pudełko idzie przez
     nie prosto. Pośrednie punkty dagre długiej krawędzi to punkty, przez
     które krzywa ma przejść, żeby ominąć pudełka warstw pomiędzy. */
-function layoutDagre(lib, scheme, boxes, strands) {
+function layoutDagre(lib, scheme, boxes, strands, seed = 0) {
     const g = new lib.graphlib.Graph();
     g.setGraph({rankdir: 'TB', nodesep: 40,
                 ranksep: 100, marginx: 0, marginy: 0});
     g.setDefaultEdgeLabel(() => ({}));
-    for (const [id, b] of boxes) g.setNode(id, {width: b.w, height: b.h});
-    for (const [from, to] of scheme.order || []) g.setEdge(from, to);
-    for (const s of strands) g.setEdge(s.from, s.to);
+    // Kolejność wstawiania wpływa na to, w którym lokalnym optimum utknie
+    // heurystyka dagre; renderScheme próbuje kilku i wybiera najmniej
+    // przecięć kresek, które naprawdę rysujemy.
+    let state = seed * 2654435761 + 1;
+    const shuffled = list => {
+        if (!seed) return list;
+        const out = [...list];
+        for (let i = out.length - 1; i > 0; i--) {
+            state = (state * 1664525 + 1013904223) >>> 0;
+            const j = state % (i + 1);
+            [out[i], out[j]] = [out[j], out[i]];
+        }
+        return out;
+    };
+    for (const [id, b] of shuffled([...boxes])) g.setNode(id, {width: b.w, height: b.h});
+    for (const [from, to] of shuffled([...(scheme.order || []),
+                                       ...strands.map(s => [s.from, s.to])])) g.setEdge(from, to);
     lib.layout(g);
     for (const [id, b] of boxes) {
         const node = g.node(id);

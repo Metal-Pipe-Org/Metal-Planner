@@ -599,5 +599,7 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
     numery = [b["lines"] for b in pomiar["badges"]]
     assert {"5 6", "5", "6", "145 146", "149"} <= set(numery)
     _plakietki_na_kreskach(pomiar)
+    # Miarą wyboru układu jest liczba przecięć kresek, które naprawdę rysujemy.
+    assert isinstance(page.evaluate("schemeCrossings(schemeLast.strands)"), int)
     assert page.errors == []
     context.close()
