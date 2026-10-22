@@ -314,6 +314,7 @@ dole, zwinięte, „Propozycje tras" z **progiem opłacalności
 przesiadki** (`transfer_gain_sec`, domyślnie 10 min — patrz opis skanu
 wyżej). Wartości lądują w `localStorage`, a te, od których zależy odpowiedź
 serwera, w query stringu `/api/flow`.
+Sekcja DEV „Eksperymenty" ma przełącznik „Nowa mapa (eksperyment)" (`newmap=1` w `/api/flow`, parametr `new_map` w `plan_flow_stages`), domyślnie wyłączony; nowa mapa rośnie za nim, a na razie nic nie zmienia.
 `value`/`checked` w `index.html` są wartościami domyślnymi: opcja różna od
 nich dostaje pasek z boku, a nagłówek sekcji — liczbę takich opcji. Jeden
 przycisk „Przywróć domyślne" kasuje wszystkie zapamiętane ustawienia

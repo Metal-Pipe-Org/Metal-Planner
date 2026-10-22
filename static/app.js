@@ -4991,6 +4991,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
+        newmap: $('new-map').checked ? '1' : '0',
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
@@ -6368,7 +6369,7 @@ showWalkPace();
 // pamiętane w tym samym kluczu i od razu nowe zapytanie.
 // Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
 // wygląda tak, jak wyglądała przed zgłoszeniem #147.
-for (const [id, domyslnie] of [['car-vans', false]]) {
+for (const [id, domyslnie] of [['car-vans', false], ['new-map', false]]) {
     const input = $(id);
     const zapisane = loadDevPrefs()[id];
     input.checked = zapisane === undefined ? domyslnie : zapisane === true;
@@ -6885,7 +6886,7 @@ const DEV_FOLD_IDS = [
     'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
     'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
     'fold-debug', 'look-section',
-    'fold-layout', 'fold-siechnice', 'fold-version',
+    'fold-layout', 'fold-siechnice', 'fold-experiments', 'fold-version',
 ];
 
 function bindDevFolds() {
