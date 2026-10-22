@@ -2270,8 +2270,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                                                    limit=journey_limit,
                                                    gain_sec=gain_sec, ride=ride)
             if new_map:
-                scheme = _scheme_of_map(day, seg_list, nodes, kept, ranges, graph,
-                                         target_set)
+                scheme = _scheme_of_map(day, seg_list, nodes, target_set)
                 _scheme_times(scheme, map_journeys if with_journeys else
                               _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                   limit=journey_limit, gain_sec=gain_sec,
@@ -3835,287 +3834,120 @@ SCHEME_START, SCHEME_END = ("start",), ("end",)
 SCHEME_HIDDEN_KINDS = {"cable"}
 
 
-def _scheme_walks(day, kept, ranges):
-    """{miejsce: {miejsca}} - dokąd z wysiadki w danym miejscu da się dojść
-    pieszo i zdążyć na narysowany tam kurs. Przejść schemat nie rysuje
-    (decyzja użytkownika), ale bez nich nie wiadomo, czy wysiadka prowadzi
-    gdziekolwiek: jazda, po której nie da się już nigdzie dojechać, jest
-    ślepą gałęzią."""
-    passing = _board_index(day, kept)
-    walks = {}
-    for seg in kept:
-        start, cut = ranges[id(seg)]
-        for pos, _, arr_t, stop in seg["exits"]:
-            if not start < pos <= cut:
-                continue
-            here = gtfs.place_name(day, stop)
-            for other in passing.get(stop, ()):
-                if other is seg:
-                    continue
-                o_start, o_cut = ranges[id(other)]
-                for stop2, buffer in _reach_from(day, stop):
-                    o_pos = other["pos_of"].get(stop2)
-                    if o_pos is None or not o_start <= o_pos < o_cut - 1:
-                        continue
-                    if arr_t + buffer > other["best_deps"][stop2]:
-                        continue
-                    there = gtfs.place_name(day, stop2)
-                    if there != here:
-                        walks.setdefault(here, set()).add(there)
-    return walks
+def _scheme(pieces, nodes, target_places=()):
+    """Graf schematu - ta sama mapa zdjęta z geografii, bez własnych decyzji.
 
+    Pudełka to kropki mapy (`nodes`), start i cel; do tego miejsce, w którym
+    narysowana linia naprawdę się zaczyna albo kończy, choć kropki tam nie ma
+    (tam mapa ją widocznie urywa). Linia idzie od pudełka do pudełka tak, jak
+    ją mapa rysuje (`pieces` = segmenty mapy), przez pudełka, które mija,
+    prosto (`chain` po obu stronach). Schemat NIE ocenia, czy linia dokądś
+    prowadzi: nic nie jest odcinane ani zgadywane, żadnych własnych przesiadek
+    - co mapa narysowała, to jest na schemacie.
 
-def _scheme_alights(day, kept, ranges):
-    """{(rodzaj, numer): {miejsca}} - gdzie podróże z mapy wysiadają z danej
-    linii (wyjścia narysowanych kursów, patrz _segments_of_journeys)."""
-    out = {}
-    for seg in kept:
-        start, cut = ranges[id(seg)]
-        num, mode = _line_parts(seg["label"])
-        for pos, _, _, stop in seg["exits"]:
-            if start < pos <= cut:
-                out.setdefault((mode, num), set()).add(gtfs.place_name(day, stop))
-    return out
+    Kawałki mapy tej samej linii, które się stykają (koniec jednego to początek
+    drugiego - szew korytarza), są jedną jazdą. Start to miejsce z węzła
+    `start`: przed nim linia się nie liczy; cel (`target_places`) kończy
+    jazdę. Jazdy Polinką (SCHEME_HIDDEN_KINDS) schemat ukrywa.
 
+    Linie między tymi samymi dwoma pudełkami to jedna strzałka, tak jak jedna
+    grupka numerków na mapie. `order` to niewidoczne krawędzie układu: pudełko,
+    do którego nic nie dochodzi, stoi pod startem, a to, z którego nic nie
+    wychodzi - nad celem. Pole `bare` węzła: miejsce bez kropki na mapie."""
+    target_places = set(target_places)
+    start_node = next((n for n in nodes if n.get("start")), None)
+    start_place = start_node["place"] if start_node else None
+    dots = {n["place"] for n in nodes}
 
-def _scheme(pieces, nodes, start_walk=(), walks=None, target_places=(),
-            target_walk=(), alights=None):
-    """Graf schematu z kawałków mapy (`segments`) i jej węzłów (`nodes`).
+    def box_of(place):
+        if place == start_place:
+            return SCHEME_START
+        return SCHEME_END if place in target_places else place
 
-    Strzałka kończy się tam, gdzie podróże z mapy z tej linii wysiadają
-    (`alights`, patrz _scheme_alights) albo gdzie mapa przestaje ją wieźć -
-    nie na każdej kropce, którą linia mija. Tramwaj, który mapa wiezie za
-    Galerię Dominikańską, ale którym podróże jadą tylko do niej, żeby
-    przesiąść się w 113, kończy tam strzałkę; 113, z którego nikt po drodze
-    nie wysiada, jest jedną strzałką do celu.
-
-    start_walk - miejsca, do których dochodzi się pieszo prosto ze startu.
-    walks - patrz _scheme_walks. Przejścia i jazdy Polinką schemat ukrywa:
-    nie ma dla nich strzałek, a strzałka kończy się tam, gdzie się naprawdę
-    wysiada (i zaczyna tam, gdzie się wsiada), więc węzły po obu stronach
-    przejścia stoją osobno. Wiedza o nich służy tylko do odcinania ślepych
-    gałęzi i do układu (pole `order`). target_places - miejsca celu;
-    target_walk - miejsca, z których do celu się dochodzi.
-
-    Linie między tymi samymi węzłami to jedna strzałka, tak jak jedna grupka
-    numerków na mapie. Zostaje tylko to, co leży na
-    drodze od startu do celu: start jest wtedy jedynym źródłem, a cel
-    jedynym ujściem grafu, i to trzyma start na górze, a cel na dole."""
-    alights = alights or {}
-    target_places, target_walk = set(target_places), set(target_walk)
-    # Ukryte połączenia: przejścia piesze i jazdy tym, czego schemat nie
-    # pokazuje (Polinka). Strzałka przez nie przeskakuje - prowadzi od razu
-    # tam, gdzie wsiada się w coś widocznego.
-    hidden = {place: set(there) for place, there in (walks or {}).items()}
-    hops = {}
+    shown = []
     for piece in pieces:
         if piece["kind"] in SCHEME_HIDDEN_KINDS:
-            hidden.setdefault(piece["stops_n"][0], set()).add(piece["stops_n"][-1])
             continue
-        line = (piece["kind"], piece["num"])
-        names = piece["stops_n"]
-        for a, b in zip(names, names[1:]):
-            if a != b:
-                hops.setdefault(line, {}).setdefault(a, set()).add(b)
+        stops = piece["stops_n"]
+        places = [p for i, p in enumerate(stops) if i == 0 or p != stops[i - 1]]
+        if start_place in places:
+            places = places[places.index(start_place):]
+        for i, place in enumerate(places):
+            if i and place in target_places:
+                places = places[:i + 1]
+                break
+        if len(places) > 1:
+            shown.append({"line": (piece["kind"], piece["num"]), "places": places})
 
-    by_place = {node["place"]: node for node in nodes}
+    def follows(a, b):
+        """b jedzie dalej tam, gdzie a się kończy (a nie z powrotem)."""
+        return (a is not b and a["line"] == b["line"]
+                and a["places"][-1] == b["places"][0]
+                and not b["places"][1] == a["places"][-2])
 
-    def boards(place):
-        node = by_place.get(place)
-        if node is None:
-            return set()
-        return {(l["kind"], l["num"]) for l in node["lines"]
-                if l["flow"] != "end" and (l["kind"], l["num"]) in hops}
+    runs = []     # (linia, [miejsca]) - kawałki sklejone na stykach
 
-    def beyond(places, line=None):
-        """Miejsca za ukrytymi połączeniami, w których da się wsiąść w coś
-        widocznego innego niż `line` - dalej niż do pierwszego takiego się
-        nie idzie, tak jak przesiadka to jedno przejście, a nie spacer."""
-        found, todo, seen = [], list(places), set(places)
-        while todo:
-            here = todo.pop(0)
-            if boards(here) - {line}:
-                found.append(here)
-                if here not in places:
-                    continue
-            for there in sorted(hidden.get(here, ())):
-                if there not in seen:
-                    seen.add(there)
-                    todo.append(there)
-        return found, seen
+    def extend(line, places, last, seen):
+        nexts = [q for q in shown if id(q) not in seen and follows(last, q)]
+        if not nexts:
+            runs.append((line, places))
+        for q in nexts:
+            extend(line, places + q["places"][1:], q, seen | {id(q)})
 
-    edges, ways = {}, {}
-    # Przejścia i ukryte jazdy między węzłami: nie są strzałkami, ale to one
-    # łączą wysiadkę z miejscem, w którym wsiada się dalej (albo z celem), więc
-    # liczą się przy odcinaniu ślepych gałęzi i przy układzie.
-    gaps = set()
-    start_here = {node["place"] for node in nodes if node.get("start")}
+    for piece in shown:
+        if not any(follows(q, piece) for q in shown):
+            extend(piece["line"], list(piece["places"]), piece, {id(piece)})
 
-    def ride(place, line):
-        """Strzałki linii `line` wsiadanej w `place`: każda kończy się tam,
-        gdzie się z niej wysiada (albo w celu). Zwraca miejsca, w których
-        wsiada się dalej."""
-        origin = SCHEME_START if place in start_here else place
-        out = []
-        todo = [(place, (place,))]
-        while todo:
-            here, path = todo.pop()
-            for nxt in sorted(hops[line].get(here, ())):
-                if nxt in path:
-                    continue
-                way = path + (nxt,)
-                if nxt in target_places:
-                    out.append((SCHEME_END, (), False, way))
-                    continue
-                onward = any(n not in way for n in hops[line].get(nxt, ()))
-                if onward:
-                    todo.append((nxt, way))
-                if onward and nxt not in alights.get(line, ()):
-                    continue
-                if boards(nxt) - {line}:
-                    out.append((nxt, (nxt,), False, way))
-                elif nxt in target_walk:
-                    out.append((nxt, (), True, way))
-                else:
-                    found, seen = beyond([nxt], line)
-                    to_end = bool(seen & (target_places | target_walk))
-                    if found or to_end:
-                        out.append((nxt, found, to_end, way))
-        # Powrót tam, skąd się wyjechało (pętla albo dojście z powrotem pod
-        # ten sam przystanek), nie jest żadnym wyborem.
-        out = [o for o in out if o[0] != place]
-        boardings = []
-        for to, found, to_end, way in out:
-            edges.setdefault((origin, to), set()).add(line)
-            ways.setdefault((origin, to, line), set()).add(way)
-            if to_end:
-                gaps.add((to, SCHEME_END))
-            for there in found:
-                if there != to:
-                    gaps.add((to, there))
-                boardings.append(there)
-        return boardings
+    edges, bare = {}, set()
+    for line, places in runs:
+        last = len(places) - 1
+        marks = [i for i, p in enumerate(places)
+                 if i in (0, last) or p in dots or p == start_place or p in target_places]
+        bare.update(places[i] for i in (0, last)
+                    if places[i] not in dots and places[i] != start_place
+                    and places[i] not in target_places)
+        for i, j in zip(marks, marks[1:]):
+            a, b = box_of(places[i]), box_of(places[j])
+            if a == b:
+                continue
+            # Linia jedzie dalej przez pudełko, na którym odcinek się kończy
+            # albo od którego zaczyna.
+            chain = j < last or i > 0
+            edges.setdefault((a, b), {})
+            edges[(a, b)][line] = edges[(a, b)].get(line, False) or chain
 
-    start_places = [node["place"] for node in nodes if node.get("start")]
-    start_places += [p for p in start_walk if p not in start_places]
-    todo = beyond(start_places)[0]
-    for place in todo:
-        if place not in start_here:
-            gaps.add((SCHEME_START, place))
-    seen = set(todo)
-    while todo:
-        place = todo.pop()
-        for line in sorted(boards(place)):
-            for there in ride(place, line):
-                if there not in seen:
-                    seen.add(there)
-                    todo.append(there)
-
-    # Wsiadanie w tę samą linię, którą się tu przyjechało, nie jest wyborem:
-    # gdy do węzła dowozi tylko ona, jej strzałka dalej tylko by udawała
-    # przesiadkę. Zostaje, gdy dowozi tu też coś innego albo dochodzi się tu
-    # pieszo.
-    arrivals = {}
-    for (_, to), lines in edges.items():
-        arrivals.setdefault(to, set()).update(lines)
-    for _, to in gaps:
-        arrivals.setdefault(to, set()).add(None)
-    for (a, b), lines in list(edges.items()):
-        if a != SCHEME_START:
-            lines -= {line for line in lines if arrivals.get(a, set()) <= {line}}
-            if not lines:
-                del edges[(a, b)]
-
-    def reach(begin, forward):
-        found, stack = {begin}, [begin]
-        while stack:
-            here = stack.pop()
-            for a, b in list(edges) + list(gaps):
-                src, dst = (a, b) if forward else (b, a)
-                if src == here and dst not in found:
-                    found.add(dst)
-                    stack.append(dst)
-        return found
-
-    useful = reach(SCHEME_START, True) & reach(SCHEME_END, False)
-
-    # Jazda jest cięta w każdym węźle schematu, który mija - nie tylko tam,
-    # gdzie ktoś się przesiada: linia jadąca przez kilka węzłów to jedna
-    # nitka od węzła do węzła, a nie osobne strzałki z każdego z nich do
-    # końca (wsiadający po drodze zostaje w tym samym pojeździe). Tnie tylko
-    # po węzłach, które już są na schemacie - każdy mijany przystanek byłby
-    # fałszywą przesiadką.
-    def node_of(place):
-        return SCHEME_START if place in start_here else place
-
-    chain, through = set(), set()
-    for (a, b), lines in list(edges.items()):
-        if a not in useful or b not in useful:
-            continue
-        for line in sorted(lines):
-            for way in ways.get((a, b, line), ()):
-                hops_on_way = [a]
-                for mid in way[1:-1]:
-                    m = node_of(mid)
-                    if m in useful and m not in hops_on_way and m != b:
-                        hops_on_way.append(m)
-                if len(hops_on_way) == 1:
-                    continue
-                edges[(a, b)].discard(line)
-                hops_on_way.append(b)
-                for x, y in zip(hops_on_way, hops_on_way[1:]):
-                    edges.setdefault((x, y), set()).add(line)
-                    chain.add((x, y, line))
-                through.update(hops_on_way[1:-1])
-    for key in [key for key, lines in edges.items() if not lines]:
-        del edges[key]
-    order = ([SCHEME_START] + sorted(p for p in useful if p not in (SCHEME_START, SCHEME_END))
+    boxes = {SCHEME_START, SCHEME_END}
+    for a, b in edges:
+        boxes.update((a, b))
+    order = ([SCHEME_START] + sorted(p for p in boxes if p not in (SCHEME_START, SCHEME_END))
              + [SCHEME_END])
     ids = {place: f"n{i}" for i, place in enumerate(order)}
-    # Wszystkie linie między tymi samymi dwoma węzłami to jedna strzałka,
-    # nawet gdy jadą inną drogą albo z innego słupka: na schemacie to jeden
-    # wybór („stąd tam - którąkolwiek z nich”), a dwie strzałki obok siebie
-    # z prawie tymi samymi numerami tylko by go zaciemniały.
-    grouped = {(a, b): lines for (a, b), lines in edges.items()
-               if a in useful and b in useful}
-    chained = {(ids[a], ids[b], line) for a, b, line in chain
-               if a in useful and b in useful}
-    start_node = next((node for node in nodes if node.get("start")), None)
+    has_in = {b for _, b in edges}
+    has_out = {a for a, _ in edges}
+    hints = [[SCHEME_START, p] for p in order
+             if p not in (SCHEME_START, SCHEME_END) and p not in has_in]
+    hints += [[p, SCHEME_END] for p in order
+              if p not in (SCHEME_START, SCHEME_END) and p not in has_out]
     return {
         "nodes": [{"id": ids[p],
-                   "role": ("start" if p == SCHEME_START else "end"
-                            if p == SCHEME_END else "stop"),
+                   "role": "start" if p == SCHEME_START else "end" if p == SCHEME_END else "stop",
                    **({"place": p} if p not in (SCHEME_START, SCHEME_END) else
-                      {"place": start_node["place"]} if p == SCHEME_START and start_node else {}),
-                   **({"through": True} if p in through else {})}
-                  for p in order if p in useful],
+                      {"place": start_place} if p == SCHEME_START and start_place else {}),
+                   **({"bare": True} if p in bare else {})}
+                  for p in order],
         "edges": [{"from": ids[a], "to": ids[b],
-                   "lines": [{"num": num, "kind": kind,
-                              **({"chain": True} if (ids[a], ids[b], (kind, num)) in chained else {})}
-                             for kind, num in sorted(
-                                 lines, key=lambda line: (line[0], len(line[1]), line[1]))]}
-                  for (a, b), lines in sorted(
-                      grouped.items(), key=lambda item: (ids[item[0][0]], ids[item[0][1]]))],
-        # Nie strzałki: tylko podpowiedź dla układu, że te węzły leżą w tej
-        # kolejności (start na górze, cel na dole), choć drogi między nimi
-        # schemat nie rysuje.
-        "order": sorted([ids[a], ids[b]] for a, b in gaps if a in useful and b in useful),
+                   "lines": [{"num": num, "kind": kind, **({"chain": True} if chain else {})}
+                             for (kind, num), chain in sorted(
+                                 lines.items(), key=lambda item: (item[0][0], len(item[0][1]), item[0][1]))]}
+                  for (a, b), lines in sorted(edges.items(), key=lambda item: (ids[item[0][0]], ids[item[0][1]]))],
+        "order": sorted([ids[a], ids[b]] for a, b in hints),
     }
 
 
-def _scheme_of_map(day, seg_list, nodes, kept, ranges, graph, target_set):
+def _scheme_of_map(day, seg_list, nodes, target_set):
     """Schemat z tego, co mapa właśnie narysowała - patrz _scheme."""
-    near_target = _target_reach(day, target_set)
-    target_places = {gtfs.place_name(day, s) for s in target_set}
-    return _scheme(
-        seg_list, nodes,
-        start_walk=sorted({gtfs.place_name(day, s) for s in graph["origin_walk"]}),
-        walks=_scheme_walks(day, kept, ranges),
-        target_places=target_places,
-        target_walk={gtfs.place_name(day, s) for s, (sec, _) in near_target.items()
-                     if sec} - target_places,
-        alights=_scheme_alights(day, kept, ranges),
-    )
+    return _scheme(seg_list, nodes,
+                   target_places={gtfs.place_name(day, s) for s in target_set})
 
 
 def _scheme_times(scheme, journeys):

@@ -124,8 +124,6 @@ KATEDRA = dict(
         _wezel("M", ("2", "end"), ("113", "through", "bus")),
     ],
     target_places={"W"},
-    alights={("tram", "7"): {"G"}, ("tram", "10"): {"G"}, ("tram", "2"): {"M"},
-             ("bus", "113"): {"W"}},
 )
 
 
@@ -144,25 +142,24 @@ def test_linia_przez_kilka_wezlow_to_lancuch_a_nie_strzalki_do_konca():
     scheme = planner._scheme(**KATEDRA)
     # 113 nie ma strzałki G -> cel ani start -> cel: tylko G -> M -> cel.
     assert not any(a == "G" and b == "end" for a, b, _ in _po_nazwach(scheme))
-    wezly = {n["id"]: n for n in scheme["nodes"]}
-    nazwa = {n["id"]: n.get("place") or n["role"] for n in scheme["nodes"]}
+    nazwa = {n["id"]: n["role"] if n["role"] != "stop" else n["place"] for n in scheme["nodes"]}
     nitka = {(nazwa[e["from"]], nazwa[e["to"]]) for e in scheme["edges"]
              if any(l["num"] == "113" and l.get("chain") for l in e["lines"])}
     assert nitka == {("G", "M"), ("M", "end")}
-    # M leży na nitkach (dwójki i 113), G na nitce dwójki.
-    assert {n["place"] for n in wezly.values() if n.get("through")} == {"G", "M"}
+    # 7 i 10 kończą jazdę na G (nic tam nie jedzie dalej): bez `chain` po tej stronie.
+    start_g = next(e for e in scheme["edges"] if nazwa[e["from"]] == "start" and nazwa[e["to"]] == "G")
+    assert {l["num"]: bool(l.get("chain")) for l in start_g["lines"]} == {"7": False, "10": False, "2": True}
 
 
 def test_jazda_jest_ciete_w_kazdym_mijanym_wezle_nawet_bez_przesiadki():
     # 1 jedzie S -> A -> E i nikt na A się z niej nie przesiada - ale A jest
-    # węzłem (wysiada się tu z 1 i wsiada w 9), więc jazda do celu to nitka
-    # S -> A -> E, a nie druga strzałka S -> E obok.
+    # kropką mapy (wysiada się tu z 1 i wsiada w 9), więc jazda do celu to
+    # nitka S -> A -> E, a nie druga strzałka S -> E obok.
     scheme = planner._scheme(
         pieces=[_kawalek("1", "S", "A", "E"), _kawalek("9", "A", "E")],
         nodes=[_wezel("S", ("1", "start"), start=True),
                _wezel("A", ("1", "through"), ("9", "start"))],
         target_places={"E"},
-        alights={("tram", "1"): {"A", "E"}, ("tram", "9"): {"E"}},
     )
     assert _po_nazwach(scheme) == {("start", "A", ("1",)), ("A", "end", ("1", "9"))}
 
@@ -172,41 +169,48 @@ def test_przystanek_bez_kropki_nie_jest_wezlem():
     assert {n.get("place") for n in nodes if n["role"] == "stop"} == {"G", "M"}
 
 
-def test_strzalka_konczy_sie_na_przystanku_wysiadki_a_przejscie_jest_ukryte():
+def test_linia_urwana_tam_gdzie_nie_ma_kropki_konczy_sie_pudelkiem_tego_miejsca():
     scheme = planner._scheme(
-        pieces=[_kawalek("10", "S", "A", "M"), _kawalek("3", "P", "E")],
-        nodes=[_wezel("S", ("10", "start"), start=True), _wezel("P", ("3", "start"))],
-        walks={"M": {"P"}},
-        target_places={"E"},
-        alights={("tram", "10"): {"M"}, ("tram", "3"): {"E"}},
-    )
-    # 10 kończy na M (gdzie się wysiada), nie na P (dokąd się potem idzie);
-    # między M a P nie ma żadnej strzałki.
-    assert _po_nazwach(scheme) == {("start", "M", ("10",)), ("P", "end", ("3",))}
-    assert [e for e in scheme["edges"] if e["lines"][0]["num"] not in ("10", "3")] == []
-
-
-def test_przejscie_piesze_i_polinka_sa_ukryte():
-    scheme = planner._scheme(
-        pieces=[
-            # Polinką ze startu na drugi brzeg (N), stamtąd pieszo na W,
-            # gdzie wsiada się w 4; 4 kończy na X, skąd pieszo na Y i 810.
-            _kawalek("Polinka", "P", "N", kind="cable"),
-            _kawalek("4", "W", "Q", "X"),
-            _kawalek("810", "Y", "Z", "R", kind="bus"),
-        ],
-        nodes=[
-            _wezel("P", ("Polinka", "start", "cable"), start=True),
-            _wezel("W", ("4", "start")),
-            _wezel("Y", ("810", "start", "bus")),
-        ],
-        walks={"N": {"W"}, "X": {"Y"}},
+        pieces=[_kawalek("4", "W", "Q", "X"), _kawalek("810", "Y", "Z", "R", kind="bus"),
+                # Polinki schemat ukrywa, i jej końców też.
+                _kawalek("Polinka", "P", "N", kind="cable")],
+        nodes=[_wezel("P", ("Polinka", "start", "cable"), start=True), _wezel("W", ("4", "start")),
+               _wezel("Y", ("810", "start", "bus"))],
         target_places={"R"},
-        alights={("tram", "4"): {"X"}, ("bus", "810"): {"R"}},
     )
-    # Bez strzałek pieszych i bez Polinki: 4 jedzie od W do X (gdzie się
-    # wysiada), 810 od Y do celu; między nimi nic nie jest narysowane.
+    # 4 jedzie z kropki W i mapa urywa ją na X (kropki tam nie ma): pudełko X,
+    # oznaczone jako bez kropki. 810 kończy w celu.
     assert _po_nazwach(scheme) == {("W", "X", ("4",)), ("Y", "end", ("810",))}
+    assert {n["place"] for n in scheme["nodes"] if n.get("bare")} == {"X"}
+    assert not any(n.get("place") in ("N",) for n in scheme["nodes"])
+    # Pudełka bez dojścia stoją pod startem, bez wyjścia - nad celem.
+    nazwa = {n["id"]: n["role"] if n["role"] != "stop" else n["place"] for n in scheme["nodes"]}
+    assert {(nazwa[a], nazwa[b]) for a, b in scheme["order"]} == {
+        ("start", "W"), ("start", "Y"), ("X", "end")}
+
+
+def test_nic_nie_jest_odcinane_jazda_donikad_tez_jest_na_schemacie():
+    scheme = planner._scheme(
+        pieces=[_kawalek("1", "S", "A", "E"), _kawalek("9", "A", "Z")],
+        nodes=[_wezel("S", ("1", "start"), start=True),
+               _wezel("A", ("1", "through"), ("9", "start"))],
+        target_places={"E"},
+    )
+    # 9 nie dojeżdża do celu, ale mapa ją rysuje - schemat nie ocenia, czy
+    # prowadzi dokądś.
+    assert _po_nazwach(scheme) == {("start", "A", ("1",)), ("A", "end", ("1",)), ("A", "Z", ("9",))}
+
+
+def test_kawalki_tej_samej_linii_na_szwie_to_jedna_jazda():
+    # 3 narysowana w dwóch kawałkach (szew na M, gdzie kropki nie ma) jedzie
+    # S -> A -> M -> E jedną nitką; kropka A jest na jej drodze.
+    scheme = planner._scheme(
+        pieces=[_kawalek("3", "S", "A", "M"), _kawalek("3", "M", "E")],
+        nodes=[_wezel("S", ("3", "start"), start=True), _wezel("A", ("3", "through"))],
+        target_places={"E"},
+    )
+    assert _po_nazwach(scheme) == {("start", "A", ("3",)), ("A", "end", ("3",))}
+    assert not [n for n in scheme["nodes"] if n.get("bare")]
 
 
 def _podroz(*rides, arrival):
@@ -228,8 +232,6 @@ def test_godziny_z_podrozy_i_najszybsza_sciezka():
                _wezel("A", ("1", "end"), ("9", "start")),
                _wezel("B", ("1", "end"), ("5", "start"))],
         target_places={"E"},
-        alights={("tram", "1"): {"A", "B"}, ("tram", "2"): {"E"}, ("tram", "5"): {"E"},
-                 ("tram", "9"): {"E"}},
     )
     planner._scheme_times(scheme, [
         _podroz(("2", [("S", 3600), ("E", 4800)]), arrival=4800),
@@ -248,17 +250,6 @@ def test_godziny_z_podrozy_i_najszybsza_sciezka():
     # Najszybsza podróż (piątka z przesiadką na B) jest wyróżniona, dwójka nie.
     assert {(name[e["from"]], name[e["to"]]) for e in scheme["edges"] if e.get("fast")} == {
         ("start", "A"), ("A", "B"), ("B", "end")}
-
-
-def test_slepe_galezie_znikaja():
-    scheme = planner._scheme(
-        pieces=[_kawalek("1", "S", "A", "E"), _kawalek("9", "A", "Z")],
-        nodes=[_wezel("S", ("1", "start"), start=True),
-               _wezel("A", ("1", "through"), ("9", "start"))],
-        target_places={"E"},
-        alights={("tram", "1"): {"A", "E"}, ("tram", "9"): {"Z"}},
-    )
-    assert _po_nazwach(scheme) == {("start", "end", ("1",))}
 
 
 # ----------------------------------------------------- bez chodzenia ---
