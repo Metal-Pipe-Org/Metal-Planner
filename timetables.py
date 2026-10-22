@@ -326,8 +326,8 @@ def stop_board(query, day):
     """
     try:
         data = gtfs.load_day(day)
-    except FileNotFoundError as e:
-        return {"error": str(e)}
+    except FileNotFoundError:
+        return {"error": gtfs.MISSING_DB_MESSAGE}
 
     name, stop_ids, hints = gtfs.match_stop(query, data)
     if name is None:
@@ -421,8 +421,8 @@ def trip_detail(trip, day, board_stop=None, board_dep=None):
     """
     try:
         data = gtfs.load_day(day)
-    except FileNotFoundError as e:
-        return {"error": str(e)}
+    except FileNotFoundError:
+        return {"error": gtfs.MISSING_DB_MESSAGE}
 
     if trip not in data.trip_info:
         return {"error": "Nie ma takiego kursu w rozkładzie na ten dzień."}

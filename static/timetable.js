@@ -301,7 +301,7 @@ window.timetableMode = {
     vehicleLines() {
         if (!active() || !data) return null;
         if (kind === 'line') return new Set([`${data.mode} ${data.num}`]);
-        return new Set([...picked].map(key => key.replace('|', ' ')));
+        return new Set([...picked].map(key => key.replace(/\|/g, ' ')));
     },
 
     /** Czy tę linię da się w ogóle otworzyć. Wyszukiwarka pyta PRZED

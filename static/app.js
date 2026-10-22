@@ -2216,7 +2216,7 @@ function clusterMarker(at, roster, weight, times) {
             // Slot jest celem myszy (patrz bindCluster) - dzięki temu wskazanie
             // linii działa tak samo, gdy kursor stoi na czasie pod numerem.
             const html = `<span class="line-chip-slot" data-i="${index++}">`
-                + `<span class="line-chip ${esc(l.kind)}">${esc(l.num)}</span>`
+                + `<span class="line-chip ${escAttr(l.kind)}">${esc(l.num)}</span>`
                 + (times
                     ? `<span class="chip-time">${sec === null ? '' : esc(fmtClock(sec))}</span>`
                     : '')
@@ -2378,11 +2378,11 @@ function flowPickHtml(when) {
     const sel = options[flowPick.index];
     if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
-    let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
+    let html = `<span class="flow-tip-line ${escAttr(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
     if (options.length > 1) {
         html += '<span class="flow-tip-row">' + options.map((o, i) =>
-            `<span class="line-chip ${esc(o.kind)}${i === flowPick.index ? ' picked' : ''}">`
+            `<span class="line-chip ${escAttr(o.kind)}${i === flowPick.index ? ' picked' : ''}">`
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
@@ -4160,7 +4160,7 @@ const WALK_ICON =
 
 function walkBadgeHtml(leg) {
     const dokad = leg.from === leg.to ? ' na inne stanowisko' : ` do: ${leg.to}`;
-    return `<span class="badge walk" title="Przejście pieszo${esc(dokad)}` +
+    return `<span class="badge walk" title="Przejście pieszo${escAttr(dokad)}` +
            ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`;
 }
 
@@ -4393,7 +4393,7 @@ function detailHtml(journey) {
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
                           leg.from_platform, depLate));
         rows.push(
-            `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
+            `<li class="tl-ride ${escAttr(leg.mode)}"><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
             // Przycisk PRZED liczbą przystanków, choć czyta się go po niej:
             // .tl-info zajmuje całą szerokość (flex-basis: 100%), więc wszystko
@@ -4416,7 +4416,7 @@ function detailHtml(journey) {
         // które przewijałoby ją do początku karty.
         for (const stop of via) {
             rows.push(
-                `<li class="tl-via ${esc(leg.mode)}" data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
+                `<li class="tl-via ${escAttr(leg.mode)}" data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
                 `<span class="tl-time">${esc(stop.t)}</span><span class="tl-dot"></span>` +
                 `<span class="tl-name">${esc(stop.name)}</span></li>`,
             );
@@ -4481,7 +4481,7 @@ function onboardNoteHtml() {
     const kurs = lastFlow && lastFlow.onboard;
     if (!kurs) return '';
     return `<p class="onboard-head">`
-        + `<span class="badge ${esc(kurs.mode)}">${esc(kurs.num)}</span>`
+        + `<span class="badge ${escAttr(kurs.mode)}">${esc(kurs.num)}</span>`
         + `<span>w stronę <b>${esc(kurs.headsign)}</b> — najbliższy przystanek `
         + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
 }
@@ -4521,7 +4521,7 @@ function renderJourneys() {
         return `
             <li class="journey${selected ? ' selected' : ''}" data-index="${i}"
                 tabindex="0" role="button" aria-expanded="${selected}"
-                aria-label="${esc(label)}">
+                aria-label="${escAttr(label)}">
                 <div class="j-head">
                     <span class="j-clock">${esc(j.departure)} – ${esc(j.arrival)}</span>
                     <span class="j-duration${j.traficar ? ' est' : ''}"${
@@ -4752,7 +4752,7 @@ function syncOnboardView() {
     const przystanek = prettyStopName(
         obStopSelect.options[obStopSelect.selectedIndex].text);
     obSummary.innerHTML =
-        `<span class="badge ${esc(kurs.mode || 'other')}">${esc(kurs.num)}</span>`
+        `<span class="badge ${escAttr(kurs.mode || 'other')}">${esc(kurs.num)}</span>`
         // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
         // linijki ucina się koniec, a stracić wolno kierunek (kontekst),
         // nie przystanek, przy którym pojazd zaraz stanie. Znaczek słupka
@@ -4880,7 +4880,7 @@ function fillStops() {
     const stops = kierunek ? kierunek.stops : [];
     obStopSelect.innerHTML = '<option value="">Przystanek</option>'
         + stops.map(stop =>
-            `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
+            `<option value="${escAttr(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
     obStopSelect.disabled = !stops.length;
     hideObWarn();
     syncOnboardView();
@@ -4969,7 +4969,7 @@ function showError(message, suggestions) {
         // wstawia ją wprost do pola, a rawStopName w queryParams zamienia ją
         // z powrotem przy wysyłaniu.
         html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(prettyStopName).map(name =>
-            `<li><a href="#" data-name="${esc(name)}">${esc(name)}</a></li>`
+            `<li><a href="#" data-name="${escAttr(name)}">${esc(name)}</a></li>`
         ).join('') + '</ul>';
     }
     resultsBox.innerHTML = html + '</div>';
