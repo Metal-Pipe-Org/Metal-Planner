@@ -164,12 +164,10 @@ o zapamiętaną przez przeglądarkę (#236). Przeglądarki dają pozycję **tylk
 `localhost`) — bez tego `navigator.geolocation` nie istnieje i przycisk się
 chowa.
 
-◎ ustawia też godzinę i datę na „teraz" (jak przycisk „teraz"): pozycja z GPS-a
-bez godziny „teraz" liczyłaby trasę z miejsca, w którym ktoś stoi, na chwilę,
-w której już go tam nie ma (#267). Da się to wyłączyć w ⚙ („Wygląd aplikacji",
-„◎ ustawia godzinę na teraz", domyślnie włączone, pamiętane w `dev-prefs`) —
-wtedy ◎ ustawia sam start, a godzina i data zostają, jakie były; dotyczy to też
-odświeżania poniżej, które wtedy odświeża tylko pozycję. Drugie kliknięcie ◎, gdy start już jest
+◎ (i zapisane miejsce, i odświeżanie poniżej) nie dotyka godziny ani daty.
+Godzina, której pasażer nie wpisał sam, jest „teraz" przy każdym szukaniu, więc
+trasa z pozycji liczy się od chwili szukania (#267); wpisana ręcznie zostaje,
+jaka była. Drugie kliknięcie ◎, gdy start już jest
 moją pozycją, nie pyta o start, tylko przełącza **odświeżanie co 30 s**:
 włączone zapala ◎ (styl aktywnych przycisków, podpis „Wyłącz odświeżanie"),
 wyłączone wraca do zwykłego wyglądu („Odświeżaj co 30 s"). Włączenie odświeża

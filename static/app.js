@@ -221,7 +221,12 @@ if (dayPanel && dayToggle) {
 // regionalnych systemu i ignoruje atrybut lang strony, więc format 24h nie
 // dało się wymusić inaczej niż samodzielnym formatowaniem.
 const timeInput = $('time');
+// Godzina i data wpisane przez pasażera zostają, jak je ustawił. Wszystko inne
+// to „teraz": formularz otwarty od godziny nie ma szukać od godziny temu.
+let timeChosen = false;
+$('date').addEventListener('input', () => { timeChosen = true; });
 timeInput.addEventListener('input', () => {
+    timeChosen = true;
     let digits = timeInput.value.replace(/\D/g, '').slice(0, 4);
     if (digits.length > 2) digits = digits.slice(0, 2) + ':' + digits.slice(2);
     timeInput.value = digits;
@@ -1058,9 +1063,6 @@ function useMyLocation(point) {
     const previous = sel.start;
     hideRecallOffer();
     sel.start = hereStart = point;
-    // Pozycja „teraz" bez godziny „teraz" liczyłaby trasę z miejsca, w którym
-    // ktoś stoi, na chwilę, w której już go tam nie ma (#267).
-    if (locateSetsTime.checked) setTimeNow();
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
@@ -1073,9 +1075,8 @@ function useMyLocation(point) {
     }
 }
 
-// ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
-// z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
-const locateSetsTime = $('locate-sets-time');
+// Pozycja nie dotyka godziny: nieruszana jest „teraz" przy każdym szukaniu
+// (patrz queryParams, #267), a wpisanej ręcznie nikt nie ma kasować po cichu.
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
@@ -1140,7 +1141,6 @@ function refreshHere() {
                                  lon: position.coords.longitude};
         startInput.value = displayValue(sel.start);
         updatePointMarker('start', sel.start);
-        if (locateSetsTime.checked) setTimeNow();
         if (!endInput.value) return;
         const kept = selectedJourney === null ? null
             : journeySignature(journeys[selectedJourney]);
@@ -4981,6 +4981,7 @@ const WALK_PACES = ['wolno', 'zwykle', 'szybko'];
 const WALK_PACE_LABELS = ['wolne', 'zwykłe', 'szybkie'];
 
 function queryParams() {
+    if (!timeChosen) setTimeNow();
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
@@ -5411,14 +5412,21 @@ function replanInPlace() {
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
+// Jedno miejsce na przedawnienie ostatniej trasy RAZEM z jej godziną.
+// Infinity - dziś trasa nie wygasa; skończony czas w ms wygasza obie naraz.
+const LAST_SEARCH_MAX_AGE_MS = Infinity;
+
 function saveLastSearch() {
     // Podróży z pokładu nie zapamiętujemy: kurs, którym się jechało, dawno
     // odjechał, a przywrócona po godzinie linia z przystankiem byłaby
     // odpowiedzią na pytanie, którego już nikt nie zadaje.
     if (onboardOn) { forgetLastSearch(); return; }
     try {
+        // Godzina i data wracają z trasą tylko wtedy, gdy pasażer sam je wpisał -
+        // „teraz" z formularza po godzinie przestałoby nim być.
         localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
-            start: sel.start, end: sel.end,
+            start: sel.start, end: sel.end, savedAt: Date.now(),
+            ...(timeChosen ? {time: $('time').value, date: $('date').value} : {}),
         }));
     } catch {
         // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
@@ -5457,6 +5465,7 @@ function restoreLastSearch() {
         return;
     }
     if (!saved || !saved.start || !saved.end) return;
+    if (Date.now() - (saved.savedAt || 0) > LAST_SEARCH_MAX_AGE_MS) return;
     recalled = saved;
     // Każdy koniec w osobnym kawałku, który się nie łamie - linia może pęknąć
     // tylko przed strzałką, a nie w środku nazwy ("Iwiny -" / "nr" / "127").
@@ -5467,8 +5476,22 @@ function restoreLastSearch() {
         return span;
     };
     $('recall-offer-name').replaceChildren(
-        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)));
+        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)),
+        ...(saved.time ? [' ', end('· ' + recalledTimeLabel(saved))] : []));
     recallOffer.hidden = false;
+}
+
+/** „8:00" dla dzisiaj, „jutro 8:00" albo „24.10 8:00" - co wróci z trasą. */
+function recalledTimeLabel(saved) {
+    const clock = saved.time.replace(/^0/, '');
+    const day = new Date();
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                   + `-${String(d.getDate()).padStart(2, '0')}`;
+    if (saved.date === iso(day)) return clock;
+    day.setDate(day.getDate() + 1);
+    if (saved.date === iso(day)) return `jutro ${clock}`;
+    const [, month, date] = saved.date.split('-');
+    return `${Number(date)}.${month} ${clock}`;
 }
 
 function applyLastSearch(saved) {
@@ -5476,8 +5499,12 @@ function applyLastSearch(saved) {
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
     endInput.value = displayValue(sel.end);
-    // Godzina zostaje "teraz" (już ustawiona przez serwer przy renderowaniu
-    // strony) - nie przywracamy tu starej godziny z poprzedniego wyszukiwania.
+    // Wraca tylko godzina wpisana ręcznie; bez niej zostaje „teraz".
+    if (saved.time) {
+        timeInput.value = saved.time;
+        $('date').value = saved.date;
+        timeChosen = true;
+    }
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
     restyle(sel.start, sel.end);
@@ -5817,11 +5844,18 @@ $('swap').addEventListener('click', () => {
 // „teraz" to CHWILA, nie sama godzina: przy dacie zostawionej na innym dniu
 // sama godzina opisywałaby 17:40 w przyszły wtorek, a nie ten moment.
 function setTimeNow() {
+    timeChosen = false;
     const now = new Date();
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
 }
+
+// Powrót do aplikacji z tła: pole ma pokazywać dzisiejszą chwilę, zanim
+// pasażer kliknie Szukaj. Ręcznie ustawionej godziny nie ruszamy.
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !timeChosen) setTimeNow();
+});
 
 $('time-now').addEventListener('click', () => {
     setTimeNow();
@@ -5979,7 +6013,7 @@ function locateOnce(onPoint, onError) {
 
 /** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
     od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
-function goToPlace(slot, button) {
+function goToPlace(slot) {
     const {place} = myPlaces[slot];
     if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
     hideRecallOffer();
@@ -5990,21 +6024,13 @@ function goToPlace(slot, button) {
     endInput.value = displayValue(place);
     updatePointMarker('end', place);
     restyle(...previous, sel.end);
-    button.disabled = true;               // GPS potrafi mielić kilka sekund
-    locateOnce(point => {
-        button.disabled = false;
-        const before = sel.start;
-        sel.start = point;
-        startInput.value = displayValue(point);
-        updatePointMarker('start', point);
-        restyle(before);
-        offerNearestStop(point);
-        search();
-    }, message => {
-        button.disabled = false;
-        showLocateMsg(message);
+    // Start idzie tą samą drogą co ◎ (łącznie z godziną „teraz" i pytaniem
+    // „Stoisz na…?"), żeby oba przyciski nie rozjechały się w szczegółach.
+    if (navigator.geolocation) locateStart(() => { if (startInput.value) search(); });
+    else {
+        showLocateMsg(GEO_MESSAGES[2]);
         if (startInput.value) search();
-    });
+    }
 }
 
 /** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
@@ -6029,7 +6055,7 @@ placesBar.addEventListener('click', event => {
     // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
     if (placeLongPress) { placeLongPress = false; return; }
     const slot = Number(button.dataset.slot);
-    if (myPlaces[slot]) goToPlace(slot, button);
+    if (myPlaces[slot]) goToPlace(slot);
     else openPlaceDialog(slot);
 });
 
@@ -6125,7 +6151,7 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open', 'locate-sets-time'];
+                        'via-open'];
 
 function storedDevPrefs() {
     try {
@@ -6290,11 +6316,6 @@ zoneButton.checked = loadDevPrefs()['zone-button'] === true;
 zoneButton.addEventListener('change', () => {
     saveDevPref('zone-button', zoneButton.checked);
     refreshZoneLayer();
-});
-
-locateSetsTime.checked = loadDevPrefs()['locate-sets-time'] !== false;
-locateSetsTime.addEventListener('change', () => {
-    saveDevPref('locate-sets-time', locateSetsTime.checked);
 });
 
 startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
