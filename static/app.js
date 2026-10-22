@@ -7321,7 +7321,7 @@ showWalkPace();
 // pamiętane w tym samym kluczu i od razu nowe zapytanie.
 // Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
 // wygląda tak, jak wyglądała przed zgłoszeniem #147.
-for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walking', false]]) {
+for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walking', true]]) {
     const input = $(id);
     const zapisane = loadDevPrefs()[id];
     input.checked = zapisane === undefined ? domyslnie : zapisane === true;
