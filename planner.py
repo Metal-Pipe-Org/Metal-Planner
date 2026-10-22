@@ -49,8 +49,8 @@ def plan_route(start_query, end_query, when=None, transfer_gain_sec=None):
 
     try:
         day = gtfs.load_day(when.date())
-    except FileNotFoundError as e:
-        return {"error": str(e)}
+    except FileNotFoundError:
+        return {"error": gtfs.MISSING_DB_MESSAGE}
 
     start_name, source_stops, start_hints = gtfs.match_stop(start_query, day)
     if start_name is None:
@@ -126,8 +126,8 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
 
     try:
         day = gtfs.load_day(when.date())
-    except FileNotFoundError as e:
-        return {"error": str(e)}
+    except FileNotFoundError:
+        return {"error": gtfs.MISSING_DB_MESSAGE}
 
     if point is not None:
         name, stops = gtfs.stop_at(point[0], point[1], day)
@@ -2053,8 +2053,8 @@ def plan_flow_stages(start_query, end_query, when=None,
 
     try:
         day = gtfs.with_pace(gtfs.load_day(when.date()), walk_pace)
-    except FileNotFoundError as e:
-        yield "error", {"error": str(e)}
+    except FileNotFoundError:
+        yield "error", {"error": gtfs.MISSING_DB_MESSAGE}
         return
 
     asked_sec = when.hour * 3600 + when.minute * 60 + when.second

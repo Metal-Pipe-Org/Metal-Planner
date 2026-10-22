@@ -600,11 +600,14 @@ class DayData:
         self.pkp_platforms = {}
 
 
+# Stały tekst, a nie str(e): FileNotFoundError z innego miejsca niesie
+# ścieżkę z serwera, a ta nie powinna wyjść do przeglądarki.
+MISSING_DB_MESSAGE = "Brak bazy rozkładów (data/gtfs.sqlite). Uruchom: python3 update_gtfs.py"
+
+
 def _connect():
     if not DB_PATH.exists():
-        raise FileNotFoundError(
-            "Brak bazy rozkładów (data/gtfs.sqlite). Uruchom: python3 update_gtfs.py"
-        )
+        raise FileNotFoundError(MISSING_DB_MESSAGE)
     return sqlite3.connect(DB_PATH)
 
 
