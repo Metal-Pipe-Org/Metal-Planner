@@ -27,6 +27,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 13. Gdy bierzemy się za zadanie, sam przełączam projekt użytkownika na gałąź tego zadania. Nie robię tego, gdy rozmawiamy o czymś innym.
 14. Użytkownik ogląda każdą wersję w aplikacji; uwagi wracają do agenta i dają kolejną wersję.
 15. PR zakłada użytkownik. Tytuł i opis PR-a daję, gdy powie, że robimy PR.
+27. Każdy commit od razu wypycham, bez pytania (zwykły push, nigdy nadpisujący).
 16. Konflikty w PR-ach rozwiązuje osobny agent; szkice (draft) pomijam. Konflikty, które dotyczą tylko kodu — także duże — agent rozwiązuje, commituje i wypycha sam; użytkownikowi mówię, które były większe, żeby puścił na nich recenzję Claude'a jeszcze raz. Z użytkownikiem konsultuję tylko konflikty, które zmieniają zachowanie aplikacji.
 17. Co jakiś czas sam sprawdzam otwarte PR-y użytkownika: czy mają konflikty z main i czy recenzja Claude'a zostawiła uwagi, które wymagają działania. Gdy tak, proponuję użytkownikowi zabranie się za nie.
 18. Do komentarzy i odpowiedzi na recenzje daję tylko suchy opis zmian do wklejenia: bez zwracania się do ludzi, próśb, pytań i uprzejmości. To, co ma iść do ludzi, użytkownik dopisuje sam; gdy chce napisać całość sam, daję uwagi do jego wersji.
