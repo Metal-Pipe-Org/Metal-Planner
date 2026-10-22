@@ -221,7 +221,12 @@ if (dayPanel && dayToggle) {
 // regionalnych systemu i ignoruje atrybut lang strony, więc format 24h nie
 // dało się wymusić inaczej niż samodzielnym formatowaniem.
 const timeInput = $('time');
+// Godzina i data wpisane przez pasażera zostają, jak je ustawił. Wszystko inne
+// to „teraz": formularz otwarty od godziny nie ma szukać od godziny temu.
+let timeChosen = false;
+$('date').addEventListener('input', () => { timeChosen = true; });
 timeInput.addEventListener('input', () => {
+    timeChosen = true;
     let digits = timeInput.value.replace(/\D/g, '').slice(0, 4);
     if (digits.length > 2) digits = digits.slice(0, 2) + ':' + digits.slice(2);
     timeInput.value = digits;
@@ -435,7 +440,9 @@ function restyle(...names) {
 
 // Markery klikniętych punktów (poza markersByName - nie są prawdziwym
 // przystankiem). Ten sam kolor co podświetlenie start/cel, ale przerywana
-// obwódka - łatwo odróżnić od słupka.
+// obwódka - łatwo odróżnić od słupka. Nieinteraktywne: punkt nie ma tablicy,
+// więc nie ma czego otwierać, a zasłaniałby przystanek pod sobą (#363) -
+// ani kursor, ani palec (tapCandidates pomija takie warstwy) go nie łapie.
 const pointMarkers = {start: null, end: null};
 const POINT_STYLE = {
     start: {radius: 9, weight: 3, dashArray: '2,4', color: '#1b5e20',
@@ -454,9 +461,8 @@ function updatePointMarker(slot, value) {
     }
     if (isPoint(value)) {
         pointMarkers[slot] = L.circleMarker(
-            [value.lat, value.lon], POINT_STYLE[slot],
+            [value.lat, value.lon], {...POINT_STYLE[slot], interactive: false},
         ).addTo(map);
-        pointMarkers[slot].tapRank = TAP_RANK.endpoint;
     }
 }
 
@@ -969,6 +975,9 @@ function timetableTook(stopName) {
 }
 
 map.on('click', e => {
+    // Leaflet nie wysyła click po przeciągnięciu, więc to jest czyste stuknięcie
+    // (phone.js zwija po nim rozwinięty formularz).
+    document.dispatchEvent(new Event('planner:map-tap'));
     if (document.body.classList.contains('mode-timetable')) return;
     pickEndpoint({lat: e.latlng.lat, lon: e.latlng.lng});
 });
@@ -1041,8 +1050,9 @@ startInput.addEventListener('input', hideLocateOffer);
 
 /** Gotowy start przy pustym celu: kursor sam przechodzi do „Dokąd" (#275),
     jak w Jakdojade. Wpisanego celu nie ruszamy - wtedy start od razu szuka.
-    Klik w mapę ani ◎ tego nie wołają: oba zostawiają mapę do wskazania celu,
-    a klawiatura telefonu zasłoniłaby jej pół (i pytanie „Stoisz na…"). */
+    Klik w mapę tego nie woła: zostawia mapę do wskazania celu, a klawiatura
+    telefonu zasłoniłaby jej pół (i pytanie „Stoisz na…"). ◎ woła, bo jest
+    wyborem startu jak podpowiedź (#319). */
 function focusEnd() {
     if (!endInput.value.trim()) endInput.focus();
 }
@@ -1053,20 +1063,20 @@ function useMyLocation(point) {
     const previous = sel.start;
     hideRecallOffer();
     sel.start = hereStart = point;
-    // Pozycja „teraz" bez godziny „teraz" liczyłaby trasę z miejsca, w którym
-    // ktoś stoi, na chwilę, w której już go tam nie ma (#267).
-    if (locateSetsTime.checked) setTimeNow();
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
     offerNearestStop(point);
-    if (endInput.value) search();
-    else map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
+    if (endInput.value) {
+        search();
+    } else {
+        map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
+        focusEnd();
+    }
 }
 
-// ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
-// z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
-const locateSetsTime = $('locate-sets-time');
+// Pozycja nie dotyka godziny: nieruszana jest „teraz" przy każdym szukaniu
+// (patrz queryParams, #267), a wpisanej ręcznie nikt nie ma kasować po cichu.
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
@@ -1131,7 +1141,6 @@ function refreshHere() {
                                  lon: position.coords.longitude};
         startInput.value = displayValue(sel.start);
         updatePointMarker('start', sel.start);
-        if (locateSetsTime.checked) setTimeNow();
         if (!endInput.value) return;
         const kept = selectedJourney === null ? null
             : journeySignature(journeys[selectedJourney]);
@@ -1658,7 +1667,7 @@ function drawFlow(flow, refit) {
     hoveredStopDot = null;
     flowDotLayer = L.layerGroup(flowStopDots(flow.nodes, flow.deadline_sec)).addTo(map);
     if (flowEndDots) map.removeLayer(flowEndDots);
-    flowEndDots = endDots(flow.nodes).addTo(map);
+    flowEndDots = endDots(flow).addTo(map);
     placeLineLabels();
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
@@ -1939,8 +1948,8 @@ const HEADLINE_GAP = 16;
 
 /** Dokąd z lewej i z prawej sięga to, na czym paskowi stawać nie wolno - ale
     tylko to, co leży na jego wysokości. Z lewej panel i pływające przyciski,
-    z prawej okienko z rozkładem i panel ⚙ (pasek wchodził na okienko, bo
-    omijał tylko lewą stronę). Mierzone, a nie wpisane liczbą: szerokość panelu
+    z prawej panel ⚙ (okienko z rozkładem pasku nie przeszkadza - samo staje
+    pod nim, patrz placeTimeHeadline). Mierzone, a nie wpisane liczbą: szerokość panelu
     zmienia suwak, a napis na przycisku trybu zmienia jego szerokość; wpisana
     liczba rozjeżdżała się z każdą taką zmianą. Schowany panel sam wyjeżdża
     poza ekran, więc przestaje być przeszkodą bez osobnej reguły. */
@@ -1956,9 +1965,8 @@ function headlineGuard(band) {
         if (box) left = Math.max(left, box.right + HEADLINE_GAP);
     }
     let right = window.innerWidth - HEADLINE_GAP;
-    for (const el of [flowPanel, devPanel]) {
-        if (!el || el.hidden || el.classList.contains('hidden')) continue;
-        const box = onBand(el);
+    if (devPanel && !devPanel.hidden && !devPanel.classList.contains('hidden')) {
+        const box = onBand(devPanel);
         if (box) right = Math.min(right, box.left - HEADLINE_GAP);
     }
     return {left, right};
@@ -1972,34 +1980,26 @@ function headlineGuard(band) {
     granica wygrywa - ale dopiero wtedy. */
 function placeTimeHeadline() {
     const el = $('time-headline');
+    if (flowPanel) flowPanel.style.top = '';
     if (!el || el.hidden) return;
     // Na telefonie pasek stoi w doku nad zakładkami - nie ma tam czego
     // omijać i całe ustawianie oddaje się arkuszowi (patrz phone.css).
     if (phoneLayout.active()) {
         el.style.maxWidth = '';
         el.style.left = '';
-        el.style.top = '';
         return;
     }
     el.style.maxWidth = '';
-    el.style.top = '';
-    let guard = headlineGuard(el.getBoundingClientRect());
-    // Pasek może zejść do dwóch linijek, ale zdanie o najszybszym dojeździe
-    // ma się nie łamać - ściśnięte obok okienka z rozkładem rozpadało się na
-    // słupek po słowie („wyjeżdżasz / o"). Gdy obok nie mieści się w całości,
-    // pasek schodzi pod okienko.
-    const best = el.querySelector('.headline-best');
-    const needed = best.getBoundingClientRect().width + 2 * HEADLINE_GAP;
-    if (guard.right - guard.left < needed && flowPanel && !flowPanel.hidden) {
-        el.style.top = flowPanel.getBoundingClientRect().bottom + HEADLINE_GAP + 'px';
-        guard = headlineGuard(el.getBoundingClientRect());
-    }
+    const guard = headlineGuard(el.getBoundingClientRect());
     el.style.maxWidth = (guard.right - guard.left) + 'px';
     // Szerokość po przycięciu: zawinięty pasek jest węższy, więc znów może
     // zmieścić się na środku.
     const width = el.getBoundingClientRect().width;
     const centred = (window.innerWidth - width) / 2;
     el.style.left = Math.max(guard.left, Math.min(centred, guard.right - width)) + 'px';
+    // Pasek ma pierwszeństwo w górnym rzędzie: okienko z rozkładem schodzi
+    // pod niego, a nie pasek pod okienko.
+    if (flowPanel) flowPanel.style.top = el.getBoundingClientRect().bottom + HEADLINE_GAP + 'px';
 }
 
 window.addEventListener('resize', placeTimeHeadline);
@@ -2376,6 +2376,7 @@ function brightestOption(options) {
 function flowPickHtml(when) {
     const options = flowPick.options;
     const sel = options[flowPick.index];
+    if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
     let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
@@ -2389,6 +2390,23 @@ function flowPickHtml(when) {
         html += segWhyHtml(sel.hit.seg.why);
     }
     return html;
+}
+
+/** Kawałek z własnym dymkiem (`tip`) - przeprawa Polinką, która rysuje się
+    jak linia, ale linią nie jest (planner: polinka.map_crossings). Dymek jest
+    zbudowany jak dymek auta (carTooltipHtml): nagłówek, przyjazd do celu
+    w tym samym zapisie, a pod nim to, co trzeba wiedzieć przed wyruszeniem. */
+function segTipHtml(tip) {
+    return [
+        `<b>${esc(tip.title)}</b>`,
+        ...tip.rides.flatMap(r => [
+            `${esc(r.from)} → ${esc(r.to)}:`,
+            `Jesteś przy niej ${fmtClock(r.at)} — ` +
+            `${fmtMins(r.walk_sec)} pieszo z „${esc(r.walk_from)}”`,
+            `U celu ok. ${fmtClock(r.arrival)} — ${fmtMins(r.sec)} przeprawy`,
+        ]),
+        ...tip.lines.map(esc),
+    ].join('<br>');
 }
 
 /** Debug: dlaczego kawałek jest na mapie z wartości podróży (pole `why`,
@@ -2855,7 +2873,12 @@ for (const type of ['mouseover', 'mouseout', 'mousemove', 'mousedown', 'mouseup'
         if (!touchInput || e.target.closest('.leaflet-control-container')) return;
         e.stopImmediatePropagation();
         if (type !== 'click') return;
-        if (!map.dragging.moved()) tapMap(e);
+        if (!map.dragging.moved()) {
+            // Stuknięcie w linię albo kropkę nie dochodzi do map.on('click'),
+            // a też jest stuknięciem w mapę.
+            document.dispatchEvent(new Event('planner:map-tap'));
+            tapMap(e);
+        }
         // Klik zatrzymany na mapie nie dochodzi też do dokumentu, a tam
         // wiszą okienka zamykane kliknięciem obok (dymek paska z czasem).
         $('map').parentNode.dispatchEvent(new MouseEvent('click', {bubbles: true}));
@@ -3107,9 +3130,6 @@ function timetableLinesHtml(data, mapSec) {
         if (!groups.has(key)) groups.set(key, {d, secs: []});
         const group = groups.get(key);
         group.secs.push(d.sec);
-        // Pierwszy w grupie bywa wierszem dorobionym z mapy (spóźniony kurs,
-        // przyjazd) - „i" bierzemy z któregokolwiek odjazdu z serwera.
-        if (d.info && !group.d.info) group.d = {...group.d, info: d.info};
     }
     const rows = [];
     for (const {d, secs} of groups.values()) {
@@ -3141,12 +3161,7 @@ function timetableLinesHtml(data, mapSec) {
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
     const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
-        // „i" za plakietką, w tej samej komórce siatki: za kierunkiem ucinałby
-        // go wielokropek, a osobny element przesunąłby kolumny wiersza.
-        (d.info
-            ? `<span class="tt-badge-info"><span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`
-              + `${infoHtml(d.info)}</span>`
-            : `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>`) +
+        `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
@@ -3464,7 +3479,7 @@ function stopDot(point, where, sec, style) {
     const isStart = !!where.start;
     const dot = L.circleMarker(point, {
         ...(style || STOP_DOT_STYLE),
-        ...(isStart ? ENDPOINT_STYLE.start : {}),
+        ...(isStart ? ENDPOINT_STYLE.start : where.end ? ENDPOINT_STYLE.end : {}),
     });
     dot.isStart = isStart;
     dot.tapRank = isStart ? TAP_RANK.endpoint : TAP_RANK.transfer;
@@ -3546,27 +3561,40 @@ const flowDotStyle = (w = 1) => {
     po miejscu jest w rozkładzie (gtfs._build_places), więc front nie ma go
     z czego odtworzyć - i nie powinien zgadywać po odległości na ekranie. */
 function flowStopDots(nodes, deadline) {
-    return (nodes || []).map(n => stopDot(
+    // Cel stoi w endDots - ma zostać widać także pod wybraną trasą.
+    return (nodes || []).filter(n => !n.end).map(n => nodeDot(n, deadline));
+}
+
+function nodeDot(n, deadline) {
+    return stopDot(
         nodePoint(n),
         // `late` - spóźnione kursy z tego przystanku (#238, patrz withLate).
-        {name: n.name, lines: n.lines, deadline, start: n.start, late: n.late},
-        // Start nigdy nie blednie: to nie jest jedna z opcji, tylko miejsce,
-        // w którym stoisz.
-        n.sec, flowDotStyle(n.start ? 1 : n.w)));
+        {name: n.name, lines: n.lines, deadline, start: n.start, end: n.end, late: n.late},
+        // Start i cel nigdy nie blednieją: to nie są opcje, tylko miejsca,
+        // z którego i do którego się jedzie.
+        n.sec, flowDotStyle(n.start || n.end ? 1 : n.w));
 }
 
 /** Kropki startu i celu - po jednej w środku ich słupków, w miejsce ich
-    wszystkich (patrz styleFor). Cel węzłem nie jest: tu się tylko wysiada.
+    wszystkich (patrz styleFor). Cel to zwykła kropka węzła (nodeDot), tylko
+    czerwona: ta sama tablica, co na każdym innym przystanku mapy, z tym, czym
+    się tu przyjeżdża (zgłoszenie #266). Tablicę ma tylko jako węzeł celu: gdy
+    żadna podróż z mapy nie kończy się przejazdem do samego celu, węzła nie
+    ma i czerwona kropka jest samym znacznikiem, bez tablicy.
     Start ma kropkę z węzła wachlarza, ale tylko wtedy, gdy dotyka go któryś
     narysowany kawałek - gdy każda droga zaczyna się dojściem pieszym na inny
     przystanek, węzła startu nie ma i bez tej kropki start znikał z mapy
     (zgłoszenie #276). Taki start wygląda jak kliknięty punkt (POINT_STYLE):
     też jest miejscem, z którego się dopiero dochodzi do przystanku.
     Osobno od flowDotLayer, bo wybrana trasa chowa tamte kropki, a start
-    i cel mają zostać widać. */
-function endDots(nodes) {
-    const dots = [endpointDot(sel.end, ENDPOINT_STYLE.end)];
-    if (!(nodes || []).some(n => n.start)) {
+    i cel mają zostać widać. Cel z punktu na mapie ma tylko swój znacznik
+    (updatePointMarker) - to nie przystanek, więc i tablicy nie ma. */
+function endDots(flow) {
+    const nodes = flow.nodes || [];
+    const endNode = nodes.find(n => n.end);
+    const dots = [endNode ? nodeDot(endNode, flow.deadline_sec)
+        : endpointDot(sel.end, ENDPOINT_STYLE.end)];
+    if (!nodes.some(n => n.start)) {
         dots.push(endpointDot(sel.start, POINT_STYLE.start));
     }
     return L.layerGroup(dots.filter(Boolean));
@@ -4054,13 +4082,6 @@ function platformHtml(p) {
     return text ? `<span class="platform">${esc(text)}</span>` : '';
 }
 
-/** Ikonka „i" z dymkiem (ta sama co w Ustawieniach, patrz showInfoTip) -
-    przy Polince godziny otwarcia i data sprawdzenia danych (#165). */
-function infoHtml(text) {
-    return text ? `<span class="info info-inline" tabindex="0" role="button"`
-        + ` aria-label="${escAttr(text)}" data-tip="${escAttr(text)}">i</span>` : '';
-}
-
 function badgeHtml(leg) {
     // Pojazd, w którym się już siedzi (start z pokładu, patrz
     // onboard.mark_journeys), ma plakietkę z obwódką - na karcie propozycji
@@ -4379,7 +4400,6 @@ function detailHtml(journey) {
             // za nim spada do trzeciej linijki - a to jest akcja tego wiersza,
             // nie osobny wiersz.
             `${badgeHtml(leg)} <span class="tl-headsign">${esc(leg.headsign)}</span>` +
-            infoHtml(leg.info) +
             // Etap, w którym się już siedzi (patrz onboard.mark_journeys),
             // nie jest wsiadaniem - i oś ma to powiedzieć wprost, bo
             // pierwszy wiersz wygląda identycznie jak każde inne wsiadanie.
@@ -4549,8 +4569,6 @@ function scrollToSelected() {
 
 resultsBox.addEventListener('click', event => {
     if (routeClick(event)) return;
-    // „i" pokazuje dymek (showInfoTip) - nie zwija przy okazji karty.
-    if (event.target.closest('.info')) return;
 
     // Rozwinięcie przystanków po drodze to nie klik w kartę - ta by się
     // przy okazji zwinęła (patrz selectJourney).
@@ -4963,6 +4981,7 @@ const WALK_PACES = ['wolno', 'zwykle', 'szybko'];
 const WALK_PACE_LABELS = ['wolne', 'zwykłe', 'szybkie'];
 
 function queryParams() {
+    if (!timeChosen) setTimeNow();
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
@@ -5393,14 +5412,21 @@ function replanInPlace() {
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
+// Jedno miejsce na przedawnienie ostatniej trasy RAZEM z jej godziną.
+// Infinity - dziś trasa nie wygasa; skończony czas w ms wygasza obie naraz.
+const LAST_SEARCH_MAX_AGE_MS = Infinity;
+
 function saveLastSearch() {
     // Podróży z pokładu nie zapamiętujemy: kurs, którym się jechało, dawno
     // odjechał, a przywrócona po godzinie linia z przystankiem byłaby
     // odpowiedzią na pytanie, którego już nikt nie zadaje.
     if (onboardOn) { forgetLastSearch(); return; }
     try {
+        // Godzina i data wracają z trasą tylko wtedy, gdy pasażer sam je wpisał -
+        // „teraz" z formularza po godzinie przestałoby nim być.
         localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
-            start: sel.start, end: sel.end,
+            start: sel.start, end: sel.end, savedAt: Date.now(),
+            ...(timeChosen ? {time: $('time').value, date: $('date').value} : {}),
         }));
     } catch {
         // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
@@ -5439,6 +5465,7 @@ function restoreLastSearch() {
         return;
     }
     if (!saved || !saved.start || !saved.end) return;
+    if (Date.now() - (saved.savedAt || 0) > LAST_SEARCH_MAX_AGE_MS) return;
     recalled = saved;
     // Każdy koniec w osobnym kawałku, który się nie łamie - linia może pęknąć
     // tylko przed strzałką, a nie w środku nazwy ("Iwiny -" / "nr" / "127").
@@ -5449,8 +5476,22 @@ function restoreLastSearch() {
         return span;
     };
     $('recall-offer-name').replaceChildren(
-        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)));
+        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)),
+        ...(saved.time ? [' ', end('· ' + recalledTimeLabel(saved))] : []));
     recallOffer.hidden = false;
+}
+
+/** „8:00" dla dzisiaj, „jutro 8:00" albo „24.10 8:00" - co wróci z trasą. */
+function recalledTimeLabel(saved) {
+    const clock = saved.time.replace(/^0/, '');
+    const day = new Date();
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                   + `-${String(d.getDate()).padStart(2, '0')}`;
+    if (saved.date === iso(day)) return clock;
+    day.setDate(day.getDate() + 1);
+    if (saved.date === iso(day)) return `jutro ${clock}`;
+    const [, month, date] = saved.date.split('-');
+    return `${Number(date)}.${month} ${clock}`;
 }
 
 function applyLastSearch(saved) {
@@ -5458,8 +5499,12 @@ function applyLastSearch(saved) {
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
     endInput.value = displayValue(sel.end);
-    // Godzina zostaje "teraz" (już ustawiona przez serwer przy renderowaniu
-    // strony) - nie przywracamy tu starej godziny z poprzedniego wyszukiwania.
+    // Wraca tylko godzina wpisana ręcznie; bez niej zostaje „teraz".
+    if (saved.time) {
+        timeInput.value = saved.time;
+        $('date').value = saved.date;
+        timeChosen = true;
+    }
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
     restyle(sel.start, sel.end);
@@ -5799,11 +5844,18 @@ $('swap').addEventListener('click', () => {
 // „teraz" to CHWILA, nie sama godzina: przy dacie zostawionej na innym dniu
 // sama godzina opisywałaby 17:40 w przyszły wtorek, a nie ten moment.
 function setTimeNow() {
+    timeChosen = false;
     const now = new Date();
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
 }
+
+// Powrót do aplikacji z tła: pole ma pokazywać dzisiejszą chwilę, zanim
+// pasażer kliknie Szukaj. Ręcznie ustawionej godziny nie ruszamy.
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !timeChosen) setTimeNow();
+});
 
 $('time-now').addEventListener('click', () => {
     setTimeNow();
@@ -5961,7 +6013,7 @@ function locateOnce(onPoint, onError) {
 
 /** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
     od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
-function goToPlace(slot, button) {
+function goToPlace(slot) {
     const {place} = myPlaces[slot];
     if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
     hideRecallOffer();
@@ -5972,21 +6024,13 @@ function goToPlace(slot, button) {
     endInput.value = displayValue(place);
     updatePointMarker('end', place);
     restyle(...previous, sel.end);
-    button.disabled = true;               // GPS potrafi mielić kilka sekund
-    locateOnce(point => {
-        button.disabled = false;
-        const before = sel.start;
-        sel.start = point;
-        startInput.value = displayValue(point);
-        updatePointMarker('start', point);
-        restyle(before);
-        offerNearestStop(point);
-        search();
-    }, message => {
-        button.disabled = false;
-        showLocateMsg(message);
+    // Start idzie tą samą drogą co ◎ (łącznie z godziną „teraz" i pytaniem
+    // „Stoisz na…?"), żeby oba przyciski nie rozjechały się w szczegółach.
+    if (navigator.geolocation) locateStart(() => { if (startInput.value) search(); });
+    else {
+        showLocateMsg(GEO_MESSAGES[2]);
         if (startInput.value) search();
-    });
+    }
 }
 
 /** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
@@ -6011,7 +6055,7 @@ placesBar.addEventListener('click', event => {
     // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
     if (placeLongPress) { placeLongPress = false; return; }
     const slot = Number(button.dataset.slot);
-    if (myPlaces[slot]) goToPlace(slot, button);
+    if (myPlaces[slot]) goToPlace(slot);
     else openPlaceDialog(slot);
 });
 
@@ -6107,7 +6151,7 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open', 'locate-sets-time'];
+                        'via-open'];
 
 function storedDevPrefs() {
     try {
@@ -6272,11 +6316,6 @@ zoneButton.checked = loadDevPrefs()['zone-button'] === true;
 zoneButton.addEventListener('change', () => {
     saveDevPref('zone-button', zoneButton.checked);
     refreshZoneLayer();
-});
-
-locateSetsTime.checked = loadDevPrefs()['locate-sets-time'] !== false;
-locateSetsTime.addEventListener('change', () => {
-    saveDevPref('locate-sets-time', locateSetsTime.checked);
 });
 
 startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;

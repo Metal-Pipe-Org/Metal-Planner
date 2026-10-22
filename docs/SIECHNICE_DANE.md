@@ -170,7 +170,11 @@ Pełne przejście po 237 słupkach na 3 dni rozkładu, ok. 95 s na dzień:
 - **kursów bez rozpoznanej linii: 0** na 779 — przecięcie zbiorów linii
   rozstrzyga numer za każdym razem;
 - **słupki:** 55 sklejonych z wrocławskimi, 182 nowe, zero nazw
-  występujących równolegle w obu źródłach (czyli nic się nie zdublowało);
+  występujących równolegle w obu źródłach — ale nie znaczy to, że nic się
+  nie zdublowało: część „nowych” to wrocławskie słupki pod nazwą gminy
+  („Park Wschodni NŻ”, „Wrocław - Okólna”), w tym samym punkcie. Od
+  zgłoszenia #348 skleja je położenie (do 10 m) bez względu na nazwę —
+  w kopii z 15.10.2026 to 92 sklejone z 238;
 - wyszukiwanie `Siechnice - Urząd Miejski` → `GALERIA DOMINIKAŃSKA` zwraca
   trasę łączącą autobus gminny z komunikacją Wrocławia.
 

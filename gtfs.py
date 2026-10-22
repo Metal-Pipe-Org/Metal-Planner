@@ -1564,11 +1564,6 @@ def trip_path(trip_id, board_stop, board_dep, exit_stop, exit_arr, db=None, data
     if trip_id.startswith("PKP:"):
         import pkp
         return pkp.trip_path(data, trip_id, board_stop, board_dep, exit_stop, exit_arr)
-    if trip_id.startswith(polinka.ID_PREFIX):
-        rows = polinka.trip_rows(trip_id)
-        ok = (rows[0][0], rows[0][2], rows[-1][0], rows[-1][1]) == (
-            board_stop, board_dep, exit_stop, exit_arr)
-        return rows if ok else []
 
     trip_id, shift = db_trip(trip_id)
     own_db = db is None
