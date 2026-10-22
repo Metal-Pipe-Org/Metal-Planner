@@ -24,7 +24,27 @@
             // localStorage niedostępny - zasłona pokaże się znowu
         }
     </script>
+    {#
+      Link z trasą (?from=…&to=…) dostaje podgląd w komunikatorach - bot nie
+      uruchamia skryptów, więc tytuł i opis składa serwer z samych parametrów
+      (routes.link_preview). Bez trasy strona wygląda jak dotąd.
+    #}
+    {% if preview %}
+    <title>{{ preview.title }} — Metal Planner</title>
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Metal Planner">
+    <meta property="og:title" content="{{ preview.title }}">
+    {% if preview.description %}
+    <meta property="og:description" content="{{ preview.description }}">
+    {% endif %}
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="{{ preview.title }}">
+    {% if preview.description %}
+    <meta name="twitter:description" content="{{ preview.description }}">
+    {% endif %}
+    {% else %}
     <title>Metal Planner — Wrocław</title>
+    {% endif %}
     <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu.">
 
     <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
@@ -157,6 +177,11 @@
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
                     aria-label="Zainstaluj aplikację" hidden>⤓</button>
+            {# Stoi w pasku aplikacji, bo ten jest w każdym widoku, także przy zwiniętym
+               formularzu na telefonie. Zawsze widoczny: udostępnia adres z paska,
+               a ten bez wyszukania to sam adres aplikacji. #}
+            <button id="share" class="icon-button" title="Udostępnij link do tej trasy"
+                    aria-label="Udostępnij link do tej trasy">⤴</button>
             <button id="dev-toggle" class="icon-button" title="Ustawienia"
                     aria-label="Ustawienia" aria-expanded="false">⚙</button>
         </div>
@@ -753,12 +778,6 @@
             <input type="checkbox" id="via-open"> Zawsze pokazuj przystanki po drodze
         </label>
 
-        <label class="dev-check">
-            <input type="checkbox" id="locate-sets-time" checked> ◎ ustawia godzinę na teraz
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Wyłączone — ◎ ustawia tylko start, a godzina i data zostają, jakie były (także przy odświeżaniu pozycji co 30 s).">i</span>
-        </label>
-
     </details>
 
     <details class="dev-fold dev-only" id="fold-window">
@@ -1051,6 +1070,11 @@
 
         <label class="dev-check">
             <input type="checkbox" id="new-map"> Nowa mapa (eksperyment)
+        </label>
+
+        {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
+        <label class="dev-check">
+            <input type="checkbox" id="location-refresh"> Odświeżanie lokalizacji co 30 s
         </label>
 
     </details>

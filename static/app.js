@@ -221,7 +221,12 @@ if (dayPanel && dayToggle) {
 // regionalnych systemu i ignoruje atrybut lang strony, więc format 24h nie
 // dało się wymusić inaczej niż samodzielnym formatowaniem.
 const timeInput = $('time');
+// Godzina i data wpisane przez pasażera zostają, jak je ustawił. Wszystko inne
+// to „teraz": formularz otwarty od godziny nie ma szukać od godziny temu.
+let timeChosen = false;
+$('date').addEventListener('input', () => { timeChosen = true; });
 timeInput.addEventListener('input', () => {
+    timeChosen = true;
     let digits = timeInput.value.replace(/\D/g, '').slice(0, 4);
     if (digits.length > 2) digits = digits.slice(0, 2) + ':' + digits.slice(2);
     timeInput.value = digits;
@@ -1054,28 +1059,24 @@ function focusEnd() {
 
 /** Przycisk ◎ - w przeciwieństwie do kliknięcia w mapę nadpisuje start, który
     już był (o to się prosi, klikając go), ale celu nie rusza. */
-function useMyLocation(point) {
+function useMyLocation(point, {fromLink = false} = {}) {
     const previous = sel.start;
     hideRecallOffer();
     sel.start = hereStart = point;
-    // Pozycja „teraz" bez godziny „teraz" liczyłaby trasę z miejsca, w którym
-    // ktoś stoi, na chwilę, w której już go tam nie ma (#267).
-    if (locateSetsTime.checked) setTimeNow();
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
     offerNearestStop(point);
     if (endInput.value) {
-        search();
+        search({fromLink});
     } else {
         map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
         focusEnd();
     }
 }
 
-// ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
-// z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
-const locateSetsTime = $('locate-sets-time');
+// Pozycja nie dotyka godziny: nieruszana jest „teraz" przy każdym szukaniu
+// (patrz queryParams, #267), a wpisanej ręcznie nikt nie ma kasować po cichu.
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
@@ -1087,16 +1088,18 @@ const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onbo
     „moja pozycja" i karta jest widoczna. Odświeżanie ma sens tylko przy takim
     starcie, więc jego utrata gasi też sam przycisk. */
 function syncAutoRefresh() {
-    if (!hereIsStart()) autoRefreshOn = false;
+    // Funkcja ukryta za przełącznikiem DEV (#379); bez niego ◎ tylko ustawia start.
+    const allowed = $('location-refresh').checked;
+    if (!hereIsStart() || !allowed) autoRefreshOn = false;
     const hint = autoRefreshOn ? 'Wyłącz odświeżanie'
-        : hereIsStart() ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
+        : hereIsStart() && allowed ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
     const label = autoRefreshOn
         ? 'Wyłącz odświeżanie mojej lokalizacji'
-        : hereIsStart() ? 'Odświeżaj moją lokalizację co 30 sekund'
+        : hereIsStart() && allowed ? 'Odświeżaj moją lokalizację co 30 sekund'
                         : 'Ustaw start na mojej lokalizacji';
     // Drugi ◎ siedzi w zwiniętej karcie telefonu (patrz phone.css) i pokazuje
     // to samo, co pierwszy - tylko przy starcie z mojej pozycji.
-    document.body.classList.toggle('here-start', hereIsStart());
+    document.body.classList.toggle('here-start', hereIsStart() && allowed);
     for (const button of [locateButton, locatePeek]) {
         button.classList.toggle('active', autoRefreshOn);
         button.setAttribute('aria-pressed', String(autoRefreshOn));
@@ -1140,7 +1143,6 @@ function refreshHere() {
                                  lon: position.coords.longitude};
         startInput.value = displayValue(sel.start);
         updatePointMarker('start', sel.start);
-        if (locateSetsTime.checked) setTimeNow();
         if (!endInput.value) return;
         const kept = selectedJourney === null ? null
             : journeySignature(journeys[selectedJourney]);
@@ -1172,7 +1174,7 @@ if (!navigator.geolocation) {
     locateButton.addEventListener('click', () => {
         // Drugie kliknięcie, gdy start już jest moją pozycją, nie pyta GPS-a o
         // start, tylko przełącza odświeżanie - pierwsze ma zostać zwykłym ◎.
-        if (hereIsStart()) {
+        if (hereIsStart() && $('location-refresh').checked) {
             toggleAutoRefresh();
             return;
         }
@@ -1180,7 +1182,7 @@ if (!navigator.geolocation) {
     });
 }
 
-function locateStart(onFail = () => {}) {
+function locateStart(onFail = () => {}, options = {}) {
     showLocateMsg('');
     hideLocateOffer();
     locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
@@ -1195,7 +1197,7 @@ function locateStart(onFail = () => {}) {
             finish();
             if (stale()) return;
             useMyLocation({lat: position.coords.latitude,
-                           lon: position.coords.longitude});
+                           lon: position.coords.longitude}, options);
         },
         error => {
             finish();
@@ -4981,6 +4983,7 @@ const WALK_PACES = ['wolno', 'zwykle', 'szybko'];
 const WALK_PACE_LABELS = ['wolne', 'zwykłe', 'szybkie'];
 
 function queryParams() {
+    if (!timeChosen) setTimeNow();
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
@@ -5058,6 +5061,7 @@ function adoptNames(data) {
     // już przygaszona, setBaseDim wychodzi od razu i stare podświetlenie
     // zostawało na mapie na zawsze.
     restyle(...previous, sel.start, sel.end);
+    syncAddress();
 }
 
 /** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
@@ -5326,6 +5330,7 @@ function loadPlan(kind, onMapped) {
         onMapped,
     };
     showBusy(run.busy);
+    syncAddress();
     return Promise.all([fetch('/api/flow?' + queryParams(), {signal: run.abort.signal}),
                         stopsReady])
         .then(([response]) => readLines(response, data => {
@@ -5412,14 +5417,21 @@ function replanInPlace() {
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
+// Jedno miejsce na przedawnienie ostatniej trasy RAZEM z jej godziną.
+// Infinity - dziś trasa nie wygasa; skończony czas w ms wygasza obie naraz.
+const LAST_SEARCH_MAX_AGE_MS = Infinity;
+
 function saveLastSearch() {
     // Podróży z pokładu nie zapamiętujemy: kurs, którym się jechało, dawno
     // odjechał, a przywrócona po godzinie linia z przystankiem byłaby
     // odpowiedzią na pytanie, którego już nikt nie zadaje.
     if (onboardOn) { forgetLastSearch(); return; }
     try {
+        // Godzina i data wracają z trasą tylko wtedy, gdy pasażer sam je wpisał -
+        // „teraz" z formularza po godzinie przestałoby nim być.
         localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
-            start: sel.start, end: sel.end,
+            start: sel.start, end: sel.end, savedAt: Date.now(),
+            ...(timeChosen ? {time: $('time').value, date: $('date').value} : {}),
         }));
     } catch {
         // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
@@ -5458,6 +5470,7 @@ function restoreLastSearch() {
         return;
     }
     if (!saved || !saved.start || !saved.end) return;
+    if (Date.now() - (saved.savedAt || 0) > LAST_SEARCH_MAX_AGE_MS) return;
     recalled = saved;
     // Każdy koniec w osobnym kawałku, który się nie łamie - linia może pęknąć
     // tylko przed strzałką, a nie w środku nazwy ("Iwiny -" / "nr" / "127").
@@ -5468,8 +5481,22 @@ function restoreLastSearch() {
         return span;
     };
     $('recall-offer-name').replaceChildren(
-        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)));
+        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)),
+        ...(saved.time ? [' ', end('· ' + recalledTimeLabel(saved))] : []));
     recallOffer.hidden = false;
+}
+
+/** „8:00" dla dzisiaj, „jutro 8:00" albo „24.10 8:00" - co wróci z trasą. */
+function recalledTimeLabel(saved) {
+    const clock = saved.time.replace(/^0/, '');
+    const day = new Date();
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                   + `-${String(d.getDate()).padStart(2, '0')}`;
+    if (saved.date === iso(day)) return clock;
+    day.setDate(day.getDate() + 1);
+    if (saved.date === iso(day)) return `jutro ${clock}`;
+    const [, month, date] = saved.date.split('-');
+    return `${Number(date)}.${month} ${clock}`;
 }
 
 function applyLastSearch(saved) {
@@ -5477,8 +5504,12 @@ function applyLastSearch(saved) {
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
     endInput.value = displayValue(sel.end);
-    // Godzina zostaje "teraz" (już ustawiona przez serwer przy renderowaniu
-    // strony) - nie przywracamy tu starej godziny z poprzedniego wyszukiwania.
+    // Wraca tylko godzina wpisana ręcznie; bez niej zostaje „teraz".
+    if (saved.time) {
+        timeInput.value = saved.time;
+        $('date').value = saved.date;
+        timeChosen = true;
+    }
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
     restyle(sel.start, sel.end);
@@ -5513,7 +5544,11 @@ function setSearching(on) {
     resultsBox.setAttribute('aria-busy', String(on));
 }
 
-function search() {
+/** `fromLink`: to wyszukiwanie wywołał link (patrz applyLink). Idzie tylko
+    jako argument, nigdy jako stan modułu - inaczej wyszukiwanie, którego link
+    nie uruchomił (np. `from=gps` bez `to`), odziedziczyłoby je po późniejszym
+    ręcznym szukaniu. */
+function search({fromLink = false} = {}) {
     // Z pokładu pola "skąd" nie ma - kompletem jest linia, kierunek
     // i przystanek (patrz onboardReady).
     if (!endInput.value) return;
@@ -5530,9 +5565,13 @@ function search() {
     resultsBox.innerHTML =
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
-    saveLastSearch();
-    if (!onboardOn) rememberPlace('start', startInput.value);
-    rememberPlace('end', endInput.value);
+    // Trasa z cudzego linku nie jest wyborem pasażera: nie wypiera jego
+    // ostatniej trasy ani nie trafia do jego podpowiedzi.
+    if (!fromLink) {
+        saveLastSearch();
+        if (!onboardOn) rememberPlace('start', startInput.value);
+        rememberPlace('end', endInput.value);
+    }
     // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
     // zakładce „Trasy". Rura spada przy pierwszym wyniku WYSZUKANIA, nie po
@@ -5541,6 +5580,132 @@ function search() {
 }
 
 $('search').addEventListener('click', search);
+
+// ------------------------------------------------------------------ link ----
+//
+// Wyszukiwanie jako zwykły tekst po „?": ?from=Katedra&to=Wojszyce&time=17:40.
+// Ten sam adres leży w pasku przeglądarki po każdym wyszukaniu (syncAddress),
+// więc kopiowanie z paska działa jak udostępnianie.
+// Czego link NIE niesie, a czemu: patrz linkParams.
+
+const POINT_PARAM = /^(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)$/;
+const pointParam = point => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`;
+
+function placeFromParam(text) {
+    const match = text.match(POINT_PARAM);
+    return match ? {lat: Number(match[1]), lon: Number(match[2])} : text;
+}
+
+const todayIso = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+         + `-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+/** Parametry linku dla tego, co jest teraz w formularzu.
+
+    Niesie: skąd i dokąd, godzinę i datę (tylko gdy wybrane ręcznie - „teraz"
+    u nadawcy znaczy „teraz" u odbiorcy). Nic więcej: ani filtrów, ani
+    ustawień z ⚙, ani startu z pokładu pojazdu (kurs, którym się jechało, odjechał).
+    Start z ◎ (też z zapisanego miejsca) to `from=gps`: odbiorca szuka ze SWOJEJ
+    pozycji, a pozycja nadawcy nie jest nikomu do udostępnienia. */
+function linkParams() {
+    const params = new URLSearchParams();
+    if (onboardOn || (!startInput.value && !endInput.value)) return params;
+    if (hereIsStart()) params.set('from', 'gps');
+    else if (startInput.value) {
+        params.set('from', isPoint(sel.start) ? pointParam(sel.start) : startInput.value);
+    }
+    if (endInput.value) {
+        params.set('to', isPoint(sel.end) ? pointParam(sel.end) : endInput.value);
+    }
+    if (timeChosen) {
+        params.set('time', $('time').value);
+        if ($('date').value !== todayIso()) params.set('date', $('date').value);
+    }
+    return params;
+}
+
+// Dwukropek i przecinek są w zapytaniu legalne, a "17%3A40" nie jest czytelne.
+const readableQuery = params => params.toString().replace(/%3A/gi, ':').replace(/%2C/gi, ',');
+
+function syncAddress() {
+    const params = linkParams();
+    const query = params ? readableQuery(params) : '';
+    history.replaceState(null, '', query ? '?' + query : location.pathname);
+}
+
+const SHARE_DONE_MS = 1500;
+let shareDoneTimer = null;
+
+/** Arkusz udostępniania tam, gdzie system go ma (telefony, Safari), a poza
+    tym schowek - z cichym potwierdzeniem na samej ikonie. */
+$('share').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (navigator.share) {
+        try {
+            await navigator.share({title: 'Metal Planner', url: location.href});
+            return;
+        } catch (error) {
+            if (error.name === 'AbortError') return;
+        }
+    }
+    try {
+        await navigator.clipboard.writeText(location.href);
+    } catch {
+        // schowek zablokowany (np. strona po http) - zostaje ręczne kopiowanie
+        window.prompt('Skopiuj link:', location.href);
+        return;
+    }
+    button.textContent = '✓';
+    button.title = 'Skopiowano';
+    clearTimeout(shareDoneTimer);
+    shareDoneTimer = setTimeout(() => {
+        button.textContent = '⤴';
+        button.title = 'Udostępnij link do tej trasy';
+    }, SHARE_DONE_MS);
+});
+
+/** Wchodząc z linku: formularz wypełnia się tak, jakby pasażer to wpisał,
+    a gdy są oba końce, od razu szuka. Brakujący koniec zostaje pusty z kursorem
+    w nim; jedynym wyjątkiem jest `from=gps` - lokalizacja odbiorcy. */
+function applyLink() {
+    const query = new URLSearchParams(location.search);
+    const from = query.get('from');
+    // Cel z lokalizacji nie istnieje, więc `to=gps` zostawia „Dokąd" puste.
+    const to = query.get('to') === 'gps' ? null : query.get('to');
+    if (!from && !to) return;
+    if (/^\d{1,2}:\d{2}$/.test(query.get('time'))) {
+        $('time').value = query.get('time').padStart(5, '0');
+        timeChosen = true;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(query.get('date'))) {
+        $('date').value = query.get('date');
+        timeChosen = true;
+        if (dayPanel.classList.contains('hidden')) dayToggle.click();
+    }
+    const fill = (side, text) => {
+        const place = placeFromParam(text);
+        if (isPoint(place)) { sel[side] = place; updatePointMarker(side, place); }
+        (side === 'start' ? startInput : endInput).value = displayValue(place);
+    };
+    if (from && from !== 'gps') fill('start', from);
+    if (to) fill('end', to);
+    restyle(sel.start, sel.end);
+    // Puste pole zostaje puste: link nie szuka za pasażera ani nie sięga
+    // po lokalizację bez `from=gps`.
+    if (from === 'gps') {
+        // Szuka sam useMyLocation, gdy cel jest wpisany.
+        if (navigator.geolocation) locateStart(undefined, {fromLink: true});
+        else startInput.focus();
+        focusEnd();
+    } else if (from && to) {
+        search({fromLink: true});
+    } else if (to) startInput.focus();
+    else focusEnd();
+}
+
+stopsReady.then(applyLink);
 stopsReady.then(restoreLastSearch);
 
 // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" - dalej
@@ -5818,11 +5983,18 @@ $('swap').addEventListener('click', () => {
 // „teraz" to CHWILA, nie sama godzina: przy dacie zostawionej na innym dniu
 // sama godzina opisywałaby 17:40 w przyszły wtorek, a nie ten moment.
 function setTimeNow() {
+    timeChosen = false;
     const now = new Date();
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
 }
+
+// Powrót do aplikacji z tła: pole ma pokazywać dzisiejszą chwilę, zanim
+// pasażer kliknie Szukaj. Ręcznie ustawionej godziny nie ruszamy.
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !timeChosen) setTimeNow();
+});
 
 $('time-now').addEventListener('click', () => {
     setTimeNow();
@@ -5846,6 +6018,7 @@ $('clear').addEventListener('click', () => {
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
     forgetLastSearch();
+    syncAddress();
 });
 
 // ----------------------------------------------------------- moje miejsca ----
@@ -5980,7 +6153,7 @@ function locateOnce(onPoint, onError) {
 
 /** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
     od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
-function goToPlace(slot, button) {
+function goToPlace(slot) {
     const {place} = myPlaces[slot];
     if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
     hideRecallOffer();
@@ -5991,21 +6164,13 @@ function goToPlace(slot, button) {
     endInput.value = displayValue(place);
     updatePointMarker('end', place);
     restyle(...previous, sel.end);
-    button.disabled = true;               // GPS potrafi mielić kilka sekund
-    locateOnce(point => {
-        button.disabled = false;
-        const before = sel.start;
-        sel.start = point;
-        startInput.value = displayValue(point);
-        updatePointMarker('start', point);
-        restyle(before);
-        offerNearestStop(point);
-        search();
-    }, message => {
-        button.disabled = false;
-        showLocateMsg(message);
+    // Start idzie tą samą drogą co ◎ (łącznie z godziną „teraz" i pytaniem
+    // „Stoisz na…?"), żeby oba przyciski nie rozjechały się w szczegółach.
+    if (navigator.geolocation) locateStart(() => { if (startInput.value) search(); });
+    else {
+        showLocateMsg(GEO_MESSAGES[2]);
         if (startInput.value) search();
-    });
+    }
 }
 
 /** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
@@ -6030,7 +6195,7 @@ placesBar.addEventListener('click', event => {
     // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
     if (placeLongPress) { placeLongPress = false; return; }
     const slot = Number(button.dataset.slot);
-    if (myPlaces[slot]) goToPlace(slot, button);
+    if (myPlaces[slot]) goToPlace(slot);
     else openPlaceDialog(slot);
 });
 
@@ -6126,7 +6291,7 @@ const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
 const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
                         'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
                         'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open', 'locate-sets-time'];
+                        'via-open'];
 
 function storedDevPrefs() {
     try {
@@ -6273,6 +6438,15 @@ noPullRefresh.addEventListener('change', () => {
     document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
 });
 
+// Odświeżanie lokalizacji co 30 s (#379): ukryta funkcja, tylko DEV - klucza nie
+// ma w DEV_PREFS_USER, więc bez DEV_MODE zapisana wartość nie działa.
+const locationRefresh = $('location-refresh');
+locationRefresh.checked = loadDevPrefs()['location-refresh'] === true;
+locationRefresh.addEventListener('change', () => {
+    saveDevPref('location-refresh', locationRefresh.checked);
+    syncAutoRefresh();
+});
+
 // Przystanki po drodze rozwinięte od razu (opcja w „Wyglądzie aplikacji",
 // zgłoszenie #169). Zmiana zaczyna od nowa - także tam, gdzie listę
 // przełączono kliknięciem - i od razu przerysowuje otwartą propozycję.
@@ -6291,11 +6465,6 @@ zoneButton.checked = loadDevPrefs()['zone-button'] === true;
 zoneButton.addEventListener('change', () => {
     saveDevPref('zone-button', zoneButton.checked);
     refreshZoneLayer();
-});
-
-locateSetsTime.checked = loadDevPrefs()['locate-sets-time'] !== false;
-locateSetsTime.addEventListener('change', () => {
-    saveDevPref('locate-sets-time', locateSetsTime.checked);
 });
 
 startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;

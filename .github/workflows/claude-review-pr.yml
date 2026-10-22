@@ -35,14 +35,13 @@ name: Claude - oceń PR
 # za to, KIEDY ocena leci i gdzie ląduje; żeby zmienić JEJ KSZTAŁT, nie ruszaj
 # workflow, tylko tamten plik.
 #
-# Ocena leci raz, przy otwarciu (albo przy wyjściu z wersji roboczej), żeby
-# dosyłanie commitów nie sypało kolejnymi ocenami pod ten sam PR. Push do PR-a
-# (`synchronize`) też tu wpada, ale ocenia tylko PR, pod którym nie ma jeszcze
-# żadnej zapowiedzi. To łata na konflikt: PR otwarty w konflikcie z bazą nie ma
-# commitu scalenia, więc GitHub w ogóle nie tworzy biegu `pull_request` — ani
-# udanego, ani pominiętego — i ocena przepadała po cichu. Teraz przychodzi
-# z pierwszym pushem, który konflikt usuwa. Po większych poprawkach albo gdy
-# ocena się nie udała, wystarczy napisać `@claude` w komentarzu pod PR-em —
+# Ocena leci przy otwarciu i przy każdym wyjściu z wersji roboczej. Push nie
+# ocenia: gotowy PR nie dostaje pushy, bo pr-drafts.yml przestawia go wtedy na
+# wersję roboczą, a poprawki wracają do oceny razem z „Ready for review" (#349).
+# Tak samo PR w konflikcie z bazą — nie ma commitu scalenia, więc GitHub nie
+# tworzy tu biegu `pull_request`, a pr-drafts.yml i pr-conflicts.yml cofają go
+# do wersji roboczej, z której po rozwiązaniu konfliktu wychodzi już z oceną.
+# Gdy ocena się nie udała, wystarczy napisać `@claude` w komentarzu pod PR-em —
 # workflow sam weźmie numer z wątku. Awaryjnie zostaje też ręczny bieg:
 # Actions -> „Claude - oceń PR" -> Run workflow -> numer PR-a (tylko tam jest
 # przełącznik debug).
@@ -63,7 +62,7 @@ name: Claude - oceń PR
 # także przy PR-ach wydaniowych do `stable`.
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review]
     # Bazy, których ocena dotyczy: zwykłe PR-y do `main` i PR-y wydaniowe
     # `main` -> `stable`. PR-y o innej bazie zostawiamy bez komentarza.
     branches: [main, stable]
@@ -149,13 +148,9 @@ jobs:
     # każdy komentarz pod PR-em tworzy bieg, a grupa na poziomie workflow
     # sprawiłaby, że zwykłe „dzięki" ubija trwającą ocenę, zanim bramka
     # zdąży je odsiać.
-    #
-    # Push do PR-a niczego nie ubija, tylko czeka w kolejce. Inaczej push
-    # zaraz po otwarciu przerwałby pierwszą ocenę, a sam, widząc już jej
-    # zapowiedź, zszedłby z drogi — i PR zostałby bez oceny.
     concurrency:
       group: claude-review-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
-      cancel-in-progress: ${{ github.event.action != 'synchronize' }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -172,7 +167,6 @@ jobs:
         id: pr
         env:
           N: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
-          ACTION: ${{ github.event.action }}
         run: |
           set -euo pipefail
 
@@ -208,23 +202,6 @@ jobs:
             fi
             echo "go=false" >> "$GITHUB_OUTPUT"
             exit 0
-          fi
-
-          # Push ocenia tylko PR, który oceny jeszcze nie dostał (patrz
-          # nagłówek). Znakiem jest zapowiedź z kroku niżej albo informacja
-          # o zmienionym workflow spod tego kroku — obie leżą pod PR-em także
-          # wtedy, gdy oceny nie było, a ponowienie to już sprawa `@claude`,
-          # nie każdego kolejnego pusha.
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-              && [ "$ACTION" = synchronize ]; then
-            hello=$(gh api --paginate "repos/$REPO/issues/$N/comments" \
-              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("🤔 Claude czyta ten PR") or startswith("⚪ Ten PR zmienia workflow oceny"))) | .id')
-            if [ -n "$hello" ]; then
-              echo "PR #$N ma już ocenę — push jej nie powtarza." \
-                | tee -a "$GITHUB_STEP_SUMMARY"
-              echo "go=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
           fi
 
           # Akcja Claude'a działa tylko z workflow identycznym jak na gałęzi
@@ -338,9 +315,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Jedna krótka linijka. Jej początek jest znakiem „ocena już była"
-          # dla pushy (krok „Ustal PR do oceny"), a zwinięty komentarz API
-          # dalej zwraca, więc znak działa także po zwinięciu.
           res=$(gh api "repos/$REPO/issues/$N/comments" \
             -f body="🤔 Claude czyta ten PR ([podgląd biegu](${RUN}))." \
             --jq '[.html_url, .node_id] | @tsv')

@@ -9,13 +9,14 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 | Plik | Co robi |
 |---|---|
-| `claude-review-pr.yml` | Ocena każdego nowego PR-a przez Claude'a; wynik nowym komentarzem i pingiem autora; nowa ocena zwija starsze do samego werdyktu. Kształt oceny: `.claude/commands/review-pr.md`. |
+| `claude-review-pr.yml` | Ocena PR-a przez Claude'a przy otwarciu i przy każdym wyjściu z wersji roboczej; wynik nowym komentarzem i pingiem autora; nowa ocena zwija starsze do samego werdyktu. Kształt oceny: `.claude/commands/review-pr.md`. |
 | `claude-issue.yml` | Solver: `@claude` pod zgłoszeniem, praca na gałęzi `claude/issue-<numer>`. |
 | `issue-labels.yml` | Etykiety stanu na zgłoszeniach wskazanych przez PR i zapasowe zamykanie po merge'u. |
 | `issue-triage.yml` | Etykieta `external` dla autorów spoza zespołu. |
 | `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. Zablokowanych nie rusza. |
 | `discord.yml` | Kanał repo na Discordzie z prawdziwymi pingami. |
-| `pr-conflicts.yml` | Po pushu do `main`: autor otwartego PR-a (poza szkicami), który ten push wpędził w konflikt z `main`, dostaje ping na Discordzie — raz na konflikt, nie po każdym kolejnym merge'u. Czekające prośby o recenzję takiego PR-a są zdejmowane. Logika w `.github/scripts/conflicts.sh`. |
+| `pr-conflicts.yml` | Po pushu do `main`: autor otwartego PR-a (także wersji roboczej), który ten push wpędził w konflikt z `main`, dostaje ping na Discordzie — raz na konflikt, nie po każdym kolejnym merge'u. Czekające prośby o recenzję takiego PR-a są zdejmowane, a gotowy PR wraca do wersji roboczej. Logika w `.github/scripts/conflicts.sh`. |
+| `pr-drafts.yml` | Gotowy PR do `main` nie dostaje zmian: push, który zmienia jego zmiany względem `main`, albo konflikt z `main` przy otwarciu i przy „Ready for review” przestawia go na wersję roboczą, z komentarzem o powodzie i zdjęciem próśb o recenzję. Push, który tylko dociąga `main` (diff PR-a bez zmian), zostawia go gotowym. Wyjście z wersji roboczej uruchamia ponowną ocenę Claude'a. Logika w `.github/scripts/drafts.sh`. |
 | `daily-digest.yml` | Co rano na Discordzie: postęp z wczoraj po karcie na osobę, potem karta „Ogólnie” z tym, co do zrobienia, i liczbami. |
 | `tests.yml` | Testy, odpalane wyłącznie ręcznie. |
 
@@ -59,3 +60,4 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
     PR, który zmienia `claude-review-pr.yml`, nie dostaje więc oceny przy
     otwarciu (zamiast niej idzie informacja); ocenia go `@claude`, a samą
     zmianę workflow widać w działaniu dopiero po merge'u.
+12. Wersja robocza to zwykły etap PR-a, nie powód do milczenia: gotowy PR wraca do niej przy każdej zmianie (`pr-drafts.yml`, `pr-conflicts.yml`). Nowy workflow, który pomija wersje robocze, musi mieć ku temu powód — dziś pomijają je tylko ocena Claude'a (przychodzi po „Ready for review”), etykiety stanu zgłoszeń i pingi w podsumowaniu dnia. Przestawienie robione naszym tokenem nie wywołuje `converted_to_draft` w innych workflow.

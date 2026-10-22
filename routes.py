@@ -2,6 +2,7 @@ import hashlib
 import http.client
 import json
 import math
+import re
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -34,6 +35,45 @@ LIVE_REFRESH_WAIT_SEC = 20
 # Tydzień rozkładu Siechnic to ~3 MB; sufit tylko po to, żeby przypadkowo
 # wybrany duży plik nie lądował cały w pamięci workera.
 SIECHNICE_MAX_BYTES = 30 * 1024 * 1024
+
+
+_LINK_POINT = re.compile(r"^-?\d{1,3}\.\d+,-?\d{1,3}\.\d+$")
+_LINK_TIME = re.compile(r"^\d{1,2}:\d{2}$")
+_LINK_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def link_preview(args):
+    """Tytuł i opis podglądu linku w komunikatorach (og:title, og:description)
+    z samych parametrów adresu - bez liczenia trasy, bo podgląd pobiera bot
+    przy każdym wklejeniu. Data jest bezwzględna ("22.10"), nigdy "jutro":
+    komunikatory trzymają podgląd w pamięci. Brak godziny to "teraz" i nie
+    ma o czym pisać, więc opis bywa pusty. Bez from i to None."""
+    def place(name):
+        return "punkt na mapie" if _LINK_POINT.match(name) else name
+
+    start = args.get("from", "").strip()
+    end = args.get("to", "").strip()
+    if end == "gps":     # cel z lokalizacji nie istnieje - pole zostaje puste
+        end = ""
+    if not start and not end:
+        return None
+    start_text = "Z Twojej lokalizacji" if start == "gps" else place(start)
+    if start and end:
+        title = f"{start_text} → {place(end)}"
+    elif end:
+        title = f"Trasa do: {place(end)}"
+    else:
+        title = f"Trasa z: {place(start)}" if start != "gps" else start_text
+    when = []
+    date = _LINK_DATE.match(args.get("date", ""))
+    if date:
+        when.append(f"{int(date.group(3))}.{date.group(2)}")
+    if _LINK_TIME.match(args.get("time", "")):
+        when.append(args["time"])
+    return {
+        "title": title,
+        "description": " · ".join(when),
+    }
 
 
 def _frontend_digest(app):
@@ -209,6 +249,7 @@ def init_routes(app):
             # do serwera wcale.
             form_date=datetime.now().strftime("%Y-%m-%d"),
             dev_mode=config.dev_mode(),
+            preview=link_preview(request.args),
         )
 
     @app.route("/sw.js")
