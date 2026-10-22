@@ -5771,9 +5771,14 @@ function schemeSvg(boxes, strands) {
     const DASH = 9;
     let rects = '', lines = '', names = '';
     for (const [id, b] of boxes) {
-        rects += `<g class="node" data-node="${id}"><rect class="scheme-box" x="${b.x}" y="${b.y}" `
-            + `width="${b.w}" height="${b.h}" rx="12"/></g>`;
-        names += `<text class="scheme-name" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+        // Miejsce, w którym mapa urywa linię, ale nie stawia kropki: ramka
+        // kreskowana, bez wypełnienia, z podpowiedzią.
+        const bare = b.node.bare ? ' bare' : '';
+        const title = b.node.bare
+            ? '<title>Tu linia kończy się na mapie, ale mapa nie stawia tu kropki</title>' : '';
+        rects += `<g class="node${bare}" data-node="${id}">${title}<rect class="scheme-box${bare}" `
+            + `x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12"/></g>`;
+        names += `<text class="scheme-name${bare}" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
     }
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.

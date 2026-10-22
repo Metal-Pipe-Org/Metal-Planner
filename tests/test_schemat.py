@@ -525,7 +525,7 @@ RECZNY = {
               {"id": "n1", "role": "stop", "place": "A"},
               {"id": "n2", "role": "stop", "place": "B"},
               {"id": "n3", "role": "stop", "place": "C"},
-              {"id": "n4", "role": "stop", "place": "D"},
+              {"id": "n4", "role": "stop", "place": "D", "bare": True},
               {"id": "n5", "role": "end"}],
     "edges": [
         {"from": "n0", "to": "n1", "lines": [{"num": "5", "kind": "tram", "chain": True},
@@ -586,6 +586,12 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
     # Jeden napis na grupę, ze wszystkimi numerami.
     numery = [b["lines"] for b in pomiar["badges"]]
     assert {"5", "6", "145 146", "149", "7 9"} <= set(numery)
+    # Miejsce bez kropki na mapie (D) wygląda inaczej niż kropki mapy i ma podpowiedź.
+    assert page.evaluate("document.querySelectorAll('rect.scheme-box').length") == 6
+    assert page.evaluate("""[...document.querySelectorAll('g.node.bare')].map(g => [
+        g.dataset.node, g.querySelector('rect').classList.contains('bare'),
+        g.querySelector('title').textContent])""") == [
+        ["n4", True, "Tu linia kończy się na mapie, ale mapa nie stawia tu kropki"]]
     _plakietki_na_kreskach(pomiar)
     # Miarą wyboru układu jest liczba przecięć kresek, które naprawdę rysujemy.
     assert page.evaluate("schemeCost(schemeLast.boxes, schemeLast.strands).total") >= 0
