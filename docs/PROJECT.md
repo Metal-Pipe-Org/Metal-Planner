@@ -167,7 +167,10 @@ chowa.
 ◎ (i zapisane miejsce, i odświeżanie poniżej) nie dotyka godziny ani daty.
 Godzina, której pasażer nie wpisał sam, jest „teraz" przy każdym szukaniu, więc
 trasa z pozycji liczy się od chwili szukania (#267); wpisana ręcznie zostaje,
-jaka była. Drugie kliknięcie ◎, gdy start już jest
+jaka była. Odświeżanie co 30 s jest ukrytą funkcją (#379): działa tylko z `DEV_MODE` i włączonym
+przełącznikiem „Odświeżanie lokalizacji co 30 s" w ⚙ → „Eksperymenty" (domyślnie
+wyłączony, pamiętany w localStorage). Bez niego ◎ za każdym razem tylko ustawia start na
+moją pozycję, a drugiego ◎ w zwiniętej karcie nie ma. Z przełącznikiem: drugie kliknięcie ◎, gdy start już jest
 moją pozycją, nie pyta o start, tylko przełącza **odświeżanie co 30 s**:
 włączone zapala ◎ (styl aktywnych przycisków, podpis „Wyłącz odświeżanie"),
 wyłączone wraca do zwykłego wyglądu („Odświeżaj co 30 s"). Włączenie odświeża

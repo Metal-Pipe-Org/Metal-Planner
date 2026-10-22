@@ -1088,16 +1088,18 @@ const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onbo
     „moja pozycja" i karta jest widoczna. Odświeżanie ma sens tylko przy takim
     starcie, więc jego utrata gasi też sam przycisk. */
 function syncAutoRefresh() {
-    if (!hereIsStart()) autoRefreshOn = false;
+    // Funkcja ukryta za przełącznikiem DEV (#379); bez niego ◎ tylko ustawia start.
+    const allowed = $('location-refresh').checked;
+    if (!hereIsStart() || !allowed) autoRefreshOn = false;
     const hint = autoRefreshOn ? 'Wyłącz odświeżanie'
-        : hereIsStart() ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
+        : hereIsStart() && allowed ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
     const label = autoRefreshOn
         ? 'Wyłącz odświeżanie mojej lokalizacji'
-        : hereIsStart() ? 'Odświeżaj moją lokalizację co 30 sekund'
+        : hereIsStart() && allowed ? 'Odświeżaj moją lokalizację co 30 sekund'
                         : 'Ustaw start na mojej lokalizacji';
     // Drugi ◎ siedzi w zwiniętej karcie telefonu (patrz phone.css) i pokazuje
     // to samo, co pierwszy - tylko przy starcie z mojej pozycji.
-    document.body.classList.toggle('here-start', hereIsStart());
+    document.body.classList.toggle('here-start', hereIsStart() && allowed);
     for (const button of [locateButton, locatePeek]) {
         button.classList.toggle('active', autoRefreshOn);
         button.setAttribute('aria-pressed', String(autoRefreshOn));
@@ -1172,7 +1174,7 @@ if (!navigator.geolocation) {
     locateButton.addEventListener('click', () => {
         // Drugie kliknięcie, gdy start już jest moją pozycją, nie pyta GPS-a o
         // start, tylko przełącza odświeżanie - pierwsze ma zostać zwykłym ◎.
-        if (hereIsStart()) {
+        if (hereIsStart() && $('location-refresh').checked) {
             toggleAutoRefresh();
             return;
         }
@@ -6433,6 +6435,15 @@ document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.check
 noPullRefresh.addEventListener('change', () => {
     saveDevPref('no-pull-refresh', noPullRefresh.checked);
     document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
+});
+
+// Odświeżanie lokalizacji co 30 s (#379): ukryta funkcja, tylko DEV - klucza nie
+// ma w DEV_PREFS_USER, więc bez DEV_MODE zapisana wartość nie działa.
+const locationRefresh = $('location-refresh');
+locationRefresh.checked = loadDevPrefs()['location-refresh'] === true;
+locationRefresh.addEventListener('change', () => {
+    saveDevPref('location-refresh', locationRefresh.checked);
+    syncAutoRefresh();
 });
 
 // Przystanki po drodze rozwinięte od razu (opcja w „Wyglądzie aplikacji",
