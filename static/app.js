@@ -5300,21 +5300,57 @@ const schemeKey = line => `${line.kind}|${line.num}`;
     byłyby jedną kreską, która w pudełku się rozdwaja. */
 function schemeSplitEdges(scheme) {
     const edges = scheme.edges;
-    const idxOf = (edge, line, dir) => edges.findIndex(o => (dir === 'dst'
-        ? o.from === edge.to : o.to === edge.from)
-        && o.lines.some(m => m.chain && schemeKey(m) === schemeKey(line)));
-    const out = [];
-    for (const edge of edges) {
-        const groups = new Map();
-        for (const line of edge.lines) {
-            const dst = line.chain ? idxOf(edge, line, 'dst') : -1;
-            const src = line.chain ? idxOf(edge, line, 'src') : 's';
-            const key = `${dst}|${src}`;
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key).push(line);
+    // Rekord na każdą linię każdego odcinka: jej następnik i poprzednik, czyli
+    // ta sama linia (`chain` po obu stronach węzła) na odcinku za węzłem albo
+    // przed nim.
+    const records = edges.map((edge, e) => edge.lines.map(line => ({e, line, group: ''})));
+    const find = (edge, line, dir) => {
+        const f = edges.findIndex(o => (dir === 'dst' ? o.from === edge.to : o.to === edge.from)
+            && o.lines.some(m => m.chain && schemeKey(m) === schemeKey(line)));
+        return f < 0 ? null : records[f].find(r => schemeKey(r.line) === schemeKey(line));
+    };
+    for (const list of records) {
+        for (const r of list) {
+            r.next = r.line.chain ? find(edges[r.e], r.line, 'dst') : null;
+            r.prev = r.line.chain ? find(edges[r.e], r.line, 'src') : null;
+            r.group = `${r.next ? r.next.e : -1}|${r.prev ? r.prev.e : -1}`;
         }
-        for (const lines of groups.values()) out.push({...edge, lines});
     }
+    // Grupa, której linie jadą dalej w różne grupy (albo skądś zbiegają się
+    // z różnych grup), rozpada się na osobne kreski - inaczej w pudełku
+    // trzeba by ją łączyć bokiem. Wysiadanie i wsiadanie tu nie liczą się:
+    // dla nich jest odnoga. Do skutku, bo rozpad idzie wzdłuż całej jazdy.
+    for (let pass = 0; pass < 24; pass++) {
+        let changed = false;
+        for (const list of records) {
+            const groups = new Map();
+            for (const r of list) {
+                if (!groups.has(r.group)) groups.set(r.group, []);
+                groups.get(r.group).push(r);
+            }
+            for (const [group, members] of groups) {
+                const nexts = [...new Set(members.filter(r => r.next).map(r => `${r.next.e}:${r.next.group}`))];
+                const prevs = [...new Set(members.filter(r => r.prev).map(r => `${r.prev.e}:${r.prev.group}`))];
+                if (nexts.length < 2 && prevs.length < 2) continue;
+                for (const r of members) {
+                    const n = r.next ? `${r.next.e}:${r.next.group}` : nexts[0];
+                    const pv = r.prev ? `${r.prev.e}:${r.prev.group}` : prevs[0];
+                    r.group = `${group}#${nexts.length > 1 ? n : ''}#${prevs.length > 1 ? pv : ''}`;
+                }
+                changed = true;
+            }
+        }
+        if (!changed) break;
+    }
+    const out = [];
+    records.forEach((list, e) => {
+        const groups = new Map();
+        for (const r of list) {
+            if (!groups.has(r.group)) groups.set(r.group, []);
+            groups.get(r.group).push(r.line);
+        }
+        for (const lines of groups.values()) out.push({...edges[e], lines});
+    });
     return out;
 }
 
@@ -5567,27 +5603,62 @@ function strandSamples(s, steps = 24) {
     return out;
 }
 
-/** Ile razy kreski schematu się przecinają (zapisane tak, jak je rysujemy:
-    krzywe po odcinkach próbek). Przecięcia kresek połączonych przez pudełko
-    się nie liczą. To miara, po której wybieramy układ. */
-function schemeCrossings(strands) {
-    const polylines = strands.map(s => strandSamples(s, 8));
+/** Koszt układu schematu, po którym go wybieramy: przecięcia kresek (te
+    w pudełkach liczą się czterokrotnie), kreski wchodzące w pudełka, przez
+    które nie przejeżdżają, i boczne łączenia w pudełkach. Liczone na tym, co
+    naprawdę rysujemy: kreskach, prostych przejazdach przez pudełka,
+    łączeniach i odnogach. */
+function schemeCost(boxes, strands) {
+    const boxList = [...boxes.values()];
+    const items = [];
+    const add = (points, owner, skip, kind) => items.push({points, owner, skip, kind});
+    for (const s of strands) {
+        add(strandSamples(s, 8), s, [s.from, s.to], 'strand');
+        const [x, top] = s.points[s.points.length - 1];
+        if (s.next) add([[x, top], [x, boxes.get(s.to).y + boxes.get(s.to).h]], s, [s.to], 'through');
+        for (const merge of s.merges) {
+            const target = merge.to.points[0];
+            add(strandSamples({curved: true, points: [[x, top], target]}, 8), s, [s.to], 'merge');
+        }
+    }
+    for (const branch of schemeBranches(boxes, strands)) {
+        add(strandSamples(branch, 8), branch.owner, [branch.owner.to], 'branch');
+    }
     const orient = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
-    let count = 0;
-    for (let i = 0; i < strands.length; i++) {
-        for (let j = i + 1; j < strands.length; j++) {
-            if (strands[i].next === strands[j] || strands[j].next === strands[i]) continue;
-            const p = polylines[i], q = polylines[j];
-            for (let a = 1; a < p.length; a++) {
-                for (let b = 1; b < q.length; b++) {
-                    const o1 = orient(p[a - 1], p[a], q[b - 1]), o2 = orient(p[a - 1], p[a], q[b]);
-                    const o3 = orient(q[b - 1], q[b], p[a - 1]), o4 = orient(q[b - 1], q[b], p[a]);
-                    if (o1 * o2 < 0 && o3 * o4 < 0) count++;
+    const inside = (x, y) => boxList.some(b => x > b.x + 1 && x < b.x + b.w - 1
+        && y > b.y + 1 && y < b.y + b.h - 1);
+    const cost = {cross: 0, inBox: 0, foreign: 0, merges: 0, total: 0};
+    for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+            const p = items[i], q = items[j];
+            if (p.owner === q.owner || p.owner.next === q.owner || q.owner.next === p.owner) continue;
+            for (let a = 1; a < p.points.length; a++) {
+                for (let b = 1; b < q.points.length; b++) {
+                    const [p1, p2, q1, q2] = [p.points[a - 1], p.points[a], q.points[b - 1], q.points[b]];
+                    if (orient(p1, p2, q1) * orient(p1, p2, q2) >= 0
+                        || orient(q1, q2, p1) * orient(q1, q2, p2) >= 0) continue;
+                    const d = (q2[0] - q1[0]) * (p2[1] - p1[1]) - (q2[1] - q1[1]) * (p2[0] - p1[0]);
+                    const t = ((q1[0] - p1[0]) * (q2[1] - q1[1]) - (q1[1] - p1[1]) * (q2[0] - q1[0])) / d;
+                    if (inside(p1[0] + t * (p2[0] - p1[0]), p1[1] + t * (p2[1] - p1[1]))) cost.inBox++;
+                    else cost.cross++;
                 }
             }
         }
+        const item = items[i];
+        if (item.kind === 'merge') {
+            const [x0] = item.points[0], [x1] = item.points[item.points.length - 1];
+            cost.merges += 2 + Math.abs(x1 - x0) / 30;
+        }
+        if (item.kind === 'strand' || item.kind === 'branch') {
+            for (const b of boxList) {
+                if (item.skip.includes([...boxes].find(([, box]) => box === b)[0])) continue;
+                if (item.points.some(([x, y]) => x > b.x - 2 && x < b.x + b.w + 2
+                                                 && y > b.y - 2 && y < b.y + b.h + 2)) cost.foreign++;
+            }
+        }
     }
-    return count;
+    cost.total = cost.cross + 4 * cost.inBox + 6 * cost.foreign + cost.merges;
+    return cost;
 }
 
 function pointAlong(samples, fraction) {
@@ -5799,9 +5870,9 @@ function renderScheme(data) {
                 const trialStrands = schemeStrands(scheme);
                 const trialBoxes = schemeBoxes(scheme, trialStrands, data);
                 layoutDagre(lib, scheme, trialBoxes, trialStrands, seed);
-                const crossings = schemeCrossings(trialStrands);
-                if (!best || crossings < best.crossings) best = {boxes: trialBoxes, strands: trialStrands, crossings};
-                if (!crossings) break;
+                const cost = schemeCost(trialBoxes, trialStrands).total;
+                if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost};
+                if (!cost) break;
             }
             finish(best.boxes, best.strands);
         });

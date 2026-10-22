@@ -525,7 +525,7 @@ def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
     context.close()
 
 
-# Graf ręcznie: grupa 5+6 (tramwaj i autobus) jedzie od startu przez A do B,
+# Graf ręcznie: 5 (tramwaj) i 6 (autobus) jadą od startu przez A do B,
 # na B 6 wysiada, a 5 jedzie dalej do celu. Grupa 145+146+149 (same autobusy)
 # dzieli się na C: 145 146 jadą do celu, 149 do D; 7 (tramwaj) jedzie ze startu
 # prosto do celu.
@@ -549,7 +549,8 @@ RECZNY = {
                                               {"num": "146", "kind": "bus", "chain": True}]},
         {"from": "n3", "to": "n4", "lines": [{"num": "149", "kind": "bus", "chain": True}]},
         {"from": "n4", "to": "n5", "lines": [{"num": "149", "kind": "bus"}]},
-        {"from": "n0", "to": "n5", "lines": [{"num": "7", "kind": "tram"}]},
+        {"from": "n0", "to": "n5", "lines": [{"num": "7", "kind": "tram"},
+                                              {"num": "9", "kind": "bus"}]},
     ],
     "order": [],
 }
@@ -567,41 +568,35 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
     po_miejscu = {n["id"]: n.get("place") or n["role"] for n in RECZNY["nodes"]}
     box = {po_miejscu[b["id"]]: b for b in pomiar["boxes"]}
     zwykle = [p for p in pomiar["paths"] if not p["through"] and not p["branch"]]
-    # Linie jadą jedną kreską tylko z tymi, z którymi mają ten sam los: 5 6 do A
-    # to jedna kreska, ale w B 6 wysiada, a 5 jedzie dalej, więc dalej są to
-    # dwie kreski; 145 146 149 do C dzieli się na 145 146 i 149 jeszcze przed C.
-    assert len(zwykle) == 10
-    assert not [p for p in pomiar["paths"] if p["branch"]]
+    # Linie jadą jedną kreską tylko z tymi, z którymi mają ten sam los: 5 i 6
+    # jadą do B osobno, bo za A idą w różne odcinki (a dwie kreski w jednym
+    # pudełku nigdy nie łączą się bokiem); 145 146 149 dzieli się na 145 146
+    # i 149 jeszcze przed C. Reszta jedzie parami do celu.
+    assert len(zwykle) == 11
+    assert not [p for p in pomiar["paths"] if p["branch"] or p["merge"]]
 
     def koniec(lines, gdzie):
         return [p for p in zwykle if p["lines"] == lines and _koniec_na_pudelku(p, box[gdzie])]
 
-    # Przez pudełka przechodzą TYLKO linie, które jadą dalej, prostą kreską:
-    # 5 przez A i B, 145 146 i 149 przez C. 6 zlewa się w A z 5 krótkim
-    # łączeniem (dwie grupy przez jeden węzeł), nie prostą kreską.
+    # Przez pudełka przechodzą TYLKO linie, które jadą dalej, prostą kreską.
     assert {(l, po_miejscu[i]) for l, i in _przejazdy(pomiar)} == {
-        ("5", "A"), ("5", "B"), ("145 146", "C"), ("149", "C")}
-    assert [p["lines"] for p in pomiar["paths"] if p["merge"]] == ["6"]
-    # Strzałka tylko tam, gdzie się wysiada: 6 w B, 5 i 145 146 w celu, 149 w D
-    # i w celu, 7 w celu. Odcinki, po których wszyscy jadą dalej, jej nie mają.
-    assert koniec("5 6", "A")[0]["marker"] is None
-    assert koniec("5", "B")[0]["marker"] is None
-    assert koniec("6", "B")[0]["marker"]
-    assert koniec("145 146", "C")[0]["marker"] is None
-    assert koniec("149", "C")[0]["marker"] is None
-    assert koniec("5", "end")[0]["marker"]
-    assert koniec("145 146", "end")[0]["marker"]
-    assert koniec("149", "D")[0]["marker"]
-    assert koniec("149", "end")[0]["marker"]
-    assert koniec("7", "end")[0]["marker"]
-    # Grupa mieszana ma oba kolory (tramwaj i autobus), czysta - jeden.
-    assert sorted(koniec("5 6", "A")[0]["colors"]) == sorted(["#c62828", "#1565c0"])
+        ("5", "A"), ("6", "A"), ("5", "B"), ("145 146", "C"), ("149", "C")}
+    # Strzałka tylko tam, gdzie się naprawdę wysiada: 6 w B, 5 i 145 146 w celu,
+    # 149 w D i w celu, 7 9 w celu. Odcinki, po których wszyscy jadą dalej, jej
+    # nie mają.
+    for lines, gdzie in [("5", "A"), ("6", "A"), ("5", "B"), ("145 146", "C"), ("149", "C")]:
+        assert koniec(lines, gdzie)[0]["marker"] is None
+    for lines, gdzie in [("6", "B"), ("5", "end"), ("145 146", "end"), ("149", "D"),
+                         ("149", "end"), ("7 9", "end")]:
+        assert koniec(lines, gdzie)[0]["marker"]
+    # Grupa z tramwaju i autobusu ma oba kolory, czysta - jeden.
+    assert sorted(koniec("7 9", "end")[0]["colors"]) == sorted(["#c62828", "#1565c0"])
     assert koniec("145 146", "C")[0]["colors"] == ["#1565c0"]
     # Jeden napis na grupę, ze wszystkimi numerami.
     numery = [b["lines"] for b in pomiar["badges"]]
-    assert {"5 6", "5", "6", "145 146", "149"} <= set(numery)
+    assert {"5", "6", "145 146", "149", "7 9"} <= set(numery)
     _plakietki_na_kreskach(pomiar)
     # Miarą wyboru układu jest liczba przecięć kresek, które naprawdę rysujemy.
-    assert isinstance(page.evaluate("schemeCrossings(schemeLast.strands)"), int)
+    assert page.evaluate("schemeCost(schemeLast.boxes, schemeLast.strands).total") >= 0
     assert page.errors == []
     context.close()
