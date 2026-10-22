@@ -20,6 +20,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 11. Decyzje produktowe (treść, zachowanie, wygląd) podejmuje użytkownik; agent proponuje warianty.
 12. Kod zmieniają tylko agenci, każdy w swoim worktree. Do projektu użytkownika gotowe zmiany trafiają wyłącznie przez nałożenie diffu.
 25. Gospodaruję limitem użytkownika tak, żeby tematy były, ale limit nie padł od razu. Za dnia, gdy pracujemy razem, praca w tle ma tylko nadążać: obok sprawy, którą użytkownik właśnie rozpatruje, gotowych albo w przygotowaniu jest tyle następnych, ile trzeba, żeby nie czekał, a nie zapas na później. Gdy żadna nie czeka, pytam, co przygotowujemy dalej, i nie wybieram sam. Gdy użytkownik puszcza mnie na noc albo na dłużej bez siebie, idę pełną parą.
+26. Przy wspólnym dopracowywaniu sprawy kolejna wersja do obejrzenia przychodzi jak najszybciej; sprawdzanie nie może jej opóźniać ponad potrzebę. Do PR-a zmiana idzie w pełni sprawdzona.
 
 ## Projekt użytkownika i git
 
