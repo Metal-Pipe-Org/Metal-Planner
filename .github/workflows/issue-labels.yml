@@ -65,6 +65,7 @@ permissions:
 
 env:
   LABEL_PROGRESS: "PR in progress"
+  LABEL_STALE: "stale"
   # Dawne etykiety, które znaczyły to samo co "PR in progress". Zgłoszenia
   # mogą je jeszcze nosić, więc traktujemy je jak jej aliasy: schodzą razem
   # z nią. Lista do skasowania, gdy żadne zgłoszenie już ich nie ma.
@@ -192,6 +193,15 @@ jobs:
               done < <(printf '%s' "$json" | jq -r --arg keep "$label" \
                 '[$ENV.LABEL_PROGRESS, $ENV.LABEL_MERGED] + ($ENV.LABELS_LEGACY | split("|")) as $ours
                 | .labels[].name | select(. != $keep and IN($ours[]))')
+
+              # Etykiety nadane naszym tokenem nie budzą stale-unlabel.yml,
+              # więc „stale" zdejmujemy tu: PR to aktywność, a zgłoszenie
+              # z PR-em nie jest zapomniane.
+              if [ "$label" = "$LABEL_PROGRESS" ] && printf '%s' "$json" \
+                   | jq -e --arg l "$LABEL_STALE" 'any(.labels[]; .name == $l)' > /dev/null; then
+                args+=(--remove-label "$LABEL_STALE")
+                echo "#$n: zdejmuję \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
 
               gh issue edit "$n" --repo "$REPO" "${args[@]}"
               echo "#$n: etykieta \"$label\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"

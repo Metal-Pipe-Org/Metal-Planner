@@ -1,0 +1,102 @@
+name: "Zgłoszenia: zdjęcie stale od razu"
+
+# Bieg dzienny (stale-issues.yml) zdejmuje etykietę "stale" dopiero następnego
+# dnia. Tu robimy to w chwili, gdy:
+#
+#  • człowiek odpisze pod zgłoszeniem albo otworzy je ponownie — decyzję i
+#    definicję aktywności bierzemy z tego samego skryptu co bieg dzienny
+#    (.github/scripts/stale.sh), więc oba biegi nie rozjadą się w tym, co
+#    liczy się jako odpowiedź,
+#  • człowiek da zgłoszeniu etykietę "external blocked" albo "PR in progress"
+#    (zablokowane nie powinno nosić "stale"; PR to aktywność),
+#  • zgłoszenie jest zablokowane przez inne ("Blocked by") i ktoś pod nim
+#    napisze — "stale" nie ma tam czego szukać.
+#
+# Czego GitHub nie zamienia na zdarzenie workflow: dodania GitHubowego
+# „Blocked by" (nie ma takiego zdarzenia wśród wyzwalaczy Actions). Tu "stale"
+# zdejmie dopiero bieg dzienny. Commit wskazujący na zgłoszenie nie jest
+# aktywnością w ogóle. Etykietę "PR in progress" nadaną przez workflow zdejmuje z "stale"
+# sam issue-labels.yml, bo etykiety nadane tokenem workflow nie budzą innych.
+#
+# Wpisy botów nie uruchamiają nic: bieg dzienny też ich nie liczy jako
+# aktywności. Samo zdjęcie etykiety nie jest wśród wyzwalaczy, więc pętli nie
+# ma. Rodzica z otwartymi pod-zgłoszeniami zostawiamy tak samo jak bieg
+# dzienny.
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [reopened, labeled]
+
+permissions:
+  issues: write
+  contents: read
+
+env:
+  LABEL_STALE: "stale"
+  DAYS_QUIET: 14
+  DAYS_GRACE: 7
+  MARKER: "<!-- stale-ping -->"
+
+jobs:
+  unlabel:
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && !github.event.issue.pull_request
+      && github.event.sender.type != 'Bot'
+      && contains(github.event.issue.labels.*.name, 'stale')
+      && (github.event.action != 'labeled'
+          || github.event.label.name == 'external blocked'
+          || github.event.label.name == 'PR in progress')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Dwa wpisy pod rząd nie mogą się mijać na jednym zgłoszeniu.
+    concurrency:
+      group: stale-unlabel-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      N: ${{ github.event.issue.number }}
+      LABELED: ${{ github.event.label.name }}
+
+    steps:
+      - name: Pobierz skrypt z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .scripts
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Zdejmij stale, jeśli ktoś odpisał po przypomnieniu
+        run: |
+          set -euo pipefail
+          source .scripts/.github/scripts/stale.sh
+
+          gh api "repos/$REPO/issues/$N" > "$RUNNER_TEMP/issue.json"
+
+          # Zablokowane albo z PR-em: zdejmujemy bez oglądania osi czasu.
+          if [ "$LABELED" = 'external blocked' ] || [ "$LABELED" = 'PR in progress' ] \
+             || [ "$(jq '[.labels[].name] | index("external blocked") != null or (.issue_dependencies_summary.blocked_by // 0) > 0' "$RUNNER_TEMP/issue.json")" = true ]; then
+            gh issue edit "$N" --repo "$REPO" --remove-label "$LABEL_STALE"
+            echo "#$N: zablokowane albo z PR-em — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -n "$(gh api --paginate "repos/$REPO/issues/$N/sub_issues?per_page=100" \
+               --jq '.[] | select(.state == "open") | .number')" ]; then
+            echo "Są otwarte pod-zgłoszenia — zostawiam."; exit 0
+          fi
+
+          gh api --paginate "repos/$REPO/issues/$N/timeline?per_page=100" --jq '.[]' \
+            | jq -s . > "$RUNNER_TEMP/timeline.json"
+
+          action=$(stale_action "$RUNNER_TEMP/issue.json" "$RUNNER_TEMP/timeline.json" \
+            "$MARKER" "$LABEL_STALE" "$DAYS_QUIET" "$DAYS_GRACE")
+
+          if [ "$action" = unlabel ]; then
+            gh issue edit "$N" --repo "$REPO" --remove-label "$LABEL_STALE"
+            echo "#$N: ktoś odpisał — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

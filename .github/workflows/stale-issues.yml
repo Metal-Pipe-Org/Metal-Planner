@@ -6,8 +6,8 @@ name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 # się je odnaleźć, a otwiera się je jednym kliknięciem.
 #
 # Aktywność to coś, co znaczy, że ktoś się tematem zajmuje: założenie
-# zgłoszenia, wpis człowieka, PR albo commit, który na nie wskazuje, PR
-# podpięty ręcznie i ponowne otwarcie przez człowieka. To ostatnie musi być
+# zgłoszenia, wpis człowieka, PR, który na nie wskazuje, PR podpięty
+# ręcznie i ponowne otwarcie przez człowieka. To ostatnie musi być
 # na liście — inaczej zgłoszenie otwarte bez komentarza po naszym zamknięciu
 # miałoby stare przypomnienie nowsze od ostatniej aktywności i następny bieg
 # zamknąłby je z powrotem.
@@ -19,7 +19,7 @@ name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 # Nie ruszamy:
 #  • zgłoszeń z etykietą "external blocked" albo zablokowanych przez inne,
 #    wciąż otwarte zgłoszenie (GitHubowe „Blocked by") — czekają na coś poza
-#    nimi, więc cisza jest tam spodziewana,
+#    nimi, więc cisza jest tam spodziewana; jeśli mają "stale", zdejmujemy ją,
 #  • rodziców z otwartymi pod-zgłoszeniami — praca toczy się w dzieciach,
 #    a do rodzica nikt nie pisze. Gdy ostatnie dziecko się zamknie, rodzic
 #    wraca pod zwykłą zasadę od razu: jeśli sam milczy od 14 dni, dostaje
@@ -27,6 +27,8 @@ name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 #
 # Etykietę "stale" zdejmujemy tylko wtedy, gdy jest nasze przypomnienie
 # i ktoś po nim odpisał. Nadaną ręcznie bez przypomnienia zostawiamy.
+# Zwykle zdejmuje ją od razu stale-unlabel.yml, z tą samą decyzją
+# (.github/scripts/stale.sh); bieg dzienny łapie to, co tamten przegapił.
 #
 # Bieg raz dziennie. Cron chodzi w UTC. Nierówna minuta z rozmysłem — biegi
 # planowane na pełne godziny czekają w kolejce GitHuba najdłużej. Jak każdy
@@ -76,22 +78,35 @@ jobs:
         run: |
           set -euo pipefail
           source .discord/.github/scripts/discord.sh
+          source .discord/.github/scripts/stale.sh
 
           # Gdy etykieta już jest (np. założona ręcznie), zostaje jak jest.
           gh label create "$LABEL_STALE" --repo "$REPO" --color EDEDED \
             --description "Cisza w zgłoszeniu — przypomnienie wysłane albo zamknięte po ciszy" || true
 
+          # Zablokowane ("external blocked" albo GitHubowe „Blocked by") czekają
+          # na coś poza sobą, więc nie dostają przypomnień, a "stale" im
+          # zdejmujemy: ma sens tylko tam, gdzie cisza jest niespodziewana.
           gh api --paginate "repos/$REPO/issues?state=open&per_page=100" \
             --jq '.[]
                   | select(.pull_request | not)
-                  | select(any(.labels[]; .name == "external blocked") | not)
-                  | select((.issue_dependencies_summary.blocked_by // 0) == 0)
-                  | "\(.number) \(.sub_issues_summary.total // 0)"' > "$RUNNER_TEMP/open.txt"
+                  | (any(.labels[]; .name == "external blocked")
+                     or (.issue_dependencies_summary.blocked_by // 0) > 0) as $blocked
+                  | "\(.number) \(.sub_issues_summary.total // 0) \($blocked) \(any(.labels[]; .name == "stale"))"' \
+            > "$RUNNER_TEMP/open.txt"
 
           # Pętla czyta z fd 3, żeby żadne `gh` w środku nie zjadło jej wejścia.
           # Zgłoszenie i komentarze idą przez pliki, nie argumenty — długi wątek
           # przekroczyłby limit długości argumentu.
-          while read -r n subs <&3; do
+          while read -r n subs blocked labeled <&3; do
+            if [ "$blocked" = true ]; then
+              if [ "$labeled" = true ]; then
+                gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL_STALE"
+                echo "#$n: zablokowane — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
             # Stan dzieci sprawdzamy wprost, a nie licznikiem `completed`
             # z podsumowania — nie mamy pewności, że liczy też zamknięte
             # jako „not planned", a od tego zależy, czy rodzic w ogóle wróci.
@@ -105,32 +120,8 @@ jobs:
               | jq -s . > "$RUNNER_TEMP/timeline.json"
 
             # Jedna decyzja na zgłoszenie: ping / close / unlabel / nic.
-            action=$(jq -nr \
-              --slurpfile i "$RUNNER_TEMP/issue.json" --slurpfile t "$RUNNER_TEMP/timeline.json" \
-              --arg marker "$MARKER" --arg label "$LABEL_STALE" \
-              --argjson quiet "$DAYS_QUIET" --argjson grace "$DAYS_GRACE" '
-                def ts: fromdateiso8601;
-                $i[0] as $issue | $t[0] as $events |
-
-                ([$issue.created_at | ts]
-                  + [$events[]
-                     | select(
-                         (.event == "commented" and .user.type != "Bot")
-                         or (.event == "cross-referenced" and .source.issue.pull_request != null)
-                         or .event == "referenced"
-                         or .event == "connected"
-                         or (.event == "reopened" and .actor.type != "Bot"))
-                     | .created_at | ts]
-                  | max) as $active
-                | ([$events[]
-                    | select(.event == "commented" and .user.type == "Bot" and (.body | contains($marker)))
-                    | .created_at | ts] | max) as $ping
-                | (any($issue.labels[]; .name == $label)) as $labeled
-                | if $ping != null and $ping > $active then
-                    (if now - $ping >= $grace * 86400 then "close" else "none" end)
-                  elif now - $active >= $quiet * 86400 then "ping"
-                  elif $ping != null and $labeled then "unlabel"
-                  else "none" end')
+            action=$(stale_action "$RUNNER_TEMP/issue.json" "$RUNNER_TEMP/timeline.json" \
+              "$MARKER" "$LABEL_STALE" "$DAYS_QUIET" "$DAYS_GRACE")
 
             # Autor najlepiej wie, czy temat jest nadal potrzebny, a przypisani
             # powinni wiedzieć, że to, co mają na sobie, stoi. Autor przypisany
