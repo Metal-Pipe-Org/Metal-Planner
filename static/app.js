@@ -5712,7 +5712,7 @@ function schemeBadges(boxes, strands, branches) {
             x += widths[i] + GAP;
             return t;
         }).join('');
-        out += `<g class="scheme-badge" data-lines="${esc(s.label)}" data-cx="${spot.cx.toFixed(1)}" `
+        out += `<g class="scheme-badge" data-lines="${escAttr(s.label)}" data-cx="${spot.cx.toFixed(1)}" `
             + `data-cy="${spot.cy.toFixed(1)}"><rect x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" `
             + `width="${w.toFixed(1)}" height="${H}" rx="9"/>${texts}</g>`;
     }
