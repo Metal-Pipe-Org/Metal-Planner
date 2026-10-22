@@ -1234,7 +1234,9 @@ function fitTo(points) {
         options.paddingBottomRight = [gutter, inset.bottom];
     } else {
         options.paddingTopLeft = [panelVisible ? sidebar.offsetWidth + gutter : gutter, gutter];
-        options.paddingBottomRight = [gutter, gutter];
+        // Schemat (eksperyment „nowa mapa”) stoi po prawej - trasa ma się
+        // zmieścić obok niego, nie pod nim.
+        options.paddingBottomRight = [gutter + schemeInset(), gutter];
     }
     map.fitBounds(L.latLngBounds(points), options);
 }
@@ -4960,6 +4962,7 @@ function resetResults() {
     clearFlow();
     hideObWarn();
     renderVehicles();
+    renderScheme(null);
     resultsBox.innerHTML = '';
     setTabCount(0);
 }
@@ -4992,6 +4995,7 @@ function queryParams() {
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
         newmap: $('new-map').checked ? '1' : '0',
+        walking: $('walking').checked ? '1' : '0',
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
@@ -5212,6 +5216,804 @@ function renderPlan(data, refit) {
     renderVehicles();            // nowa mapa - inne linie, inne pojazdy
     renderList(data);
     warnOnboardRide(data.onboard);
+    renderScheme(data);
+}
+
+// ------------------------------------------- schemat obok mapy (#367) --
+//
+// Eksperyment „nowa mapa”: ta sama mapa zdjęta z geografii - te same kropki
+// przesiadek, start na górze, cel na dole, jedna linia to jedna jazda od
+// wsiadania do wysiadania. Graf składa serwer (pole `scheme`, patrz
+// planner._scheme), bo tylko on wie, gdzie podróże z mapy wysiadają i dokąd
+// dochodzą pieszo. Biblioteka ELK liczy tylko położenie pudełek, a kreski
+// i napisy rysujemy sami: linia, która przez węzeł tylko przejeżdża, ma
+// iść przez jego pudełko jedną ciągłą kreską, a to nie jest coś, co układacz
+// strzałek umie narysować. ELK przychodzi z sieci dopiero przy pierwszym
+// schemacie - bez przełącznika strona go w ogóle nie pobiera.
+const ELK_URL = 'https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js';
+const DAGRE_URL = 'https://cdn.jsdelivr.net/npm/@dagrejs/dagre@1.1.4/dist/dagre.min.js';
+let elkReady = null;
+let dagreReady = null;
+let lastSchemeData = null;
+let schemeToken = 0;
+let schemeCollapsed = !!uiState.schemeCollapsed;
+// Przybliżenie i przesunięcie rysunku w panelu: rysunek po „Pokaż więcej”
+// bywa kilka razy szerszy niż panel, więc trzeba go dać obejrzeć z bliska.
+const schemeView = {scale: 1, x: 0, y: 0};
+const SCHEME_MIN_SCALE = 0.1;
+const SCHEME_MAX_SCALE = 4;
+// Węzeł, którego tablica jest teraz w dymku (patrz showSchemeTip).
+let schemeTipOwner = null;
+
+const SCHEME_BOX_H = 38;
+const SCHEME_LANE = 30;       // odstęp między sąsiednimi liniami przy pudełku
+const SCHEME_MARGIN = 28;
+
+function loadElk() {
+    if (!elkReady) {
+        elkReady = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = ELK_URL;
+            script.onload = () => resolve(new ELK());
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+    return elkReady;
+}
+
+function loadDagre() {
+    if (!dagreReady) {
+        dagreReady = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = DAGRE_URL;
+            script.onload = () => resolve(dagre);
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+    return dagreReady;
+}
+
+let schemeMeasure = null;
+function schemeTextWidth(text) {
+    schemeMeasure = schemeMeasure || document.createElement('canvas').getContext('2d');
+    schemeMeasure.font = '600 13px system-ui, sans-serif';
+    return schemeMeasure.measureText(text).width;
+}
+
+const schemeKey = line => `${line.kind}|${line.num}`;
+
+/** Jedna kreska na jednym odcinku między dwoma węzłami: wszystkie linie
+    jadące tym odcinkiem naraz (tak jak jedna grupka numerków na mapie).
+    Linie, które w węźle jadą dalej (serwer oznacza to `chain` po obu stronach
+    węzła), idą przez jego pudełko prostą kreską do następnego odcinka -
+    także gdy skład grupy się tam zmienia (`through`). Linie, które w tym
+    węźle wysiadają, odchodzą od kreski krótką odnogą ze strzałką w pudełko
+    (`alight`, patrz schemeBranches); strzałką kończy się cały odcinek tylko
+    wtedy, gdy nic nie jedzie dalej. */
+/** Linie jadą jedną kreską tylko wtedy, gdy mają ten sam los przy następnym
+    pudełku (jadą dalej tą samą krawędzią albo wysiadają) i to samo
+    pochodzenie przy poprzednim - inaczej wysiadająca 18 i jadąca dalej 145
+    byłyby jedną kreską, która w pudełku się rozdwaja. */
+function schemeSplitEdges(scheme) {
+    const edges = scheme.edges;
+    const idxOf = (edge, line, dir) => edges.findIndex(o => (dir === 'dst'
+        ? o.from === edge.to : o.to === edge.from)
+        && o.lines.some(m => m.chain && schemeKey(m) === schemeKey(line)));
+    const out = [];
+    for (const edge of edges) {
+        const groups = new Map();
+        for (const line of edge.lines) {
+            const dst = line.chain ? idxOf(edge, line, 'dst') : -1;
+            const src = line.chain ? idxOf(edge, line, 'src') : 's';
+            const key = `${dst}|${src}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(line);
+        }
+        for (const lines of groups.values()) out.push({...edge, lines});
+    }
+    return out;
+}
+
+function schemeStrands(scheme) {
+    const strands = schemeSplitEdges(scheme).map(edge => ({
+        from: edge.from, to: edge.to, lines: edge.lines, next: null, prev: null,
+        label: edge.lines.map(line => line.num).join(' '),
+    }));
+    const pairs = [];
+    for (const a of strands) {
+        for (const b of strands) {
+            if (b.from !== a.to) continue;
+            const shared = a.lines.filter(line => line.chain
+                && b.lines.some(o => o.chain && schemeKey(o) === schemeKey(line)));
+            if (shared.length) pairs.push({a, b, shared});
+        }
+    }
+    // Najwięcej wspólnych linii pierwsze: to ona jest „główną” kreską przez węzeł.
+    pairs.sort((p, q) => q.shared.length - p.shared.length);
+    for (const strand of strands) strand.merges = [];
+    for (const {a, b, shared} of pairs) {
+        if (a.next || b.prev) {
+            // Druga linia „na wprost” przez ten sam węzeł (dwie grupy zlewają
+            // się albo rozchodzą): krótkie łączenie przez pudełko.
+            a.merges.push({to: b, lines: shared});
+            continue;
+        }
+        a.next = b;
+        b.prev = a;
+        a.through = shared;
+    }
+    for (const strand of strands) {
+        strand.alight = strand.lines.filter(line => !(line.chain && strands.some(other =>
+            other.from === strand.to
+            && other.lines.some(o => o.chain && schemeKey(o) === schemeKey(line)))));
+        strand.arrow = !strand.next && !strand.merges.length && strand.alight.length > 0;
+    }
+    return strands;
+}
+
+function schemeBoxes(scheme, strands, data) {
+    const boxes = new Map();
+    for (const node of scheme.nodes) {
+        const label = node.role === 'start' ? 'Start: ' + displayValue(data.start)
+            : node.role === 'end' ? 'Cel: ' + displayValue(data.end)
+            : prettyStopName(node.place);
+        // Przejazd przez węzeł zajmuje jedno miejsce na górze i na dole naraz.
+        const lanes = strands.filter(s => s.to === node.id && !s.next).length
+            + strands.filter(s => s.from === node.id).length;
+        const slots = Math.max(1, lanes);
+        // Odstęp kresek przy pudełku z najszerszego numeru, który przy nim stoi.
+        const lane = Math.max(SCHEME_LANE, ...strands.filter(s => s.from === node.id)
+            .map(s => schemeTextWidth(s.label) * 0.9 + 16));
+        boxes.set(node.id, {node, label, lane, w: Math.ceil(Math.max(schemeTextWidth(label) + 28,
+                                                                     slots * lane + 16)),
+                            h: SCHEME_BOX_H, x: 0, y: 0});
+    }
+    return boxes;
+}
+
+/** Miejsca linii przy pudełkach: u góry kończące się i przejeżdżające, u dołu
+    zaczynające się i przejeżdżające - przejazd ma ten sam x z obu stron,
+    żeby kreska szła przez pudełko prosto. Kolejność od lewej wg tego, gdzie
+    linia dalej biegnie, żeby kreski się nie plątały. */
+function assignPorts(boxes, strands) {
+    const center = id => boxes.get(id).x + boxes.get(id).w / 2;
+    for (const [id, box] of boxes) {
+        const items = [];
+        for (const s of strands) {
+            if (s.to === id) {
+                items.push({top: s, bottom: s.next, key: s.next
+                    ? (center(s.from) + center(s.next.to)) / 2 : center(s.from)});
+            } else if (s.from === id && !s.prev) {
+                items.push({top: null, bottom: s, key: center(s.to)});
+            }
+        }
+        items.sort((a, b) => a.key - b.key);
+        const place = (list, set) => {
+            const first = box.x + (box.w - (list.length - 1) * box.lane) / 2;
+            list.forEach((item, i) => set(item, first + i * box.lane));
+        };
+        // Bez przejazdu przez pudełko wejścia i wyjścia nie muszą się
+        // zgadzać co do x, więc każda strona rozkłada się sama, wyśrodkowana.
+        if (items.some(item => item.top && item.bottom)) {
+            place(items, (item, x) => {
+                if (item.top) item.top.xt = x;
+                if (item.bottom) item.bottom.xs = x;
+            });
+        } else {
+            place(items.filter(item => item.top), (item, x) => { item.top.xt = x; });
+            place(items.filter(item => item.bottom), (item, x) => { item.bottom.xs = x; });
+        }
+    }
+}
+
+/** Kolumny pudełek (warstwy) po ich górnej krawędzi: indeks warstwy węzła
+    i pas wolny od pudełek pod każdą warstwą, w którym biegną poziome
+    odcinki kresek. */
+function schemeLayers(boxes) {
+    const tops = [...new Set([...boxes.values()].map(b => Math.round(b.y)))].sort((a, b) => a - b);
+    const layerOf = new Map();
+    const gaps = tops.map(() => ({top: -Infinity, bottom: Infinity, used: 0, seen: 0}));
+    for (const [id, box] of boxes) {
+        const layer = tops.indexOf(Math.round(box.y));
+        layerOf.set(id, layer);
+        gaps[layer].top = Math.max(gaps[layer].top, box.y + box.h);
+        if (layer > 0) gaps[layer - 1].bottom = Math.min(gaps[layer - 1].bottom, box.y);
+    }
+    return {layerOf, gaps};
+}
+
+/** Droga linii od dołu pudełka źródła do góry pudełka celu: w dół, poziomy
+    skok w pasie pod źródłem, w dół korytarzem wolnym od pudełek, poziomy
+    skok w pasie nad celem, w dół. Linie jednej strzałki (te same dwa węzły)
+    idą razem jak tęcza - ta, która ma dalej do celu, skacze najniżej - więc
+    nie przecinają się nawzajem. Poziomy skoków przydziela schemeRoutes,
+    gdy wiadomo, ile ich jest w pasie. */
+function planRoutes(boxes, strands, hintX) {
+    const {layerOf, gaps} = schemeLayers(boxes);
+    const all = [...boxes.values()];
+    const MARGIN = 10, STEP = 7;
+    const clear = (x, from, to) => all.every(b => b.y + b.h + 2 < from || b.y - 2 > to
+        || b.x - MARGIN > x || b.x + b.w + MARGIN < x);
+    const groups = new Map();
+    for (const s of strands) {
+        const key = `${s.from}>${s.to}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(s);
+    }
+    const taken = [];
+    const mean = values => values.reduce((a, b) => a + b, 0) / values.length;
+    for (const group of groups.values()) {
+        group.sort((p, q) => p.xs - q.xs);
+        const src = boxes.get(group[0].from), dst = boxes.get(group[0].to);
+        const gapA = layerOf.get(group[0].from), gapB = layerOf.get(group[0].to) - 1;
+        const meanS = mean(group.map(s => s.xs)), meanT = mean(group.map(s => s.xt));
+        const spread = (group.length - 1) / 2 * STEP;
+        let base = meanT;
+        if (gapB > gapA) {
+            const from = gaps[gapA].top, to = gaps[gapB].bottom;
+            const candidates = [meanS, meanT, ...group.flatMap(s => hintX.get(s) || [])];
+            for (const b of all) candidates.push(b.x - MARGIN - 8, b.x + b.w + MARGIN + 8);
+            candidates.sort((p, q) => Math.abs(p - meanS) + Math.abs(p - meanT)
+                                    - Math.abs(q - meanS) - Math.abs(q - meanT));
+            const fits = x => clear(x - spread, from, to) && clear(x + spread, from, to);
+            base = candidates.find(fits);
+            // Dwie grupy jednym korytarzem nie mogą leżeć na sobie.
+            for (const shift of [0, 40, -40, 80, -80]) {
+                if (fits(base + shift) && !taken.some(t => Math.abs(t.x - (base + shift)) < 2 * spread + 10
+                                                         && t.from < to && t.to > from)) {
+                    base += shift;
+                    break;
+                }
+            }
+            taken.push({x: base, from, to});
+        }
+        group.forEach((s, i) => {
+            s.start = [s.xs, src.y + src.h];
+            s.end = [s.xt, dst.y];
+            s.gapA = gapA;
+            s.gapB = gapB;
+            s.xc = base + (i - (group.length - 1) / 2) * STEP;
+            s.rank = meanT >= meanS ? -i : i;
+            s.groupX = meanS;
+        });
+    }
+    return gaps;
+}
+
+function schemeRoutes(boxes, strands, hintX) {
+    const gaps = planRoutes(boxes, strands, hintX);
+    // Skoki w jednym pasie od góry do dołu: grupy od lewej, a w grupie tak,
+    // żeby się nie przecinały (patrz planRoutes).
+    const jogs = gaps.map(() => []);
+    for (const s of strands) {
+        const [xs] = s.start, [xt] = s.end;
+        if (s.gapB > s.gapA) {
+            jogs[s.gapA].push({s, which: 'yA'});
+            jogs[s.gapB].push({s, which: 'yB'});
+        } else if (Math.abs(xs - xt) >= 0.5) {
+            jogs[s.gapA].push({s, which: 'yA'});
+        }
+    }
+    jogs.forEach((list, g) => {
+        list.sort((p, q) => p.s.groupX - q.s.groupX || p.s.rank - q.s.rank);
+        const top = gaps[g].top + 26, bottom = gaps[g].bottom - 14;
+        list.forEach(({s, which}, k) => { s[which] = top + (bottom - top) * (k + 1) / (list.length + 1); });
+    });
+    for (const s of strands) {
+        const [xs, ys] = s.start, [xt, yt] = s.end;
+        let points;
+        if (s.gapB > s.gapA) {
+            points = [[xs, ys], [xs, s.yA], [s.xc, s.yA], [s.xc, s.yB], [xt, s.yB], [xt, yt]];
+        } else if (Math.abs(xs - xt) < 0.5) {
+            points = [[xs, ys], [xt, yt]];
+        } else {
+            points = [[xs, ys], [xs, s.yA], [xt, s.yA], [xt, yt]];
+        }
+        s.points = points.filter((p, i) => i === 0 || p[0] !== points[i - 1][0] || p[1] !== points[i - 1][1]);
+    }
+}
+
+/** Krzywa przez punkty, pionowa w każdym z nich. */
+function curvePath(points) {
+    let d = `M${points[0][0].toFixed(1)} ${points[0][1].toFixed(1)}`;
+    for (let i = 1; i < points.length; i++) {
+        const [x0, y0] = points[i - 1], [x1, y1] = points[i];
+        const mid = (y0 + y1) / 2;
+        d += `C${x0.toFixed(1)} ${mid.toFixed(1)} ${x1.toFixed(1)} ${mid.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    return d;
+}
+
+/** Punkty kreski gęsto, do liczenia drogi po niej: krzywa jak w curvePath,
+    łamana jak jest. */
+function strandSamples(s) {
+    if (!s.curved) return s.points;
+    const out = [s.points[0]];
+    for (let i = 1; i < s.points.length; i++) {
+        const [x0, y0] = s.points[i - 1], [x1, y1] = s.points[i];
+        const mid = (y0 + y1) / 2;
+        for (let k = 1; k <= 24; k++) {
+            const t = k / 24, u = 1 - t;
+            out.push([u * u * u * x0 + 3 * u * u * t * x0 + 3 * u * t * t * x1 + t * t * t * x1,
+                      u * u * u * y0 + 3 * u * u * t * mid + 3 * u * t * t * mid + t * t * t * y1]);
+        }
+    }
+    return out;
+}
+
+function pointAlong(samples, fraction) {
+    const lengths = samples.slice(1).map((p, i) => Math.hypot(p[0] - samples[i][0], p[1] - samples[i][1]));
+    let left = lengths.reduce((a, b) => a + b, 0) * fraction;
+    for (let i = 0; i < lengths.length; i++) {
+        if (left <= lengths[i] || i === lengths.length - 1) {
+            const k = lengths[i] ? Math.min(1, left / lengths[i]) : 0;
+            return [samples[i][0] + (samples[i + 1][0] - samples[i][0]) * k,
+                    samples[i][1] + (samples[i + 1][1] - samples[i][1]) * k];
+        }
+        left -= lengths[i];
+    }
+    return samples[0];
+}
+
+/** Numery każdej grupy jako biała plakietka NA kresce, jak grupka numerów na
+    mapie (.line-cluster): numer stoi na swojej kresce, więc nie da się go
+    pomylić z sąsiednią. Plakietka szuka miejsca wzdłuż kreski tak, żeby nie
+    leżała na pudełku ani na innej plakietce. */
+function schemeBadges(boxes, strands, branches) {
+    const PAD = 5, GAP = 4, H = 19;
+    const placed = [];
+    const all = [...boxes.values()];
+    const hits = (a, b, margin) => a.x - margin < b.x + b.w && a.x + a.w + margin > b.x
+        && a.y - margin < b.y + b.h && a.y + a.h + margin > b.y;
+    let out = '';
+    // Odnogi pierwsze: mają najmniej miejsca do wyboru.
+    for (const s of [...branches, ...strands].filter(item => !item.noBadge)) {
+        const widths = s.lines.map(line => schemeBadgeWidth(line.num));
+        const w = widths.reduce((a, b) => a + b, 0) + GAP * (widths.length - 1) + 2 * PAD;
+        const samples = strandSamples(s);
+        const rectAt = fraction => {
+            const [cx, cy] = pointAlong(samples, fraction);
+            return {x: cx - w / 2, y: cy - H / 2, w, h: H, cx, cy};
+        };
+        const others = [...strands, ...branches].filter(o => o !== s).flatMap(strandSamples);
+        const onOther = r => others.some(([x, y]) => x > r.x - 3 && x < r.x + r.w + 3
+            && y > r.y - 3 && y < r.y + r.h + 3);
+        const free = r => !all.some(b => hits(r, b, 2)) && !placed.some(b => hits(r, b, 2));
+        const fractions = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9, 0.05, 0.95, 0.35, 0.65, 0.25, 0.75];
+        // Najpierw miejsce bez cudzych kresek pod plakietką, potem choćby wolne od pudełek.
+        const spot = fractions.map(rectAt).find(r => free(r) && !onOther(r))
+            || fractions.map(rectAt).find(free) || rectAt(0.5);
+        placed.push(spot);
+        s.badge = spot;
+        let x = spot.x + PAD;
+        const texts = s.lines.map((line, i) => {
+            const t = `<text class="scheme-num" fill="${LINE_COLORS[line.kind] || LINE_COLORS.other}" `
+                + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`;
+            x += widths[i] + GAP;
+            return t;
+        }).join('');
+        out += `<g class="scheme-badge" data-lines="${esc(s.label)}" data-cx="${spot.cx.toFixed(1)}" `
+            + `data-cy="${spot.cy.toFixed(1)}"><rect x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" `
+            + `width="${w.toFixed(1)}" height="${H}" rx="9"/>${texts}</g>`;
+    }
+    return out;
+}
+
+function schemeBadgeWidth(text) {
+    schemeMeasure = schemeMeasure || document.createElement('canvas').getContext('2d');
+    schemeMeasure.font = '700 11px system-ui, sans-serif';
+    return schemeMeasure.measureText(text).width + 6;
+}
+
+/** Odnoga linii, które wysiadają w pudełku, przez które reszta grupy jedzie
+    dalej: odchodzi od kreski kawałek nad pudełkiem w bok i kończy się strzałką
+    w jego górną krawędź. Ma własną plakietkę z numerami wysiadających. */
+function schemeBranches(boxes, strands) {
+    const out = [];
+    for (const s of strands) {
+        if ((!s.next && !s.merges.length) || !s.alight.length) continue;
+        const box = boxes.get(s.to);
+        const [xt, top] = s.points[s.points.length - 1];
+        const half = (s.alight.reduce((sum, line) => sum + schemeBadgeWidth(line.num) + 4, 0) + 10) / 2;
+        const dx = half + 16;
+        const side = xt + dx <= box.x + box.w - 8 ? xt + dx : xt - dx;
+        const xe = Math.max(box.x + 8, Math.min(box.x + box.w - 8, side));
+        // Odnoga startuje z samej kreski (jej krzywa nie jest nad pudełkiem
+        // pionowa), nie z punktu nad pudełkiem.
+        const samples = strandSamples(s);
+        let start = samples[0];
+        for (let i = samples.length - 1; i >= 0; i--) {
+            if (samples[i][1] <= top - 44) { start = samples[i]; break; }
+        }
+        out.push({lines: s.alight, label: s.alight.map(line => line.num).join(' '), curved: true,
+                  points: [start, [xe, top]], owner: s});
+    }
+    return out;
+}
+
+function schemeSvg(boxes, strands) {
+    const branches = schemeBranches(boxes, strands);
+    const labels = schemeBadges(boxes, strands, branches);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const b of boxes.values()) {
+        minX = Math.min(minX, b.x); maxX = Math.max(maxX, b.x + b.w);
+        minY = Math.min(minY, b.y); maxY = Math.max(maxY, b.y + b.h);
+    }
+    for (const s of [...strands, ...branches]) {
+        for (const [x, y] of s.points) {
+            minX = Math.min(minX, x - 30); maxX = Math.max(maxX, x + 30);
+        }
+        if (s.badge) { minX = Math.min(minX, s.badge.x); maxX = Math.max(maxX, s.badge.x + s.badge.w); }
+    }
+    const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
+    const colors = new Set();
+    const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
+    const DASH = 9;
+    let rects = '', lines = '', names = '';
+    for (const [id, b] of boxes) {
+        rects += `<g class="node" data-node="${id}"><rect class="scheme-box" x="${b.x}" y="${b.y}" `
+            + `width="${b.w}" height="${b.h}" rx="12"/></g>`;
+        names += `<text class="scheme-name" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+    }
+    // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
+    // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
+    const stroke = (group, label, d, arrow, extra = '') => {
+        const kinds = [...new Set(group.map(line => line.kind))].sort();
+        const tint = kinds.length === 1 ? colorOf(kinds[0]) : WALK_COLOR;
+        const marker = arrow ? ` marker-end="url(#scheme-arrow-${tint.slice(1)})"` : '';
+        if (arrow) colors.add(tint);
+        const strokes = kinds.map((kind, i) => kinds.length === 1
+            ? `<path class="scheme-line" stroke="${colorOf(kind)}"${marker} d="${d}"/>`
+            : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
+              + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
+              + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
+        return `<g class="scheme-stroke${extra}" data-lines="${esc(label)}">${strokes}</g>`;
+    };
+    const pathOf = (curved, points) => curved ? curvePath(points)
+        : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
+    for (const s of strands) {
+        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow);
+        if (s.next) {
+            // Linie jadące dalej przechodzą przez pudełko jedną prostą kreską.
+            const [x, top] = s.points[s.points.length - 1];
+            const box = boxes.get(s.to);
+            lines += stroke(s.through, s.through.map(line => line.num).join(' '),
+                            `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(box.y + box.h).toFixed(1)}`,
+                            false, ' scheme-through');
+        }
+        for (const merge of s.merges) {
+            const [x, top] = s.points[s.points.length - 1];
+            const [x2, bottom] = merge.to.points[0];
+            lines += stroke(merge.lines, merge.lines.map(line => line.num).join(' '),
+                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge');
+        }
+    }
+    for (const branch of branches) {
+        lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch');
+    }
+    const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
+        + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
+        + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
+        + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
+        + `${rects}${lines}${names}${labels}</svg>`;
+}
+
+/** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
+    wyłączony albo odpowiedź schematu nie ma (null: mapa zeszła z ekranu). */
+function renderScheme(data) {
+    lastSchemeData = data;
+    const panel = $('scheme-panel');
+    const mine = ++schemeToken;
+    hideSchemeTip();
+    if (!data || !data.scheme || !$('new-map').checked) {
+        panel.hidden = true;
+        $('scheme-canvas').innerHTML = '';
+        return;
+    }
+    const scheme = data.scheme;
+    const strands = schemeStrands(scheme);
+    const boxes = schemeBoxes(scheme, strands, data);
+    // Węzły bez strzałki między sobą (przejścia ukryte) układają się w tej
+    // kolejności dzięki dodatkowym, niewidocznym krawędziom.
+    const hidden = (scheme.order || []).map(([from, to]) => ({from, to}));
+    const graph = {
+        id: 'root',
+        layoutOptions: {
+            'elk.algorithm': 'layered',
+            'elk.direction': 'DOWN',
+            'elk.edgeRouting': 'POLYLINE',
+            'elk.spacing.nodeNode': '56',
+            'elk.layered.spacing.nodeNodeBetweenLayers': '110',
+            'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+        },
+        children: [...boxes].map(([id, b]) => ({id, width: b.w, height: b.h})),
+        edges: [...scheme.edges, ...hidden].map((e, i) => ({
+            id: `e${i}`, sources: [e.from], targets: [e.to],
+        })),
+    };
+    const finish = () => {
+        const canvas = $('scheme-canvas');
+        canvas.innerHTML = schemeSvg(boxes, strands);
+        panel.hidden = false;
+        setSchemeCollapsed(schemeCollapsed);
+        bindSchemeNodes(canvas, data);
+        fitScheme();
+    };
+    if ($('scheme-layout').value === 'dagre') {
+        loadDagre().then(lib => {
+            if (mine !== schemeToken) return;
+            layoutDagre(lib, scheme, boxes, strands);
+            finish();
+        });
+        return;
+    }
+    loadElk()
+        .then(elk => elk.layout(graph))
+        .then(laid => {
+            if (mine !== schemeToken) return;
+            for (const child of laid.children) {
+                // Całkowite współrzędne pudełek: kreski kończą się dokładnie na ich krawędziach.
+                Object.assign(boxes.get(child.id), {x: Math.round(child.x), y: Math.round(child.y)});
+            }
+            // Zakręty, którymi ELK obszedł pudełka długiej krawędzi, to
+            // gotowe korytarze wolne od pudełek.
+            const hintX = new Map();
+            for (const s of strands) {
+                const routed = (laid.edges || []).find(e => e.sources[0] === s.from && e.targets[0] === s.to);
+                const bends = routed && routed.sections && routed.sections[0].bendPoints;
+                if (bends) hintX.set(s, bends.map(p => p.x));
+            }
+            assignPorts(boxes, strands);
+            schemeRoutes(boxes, strands, hintX);
+            finish();
+        });
+}
+
+/** Kreski tych samych dwóch węzłów, które nie mają nic do powiedzenia po
+    drodze, zbiegają się w połowie odcinka w jedną z plakietką wszystkich
+    numerów (N i 145 pod Morwową). */
+function schemeMergeSiblings(strands) {
+    const groups = new Map();
+    for (const s of strands) {
+        const key = `${s.from}>${s.to}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(s);
+    }
+    for (const group of groups.values()) {
+        if (group.length < 2 || group.some(s => s.points.length !== 2 || s.next || s.merges.length)) continue;
+        const xt = group[0].points[1][0], y1 = group[0].points[1][1];
+        const top = Math.max(...group.map(s => s.points[0][1]));
+        const ym = top + 0.55 * (y1 - top);
+        const lines = group.flatMap(s => s.lines);
+        strands.push({from: group[0].from, to: group[0].to, lines,
+                      label: lines.map(line => line.num).join(' '), next: null, prev: null,
+                      merges: [], alight: [], arrow: group.some(s => s.arrow), curved: true,
+                      points: [[xt, ym], [xt, y1]]});
+        for (const s of group) {
+            s.points = [s.points[0], [xt, ym]];
+            s.arrow = false;
+            s.noBadge = true;
+        }
+    }
+}
+
+/** Układ dagre (ten sam, którego używa Mermaid) ze zwartymi odstępami,
+    a kreski jako gładkie krzywe: każdy odcinek wychodzi z pudełka i wchodzi
+    do następnego pionowo, więc kreska przejeżdżająca przez pudełko idzie przez
+    nie prosto. Pośrednie punkty dagre długiej krawędzi to punkty, przez
+    które krzywa ma przejść, żeby ominąć pudełka warstw pomiędzy. */
+function layoutDagre(lib, scheme, boxes, strands) {
+    const g = new lib.graphlib.Graph();
+    g.setGraph({rankdir: 'TB', nodesep: 40,
+                ranksep: 100, marginx: 0, marginy: 0});
+    g.setDefaultEdgeLabel(() => ({}));
+    for (const [id, b] of boxes) g.setNode(id, {width: b.w, height: b.h});
+    for (const [from, to] of scheme.order || []) g.setEdge(from, to);
+    for (const s of strands) g.setEdge(s.from, s.to);
+    lib.layout(g);
+    for (const [id, b] of boxes) {
+        const node = g.node(id);
+        b.x = Math.round(node.x - b.w / 2);
+        b.y = Math.round(node.y - b.h / 2);
+    }
+    assignPorts(boxes, strands);
+    const {layerOf} = schemeLayers(boxes);
+    for (const s of strands) {
+        const src = boxes.get(s.from), dst = boxes.get(s.to);
+        const points = g.edge(s.from, s.to).points || [];
+        const long = layerOf.get(s.to) - layerOf.get(s.from) > 1;
+        s.points = [[s.xs, src.y + src.h],
+                    ...(long ? points.slice(1, -1).map(p => [p.x, p.y]) : []),
+                    [s.xt, dst.y]];
+        s.curved = true;
+    }
+    schemeMergeSiblings(strands);
+}
+
+function setSchemeCollapsed(collapsed) {
+    schemeCollapsed = collapsed;
+    const panel = $('scheme-panel');
+    panel.classList.toggle('collapsed', collapsed);
+    const toggle = $('scheme-toggle');
+    const label = `${collapsed ? 'Pokaż' : 'Ukryj'} schemat`;
+    toggle.textContent = collapsed ? '▸' : '▾';
+    toggle.title = label;
+    toggle.setAttribute('aria-label', label);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    if (collapsed) hideSchemeTip();
+}
+
+setSchemeCollapsed(schemeCollapsed);
+
+/** Ile miejsca po prawej zabiera schemat na szerokim ekranie - ta sama
+    szerokość co .scheme-panel w style.css: min(560px, 45vw) i 16 px od
+    brzegu. Liczona z reguły, a nie z panelu, bo przy pierwszym wyszukaniu
+    mapa kadruje się, zanim schemat zdąży się pokazać. */
+function schemeInset() {
+    if (!$('new-map').checked || $('scheme-panel').classList.contains('collapsed')) return 0;
+    return Math.min(560, innerWidth * 0.45) + 16;
+}
+
+$('scheme-toggle').addEventListener('click', () => {
+    setSchemeCollapsed(!schemeCollapsed);
+    saveUiState({schemeCollapsed});
+    if (!schemeCollapsed) fitScheme();
+});
+$('scheme-fit').addEventListener('click', fitScheme);
+
+function applySchemeView() {
+    const svg = $('scheme-canvas').querySelector('svg');
+    if (!svg) return;
+    svg.style.transform = `translate(${schemeView.x}px, ${schemeView.y}px) scale(${schemeView.scale})`;
+}
+
+/** Cały schemat w oknie panelu, ale nie większy niż naturalny - mały
+    schemat nie puchnie, a duży da się potem przybliżyć. */
+function fitScheme() {
+    const viewport = $('scheme-viewport');
+    const svg = viewport.querySelector('svg');
+    if (!svg || schemeCollapsed) return;
+    const box = svg.viewBox.baseVal;
+    svg.setAttribute('width', box.width);
+    svg.setAttribute('height', box.height);
+    svg.style.maxWidth = 'none';
+    const scale = Math.min(1, viewport.clientWidth / box.width, viewport.clientHeight / box.height);
+    schemeView.scale = scale;
+    schemeView.x = (viewport.clientWidth - box.width * scale) / 2;
+    schemeView.y = Math.max(0, (viewport.clientHeight - box.height * scale) / 2);
+    applySchemeView();
+}
+
+function zoomSchemeAt(px, py, factor) {
+    const scale = Math.min(SCHEME_MAX_SCALE,
+                           Math.max(SCHEME_MIN_SCALE, schemeView.scale * factor));
+    const k = scale / schemeView.scale;
+    schemeView.x = px - (px - schemeView.x) * k;
+    schemeView.y = py - (py - schemeView.y) * k;
+    schemeView.scale = scale;
+    applySchemeView();
+}
+
+(() => {
+    const viewport = $('scheme-viewport');
+    const local = e => {
+        const rect = viewport.getBoundingClientRect();
+        return [e.clientX - rect.left, e.clientY - rect.top];
+    };
+    viewport.addEventListener('wheel', e => {
+        e.preventDefault();
+        hideSchemeTip();
+        zoomSchemeAt(...local(e), Math.exp(-e.deltaY * 0.0015));
+    }, {passive: false});
+
+    // Przeciąganie jednym palcem (myszą) przesuwa, dwoma - przybliża. Kursor
+    // łapiemy dopiero po kilku pikselach ruchu: inaczej dotknięcie węzła,
+    // które ma otworzyć tablicę, stawałoby się początkiem przeciągania.
+    const pointers = new Map();
+    let dragging = false;
+    viewport.addEventListener('pointerdown', e => {
+        pointers.set(e.pointerId, local(e));
+        dragging = false;
+    });
+    viewport.addEventListener('pointermove', e => {
+        const last = pointers.get(e.pointerId);
+        if (!last) return;
+        const now = local(e);
+        if (pointers.size === 1) {
+            const dx = now[0] - last[0], dy = now[1] - last[1];
+            if (!dragging && Math.hypot(dx, dy) < 4) return;
+            if (!dragging) {
+                dragging = true;
+                viewport.setPointerCapture(e.pointerId);
+                hideSchemeTip();
+            }
+            schemeView.x += dx;
+            schemeView.y += dy;
+            applySchemeView();
+        } else if (pointers.size === 2) {
+            const other = [...pointers.entries()].find(([id]) => id !== e.pointerId)[1];
+            const before = Math.hypot(last[0] - other[0], last[1] - other[1]);
+            const after = Math.hypot(now[0] - other[0], now[1] - other[1]);
+            dragging = true;
+            hideSchemeTip();
+            if (before > 0) {
+                zoomSchemeAt((now[0] + other[0]) / 2, (now[1] + other[1]) / 2, after / before);
+            }
+        }
+        pointers.set(e.pointerId, now);
+    });
+    const release = e => { pointers.delete(e.pointerId); };
+    viewport.addEventListener('pointerup', release);
+    viewport.addEventListener('pointercancel', release);
+    // Klik po przeciągnięciu to koniec przeciągania, nie wybór węzła.
+    viewport.addEventListener('click', e => {
+        if (dragging) { e.stopPropagation(); dragging = false; return; }
+        if (!e.target.closest('g.node')) hideSchemeTip();
+    }, true);
+})();
+
+// --- tablica odjazdów węzła ---------------------------------------------
+//
+// Ta sama tablica co pod kropką przesiadki na mapie (loadTimetable) - węzeł
+// schematu JEST tą kropką. Pokazuje się po najechaniu, a na telefonie po
+// dotknięciu, tak jak na mapie.
+
+function hideSchemeTip() {
+    schemeTipOwner = null;
+    $('scheme-tip').hidden = true;
+}
+
+function showSchemeTip(element, where, sec) {
+    const tip = $('scheme-tip');
+    const owner = {
+        // Udaje kropkę mapy na tyle, ile loadTimetable jej potrzebuje: dymek,
+        // do którego wpisuje się tablica, gdy dojdzie z sieci.
+        getTooltip: () => true,
+        setTooltipContent: html => {
+            if (schemeTipOwner !== owner) return;
+            tip.innerHTML = html;
+            placeSchemeTip(element);
+        },
+    };
+    schemeTipOwner = owner;
+    tip.hidden = false;
+    loadTimetable(owner, where, sec);
+}
+
+/** Pod węzłem, a gdy tam brak miejsca - nad nim; zawsze w oknie. */
+function placeSchemeTip(element) {
+    const tip = $('scheme-tip');
+    const node = element.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(innerWidth - box.width - 8,
+                                      node.left + node.width / 2 - box.width / 2));
+    let top = node.bottom + 6;
+    if (top + box.height > innerHeight - 8) top = Math.max(8, node.top - box.height - 6);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+}
+
+function bindSchemeNodes(canvas, data) {
+    const byId = new Map(data.scheme.nodes.map(node => [node.id, node]));
+    const mapNodes = new Map((data.nodes || []).map(node => [node.place, node]));
+    for (const element of canvas.querySelectorAll('g.node')) {
+        const node = byId.get(element.dataset.node);
+        const mapNode = node && node.place && mapNodes.get(node.place);
+        if (!mapNode) continue;
+        const where = {name: mapNode.name, lines: mapNode.lines, deadline: data.deadline_sec,
+                       start: mapNode.start, late: mapNode.late};
+        const show = () => showSchemeTip(element, where, mapNode.sec);
+        // Najechanie i zjechanie tylko myszą: palec po dotknięciu też
+        // „zjeżdża” z węzła i tablica znikałaby, zanim się pokaże.
+        element.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(); });
+        element.addEventListener('pointerleave', e => {
+            if (e.pointerType === 'mouse') hideSchemeTip();
+        });
+        element.addEventListener('click', show);
+    }
 }
 
 /** Tożsamość trasy na liście: te same przejazdy tymi samymi kursami i te
@@ -5264,6 +6066,7 @@ function renderList(data) {
     przepływów - do tego czasu lista mówi, że szuka. */
 function renderHeadlineOnly(data) {
     clearFlow(false);
+    renderScheme(null);
     headlineFlow = data;
     renderTimeHeadline();
 }
@@ -5350,6 +6153,7 @@ function applyStage(run, data) {
     if (data.error) {
         clearFlow();
         hideObWarn();
+        renderScheme(null);
         showError(data.error, data.suggestions);
         return;
     }
@@ -6369,7 +7173,7 @@ showWalkPace();
 // pamiętane w tym samym kluczu i od razu nowe zapytanie.
 // Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
 // wygląda tak, jak wyglądała przed zgłoszeniem #147.
-for (const [id, domyslnie] of [['car-vans', false], ['new-map', false]]) {
+for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walking', false]]) {
     const input = $(id);
     const zapisane = loadDevPrefs()[id];
     input.checked = zapisane === undefined ? domyslnie : zapisane === true;
@@ -6379,6 +7183,21 @@ for (const [id, domyslnie] of [['car-vans', false], ['new-map', false]]) {
         if (id === 'car-vans' && !flowOnScreen()) refreshCarLayer();
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    });
+}
+
+// Układ schematu (tymczasowy wybór do porównania): zmiana tylko przerysowuje
+// to, co już przyszło.
+{
+    const input = $('scheme-layout');
+    const row = $('scheme-layout-row');
+    input.value = loadDevPrefs()['scheme-layout'] === 'elk' ? 'elk' : 'dagre';
+    const showRow = () => { row.hidden = !$('new-map').checked; };
+    showRow();
+    $('new-map').addEventListener('change', showRow);
+    input.addEventListener('change', () => {
+        saveDevPref('scheme-layout', input.value);
+        if (lastSchemeData) renderScheme(lastSchemeData);
     });
 }
 
