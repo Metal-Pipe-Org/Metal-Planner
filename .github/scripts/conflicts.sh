@@ -1,13 +1,15 @@
 # Ping autorów PR-ów, które push do `main` właśnie wpędził w konflikt.
-# Wołający robi `source` (razem z discord.sh) i woła `ping_new_conflicts`;
-# resztę bierze z env:
+# Wołający robi `source` (razem z discord.sh i drafts.sh) i woła
+# `ping_new_conflicts`; resztę bierze z env:
 #
 #   GH_TOKEN  token z `pull-requests: write` — zdejmuje prośby o recenzję
+#             i przestawia PR na wersję roboczą
 #   REPO      `właściciel/repozytorium`
 #   BEFORE    `main` przed pushem (`github.event.before`)
 #   AFTER     `main` po pushu (`github.sha`)
 #   GIT_REPO  klon repo z historią, w którym liczymy konflikty; domyślnie `.`
-#   DRY_RUN   `1` = tylko wypisz, co by poszło na Discorda i co by zdjęto;
+#   DRY_RUN   `1` = tylko wypisz, co by poszło na Discorda, co by zdjęto
+#             i co by wróciło do wersji roboczej;
 #             do sprawdzenia na prawdziwych PR-ach tokenem tylko do odczytu
 #
 # Wołający pobiera ten plik z `main`, tak jak skrypt Discorda.
@@ -27,10 +29,11 @@ conflicts_with() {
   esac
 }
 
-# ping_conflict N TYTUŁ LINK AUTOR UŻYTKOWNICY ZESPOŁY — pinguje autora PR-a
-# w konflikcie i zdejmuje prośby o recenzję, jeśli jakieś czekają.
+# ping_conflict N TYTUŁ LINK AUTOR SZKIC UŻYTKOWNICY ZESPOŁY — pinguje autora
+# PR-a w konflikcie, zdejmuje prośby o recenzję, jeśli jakieś czekają, a gotowy
+# PR przestawia na wersję roboczą.
 ping_conflict() {
-  local n=$1 title=$2 url=$3 author=$4 users=${5:-} teams=${6:-} who desc=""
+  local n=$1 title=$2 url=$3 author=$4 draft=$5 users=${6:-} teams=${7:-} who desc=""
 
   who=$(jq -rn --arg u "$users" --arg t "$teams" \
     '[($u | split(",") | map(select(. != "") | "**" + . + "**"))[],
@@ -44,18 +47,15 @@ ping_conflict() {
     echo "  @$author"
     echo "  Konflikt z main: #$n $title"
     [ -z "$desc" ] || echo "  $desc"
+    [ "$draft" = true ] || echo "  i przestawiłbym PR na wersję roboczą"
     return 0
   fi
 
-  # Zdjęcie od zespołu może się nie udać, gdy token nie widzi zespołów
-  # organizacji. Wiadomość i tak wychodzi: autor ma się dowiedzieć
-  # o konflikcie, a niezdjęta prośba nikogo drugi raz nie zawoła, bo ping
-  # zależy od przejścia w konflikt, nie od prośby.
-  if [ -n "$who" ] && ! jq -n --arg u "$users" --arg t "$teams" \
-      '{reviewers: ($u | split(",") | map(select(. != ""))),
-        team_reviewers: ($t | split(",") | map(select(. != "")))}' \
-      | gh api -X DELETE "repos/$REPO/pulls/$n/requested_reviewers" --input - > /dev/null; then
-    echo "::warning::#$n: nie udało się zdjąć próśb o recenzję ($users $teams)."
+  # Niezdjęta prośba nikogo drugi raz nie zawoła, bo ping zależy od przejścia
+  # w konflikt, nie od prośby — więc wiadomość wychodzi i bez zdjęcia.
+  drop_review_requests "$n" "$users" "$teams"
+  if [ "$draft" != true ] && to_draft "$n" "$DRAFT_ON_CONFLICT"; then
+    desc="PR wraca do wersji roboczej${desc:+. $desc}"
   fi
 
   echo "#$n: nowy konflikt z main${who:+ — zdjęte prośby o recenzję: $users $teams}" \
@@ -65,10 +65,11 @@ ping_conflict() {
 
 # ping_new_conflicts
 #
-# Bierzemy wszystkie otwarte PR-y do `main` poza szkicami: zatwierdzony PR
-# albo PR bez recenzentów też ktoś chce zmergować, a w konflikcie GitHub nie
-# puszcza jego automatów (#245), więc bez pingu nikt się nie dowie. Szkic
-# autor i tak jeszcze przerabia.
+# Bierzemy wszystkie otwarte PR-y do `main`: zatwierdzony PR albo PR bez
+# recenzentów też ktoś chce zmergować, a w konflikcie GitHub nie puszcza jego
+# automatów (#245), więc bez pingu nikt się nie dowie. Szkice też, bo wersja
+# robocza to zwykły etap PR-a (#349): poprawki po ocenie czy recenzji, które
+# przed powrotem do gotowych i tak muszą się zmieścić na `main`.
 #
 # Ping idzie tylko przy przejściu: PR nie miał konfliktu ze starym `main`,
 # a z nowym ma. Jeden konflikt to jeden ping, a nie ping po każdym kolejnym
@@ -89,8 +90,7 @@ ping_new_conflicts() {
   while IFS= read -r line; do
     prs+=("$line")
   done < <(gh api --paginate "repos/$REPO/pulls?state=open&base=main&per_page=100" --jq '.[]
-    | select(.draft | not)
-    | [(.number | tostring), .title, .html_url, .user.login,
+    | [(.number | tostring), .title, .html_url, .user.login, (.draft | tostring),
        (.requested_reviewers | map(.login) | join(",")),
        (.requested_teams | map(.slug) | join(","))]
     | join("\u001f")')
