@@ -43,7 +43,7 @@ Wspólny sposób pracy na GitHubie: branche, pull requesty, review Claude'a, iss
 
 ### Labels
 
-23. Labele stanu nadają się same: `waiting for PR review` przy PR-ze z `Closes`, `PR created` przy `Refs`, `merged - is it ok?` po merge'u takiego PR-a. Ten ostatni zdejmuje ten, kto issue zamyka.
+23. Labele stanu nadają się same: `PR in progress` od otwarcia PR-a (także wersji roboczej) z `Closes` albo `Refs`, niezależnie od stanu PR-a (zdejmuje się, gdy PR jest zamknięty), `merged - is it ok?` po merge'u PR-a z `Refs`. Ten ostatni zdejmuje ten, kto issue zamyka.
 24. Issue bez niczyjego wpisu przez 14 dni dostaje pytanie, czy temat jest aktualny, i label `stale`. Po kolejnych 7 dniach ciszy zamyka się jako „not planned”. Automat zostawia issue otwarte po każdym komentarzu człowieka, ale nie odpisuj samym „tak” — napisz, dlaczego ma zostać, choć nikt go nie ruszał przez 14 dni. Nie dotyczy issues z labelem `external blocked`, zablokowanych przez inne otwarte issue (GitHubowe „Blocked by") ani takich, które mają otwarte sub-issues.
 25. Issue, które stoi przez coś poza naszym wpływem, dostaje label `external blocked`, a w issue trzeba napisać, na co czeka. Issue zablokowane przez inne otwarte issue (GitHubowe „Blocked by") jest traktowane tak samo, bez labela i bez opisu — zależność sama mówi, na co czeka; po zamknięciu blokującego issue przestaje blokować. Dając `external blocked`, zdejmij `stale` — te dwa labele nie powinny stać razem, a automat sam tego nie posprząta.
 26. `to discuss` znaczy, że issue trzeba omówić z zespołem. Każdy z zespołu jest zachęcany, żeby dorzucić swoje zdanie. Label zdejmujemy, gdy dyskusję uznamy za zakończoną.
