@@ -702,7 +702,7 @@
       (gtfs.with_pace), więc każde tempo to jedno przeliczenie, a nie jedno
       na każde zapytanie.
     #}
-    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe, Czas">
+    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe">
         <label for="walk-pace">
             Tempo marszu <output id="walk-pace-value">zwykłe</output>
             <span class="info" tabindex="0" role="button"
@@ -710,7 +710,7 @@
         </label>
         <input type="range" id="walk-pace" min="0" max="2" step="1" value="1">
     </div>
-    <div class="field set-row" data-setting="bike-kmh" data-labels="Założenia czasowe, Rower, Czas">
+    <div class="field set-row" data-setting="bike-kmh" data-labels="Założenia czasowe, Rower">
         <label for="bike-kmh">
             Prędkość roweru <output id="bike-kmh-value">10</output> km/h
             <span class="info" tabindex="0" role="button"
@@ -718,13 +718,13 @@
         </label>
         <input type="range" id="bike-kmh" min="5" max="20" step="1" value="10">
     </div>
-    <div class="field set-row" data-setting="bike-overhead" data-labels="Założenia czasowe, Rower, Czas">
+    <div class="field set-row" data-setting="bike-overhead" data-labels="Założenia czasowe, Rower">
         <label for="bike-overhead">
             Wypożyczenie i zwrot roweru <output id="bike-overhead-value">2</output> min
         </label>
         <input type="range" id="bike-overhead" min="0" max="10" step="1" value="2">
     </div>
-    <div class="field set-row" data-setting="car-kmh" data-labels="Założenia czasowe, Traficar, Czas">
+    <div class="field set-row" data-setting="car-kmh" data-labels="Założenia czasowe, Traficar">
         <label for="car-kmh">
             Prędkość Traficara <output id="car-kmh-value">22</output> km/h
             <span class="info" tabindex="0" role="button"
@@ -732,7 +732,7 @@
         </label>
         <input type="range" id="car-kmh" min="10" max="40" step="1" value="22">
     </div>
-    <div class="field set-row" data-setting="car-overhead" data-labels="Założenia czasowe, Traficar, Czas">
+    <div class="field set-row" data-setting="car-overhead" data-labels="Założenia czasowe, Traficar">
         <label for="car-overhead">
             Ruszenie i parkowanie Traficara <output id="car-overhead-value">8</output> min
             <span class="info" tabindex="0" role="button"
@@ -851,7 +851,7 @@
             <span class="info" tabindex="0" role="button"
                   data-tip="Godzina szacowana z odległości w linii prostej i założeń czasowych. Auta wybierane są nią zawsze — przełącznik tylko ją pokazuje.">i</span>
         </label>
-    <label class="dev-check dev-only set-row" data-setting="zone-button" data-labels="Traficar, Mapa">
+    <label class="dev-check dev-only set-row" data-setting="zone-button" data-labels="Traficar">
             <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
             <span class="info" tabindex="0" role="button"
                   data-tip="Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez niego strefa pokazuje się po najechaniu na auto.">i</span>
@@ -878,7 +878,7 @@
       LOOK_DEFAULTS w app.js i to one są domyślne, gdy suwaki są schowane.
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
-    <div class="field compact dev-only look-row set-row" data-setting="dot-size" data-labels="Wygląd mapy, Mapa" hidden>
+    <div class="field compact dev-only look-row set-row" data-setting="dot-size" data-labels="Wygląd mapy" hidden>
             <label for="dot-size">
                 Wielkość kropek <output id="dot-size-value">8</output> px
             </label>
@@ -886,31 +886,31 @@
         </div>
     {# Każda linia jest pełna, więc suwaków „najbledsza/najjaśniejsza
            linia" i otoczki od jasności tu nie ma - nic by nie zmieniały. #}
-    <div class="field compact dev-only look-row set-row" data-setting="look-weight" data-labels="Wygląd mapy, Mapa" hidden>
+    <div class="field compact dev-only look-row set-row" data-setting="look-weight" data-labels="Wygląd mapy" hidden>
             <label for="look-weight">
                 Grubość linii <output id="look-weight-value">3</output> px
             </label>
             <input type="range" id="look-weight" min="2" max="12" step="0.5" value="3">
         </div>
-    <div class="field compact dev-only look-row set-row" data-setting="look-dim" data-labels="Wygląd mapy, Mapa" hidden>
+    <div class="field compact dev-only look-row set-row" data-setting="look-dim" data-labels="Wygląd mapy" hidden>
             <label for="look-dim">
                 Przygaszenie przy wybranej trasie <output id="look-dim-value">0.22</output>
             </label>
             <input type="range" id="look-dim" min="0.05" max="1" step="0.01" value="0.22">
         </div>
-    <div class="field compact dev-only look-row set-row" data-setting="look-label-step" data-labels="Wygląd mapy, Mapa" hidden>
+    <div class="field compact dev-only look-row set-row" data-setting="look-label-step" data-labels="Wygląd mapy" hidden>
             <label for="look-label-step">
                 Odstęp grupek numerów <output id="look-label-step-value">200</output> px
             </label>
             <input type="range" id="look-label-step" min="120" max="700" step="20" value="200">
         </div>
-    <div class="field compact dev-only look-row set-row" data-setting="look-label-size" data-labels="Wygląd mapy, Mapa" hidden>
+    <div class="field compact dev-only look-row set-row" data-setting="look-label-size" data-labels="Wygląd mapy" hidden>
             <label for="look-label-size">
                 Wielkość numerów <output id="look-label-size-value">0.8</output>×
             </label>
             <input type="range" id="look-label-size" min="0.7" max="1.6" step="0.05" value="0.8">
         </div>
-    <div class="field compact dev-only look-row set-row" data-setting="look-label-op" data-labels="Wygląd mapy, Mapa" hidden>
+    <div class="field compact dev-only look-row set-row" data-setting="look-label-op" data-labels="Wygląd mapy" hidden>
             <label for="look-label-op">
                 Krycie numerów <output id="look-label-op-value">1</output>×
             </label>
