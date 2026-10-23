@@ -6940,16 +6940,24 @@ function renderSettingsList() {
     for (const row of settingsRows) row.classList.toggle('search-miss', !visible.includes(row) && !row.hidden);
     const {groups, rest} = settingsGroups(visible);
     if (rest.length && groups.length) groups.push({label: 'Inne', rows: rest});
+    const searching = needle !== '';
+    const prefs = loadDevPrefs();
     const nodes = [];
     for (const group of groups) {
-        const head = document.createElement('div');
-        head.className = 'set-group-head';
-        head.textContent = group.label;
-        nodes.push(head, ...group.rows);
+        const fold = document.createElement('details');
+        fold.className = 'set-group';
+        // Szukanie rozwija wszystko, żeby wyniki było widać; po jego wyczyszczeniu
+        // wraca to, co zapamiętane.
+        fold.open = searching || !!prefs['fold:' + group.label];
+        fold.append(Object.assign(document.createElement('summary'), {textContent: group.label}), ...group.rows);
+        fold.addEventListener('toggle', () => {
+            if (!settingsSearch.value.trim()) saveDevPref('fold:' + group.label, fold.open);
+        });
+        nodes.push(fold);
     }
     if (!groups.length) nodes.push(...visible);
     // Wiersze schowane z innych powodów zostają w DOM, na końcu.
-    nodes.push(...settingsRows.filter(row => !nodes.includes(row)));
+    nodes.push(...settingsRows.filter(row => !visible.includes(row)));
     settingsList.replaceChildren(...nodes);
 }
 
@@ -6985,15 +6993,19 @@ markChangedSettings();
 // `change` (po puszczeniu), nie na każdy `input`, inaczej jeden ruch dawałby
 // dziesiątki zliczeń. Klucz nie jest na liście z #dev-reset: „Przywróć
 // domyślne” ma zostawić statystyki, bo to właśnie ono jest jednym z liczonych
-// zdarzeń.
+// zdarzeń. Tabelę pokazuje osobna strona (/statystyki, statystyki.js).
 const SETTINGS_STATS_KEY = 'metal-planner:settings-stats';
 
 function loadSettingsStats() {
     try {
         const stats = JSON.parse(localStorage.getItem(SETTINGS_STATS_KEY));
-        return {changes: (stats && stats.changes) || {}, reset: (stats && stats.reset) || {n: 0, t: null}};
+        return {
+            changes: (stats && stats.changes) || {},
+            labels: (stats && stats.labels) || {},
+            reset: (stats && stats.reset) || {n: 0, t: null},
+        };
     } catch {
-        return {changes: {}, reset: {n: 0, t: null}};   // localStorage niedostępny albo zepsuty JSON
+        return {changes: {}, labels: {}, reset: {n: 0, t: null}};   // localStorage niedostępny albo zepsuty JSON
     }
 }
 
@@ -7033,90 +7045,27 @@ function settingLabel(control) {
     return clone.textContent.replace(/\s+/g, ' ').trim();
 }
 
-function settingValue(control) {
-    if (control.type === 'checkbox') return control.checked ? 'tak' : 'nie';
-    if (control.tagName === 'SELECT') return control.selectedOptions[0].textContent.trim();
-    return control.value;
-}
-
-function statsAgo(t) {
-    if (!t) return '—';
-    const minutes = Math.floor((Date.now() - t) / 60000);
-    if (minutes < 1) return 'przed chwilą';
-    if (minutes < 60) return `${minutes} min temu`;
-    if (minutes < 60 * 24) return `${Math.floor(minutes / 60)} godz. temu`;
-    if (minutes < 60 * 24 * 30) return `${Math.floor(minutes / 60 / 24)} dni temu`;
-    return new Date(t).toLocaleDateString('pl-PL');
-}
-
-function settingsStatsRows() {
-    const stats = loadSettingsStats();
-    const rows = [];
-    for (const control of settingControls()) {
-        if (!control.id) continue;
-        const entry = stats.changes[control.id] || {n: 0, t: null};
-        rows.push({id: control.id, label: settingLabel(control), changes: entry.n,
-                   last: entry.t, value: settingValue(control)});
-    }
-    // Nietknięte lądują na dole, bo to one są wynikiem tej tabeli.
-    return rows.sort((a, b) => b.changes - a.changes);
-}
-
-function renderSettingsStats() {
-    const stats = loadSettingsStats();
-    const table = document.createElement('table');
-    table.className = 'stats-table';
-    const head = table.createTHead().insertRow();
-    for (const title of ['Ustawienie', 'Zmian', 'Ostatnio', 'Teraz']) {
-        head.appendChild(document.createElement('th')).textContent = title;
-    }
-    const body = table.createTBody();
-    const addRow = (label, changes, last, value) => {
-        const row = body.insertRow();
-        row.insertCell().textContent = label;
-        row.insertCell().textContent = changes;
-        row.insertCell().textContent = statsAgo(last);
-        row.insertCell().textContent = value;
-        if (!changes) row.className = 'untouched';
-        return row;
-    };
-    addRow('Przywróć domyślne', stats.reset.n, stats.reset.t, '—').classList.add('stats-reset');
-    for (const row of settingsStatsRows()) addRow(row.label, row.changes, row.last, row.value);
-    $('stats-body').replaceChildren(table);
-}
-
 devPanel.addEventListener('change', event => {
     if (![...settingControls()].includes(event.target) || !event.target.id) return;
     recordSettingChange(event.target.id);
-    if ($('fold-stats').open) renderSettingsStats();
-});
-$('fold-stats').addEventListener('toggle', () => {
-    if ($('fold-stats').open) renderSettingsStats();
 });
 
-$('stats-copy').addEventListener('click', async () => {
+// Strona /statystyki nie ma panelu, więc nazwy bierze stąd. Zapisujemy je
+// wszystkie, żeby tabela pokazała też ustawienia, których nikt nie ruszył.
+function syncSettingLabels() {
     const stats = loadSettingsStats();
-    const iso = t => (t ? new Date(t).toISOString() : null);
-    const json = JSON.stringify({
-        settings: settingsStatsRows().map(r => ({
-            id: r.id, label: r.label, changes: r.changes, last: iso(r.last), value: r.value,
-        })),
-        reset: {count: stats.reset.n, last: iso(stats.reset.t)},
-    }, null, 2);
-    const button = $('stats-copy');
-    await navigator.clipboard.writeText(json);
-    button.textContent = 'Skopiowano';
-    setTimeout(() => { button.textContent = 'Kopiuj statystyki'; }, 1500);
-});
-
-$('stats-clear').addEventListener('click', () => {
-    try {
-        localStorage.removeItem(SETTINGS_STATS_KEY);
-    } catch {
-        // localStorage niedostępny - i tak nie ma czego kasować
+    let changed = false;
+    for (const control of settingControls()) {
+        if (!control.id) continue;
+        const label = settingLabel(control);
+        if (stats.labels[control.id] !== label) {
+            stats.labels[control.id] = label;
+            changed = true;
+        }
     }
-    renderSettingsStats();
-});
+    if (changed) saveSettingsStats(stats);
+}
+syncSettingLabels();
 
 // --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
 //

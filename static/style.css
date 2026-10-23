@@ -2480,10 +2480,22 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
     font-size: 16px;
 }
 
-.set-group-head {
-    margin-top: 18px;
-    padding-top: 8px;
+/* Grupy składa app.js z etykiet wierszy (renderSettingsList); domyślnie zwinięte,
+   żeby panel nie przewijał się dłużej niż ekran. */
+.set-group {
+    margin-top: 14px;
+    padding-top: 10px;
     border-top: 1px dashed var(--line);
+}
+
+.set-group:first-of-type { margin-top: 12px; border-top: 0; padding-top: 0; }
+
+.set-group > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    list-style: none;
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -2491,7 +2503,25 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
     color: var(--ink-soft);
 }
 
-.set-group-head:first-child { margin-top: 12px; border-top: 0; padding-top: 0; }
+.set-group > summary::-webkit-details-marker { display: none; }
+
+/* Strzałka rysowana sama, żeby wyglądała tak samo we wszystkich
+   przeglądarkach (natywny marker bywa różny). */
+.set-group > summary::before {
+    content: '⌵';
+    font-size: 11px;
+    line-height: 1;
+    transform: rotate(-90deg);
+    transition: transform 0.12s ease;
+}
+
+.set-group[open] > summary::before { transform: none; }
+
+/* Strona /statystyki - bez mapy i panelu, zwykła przewijana strona. */
+.stats-page { background: var(--surface); min-height: 100vh; }
+.stats-main { max-width: 640px; margin: 0 auto; padding: 16px; }
+.stats-page .stats-table { font-size: 14px; }
+.stats-page h1 { font-size: 20px; }
 
 .set-title {
     font-size: 12px;
