@@ -33,6 +33,7 @@
 #               🔀 PR zmergowany             🔒 zgłoszenie zamknięte jako zrobione
 #               🚫 nie robimy / PR zamknięty bez merge'a
 #               📑 duplikat                  ⚔️ konflikt z main
+#               🏷️ błędna składnia PR-a
 #               ⏳ cisza w zgłoszeniu        💤 zamknięte po ciszy
 #               🤖 Claude skończył / ocenił  ⚠️ Claude nie dał rady
 #               📊 podsumowanie dnia         📋 ogólnie — do zrobienia
