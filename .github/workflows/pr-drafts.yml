@@ -17,7 +17,14 @@ name: "PR-y: zmiany przez wersję roboczą"
 #    z bazą, wraca do wersji roboczej. Przy konflikcie GitHub nie tworzy biegu
 #    `pull_request`, więc ocena i tak by nie ruszyła; autor rozwiązuje konflikt
 #    i oznacza PR jako gotowy jeszcze raz. Konflikt, który powstaje później,
-#    przez merge do `main`, łapie pr-conflicts.yml.
+#    przez zmianę bazy (merge do `main`, push do niższego piętra stosu),
+#    łapie pr-conflicts.yml.
+#
+# Każda baza poza `stable` — także gałąź PR-a pod nim, czyli PR w stosie
+# (#418): stos trafia na `main` w całości, więc każde jego piętro idzie tą
+# samą drogą co PR do `main`. Zmiany i konflikt liczymy zawsze względem
+# faktycznej bazy PR-a. PR-ów wydaniowych do `stable` nie ruszamy: to
+# gotowy `main`, a nie praca, którą się poprawia.
 #
 # `pull_request_target`, bo działa także przy PR-ze w konflikcie i przy PR-ach
 # z forków daje token z zapisem. Kodu z PR-a nie wypakowujemy: `merge-tree`
@@ -25,7 +32,7 @@ name: "PR-y: zmiany przez wersję roboczą"
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
-    branches: [main]
+    branches-ignore: [stable]
 
 permissions:
   # Przestawienie na wersję roboczą, zdjęcie próśb o recenzję i komentarz.

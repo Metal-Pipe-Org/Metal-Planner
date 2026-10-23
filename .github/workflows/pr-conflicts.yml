@@ -1,13 +1,13 @@
-name: "PR-y: nowy konflikt z main — ping i wersja robocza"
+name: "PR-y: nowy konflikt z bazą — ping i wersja robocza"
 
 # Przy PR-ze w konflikcie z bazą GitHub nie uruchamia automatów PR-a — także
 # discord.yml dla wystawionej recenzji. Zatwierdzenie takiego PR-a przechodziło
 # więc po cichu (#245), a zatwierdzony PR mógł utknąć w konflikcie bez wiedzy
 # autora. Konflikt powstaje zwykle wtedy, gdy coś wjeżdża na `main`, więc po
-# każdym pushu do `main` sprawdzamy wszystkie otwarte PR-y, także szkice.
-# Autor dostaje ping na Discordzie tylko wtedy, gdy ten push wpędził jego PR
-# w konflikt — raz na konflikt. Czekające prośby o recenzję są przy tym
-# zdejmowane: recenzent nie traci czasu na PR, który i tak się jeszcze
+# każdym pushu do `main` sprawdzamy wszystkie otwarte PR-y do `main`, także
+# szkice. Autor dostaje ping na Discordzie tylko wtedy, gdy ten push wpędził
+# jego PR w konflikt — raz na konflikt. Czekające prośby o recenzję są przy
+# tym zdejmowane: recenzent nie traci czasu na PR, który i tak się jeszcze
 # zmieni, a autor po rozwiązaniu konfliktu prosi o recenzję od nowa.
 #
 # Gotowy PR w konflikcie wraca do wersji roboczej (#349): rozwiązanie
@@ -15,17 +15,33 @@ name: "PR-y: nowy konflikt z main — ping i wersja robocza"
 # a wyjście z niej uruchamia ponowną ocenę Claude'a. PR otwarty od razu
 # w konflikcie, którego ten bieg nie zobaczy, przestawia pr-drafts.yml.
 #
+# Ta sama droga dla PR-ów w stosie (#418): bazą piętra jest gałąź PR-a pod
+# nim, więc konflikt powstaje też przy pushu do niższego piętra. Wtedy
+# sprawdzamy PR-y, których bazą jest właśnie ta gałąź.
+#
+# Push do niższego piętra łapiemy jako `synchronize` jego PR-a
+# (`pull_request_target`), a nie jako `push` do dowolnej gałęzi. `push`
+# bierze workflow z wypchniętej gałęzi — z cudzej pracy w toku albo ze
+# starej kopii sprzed tej zmiany — a ten bieg ma sekret webhooka Discorda
+# i token z zapisem do PR-ów. `pull_request_target` zawsze bierze workflow
+# z `main`, tak jak `push` do `main`. Cena: push do gałęzi, która jest bazą
+# PR-a, a sama nie ma otwartego PR-a, przechodzi bez sprawdzenia. W stosie
+# każde piętro ma swój PR, więc to nie nasz przypadek; GitHub i tak pokazuje
+# konflikt na stronie PR-a. Gałąź z forka nie bywa bazą PR-a w tym repo,
+# a jej nazwa mogłaby się pokryć z naszą — PR-y z forków pomijamy, tak samo
+# PR wydaniowy (`main` -> `stable`), którego pushe łapie gałąź `push`.
+# Bieg, który nie znalazł nikogo nad pushem, kończy się sukcesem i budzi
+# pełne przeliczenie w pr-state.yml, jak bieg pr-drafts.yml po pushu do
+# gotowego PR-a. To kilka wywołań API na otwarty PR, więc tego nie
+# odsiewamy.
+#
 # Logika siedzi w `.github/scripts/conflicts.sh`; z `DRY_RUN=1` da się ją
 # puścić na prawdziwych PR-ach tokenem tylko do odczytu.
 on:
   push:
     branches: [main]
-
-# Dwa merge'e chwilę po sobie: każdy bieg ocenia tylko swój push, więc nie
-# pingują podwójnie, ale po kolei wiadomości idą w kolejności merge'y.
-concurrency:
-  group: pr-conflicts
-  cancel-in-progress: false
+  pull_request_target:
+    types: [synchronize]
 
 permissions:
   # Zdjęcie próśb o recenzję i przestawienie na wersję roboczą.
@@ -35,20 +51,49 @@ permissions:
 
 jobs:
   ping-conflicts:
-    if: github.repository == 'Metal-Pipe-Org/Metal-Planner'
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && (github.event_name == 'push'
+          || (github.event.pull_request.head.repo.full_name == github.repository
+              && github.event.pull_request.head.ref != 'main'
+              && github.event.pull_request.head.ref != 'stable'))
+    # Dwa pushe do tej samej bazy chwilę po sobie: każdy bieg ocenia tylko
+    # swój push, więc nie pingują podwójnie, ale po kolei wiadomości idą
+    # w kolejności pushy. Różne bazy nie mają na siebie czekać.
+    concurrency:
+      group: pr-conflicts-${{ github.event.pull_request.head.ref || 'main' }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
+      # Gałąź, która właśnie dostała push: `main` albo gałąź PR-a, który
+      # zsynchronizowano. Nazwa to tekst od ludzi — do basha tylko przez env.
+      BASE: ${{ github.event.pull_request.head.ref || 'main' }}
 
     steps:
-      # Pełna historia, bo konflikt liczymy od wspólnego przodka PR-a i `main`.
+      # Większość pushy do PR-ów nie ma nikogo nad sobą — wtedy kończymy,
+      # zanim pobierzemy całą historię.
+      - name: Czy jakiś PR stoi na tej gałęzi
+        id: any
+        run: |
+          set -euo pipefail
+          n=$(gh api "repos/$REPO/pulls?state=open&per_page=1&base=$(jq -rn --arg b "$BASE" '$b | @uri')" --jq length)
+          if [ "$n" -gt 0 ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Żaden otwarty PR nie celuje w $BASE — nie ma czego sprawdzać."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Pełna historia, bo konflikt liczymy od wspólnego przodka PR-a i bazy.
       # Drzewo robocze tylko ze skryptami: kodu z PR-ów nigdy nie wypakowujemy,
       # `merge-tree` czyta same obiekty. Repo jest publiczne, więc głowy PR-ów
-      # skrypt dociąga bez zapisanego tokena.
+      # i bazę skrypt dociąga bez zapisanego tokena.
       - name: Pobierz skrypty i historię main
+        if: steps.any.outputs.go == 'true'
         uses: actions/checkout@v6
         with:
           ref: main
@@ -58,13 +103,16 @@ jobs:
           persist-credentials: false
 
       - name: Pinguj o nowe konflikty
+        if: steps.any.outputs.go == 'true'
         # Prośby zdejmujemy naszym tokenem, a takich zdarzeń GitHub nie
         # przekazuje do discord.yml — na Discorda wysyłamy stąd.
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+          # Przy `pull_request_target` `github.sha` to `main`, nie push —
+          # czubek piętra po pushu niesie `after`.
           BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
+          AFTER: ${{ github.event.after || github.sha }}
           GIT_REPO: .discord
         run: |
           set -euo pipefail
