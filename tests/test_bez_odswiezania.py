@@ -25,9 +25,8 @@ def _index(dev_mode):
 @pytest.mark.parametrize("dev_mode", [False, True])
 def test_opcja_w_layoucie_niezaleznie_od_trybu(dev_mode):
     html = _index(dev_mode)
-    start = html.index('id="fold-layout"')
-    layout = html[start:html.index("</details>", start)]
-    assert 'id="no-pull-refresh"' in layout
+    wiersz = re.search(r'<label[^>]*data-setting="no-pull-refresh"[^>]*>', html).group(0)
+    assert "dev-only" not in wiersz
     assert 'id="dev-toggle"' in html
 
 

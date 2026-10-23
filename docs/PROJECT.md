@@ -301,21 +301,10 @@ Gdy rower jest włączony, a propozycji z rowerem nie ma, pod listą staje
 kartka mówiąca dlaczego (`bikeNoteHtml`) — brak wyniku i zepsuta funkcja
 wyglądają inaczej tylko wtedy, gdy ktoś to powie.
 
-Ustawienia Developerskie są schowane za przyciskiem ⚙. Czysty JS bez
-frameworka, cała logika w `static/app.js`. Sekcje po kolei: „Co pokazuje
-mapa" (gęstość, liczba aut i przejazdów rowerem), „Czas na mapie",
-„Przystanki, rowery i Traficary" (m.in. godziny przejazdu rowerem i dojazdu
-autem w dymku, przejazdy rowerem zawsze widoczne, dostawczaki), „Założenia
-czasowe" (tempo marszu, prędkość i narzut roweru oraz auta), „Debug" (podglądy „dlaczego kawałek / rower / auto jest na mapie"),
-schowane „Wygląd mapy", „Dźwięk" i „Layout", „Wersja aplikacji", „Funkcje"
-z przełącznikami „Stoję tutaj / Jestem w pojeździe" i „Propozycje tras" (zgaszone to `routes=0` w `/api/flow` —
-serwer listy wtedy w ogóle nie składa), a na samym
-dole, zwinięte, „Propozycje tras" z **progiem opłacalności
-przesiadki** (`transfer_gain_sec`, domyślnie 10 min — patrz opis skanu
-wyżej). Wartości lądują w `localStorage`, a te, od których zależy odpowiedź
+Ustawienia Developerskie są schowane za przyciskiem ⚙. Czysty JS bez frameworka, cała logika w `static/app.js`. Panel to jedna płaska lista wszystkich ustawień (bez kategorii) z polem wyszukiwania na górze, które filtruje wiersze po widocznej nazwie, bez względu na wielkość liter i polskie ogonki. Ustawienia tylko dla dewelopera mają klasę `dev-only` i znaczek DEV — bez `DEV_MODE` ich nie widać. Nowe ustawienie to po prostu nowy wiersz `.set-row` z `data-setting` w `index.html`. Wartości lądują w `localStorage`, a te, od których zależy odpowiedź
 serwera, w query stringu `/api/flow`.
 `value`/`checked` w `index.html` są wartościami domyślnymi: opcja różna od
-nich dostaje pasek z boku, a nagłówek sekcji — liczbę takich opcji. Jeden
+nich dostaje pasek z boku. Jeden
 przycisk „Przywróć domyślne" kasuje wszystkie zapamiętane ustawienia
 i przeładowuje stronę.
 

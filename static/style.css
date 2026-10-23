@@ -2344,42 +2344,7 @@ body.dev-open #flow-panel { right: 322px; }
     line-height: 1.4;
 }
 
-/* Panel ma już tyle opcji, że przewijał się dłużej niż ekran - każda grupa
-   siedzi więc w składanej sekcji (patrz DEV_FOLD_IDS w app.js). */
-.dev-fold {
-    margin-top: 14px;
-    padding-top: 10px;
-    border-top: 1px dashed var(--line);
-}
-
-.dev-fold > summary {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    list-style: none;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-}
-
-.dev-fold > summary::-webkit-details-marker { display: none; }
-
-/* Strzałka rysowana sama, żeby wyglądała tak samo we wszystkich
-   przeglądarkach (natywny marker bywa różny). */
-.dev-fold > summary::before {
-    content: '⌵';
-    font-size: 11px;
-    line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 0.12s ease;
-}
-
-.dev-fold[open] > summary::before { transform: none; }
-
-/* Sekcja tylko dla dewelopera: poza DEV_MODE nie istnieje, a w nim nosi
+/* Ustawienie tylko dla dewelopera: poza DEV_MODE nie istnieje, a w nim nosi
    znaczek, żeby było widać, czego zwykły użytkownik nie zobaczy. */
 body:not(.dev-mode) .dev-only { display: none; }
 
@@ -2393,9 +2358,6 @@ body:not(.dev-mode) .dev-only { display: none; }
     letter-spacing: 0.06em;
 }
 
-/* Liczba zmienionych opcji staje wtedy za znaczkiem, a nie pośrodku nagłówka. */
-.dev-fold.dev-only > summary[data-changed]::after { margin-left: 0; }
-
 #dev-panel .dev-check {
     display: flex;
     align-items: center;
@@ -2408,17 +2370,6 @@ body:not(.dev-mode) .dev-only { display: none; }
 }
 
 #dev-panel .dev-check input { margin: 0; flex: none; }
-
-/* Podpodział wewnątrz rozwiniętej sekcji - lżejszy niż <summary>, bo to wciąż
-   ta sama sekcja, tylko druga jej połowa. */
-.dev-section-head {
-    margin: 14px 0 2px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-}
 
 #dev-panel select {
     width: 100%;
@@ -2483,26 +2434,43 @@ body:not(.dev-mode) .dev-only { display: none; }
 .dev-foot { margin-top: 18px; }
 #dev-reset { width: 100%; }
 
-/* Opcja różna od domyślnej (patrz markChangedSettings w app.js): pasek z boku,
-   a przy nagłówku sekcji liczba takich opcji - widać ją też przy zwiniętej. */
+/* Opcja różna od domyślnej (patrz markChangedSettings w app.js): pasek z boku. */
 #dev-panel .changed {
     margin-left: -9px;
     padding-left: 6px;
     border-left: 3px solid var(--accent);
 }
 
-.dev-fold > summary[data-changed]::after {
-    content: attr(data-changed);
-    margin-left: auto;
-    min-width: 18px;
-    padding: 1px 5px;
+/* Wiersze mają własne `display`, które przebijałoby atrybut hidden i klasę
+   wyszukiwarki. */
+#dev-panel .set-row[hidden],
+#dev-panel .set-row.search-miss,
+body:not(.dev-mode) #dev-panel .dev-only { display: none; }
+
+#dev-panel .set-row { margin-top: 14px; }
+#dev-panel .dev-check.set-row { margin-top: 9px; }
+#dev-panel .field.compact.set-row { margin-top: 10px; }
+
+.settings-search {
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 12px;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: var(--accent);
-    color: var(--surface);
-    font-size: 10px;
-    letter-spacing: 0;
-    text-align: center;
+    background: var(--surface-alt);
+    color: var(--ink);
+    /* 16 px, żeby iOS nie przybliżał ekranu po dotknięciu pola. */
+    font: inherit;
+    font-size: 16px;
 }
+
+.set-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+}
+
 #look-dump { font-variant-numeric: tabular-nums; word-break: break-word; }
 
 .field-hint code {

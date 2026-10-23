@@ -6408,7 +6408,7 @@ const routesOn = $('routes-on');
 function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
-    $('fold-transfer').hidden = !on;
+    $('transfer-gain').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
@@ -6514,10 +6514,10 @@ function applyLook() {
 }
 
 function bindLookSliders() {
-    const section = $('look-section');
-    if (!section) return;               // sekcja skasowana - wartości zostają domyślne
-    if (!LOOK_TUNING) { section.hidden = true; return; }
-    section.hidden = false;
+    const rows = devPanel.querySelectorAll('.look-row');
+    if (!rows.length) return;           // suwaki skasowane - wartości zostają domyślne
+    for (const row of rows) row.hidden = !LOOK_TUNING;
+    if (!LOOK_TUNING) return;
     let timer = null;
     const show = id => {
         const input = $(id);
@@ -6734,10 +6734,9 @@ function playPipeDrop() {
 }
 
 function bindSoundToggle() {
-    const fold = $('fold-sound');
-    if (fold) fold.hidden = !SOUND_TUNING;
     const input = $('sound-pipe');
     if (!input) return;
+    input.closest('.set-row').hidden = !SOUND_TUNING;
     input.checked = !!soundOpts.pipe;
     input.addEventListener('change', () => {
         soundOpts.pipe = input.checked;
@@ -6877,48 +6876,45 @@ function bindDotOpts() {
 }
 bindDotOpts();
 
-// --- rozwijane sekcje panelu -----------------------------------------------
+// --- wyszukiwarka ustawień ---------------------------------------------------
 //
-// Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
-// pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
-const DEV_FOLD_IDS = [
-    'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
-    'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
-    'fold-debug', 'look-section',
-    'fold-layout', 'fold-siechnice', 'fold-version',
-];
+// Ustawień przybywa szybciej, niż da się je trzymać w sensownych kategoriach,
+// więc to jedna lista, a porządek robi szukanie po widocznej nazwie.
+// Rzeczy, które wiersz już ma schowane (`hidden`), szukanie zostawia w spokoju.
+const settingsRows = [...devPanel.querySelectorAll('.set-row')];
 
-function bindDevFolds() {
-    const prefs = loadDevPrefs();
-    for (const id of DEV_FOLD_IDS) {
-        const el = $(id);
-        if (!el) continue;
-        const saved = prefs['fold:' + id];
-        if (saved !== undefined) el.open = !!saved;
-        el.addEventListener('toggle', () => saveDevPref('fold:' + id, el.open));
-    }
+for (const row of devPanel.querySelectorAll('.set-row.dev-only')) {
+    const badge = document.createElement('span');
+    badge.className = 'dev-badge';
+    badge.textContent = 'DEV';
+    (row.querySelector('label:not(.button), .set-title') || row).append(badge);
 }
-bindDevFolds();
+
+const settingsText = row => {
+    const copy = row.cloneNode(true);
+    for (const skip of copy.querySelectorAll('output, .info, .dev-badge')) skip.remove();
+    return fold(copy.textContent).replace(/\s+/g, ' ');
+};
+const settingsTexts = new Map(settingsRows.map(row => [row, settingsText(row)]));
+
+$('settings-search').addEventListener('input', event => {
+    const needle = fold(event.target.value.trim());
+    for (const [row, text] of settingsTexts) {
+        row.classList.toggle('search-miss', !text.includes(needle));
+    }
+});
 
 // --- zmienione ustawienia i powrót do domyślnych ----------------------------
 //
 // `value`/`checked` z index.html to wartości domyślne (patrz komentarz nad
-// panelem), więc opcja różna od nich dostaje znacznik, a nagłówek sekcji -
-// liczbę takich opcji, żeby było je widać także przy zwiniętej sekcji.
+// panelem), więc opcja różna od nich dostaje znacznik.
 function markChangedSettings() {
-    for (const fold of devPanel.querySelectorAll('.dev-fold')) {
-        let changed = 0;
-        // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
-        for (const input of fold.querySelectorAll('input:not([type=file])')) {
-            const differs = input.type === 'checkbox'
-                ? input.checked !== input.defaultChecked
-                : Number(input.value) !== Number(input.defaultValue);
-            input.closest('.field, .dev-check').classList.toggle('changed', differs);
-            if (differs) changed++;
-        }
-        const summary = fold.querySelector('summary');
-        if (changed) summary.dataset.changed = changed;
-        else delete summary.dataset.changed;
+    // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
+    for (const input of devPanel.querySelectorAll('.set-row input:not([type=file])')) {
+        const differs = input.type === 'checkbox'
+            ? input.checked !== input.defaultChecked
+            : Number(input.value) !== Number(input.defaultValue);
+        input.closest('.set-row').classList.toggle('changed', differs);
     }
 }
 devPanel.addEventListener('input', markChangedSettings);
