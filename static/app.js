@@ -135,19 +135,8 @@ $('sidebar-toggle').addEventListener('click', () => {
     saveUiState({sidebarHidden: hidden});
 });
 
-// Poza trybem deweloperskim (DEV_MODE, patrz config.dev_mode) sekcje DEV
-// panelu ⚙ są schowane, więc z pamięci bierze się tylko to, co użytkownik
-// w nim widzi - schowanej opcji nie miałby czym cofnąć, wraca więc do
-// domyślnej (zgłoszenie #175). Schowana wartość jest tylko pomijana, nie
-// kasowana: zapis dokłada się do tego, co już leży w pamięci, więc po
-// ponownym włączeniu DEV_MODE wraca.
+// Czy strona jest w trybie deweloperskim (DEV_MODE, patrz config.dev_mode).
 const devMode = document.body.classList.contains('dev-mode');
-
-function visiblePrefs(prefs, userKeys) {
-    if (devMode) return prefs;
-    return Object.fromEntries(Object.entries(prefs).filter(([key]) =>
-        userKeys.includes(key) || key.startsWith('fold:')));
-}
 
 // Ustawienia są schowane za przyciskiem, a strojenie algorytmu siedzi
 // w nich, w sekcjach DEV.
@@ -715,7 +704,7 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup(flowBikeMarkers(
             lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
-        if (dotOpts.bikeRides) showAllBikeRides(lastFlow.bike_places);
+        if (setting('bike-rides')) showAllBikeRides(lastFlow.bike_places);
         return;
     }
     loadCityBikes();
@@ -1276,48 +1265,154 @@ function endpointPoints() {
 // niosło samo krycie; przy szerokim oknie setka bladych kresek o tej samej
 // grubości sumowała się w plamę cięższą niż korytarz, który naprawdę
 // prowadzi do celu.
-const LOOK_DEFAULTS = {
-    minOpacity: 0.3,      // krycie najbledszego kawałka (w=0)
-    maxOpacity: 1,        // krycie najjaśniejszego (w=1)
-    minWeight: 2,         // grubość najbledszego kawałka [px]
-    maxWeight: 3,         // grubość najjaśniejszego [px]
-    casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
-    dimFactor: 0.22,      // ile zostaje z krycia, gdy wybrana jest jedna trasa
-    labelStep: 200,       // co tyle pikseli korytarza staje kolejna grupka numerów
-    labelScale: 0.8,      // wielkość numerów (1 = jak w CSS)
-    labelOpacity: 1,      // mnożnik krycia grupek numerów
-};
+// --- USTAWIENIA: jeden opis, jeden zapis -------------------------------------
+//
+// Ustawienie to wiersz `.set-row` w index.html i NIC więcej nie trzeba opisywać:
+// rodzaj wynika z kontrolki (przełącznik, suwak, lista wyboru), wartość
+// domyślna z jej `checked`/`value`/`selected` w HTML-u, etykiety z `data-labels`,
+// "tylko DEV" z klasy `dev-only`. Zapamiętywanie, przywracanie, pasek
+// "zmienione", kopie pod nagłówkami i statystyki działają na tym opisie
+// jednakowo dla każdego rodzaju. Aplikacja czyta wartość przez setting(id) w
+// chwili użycia; skutek zmiany (jeśli jest) wpisuje się w SETTING_EFFECTS.
+const settingsList = $('settings-list');
+const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 
 // JEDYNY przełącznik strojenia wyglądu: `true` pokazuje sekcję „Wygląd mapy"
-// w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków w
-// localStorage), `false` chowa ją w całości i zostawia same wartości wyżej.
-// Kod suwaków zostaje w repo celowo - patrz znaczniki TYMCZASOWE w
-// index.html i style.css.
+// w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków),
+// `false` chowa ją w całości i zostawia domyślne. Kod suwaków zostaje w repo
+// celowo - patrz znaczniki TYMCZASOWE w index.html i style.css. Dźwięk działa
+// tak samo (SOUND_TUNING, wiersze z `data-tuning`).
 const LOOK_TUNING = true;
-const LOOK_PREFS_KEY = 'metal-planner:look-prefs';
+const SOUND_TUNING = false;
+const TUNING = {look: LOOK_TUNING, sound: SOUND_TUNING};
 
-function loadLookPrefs() {
+const SETTINGS_KEY = 'metal-planner:settings';
+
+const readControl = control => (control.type === 'checkbox' ? control.checked
+    : control.tagName === 'SELECT' ? control.value : Number(control.value));
+
+function writeControl(control, value) {
+    if (control.type === 'checkbox') control.checked = value === true;
+    else if (control.tagName !== 'SELECT') control.value = String(value);
+    // Zapamiętana opcja mogła zniknąć z listy.
+    else if ([...control.options].some(option => option.value === value)) control.value = value;
+}
+
+const SETTINGS = new Map();
+const SETTING_BY_CONTROL = new Map();
+for (const row of settingsRows) {
+    // Wybór pliku, przyciski i odnośniki to akcje, nie ustawienia z wartością.
+    const control = row.querySelector('input:not([type=file]), select');
+    if (!control) continue;
+    const info = {
+        id: row.dataset.setting, row, control,
+        kind: control.tagName === 'SELECT' ? 'select' : control.type,
+        dflt: readControl(control),
+        devOnly: row.classList.contains('dev-only'),
+    };
+    SETTINGS.set(info.id, info);
+    SETTING_BY_CONTROL.set(control, info);
+}
+
+const setting = id => readControl(SETTINGS.get(id).control);
+
+// Wartość suwaka podpisana w `<output>`, jeśli ma inną postać niż liczba.
+const SETTING_FORMATS = {'walk-pace': value => WALK_PACE_LABELS[value]};
+
+function paintSettingOutput(info) {
+    const out = info.row.querySelector('output');
+    if (out) out.textContent = (SETTING_FORMATS[info.id] || String)(readControl(info.control));
+}
+
+function readStored(key) {
     try {
-        return JSON.parse(localStorage.getItem(LOOK_PREFS_KEY)) || {};
+        return JSON.parse(localStorage.getItem(key)) || {};
     } catch {
-        return {};
+        return {};       // localStorage niedostępny (tryb prywatny) albo zepsuty JSON
     }
 }
 
-// Przy schowanych suwakach zapamiętane wartości są celowo POMIJANE - inaczej
-// czyjeś stare ustawienia z localStorage przykryłyby domyślne na zawsze, bez
-// żadnej kontrolki, którą dałoby się je cofnąć.
-//
-// Z pamięci bierze się też tylko to, co ma jeszcze suwak (LOOK_TUNED) - te
-// same obawy dotyczą suwaków skasowanych.
-const LOOK_TUNED = ['maxWeight', 'dimFactor', 'labelStep', 'labelScale',
-                    'labelOpacity'];
-const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING && devMode ? Object.fromEntries(
-    Object.entries(loadLookPrefs()).filter(([key]) => LOOK_TUNED.includes(key)))
-    : {})};
+// Dawne klucze, zanim wszystko zeszło się w jednym: klucz -> {pole -> id
+// ustawienia}; null znaczy, że pola już nazywają się jak id.
+const LEGACY_SETTINGS_KEYS = {
+    'metal-planner:dev-prefs': null,
+    'metal-planner:time-prefs': {
+        hover: 'time-hover', ends: 'time-ends', chips: 'time-chips',
+        headline: 'time-show-headline', ride: 'time-ride',
+    },
+    'metal-planner:dot-prefs': {
+        size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past', center: 'dot-center',
+        tipCursor: 'tip-cursor', tipPanel: 'tip-panel', bikeTimes: 'bike-times',
+        bikeRides: 'bike-rides', carTimes: 'car-times', why: 'debug-why',
+        whySeg: 'debug-why-seg', namesZoom: 'names-zoom',
+    },
+    'metal-planner:look-prefs': {
+        maxWeight: 'look-weight', dimFactor: 'look-dim', labelStep: 'look-label-step',
+        labelScale: 'look-label-size', labelOpacity: 'look-label-op',
+    },
+    'metal-planner:sound-prefs': {pipe: 'sound-pipe'},
+};
+
+// Jednorazowo: kto miał ustawienia pod dawnymi kluczami, nie traci ich.
+function migrateLegacySettings() {
+    try {
+        if (localStorage.getItem(SETTINGS_KEY) !== null) return;
+        const legacy = Object.keys(LEGACY_SETTINGS_KEYS);
+        if (legacy.every(key => localStorage.getItem(key) === null)) return;
+        const merged = {};
+        for (const [key, names] of Object.entries(LEGACY_SETTINGS_KEYS)) {
+            for (const [name, value] of Object.entries(readStored(key))) {
+                const id = names ? names[name] : name;
+                if (id) merged[id] = value;
+            }
+        }
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+        for (const key of legacy) localStorage.removeItem(key);
+    } catch {
+        // localStorage niedostępny - i tak nie ma czego przenosić
+    }
+}
+
+const storedSettings = () => readStored(SETTINGS_KEY);
+
+function storeSetting(key, value) {
+    const stored = storedSettings();
+    stored[key] = value;
+    try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(stored));
+    } catch {
+        // localStorage niedostępny - ustawienie działa dalej, po prostu się nie zapamięta
+    }
+}
+
+// Poza trybem deweloperskim (DEV_MODE, patrz config.dev_mode) wiersze DEV są
+// schowane, więc z pamięci bierze się tylko to, co użytkownik w panelu widzi -
+// schowanej opcji nie miałby czym cofnąć (zgłoszenie #175). Schowana wartość
+// jest tylko pomijana, nie kasowana: po ponownym włączeniu DEV_MODE wraca.
+// To samo dotyczy strojeń wyłączonych stałymi (TUNING).
+function restoreSettings() {
+    const stored = storedSettings();
+    for (const info of SETTINGS.values()) {
+        const row = info.row;
+        if (stored[info.id] === undefined || (info.devOnly && !devMode)
+            || (row.dataset.tuning && !TUNING[row.dataset.tuning])) continue;
+        writeControl(info.control, stored[info.id]);
+    }
+}
+migrateLegacySettings();
+restoreSettings();
+
+const differsFromDefault = info => readControl(info.control) !== info.dflt;
+
+const look = {
+    minOpacity: 0.3,      // krycie najbledszego kawałka (w=0)
+    maxOpacity: 1,        // krycie najjaśniejszego (w=1)
+    minWeight: 2,         // grubość najbledszego kawałka [px]
+    casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
+};
 
 const lookOpacity = rel => look.minOpacity + (look.maxOpacity - look.minOpacity) * rel;
-const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * rel;
+const lookWeight = rel => look.minWeight + (setting('look-weight') - look.minWeight) * rel;
 
 // --- CZAS NA MAPIE ---------------------------------------------------------
 //
@@ -1334,95 +1429,6 @@ const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * r
 // sasiednimi godzinami tego samego kursu, proporcjonalnie do przebytej drogi.
 // Nic poza tym - zadnej sredniej predkosci, zadnego sklejania kursow.
 //
-// Kazda rzecz siedzi na wlasnym przelaczniku w Ustawieniach Developerskich - to
-// wciaz szukanie formy, a nie gotowa decyzja.
-const TIME_DEFAULTS = {
-    hover: true,        // godzina w punkcie pod kursorem + przyjazd do celu
-    ends: false,        // kropka dokladnie w punkcie, ktorego dotyczy godzina
-    chips: false,       // godzina malym drukiem pod numerkiem w grupce
-    headline: true,     // pasek nad mapa: najszybciej tyle, pokazane do tyle
-    ride: false,        // ...i w nim sam czas jazdy obok "za ile tam bedziesz"
-};
-
-const TIME_PREFS_KEY = 'metal-planner:time-prefs';
-
-function loadTimePrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(TIME_PREFS_KEY)) || {};
-    } catch {
-        return {};
-    }
-}
-
-const TIME_PREFS_USER = ['headline'];
-const timeOpts = {...TIME_DEFAULTS, ...visiblePrefs(loadTimePrefs(), TIME_PREFS_USER)};
-
-// Kropki przystanków i to, gdzie ląduje ich rozkład. Osobny klucz od
-// TIME_PREFS_KEY, bo tamto jest eksperymentem na czas strojenia, a to nie.
-// Wartości dobrane na żywo, na realnej mapie (2026-08-30).
-const DOT_DEFAULTS = {
-    size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
-    rows: 20,          // ile odjazdów wypisuje tablica pod kropką
-    ttPast: true,      // szare godziny sprzed chwili z mapy (timetableLinesHtml)
-    center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
-    tipCursor: true,   // dymek przy kursorze
-    tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
-    // Godziny SAMEGO przejazdu rowerem - domyślnie zgaszone. Godzina "jesteś
-    // przy rowerze" pochodzi z rozkładu i jest pokazywana zawsze; ta druga
-    // jest jedyną liczbą na tej mapie, której w żadnym rozkładzie nie ma.
-    // Odległość obok mówi to samo, nie udając odczytanej.
-    bikeTimes: false,
-    // Kreski wybranych przejazdów rowerem i ich stacje końcowe na stałe,
-    // a nie tylko pod kursorem - domyślnie zgaszone.
-    bikeRides: false,
-    // Szacowany przyjazd autem do celu w dymku auta - domyślnie zgaszony, z tego
-    // samego powodu co godziny roweru: policzony, nie odczytany. Auta wybiera
-    // się nim zawsze (zgłoszenie #150), przełącznik mówi tylko, czy go pokazać.
-    carTimes: false,
-    // Debug: dlaczego rower i auto przeszły wybór (pole `why` z serwera).
-    why: false,
-    // Debug: dlaczego kawałek jest na mapie (pole `why` kawałka, patrz
-    // planner._value_map).
-    whySeg: false,
-    // Od tego przybliżenia mapa podpisuje przystanki nazwami (zgłoszenia #252
-    // i #253): przy narysowanej trasie tylko te, przez które jedzie któraś
-    // z jej linii, bez trasy - wszystkie w kadrze. Zmierzone 2026-10-09: przy
-    // 16 nazwy całego centrum już się nie zderzają, ale numery linii i kropki
-    // zabierają im miejsce, więc domyślnie o jeden stopień bliżej.
-    namesZoom: 17,
-};
-
-const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
-
-function loadDotPrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(DOT_PREFS_KEY)) || {};
-    } catch {
-        return {};
-    }
-}
-
-const DOT_PREFS_USER = ['ttPast'];
-const dotOpts = {...DOT_DEFAULTS, ...visiblePrefs(loadDotPrefs(), DOT_PREFS_USER)};
-
-function saveDotPrefs() {
-    try {
-        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(
-            {...loadDotPrefs(), ...visiblePrefs(dotOpts, DOT_PREFS_USER)}));
-    } catch {
-        // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
-    }
-}
-
-function saveTimePrefs() {
-    try {
-        localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(
-            {...loadTimePrefs(), ...visiblePrefs(timeOpts, TIME_PREFS_USER)}));
-    } catch {
-        // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
-    }
-}
-
 /** Sekundy -> "8 min" / "1 h 3 min". */
 function fmtMins(sec) {
     const total = Math.round(sec / 60);
@@ -1807,7 +1813,7 @@ function renderTimeHeadline() {
     if (!el) return;
     hideHeadlineTip();
     const flow = headlineFlow;
-    if (!timeOpts.headline || !flow || typeof flow.best_sec !== 'number') {
+    if (!setting('time-show-headline') || !flow || typeof flow.best_sec !== 'number') {
         el.hidden = true;
         el.innerHTML = '';
         hideFastest();
@@ -1830,7 +1836,7 @@ function renderTimeHeadline() {
           + '"><span class="spinner" aria-hidden="true"></span>Pokaż więcej</button>'
         : '';
     // Sama jazda to osobna liczba na życzenie.
-    const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
+    const ride = setting('time-ride') && typeof flow.ride_sec === 'number'
         ? item('', `Sama jazda: ${fmtMins(flow.ride_sec)}, od odjazdu pierwszego pojazdu`
                    + ' do celu, bez czekania na niego.',
                `${HEADLINE_RIDE_ICON}<b>${esc(fmtMins(flow.ride_sec))}</b>`)
@@ -2037,11 +2043,11 @@ if (devPanel) devPanel.addEventListener('transitionend', placeTimeHeadline);
 // rzadkiej okolicy potrafił zejść z 57% opisanych korytarzy na 14%, nie
 // oszczędzając ani procenta ekranu. Blade korytarze dostają więc numer wtedy,
 // gdy zostało dla niego miejsce - i tylko trochę bledszy.
-// Odstęp grupek i ich wielkość siedzą na suwakach (look.labelStep/labelScale) -
+// Odstęp grupek i ich wielkość siedzą na suwakach (look-label-step, look-label-size) -
 // "co ile numerów" i "jak duże numery" to dokładnie te dwie rzeczy, którymi
 // reguluje się, jak natrętne są numery na mapie.
-const labelStepPx = () => look.labelStep;
-const labelRepeatPx = () => look.labelStep * 1.6;  // ten sam skład nie częściej niż co tyle
+const labelStepPx = () => setting('look-label-step');
+const labelRepeatPx = () => setting('look-label-step') * 1.6;  // ten sam skład nie częściej niż co tyle
 const LABEL_EDGE_PX = 14;        // margines kadru - grupka nie może wystawać za mapę
 const LABEL_GAP_PX = 4;          // odstęp między sąsiednimi grupkami
 const LABEL_MAX = 60;            // sufit, żeby mapa nie zamieniła się w ścianę liczb
@@ -2071,14 +2077,14 @@ function clusterRows(roster) {
     pojedynczy numer. */
 function clusterBox(roster) {
     const rows = clusterRows(roster);
-    const scale = look.labelScale;   // numery rosną razem z suwakiem - i tak samo ich kolizje
+    const scale = setting('look-label-size');   // numery rosną razem z suwakiem - i tak samo ich kolizje
     // Czas pod numerkiem powiększa grupkę w obu wymiarach, więc musi wejść
     // do POMIARU, nie tylko do rysowania - inaczej grupki zaczęłyby na siebie
     // wchodzić (kolizje liczą się z tego pudełka, patrz placeLineLabels).
-    const chars = l => (timeOpts.chips
+    const chars = l => (setting('time-chips')
         ? Math.max(String(l.num).length, 5)   // "16:04" bywa szersze niż sam numer
         : String(l.num).length);
-    const rowPx = CHIP_ROW_PX + (timeOpts.chips ? CHIP_TIME_ROW_PX : 0);
+    const rowPx = CHIP_ROW_PX + (setting('time-chips') ? CHIP_TIME_ROW_PX : 0);
     let width = 0;
     for (const row of rows) {
         let w = 2 * CLUSTER_PAD_PX;
@@ -2165,7 +2171,7 @@ function placeLineLabels() {
         if (same) same.push(c.at); else byKey.set(c.key, [c.at]);
         markers.push(clusterMarker(
             map.containerPointToLatLng(c.at), c.roster, c.w,
-            timeOpts.chips ? chipTimesAt(c.at, c.roster) : null,
+            setting('time-chips') ? chipTimesAt(c.at, c.roster) : null,
         ));
     }
 
@@ -2234,7 +2240,7 @@ function clusterMarker(at, roster, weight, times) {
             iconSize: null,
         }),
         keyboard: false,
-        opacity: (flowDimmed ? 0.25 : 0.65 + 0.35 * weight) * look.labelOpacity,
+        opacity: (flowDimmed ? 0.25 : 0.65 + 0.35 * weight) * setting('look-label-op'),
     });
     marker.roster = roster;
     return marker;
@@ -2261,7 +2267,7 @@ let flowDimmed = false;
 function dimFlow(dim) {
     flowDimmed = dim;
     for (const part of flowParts) {
-        part.layer.setStyle({opacity: dim ? part.opacity * look.dimFactor : part.opacity});
+        part.layer.setStyle({opacity: dim ? part.opacity * setting('look-dim') : part.opacity});
     }
     // Wybrana trasa ma własne kropki na swoich przystankach - te z wachlarza
     // leżałyby na nich i pytały o to samo dwa razy.
@@ -2389,7 +2395,7 @@ function flowPickHtml(when) {
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
-    if (dotOpts.whySeg && sel.hit && sel.hit.seg.why) {
+    if (setting('debug-why-seg') && sel.hit && sel.hit.seg.why) {
         html += segWhyHtml(sel.hit.seg.why);
     }
     return html;
@@ -2461,7 +2467,7 @@ function segWhyHtml(why) {
     ta sama liczba, z ktorej policzona jest jasnosc tego kawalka, wiec kolor
     i godzina nigdy nie moga powiedziec czegos innego. */
 function flowTipTimeHtml(when) {
-    if (!timeOpts.hover || !when) return '';
+    if (!setting('time-hover') || !when) return '';
     let html = '<span class="flow-tip-time">'
         + `<b>${esc(fmtClock(when.now))}</b>`
         + '<span class="flow-tip-what">tu jesteś'
@@ -2483,7 +2489,7 @@ function flowTipTimeHtml(when) {
 // miejsca NA torze.
 function showTimeDot(when) {
     hideTimeDot();
-    if (!timeOpts.ends || !when) return;
+    if (!setting('time-ends') || !when) return;
     flowSpanLayer = L.circleMarker(when.at, {
         radius: 5, color: '#111', weight: 2, opacity: 0.9,
         fillColor: '#fff', fillOpacity: 1, interactive: false,
@@ -2535,10 +2541,10 @@ function renderFlowPick() {
     if (sel.hit) showLineHighlight(sel.num, sel.kind);
     else hideLineHighlight();
     // Liczone RAZ: ta sama chwila opisuje i dymek, i kropke na linii.
-    const when = timeOpts.hover ? timeAtHover(sel.hit, flowPickPoint) : null;
+    const when = setting('time-hover') ? timeAtHover(sel.hit, flowPickPoint) : null;
     showTimeDot(when);
     const html = flowPickHtml(when);
-    if (dotOpts.tipCursor) {
+    if (setting('tip-cursor')) {
         if (!flowTooltip) {
             // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
             // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
@@ -2621,7 +2627,7 @@ function pickFromCluster(marker, index) {
 // kropki są mniejsze i lżejsze od kropek przesiadek i nie mają tablicy
 // odjazdów - tylko nazwę i godzinę, jak przystanki linii w rozkładach.
 // Widać je pod kursorem na wskazanej linii, a od przybliżenia
-// dotOpts.namesZoom - wszystkie, razem z nazwami. Pozostałe słupki miasta
+// ustawienia „Nazwy przystanków od przybliżenia" - wszystkie, razem z nazwami. Pozostałe słupki miasta
 // zostają blade i bez nazw: mówią o czymś innym niż ta mapa (ta sama zasada,
 // co przy ◉). Nic z tego nie rusza samych linii.
 
@@ -2783,7 +2789,7 @@ function placeStopNames() {
     if (flowStopsLayer) { map.removeLayer(flowStopsLayer); flowStopsLayer = null; }
     if (stopNameLayer) { map.removeLayer(stopNameLayer); stopNameLayer = null; }
     if (hoveredLineStop && !flowLineStopLayer) hoveredLineStop = null;
-    if (map.getZoom() < dotOpts.namesZoom) return;
+    if (map.getZoom() < setting('names-zoom')) return;
     // Wybrana trasa ma własne przystanki po drodze - nazwy wachlarza
     // opisywałyby to, co jest właśnie przygaszone.
     if (lastFlow && flowDimmed) return;
@@ -3003,7 +3009,7 @@ const flowPanel = $('flow-panel');
 const flowPanelBody = $('flow-panel-body');
 
 function showSidePanel(html) {
-    if (!flowPanel || !dotOpts.tipPanel) return;
+    if (!flowPanel || !setting('tip-panel')) return;
     flowPanelBody.innerHTML = html;
     flowPanel.hidden = false;
     placeTimeHeadline();    // okienko stoi obok paska i zmienia wysokość z treścią
@@ -3026,7 +3032,7 @@ function hideSidePanel() {
     więc pytanie ich o cokolwiek pokazywałoby rozkład punktu, którego nie
     widać. */
 function seedStartPanel() {
-    if (!dotOpts.tipPanel || !flowPanel) return;
+    if (!setting('tip-panel') || !flowPanel) return;
     // Nie wyrywamy okienka spod ręki: przerysowanie w trakcie najeżdżania
     // (suwaki wyglądu) ma zostawić to, na co użytkownik właśnie patrzy.
     if (hoveredStopDot || flowPick) return;
@@ -3063,8 +3069,8 @@ const STOP_DOT_STYLE = {radius: 5, weight: 3, color: '#263238',
 
 const journeyDotStyle = () => ({
     ...STOP_DOT_STYLE,
-    radius: dotOpts.size,
-    weight: Math.min(4, Math.max(2, Math.round(dotOpts.size * 0.5))),
+    radius: setting('dot-size'),
+    weight: Math.min(4, Math.max(2, Math.round(setting('dot-size') * 0.5))),
 });
 
 const TIP_LOADING = '<div class="tt-note">Ładowanie…</div>';
@@ -3122,7 +3128,7 @@ function timetableHtml(data, mapSec) {
     Bez "za ile", bez "co N min" i bez godziny w nagłówku: takt z trzech
     kursów pod rząd mylił ("co 2 min"), a rząd godzin mówi to samo bez
     uogólniania. Godziny sprzed chwili z mapy są szare, a bez nich (ustawienie
-    „Szare godziny w tablicy", dotOpts.ttPast) tablica zaczyna się od tej
+    „Szare godziny w tablicy") tablica zaczyna się od tej
     chwili. */
 function timetableLinesHtml(data, mapSec) {
     const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span></div>`;
@@ -3143,7 +3149,7 @@ function timetableLinesHtml(data, mapSec) {
         // z wiersza (Lutosławskiego: sześć szarych 310, żadnej na czas).
         // Spóźniony kurs (#238, patrz withLate) to też szara godzina - z obu
         // rodzajów razem zostaje najpóźniejsza.
-        const szare = dotOpts.ttPast ? przed.slice(-1) : [];
+        const szare = setting('tt-past') ? przed.slice(-1) : [];
         const miejsce = TT_TIMES_MAX - szare.length;
         const ciete = po.length > miejsce;
         const pokazane = [...szare, ...(ciete ? po.slice(0, miejsce - 1) : po)];
@@ -3188,12 +3194,9 @@ const TT_TIMES_MAX = 6;
 const TIMETABLE_ROWS_MAX = 20;  // wyżej dymek przykrywa mapę, o którą się pyta
 const TIMETABLE_FETCH = 40;     // ...a tyle pobieramy, bo część odsiewamy
 
-/** Suwak ma swój sufit w atrybucie, ale wartość wraca też z localStorage -
-    a tam może leżeć cokolwiek, również z czasów, gdy zakres był inny. */
+/** Suwak ma swój sufit w atrybucie, ale ten tutaj bywa niższy. */
 function timetableRows() {
-    const rows = Math.round(Number(dotOpts.rows));
-    if (!Number.isFinite(rows)) return DOT_DEFAULTS.rows;
-    return Math.max(1, Math.min(rows, TIMETABLE_ROWS_MAX));
+    return Math.max(1, Math.min(Math.round(setting('dot-rows')), TIMETABLE_ROWS_MAX));
 }
 
 const lineKey = l => `${l.kind} ${l.num} ${l.headsign}`;
@@ -3280,7 +3283,7 @@ function withArrivals(data, lines) {
     Wiersz dostaje `flow` linii z mapy, jeśli ją mapa proponuje - inaczej
     stanąłby jako osobny wiersz obok jej odjazdów. */
 function withLate(data, where) {
-    if (!dotOpts.ttPast || !where.late) return data;
+    if (!setting('tt-past') || !where.late) return data;
     const flow = new Map((where.lines || []).filter(l => l.flow !== 'end')
         .map(l => [lineKey(l), l.flow]));
     const key = d => `${lineKey({kind: d.mode, num: d.num, headsign: d.headsign})}@${d.sec}`;
@@ -3493,7 +3496,7 @@ function stopDot(point, where, sec, style) {
     // dymek sam, na mouseover, więc "nie pokazuj go" nie da się zrobić inaczej
     // niż nie wiążąc go wcale. Przełącznik przerysowuje mapę (patrz applyDots),
     // więc kropki powstają od nowa z aktualnym ustawieniem.
-    if (dotOpts.tipCursor) {
+    if (setting('tip-cursor')) {
         dot.bindTooltip(TIP_LOADING, {
             direction: 'top', offset: [0, -6], opacity: 1,
             className: 'timetable-tip',
@@ -3549,8 +3552,8 @@ const flowDotStyle = (w = 1) => {
     const krycie = lookOpacity(Math.max(0, Math.min(1, Number(w) || 0)));
     return {
         ...FLOW_DOT_STYLE,
-        radius: Math.max(2, dotOpts.size - 1),
-        weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
+        radius: Math.max(2, setting('dot-size') - 1),
+        weight: Math.min(3, Math.max(1.5, Math.round(setting('dot-size') * 0.4))),
         opacity: krycie,
         fillOpacity: krycie,
     };
@@ -3621,7 +3624,7 @@ function endpointDot(name, style) {
     godzina, `clat`/`clon` - środek wszystkich słupków tego miejsca.
     Przełącznik tylko wybiera, bo nie ma tu czego dopytywać. */
 function nodePoint(node) {
-    return dotOpts.center && node.clat !== undefined
+    return setting('dot-center') && node.clat !== undefined
         ? [node.clat, node.clon]
         : [node.lat, node.lon];
 }
@@ -3676,13 +3679,13 @@ function carTooltipHtml(car) {
         ...(lastFlow.cars_dest_in_zone === false ? [
             '<b>⚠ Cel poza strefą Traficara — tam auta nie oddasz</b>',
         ] : []),
-        ...(dotOpts.carTimes ? [
+        ...(setting('car-times') ? [
             `W celu ok. ${fmtClock(car.arrival)} — ${fmtMins(car.drive_sec)} ` +
             'jazdy z ruszeniem i parkowaniem',
         ] : []),
         `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
         ogarniamText(car.ogarniam),
-        ...(dotOpts.why && car.why ? [
+        ...(setting('debug-why') && car.why ? [
             whyText(car.why),
         ] : []),
     ].join('<br>');
@@ -3747,7 +3750,7 @@ const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
 
     Sam przejazd domyślnie nie jest narysowany na stałe: dwie kropki mówią to
     samo, co kreska między nimi. Kreski pojawiają się pod kursorem, a na stałe
-    - po zapaleniu przełącznika pod zębatką (dotOpts.bikeRides). */
+    - po zapaleniu przełącznika pod zębatką. */
 function flowBikeMarkers(places, live) {
     return (places || []).map(place => {
         const dot = L.circleMarker([place.lat, place.lon],
@@ -3757,7 +3760,7 @@ function flowBikeMarkers(places, live) {
         dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
-            if (!dotOpts.bikeRides) clearBikeRides();
+            if (!setting('bike-rides')) clearBikeRides();
             else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
         });
         return dot;
@@ -3780,7 +3783,7 @@ function bikeTooltipHtml(place, live) {
     rows.push(live ? bikeCountText(place)
                    : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
                      'jest z tej chwili, a pytasz o inny dzień');
-    if (dotOpts.why && place.why) {
+    if (setting('debug-why') && place.why) {
         // Wybór przechodzi STACJA (punkt 16), więc powód stoi przy niej, a pod
         // nim podróże, które stacja pokazuje - każda ze swoimi trzema liczbami.
         rows.push(whyText(place.why));
@@ -3872,14 +3875,14 @@ function bikeRideLayers(place, labels) {
     jest policzona, nie odczytana - wraca przełącznikiem pod zębatką. */
 function bikeRideLabel(ride) {
     const parts = [];
-    if (dotOpts.bikeTimes) parts.push(fmtClock(ride.at));
+    if (setting('bike-times')) parts.push(fmtClock(ride.at));
     parts.push(fmtDist(ride.m));
     return parts.join(' · ');
 }
 
 function bikeRideTooltipHtml(ride) {
     const rows = [`<b>${esc(ride.name)}</b>`];
-    rows.push(dotOpts.bikeTimes
+    rows.push(setting('bike-times')
         ? `Stąd ${fmtDist(ride.m)} w linii prostej — ${fmtMins(ride.sec)} ` +
           `z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
         : `Stąd ${fmtDist(ride.m)} w linii prostej`);
@@ -6273,139 +6276,55 @@ placeDialog.addEventListener('close', () => { placeLongPress = false; });
 
 renderPlaces();
 
+// Co zmiana ustawienia robi poza zapamiętaniem. Zapamiętuje, przywraca i
+// pokazuje wartość wspólny mechanizm (patrz „USTAWIENIA" wyżej); tu zostaje
+// tylko skutek dla reszty aplikacji: `paint` rysuje stan i odpala się też na
+// starcie, `react` tylko po ruchu użytkownika. Ustawienie, które nic nie robi
+// samo (aplikacja czyta je przez setting() w chwili użycia), nie ma tu wpisu.
+//
 // Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
 // więc każdy suwak siłą rzeczy odświeża i mapę, i listę - nie ma już
 // suwaków "tylko dla mapy".
-//
-// Wartości suwaków zapamiętujemy w localStorage (jeden klucz, mały JSON) -
-// przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
-// preferencji od nowa za każdym razem.
-const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
-                        'walk-pace', 'bike-kmh', 'bike-overhead',
-                        'car-kmh', 'car-overhead', 'onboard-slack'];
-
-// To, co z tego klucza widać w ⚙ także bez DEV_MODE (patrz visiblePrefs).
-const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
-                        'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
-                        'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open'];
-
-function storedDevPrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(DEV_PREFS_KEY)) || {};
-    } catch {
-        return {};       // localStorage niedostępny (tryb prywatny) albo zepsuty JSON
-    }
-}
-
-function loadDevPrefs() {
-    return visiblePrefs(storedDevPrefs(), DEV_PREFS_USER);
-}
-
-function saveDevPref(id, value) {
-    const prefs = storedDevPrefs();
-    prefs[id] = value;
-    try {
-        localStorage.setItem(DEV_PREFS_KEY, JSON.stringify(prefs));
-    } catch {
-        // localStorage niedostępny - suwak działa dalej, po prostu się nie zapamięta
-    }
-}
-
-function applyStoredDevPrefs() {
-    const prefs = loadDevPrefs();
-    for (const id of DEV_SLIDER_IDS) {
-        if (prefs[id] === undefined) continue;
-        const input = $(id);
-        const valueEl = $(id + '-value');
-        if (!input) continue;
-        input.value = prefs[id];
-        if (valueEl) valueEl.textContent = prefs[id];
-    }
-}
-
-function liveSlider(inputId, valueId, resetsMore) {
-    const input = $(inputId);
-    const valueEl = $(valueId);
+function debounced(run, wait) {
     let timer = null;
-    input.addEventListener('input', () => {
-        valueEl.textContent = input.value;
-        // Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
-        // z "pokaż więcej" liczyłaby się inaczej od starej i suwak
-        // wyglądałby na zepsuty.
-        if (resetsMore) mapMore = 0;
-        saveDevPref(inputId, input.value);
+    return (...args) => {
         clearTimeout(timer);
-        timer = setTimeout(() => {
-            // Start z pokładu nie ma pola „skąd" - o komplecie pytania mówi
-            // tam wybór pojazdu (patrz onboardReady).
-            if (!endInput.value || (onboardOn ? !onboardReady() : !startInput.value)) return;
-            loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
-        }, 200);
-    });
+        timer = setTimeout(() => run(...args), wait);
+    };
 }
-applyStoredDevPrefs();
-liveSlider('density', 'density-value', true);
-liveSlider('car-count', 'car-count-value', true);
-liveSlider('bike-count', 'bike-count-value', true);
-liveSlider('transfer-gain', 'transfer-gain-value');
-liveSlider('walk-pace', 'walk-pace-value');
-liveSlider('bike-kmh', 'bike-kmh-value');
-liveSlider('bike-overhead', 'bike-overhead-value');
-liveSlider('car-kmh', 'car-kmh-value');
-liveSlider('car-overhead', 'car-overhead-value');
-liveSlider('onboard-slack', 'onboard-slack-value');
 
-function showWalkPace() {
-    $('walk-pace-value').textContent = WALK_PACE_LABELS[$('walk-pace').value];
+function replanQuietly() {
+    // Start z pokładu nie ma pola „skąd" - o komplecie pytania mówi
+    // tam wybór pojazdu (patrz onboardReady).
+    if (!endInput.value || (onboardOn ? !onboardReady() : !startInput.value)) return;
+    loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
-$('walk-pace').addEventListener('input', showWalkPace);
-showWalkPace();
 
-// Dostawczaki i rodzaj roweru zmieniają odpowiedź serwera, więc jak suwak:
-// pamiętane w tym samym kluczu i od razu nowe zapytanie.
-// Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
-// wygląda tak, jak wyglądała przed zgłoszeniem #147.
-for (const [id, domyslnie] of [['car-vans', false]]) {
-    const input = $(id);
-    const zapisane = loadDevPrefs()[id];
-    input.checked = zapisane === undefined ? domyslnie : zapisane === true;
-    input.addEventListener('change', () => {
-        mapMore = 0;
-        saveDevPref(id, input.checked);
-        if (id === 'car-vans' && !flowOnScreen()) refreshCarLayer();
-        if (!startInput.value || !endInput.value) return;
-        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
-    });
+// Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
+// z "pokaż więcej" liczyłaby się inaczej od starej i suwak
+// wyglądałby na zepsuty.
+function replanSoon(resetsMore) {
+    const later = debounced(replanQuietly, 200);
+    return () => {
+        if (resetsMore) mapMore = 0;
+        later();
+    };
 }
 
 // „Stoję tutaj / Jestem w pojeździe" da się schować - kto nie jeździ
 // z pokładu, ma o jeden rząd formularza mniej. Bez przełącznika nie byłoby
 // jak wrócić z trybu pojazdu, więc start jest wtedy zawsze stojącym miejscem.
-const startModeSwitch = $('start-mode-switch');
-
 function showStartMode(on) {
     document.body.classList.toggle('start-mode-off', !on);
     if (!on && onboardOn) setStartMode(false);
 }
 
-const bikesMergedInput = $('bikes-merged');
-bikesMergedInput.checked = loadDevPrefs()['bikes-merged'] === true;
-paintBikeButtons();
-bikesMergedInput.addEventListener('change', () => {
-    saveDevPref('bikes-merged', bikesMergedInput.checked);
-    paintBikeButtons();
-});
-
 // Propozycje tras da się wyłączyć w całości (sekcja „Wygląd aplikacji") -
 // zostaje sama mapa, a serwer listy w ogóle nie składa (patrz queryParams).
 // Znika lista, jej nagłówek ze strzałką i karta „Szukam połączeń…” (czeka
 // na listę), ale nie błędy w tym samym miejscu: te mówią o wyszukiwaniu. Na telefonie znika też zakładka „Trasy".
-const routesOn = $('routes-on');
-
 function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
@@ -6414,132 +6333,133 @@ function showRoutes(on) {
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
 }
-
-routesOn.checked = loadDevPrefs()['routes-on'] !== false;
-showRoutes(routesOn.checked);
 // Widok telefonu wraca na ostatnią zakładkę dopiero pod koniec wczytywania -
 // wtedy okazuje się, czy nie stoi się na schowanej „Trasy".
-document.addEventListener('DOMContentLoaded', () => showRoutes(routesOn.checked));
-routesOn.addEventListener('change', () => {
-    saveDevPref('routes-on', routesOn.checked);
-    showRoutes(routesOn.checked);
-    // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
-    // tak jak propozycje z rowerem (patrz replanInPlace).
-    if (routesOn.checked) replanInPlace();
-});
+document.addEventListener('DOMContentLoaded', () => showRoutes(setting('routes-on')));
 
-// Gest „pociągnij w dół, żeby odświeżyć" (opcja w „Wyglądzie aplikacji”) - overscroll-behavior
-// na <html> (patrz style.css) gasi go bez ruszania zwykłego przewijania.
-const noPullRefresh = $('no-pull-refresh');
-noPullRefresh.checked = loadDevPrefs()['no-pull-refresh'] === true;
-document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
-noPullRefresh.addEventListener('change', () => {
-    saveDevPref('no-pull-refresh', noPullRefresh.checked);
-    document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
-});
-
-// Odświeżanie lokalizacji co 30 s (#379): ukryta funkcja, tylko DEV - klucza nie
-// ma w DEV_PREFS_USER, więc bez DEV_MODE zapisana wartość nie działa.
-const locationRefresh = $('location-refresh');
-locationRefresh.checked = loadDevPrefs()['location-refresh'] === true;
-locationRefresh.addEventListener('change', () => {
-    saveDevPref('location-refresh', locationRefresh.checked);
-    syncAutoRefresh();
-});
-
-// Przystanki po drodze rozwinięte od razu (opcja w „Wyglądzie aplikacji",
-// zgłoszenie #169). Zmiana zaczyna od nowa - także tam, gdzie listę
-// przełączono kliknięciem - i od razu przerysowuje otwartą propozycję.
-const viaOpenInput = $('via-open');
-viaOpenInput.checked = loadDevPrefs()['via-open'] === true;
-viaOpenInput.addEventListener('change', () => {
-    saveDevPref('via-open', viaOpenInput.checked);
-    viaShown = new WeakMap();
-    if (selectedJourney !== null) renderJourneys();
-});
-
-// Przycisk strefy Traficara (🅿) - domyślnie go nie ma, strefa pokazuje się
-// wtedy tylko pod kursorem (patrz refreshZoneLayer).
-const zoneButton = $('zone-button');
-zoneButton.checked = loadDevPrefs()['zone-button'] === true;
-zoneButton.addEventListener('change', () => {
-    saveDevPref('zone-button', zoneButton.checked);
-    refreshZoneLayer();
-});
-
-startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
-showStartMode(startModeSwitch.checked);
-startModeSwitch.addEventListener('change', () => {
-    saveDevPref('start-mode-switch', startModeSwitch.checked);
-    showStartMode(startModeSwitch.checked);
-});
-
-// --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
-//
-// Te suwaki nie dotykają serwera - kręcą wyłącznie liczbami z LOOK_DEFAULTS,
-// więc mapa przemalowuje się natychmiast, z ostatniej odpowiedzi (lastFlow),
-// bez ponownego zapytania. Wartości są już dobrane (siedzą w LOOK_DEFAULTS),
-// więc cała sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca
-// ją, gdyby trzeba było stroić od nowa.
-// Grubość linii to grubość najjaśniejszej: każda linia jest najjaśniejsza
-// (patrz look-weight w index.html).
-const LOOK_KNOBS = {
-    'look-weight': 'maxWeight',
-    'look-dim': 'dimFactor',
-    'look-label-step': 'labelStep',
-    'look-label-size': 'labelScale',
-    'look-label-op': 'labelOpacity',
-};
-
-function saveLookPrefs() {
-    try {
-        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(
-            {...loadLookPrefs(), ...visiblePrefs(look, [])}));
-    } catch {
-        // localStorage niedostępny - suwaki działają dalej, po prostu się nie zapamiętają
+// W pamięci leży GOTOWY html tablicy, przycięty do starej liczby wierszy i
+// starych szarych godzin - bez czyszczenia ustawienie działałoby dopiero na
+// kropkach jeszcze nietkniętych.
+function reloadTimetable() {
+    timetableCache.clear();
+    if (timetableTarget) {
+        loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
     }
 }
+
+// Zmiana rysuje stan (`paint`, też na starcie) i/albo coś robi po ruchu (`react`).
+const SETTING_EFFECTS = {
+    'density': {react: replanSoon(true)},
+    'car-count': {react: replanSoon(true)},
+    'bike-count': {react: replanSoon(true)},
+    'transfer-gain': {react: replanSoon(false)},
+    'walk-pace': {react: replanSoon(false)},
+    'bike-kmh': {react: replanSoon(false)},
+    'bike-overhead': {react: replanSoon(false)},
+    'car-kmh': {react: replanSoon(false)},
+    'car-overhead': {react: replanSoon(false)},
+    'onboard-slack': {react: replanSoon(false)},
+    // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
+    'car-vans': {react: () => {
+        mapMore = 0;
+        if (!flowOnScreen()) refreshCarLayer();
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
+    'bikes-merged': {paint: () => paintBikeButtons()},
+    'start-mode-switch': {paint: showStartMode},
+    'routes-on': {paint: showRoutes, react: on => {
+        // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
+        // tak jak propozycje z rowerem (patrz replanInPlace).
+        if (on) replanInPlace();
+    }},
+    // Gest „pociągnij w dół, żeby odświeżyć" - overscroll-behavior na <html>
+    // (patrz style.css) gasi go bez ruszania zwykłego przewijania.
+    'no-pull-refresh': {paint: on => document.documentElement.classList.toggle('no-pull-refresh', on)},
+    'location-refresh': {react: () => syncAutoRefresh()},
+    // Zmiana zaczyna od nowa - także tam, gdzie listę przełączono kliknięciem -
+    // i od razu przerysowuje otwartą propozycję.
+    'via-open': {react: () => {
+        viaShown = new WeakMap();
+        if (selectedJourney !== null) renderJourneys();
+    }},
+    // Bez przycisku strefa pokazuje się tylko pod kursorem (patrz refreshZoneLayer).
+    'zone-button': {react: () => refreshZoneLayer()},
+    'sound-pipe': {react: on => {
+        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
+        // co się właśnie włączyło.
+        if (on) playPipeDrop();
+    }},
+    'dot-size': {react: debounced(() => applyDotOpts(), 60)},   // przeciąganie suwaka: jedno przemalowanie na klatkę
+    'dot-rows': {react: reloadTimetable},
+    'tt-past': {react: reloadTimetable},
+    'names-zoom': {react: () => placeStopNames()},
+    // Te suwaki nie dotykają serwera - mapa przemalowuje się natychmiast,
+    // z ostatniej odpowiedzi (lastFlow), bez ponownego zapytania.
+    'look-weight': {react: debounced(() => applyLook(), 60)},
+    'look-dim': {react: debounced(() => applyLook(), 60)},
+    'look-label-step': {react: debounced(() => applyLook(), 60)},
+    'look-label-size': {react: debounced(() => applyLook(), 60)},
+    'look-label-op': {react: debounced(() => applyLook(), 60)},
+};
+// Przełączniki, które tylko przemalowują z lastFlow, bez zapytania do serwera.
+for (const id of ['time-hover', 'time-ends', 'time-chips', 'time-show-headline', 'time-ride']) {
+    SETTING_EFFECTS[id] = {react: () => applyTimeOpts()};
+}
+for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-rides',
+                  'car-times', 'debug-why', 'debug-why-seg']) {
+    SETTING_EFFECTS[id] = {react: () => applyDotOpts()};
+}
+
+// Strojenia schowane stałymi (LOOK_TUNING, SOUND_TUNING) nie mają wiersza w panelu.
+for (const row of settingsRows) {
+    if (row.dataset.tuning) row.hidden = !TUNING[row.dataset.tuning];
+}
+
+for (const info of SETTINGS.values()) {
+    paintSettingOutput(info);
+    const effect = SETTING_EFFECTS[info.id];
+    if (effect && effect.paint) effect.paint(setting(info.id));
+}
+
+for (const type of ['input', 'change']) {
+    devPanel.addEventListener(type, event => {
+        const info = SETTING_BY_CONTROL.get(event.target);
+        if (!info) return;
+        const value = readControl(info.control);
+        storeSetting(info.id, value);
+        paintSettingOutput(info);
+        if (type !== (info.kind === 'range' ? 'input' : 'change')) return;
+        const effect = SETTING_EFFECTS[info.id];
+        if (effect && effect.react) effect.react(value);
+    }, true);   // faza przechwytywania: działa też dla zdarzeń, które nie bąblują
+}
+
+// --- wygląd mapy: przemalowanie suwakami (schowane, patrz LOOK_TUNING) -----
+//
+// Wartości są już dobrane (siedzą w index.html jako domyślne), więc cała
+// sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca ją, gdyby
+// trzeba było stroić od nowa.
+// Grubość linii to grubość najjaśniejszej: każda linia jest najjaśniejsza
+// (patrz look-weight w index.html).
 
 /** Przemalowanie z ostatniej odpowiedzi - bez zapytania do serwera. Wybrana
     trasa rysuje się na nowo NA WIERZCHU przemalowanego wachlarza (kolejność
     warstw w canvasie to kolejność dokładania). */
 function applyLook() {
-    document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+    document.documentElement.style.setProperty('--chip-scale', setting('look-label-size'));
     if (lastFlow) drawFlow(lastFlow, false);
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
     const dump = $('look-dump');
     if (dump) {
-        dump.textContent = Object.entries(look)
-            .map(([k, v]) => `${k}: ${v}`).join(', ');
+        dump.textContent = [
+            ...Object.entries(look),
+            ...[...SETTINGS.keys()].filter(id => id.startsWith('look-') && SETTINGS.get(id).kind === 'range')
+                .map(id => [id, setting(id)]),
+        ].map(([k, v]) => `${k}: ${v}`).join(', ');
     }
 }
-
-function bindLookSliders() {
-    const rows = devPanel.querySelectorAll('.look-row');
-    if (!rows.length) return;           // suwaki skasowane - wartości zostają domyślne
-    for (const row of rows) row.hidden = !LOOK_TUNING;
-    if (!LOOK_TUNING) return;
-    let timer = null;
-    const show = id => {
-        const input = $(id);
-        const out = $(id + '-value');
-        if (out) out.textContent = input.value;
-    };
-    for (const [id, key] of Object.entries(LOOK_KNOBS)) {
-        const input = $(id);
-        input.value = look[key];        // źródłem prawdy jest LOOK_DEFAULTS + localStorage
-        show(id);
-        input.addEventListener('input', () => {
-            look[key] = Number(input.value);
-            show(id);
-            saveLookPrefs();
-            clearTimeout(timer);        // przeciąganie suwaka: jedno przemalowanie na klatkę
-            timer = setTimeout(applyLook, 60);
-        });
-    }
-}
-bindLookSliders();
-document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+document.documentElement.style.setProperty('--chip-scale', setting('look-label-size'));
 
 // --- dźwięk: spadająca metalowa rura ---------------------------------------
 //
@@ -6557,8 +6477,6 @@ document.documentElement.style.setProperty('--chip-scale', look.labelScale);
 // Przełącznik zostaje w kodzie i w panelu, więc pokazanie go to zmiana
 // jednej stałej (ten sam układ, co przy LOOK_TUNING).
 
-const SOUND_TUNING = false;      // czy pokazywać sekcję "Dźwięk" w panelu ⚙
-
 const PIPE_SOURCES = [
     ['audio/ogg; codecs=opus', '/static/sounds/metal-pipe.ogg'],
     ['audio/mp4; codecs="mp4a.40.2"', '/static/sounds/metal-pipe.m4a'],
@@ -6573,33 +6491,6 @@ const PIPE_SOURCES = [
 // swoją głośność. Cena na iPhonie: dźwięk z miksera milknie przy włączonym
 // wyciszeniu telefonu - dla żartu w tle to raczej zaleta.
 const PIPE_VOLUME = 0.175;
-
-const SOUND_DEFAULTS = {
-    pipe: true,
-};
-
-const SOUND_PREFS_KEY = 'metal-planner:sound-prefs';
-
-function loadSoundPrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(SOUND_PREFS_KEY)) || {};
-    } catch {
-        return {};
-    }
-}
-
-// Zapamiętany wybór czytamy tylko wtedy, gdy przełącznik jest widoczny -
-// inaczej ktoś, kto wyłączył dźwięk, gdy sekcja była na wierzchu, zostałby
-// z ciszą i bez czegokolwiek, czym da się ją cofnąć.
-const soundOpts = {...SOUND_DEFAULTS, ...(SOUND_TUNING ? loadSoundPrefs() : {})};
-
-function saveSoundPrefs() {
-    try {
-        localStorage.setItem(SOUND_PREFS_KEY, JSON.stringify(soundOpts));
-    } catch {
-        // localStorage niedostępny - przełącznik działa dalej, tylko się nie zapamięta
-    }
-}
 
 let pipeAudio = null;
 let soundMixer = null;
@@ -6683,7 +6574,7 @@ function playPipeBuffer() {
 // go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
 // z powrotem, gdy strona zejdzie w tło.
 function wakeMixer() {
-    if (!soundOpts.pipe) return;
+    if (!setting('sound-pipe')) return;
     const ctx = mixer();
     if (!ctx) return;
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
@@ -6716,7 +6607,7 @@ function prefersLessMotion() {
 /** Cicho, gdy przełącznik wyłączony, gdy system prosi o ograniczenie
     animacji albo gdy przeglądarka nie umie żadnego z formatów. */
 function playPipeDrop() {
-    if (!soundOpts.pipe || prefersLessMotion()) return;
+    if (!setting('sound-pipe') || prefersLessMotion()) return;
     if (mixer()) {
         if (pipeBuffer) playPipeBuffer();
         else { pipePending = true; loadPipe(); }
@@ -6734,148 +6625,31 @@ function playPipeDrop() {
     if (started && started.catch) started.catch(() => {});
 }
 
-function bindSoundToggle() {
-    const input = $('sound-pipe');
-    if (!input) return;
-    input.closest('.set-row').hidden = !SOUND_TUNING;
-    input.checked = !!soundOpts.pipe;
-    input.addEventListener('change', () => {
-        soundOpts.pipe = input.checked;
-        saveSoundPrefs();
-        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
-        // co się właśnie włączyło.
-        if (input.checked) playPipeDrop();
-    });
-}
-bindSoundToggle();
-
 // --- przełączniki "czasu na mapie" -----------------------------------------
 //
 // Nic tu nie rusza serwera: wszystkie liczby są już w ostatniej odpowiedzi
 // (lastFlow), więc przełącznik przemalowuje mapę natychmiast, bez zapytania.
-const TIME_TOGGLES = {
-    'time-hover': 'hover',
-    'time-ends': 'ends',
-    'time-chips': 'chips',
-    'time-show-headline': 'headline',
-    'time-ride': 'ride',
-};
-
 function applyTimeOpts() {
     if (lastFlow) drawFlow(lastFlow, false);   // grupki i pasek liczą się od nowa
     else renderTimeHeadline();
     renderFlowPick();                          // dymek pod kursorem, jeśli akurat wisi
 }
 
-function bindTimeToggles() {
-    for (const [id, key] of Object.entries(TIME_TOGGLES)) {
-        const input = $(id);
-        if (!input) continue;
-        input.checked = !!timeOpts[key];
-        input.addEventListener('change', () => {
-            timeOpts[key] = input.checked;
-            saveTimePrefs();
-            applyTimeOpts();
-        });
-    }
-}
-bindTimeToggles();
-
 // --- kropki przystanków i miejsce na rozkład -------------------------------
 //
 // Też bez zapytania do serwera: obie współrzędne węzła i cała tablica odjazdów
 // są już w odpowiedziach, więc wystarczy przemalować z lastFlow i przerysować
 // wybraną trasę w miejscu (keepView - kadr ma się nie ruszyć).
-const DOT_TOGGLES = {
-    'dot-center': 'center',
-    'tip-cursor': 'tipCursor',
-    'tip-panel': 'tipPanel',
-    'bike-times': 'bikeTimes',
-    'bike-rides': 'bikeRides',
-    'car-times': 'carTimes',
-    'debug-why': 'why',
-    'debug-why-seg': 'whySeg',
-};
-
 function applyDotOpts() {
     restyle(sel.start, sel.end);
     if (lastFlow) drawFlow(lastFlow, false);
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
-    if (!dotOpts.tipPanel) hideSidePanel();
-    if (!dotOpts.tipCursor && flowTooltip) {
+    if (!setting('tip-panel')) hideSidePanel();
+    if (!setting('tip-cursor') && flowTooltip) {
         map.removeLayer(flowTooltip);
         flowTooltip = null;
     }
 }
-
-function bindDotOpts() {
-    const size = $('dot-size');
-    const sizeOut = $('dot-size-value');
-    if (size) {
-        size.value = dotOpts.size;
-        if (sizeOut) sizeOut.textContent = size.value;
-        let timer = null;
-        size.addEventListener('input', () => {
-            dotOpts.size = Number(size.value);
-            if (sizeOut) sizeOut.textContent = size.value;
-            saveDotPrefs();
-            clearTimeout(timer);      // przeciąganie suwaka: jedno przemalowanie na klatkę
-            timer = setTimeout(applyDotOpts, 60);
-        });
-    }
-    const rows = $('dot-rows');
-    const rowsOut = $('dot-rows-value');
-    if (rows) {
-        rows.value = dotOpts.rows;
-        if (rowsOut) rowsOut.textContent = rows.value;
-        rows.addEventListener('input', () => {
-            dotOpts.rows = Number(rows.value);
-            if (rowsOut) rowsOut.textContent = rows.value;
-            saveDotPrefs();
-            // W pamięci leży GOTOWY html, przycięty do starej liczby wierszy -
-            // bez tego suwak działałby dopiero na kropkach jeszcze nietkniętych.
-            timetableCache.clear();
-            if (timetableTarget) {
-                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
-            }
-        });
-    }
-    const namesZoom = $('names-zoom');
-    const namesZoomOut = $('names-zoom-value');
-    if (namesZoom) {
-        namesZoom.value = dotOpts.namesZoom;
-        if (namesZoomOut) namesZoomOut.textContent = namesZoom.value;
-        namesZoom.addEventListener('input', () => {
-            dotOpts.namesZoom = Number(namesZoom.value);
-            if (namesZoomOut) namesZoomOut.textContent = namesZoom.value;
-            saveDotPrefs();
-            placeStopNames();
-        });
-    }
-    const ttPast = $('tt-past');
-    if (ttPast) {
-        ttPast.checked = dotOpts.ttPast;
-        ttPast.addEventListener('change', () => {
-            dotOpts.ttPast = ttPast.checked;
-            saveDotPrefs();
-            timetableCache.clear();
-            if (timetableTarget) {
-                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
-            }
-        });
-    }
-    for (const [id, key] of Object.entries(DOT_TOGGLES)) {
-        const input = $(id);
-        if (!input) continue;
-        input.checked = !!dotOpts[key];
-        input.addEventListener('change', () => {
-            dotOpts[key] = input.checked;
-            saveDotPrefs();
-            applyDotOpts();
-        });
-    }
-}
-bindDotOpts();
 
 // --- lista ustawień: wyszukiwarka i nagłówki z etykiet -----------------------
 //
@@ -6888,9 +6662,7 @@ bindDotOpts();
 // liczy się raz, a obsługa po id zostaje bez zmian. Wiersz bez nagłówka ląduje
 // w „Inne". Kolejność układa się z dziennika ostatnich zmian i jest liczona
 // tylko przy otwarciu panelu, żeby nic nie przeskakiwało pod palcem.
-const settingsList = $('settings-list');
 const settingsSearch = $('settings-search');
-const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 
 for (const row of settingsRows) {
     if (row.classList.contains('dev-only')) {
@@ -6935,7 +6707,7 @@ function loadSettingsOrder() {
 }
 
 function snapshotSettingsLog() {
-    const limit = SETTINGS_ORDER_LIMITS[loadDevPrefs()['order-limit']];
+    const limit = SETTINGS_ORDER_LIMITS[setting('order-limit')];
     const stored = loadSettingsOrder();
     if (limit && stored && Date.now() - stored.t < limit) {
         settingsLog = {counts: new Map(stored.counts), recent: stored.recent, known: new Set(stored.known)};
@@ -6969,7 +6741,7 @@ const byScore = (a, b) => rowScore(b) - rowScore(a) || rowIsNew(a) - rowIsNew(b)
 
 // Wiersze z suwakiem albo przełącznikiem da się skopiować; reszta (link,
 // wgranie pliku, przycisk wersji) ma swoje id i stoi tylko w jednym miejscu.
-const isCopyable = row => !!row.querySelector('input[type=checkbox], input[type=range]');
+const isCopyable = row => SETTINGS.has(row.dataset.setting);
 
 let copyCounter = 0;
 function makeSettingCopy(row) {
@@ -6984,7 +6756,7 @@ function makeSettingCopy(row) {
         else renamed.set(el.id, `${el.id}-copy-${++copyCounter}`);
         el.removeAttribute('id');
     }
-    for (const el of copy.querySelectorAll('input')) el.id = renamed.get(row.dataset.setting) || '';
+    for (const el of copy.querySelectorAll('input, select')) el.id = renamed.get(row.dataset.setting) || '';
     for (const label of copy.querySelectorAll('label[for]')) label.htmlFor = renamed.get(label.htmlFor) || '';
     return copy;
 }
@@ -6992,7 +6764,7 @@ function makeSettingCopy(row) {
 function syncSettingCopies() {
     for (const copy of settingsList.querySelectorAll('.set-copy')) {
         const source = $(copy.dataset.copyOf);
-        const input = copy.querySelector('input');
+        const input = copy.querySelector('input, select');
         if (input.type === 'checkbox') input.checked = source.checked;
         else input.value = source.value;
         for (const out of copy.querySelectorAll('output')) out.textContent = $(out.dataset.of).textContent;
@@ -7008,7 +6780,9 @@ for (const type of ['input', 'change']) {
             const source = $(copy.dataset.copyOf);
             if (source.type === 'checkbox') source.checked = event.target.checked;
             else source.value = event.target.value;
+            // Odświeżenie zrobi ten sam nasłuch przy zdarzeniu oryginału, raz.
             source.dispatchEvent(new Event(type, {bubbles: true}));
+            return;
         }
         syncSettingCopies();
         markChangedSettings();
@@ -7052,14 +6826,14 @@ function renderSettingsList() {
         return info.name.includes(needle) || info.folded.some(label => label.includes(needle));
     });
     for (const row of settingsRows) row.classList.toggle('search-miss', !matching.includes(row) && !row.hidden);
-    const prefs = loadDevPrefs();
+    const prefs = storedSettings();
     const addGroup = (nodes, label, rows, openByDefault) => {
         const group = document.createElement('details');
         group.className = 'set-group';
         const saved = prefs['fold:' + label];
         group.open = saved === undefined ? openByDefault : !!saved;
         group.append(Object.assign(document.createElement('summary'), {textContent: label}), ...rows);
-        group.addEventListener('toggle', () => saveDevPref('fold:' + label, group.open));
+        group.addEventListener('toggle', () => storeSetting('fold:' + label, group.open));
         nodes.push(group);
     };
     const nodes = [];
@@ -7111,19 +6885,15 @@ new MutationObserver(renderSettingsList).observe(settingsList,
 
 // --- zmienione ustawienia i powrót do domyślnych ----------------------------
 //
-// `value`/`checked` z index.html to wartości domyślne (patrz komentarz nad
-// panelem), więc opcja różna od nich dostaje znacznik.
-const differsFromDefault = input => (input.type === 'checkbox'
-    ? input.checked !== input.defaultChecked
-    : Number(input.value) !== Number(input.defaultValue));
+// Wartości domyślne to te z index.html (SETTINGS[...].dflt), więc opcja różna od
+// nich dostaje znacznik.
 
 // Stała sekcja pod „Proponowane": ustawienia różne od domyślnych, zawsze z bieżącego
 // stanu (nie z migawki kolejności), więc odświeża się na żywo.
 const CHANGED_GROUP = 'Inne niż domyślne';
 
 function changedSettingRows(shown) {
-    return shown.filter(row => isCopyable(row)
-        && differsFromDefault(row.querySelector('input[type=checkbox], input[type=range]')));
+    return shown.filter(row => isCopyable(row) && differsFromDefault(SETTINGS.get(row.dataset.setting)));
 }
 
 function visibleSettingRows() {
@@ -7140,7 +6910,7 @@ function buildChangedGroup(rows, prefs) {
     const summary = Object.assign(document.createElement('summary'), {textContent: CHANGED_GROUP});
     summary.dataset.changed = rows.length;
     group.append(summary, ...rows.map(makeSettingCopy));
-    group.addEventListener('toggle', () => saveDevPref('fold:' + CHANGED_GROUP, group.open));
+    group.addEventListener('toggle', () => storeSetting('fold:' + CHANGED_GROUP, group.open));
     return group;
 }
 
@@ -7151,7 +6921,7 @@ function refreshChangedGroup() {
     const ids = rows.map(row => row.dataset.setting).join(',');
     const current = settingsList.querySelector('[data-kind=changed]');
     if ((current ? current.dataset.ids : '') === ids) return;
-    const next = rows.length ? buildChangedGroup(rows, loadDevPrefs()) : null;
+    const next = rows.length ? buildChangedGroup(rows, storedSettings()) : null;
     if (current && next) current.replaceWith(next);
     else if (current) current.remove();
     else if (next) {
@@ -7162,9 +6932,9 @@ function refreshChangedGroup() {
 }
 
 function markChangedSettings() {
-    // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
-    for (const input of devPanel.querySelectorAll('.set-row input:not([type=file])')) {
-        input.closest('.set-row').classList.toggle('changed', differsFromDefault(input));
+    for (const row of settingsList.querySelectorAll('.set-row')) {
+        const info = SETTINGS.get(row.dataset.setting || row.dataset.copyOf);
+        if (info) row.classList.toggle('changed', differsFromDefault(info));
     }
     refreshChangedGroup();
 }
@@ -7267,9 +7037,6 @@ function syncSettingsSnapshot() {
     if (changed) saveSettingsStats(stats);
 }
 syncSettingsSnapshot();
-const orderLimit = $('order-limit');
-orderLimit.value = loadDevPrefs()['order-limit'] || 'off';
-orderLimit.addEventListener('change', () => saveDevPref('order-limit', orderLimit.value));
 refreshSettingsOrder();
 devPanel.addEventListener('settings-open', refreshSettingsOrder);
 
@@ -7391,14 +7158,13 @@ document.addEventListener('click', event => {
 document.addEventListener('scroll', () => { infoTip.hidden = true; }, true);
 
 // Jeden przycisk na cały panel: kasuje wszystkie zapamiętane ustawienia
-// i przeładowuje stronę, więc każda wartość wraca z *_DEFAULTS tą samą drogą,
-// co przy pierwszej wizycie - bez osobnego "przywróć" dla każdej sekcji, które
-// trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma własny
-// klucz, więc mapa wraca ta sama.
+// i przeładowuje stronę, więc każda wartość wraca z index.html tą samą drogą,
+// co przy pierwszej wizycie - bez osobnego "przywróć" dla każdego ustawienia,
+// które trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma
+// własny klucz, więc mapa wraca ta sama.
 $('dev-reset').addEventListener('click', () => {
     recordSettingsReset();
-    for (const key of [DEV_PREFS_KEY, TIME_PREFS_KEY, DOT_PREFS_KEY,
-                       LOOK_PREFS_KEY, SOUND_PREFS_KEY, phoneLayout.PREFS_KEY]) {
+    for (const key of [SETTINGS_KEY, phoneLayout.PREFS_KEY]) {
         try {
             localStorage.removeItem(key);
         } catch {
