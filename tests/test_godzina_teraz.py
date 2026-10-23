@@ -102,6 +102,15 @@ def _trasy(page):
     page.wait_for_selector("body:not(.mode-timetable)", state="attached")
 
 
+def _gdzie(page):
+    """Panel, w którym naprawdę stoją pola: to samo pole #time i #date
+    przenosi się między widokami, więc samą wartość trzeba czytać razem z miejscem."""
+    return page.evaluate("""() => ({
+        time: document.getElementById('time').closest('#tt-time-field') ? 'rozklady' : 'trasy',
+        date: document.getElementById('date').closest('.tt-date-part') ? 'rozklady' : 'trasy',
+    })""")
+
+
 def test_godzina_z_tras_jest_w_rozkladach(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
@@ -109,6 +118,7 @@ def test_godzina_z_tras_jest_w_rozkladach(przegladarka, adres):
         page.click("#day-toggle")
         page.fill("#date", "2030-01-02")
         _rozklady(page)
+        assert _gdzie(page) == {"time": "rozklady", "date": "rozklady"}
         assert page.input_value("#time") == "09:30"
         assert page.input_value("#date") == "2030-01-02"
     finally:
@@ -124,11 +134,11 @@ def test_godzina_z_rozkladow_jest_w_trasach(przegladarka, adres):
         page.keyboard.press("Tab")
         page.fill("#date", "2030-01-02")
         _trasy(page)
+        assert _gdzie(page) == {"time": "trasy", "date": "trasy"}
         assert page.input_value("#time") == "07:45"
         assert page.input_value("#date") == "2030-01-02"
         # wpisana w Rozkładach jest ręczna także w Trasach
         _po_godzinie(page)
-        assert page.input_value("#time") == "07:45"
         assert page.input_value("#time") == "07:45"
     finally:
         context.close()
@@ -141,13 +151,19 @@ def test_teraz_w_rozkladach_wraca_oba_widoki_do_teraz(przegladarka, adres):
         page.click("#day-toggle")
         page.fill("#date", "2030-01-02")
         _rozklady(page)
+        assert _gdzie(page) == {"time": "rozklady", "date": "rozklady"}
+        assert page.input_value("#time") == "09:30"
         page.click("#tt-now")
         assert page.input_value("#date") == page.evaluate(DATA_JS)
-        assert page.input_value("#date") == page.evaluate(DATA_JS)
         assert _minuty_temu(page, page.input_value("#time"))
-        assert page.input_value("#time") == page.input_value("#time")
+        teraz = page.input_value("#time")
+        _trasy(page)
+        assert _gdzie(page) == {"time": "trasy", "date": "trasy"}
+        assert page.input_value("#time") == teraz
+        assert page.input_value("#date") == page.evaluate(DATA_JS)
         _po_godzinie(page)
         assert _minuty_temu(page, page.input_value("#time"))
+        assert page.input_value("#time") != teraz
     finally:
         context.close()
 
@@ -158,9 +174,16 @@ def test_teraz_w_trasach_wraca_rozklady_do_teraz(przegladarka, adres):
         _rozklady(page)
         page.fill("#time", "09:30")
         _trasy(page)
+        assert _gdzie(page)["time"] == "trasy"
+        assert page.input_value("#time") == "09:30"
         page.click("#time-now")
-        assert page.input_value("#time") == page.input_value("#time")
-        assert _minuty_temu(page, page.input_value("#time"))
+        teraz = page.input_value("#time")
+        assert teraz != "09:30"
+        assert _minuty_temu(page, teraz)
+        _rozklady(page)
+        assert _gdzie(page)["time"] == "rozklady"
+        assert page.input_value("#time") == teraz
+        assert page.input_value("#date") == page.evaluate(DATA_JS)
     finally:
         context.close()
 
@@ -170,9 +193,18 @@ def test_nieruszana_godzina_starzeje_sie_w_obu_widokach(przegladarka, adres):
     try:
         przed = page.input_value("#time")
         _po_godzinie(page)
-        assert page.input_value("#time") != przed
-        assert page.input_value("#time") == page.input_value("#time")
-        assert page.input_value("#date") == page.input_value("#date")
+        w_trasach = page.input_value("#time")
+        assert w_trasach != przed
+        _rozklady(page)
+        assert _gdzie(page)["time"] == "rozklady"
+        assert page.input_value("#time") == w_trasach
+        assert page.input_value("#date") == page.evaluate(DATA_JS)
+        _po_godzinie(page)
+        w_rozkladach = page.input_value("#time")
+        assert w_rozkladach != w_trasach
+        assert _minuty_temu(page, w_rozkladach)
+        _trasy(page)
+        assert page.input_value("#time") == w_rozkladach
     finally:
         context.close()
 
