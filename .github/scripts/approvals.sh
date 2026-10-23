@@ -43,6 +43,9 @@ standing_approvals() {
 _review_states_jq() {
   cat <<'JQ'
     [ .[]
+      # Recenzja konta skasowanego po fakcie ma `user: null` — bez tego
+      # `endswith` wywraca cały filtr, a z nim ocenę zatwierdzeń.
+      | select(.user != null)
       | select((.user.type // "User") != "Bot" and (.user.login | endswith("[bot]") | not))
       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
     | group_by(.user.login)
@@ -134,7 +137,9 @@ apply_approvals() {
       echo "#$n: żadne zatwierdzenie człowieka nie stoi — nic do zrobienia."
       ;;
     dismiss)
-      msg="Zatwierdzenie cofnięte: $(jq -r '.reasons | join("; ")' <<<"$plan") (szczegóły: $url). Potrzebne ponowne review."
+      # Wiadomość cofnięcia to jedyne, co recenzent i autor zobaczą w osi
+      # czasu PR-a, więc mówi też, co dalej (#393).
+      msg="Zatwierdzenie cofnięte: $(jq -r '.reasons | join("; ")' <<<"$plan") (szczegóły: $url). Potrzebne ponowne review: przeczytaj ocenę, popraw, co trzeba (przez wersję roboczą), i poproś o review w panelu „Reviewers”. Jak to działa: $APPROVALS_DOC"
       for id in $(jq -r '.approvals[].id' <<<"$plan"); do
         if [ "${DRY_RUN:-}" = 1 ]; then
           echo "DRY_RUN: cofnąłbym recenzję $id: $msg"
@@ -146,6 +151,12 @@ apply_approvals() {
       done
       echo "#$n: cofnięte zatwierdzenia ($who): $(jq -r '.reasons | join("; ")' <<<"$plan")" \
         | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+      # Instrukcja „zatwierdzenie nadal obowiązuje” spod poprzedniej oceny
+      # właśnie przestała być prawdą. Po udanej ocenie zwinął ją już krok
+      # zwijania, ale po porażce i przy PR-ze, który zmienia workflow oceny,
+      # tamten krok nie biegnie — a autor nie może jej posłuchać i mergować.
+      # Porażka zwijania nie zmienia rozstrzygnięcia, więc tylko ostrzegamy.
+      fold_approval_notes "$n" || echo "::warning::#$n: nie udało się zwinąć starej instrukcji o zatwierdzeniu."
       APPROVALS_NOTE="Zatwierdzenie cofnięte ($who) — potrzebne ponowne review."
       ;;
     keep)
@@ -166,6 +177,34 @@ apply_approvals() {
       ;;
   esac
   return "$rc"
+}
+
+# approval_note_nodes — filtr: z tablicy komentarzy wypisuje node_id
+# instrukcji „zatwierdzenie nadal obowiązuje” (znacznik APPROVAL_NOTE_MARK).
+approval_note_nodes() {
+  jq -r --arg mark "$APPROVAL_NOTE_MARK" '.[]
+    | select(.user.login == "github-actions[bot]" and (.body | contains($mark)))
+    | .node_id'
+}
+
+# fold_approval_notes N — zwija wszystkie instrukcje o zatwierdzeniu pod PR-em
+# (jak `minimize_comment` z guard.sh; ponowne zwinięcie niczego nie zmienia).
+fold_approval_notes() {
+  local node
+  if [ "${DRY_RUN:-}" = 1 ]; then
+    echo "DRY_RUN: zwinąłbym instrukcje o zatwierdzeniu pod #$1"
+    return 0
+  fi
+  gh api --paginate --slurp "repos/$REPO/issues/$1/comments" | jq 'add // []' \
+    | approval_note_nodes \
+    | while IFS= read -r node; do
+        gh api graphql -f id="$node" -f query='
+          mutation($id: ID!) {
+            minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
+              minimizedComment { isMinimized }
+            }
+          }' > /dev/null
+      done
 }
 
 # approval_note AUTOR KTO URL — treść komentarza, gdy zatwierdzenie zostaje.
