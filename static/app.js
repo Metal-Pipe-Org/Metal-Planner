@@ -6904,7 +6904,7 @@ for (const row of settingsRows) {
 const settingsInfo = new Map(settingsRows.map(row => {
     const copy = row.cloneNode(true);
     for (const skip of copy.querySelectorAll('output, .info, .dev-badge')) skip.remove();
-    const labels = row.dataset.labels.split(',').map(label => label.trim());
+    const labels = (row.dataset.labels || '').split(',').map(label => label.trim()).filter(Boolean);
     return [row, {
         labels,
         name: fold(copy.textContent).replace(/\s+/g, ' '),
@@ -7168,8 +7168,6 @@ function markChangedSettings() {
     }
     refreshChangedGroup();
 }
-devPanel.addEventListener('input', markChangedSettings);
-devPanel.addEventListener('change', markChangedSettings);
 markChangedSettings();
 
 // --- statystyki zmian ustawień (DEV, #404) ------------------------------------

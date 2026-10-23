@@ -71,8 +71,12 @@ $('stats-copy').addEventListener('click', async () => {
         reset: {count: stats.reset.n, last: iso(stats.reset.t)},
     }, null, 2);
     const button = $('stats-copy');
-    await navigator.clipboard.writeText(json);
-    button.textContent = 'Skopiowano';
+    try {
+        await navigator.clipboard.writeText(json);
+        button.textContent = 'Skopiowano';
+    } catch {
+        button.textContent = 'Nie udało się skopiować';
+    }
     setTimeout(() => { button.textContent = 'Kopiuj statystyki'; }, 1500);
 });
 
