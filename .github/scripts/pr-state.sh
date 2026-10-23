@@ -122,25 +122,35 @@ put_status() {
 
 # pr_facts PR REQUIRED — dla jednego otwartego PR-a (obiekt z listy PR-ów
 # z API) stawia status „Recenzenci konieczni” i wypisuje jedną linijkę JSON
-# ze wszystkim, czego potrzebuje `labels_plan`. Dwa wywołania API na PR.
+# ze wszystkim, czego potrzebuje `labels_plan`. Trzy wywołania API na PR.
+#
+# `mergeable_state` jest tylko w pojedynczym PR-ze, lista PR-ów go nie ma —
+# stąd osobne pytanie. Konflikt powinien i tak cofnąć PR do wersji roboczej
+# (pr-drafts.yml, pr-conflicts.yml), ale gdy to się nie uda (#417), etykieta
+# nie może dalej mówić „czeka na recenzję” albo „czeka na inny PR”. Póki
+# GitHub stanu nie policzył (`null`, `unknown`), traktujemy PR jak bez
+# konfliktu — następne przeliczenie go poprawi.
 pr_facts() {
-  local pr=$1 req=$2 n sha author reviews statuses reviewers
+  local pr=$1 req=$2 n sha author reviews statuses reviewers mergeable
 
   n=$(jq -r .number <<<"$pr")
   sha=$(jq -r .head.sha <<<"$pr")
   author=$(jq -r .user.login <<<"$pr")
   reviews=$(pr_reviews "$n")
   statuses=$(commit_statuses "$sha")
+  mergeable=$(gh api "repos/$REPO/pulls/$n" --jq '.mergeable_state // ""')
 
   reviewers=$(reviewers_status "$req" "$author" <<<"$reviews")
   echo "#$n (${sha:0:7}): $REVIEWERS_CONTEXT → $(jq -r '"\(.state): \(.description)"' <<<"$reviewers")" >&2
   put_status "$sha" "$REVIEWERS_CONTEXT" "$reviewers" "$statuses" >&2
 
   jq -nc --argjson pr "$pr" --argjson st "$statuses" --argjson rv "$reviewers" \
-    --argjson sum "$(review_summary <<<"$reviews")" --arg ctx "$REVIEW_CONTEXT" --arg repo "$REPO" '
+    --argjson sum "$(review_summary <<<"$reviews")" --arg ctx "$REVIEW_CONTEXT" --arg repo "$REPO" \
+    --arg mergeable "$mergeable" '
     $pr | {number, draft, base: .base.ref, head: .head.ref,
            same_repo: ((.head.repo.full_name // "") == $repo),
            labels: [.labels[]?.name],
+           conflict: ($mergeable == "dirty"),
            requested: ((.requested_reviewers | length) + (.requested_teams | length)),
            review: ([$st[] | select(.context == $ctx)] | first // null),
            reviewers_ok: ($rv.state == "success")} + $sum'
@@ -177,7 +187,8 @@ STACK_JQ='
 # „autor” to wszystko, co musi zrobić autor, „recenzja” — wszystko, co musi
 # zrobić ktoś inny (Claude też):
 #
-#   1. wersja robocza → autor (poprawia i oznacza jako gotowy),
+#   1. wersja robocza albo konflikt z bazą → autor (poprawia i oznacza jako
+#      gotowy; konflikt zwykle i tak cofa PR do wersji roboczej),
 #   2. ocena Claude'a (tylko PR-y z tego repo do `main` i `stable` — innych
 #      Claude nie ocenia): właśnie rusza albo status czeka → recenzja; status
 #      z „@claude” w opisie (porażka, PR zmienia workflow oceny), inna
@@ -199,6 +210,7 @@ labels_plan() {
     def own:
       ((.base | IN("main", "stable")) and .same_repo) as $claude
       | if .draft then {s: "author", why: "wersja robocza"}
+        elif .conflict then {s: "author", why: "konflikt z bazą"}
         elif $claude and (.number as $n | any($starting[]; . == $n)) then {s: "review", why: "ocena Claude'\''a rusza"}
         elif $claude and .review == null then {s: "author", why: "brak statusu oceny Claude'\''a — trzeba napisać @claude"}
         elif $claude and ((.review.description // "") | test("@claude")) then {s: "author", why: "ocena Claude'\''a czeka na @claude"}
