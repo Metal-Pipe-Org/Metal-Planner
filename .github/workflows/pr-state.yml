@@ -19,9 +19,10 @@ name: "PR-y: stan"
 # `waiting for author` (wszystko, co robi autor — poprawki, `@claude`, prośba
 # o recenzję, merge), `waiting for review` (wszystko, co robi ktoś inny —
 # recenzja człowieka, ocena Claude'a) i `waiting for other PR` (gotowy PR ze
-# stosu, który czeka na resztę stosu — stos scalamy raz, od najwyższego,
-# #400). Zamknięty PR traci wszystkie trzy. Reguły w `labels_plan`
-# w pr-state.sh. Zmiana jednego PR-a ze stosu przelicza cały stos.
+# stosu, który czeka na resztę stosu — stos scalamy w całości, od dołu,
+# merge'em albo auto-merge'em na najwyższym PR-ze, #400, #418). Zamknięty PR
+# traci wszystkie trzy. Reguły w `labels_plan` w pr-state.sh. Zmiana jednego
+# PR-a ze stosu przelicza cały stos.
 #
 # Stan liczymy zawsze od zera z API (pr-state.sh), więc wystarczy, że bieg
 # ruszy po każdej zmianie, która może go przestawić:
@@ -39,7 +40,7 @@ name: "PR-y: stan"
 #    żadnych danych, a bez przekaźnika status najwyżej nie zzielenieje;
 #  • biegi naszych workflow, których akcje nie tworzą zdarzeń (token
 #    workflow nie budzi innych workflow): cofnięcie zatwierdzeń po ocenie
-#    Claude'a, przestawienie na wersję roboczą, konflikt po merge'u do `main`,
+#    Claude'a, przestawienie na wersję roboczą, nowy konflikt z bazą,
 #    błąd składni. Nazwy słuchanych workflow muszą się zgadzać co do znaku;
 #    nazwa workflow, którego jeszcze nie ma, niczego nie psuje.
 #
@@ -68,7 +69,7 @@ on:
     workflows:
       - "Claude - oceń PR"
       - "PR-y: zmiany przez wersję roboczą"
-      - "PR-y: nowy konflikt z main — ping i wersja robocza"
+      - "PR-y: nowy konflikt z bazą — ping i wersja robocza"
       - "PR-y: składnia"
       - "PR-y: recenzja (przekaźnik)"
     types: [completed]
@@ -127,6 +128,10 @@ jobs:
                  || github.event.action == 'ready_for_review')
                 && github.event.pull_request.draft == false
                 && github.event.pull_request.number || '' }}
+          # Stara baza przy zmianie bazy (`edited`): PR pod nią traci ten PR
+          # ze swojego stosu i też trzeba go przeliczyć (base_seeds
+          # w pr-state.sh). Nazwa gałęzi to tekst od ludzi — tylko przez env.
+          OLD_BASE: ${{ github.event.changes.base.ref.from }}
         run: |
           set -euo pipefail
           source .discord/.github/scripts/statuses.sh

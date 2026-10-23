@@ -32,7 +32,7 @@
 #               ✅ PR zatwierdzony           🛠️ prośba o zmiany
 #               🔀 PR zmergowany             🔒 zgłoszenie zamknięte jako zrobione
 #               🚫 nie robimy / PR zamknięty bez merge'a
-#               📑 duplikat                  ⚔️ konflikt z main
+#               📑 duplikat                  ⚔️ konflikt z bazą
 #               🏷️ błędna składnia PR-a
 #               ⏳ cisza w zgłoszeniu        💤 zamknięte po ciszy
 #               🤖 Claude skończył / ocenił  ⚠️ Claude nie dał rady

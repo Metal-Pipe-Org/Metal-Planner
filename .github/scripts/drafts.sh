@@ -64,6 +64,15 @@ to_draft() {
 # ocena nie ma czego oglądać. Każdy diff liczymy od wspólnego przodka z BAZĄ,
 # bez kontekstu (`-U0`), żeby zmiany w BAZIE tuż obok nie liczyły się jako
 # zmiana PR-a, i porównujemy `patch-id`, które pomija numery linii.
+#
+# W stosie (#418) to nie wystarcza: po „Rebase stack” albo po merge'u dolnej
+# części stosu niższe piętro ma nowe commity z tymi samymi zmianami, a PRZED
+# dalej niesie stare. Wspólny przodek PRZED z nową BAZĄ cofa się wtedy pod
+# niższe piętro i diff PRZED wnosi też jego zmiany, a diff PO — już nie. Gdy
+# pierwsze porównanie zawiedzie, porównujemy więc commity PR-a bez tych,
+# których zmiana już jest w BAZIE (`--cherry-pick`, po `patch-id`): po samym
+# przeniesieniu stosu zostają te same commity PR-a. Tylko gdy PO nie ma
+# commitów scalenia — `--no-merges` pominąłby zmiany schowane w scaleniu.
 same_changes() {
   local base=$1 before=$2 after=$3 git=(git -C "${GIT_REPO:-.}") a b
 
@@ -71,7 +80,20 @@ same_changes() {
     | "${git[@]}" patch-id --stable)
   b=$("${git[@]}" diff -U0 "$("${git[@]}" merge-base "$base" "$after")" "$after" \
     | "${git[@]}" patch-id --stable)
-  [ "$a" = "$b" ]
+  [ "$a" != "$b" ] || return 0
+
+  [ -z "$("${git[@]}" rev-list --merges "$base..$after")" ] || return 1
+  a=$(own_patch_ids "$base" "$before")
+  b=$(own_patch_ids "$base" "$after")
+  [ -n "$b" ] && [ "$a" = "$b" ]
+}
+
+# own_patch_ids BAZA CZUBEK — `patch-id` kolejnych commitów CZUBKA, których
+# zmiany nie ma jeszcze w BAZIE, od najstarszego; bez scaleń.
+own_patch_ids() {
+  local git=(git -C "${GIT_REPO:-.}")
+  "${git[@]}" log -p --reverse --no-merges --cherry-pick --right-only "$1...$2" \
+    | "${git[@]}" patch-id --stable | cut -d' ' -f1
 }
 
 # carry_review_status N PRZED PO — przenosi zielony status „Ocena Claude'a”

@@ -7,6 +7,8 @@
 #   REPO      `właściciel/repozytorium`
 #   STARTING  numer PR-a, którego ocena Claude'a właśnie rusza (otwarcie,
 #             ponowne otwarcie, „Ready for review”); puste, gdy żaden
+#   OLD_BASE  poprzednia gałąź bazowa PR-a, gdy zdarzeniem jest zmiana bazy
+#             (`edited`); puste w każdym innym razie
 #   DRY_RUN   `1` — tylko wypisz, co by się zmieniło; nic nie zapisuj.
 #             Do sprawdzenia na prawdziwych PR-ach tokenem tylko do odczytu
 #
@@ -180,6 +182,17 @@ STACK_JQ='
     $start | unique | until(. == grow; grow);
 '
 
+# base_seeds GAŁĄŹ OTWARTE — numery otwartych PR-ów z gałęzi GAŁĄŹ w tym repo.
+# Po zmianie bazy PR-a (przestawienie ręczne albo przez GitHuba po merge'u
+# dolnej części stosu) PR pod jego starą bazą traci go ze swojego stosu,
+# a sam nie dostaje żadnego zdarzenia — bez tego jego etykieta czekałaby na
+# PR, którego w stosie już nie ma, do najbliższego pełnego przeliczenia.
+base_seeds() {
+  case "$1" in ""|main|stable) return 0 ;; esac
+  jq -r --arg b "$1" --arg repo "$REPO" \
+    '.[] | select(.head.ref == $b and (.head.repo.full_name // "") == $repo) | .number' <<<"$2"
+}
+
 # labels_plan STARTING — filtr: z tablicy faktów (`pr_facts`) liczy, jaką
 # etykietę ma dostać każdy PR. STARTING to tablica numerów PR-ów, których
 # ocena Claude'a właśnie rusza. Na wyjściu tablica `{number, want, why,
@@ -189,18 +202,22 @@ STACK_JQ='
 #
 #   1. wersja robocza albo konflikt z bazą → autor (poprawia i oznacza jako
 #      gotowy; konflikt zwykle i tak cofa PR do wersji roboczej),
-#   2. ocena Claude'a (tylko PR-y z tego repo do `main` i `stable` — innych
-#      Claude nie ocenia): właśnie rusza albo status czeka → recenzja; status
-#      z „@claude” w opisie (porażka, PR zmienia workflow oceny), inna
-#      porażka albo brak statusu, gdy ocena nie rusza → autor (`@claude`),
+#   2. ocena Claude'a (PR-y z gałęzi tego repo, do każdej bazy — także PR-y
+#      w stosie, #418; PR-ów z forków Claude nie ocenia): właśnie rusza albo
+#      status czeka → recenzja; status z „@claude” w opisie (porażka, PR albo
+#      jego baza zmienia workflow oceny), inna porażka albo brak statusu, gdy
+#      ocena nie rusza → autor (`@claude`),
 #   3. czekające „Request changes” → autor,
 #   4. brak pełnego zatwierdzenia (co najmniej jedno stojące zatwierdzenie
 #      człowieka i zielony „Recenzenci konieczni”): czeka prośba o recenzję
 #      (osoba albo zespół) → recenzja, nie czeka żadna → autor (prosi),
 #   5. wszystko gotowe → autor (merguje), chyba że PR jest w stosie, a inny
-#      PR tego stosu nie jest gotowy → inny PR. Stos scalamy raz, od
-#      najwyższego (#400), więc gotowy kawałek stosu czeka na resztę — także
-#      na PR-y pod nim, nie tylko nad nim.
+#      PR tego stosu nie jest gotowy → inny PR. Stos scalamy w całości, od
+#      dołu, merge'em albo auto-merge'em na najwyższym PR-ze (#400, #418),
+#      więc gotowy kawałek stosu czeka na resztę — także na PR-y pod nim, nie
+#      tylko nad nim. To tylko podpowiedź: scalanie stosu w całości pilnuje
+#      sam GitHub (auto-merge na najwyższym PR-ze to jeden wybór dla całego
+#      stosu), a niższego piętra osobno nie scalamy z umowy (CONTRIBUTING).
 #
 # Przy „ocena rusza” patrzymy na zdarzenie, nie na status: bieg oceny stawia
 # `pending` chwilę później, a commit może jeszcze mieć zielony status
@@ -208,7 +225,7 @@ STACK_JQ='
 labels_plan() {
   jq -c --argjson starting "$1" "$STACK_JQ"'
     def own:
-      ((.base | IN("main", "stable")) and .same_repo) as $claude
+      .same_repo as $claude
       | if .draft then {s: "author", why: "wersja robocza"}
         elif .conflict then {s: "author", why: "konflikt z bazą"}
         elif $claude and (.number as $n | any($starting[]; . == $n)) then {s: "review", why: "ocena Claude'\''a rusza"}
@@ -347,6 +364,7 @@ pr_state() {
     set_pr_label "$n" "" "$(jq -c '[.labels[]?.name]' <<<"$pr")"
     seeds="$seeds $(stack_seeds "$pr" "$prs" | tr '\n' ' ')"
   done
+  seeds="$seeds $(base_seeds "${OLD_BASE:-}" "$prs" | tr '\n' ' ')"
 
   # Wskazane PR-y razem z ich stosami: gotowość jednego PR-a zmienia etykietę
   # reszty stosu. Fakty to dwa wywołania API na PR, więc liczymy je tylko dla
