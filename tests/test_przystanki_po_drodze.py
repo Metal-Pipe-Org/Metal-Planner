@@ -82,7 +82,5 @@ def test_opcja_w_wygladzie_aplikacji_domyslnie_zgaszona():
         html = render_template("index.html", stops=[], abbreviations={},
                                lines=[], data_error=None, form_time="12:00",
                                form_date="2026-10-01", dev_mode=False)
-    start = html.index('id="fold-layout"')
-    layout = html[start:html.index("</details>", start)]
-    tag = re.search(r'<input[^>]*id="via-open"[^>]*>', layout).group(0)
+    tag = re.search(r'<input[^>]*id="via-open"[^>]*>', html).group(0)
     assert "checked" not in tag
