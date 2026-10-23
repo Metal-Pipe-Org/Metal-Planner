@@ -1074,6 +1074,19 @@
 
     </details>
 
+    <details class="dev-fold dev-only" id="fold-stats">
+    <summary>Statystyki <span class="dev-badge">DEV</span></summary>
+
+        {# Tylko w tej przeglądarce (#404): nic nie idzie na serwer. Tabelę rysuje front (renderSettingsStats w app.js). #}
+        <div id="stats-body" class="stats-scroll"></div>
+
+        <div class="stats-actions">
+            <button type="button" id="stats-copy" class="button">Kopiuj statystyki</button>
+            <button type="button" id="stats-clear" class="button">Wyczyść statystyki</button>
+        </div>
+
+    </details>
+
     <div class="dev-foot">
         <button type="button" id="dev-reset" class="button">Przywróć domyślne</button>
     </div>

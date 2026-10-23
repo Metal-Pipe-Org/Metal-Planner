@@ -6925,6 +6925,145 @@ devPanel.addEventListener('input', markChangedSettings);
 devPanel.addEventListener('change', markChangedSettings);
 markChangedSettings();
 
+// --- statystyki zmian ustawień (DEV, #404) ------------------------------------
+//
+// Tylko lokalnie: ile razy i kiedy ostatnio ktoś ruszył każde ustawienie, żeby
+// było widać, których nikt nie dotyka. Jeden nasłuch na cały panel zamiast
+// podpinania pod każde ustawienie - nowe są liczone same. Suwak liczymy na
+// `change` (po puszczeniu), nie na każdy `input`, inaczej jeden ruch dawałby
+// dziesiątki zliczeń. Klucz nie jest na liście z #dev-reset: „Przywróć
+// domyślne” ma zostawić statystyki, bo to właśnie ono jest jednym z liczonych
+// zdarzeń.
+const SETTINGS_STATS_KEY = 'metal-planner:settings-stats';
+
+function loadSettingsStats() {
+    try {
+        const stats = JSON.parse(localStorage.getItem(SETTINGS_STATS_KEY));
+        return {changes: (stats && stats.changes) || {}, reset: (stats && stats.reset) || {n: 0, t: null}};
+    } catch {
+        return {changes: {}, reset: {n: 0, t: null}};   // localStorage niedostępny albo zepsuty JSON
+    }
+}
+
+function saveSettingsStats(stats) {
+    try {
+        localStorage.setItem(SETTINGS_STATS_KEY, JSON.stringify(stats));
+    } catch {
+        // localStorage niedostępny - statystyki po prostu się nie zapiszą
+    }
+}
+
+function recordSettingChange(id) {
+    const stats = loadSettingsStats();
+    const entry = stats.changes[id] || {n: 0, t: null};
+    stats.changes[id] = {n: entry.n + 1, t: Date.now()};
+    saveSettingsStats(stats);
+}
+
+function recordSettingsReset() {
+    const stats = loadSettingsStats();
+    stats.reset = {n: stats.reset.n + 1, t: Date.now()};
+    saveSettingsStats(stats);
+}
+
+function settingControls() {
+    return devPanel.querySelectorAll('input:not([type=file]), select');
+}
+
+// Etykieta tak, jak widać ją w panelu - bez wartości suwaka i dymka „i”.
+function settingLabel(control) {
+    const label = (control.id && devPanel.querySelector(`label[for="${control.id}"]`))
+        || control.closest('label');
+    const clone = label.cloneNode(true);
+    for (const extra of clone.querySelectorAll('output, .info, input, select')) extra.remove();
+    return clone.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function settingValue(control) {
+    if (control.type === 'checkbox') return control.checked ? 'tak' : 'nie';
+    if (control.tagName === 'SELECT') return control.selectedOptions[0].textContent.trim();
+    return control.value;
+}
+
+function statsAgo(t) {
+    if (!t) return '—';
+    const minutes = Math.floor((Date.now() - t) / 60000);
+    if (minutes < 1) return 'przed chwilą';
+    if (minutes < 60) return `${minutes} min temu`;
+    if (minutes < 60 * 24) return `${Math.floor(minutes / 60)} godz. temu`;
+    if (minutes < 60 * 24 * 30) return `${Math.floor(minutes / 60 / 24)} dni temu`;
+    return new Date(t).toLocaleDateString('pl-PL');
+}
+
+function settingsStatsRows() {
+    const stats = loadSettingsStats();
+    const rows = [];
+    for (const control of settingControls()) {
+        if (!control.id) continue;
+        const entry = stats.changes[control.id] || {n: 0, t: null};
+        rows.push({id: control.id, label: settingLabel(control), changes: entry.n,
+                   last: entry.t, value: settingValue(control)});
+    }
+    // Nietknięte lądują na dole, bo to one są wynikiem tej tabeli.
+    return rows.sort((a, b) => b.changes - a.changes);
+}
+
+function renderSettingsStats() {
+    const stats = loadSettingsStats();
+    const table = document.createElement('table');
+    table.className = 'stats-table';
+    const head = table.createTHead().insertRow();
+    for (const title of ['Ustawienie', 'Zmian', 'Ostatnio', 'Teraz']) {
+        head.appendChild(document.createElement('th')).textContent = title;
+    }
+    const body = table.createTBody();
+    const addRow = (label, changes, last, value) => {
+        const row = body.insertRow();
+        row.insertCell().textContent = label;
+        row.insertCell().textContent = changes;
+        row.insertCell().textContent = statsAgo(last);
+        row.insertCell().textContent = value;
+        if (!changes) row.className = 'untouched';
+        return row;
+    };
+    addRow('Przywróć domyślne', stats.reset.n, stats.reset.t, '—').classList.add('stats-reset');
+    for (const row of settingsStatsRows()) addRow(row.label, row.changes, row.last, row.value);
+    $('stats-body').replaceChildren(table);
+}
+
+devPanel.addEventListener('change', event => {
+    if (!event.target.matches('input:not([type=file]), select') || !event.target.id) return;
+    recordSettingChange(event.target.id);
+    if ($('fold-stats').open) renderSettingsStats();
+});
+$('fold-stats').addEventListener('toggle', () => {
+    if ($('fold-stats').open) renderSettingsStats();
+});
+
+$('stats-copy').addEventListener('click', async () => {
+    const stats = loadSettingsStats();
+    const iso = t => (t ? new Date(t).toISOString() : null);
+    const json = JSON.stringify({
+        settings: settingsStatsRows().map(r => ({
+            id: r.id, label: r.label, changes: r.changes, last: iso(r.last), value: r.value,
+        })),
+        reset: {count: stats.reset.n, last: iso(stats.reset.t)},
+    }, null, 2);
+    const button = $('stats-copy');
+    await navigator.clipboard.writeText(json);
+    button.textContent = 'Skopiowano';
+    setTimeout(() => { button.textContent = 'Kopiuj statystyki'; }, 1500);
+});
+
+$('stats-clear').addEventListener('click', () => {
+    try {
+        localStorage.removeItem(SETTINGS_STATS_KEY);
+    } catch {
+        // localStorage niedostępny - i tak nie ma czego kasować
+    }
+    renderSettingsStats();
+});
+
 // --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
 //
 // Plik idzie na serwer, ten go sprawdza, zapisuje i sam odpala przebudowę
@@ -7048,6 +7187,7 @@ document.addEventListener('scroll', () => { infoTip.hidden = true; }, true);
 // trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma własny
 // klucz, więc mapa wraca ta sama.
 $('dev-reset').addEventListener('click', () => {
+    recordSettingsReset();
     for (const key of [DEV_PREFS_KEY, TIME_PREFS_KEY, DOT_PREFS_KEY,
                        LOOK_PREFS_KEY, SOUND_PREFS_KEY, phoneLayout.PREFS_KEY]) {
         try {
