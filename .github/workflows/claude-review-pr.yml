@@ -44,7 +44,8 @@ name: Claude - oceń PR
 # w regułach `main`: `pending` na starcie, `success` dopiero po wstawieniu
 # oceny i udanym kroku o zatwierdzeniach, a przy każdej porażce `failure` albo
 # `error` z „napisz @claude” w opisie, bo to ratunek w każdym z tych
-# przypadków. `success` znaczy „ocena skończona”, nie „ocena dobra”:
+# przypadków — i po tym dopisku pr-state.sh poznaje, że PR czeka na ruch
+# autora (etykieta `waiting for author`). `success` znaczy „ocena skończona”, nie „ocena dobra”:
 # werdykt widać w opisie statusu, a o merge'u decydują ludzie. Commit bez
 # statusu (nowy push) też blokuje merge; samo dociągnięcie bazy przenosi
 # status na nowy commit (drafts.sh), bo ocena nie miałaby czego oglądać.
