@@ -9,7 +9,10 @@ name: "PR-y: zmiany przez wersję roboczą"
 #    Push, po którym PR wnosi do bazy to samo co przed nim (samo dociągnięcie
 #    bazy: „Update branch", merge bazy bez poprawek, rebase), zostawia PR
 #    gotowym, bo ocena nie miałaby czego oglądać. Rozstrzyga `same_changes`
-#    w drafts.sh,
+#    w drafts.sh. Taki push przenosi też zielony status „Ocena Claude'a”
+#    (#350) ze starego czubka na nowy — bez tego wymagany status blokowałby
+#    merge po każdym „Update branch”. Push, który zmienia zmiany, zostawia
+#    nowy czubek bez statusu: merge czeka na ponowną ocenę,
 #  • PR otwarty, otwarty ponownie albo oznaczony jako gotowy, który ma konflikt
 #    z bazą, wraca do wersji roboczej. Przy konflikcie GitHub nie tworzy biegu
 #    `pull_request`, więc ocena i tak by nie ruszyła; autor rozwiązuje konflikt
@@ -29,6 +32,10 @@ permissions:
   pull-requests: write
   # Skrypty i historia bazy do liczenia konfliktu i porównania zmian.
   contents: read
+
+  # Przeniesienie zielonego statusu „Ocena Claude'a” na nowy czubek po
+  # samym dociągnięciu bazy (carry_review_status w drafts.sh).
+  statuses: write
 
 jobs:
   to-draft:
@@ -74,6 +81,7 @@ jobs:
           AFTER: ${{ github.event.after }}
         run: |
           set -euo pipefail
+          source .discord/.github/scripts/statuses.sh
           source .discord/.github/scripts/drafts.sh
 
           # Stary czubek po force-pushu bywa już nie do pobrania; wtedy nie da
@@ -82,6 +90,7 @@ jobs:
               && same_changes refs/remotes/base "$BEFORE" "$AFTER"; then
             echo "#$N: push nie zmienia zmian PR-a (samo dociągnięcie $BASE) — zostaje gotowy." \
               | tee -a "$GITHUB_STEP_SUMMARY"
+            carry_review_status "$N" "$BEFORE" "$AFTER"
             exit 0
           fi
           to_draft "$N" "$DRAFT_ON_PUSH" || [ $? -eq 1 ]

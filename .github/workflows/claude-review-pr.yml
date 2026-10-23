@@ -37,6 +37,18 @@ name: Claude - oceń PR
 # innym razie zatwierdzenia są cofane z powodem. Reguły w
 # `.github/scripts/approvals.sh`.
 #
+# Od wyjścia z wersji roboczej do końca oceny i rozstrzygnięcia
+# o zatwierdzeniach PR stoi z zatwierdzeniem sprzed zmian — bez blokady dałoby
+# się go w tym oknie zmergować, zanim workflow zdąży cofnąć zatwierdzenie.
+# Dlatego bieg stawia na ocenianym commicie status „Ocena Claude'a”, wymagany
+# w regułach `main`: `pending` na starcie, `success` dopiero po wstawieniu
+# oceny i udanym kroku o zatwierdzeniach, a przy każdej porażce `failure` albo
+# `error` z „napisz @claude” w opisie, bo to ratunek w każdym z tych
+# przypadków. `success` znaczy „ocena skończona”, nie „ocena dobra”:
+# werdykt widać w opisie statusu, a o merge'u decydują ludzie. Commit bez
+# statusu (nowy push) też blokuje merge; samo dociągnięcie bazy przenosi
+# status na nowy commit (drafts.sh), bo ocena nie miałaby czego oglądać.
+#
 # Testów nie uruchamiamy: zestaw nie jest jeszcze właściwie skonfigurowany
 # (stąd `tests.yml` odpalany wyłącznie ręcznie), więc jego wynik niczego by nie
 # rozstrzygnął, a łatwo byłoby na jego podstawie postawić PR-owi fałszywy
@@ -172,6 +184,8 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
+      # Status „Ocena Claude'a” na ocenianym commicie (patrz nagłówek).
+      statuses: write
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -281,6 +295,40 @@ jobs:
           path: .discord
           sparse-checkout: .github/scripts
           persist-credentials: false
+
+      - name: Status „Ocena Claude'a” — czeka
+        # Blokada merge'a na czas oceny (patrz nagłówek) — jak najwcześniej,
+        # zaraz po tym, jak wiadomo, że ocena rusza. Commit mógł już mieć
+        # zielony status z poprzedniej oceny (wyjście z wersji roboczej bez
+        # pushu, `@claude` od nowa); bez tego kroku zostałby zielony do końca
+        # tego biegu.
+        #
+        # Przy PR-ze, który zmienia workflow oceny, oceny nie ma, więc
+        # status czeka na `@claude` — mówi to jego opis, a link prowadzi do
+        # informacji pod PR-em.
+        #
+        # Porażka nie zatrzymuje oceny: bez `pending` stoi albo nic (merge
+        # i tak zablokowany), albo zielony status sprzed chwili, o tym samym
+        # commicie, który już raz przeszedł ocenę i rozstrzygnięcie
+        # o zatwierdzeniach.
+        if: steps.pr.outputs.go == 'true' || steps.pr.outputs.kind == 'workflow'
+        continue-on-error: true
+        env:
+          SHA: ${{ steps.pr.outputs.head_sha }}
+          KIND: ${{ steps.pr.outputs.kind }}
+          URL: ${{ steps.pr.outputs.url }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/statuses.sh
+
+          if [ "$KIND" = workflow ]; then
+            set_status "$SHA" "$REVIEW_CONTEXT" pending \
+              "PR zmienia workflow oceny — napisz pod nim @claude, żeby ocena ruszyła" "$URL"
+          else
+            set_status "$SHA" "$REVIEW_CONTEXT" pending \
+              "Claude ocenia ten PR — merge poczeka do końca oceny" "$RUN"
+          fi
 
       - name: Weź instrukcję oceny z gałęzi bazowej
         if: steps.pr.outputs.go == 'true'
@@ -507,7 +555,9 @@ jobs:
             fi
             {
               echo
-              echo "@$author — tym razem bez oceny."
+              # Status „Ocena Claude'a” zostanie zaraz czerwony — autor ma
+              # wiedzieć, czemu nie może zmergować i gdzie to opisano.
+              echo "@$author — tym razem bez oceny. Do udanej oceny merge blokuje status „Ocena Claude'a” ([jak to działa]($GITHUB_SERVER_URL/$REPO/blob/main/CONTRIBUTING.md#review-i-mergowanie))."
             } >> "$RUNNER_TEMP/post.md"
             kind=failed
             verdict=""
@@ -641,11 +691,51 @@ jobs:
               "Szczegóły pod PR-em$note" "" "$AUTHOR"
           fi
 
-      # ── Miejsce na wymagany status „Ocena Claude'a” ──────────────────────
-      # Później (#350): commit status na HEAD_SHA, ustawiany na „pending” przy
-      # zapowiedzi i na „success” po wstawieniu oceny i rozstrzygnięciu
-      # o zatwierdzeniach, jako wymagany w regułach `main` — żeby nie dało
-      # się zmergować, zanim ocena skończy. Ma iść ostatni, po kroku
-      # „Zatwierdzenia ludzi”: zielony status przy zatwierdzeniu, które
-      # właśnie ma zniknąć, otwierałby okno na merge. Wymaga
-      # `statuses: write` w uprawnieniach joba.
+      - name: Status „Ocena Claude'a” — wynik
+        # Ostatni, po kroku „Zatwierdzenia ludzi”: zielony status przy
+        # zatwierdzeniu, które właśnie ma zniknąć, otwierałby okno na merge.
+        # Zielony tylko wtedy, gdy ocena stoi pod PR-em i rozstrzygnięcie
+        # o zatwierdzeniach się udało; każda inna droga kończy się czerwonym
+        # statusem z „napisz @claude” — nowy bieg zaczyna od `pending`
+        # i rozstrzyga wszystko od nowa.
+        #
+        # Przy PR-ze, który zmienia workflow oceny, zostaje `pending`
+        # z pierwszego kroku statusu (czeka na `@claude`), chyba że nie udało
+        # się cofnąć zatwierdzeń — wtedy czerwony, jak wszędzie.
+        #
+        # Ubity bieg milczy (`!cancelled()`), jak reszta tego workflow: jego
+        # `pending` nadpisze następny bieg, który go ubił.
+        #
+        # Bez `continue-on-error`: gdy nie da się postawić zielonego, PR zostaje
+        # zablokowany, a czerwony bieg mówi, że trzeba spróbować jeszcze raz.
+        if: ${{ !cancelled() && (steps.pr.outputs.go == 'true' || steps.pr.outputs.kind == 'workflow') }}
+        env:
+          SHA: ${{ steps.pr.outputs.head_sha }}
+          KIND: ${{ steps.post.outputs.kind || steps.pr.outputs.kind }}
+          URL: ${{ steps.post.outputs.url || steps.pr.outputs.url }}
+          VERDICT: ${{ steps.post.outputs.verdict }}
+          APPROVALS: ${{ steps.approvals.outcome }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/statuses.sh
+
+          case "$KIND:$APPROVALS" in
+            workflow:failure)
+              set_status "$SHA" "$REVIEW_CONTEXT" failure \
+                "Nie udało się cofnąć zatwierdzeń — napisz pod PR-em @claude" "$RUN" ;;
+            workflow:*)
+              echo "PR zmienia workflow oceny — status czeka na @claude." ;;
+            review:success)
+              set_status "$SHA" "$REVIEW_CONTEXT" success "Ocena gotowa: ${VERDICT:-bez werdyktu}" "$URL" ;;
+            review:*)
+              set_status "$SHA" "$REVIEW_CONTEXT" failure \
+                "Ocena jest, ale nie udało się rozstrzygnąć o zatwierdzeniach — napisz pod PR-em @claude" "$RUN" ;;
+            failed:*)
+              set_status "$SHA" "$REVIEW_CONTEXT" failure \
+                "Ocena się nie udała — napisz pod PR-em @claude" "$URL" ;;
+            *)
+              # Ocena nie stanęła pod PR-em (padła zapowiedź albo wstawienie).
+              set_status "$SHA" "$REVIEW_CONTEXT" error \
+                "Bieg oceny się wywrócił — napisz pod PR-em @claude" "$RUN" ;;
+          esac

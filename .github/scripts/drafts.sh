@@ -73,3 +73,31 @@ same_changes() {
     | "${git[@]}" patch-id --stable)
   [ "$a" = "$b" ]
 }
+
+# carry_review_status N PRZED PO — przenosi zielony status „Ocena Claude'a”
+# (REVIEW_CONTEXT ze statuses.sh, które wołający też musi zrobić `source`)
+# ze starego czubka PR-a na nowy; token potrzebuje do tego jeszcze
+# `statuses: write`. Woła się to tylko po pushu, który według
+# `same_changes` jedynie dociągnął bazę: ocena nie miałaby czego oglądać,
+# a bez statusu na nowym commicie wymagany status blokowałby merge — po
+# „Update branch” PR wisiałby do następnego `@claude`.
+#
+# Przenosimy tylko `success`. Status w toku (`pending`) zostaje na starym
+# commicie: bieg oceny skończy go tam i nie wie o nowym czubku, więc
+# przeniesiony wisiałby w nieskończoność. Porażka (`failure`/`error`) też
+# zostaje — nowy commit bez statusu blokuje merge tak samo, a ratunek ten sam:
+# `@claude`. Kod różny od zera, gdy przeniesienie się nie udało: PR stoi
+# wtedy zablokowany bez powodu, więc ma to być widać na czerwono.
+carry_review_status() {
+  local n=$1 before=$2 after=$3 st desc
+
+  st=$(get_status "$before" "$REVIEW_CONTEXT")
+  if [ -z "$st" ] || [ "$(jq -r .state <<<"$st")" != success ]; then
+    echo "#$n: na ${before:0:7} nie ma zielonego statusu „$REVIEW_CONTEXT” — nie przenoszę."
+    return 0
+  fi
+  desc="Z ${before:0:7} (samo dociągnięcie bazy) — $(jq -r '.description // ""' <<<"$st")"
+  set_status "$after" "$REVIEW_CONTEXT" success "$desc" "$(jq -r '.target_url // ""' <<<"$st")" || return 1
+  echo "#$n: status „$REVIEW_CONTEXT” przeniesiony z ${before:0:7} na ${after:0:7}." \
+    | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+}
