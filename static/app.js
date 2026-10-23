@@ -6917,9 +6917,30 @@ const SETTINGS_SUGGEST_FREQUENT = 5;
 
 // Dziennik z chwili otwarcia panelu: z niego liczy się kolejność aż do
 // następnego otwarcia.
-let settingsLog = {counts: new Map(), recent: []};
+let settingsLog = {counts: new Map(), recent: [], known: null};
+
+// Najrzadszy odstęp między przeliczeniami kolejności (ustawienie w ⚙). Wyłączony
+// = przeliczanie przy każdym otwarciu panelu.
+const SETTINGS_ORDER_KEY = 'metal-planner:settings-order';
+const SETTINGS_ORDER_LIMITS = {
+    '1h': 3600e3, '1d': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3,
+};
+
+function loadSettingsOrder() {
+    try {
+        return JSON.parse(localStorage.getItem(SETTINGS_ORDER_KEY));
+    } catch {
+        return null;       // localStorage niedostępny albo zepsuty JSON
+    }
+}
 
 function snapshotSettingsLog() {
+    const limit = SETTINGS_ORDER_LIMITS[loadDevPrefs()['order-limit']];
+    const stored = loadSettingsOrder();
+    if (limit && stored && Date.now() - stored.t < limit) {
+        settingsLog = {counts: new Map(stored.counts), recent: stored.recent, known: new Set(stored.known)};
+        return;
+    }
     const log = loadSettingsStats().log;
     const counts = new Map();
     for (const event of log) counts.set(event.id, (counts.get(event.id) || 0) + 1);
@@ -6927,12 +6948,24 @@ function snapshotSettingsLog() {
     for (const event of [...log].reverse()) {
         if (!recent.includes(event.id)) recent.push(event.id);
     }
-    settingsLog = {counts, recent};
+    settingsLog = {counts, recent, known: null};
+    // Zapis także przy wyłączonym limicie: włączenie go niczego wtedy nie przestawia.
+    try {
+        localStorage.setItem(SETTINGS_ORDER_KEY, JSON.stringify({
+            t: Date.now(), counts: [...counts], recent,
+            known: settingsRows.map(row => row.dataset.setting),
+        }));
+    } catch {
+        // localStorage niedostępny - kolejność po prostu liczy się za każdym razem
+    }
 }
 
 const rowScore = row => settingsLog.counts.get(row.dataset.setting) || 0;
 const rowIndex = new Map(settingsRows.map((row, i) => [row, i]));
-const byScore = (a, b) => rowScore(b) - rowScore(a) || rowIndex.get(a) - rowIndex.get(b);
+// Ustawienie dodane po ostatnim przeliczeniu staje na końcu wśród równych.
+const rowIsNew = row => (settingsLog.known && !settingsLog.known.has(row.dataset.setting) ? 1 : 0);
+const byScore = (a, b) => rowScore(b) - rowScore(a) || rowIsNew(a) - rowIsNew(b)
+    || rowIndex.get(a) - rowIndex.get(b);
 
 // Wiersze z suwakiem albo przełącznikiem da się skopiować; reszta (link,
 // wgranie pliku, przycisk wersji) ma swoje id i stoi tylko w jednym miejscu.
@@ -7192,6 +7225,9 @@ function syncSettingsSnapshot() {
     if (changed) saveSettingsStats(stats);
 }
 syncSettingsSnapshot();
+const orderLimit = $('order-limit');
+orderLimit.value = loadDevPrefs()['order-limit'] || 'off';
+orderLimit.addEventListener('change', () => saveDevPref('order-limit', orderLimit.value));
 refreshSettingsOrder();
 devPanel.addEventListener('settings-open', refreshSettingsOrder);
 

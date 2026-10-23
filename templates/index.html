@@ -986,6 +986,18 @@
         <a class="set-title" href="/statystyki">Statystyki ustawień</a>
     </div>
 
+    {# Jak często wolno przestawić kolejność listy (patrz snapshotSettingsLog w app.js). #}
+    <div class="field dev-only set-row" data-setting="order-limit" data-labels="Aplikacja, Statystyki">
+        <label for="order-limit">Przeliczanie kolejności ustawień najrzadziej co</label>
+        <select id="order-limit">
+            <option value="off" selected>wyłączony</option>
+            <option value="1h">1 godz.</option>
+            <option value="1d">1 dzień</option>
+            <option value="7d">1 tydzień</option>
+            <option value="30d">1 miesiąc</option>
+        </select>
+    </div>
+
     </div>
 
     <div class="dev-foot">
