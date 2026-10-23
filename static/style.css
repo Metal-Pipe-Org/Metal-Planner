@@ -2517,6 +2517,24 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
 
 .set-group[open] > summary::before { transform: none; }
 
+/* „Proponowane" i „Inne niż domyślne" to nie grupy etykiet, tylko skróty -
+   osobny, lekko podbarwiony blok nad listą grup. */
+.set-group[data-kind] {
+    margin-top: 8px;
+    padding: 10px 10px 8px;
+    border-top: 0;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.set-group[data-kind]:first-of-type { margin-top: 12px; }
+.set-group[data-kind] > summary { color: var(--accent); }
+.set-group[data-kind] + .set-group:not([data-kind]) {
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 2px solid var(--line);
+}
+
 /* Liczba zmienionych opcji (patrz markChangedSettings w app.js) - widać ją też
    przy zwiniętej grupie. */
 .set-group > summary[data-changed]::after {
