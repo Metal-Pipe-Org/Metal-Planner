@@ -2517,6 +2517,21 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
 
 .set-group[open] > summary::before { transform: none; }
 
+/* Liczba zmienionych opcji (patrz markChangedSettings w app.js) - widać ją też
+   przy zwiniętej grupie. */
+.set-group > summary[data-changed]::after {
+    content: attr(data-changed);
+    margin-left: auto;
+    min-width: 18px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--surface);
+    font-size: 10px;
+    letter-spacing: 0;
+    text-align: center;
+}
+
 /* Strona /statystyki - bez mapy i panelu, zwykła przewijana strona. */
 .stats-page { background: var(--surface); min-height: 100vh; }
 .stats-main { max-width: 640px; margin: 0 auto; padding: 16px; }

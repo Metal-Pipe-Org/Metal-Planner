@@ -6959,6 +6959,7 @@ function renderSettingsList() {
     // Wiersze schowane z innych powodów zostają w DOM, na końcu.
     nodes.push(...settingsRows.filter(row => !visible.includes(row)));
     settingsList.replaceChildren(...nodes);
+    markChangedSettings();
 }
 
 settingsSearch.addEventListener('input', renderSettingsList);
@@ -6979,6 +6980,13 @@ function markChangedSettings() {
             ? input.checked !== input.defaultChecked
             : Number(input.value) !== Number(input.defaultValue);
         input.closest('.set-row').classList.toggle('changed', differs);
+    }
+    // Zwinięta grupa też ma pokazać, że coś w niej zmieniono.
+    for (const group of devPanel.querySelectorAll('.set-group')) {
+        const changed = group.querySelectorAll('.set-row.changed').length;
+        const summary = group.querySelector('summary');
+        if (changed) summary.dataset.changed = changed;
+        else delete summary.dataset.changed;
     }
 }
 devPanel.addEventListener('input', markChangedSettings);
