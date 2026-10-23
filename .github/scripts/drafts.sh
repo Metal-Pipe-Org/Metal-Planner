@@ -3,7 +3,11 @@
 # idą przez wersję roboczą, a wyjście z niej („Ready for review") uruchamia
 # ponowną ocenę Claude'a. Wołający robi `source`; resztę bierze z env:
 #
-#   GH_TOKEN  token z `pull-requests: write`
+#   GH_TOKEN  token z `pull-requests: write` i `contents: write` — bez
+#             tego drugiego GraphQL `convertPullRequestToDraft` (pod
+#             `gh pr ready --undo`) odmawia przestawienia (#417). Taki token
+#             wolno dać tylko w jobie, który nie uruchamia kodu z PR-a
+#             (docs/WORKFLOWS.md, zasada 9)
 #   REPO      `właściciel/repozytorium`
 #   GIT_REPO  klon repo z historią, w którym porównujemy zmiany; domyślnie `.`
 #

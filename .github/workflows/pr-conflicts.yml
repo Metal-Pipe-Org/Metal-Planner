@@ -28,10 +28,23 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # Zdjęcie próśb o recenzję i przestawienie na wersję roboczą.
+  # Zdjęcie próśb o recenzję.
   pull-requests: write
-  # Skrypty z `main`, historia i głowy PR-ów do liczenia konfliktów.
-  contents: read
+  # Skrypty z `main`, historia i głowy PR-ów do liczenia konfliktów, ale
+  # przede wszystkim przestawienie na wersję roboczą: GraphQL
+  # `convertPullRequestToDraft` (pod `gh pr ready --undo`) odmawia tokenowi
+  # bez `contents: write` („Resource not accessible by integration", #417),
+  # choć dokumentacja GitHuba wymienia tylko `pull-requests: write`. REST stanu
+  # wersji roboczej zmienić nie umie, więc innej drogi nie ma.
+  #
+  # Zapis do repo jest bezpieczny tylko dlatego, że ten job nigdy nie
+  # wypakowuje ani nie uruchamia kodu z PR-ów: skrypty idą z `main` (sparse
+  # checkout, `persist-credentials: false`), a głowy PR-ów pobieramy
+  # wyłącznie jako obiekty gita, które czyta `merge-tree` — nic z nich się nie
+  # wykonuje. Z tym tokenem kod z PR-a mógłby pushować do gałęzi PR-ów
+  # (`main` chroni ruleset). Każda zmiana tego pliku musi tę zasadę utrzymać
+  # (docs/WORKFLOWS.md, zasada 9).
+  contents: write
 
 jobs:
   ping-conflicts:
