@@ -51,7 +51,7 @@ Wspólny sposób pracy na GitHubie: branche, pull requesty, review Claude'a, iss
 ### Labels
 
 30. PR-y i issues mają osobne labele stanu. Każdy otwarty PR nosi dokładnie jeden z trzech, który mówi, czyj jest następny ruch; automat przestawia go po każdej zmianie PR-a, recenzji i review Claude'a, a zamknięty PR traci go całkiem. Ręcznie ich nie zmieniaj — przy następnym przeliczeniu wrócą.
-   - `waiting for author` — ruch autora: PR jest draftem; review Claude'a się nie udało albo nie ruszyło (napisz `@claude`); ktoś ma czekające „Request changes”; brakuje zatwierdzeń, a nikt nie jest proszony o review (poproś w „Reviewers”); albo wszystko jest gotowe — zmerguj.
+   - `waiting for author` — ruch autora: PR jest draftem albo ma konflikt z bazą; review Claude'a się nie udało albo nie ruszyło (napisz `@claude`); ktoś ma czekające „Request changes”; brakuje zatwierdzeń, a nikt nie jest proszony o review (poproś w „Reviewers”); albo wszystko jest gotowe — zmerguj.
    - `waiting for review` — ruch kogoś innego niż autor: Claude właśnie robi review albo czeka prośba o review człowieka, w tym recenzenta koniecznego.
    - `waiting for other PR` — PR jest gotowy do merge'a, ale należy do stosu (PR, którego baza to branch innego PR-a, i PR-y z nim tak połączone), a inny PR w tym stosie nie jest. Stos mergujemy raz, gdy gotowy jest cały.
 31. Labele stanu issues nadają się same: `PR in progress` od otwarcia PR-a (także wersji roboczej) z `Closes` albo `Refs`, niezależnie od stanu PR-a (zdejmuje się, gdy PR jest zamknięty), `merged - is it ok?` po merge'u PR-a z `Refs`. Ten ostatni zdejmuje ten, kto issue zamyka.
