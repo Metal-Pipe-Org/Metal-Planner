@@ -74,7 +74,7 @@ jobs:
           # Zablokowane albo z PR-em: zdejmujemy bez oglądania osi czasu.
           if [ "$LABELED" = 'external blocked' ] || [ "$LABELED" = 'PR in progress' ] \
              || [ "$(jq '[.labels[].name] | index("external blocked") != null or (.issue_dependencies_summary.blocked_by // 0) > 0' "$RUNNER_TEMP/issue.json")" = true ]; then
-            gh issue edit "$N" --repo "$REPO" --remove-label "$LABEL_STALE"
+            remove_stale "$N"
             echo "#$N: zablokowane albo z PR-em — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -91,6 +91,6 @@ jobs:
             "$MARKER" "$LABEL_STALE" "$DAYS_QUIET" "$DAYS_GRACE")
 
           if [ "$action" = unlabel ]; then
-            gh issue edit "$N" --repo "$REPO" --remove-label "$LABEL_STALE"
+            remove_stale "$N"
             echo "#$N: ktoś odpisał — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
