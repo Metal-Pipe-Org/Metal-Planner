@@ -11,6 +11,8 @@ pomija się bez playwright albo bez bazy rozkładów.
 """
 
 import datetime
+import json
+import os
 
 import pytest
 
@@ -29,7 +31,19 @@ UKRYJ_JS = """hidden => {
 USTAW_JS = """([id, value]) => { document.getElementById(id).value = value; }"""
 
 
-def _otworz(przegladarka, adres, **opcje):
+@pytest.fixture(scope="module", autouse=True)
+def tryb_deweloperski():
+    """Przełącznik odświeżania siedzi w sekcji DEV (#379) - bez DEV_MODE nie działa."""
+    stare = os.environ.get("DEV_MODE")
+    os.environ["DEV_MODE"] = "1"
+    yield
+    if stare is None:
+        del os.environ["DEV_MODE"]
+    else:
+        os.environ["DEV_MODE"] = stare
+
+
+def _otworz(przegladarka, adres, przelacznik=True, **opcje):
     slupek = next(s for s in gtfs.all_stops_geo() if s["name"] == TRASA[0])
     context = przegladarka.new_context(
         viewport={"width": 390, "height": 844}, device_scale_factor=2,
@@ -43,6 +57,9 @@ def _otworz(przegladarka, adres, **opcje):
         datetime.date.today(), datetime.time(12, 0)))
     bledy = []
     page.on("pageerror", lambda e: bledy.append(str(e)))
+    page.add_init_script(
+        "localStorage.setItem('metal-planner:dev-prefs', %s)"
+        % json.dumps(json.dumps({"location-refresh": przelacznik})))
     for wzor, odpowiedz in PUSTE_ZRODLA.items():
         page.route(wzor, _odpowiedz(odpowiedz))
     page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
@@ -311,5 +328,39 @@ def test_spozniony_gps_nie_nadpisuje_startu_wpisanego_w_miedzyczasie(
     assert not page.is_visible("#locate-offer")
     assert not page.is_visible("#locate-msg")
     assert page.is_enabled("#locate")
+    context.close()
+    assert not bledy
+
+
+def test_przelacznik_wylaczony_drugie_kolko_nie_wlacza_odswiezania(przegladarka, adres):
+    context, page, bledy = _otworz(przegladarka, adres, przelacznik=False)
+    zapytania = []
+    page.on("request", lambda r: zapytania.append(r.url) if "/api/flow" in r.url else None)
+    _z_trasa_od_pozycji(page)
+    start = page.input_value("#start")
+    _przelacz_odswiezanie(page)
+    page.wait_for_selector("body:not(.searching)", state="attached")
+    assert page.input_value("#start") == start
+    assert not _swieci(page)
+    assert page.get_attribute("#locate", "title") == "Użyj mojej lokalizacji"
+    # Drugie ◎ szuka od nowa jak pierwsze - liczą się dopiero zapytania z zegara.
+    page.wait_for_timeout(1000)
+    zapytania.clear()
+    page.clock.run_for(90000)
+    page.wait_for_timeout(500)
+    assert zapytania == []
+    assert not page.is_visible("#locate-peek")
+    context.close()
+    assert not bledy
+
+
+def test_przelacznik_zapisany_bez_trybu_deweloperskiego_nie_dziala(przegladarka, adres, monkeypatch):
+    monkeypatch.delenv("DEV_MODE", raising=False)
+    context, page, bledy = _otworz(przegladarka, adres)
+    assert not page.evaluate("document.getElementById('location-refresh').checked")
+    page.click("#locate")
+    page.wait_for_selector("#locate-offer", state="visible")
+    _przelacz_odswiezanie(page)
+    assert not _swieci(page)
     context.close()
     assert not bledy
