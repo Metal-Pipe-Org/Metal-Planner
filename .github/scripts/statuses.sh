@@ -18,6 +18,8 @@
 # Nazwy statusów są częścią reguł `main` (wymagane statusy) — zmiana nazwy tu
 # bez zmiany w regułach zablokuje merge wszystkich PR-ów.
 REVIEW_CONTEXT="Ocena Claude'a"
+# Zatwierdzenie od każdego recenzenta koniecznego (#352) — stawia pr-state.sh.
+REVIEWERS_CONTEXT="Recenzenci konieczni"
 
 # set_status SHA NAZWA STAN OPIS [LINK] — stawia status NAZWA na commicie.
 # STAN: pending / success / failure / error. GitHub odrzuca opis dłuższy niż
@@ -42,6 +44,13 @@ set_status() {
 # `{state, description, target_url}` albo nic, gdy go nie ma. Zbiorczy status
 # commitu podaje już tylko najnowszy status każdej nazwy.
 get_status() {
+  commit_statuses "$1" | jq -c --arg c "$2" '.[] | select(.context == $c) | {state, description, target_url}'
+}
+
+# commit_statuses SHA — najnowszy status każdej nazwy na commicie, jako
+# tablica `{context, state, description, target_url}`. Jedno wywołanie API
+# dla wszystkich nazw naraz — pr-state.sh potrzebuje kilku.
+commit_statuses() {
   gh api "repos/$REPO/commits/$1/status?per_page=100" \
-    | jq -c --arg c "$2" '.statuses[]? | select(.context == $c) | {state, description, target_url}'
+    | jq -c '[.statuses[]? | {context, state, description, target_url}]'
 }

@@ -215,7 +215,7 @@ approval_note() {
 @$1 — zatwierdzenie od $2 nadal obowiązuje: [nowa ocena]($3) jest 🟢, a zmiany od zatwierdzenia Claude ocenił jako drobne. Co dalej — jedno z trzech:
 
 1. **Chcesz jeszcze coś zmienić** — wróć do wersji roboczej („Convert to draft”) i dopiero tam wypchnij poprawki.
-2. **Zmerguj sam** — zatwierdzenie człowieka nadal obowiązuje, bo Claude ocenił zmiany od niego jako drobne.
+2. **Zmerguj sam** — zatwierdzenie człowieka nadal obowiązuje, bo Claude ocenił zmiany od niego jako drobne. Gdy merge jest jeszcze zablokowany, opis statusu „Recenzenci konieczni” mówi, czyjego zatwierdzenia brakuje.
 3. **Wolisz, żeby ktoś jeszcze spojrzał** — poproś o ponowne review w panelu „Reviewers”.
 
 Jak to działa: [CONTRIBUTING.md — Review i mergowanie]($APPROVALS_DOC).
