@@ -122,7 +122,8 @@ fold_review_comments() {
 # (wzmianka w treści była już wcześniej) i nie odpala żadnego workflow: żaden
 # nie słucha `edited`, a zdarzeń z `GITHUB_TOKEN` GitHub innym workflow nie daje.
 #
-# Informację „Ten PR zmienia workflow oceny” zwijamy za to w całości przez
+# Informację „Ten PR zmienia workflow oceny” (i jej odmianę „Baza tego PR-a
+# ma inny workflow oceny” przy PR-ze w stosie) zwijamy za to w całości przez
 # `minimize_comment`: to jedna linijka bez werdyktu, więc nie ma czego zostawić
 # na wierzchu, a ocena, na którą czekała, właśnie przyszła. Zwinięty komentarz
 # API dalej zwraca, więc dalej działa jako znak „ocena już była” dla pushy.
@@ -146,12 +147,14 @@ fold_old_reviews() {
 }
 
 # workflow_notice_nodes — filtr: z tablicy komentarzy wypisuje node_id
-# informacji botów o tym, że PR zmienia workflow oceny, i instrukcji
-# o zatwierdzeniu, które zostaje (znacznik APPROVAL_NOTE_MARK z approvals.sh).
+# informacji botów o tym, że PR — sam albo przez swoją bazę, niższe piętro
+# stosu (#418) — zmienia workflow oceny, i instrukcji o zatwierdzeniu, które
+# zostaje (znacznik APPROVAL_NOTE_MARK z approvals.sh).
 workflow_notice_nodes() {
   jq -r '.[]
     | select(.user.login == "github-actions[bot]")
     | select((.body | startswith("⚪ Ten PR zmienia workflow oceny"))
+             or (.body | startswith("⚪ Baza tego PR-a ma inny workflow oceny"))
              or (.body | contains("<!-- claude-approval-note -->")))
     | .node_id'
 }
