@@ -1,0 +1,115 @@
+name: "PR-y: stan"
+
+# Wymagany status „Recenzenci konieczni” na czubku każdego otwartego PR-a
+# (#352). Recenzent konieczny to ktoś, kto dopisał się PR-em do linijki `*`
+# w `.github/CODEOWNERS`: każdy PR musi dostać jego zatwierdzenie, a on sam
+# zobowiązuje się zrobić review każdego PR-a w ciągu 24 h. To deklaracja, nie
+# hierarchia — dopisać się może każdy. Status jest zielony, gdy każdy z nich
+# (poza autorem PR-a) ma stojące zatwierdzenie; inaczej czeka i w opisie
+# mówi, na kogo.
+#
+# Czemu nie wbudowane „Require review from Code Owners”: przy kilku ownerach
+# jednej ścieżki GitHub zadowala się zatwierdzeniem jednego z nich, a my
+# potrzebujemy każdego. To ustawienie jest więc w regułach `main` wyłączone,
+# a ten status — wymagany; „co najmniej jedno zatwierdzenie” zostaje
+# w regułach jak było.
+#
+# Stan liczymy zawsze od zera z API (pr-state.sh), więc wystarczy, że bieg
+# ruszy po każdej zmianie, która może go przestawić:
+#
+#  • zdarzenia samego PR-a (`pull_request_target`) — przeliczamy ten PR.
+#    `pull_request_target` bierze workflow z `main` i działa także przy PR-ze
+#    w konflikcie; kodu z PR-a nie pobieramy wcale — wszystko idzie z API;
+#  • recenzje — `pull_request_review` nie ma wersji „_target”: bierze
+#    workflow z commitu scalenia PR-a, a dla forków daje token tylko do
+#    odczytu. Nie słuchamy go więc tutaj, tylko przez przekaźnik
+#    (pr-review-relay.yml), który nie ma żadnych uprawnień i niczego nie
+#    robi; jego zakończenie budzi ten workflow przez `workflow_run`, który
+#    zawsze biegnie z `main` i z naszym tokenem. PR może przekaźnik zmienić
+#    albo usunąć, ale nic przez to nie zyska: stąd nie bierzemy od niego
+#    żadnych danych, a bez przekaźnika status najwyżej nie zzielenieje;
+#  • biegi naszych workflow, których akcje nie tworzą zdarzeń (token
+#    workflow nie budzi innych workflow): cofnięcie zatwierdzeń po ocenie
+#    Claude'a, przestawienie na wersję roboczą, konflikt po merge'u do `main`,
+#    błąd składni. Nazwy słuchanych workflow muszą się zgadzać co do znaku;
+#    nazwa workflow, którego jeszcze nie ma, niczego nie psuje.
+#
+# Po `workflow_run` przeliczamy wszystkie otwarte PR-y. Z samego zdarzenia nie
+# da się pewnie powiedzieć, którego PR-a dotyczył bieg: przy
+# `pull_request_target`, `issue_comment` i ręcznym biegu GitHub wiąże go
+# z gałęzią bazową, nie z PR-em. Pełne przeliczenie to kilka wywołań API na
+# PR, a pomijamy biegi, które nic nie zrobiły (`skipped` — np. komentarz bez
+# `@claude`). Push do `main` (konflikty) budzi pełne przeliczenie i tak, więc
+# nowa deklaracja w CODEOWNERS dociera do wszystkich PR-ów od razu.
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - converted_to_draft
+      - review_requested
+      - review_request_removed
+      - edited
+      - labeled
+      - unlabeled
+      - closed
+  workflow_run:
+    workflows:
+      - "Claude - oceń PR"
+      - "PR-y: zmiany przez wersję roboczą"
+      - "PR-y: nowy konflikt z main — ping i wersja robocza"
+      - "PR-y: składnia"
+      - "PR-y: recenzja (przekaźnik)"
+    types: [completed]
+
+permissions:
+  # Status „Recenzenci konieczni”.
+  statuses: write
+  # Skrypty z `main` i CODEOWNERS z `main`.
+  contents: read
+  # Lista PR-ów i ich recenzje.
+  pull-requests: read
+
+jobs:
+  state:
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && (github.event_name != 'workflow_run'
+          || github.event.workflow_run.conclusion != 'skipped')
+    # Jeden bieg naraz na PR, po kolei — przeliczenie i tak bierze stan
+    # z chwili biegu, więc czekający bieg, który GitHub zastąpi nowszym, nic
+    # nie traci. Pełne przeliczenia po `workflow_run` mają wspólną grupę
+    # z tego samego powodu.
+    concurrency:
+      group: pr-state-${{ github.event.pull_request.number || 'all' }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Pobierz skrypty z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Przelicz stan
+        env:
+          N: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/statuses.sh
+          source .discord/.github/scripts/approvals.sh
+          source .discord/.github/scripts/pr-state.sh
+
+          # `pull_request_target` dotyczy jednego PR-a, `workflow_run` —
+          # wszystkich otwartych (patrz nagłówek).
+          pr_state "${N:-all}"
