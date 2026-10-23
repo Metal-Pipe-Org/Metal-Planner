@@ -7046,7 +7046,7 @@ function suggestedSettings(visible) {
 
 function renderSettingsList() {
     const needle = fold(settingsSearch.value.trim());
-    const shown = settingsRows.filter(row => !row.hidden && (devMode || !row.classList.contains('dev-only')));
+    const shown = visibleSettingRows();
     const matching = shown.filter(row => {
         const info = settingsInfo.get(row);
         return info.name.includes(needle) || info.folded.some(label => label.includes(needle));
@@ -7070,7 +7070,12 @@ function renderSettingsList() {
         for (const row of matching) placed.add(row);
     } else {
         const suggested = suggestedSettings(shown);
-        if (suggested.length) addGroup(nodes, 'Proponowane', suggested.map(makeSettingCopy), true);
+        if (suggested.length) {
+            addGroup(nodes, 'Proponowane', suggested.map(makeSettingCopy), true);
+            nodes[nodes.length - 1].dataset.kind = 'suggested';
+        }
+        const changedRows = changedSettingRows(shown);
+        if (changedRows.length) nodes.push(buildChangedGroup(changedRows, prefs));
         for (const group of settingGroups(shown)) {
             const rows = [];
             for (const row of group.rows) {
@@ -7108,21 +7113,60 @@ new MutationObserver(renderSettingsList).observe(settingsList,
 //
 // `value`/`checked` z index.html to wartości domyślne (patrz komentarz nad
 // panelem), więc opcja różna od nich dostaje znacznik.
+const differsFromDefault = input => (input.type === 'checkbox'
+    ? input.checked !== input.defaultChecked
+    : Number(input.value) !== Number(input.defaultValue));
+
+// Stała sekcja pod „Proponowane": ustawienia różne od domyślnych, zawsze z bieżącego
+// stanu (nie z migawki kolejności), więc odświeża się na żywo.
+const CHANGED_GROUP = 'Inne niż domyślne';
+
+function changedSettingRows(shown) {
+    return shown.filter(row => isCopyable(row)
+        && differsFromDefault(row.querySelector('input[type=checkbox], input[type=range]')));
+}
+
+function visibleSettingRows() {
+    return settingsRows.filter(row => !row.hidden && (devMode || !row.classList.contains('dev-only')));
+}
+
+function buildChangedGroup(rows, prefs) {
+    const saved = prefs['fold:' + CHANGED_GROUP];
+    const group = document.createElement('details');
+    group.className = 'set-group';
+    group.dataset.kind = 'changed';
+    group.dataset.ids = rows.map(row => row.dataset.setting).join(',');
+    group.open = saved === undefined ? false : !!saved;
+    const summary = Object.assign(document.createElement('summary'), {textContent: CHANGED_GROUP});
+    summary.dataset.changed = rows.length;
+    group.append(summary, ...rows.map(makeSettingCopy));
+    group.addEventListener('toggle', () => saveDevPref('fold:' + CHANGED_GROUP, group.open));
+    return group;
+}
+
+// Przy szukaniu lista jest płaska i tej sekcji nie ma.
+function refreshChangedGroup() {
+    if (settingsSearch.value.trim()) return;
+    const rows = changedSettingRows(visibleSettingRows());
+    const ids = rows.map(row => row.dataset.setting).join(',');
+    const current = settingsList.querySelector('[data-kind=changed]');
+    if ((current ? current.dataset.ids : '') === ids) return;
+    const next = rows.length ? buildChangedGroup(rows, loadDevPrefs()) : null;
+    if (current && next) current.replaceWith(next);
+    else if (current) current.remove();
+    else if (next) {
+        const anchor = [...settingsList.children].find(el => !el.dataset.kind);
+        settingsList.insertBefore(next, anchor || null);
+    }
+    syncSettingCopies();
+}
+
 function markChangedSettings() {
     // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
     for (const input of devPanel.querySelectorAll('.set-row input:not([type=file])')) {
-        const differs = input.type === 'checkbox'
-            ? input.checked !== input.defaultChecked
-            : Number(input.value) !== Number(input.defaultValue);
-        input.closest('.set-row').classList.toggle('changed', differs);
+        input.closest('.set-row').classList.toggle('changed', differsFromDefault(input));
     }
-    // Zwinięta grupa też ma pokazać, że coś w niej zmieniono.
-    for (const group of devPanel.querySelectorAll('.set-group')) {
-        const changed = group.querySelectorAll('.set-row.changed').length;
-        const summary = group.querySelector('summary');
-        if (changed) summary.dataset.changed = changed;
-        else delete summary.dataset.changed;
-    }
+    refreshChangedGroup();
 }
 devPanel.addEventListener('input', markChangedSettings);
 devPanel.addEventListener('change', markChangedSettings);
