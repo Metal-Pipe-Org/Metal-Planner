@@ -65,6 +65,41 @@ minimize_comment() {
 REVIEW_MARK='<!-- claude-review -->'
 FOLDED_MARK='<!-- claude-review-folded -->'
 
+# review_sha_mark SHA — drugi znacznik, tylko pod udaną oceną: commit, który
+# Claude oceniał. Następna ocena zaczyna od tego, co doszło od tamtego
+# commitu (#350). Informacja o porażce go nie niesie — nic wtedy nie
+# oceniono. Osobna linijka zamiast dopisku w REVIEW_MARK, bo po samym
+# REVIEW_MARK (`contains`) poznaje oceny `fold_review_comments`.
+review_sha_mark() {
+  printf '<!-- claude-review-sha: %s -->' "$1"
+}
+
+# last_review — filtr: z tablicy komentarzy z API wypisuje `SHA<TAB>URL`
+# najnowszej udanej oceny Claude'a albo nic. Liczy się ostatnia linijka ze
+# znacznikiem i tylko w całości: ocena PR-a, który zmienia ten mechanizm,
+# może ten sam napis zacytować w treści, a nasz znacznik stoi zawsze na samym
+# końcu. Zwinięte oceny niosą go dalej, tylko pod „rozwiń”.
+last_review() {
+  jq -r --arg mark "$REVIEW_MARK" '
+    [ .[]
+      | select(.user.login == "github-actions[bot]" and (.body | contains($mark)))
+      | {at: .created_at, url: .html_url,
+         sha: ([.body | split("\n")[] | rtrimstr("\r")
+                | capture("^<!-- claude-review-sha: (?<s>[0-9a-f]{40}) -->$") | .s] | last)}
+      | select(.sha != null) ]
+    | sort_by(.at) | last // empty
+    | "\(.sha)\t\(.url)"'
+}
+
+# have_commit SHA — czy commit jest w klonie w bieżącym katalogu; gdy go nie
+# ma, próbuje go dociągnąć. Commit sprzed force-pusha nie należy już do żadnej
+# gałęzi i bywa nie do pobrania — wtedy kod 1, a wołający wraca do pełnej
+# oceny.
+have_commit() {
+  git cat-file -e "$1^{commit}" 2>/dev/null && return 0
+  git fetch -q --no-tags origin "$1" 2>/dev/null && git cat-file -e "$1^{commit}" 2>/dev/null
+}
+
 # fold_review_comments KEEP_ID — filtr: na wejściu tablica komentarzy z API,
 # na wyjściu po jednej linii `{id, body}` dla każdej starszej oceny do zwinięcia,
 # z gotową nową treścią. Pierwsza linijka (werdykt) zostaje na wierzchu, reszta
@@ -91,6 +126,9 @@ fold_review_comments() {
 # `minimize_comment`: to jedna linijka bez werdyktu, więc nie ma czego zostawić
 # na wierzchu, a ocena, na którą czekała, właśnie przyszła. Zwinięty komentarz
 # API dalej zwraca, więc dalej działa jako znak „ocena już była” dla pushy.
+# Tak samo w całości zwijamy instrukcję „zatwierdzenie nadal obowiązuje”
+# z approvals.sh: dotyczyła poprzedniej oceny, a o zatwierdzeniach po nowej
+# rozstrzyga krok, który biegnie dopiero po tym zwijaniu.
 # Ponowne zwinięcie zwiniętego niczego nie zmienia.
 fold_old_reviews() {
   local comments line node
@@ -108,10 +146,12 @@ fold_old_reviews() {
 }
 
 # workflow_notice_nodes — filtr: z tablicy komentarzy wypisuje node_id
-# informacji botów o tym, że PR zmienia workflow oceny.
+# informacji botów o tym, że PR zmienia workflow oceny, i instrukcji
+# o zatwierdzeniu, które zostaje (znacznik APPROVAL_NOTE_MARK z approvals.sh).
 workflow_notice_nodes() {
   jq -r '.[]
     | select(.user.login == "github-actions[bot]")
-    | select(.body | startswith("⚪ Ten PR zmienia workflow oceny"))
+    | select((.body | startswith("⚪ Ten PR zmienia workflow oceny"))
+             or (.body | contains("<!-- claude-approval-note -->")))
     | .node_id'
 }

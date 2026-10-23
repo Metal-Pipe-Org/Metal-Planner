@@ -18,9 +18,24 @@ name: Claude - oceń PR
 # wysyła wtedy `discord.yml`.
 #
 # Ocena jest do przeczytania przez człowieka. Claude nie wystawia recenzji
-# GitHuba, nie zatwierdza, nie blokuje i nie merguje. `Write` dostaje wyłącznie
+# GitHuba, nie zatwierdza, nie blokuje i nie merguje — cofanie zatwierdzeń
+# niżej robi workflow swoim tokenem, po biegu Claude'a. `Write` dostaje wyłącznie
 # po to, żeby zapisać ocenę do `.claude-review.md` — zapis ląduje w drzewie na
 # maszynie biegu i ginie razem z nią, do ocenianego PR-a nie trafia.
+#
+# Ocena jest przyrostowa (#350): pod każdą udaną oceną zostaje ukryty znacznik
+# z ocenianym commitem, a następna ocena dostaje go jako PREV_SHA i zaczyna od
+# tego, co od tamtej pory zmieniło się w zmianach PR-a — mała poprawka nie
+# kosztuje pełnej oceny. Czy przejrzeć cały PR od nowa, Claude decyduje sam.
+#
+# Po ocenie workflow (nie Claude) rozstrzyga o zatwierdzeniach ludzi. GitHub
+# ich przy pushu nie zdejmuje (ustawienie wyłączone w regułach `main`), więc
+# robimy to tu: Claude dostaje APPROVED_SHA, commit najnowszego stojącego
+# zatwierdzenia, i ocenia, czy zmiany od niego są drobne. Zatwierdzenie zostaje
+# tylko przy drobnych zmianach, werdykcie 🟢 i bez czekającej prośby o zmiany —
+# wtedy autor dostaje osobny komentarz z tym, co może zrobić dalej. W każdym
+# innym razie zatwierdzenia są cofane z powodem. Reguły w
+# `.github/scripts/approvals.sh`.
 #
 # Testów nie uruchamiamy: zestaw nie jest jeszcze właściwie skonfigurowany
 # (stąd `tests.yml` odpalany wyłącznie ręcznie), więc jego wynik niczego by nie
@@ -223,10 +238,13 @@ jobs:
           @$author")
               echo "PR #$N zmienia $wf — zamiast oceny informacja: $url" \
                 | tee -a "$GITHUB_STEP_SUMMARY"
-              # Dane dla pingu na Discordzie, jak przy zwykłej ocenie.
+              # Dane dla pingu na Discordzie, jak przy zwykłej ocenie, i dla
+              # kroku o zatwierdzeniach — bez oceny też trzeba o nich
+              # rozstrzygnąć.
               {
                 echo "go=false"
                 echo "number=$N"
+                echo "head_sha=$head_sha"
                 echo "kind=workflow"
                 echo "url=$url"
                 echo "author=$author"
@@ -321,6 +339,48 @@ jobs:
           echo "Zapowiedź: ${res%%$'\t'*}"
           echo "node=${res##*$'\t'}" >> "$GITHUB_OUTPUT"
 
+      - name: Poprzednia ocena i zatwierdzenia
+        id: prev
+        if: steps.pr.outputs.go == 'true'
+        # Bez tych danych ocena i tak ma sens — pełna, a o zatwierdzeniach
+        # krok po ocenie rozstrzygnie jak o nieocenionych zmianach, czyli
+        # bezpiecznie. Porażka tutaj nie może więc zatrzymać oceny.
+        continue-on-error: true
+        env:
+          N: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/guard.sh
+          source .discord/.github/scripts/approvals.sh
+
+          # Ostatnia udana ocena i commit, który oceniała. Commit sprzed
+          # force-pusha bywa już nie do pobrania — wtedy ocena jest pełna.
+          prev=$(gh api --paginate --slurp "repos/$REPO/issues/$N/comments" \
+            | jq 'add // []' | last_review)
+          prev_sha=${prev%%$'\t'*}
+          prev_url=${prev#*$'\t'}
+          if [ -n "$prev_sha" ] && ! have_commit "$prev_sha"; then
+            echo "Poprzednia ocena ($prev_url) dotyczy $prev_sha, którego już nie ma — ocena pełna."
+            prev_sha="" prev_url=""
+          fi
+
+          # Commit najnowszego zatwierdzenia, które dalej stoi. Też musi być
+          # w klonie, inaczej Claude nie ma od czego liczyć zmian, a pytanie
+          # bez odpowiedzi krok po ocenie i tak liczy jako duże zmiany.
+          approved_sha=$(pr_reviews "$N" | standing_approvals | jq -r 'last | .commit_id // empty')
+          if [ -n "$approved_sha" ] && ! have_commit "$approved_sha"; then
+            echo "Zatwierdzenie dotyczy $approved_sha, którego już nie ma — zmiany od niego liczą się jako duże."
+            approved_sha=""
+          fi
+
+          echo "Poprzednia ocena: ${prev_sha:-brak} ${prev_url}; zatwierdzenie: ${approved_sha:-brak}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo "prev_sha=$prev_sha"
+            echo "prev_url=$prev_url"
+            echo "approved_sha=$approved_sha"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Claude
         id: claude
         if: steps.pr.outputs.go == 'true'
@@ -339,12 +399,17 @@ jobs:
           # żeby przy ręcznym powtórzeniu dało się zobaczyć, na co poszły tury
           # i które wywołania odbiła lista `--allowedTools`.
           show_full_output: ${{ github.event.inputs.debug == 'true' }}
+          # PREV_SHA, PREV_URL i APPROVED_SHA wylicza krok wyżej z API, a nie
+          # z tekstu od ludzi — to SHA i adres komentarza bota, więc mogą
+          # wejść do promptu wprost. „brak” znaczy: ocena pełna / nikt nie
+          # zatwierdził (albo commitu zatwierdzenia nie ma w klonie).
           prompt: |
-            /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} REVIEW_FILE: ${{ github.workspace }}/.claude-review.md
+            /review-pr REPO: ${{ github.repository }} PR_NUMBER: ${{ steps.pr.outputs.number }} REVIEW_FILE: ${{ github.workspace }}/.claude-review.md PREV_SHA: ${{ steps.prev.outputs.prev_sha || 'brak' }} PREV_URL: ${{ steps.prev.outputs.prev_url || 'brak' }} APPROVED_SHA: ${{ steps.prev.outputs.approved_sha || 'brak' }}
 
             PR celuje w gałąź `${{ steps.pr.outputs.base_ref }}`; w drzewie masz
             jego czubek (${{ steps.pr.outputs.head_sha }}), więc zmianę zobaczysz
             przez `git diff origin/${{ steps.pr.outputs.base_ref }}...HEAD`.
+            Commity z PREV_SHA i APPROVED_SHA (o ile nie „brak”) są już w klonie.
 
             Twoje jedyne wyjście to gotowa ocena zapisana do pliku
             ${{ github.workspace }}/.claude-review.md — pod PR-em wstawi ją workflow.
@@ -384,6 +449,7 @@ jobs:
           REVIEW: ${{ github.workspace }}/.claude-review.md
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EXEC: ${{ steps.claude.outputs.execution_file }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
           set -euo pipefail
           source .discord/.github/scripts/guard.sh
@@ -446,8 +512,13 @@ jobs:
             kind=failed
             verdict=""
           fi
-          # Znak „to komentarz z oceną” dla zwijania starszych ocen niżej.
+          # Znak „to komentarz z oceną” dla zwijania starszych ocen niżej,
+          # a pod udaną oceną także oceniany commit — od niego zacznie
+          # następna ocena.
           printf '\n%s\n' "$REVIEW_MARK" >> "$RUNNER_TEMP/post.md"
+          if [ "$kind" = review ]; then
+            printf '%s\n' "$(review_sha_mark "$HEAD_SHA")" >> "$RUNNER_TEMP/post.md"
+          fi
 
           url=$(gh pr comment "$N" --repo "$REPO" --body-file "$RUNNER_TEMP/post.md")
           echo "Komentarz ($kind): $url" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -490,12 +561,59 @@ jobs:
           source .discord/.github/scripts/guard.sh
           fold_old_reviews "$N" "${URL##*-}"
 
+      - name: Zatwierdzenia ludzi
+        id: approvals
+        # Po ocenie, po porażce i po informacji o zmienionym workflow — za
+        # każdym razem, gdy PR wychodzi z wersji roboczej, bo właśnie wtedy
+        # mogło przybyć coś, czego zatwierdzający nie widział. Bez nowej oceny
+        # liczy się tylko to, czy od zatwierdzenia PR się zmienił. Po zwijaniu,
+        # bo ono zwija też poprzednią instrukcję o zatwierdzeniu, a ten krok
+        # może wstawić nową.
+        #
+        # Bez `continue-on-error`: zatwierdzenie, które miało zniknąć, a stoi,
+        # pozwala zmergować kod, którego nikt nie widział — to ma być widać na
+        # czerwono. Discord idzie i tak (`always()`).
+        if: ${{ !cancelled() && (steps.post.outputs.url != '' || steps.pr.outputs.kind == 'workflow') }}
+        env:
+          N: ${{ steps.pr.outputs.number }}
+          KIND: ${{ steps.post.outputs.kind || steps.pr.outputs.kind }}
+          URL: ${{ steps.post.outputs.url || steps.pr.outputs.url }}
+          AUTHOR: ${{ steps.post.outputs.author || steps.pr.outputs.author }}
+          VERDICT: ${{ steps.post.outputs.verdict }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          JUDGED: ${{ steps.prev.outputs.approved_sha }}
+          REVIEW: ${{ github.workspace }}/.claude-review.md
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/approvals.sh
+
+          # Odpowiedź Claude'a liczy się tylko wtedy, gdy o nią pytaliśmy:
+          # bez APPROVED_SHA w prompcie ta sama linijka w pliku byłaby
+          # odpowiedzią na pytanie, którego nie było.
+          size=""
+          if [ "$KIND" = review ] && [ -n "$JUDGED" ] && [ -f "$REVIEW" ]; then
+            size=$(approval_size < "$REVIEW")
+          fi
+
+          # Recenzje pobieramy dopiero teraz, nie na starcie: w trakcie oceny
+          # ktoś mógł zatwierdzić albo poprosić o zmiany.
+          plan=$(pr_reviews "$N" | approvals_plan "$KIND" "$HEAD_SHA" "$JUDGED" "$size" "$VERDICT")
+          echo "Plan: $plan"
+          rc=0
+          apply_approvals "$N" "$KIND" "$URL" "$AUTHOR" "$plan" || rc=$?
+          echo "note=${APPROVALS_NOTE:-}" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
       - name: Daj znać autorowi na Discordzie
         # Zespół śledzi repo na Discordzie, a @wzmianka z GitHuba tam nikogo
         # nie budzi — stąd osobna wiadomość z prawdziwym pingiem. Discord to
         # dodatek: jego awaria nie może zaczerwienić oceny, która już stoi.
         # Informację o zmienionym workflow wstawia już krok „Ustal PR do
         # oceny” i to on podaje jej dane.
+        #
+        # Cofnięcie albo zostawienie zatwierdzenia dopisujemy tu drugą
+        # linijką: robi je nasz token, więc discord.yml się o nim nie dowie,
+        # a autor musi wiedzieć, czy czeka go ponowna recenzja.
         if: always() && (steps.post.outputs.url != '' || steps.pr.outputs.url != '')
         continue-on-error: true
         env:
@@ -505,18 +623,29 @@ jobs:
           AUTHOR: ${{ steps.post.outputs.author || steps.pr.outputs.author }}
           TITLE: ${{ steps.post.outputs.title || steps.pr.outputs.title }}
           VERDICT: ${{ steps.post.outputs.verdict }}
+          NOTE: ${{ steps.approvals.outputs.note }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
         run: |
           set -euo pipefail
           source .discord/.github/scripts/discord.sh
 
+          note=${NOTE:+$'\n'$NOTE}
           if [ "$KIND" = review ]; then
-            discord_send info "" "🤖 Ocena Claude'a: #$N $TITLE" "$URL" "$VERDICT" "" "$AUTHOR"
+            discord_send info "" "🤖 Ocena Claude'a: #$N $TITLE" "$URL" "$VERDICT$note" "" "$AUTHOR"
           elif [ "$KIND" = workflow ]; then
             discord_send grey "" "⚠️ Claude nie oceni przy otwarciu: #$N $TITLE" "$URL" \
-              "PR zmienia workflow oceny — napisz pod nim @claude" "" "$AUTHOR"
+              "PR zmienia workflow oceny — napisz pod nim @claude$note" "" "$AUTHOR"
           else
             discord_send grey "" "⚠️ Ocena Claude'a się nie udała: #$N $TITLE" "$URL" \
-              "Szczegóły pod PR-em" "" "$AUTHOR"
+              "Szczegóły pod PR-em$note" "" "$AUTHOR"
           fi
+
+      # ── Miejsce na wymagany status „Ocena Claude'a” ──────────────────────
+      # Później (#350): commit status na HEAD_SHA, ustawiany na „pending” przy
+      # zapowiedzi i na „success” po wstawieniu oceny i rozstrzygnięciu
+      # o zatwierdzeniach, jako wymagany w regułach `main` — żeby nie dało
+      # się zmergować, zanim ocena skończy. Ma iść ostatni, po kroku
+      # „Zatwierdzenia ludzi”: zielony status przy zatwierdzeniu, które
+      # właśnie ma zniknąć, otwierałby okno na merge. Wymaga
+      # `statuses: write` w uprawnieniach joba.
