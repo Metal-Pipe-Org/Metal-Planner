@@ -981,6 +981,18 @@
             <input type="checkbox" id="location-refresh"> Odświeżanie lokalizacji co 30 s
         </label>
 
+    {# Tylko w tej przeglądarce (#404): nic nie idzie na serwer. Tabelę rysuje front (renderSettingsStats w app.js). #}
+    <div class="field dev-only set-row" data-setting="stats" data-labels="Statystyki, Aplikacja">
+        <details id="fold-stats">
+            <summary class="set-title">Statystyki</summary>
+            <div id="stats-body" class="stats-scroll"></div>
+            <div class="stats-actions">
+                <button type="button" id="stats-copy" class="button">Kopiuj statystyki</button>
+                <button type="button" id="stats-clear" class="button">Wyczyść statystyki</button>
+            </div>
+        </details>
+    </div>
+
     </div>
 
     <div class="dev-foot">

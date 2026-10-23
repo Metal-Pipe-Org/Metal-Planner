@@ -307,6 +307,7 @@ serwera, w query stringu `/api/flow`.
 nich dostaje pasek z boku. Jeden
 przycisk „Przywróć domyślne" kasuje wszystkie zapamiętane ustawienia
 i przeładowuje stronę.
+Wiersz DEV „Statystyki" na liście ustawień (zgłoszenie #404) liczy lokalnie, w `localStorage` (`metal-planner:settings-stats`), ile razy i kiedy zmieniono każde ustawienie oraz użyto „Przywróć domyślne" (to ostatnie nie kasuje statystyk); nic nie idzie na serwer.
 
 #### Rozkłady jazdy — drugi tryb panelu (`static/timetable.js`)
 
