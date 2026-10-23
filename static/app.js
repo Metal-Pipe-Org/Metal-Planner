@@ -7010,10 +7010,11 @@ function loadSettingsStats() {
         return {
             changes: (stats && stats.changes) || {},
             labels: (stats && stats.labels) || {},
+            values: (stats && stats.values) || {},
             reset: (stats && stats.reset) || {n: 0, t: null},
         };
     } catch {
-        return {changes: {}, labels: {}, reset: {n: 0, t: null}};   // localStorage niedostępny albo zepsuty JSON
+        return {changes: {}, labels: {}, values: {}, reset: {n: 0, t: null}};   // localStorage niedostępny albo zepsuty JSON
     }
 }
 
@@ -7053,27 +7054,37 @@ function settingLabel(control) {
     return clone.textContent.replace(/\s+/g, ' ').trim();
 }
 
+function settingValue(control) {
+    if (control.type === 'checkbox') return control.checked ? 'tak' : 'nie';
+    if (control.tagName === 'SELECT') return control.selectedOptions[0].textContent.trim();
+    return control.value;
+}
+
 devPanel.addEventListener('change', event => {
     if (![...settingControls()].includes(event.target) || !event.target.id) return;
     recordSettingChange(event.target.id);
+    syncSettingsSnapshot();
 });
 
-// Strona /statystyki nie ma panelu, więc nazwy bierze stąd. Zapisujemy je
-// wszystkie, żeby tabela pokazała też ustawienia, których nikt nie ruszył.
-function syncSettingLabels() {
+// Strona /statystyki nie ma panelu, więc nazwy i bieżące wartości bierze stąd.
+// Zapisujemy je dla wszystkich, żeby tabela pokazała też ustawienia, których
+// nikt nie ruszył.
+function syncSettingsSnapshot() {
     const stats = loadSettingsStats();
     let changed = false;
     for (const control of settingControls()) {
         if (!control.id) continue;
         const label = settingLabel(control);
-        if (stats.labels[control.id] !== label) {
+        const value = settingValue(control);
+        if (stats.labels[control.id] !== label || stats.values[control.id] !== value) {
             stats.labels[control.id] = label;
+            stats.values[control.id] = value;
             changed = true;
         }
     }
     if (changed) saveSettingsStats(stats);
 }
-syncSettingLabels();
+syncSettingsSnapshot();
 
 // --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
 //
