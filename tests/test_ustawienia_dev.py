@@ -60,3 +60,12 @@ def test_lista_ma_wyszukiwarke_i_zadnych_sekcji():
 
 def test_ustawienie_eksperymentu_jest_na_liscie():
     assert 'id="location-refresh"' in _index(dev_mode=True)
+
+
+def test_kazdy_wiersz_ustawien_ma_etykiety():
+    """Nagłówki listy składają się z etykiet - wiersz bez nich nie trafiłby do żadnej grupy."""
+    tags = re.findall(r'<(?:div|label)\s[^>]*\bset-row\b[^>]*>', _index(dev_mode=True))
+    assert tags
+    for tag in tags:
+        labels = re.search(r'data-labels="([^"]*)"', tag)
+        assert labels and any(l.strip() for l in labels.group(1).split(",")), tag
