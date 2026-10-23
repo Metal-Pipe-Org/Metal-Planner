@@ -2441,8 +2441,7 @@ body:not(.dev-mode) .dev-only { display: none; }
     border-left: 3px solid var(--accent);
 }
 
-/* Wiersze mają własne `display`, które przebijałoby atrybut hidden i klasę
-   wyszukiwarki. */
+/* Wiersze mają własne `display`, które przebijałoby atrybut hidden i szukanie. */
 #dev-panel .set-row[hidden],
 #dev-panel .set-row.search-miss,
 body:not(.dev-mode) #dev-panel .dev-only { display: none; }
@@ -2464,6 +2463,19 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
     font: inherit;
     font-size: 16px;
 }
+
+.set-group-head {
+    margin-top: 18px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--line);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.set-group-head:first-child { margin-top: 12px; border-top: 0; padding-top: 0; }
 
 .set-title {
     font-size: 12px;
@@ -2535,7 +2547,7 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
 /* --------------------------------------------------------------- PWA --- */
 
 /* Przycisk instalacji pokazuje się dopiero, gdy przeglądarka ją proponuje,
-   a inline-flex z .icon-button sam z siebie zignorowałby atrybut hidden. */
+   a inline-flex z .icon-button sam z siebie zignorowałby atrybut hidden i szukanie. */
 .icon-button[hidden] { display: none; }
 
 /* Wersja aplikacji w panelu ⚙: skrót + przycisk wymuszenia sprawdzenia. */

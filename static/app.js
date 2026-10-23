@@ -6876,33 +6876,89 @@ function bindDotOpts() {
 }
 bindDotOpts();
 
-// --- wyszukiwarka ustawień ---------------------------------------------------
+// --- lista ustawień: wyszukiwarka i nagłówki z etykiet -----------------------
 //
 // Ustawień przybywa szybciej, niż da się je trzymać w sensownych kategoriach,
-// więc to jedna lista, a porządek robi szukanie po widocznej nazwie.
-// Rzeczy, które wiersz już ma schowane (`hidden`), szukanie zostawia w spokoju.
-const settingsRows = [...devPanel.querySelectorAll('.set-row')];
+// więc każdy wiersz niesie tylko etykiety (`data-labels`), a nagłówki składają
+// się z nich same, z wierszy widocznych w tej chwili: najpierw etykieta
+// wspólna dla największej liczby jeszcze nieumieszczonych wierszy, potem
+// następna. Etykieta z jednym wierszem nagłówka nie dostaje, taki wiersz
+// ląduje w „Inne".
+const settingsList = $('settings-list');
+const settingsSearch = $('settings-search');
+const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 
-for (const row of devPanel.querySelectorAll('.set-row.dev-only')) {
-    const badge = document.createElement('span');
-    badge.className = 'dev-badge';
-    badge.textContent = 'DEV';
-    (row.querySelector('label:not(.button), .set-title') || row).append(badge);
+for (const row of settingsRows) {
+    if (row.classList.contains('dev-only')) {
+        const badge = document.createElement('span');
+        badge.className = 'dev-badge';
+        badge.textContent = 'DEV';
+        (row.querySelector('label:not(.button), .set-title') || row).append(badge);
+    }
 }
 
-const settingsText = row => {
+const settingsInfo = new Map(settingsRows.map(row => {
     const copy = row.cloneNode(true);
     for (const skip of copy.querySelectorAll('output, .info, .dev-badge')) skip.remove();
-    return fold(copy.textContent).replace(/\s+/g, ' ');
-};
-const settingsTexts = new Map(settingsRows.map(row => [row, settingsText(row)]));
+    const labels = row.dataset.labels.split(',').map(label => label.trim());
+    return [row, {
+        labels,
+        name: fold(copy.textContent).replace(/\s+/g, ' '),
+        folded: labels.map(fold),
+    }];
+}));
 
-$('settings-search').addEventListener('input', event => {
-    const needle = fold(event.target.value.trim());
-    for (const [row, text] of settingsTexts) {
-        row.classList.toggle('search-miss', !text.includes(needle));
+function settingsGroups(rows) {
+    const groups = [];
+    let rest = rows;
+    for (;;) {
+        const byLabel = new Map();
+        for (const row of rest) {
+            for (const label of settingsInfo.get(row).labels) {
+                if (!byLabel.has(label)) byLabel.set(label, []);
+                byLabel.get(label).push(row);
+            }
+        }
+        let best = null;
+        for (const [label, members] of byLabel) {
+            if (!best || members.length > best.rows.length) best = {label, rows: members};
+        }
+        if (!best || best.rows.length < 2) break;
+        groups.push(best);
+        rest = rest.filter(row => !best.rows.includes(row));
     }
-});
+    return {groups, rest};
+}
+
+function renderSettingsList() {
+    const needle = fold(settingsSearch.value.trim());
+    const visible = settingsRows.filter(row => {
+        if (row.hidden || (!devMode && row.classList.contains('dev-only'))) return false;
+        const info = settingsInfo.get(row);
+        return info.name.includes(needle) || info.folded.some(label => label.includes(needle));
+    });
+    for (const row of settingsRows) row.classList.toggle('search-miss', !visible.includes(row) && !row.hidden);
+    const {groups, rest} = settingsGroups(visible);
+    if (rest.length && groups.length) groups.push({label: 'Inne', rows: rest});
+    const nodes = [];
+    for (const group of groups) {
+        const head = document.createElement('div');
+        head.className = 'set-group-head';
+        head.textContent = group.label;
+        nodes.push(head, ...group.rows);
+    }
+    if (!groups.length) nodes.push(...visible);
+    // Wiersze schowane z innych powodów zostają w DOM, na końcu.
+    nodes.push(...settingsRows.filter(row => !nodes.includes(row)));
+    settingsList.replaceChildren(...nodes);
+}
+
+settingsSearch.addEventListener('input', renderSettingsList);
+// Część wierszy chowają i pokazują inne ustawienia (np. próg przesiadki bez
+// propozycji tras) - nagłówki muszą to nadążyć.
+new MutationObserver(renderSettingsList).observe(settingsList,
+    {attributes: true, attributeFilter: ['hidden'], subtree: true});
+renderSettingsList();
 
 // --- zmienione ustawienia i powrót do domyślnych ----------------------------
 //
