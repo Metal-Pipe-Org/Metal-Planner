@@ -301,24 +301,14 @@ Gdy rower jest włączony, a propozycji z rowerem nie ma, pod listą staje
 kartka mówiąca dlaczego (`bikeNoteHtml`) — brak wyniku i zepsuta funkcja
 wyglądają inaczej tylko wtedy, gdy ktoś to powie.
 
-Ustawienia Developerskie są schowane za przyciskiem ⚙. Czysty JS bez
-frameworka, cała logika w `static/app.js`. Sekcje po kolei: „Co pokazuje
-mapa" (gęstość, liczba aut i przejazdów rowerem), „Czas na mapie",
-„Przystanki, rowery i Traficary" (m.in. godziny przejazdu rowerem i dojazdu
-autem w dymku, przejazdy rowerem zawsze widoczne, dostawczaki), „Założenia
-czasowe" (tempo marszu, prędkość i narzut roweru oraz auta), „Debug" (podglądy „dlaczego kawałek / rower / auto jest na mapie"),
-schowane „Wygląd mapy", „Dźwięk" i „Layout", „Wersja aplikacji", „Funkcje"
-z przełącznikami „Stoję tutaj / Jestem w pojeździe" i „Propozycje tras" (zgaszone to `routes=0` w `/api/flow` —
-serwer listy wtedy w ogóle nie składa), a na samym
-dole, zwinięte, „Propozycje tras" z **progiem opłacalności
-przesiadki** (`transfer_gain_sec`, domyślnie 10 min — patrz opis skanu
-wyżej). Wartości lądują w `localStorage`, a te, od których zależy odpowiedź
+Ustawienia Developerskie są schowane za przyciskiem ⚙. Czysty JS bez frameworka, cała logika w `static/app.js`. Panel to jedna lista wszystkich ustawień z polem wyszukiwania na górze, które filtruje po widocznej nazwie wiersza albo po jego etykiecie (bez względu na wielkość liter i polskie ogonki); wyniki idą płaską listą, każde ustawienie raz. Każdy wiersz `.set-row` niesie w `data-labels` etykiety opisujące wyłącznie to, czego ustawienie dotyczy z punktu widzenia pasażera (np. „Rower, Czas”). Nagłówki grup `app.js` składa z nich sam, z wierszy widocznych w danej chwili: każda etykieta z co najmniej trzema wierszami dostaje nagłówek, a wiersz stoi pod każdą swoją etykietą (kontrolka jest jedna, pod pozostałymi nagłówkami stoją kopie przekazujące zmianę oryginałowi, więc zmiana liczy się raz); wiersz bez nagłówka trafia do „Inne”. Kolejność układa się z dziennika 100 ostatnich zmian (nagłówki wg sumy zmian ich wierszy, potem liczby wierszy, potem kolejności w pliku; wiersze w grupie wg liczby zmian) i jest liczona tylko przy starcie i otwarciu panelu, żeby nic nie przeskakiwało; dev-owe ustawienie „Przeliczanie kolejności ustawień najczęściej co” (domyślnie wyłączone) dodatkowo ogranicza to do jednego przeliczenia na wybrany odstęp, a w międzyczasie używa zapisanej kolejności (`metal-planner:settings-order`; nowe ustawienia stają na końcu swojej grupy). Na samej górze stoi rozwinięta sekcja „Proponowane” (3 ostatnio zmienione i do 5 najczęściej zmienianych, bez powtórzeń, max 8; bez danych jej nie ma), a zaraz pod nią zwinięta „Inne niż domyślne” z kopiami wszystkich kopiowalnych ustawień (przełączniki i suwaki) różnych od domyślnych, w kolejności pliku — to jedyny nagłówek z liczbą zmienionych opcji, nie podlega limitowi przeliczania i odświeża się na żywo (nie ma jej, gdy nic nie odbiega od domyślnych). Nagłówki są składane (domyślnie zwinięte, stan per etykieta w `fold:<etykieta>`). Ustawienia tylko dla dewelopera mają klasę `dev-only` i znaczek DEV — bez `DEV_MODE` ich nie widać i nie liczą się do nagłówków. Nowe ustawienie to nowy wiersz `.set-row` z `data-setting` i `data-labels` w `index.html`; test pilnuje, żeby żaden wiersz nie został bez etykiet. Wartości lądują w `localStorage`, a te, od których zależy odpowiedź
 serwera, w query stringu `/api/flow`.
 Sekcja DEV „Eksperymenty" ma przełącznik „Nowa mapa (eksperyment)" (`newmap=1` w `/api/flow`, parametr `new_map` w `plan_flow_stages`), domyślnie wyłączony; nowa mapa rośnie za nim, a na razie nic nie zmienia.
 `value`/`checked` w `index.html` są wartościami domyślnymi: opcja różna od
-nich dostaje pasek z boku, a nagłówek sekcji — liczbę takich opcji. Jeden
+nich dostaje pasek z boku. Jeden
 przycisk „Przywróć domyślne" kasuje wszystkie zapamiętane ustawienia
 i przeładowuje stronę.
+Wiersz DEV „Statystyki ustawień" na liście ustawień prowadzi do strony `/statystyki` (tylko z `DEV_MODE`, inaczej 404). Zgłoszenie #404: `app.js` liczy lokalnie, w `localStorage` (`metal-planner:settings-stats`), ile razy i kiedy zmieniono każde ustawienie oraz użyto „Przywróć domyślne" (to ostatnie nie kasuje statystyk), i zapisuje tam też nazwy ustawień, bo strona `statystyki.js` nie ma panelu; nic nie idzie na serwer.
 
 #### Rozkłady jazdy — drugi tryb panelu (`static/timetable.js`)
 
@@ -335,7 +325,7 @@ przystanek. Rodzaj widać na liście podpowiedzi — linie mają plakietkę
 w kolorze pojazdu, przystanki znaczek słupka — czyli tam, gdzie faktycznie
 jest potrzebny, a nie w przełączniku ustawianym przed wpisaniem czegokolwiek.
 
-Pod polem stoi **czas** — ta sama ramka co w wyszukiwarce, na całą szerokość karty: „Odjazd", godzina i „teraz", a obok nich — bez rozwijania — data. Godzina nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko przesuwa to, od czego zaczyna się tablica przystanku, i kurs rysowany na mapie. Rozkład linii godziny nie używa, więc po wczytaniu linii w ramce zostaje sama **data**, bez godziny i „teraz"; pusty wpis albo przystanek przywracają pełne pole.
+Pod polem stoi **czas** — ta sama ramka co w wyszukiwarce, na całą szerokość karty: „Odjazd", godzina i „teraz", a obok nich — bez rozwijania — data. Godzina nic nie dociąga — odpowiedź niesie całą dobę, więc jej zmiana tylko przesuwa to, od czego zaczyna się tablica przystanku, i kurs rysowany na mapie. Godzina i data są **jedne dla całej aplikacji**: to dosłownie te same dwa pola, które przy zmianie widoku przenoszą się między panelem wyszukiwarki a kartą rozkładów (jedno miejsce, w którym godzina żyje, więc kod ustawiający ją wprost, np. link do wyszukiwania, nie musi nic wiedzieć o rozkładach), więc zmiana w jednym widoku jest widoczna w drugim, z tą samą zasadą co w wyszukiwarce — nieruszana to „teraz" (odświeża się po powrocie z tła w obu polach naraz), wpisana ręcznie zostaje, a „teraz" w któregokolwiek widoku wraca oba. Rozkład już otwarty nie przelicza się po cichu, gdy godzina zmieni się w tle; dopasowuje się przy ponownym wejściu w Rozkłady (inna data = nowe zapytanie, sama godzina przesuwa tablicę). Rozkład linii godziny nie używa, więc po wczytaniu linii w ramce zostaje sama **data**, bez godziny i „teraz"; pusty wpis albo przystanek przywracają pełne pole.
 
 **Linia** odpowiada na „którędy jedzie": wybór wariantu i lista jego
 przystanków, z przebiegiem na mapie. Kierunki podstawowe stoją obok siebie,

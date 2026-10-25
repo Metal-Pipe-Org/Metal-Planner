@@ -42,8 +42,8 @@ POMIAR_JS = """() => {
     };
     return {
         pole: box('#tt-query'), wyczysc: box('#tt-clear'), zamknij: box('#tt-close'), czas: box('#tt-time-field'), karta: box('#timetable-card'),
-        godzina: box('#tt-time'), teraz: box('#tt-now'), 
-        data: box('#tt-date'), szerokosc: document.documentElement.scrollWidth,
+        godzina: box('#time'), teraz: box('#tt-now'), 
+        data: box('#date'), szerokosc: document.documentElement.scrollWidth,
         ekran: innerWidth,
     };
 }"""
@@ -187,11 +187,11 @@ def test_przystanek_ma_godzine_i_date_obok_siebie(strona):
 
 
 def test_teraz_ustawia_dzis_i_te_chwile(strona):
-    strona.fill("#tt-date", "2030-01-01")
-    strona.fill("#tt-time", "03:00")
+    strona.fill("#date", "2030-01-01")
+    strona.fill("#time", "03:00")
     strona.click("#tt-now")
-    assert strona.input_value("#tt-date") == datetime.date.today().isoformat()
-    assert strona.input_value("#tt-time") != "03:00"
+    assert strona.input_value("#date") == datetime.date.today().isoformat()
+    assert strona.input_value("#time") != "03:00"
 
 
 def test_rozklad_linii_ma_sama_date(strona):
