@@ -2344,42 +2344,7 @@ body.dev-open #flow-panel { right: 322px; }
     line-height: 1.4;
 }
 
-/* Panel ma już tyle opcji, że przewijał się dłużej niż ekran - każda grupa
-   siedzi więc w składanej sekcji (patrz DEV_FOLD_IDS w app.js). */
-.dev-fold {
-    margin-top: 14px;
-    padding-top: 10px;
-    border-top: 1px dashed var(--line);
-}
-
-.dev-fold > summary {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    list-style: none;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-}
-
-.dev-fold > summary::-webkit-details-marker { display: none; }
-
-/* Strzałka rysowana sama, żeby wyglądała tak samo we wszystkich
-   przeglądarkach (natywny marker bywa różny). */
-.dev-fold > summary::before {
-    content: '⌵';
-    font-size: 11px;
-    line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 0.12s ease;
-}
-
-.dev-fold[open] > summary::before { transform: none; }
-
-/* Sekcja tylko dla dewelopera: poza DEV_MODE nie istnieje, a w nim nosi
+/* Ustawienie tylko dla dewelopera: poza DEV_MODE nie istnieje, a w nim nosi
    znaczek, żeby było widać, czego zwykły użytkownik nie zobaczy. */
 body:not(.dev-mode) .dev-only { display: none; }
 
@@ -2393,9 +2358,6 @@ body:not(.dev-mode) .dev-only { display: none; }
     letter-spacing: 0.06em;
 }
 
-/* Liczba zmienionych opcji staje wtedy za znaczkiem, a nie pośrodku nagłówka. */
-.dev-fold.dev-only > summary[data-changed]::after { margin-left: 0; }
-
 #dev-panel .dev-check {
     display: flex;
     align-items: center;
@@ -2408,17 +2370,6 @@ body:not(.dev-mode) .dev-only { display: none; }
 }
 
 #dev-panel .dev-check input { margin: 0; flex: none; }
-
-/* Podpodział wewnątrz rozwiniętej sekcji - lżejszy niż <summary>, bo to wciąż
-   ta sama sekcja, tylko druga jej połowa. */
-.dev-section-head {
-    margin: 14px 0 2px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-}
 
 #dev-panel select {
     width: 100%;
@@ -2483,15 +2434,110 @@ body:not(.dev-mode) .dev-only { display: none; }
 .dev-foot { margin-top: 18px; }
 #dev-reset { width: 100%; }
 
-/* Opcja różna od domyślnej (patrz markChangedSettings w app.js): pasek z boku,
-   a przy nagłówku sekcji liczba takich opcji - widać ją też przy zwiniętej. */
+.stats-scroll { margin-top: 10px; overflow-x: auto; }
+.stats-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.stats-table th {
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+.stats-table th, .stats-table td { padding: 3px 6px 3px 0; vertical-align: top; }
+.stats-table td { border-top: 1px solid var(--line); }
+.stats-table tr.untouched { color: var(--ink-faint); }
+.stats-table tr.stats-reset td { font-weight: 600; }
+.stats-actions { display: flex; gap: 8px; margin-top: 10px; }
+.stats-actions .button { flex: 1; }
+
+/* Opcja różna od domyślnej (patrz markChangedSettings w app.js): pasek z boku. */
 #dev-panel .changed {
     margin-left: -9px;
     padding-left: 6px;
     border-left: 3px solid var(--accent);
 }
 
-.dev-fold > summary[data-changed]::after {
+/* Wiersze mają własne `display`, które przebijałoby atrybut hidden i szukanie. */
+#dev-panel .set-row[hidden],
+#dev-panel .set-row.search-miss,
+body:not(.dev-mode) #dev-panel .dev-only { display: none; }
+
+#dev-panel .set-row { margin-top: 14px; }
+#dev-panel .dev-check.set-row { margin-top: 9px; }
+#dev-panel .field.compact.set-row { margin-top: 10px; }
+
+.settings-search {
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 12px;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-alt);
+    color: var(--ink);
+    /* 16 px, żeby iOS nie przybliżał ekranu po dotknięciu pola. */
+    font: inherit;
+    font-size: 16px;
+}
+
+/* Grupy składa app.js z etykiet wierszy (renderSettingsList); domyślnie zwinięte,
+   żeby panel nie przewijał się dłużej niż ekran. */
+.set-group {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--line);
+}
+
+.set-group:first-of-type { margin-top: 12px; border-top: 0; padding-top: 0; }
+
+.set-group > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.set-group > summary::-webkit-details-marker { display: none; }
+
+/* Strzałka rysowana sama, żeby wyglądała tak samo we wszystkich
+   przeglądarkach (natywny marker bywa różny). */
+.set-group > summary::before {
+    content: '⌵';
+    font-size: 11px;
+    line-height: 1;
+    transform: rotate(-90deg);
+    transition: transform 0.12s ease;
+}
+
+.set-group[open] > summary::before { transform: none; }
+
+/* „Proponowane" i „Inne niż domyślne" to nie grupy etykiet, tylko skróty -
+   osobny, lekko podbarwiony blok nad listą grup. */
+.set-group[data-kind] {
+    margin-top: 8px;
+    padding: 10px 10px 8px;
+    border-top: 0;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.set-group[data-kind]:first-of-type { margin-top: 12px; }
+.set-group[data-kind] > summary { color: var(--accent); }
+.set-group[data-kind] + .set-group:not([data-kind]) {
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 2px solid var(--line);
+}
+
+/* Liczba zmienionych opcji (patrz markChangedSettings w app.js) - widać ją też
+   przy zwiniętej grupie. */
+.set-group > summary[data-changed]::after {
     content: attr(data-changed);
     margin-left: auto;
     min-width: 18px;
@@ -2503,6 +2549,19 @@ body:not(.dev-mode) .dev-only { display: none; }
     letter-spacing: 0;
     text-align: center;
 }
+
+/* Strona /statystyki - bez mapy i panelu, zwykła przewijana strona. */
+.stats-page { background: var(--surface); min-height: 100vh; }
+.stats-main { max-width: 640px; margin: 0 auto; padding: 16px; }
+.stats-page .stats-table { font-size: 14px; }
+.stats-page h1 { font-size: 20px; }
+
+.set-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+}
+
 #look-dump { font-variant-numeric: tabular-nums; word-break: break-word; }
 
 .field-hint code {
@@ -2567,7 +2626,7 @@ body:not(.dev-mode) .dev-only { display: none; }
 /* --------------------------------------------------------------- PWA --- */
 
 /* Przycisk instalacji pokazuje się dopiero, gdy przeglądarka ją proponuje,
-   a inline-flex z .icon-button sam z siebie zignorowałby atrybut hidden. */
+   a inline-flex z .icon-button sam z siebie zignorowałby atrybut hidden i szukanie. */
 .icon-button[hidden] { display: none; }
 
 /* Wersja aplikacji w panelu ⚙: skrót + przycisk wymuszenia sprawdzenia. */

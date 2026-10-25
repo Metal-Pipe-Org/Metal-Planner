@@ -661,46 +661,45 @@
     </header>
 
     {#
-      Kolejność: najpierw sekcje dla każdego, potem sekcje `dev-only` ze
-      znaczkiem DEV - bez DEV_MODE ich nie widać (style.css), a ich ustawienia
-      wracają do domyślnych (visiblePrefs w app.js). Deweloper widzi więc od
-      razu, co z tego zobaczy zwykły użytkownik, bez przełączania trybu.
+      Kolejność: najpierw ustawienia dla każdego, potem `dev-only` (znaczek DEV dokłada app.js) - bez DEV_MODE ich nie widać
+      (style.css), a ich ustawienia wracają do domyślnych (visiblePrefs
+      w app.js). Deweloper widzi więc od razu, co z tego zobaczy zwykły
+      użytkownik, bez przełączania trybu.
+
+      Wszystkie ustawienia stoją w jednej liście z wyszukiwarką (settingsList w app.js).
+      Nagłówki grup składa app.js z `data-labels` widocznych wierszy, więc nowe
+      ustawienie wymaga tylko etykiet, nie miejsca w jakiejś sekcji.
 
       `value` i `checked` w tym pliku to wartości DOMYŚLNE: z nimi porównuje
       podświetlenie zmienionych opcji (markChangedSettings w app.js), więc
       muszą się zgadzać z *_DEFAULTS w app.js i z domyślnymi w plannerze.
     #}
-    <details class="dev-fold" id="fold-map">
-    <summary>Mapa</summary>
+    <input type="search" id="settings-search" class="settings-search"
+           placeholder="Szukaj ustawienia" aria-label="Szukaj ustawienia" autocomplete="off">
 
-        <label class="dev-check">
+    <div id="settings-list">
+
+    <label class="dev-check set-row" data-setting="time-show-headline" data-labels="Mapa, Czas">
             <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="tt-past" data-labels="Rozkład, Czas">
             <input type="checkbox" id="tt-past" checked> Szare godziny w tablicy
             <span class="info" tabindex="0" role="button"
                   data-tip="Odjazdy, na które już nie zdążysz, zostają w tablicy na szaro. Wyłączone — tablica zaczyna się od chwili, w której według mapy tu jesteś.">i</span>
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="car-vans" data-labels="Traficar, Mapa">
             <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
             <span class="info" tabindex="0" role="button"
                   data-tip="Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka, i stoją na mapie jako puste pierścienie.">i</span>
         </label>
 
-    </details>
-
-    {#
+{#
       Założenia czasowe (zgłoszenie #151) - każdy ustawia swoje. Tempo marszu
       to trzy stałe tempa, nie płynny suwak: przejścia liczy się raz na dzień
       (gtfs.with_pace), więc każde tempo to jedno przeliczenie, a nie jedno
       na każde zapytanie.
     #}
-    <details class="dev-fold" id="fold-assumptions">
-    <summary>Założenia czasowe</summary>
-
-    <div class="field">
+    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe">
         <label for="walk-pace">
             Tempo marszu <output id="walk-pace-value">zwykłe</output>
             <span class="info" tabindex="0" role="button"
@@ -708,8 +707,7 @@
         </label>
         <input type="range" id="walk-pace" min="0" max="2" step="1" value="1">
     </div>
-
-    <div class="field">
+    <div class="field set-row" data-setting="bike-kmh" data-labels="Założenia czasowe, Rower">
         <label for="bike-kmh">
             Prędkość roweru <output id="bike-kmh-value">10</output> km/h
             <span class="info" tabindex="0" role="button"
@@ -717,15 +715,13 @@
         </label>
         <input type="range" id="bike-kmh" min="5" max="20" step="1" value="10">
     </div>
-
-    <div class="field">
+    <div class="field set-row" data-setting="bike-overhead" data-labels="Założenia czasowe, Rower">
         <label for="bike-overhead">
             Wypożyczenie i zwrot roweru <output id="bike-overhead-value">2</output> min
         </label>
         <input type="range" id="bike-overhead" min="0" max="10" step="1" value="2">
     </div>
-
-    <div class="field">
+    <div class="field set-row" data-setting="car-kmh" data-labels="Założenia czasowe, Traficar">
         <label for="car-kmh">
             Prędkość Traficara <output id="car-kmh-value">22</output> km/h
             <span class="info" tabindex="0" role="button"
@@ -733,8 +729,7 @@
         </label>
         <input type="range" id="car-kmh" min="10" max="40" step="1" value="22">
     </div>
-
-    <div class="field">
+    <div class="field set-row" data-setting="car-overhead" data-labels="Założenia czasowe, Traficar">
         <label for="car-overhead">
             Ruszenie i parkowanie Traficara <output id="car-overhead-value">8</output> min
             <span class="info" tabindex="0" role="button"
@@ -743,44 +738,30 @@
         <input type="range" id="car-overhead" min="0" max="20" step="1" value="8">
     </div>
 
-    </details>
-
-    {#
+{#
       Co widać na ekranie aplikacji, poza samą mapą, i całe funkcje do
       schowania. Wyłączona lista propozycji nie tylko znika z ekranu - serwer
       w ogóle jej nie składa (zgłoszenie #171).
     #}
-    <details class="dev-fold" id="fold-layout">
-    <summary>Wygląd aplikacji</summary>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="bikes-merged" data-labels="Rower">
             <input type="checkbox" id="bikes-merged"> Jeden przycisk rowerów
             <span class="info" tabindex="0" role="button"
                   data-tip="Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe i elektryczne naraz.">i</span>
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="no-pull-refresh" data-labels="Zachowanie strony">
             <input type="checkbox" id="no-pull-refresh"> Wyłącz odświeżanie przeciągnięciem w dół
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="start-mode-switch" data-labels="Funkcje">
             <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="routes-on" data-labels="Propozycje tras, Funkcje">
             <input type="checkbox" id="routes-on" checked> Propozycje tras
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="via-open" data-labels="Przystanki">
             <input type="checkbox" id="via-open"> Zawsze pokazuj przystanki po drodze
         </label>
 
-    </details>
-
-    <details class="dev-fold dev-only" id="fold-window">
-    <summary>Zagęszczenie <span class="dev-badge">DEV</span></summary>
-
-    <div class="field">
+    <div class="field dev-only set-row" data-setting="density" data-labels="Zagęszczenie, Mapa">
         <label for="density">
             Gęstość mapy <output id="density-value">2</output>
             <span class="info" tabindex="0" role="button"
@@ -788,8 +769,7 @@
         </label>
         <input type="range" id="density" min="0.5" max="15" step="0.5" value="2">
     </div>
-
-    <div class="field">
+    <div class="field dev-only set-row" data-setting="car-count" data-labels="Zagęszczenie, Traficar">
         <label for="car-count">
             Ile aut Traficara <output id="car-count-value">3</output>
             <span class="info" tabindex="0" role="button"
@@ -797,8 +777,7 @@
         </label>
         <input type="range" id="car-count" min="1" max="30" step="1" value="3">
     </div>
-
-    <div class="field">
+    <div class="field dev-only set-row" data-setting="bike-count" data-labels="Zagęszczenie, Rower">
         <label for="bike-count">
             Ile stacji z rowerem <output id="bike-count-value">3</output>
             <span class="info" tabindex="0" role="button"
@@ -807,51 +786,39 @@
         <input type="range" id="bike-count" min="1" max="30" step="1" value="3">
     </div>
 
-    </details>
-
-    <details class="dev-fold dev-only" id="fold-time">
-    <summary>Czas na mapie <span class="dev-badge">DEV</span></summary>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="time-hover" data-labels="Czas, Mapa">
             <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
             <span class="info" tabindex="0" role="button"
                   data-tip="Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu, jeśli jedzie się dalej stąd.">i</span>
         </label>
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="time-ends" data-labels="Czas, Mapa">
             <input type="checkbox" id="time-ends"> …z kropką dokładnie w tym punkcie
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="time-chips" data-labels="Czas, Mapa">
             <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
         </label>
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="time-ride" data-labels="Czas, Mapa">
             <input type="checkbox" id="time-ride"> Sam czas jazdy w pasku nad mapą
             <span class="info" tabindex="0" role="button"
                   data-tip="Czas jazdy liczy się od wejścia do pierwszego pojazdu, bez czekania na niego.">i</span>
         </label>
-    </details>
 
-    {#
+{#
       Przystanki i rozkład spod kropki - nic tu nie rusza serwera (wszystko
       jest już w odpowiedziach, przełącznik tylko przemalowuje).
     #}
-    <details class="dev-fold dev-only" id="fold-places">
-    <summary>Przystanki i rozkład <span class="dev-badge">DEV</span></summary>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="dot-center" data-labels="Przystanki, Rozkład, Mapa">
             <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
             <span class="info" tabindex="0" role="button"
                   data-tip="Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie, z którego wzięta jest godzina.">i</span>
         </label>
-
-        <div class="field compact">
+    <div class="field compact dev-only set-row" data-setting="dot-rows" data-labels="Przystanki, Rozkład">
             <label for="dot-rows">
                 Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
             </label>
             <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
         </div>
-
-        <div class="field compact">
+    <div class="field compact dev-only set-row" data-setting="names-zoom" data-labels="Przystanki, Mapa">
             <label for="names-zoom">
                 Nazwy przystanków od przybliżenia <output id="names-zoom-value">17</output>
                 <span class="info" tabindex="0" role="button"
@@ -859,154 +826,116 @@
             </label>
             <input type="range" id="names-zoom" min="14" max="19" step="1" value="17">
         </div>
-
-        <div class="dev-section-head">Gdzie pokazać rozkład</div>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="tip-cursor" data-labels="Rozkład, Przystanki">
             <input type="checkbox" id="tip-cursor" checked> Dymek przy kursorze
         </label>
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="tip-panel" data-labels="Rozkład, Przystanki">
             <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
             <span class="info" tabindex="0" role="button"
                   data-tip="Okienko zostaje do zamknięcia. Można włączyć dymek, okienko, oba albo żadne.">i</span>
         </label>
 
-    </details>
-
-    <details class="dev-fold dev-only" id="fold-vehicles">
-    <summary>Rowery i Traficary <span class="dev-badge">DEV</span></summary>
-
-        <div class="dev-section-head">Rower miejski</div>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="bike-times" data-labels="Rower, Czas">
             <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
             <span class="info" tabindex="0" role="button"
                   data-tip="Obok drugiego końca przejazdu staje godzina policzona z odległości, a nie sama odległość.">i</span>
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="bike-rides" data-labels="Rower, Mapa">
             <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
         </label>
-
-        <div class="dev-section-head">Traficary</div>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="car-times" data-labels="Traficar, Czas">
             <input type="checkbox" id="car-times"> Godzina dojazdu autem
             <span class="info" tabindex="0" role="button"
                   data-tip="Godzina szacowana z odległości w linii prostej i założeń czasowych. Auta wybierane są nią zawsze — przełącznik tylko ją pokazuje.">i</span>
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="zone-button" data-labels="Traficar">
             <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
             <span class="info" tabindex="0" role="button"
                   data-tip="Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez niego strefa pokazuje się po najechaniu na auto.">i</span>
         </label>
 
-    </details>
-
-    {#
+{#
       Podgląd do oceniania reguł wyboru - nic tu nie rusza serwera, dane
       przychodzą zawsze, przełącznik tylko je pokazuje.
     #}
-    <details class="dev-fold dev-only" id="fold-debug">
-    <summary>Debug <span class="dev-badge">DEV</span></summary>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="debug-why" data-labels="Debug, Mapa, Rower, Traficar">
             <input type="checkbox" id="debug-why"> Dlaczego rower i auto są na mapie
             <span class="info" tabindex="0" role="button"
                   data-tip="Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych je bije i które.">i</span>
         </label>
-
-        <label class="dev-check">
+    <label class="dev-check dev-only set-row" data-setting="debug-why-seg" data-labels="Debug, Mapa">
             <input type="checkbox" id="debug-why-seg"> Dlaczego kawałek jest na mapie
         </label>
 
-    </details>
-
-    {#
+{#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
-      Sekcja jest WIDOCZNA (LOOK_TUNING = true w app.js) — strojenie trwa.
+      Suwaki są WIDOCZNE (LOOK_TUNING = true w app.js) — strojenie trwa.
       Atrybut `hidden` niżej to tylko stan startowy: app.js zdejmuje go albo
       zostawia, zależnie od tego przełącznika. Bieżące wartości siedzą w
-      LOOK_DEFAULTS w app.js i to one są domyślne, gdy sekcja jest schowana.
+      LOOK_DEFAULTS w app.js i to one są domyślne, gdy suwaki są schowane.
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
-    <details class="dev-fold dev-only" id="look-section" hidden>
-        <summary>Wygląd mapy <span class="dev-badge">DEV</span></summary>
-
-        <div class="field compact">
+    <div class="field compact dev-only look-row set-row" data-setting="dot-size" data-labels="Wygląd mapy" hidden>
             <label for="dot-size">
                 Wielkość kropek <output id="dot-size-value">8</output> px
             </label>
             <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
         </div>
-
-        {# Każda linia jest pełna, więc suwaków „najbledsza/najjaśniejsza
+    {# Każda linia jest pełna, więc suwaków „najbledsza/najjaśniejsza
            linia" i otoczki od jasności tu nie ma - nic by nie zmieniały. #}
-        <div class="field compact">
+    <div class="field compact dev-only look-row set-row" data-setting="look-weight" data-labels="Wygląd mapy" hidden>
             <label for="look-weight">
                 Grubość linii <output id="look-weight-value">3</output> px
             </label>
             <input type="range" id="look-weight" min="2" max="12" step="0.5" value="3">
         </div>
-
-        <div class="field compact">
+    <div class="field compact dev-only look-row set-row" data-setting="look-dim" data-labels="Wygląd mapy" hidden>
             <label for="look-dim">
                 Przygaszenie przy wybranej trasie <output id="look-dim-value">0.22</output>
             </label>
             <input type="range" id="look-dim" min="0.05" max="1" step="0.01" value="0.22">
         </div>
-
-        <div class="field compact">
+    <div class="field compact dev-only look-row set-row" data-setting="look-label-step" data-labels="Wygląd mapy" hidden>
             <label for="look-label-step">
                 Odstęp grupek numerów <output id="look-label-step-value">200</output> px
             </label>
             <input type="range" id="look-label-step" min="120" max="700" step="20" value="200">
         </div>
-
-        <div class="field compact">
+    <div class="field compact dev-only look-row set-row" data-setting="look-label-size" data-labels="Wygląd mapy" hidden>
             <label for="look-label-size">
                 Wielkość numerów <output id="look-label-size-value">0.8</output>×
             </label>
             <input type="range" id="look-label-size" min="0.7" max="1.6" step="0.05" value="0.8">
         </div>
-
-        <div class="field compact">
+    <div class="field compact dev-only look-row set-row" data-setting="look-label-op" data-labels="Wygląd mapy" hidden>
             <label for="look-label-op">
                 Krycie numerów <output id="look-label-op-value">1</output>×
             </label>
             <input type="range" id="look-label-op" min="0.3" max="1" step="0.05" value="1">
         </div>
-
+    <div class="field dev-only look-row set-row" data-setting="look-dump" data-labels="Wygląd mapy" hidden>
+        <div class="set-title">Wartości do wpisania</div>
         <p class="field-hint" id="look-dump">
             Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
-            i skasuję tę sekcję.
+            i skasuję te suwaki.
         </p>
-    </details>
+    </div>
 
-    {#
-      SEKCJA SCHOWANA (SOUND_TUNING = false w app.js) — na razie dźwięk po
-      prostu jest, bez ustawienia. Atrybut `hidden` niżej to tylko stan
+{#
+      USTAWIENIE SCHOWANE (SOUND_TUNING = false w app.js) — na razie dźwięk po
+      prostu jest, bez ustawienia. Atrybut `hidden` wiersza to tylko stan
       startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
     #}
-    <details class="dev-fold" id="fold-sound" hidden>
-    <summary>Dźwięk</summary>
-
-        <label class="dev-check">
+    <label class="dev-check set-row" data-setting="sound-pipe" data-labels="Dźwięk" hidden>
             <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
         </label>
 
-    </details>
-
-    {#
+{#
       Rozkładu Siechnic nie ma w repo ani serwer go nie pobiera - kopię
       tygodnia wgrywa się stąd (patrz siechnice.validate_snapshot). Nie jest
       ustawieniem: nic tu nie trafia do pamięci przeglądarki.
     #}
-    <details class="dev-fold dev-only" id="fold-siechnice">
-    <summary>Rozkład Siechnic <span class="dev-badge">DEV</span></summary>
-
-    <div class="field">
+    <div class="field dev-only set-row" data-setting="siechnice-file" data-labels="Rozkład, Aplikacja">
         <div class="sw-row">
             <label class="button" for="siechnice-file">Wgraj rozkład Siechnic</label>
             <input type="file" id="siechnice-file" accept=".json,application/json" hidden>
@@ -1014,12 +943,8 @@
         <p class="field-hint" id="siechnice-status" role="status"></p>
     </div>
 
-    </details>
-
-    <details class="dev-fold dev-only" id="fold-version">
-    <summary>Wersja aplikacji <span class="dev-badge">DEV</span></summary>
-
-    <div class="field" id="sw-field">
+    <div class="field dev-only set-row" data-setting="sw-check" data-labels="Aplikacja" id="sw-field">
+        <div class="set-title">Wersja aplikacji</div>
         <div class="sw-row">
             <code id="sw-version">—</code>
             <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
@@ -1029,13 +954,7 @@
         <p class="field-hint" id="sw-status" role="status"></p>
     </div>
 
-    </details>
-
-    {# Na samym dole i zwinięte: jako jedyny nie zmienia niczego na mapie. #}
-    <details class="dev-fold dev-only" id="fold-transfer">
-    <summary>Propozycje tras <span class="dev-badge">DEV</span></summary>
-
-    <div class="field">
+    <div class="field dev-only set-row" data-setting="transfer-gain" data-labels="Propozycje tras, Czas">
         <label for="transfer-gain">
             Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
             <span class="info" tabindex="0" role="button"
@@ -1044,13 +963,8 @@
         <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
     </div>
 
-    </details>
-
-    {# Tryb względny przy starcie z pokładu (#231, patrz onboard.find_ride). #}
-    <details class="dev-fold dev-only" id="fold-onboard">
-    <summary>Jestem w pojeździe <span class="dev-badge">DEV</span></summary>
-
-    <div class="field">
+{# Tryb względny przy starcie z pokładu (#231, patrz onboard.find_ride). #}
+    <div class="field dev-only set-row" data-setting="onboard-slack" data-labels="Jestem w pojeździe, Czas">
         <label for="onboard-slack">
             Tryb względny od <output id="onboard-slack-value">3</output> min
             <span class="info" tabindex="0" role="button"
@@ -1059,17 +973,29 @@
         <input type="range" id="onboard-slack" min="0" max="15" step="1" value="3">
     </div>
 
-    </details>
-
-    <details class="dev-fold dev-only" id="fold-experiments">
-    <summary>Eksperymenty <span class="dev-badge">DEV</span></summary>
-
-        {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
-        <label class="dev-check">
+    {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
+    <label class="dev-check dev-only set-row" data-setting="location-refresh" data-labels="Eksperymenty, Lokalizacja, Funkcje">
             <input type="checkbox" id="location-refresh"> Odświeżanie lokalizacji co 30 s
         </label>
 
-    </details>
+    {# Zliczenia leżą w localStorage tej przeglądarki (#404), więc tabela jest na osobnej stronie. #}
+    <div class="field dev-only set-row" data-setting="stats" data-labels="Statystyki, Aplikacja">
+        <a class="set-title" href="/statystyki">Statystyki ustawień</a>
+    </div>
+
+    {# Jak często wolno przestawić kolejność listy (patrz snapshotSettingsLog w app.js). #}
+    <div class="field dev-only set-row" data-setting="order-limit" data-labels="Aplikacja, Statystyki">
+        <label for="order-limit">Przeliczanie kolejności ustawień najczęściej co</label>
+        <select id="order-limit">
+            <option value="off" selected>wyłączony</option>
+            <option value="1h">1 godz.</option>
+            <option value="1d">1 dzień</option>
+            <option value="7d">1 tydzień</option>
+            <option value="30d">1 miesiąc</option>
+        </select>
+    </div>
+
+    </div>
 
     <div class="dev-foot">
         <button type="button" id="dev-reset" class="button">Przywróć domyślne</button>
