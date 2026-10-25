@@ -13,7 +13,8 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `claude-issue.yml` | Solver: `@claude` pod zgłoszeniem, praca na gałęzi `claude/issue-<numer>`. |
 | `issue-labels.yml` | Etykiety stanu na zgłoszeniach wskazanych przez PR i zapasowe zamykanie po merge'u. |
 | `issue-triage.yml` | Etykieta `external` dla autorów spoza zespołu. |
-| `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. Zablokowanych nie rusza. |
+| `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. Zablokowanym zdejmuje `stale` zamiast przypominać. |
+| `stale-unlabel.yml` | Zdejmuje `stale` od razu po komentarzu człowieka, ponownym otwarciu albo ręcznym nadaniu `external blocked` / `PR in progress`, tą samą decyzją co bieg dzienny (`.github/scripts/stale.sh`). Etykietę `PR in progress` nadaną przez workflow obsługuje `issue-labels.yml`. |
 | `discord.yml` | Kanał repo na Discordzie z prawdziwymi pingami. |
 | `pr-conflicts.yml` | Po pushu do `main`: autor otwartego PR-a (także wersji roboczej), który ten push wpędził w konflikt z `main`, dostaje ping na Discordzie — raz na konflikt, nie po każdym kolejnym merge'u. Czekające prośby o recenzję takiego PR-a są zdejmowane, a gotowy PR wraca do wersji roboczej. Logika w `.github/scripts/conflicts.sh`. |
 | `pr-drafts.yml` | Gotowy PR do `main` nie dostaje zmian: push, który zmienia jego zmiany względem `main`, albo konflikt z `main` przy otwarciu i przy „Ready for review” przestawia go na wersję roboczą, z komentarzem o powodzie i zdjęciem próśb o recenzję. Push, który tylko dociąga `main` (diff PR-a bez zmian), zostawia go gotowym. Wyjście z wersji roboczej uruchamia ponowną ocenę Claude'a. Logika w `.github/scripts/drafts.sh`. |

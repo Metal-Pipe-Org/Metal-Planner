@@ -65,6 +65,7 @@ permissions:
 
 env:
   LABEL_PROGRESS: "PR in progress"
+  LABEL_STALE: "stale"
   # Dawne etykiety, które znaczyły to samo co "PR in progress". Zgłoszenia
   # mogą je jeszcze nosić, więc traktujemy je jak jej aliasy: schodzą razem
   # z nią. Lista do skasowania, gdy żadne zgłoszenie już ich nie ma.
@@ -195,6 +196,18 @@ jobs:
 
               gh issue edit "$n" --repo "$REPO" "${args[@]}"
               echo "#$n: etykieta \"$label\" (PR #$PR)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+              # Etykiety nadane naszym tokenem nie budzą stale-unlabel.yml,
+              # więc „stale" zdejmujemy tu: PR to aktywność, a zgłoszenie
+              # z PR-em nie jest zapomniane. Osobno i po świeżym odczycie:
+              # stale-unlabel.yml mógł ją zdjąć w międzyczasie, a
+              # `--remove-label` na brakującej etykiecie wywraca wywołanie
+              # i nie może to zablokować nadania etykiety powyżej.
+              if [ "$label" = "$LABEL_PROGRESS" ] \
+                 && [ "$(gh issue view "$n" --repo "$REPO" --json labels --jq "any(.labels[]; .name == \"$LABEL_STALE\")")" = true ]; then
+                gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL_STALE"
+                echo "#$n: zdejmuję \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
             done
           }
 
