@@ -29,8 +29,11 @@ const {map, esc, fitTo, LINE_COLORS, MODE_LABEL, ROUTE_ICON} = B;
 const $ = id => document.getElementById(id);
 
 const queryInput = $('tt-query');
-const dateInput = $('tt-date');
-const timeInput = $('tt-time');
+// Godzina i data to te same dwa pola co w wyszukiwarce, przenoszone między
+// panelami (patrz setMode): jedno miejsce, w którym żyją, więc cokolwiek je
+// ustawia, nie musi wiedzieć o rozkładach.
+const dateInput = $('date');
+const timeInput = $('time');
 const timeField = $('tt-time-field');
 const clearButton = $('tt-clear');
 const resultsBox = $('tt-results');
@@ -252,12 +255,19 @@ function setMode(on) {
     }
     B.syncTabs();
 
+    const datePart = document.querySelector('.tt-date-part');
     if (on) {
+        $('tt-now').before(timeInput);
+        datePart.append(dateInput);
         document.body.classList.remove('panel-hidden');
         B.suspendPlanner();
-        draw(true);
+        // Godzina mogła się zmienić w Trasach, gdy rozkład stał schowany.
+        if (data && data.date !== currentDate()) load(kind);
+        else { render(); draw(true); }
         queryInput.focus();
     } else {
+        $('time-now').before(timeInput);
+        $('day-panel').append(dateInput);
         clearMap();
         dimBase(false);
         B.resumePlanner();
@@ -514,15 +524,16 @@ function load(forced) {
 }
 
 queryInput.addEventListener('input', syncField);
-if (dateInput) dateInput.addEventListener('change', () => { if (data) load(kind); });
-if (timeInput) timeInput.addEventListener('input', retime);
+// Pola stoją też w wyszukiwarce, gdzie rozkład schowany nie ma co przeliczać:
+// dociąga się przy wejściu (patrz setMode).
+dateInput.addEventListener('change', () => { if (active() && data) load(kind); });
+timeInput.addEventListener('input', () => { if (active()) retime(); });
 // „teraz" to CHWILA, więc wraca też na dzisiejszy dzień - sama godzina przy
 // dacie zostawionej na innym dniu opisywałaby tamtą dobę. Zmiana dnia to nowy
 // rozkład; sama godzina tylko przesuwa tablicę (patrz retime).
 $('tt-now').addEventListener('click', () => {
     const otherDay = dateInput.value !== isoToday();
-    dateInput.value = isoToday();
-    timeInput.value = isoNow();
+    B.setTimeNow();
     if (otherDay && data) load(kind);
     else retime();
 });
@@ -566,12 +577,6 @@ function isoToday() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
          + `-${String(now.getDate()).padStart(2, '0')}`;
-}
-
-function isoNow() {
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, '0')}`
-         + `:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
 /** Godzina odniesienia obu rozkładów - ta z pola, nie ta z zegara. Serwer

@@ -129,10 +129,9 @@ def test_prog_nazw_jest_suwakiem_dev_z_ta_sama_wartoscia_co_front():
         html = render_template("index.html", stops=[], abbreviations={},
                                lines=[], data_error=None, form_time="12:00",
                                form_date="2026-10-01", dev_mode=True)
-    start = html.index('id="fold-places"')
-    sekcja = html[html.rindex("<details", 0, start):html.index("</details>", start)]
-    assert "dev-only" in sekcja
-    suwak = re.search(r'<input[^>]*id="names-zoom"[^>]*>', sekcja).group(0)
+    wiersz = re.search(r'<div[^>]*data-setting="names-zoom"[^>]*>', html).group(0)
+    assert "dev-only" in wiersz
+    suwak = re.search(r'<input[^>]*id="names-zoom"[^>]*>', html).group(0)
     app_js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
     domyslny = re.search(r"namesZoom: (\d+)", app_js).group(1)
     assert f'value="{domyslny}"' in suwak

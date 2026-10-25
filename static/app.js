@@ -162,6 +162,7 @@ if (devPanel) {
         // odsuwa okienko, żeby dało się widzieć oba naraz (jego własne
         // przełączniki siedzą właśnie w tym panelu).
         document.body.classList.toggle('dev-open', open);
+        if (open) devPanel.dispatchEvent(new Event('settings-open'));
         if (persist) saveUiState({devOpen: open});
     };
     // Na telefonie panel przykrywa cały ekran - otwarty sam po odświeżeniu
@@ -7376,7 +7377,7 @@ const routesOn = $('routes-on');
 function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
-    $('fold-transfer').hidden = !on;
+    $('transfer-gain').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
@@ -7482,10 +7483,10 @@ function applyLook() {
 }
 
 function bindLookSliders() {
-    const section = $('look-section');
-    if (!section) return;               // sekcja skasowana - wartości zostają domyślne
-    if (!LOOK_TUNING) { section.hidden = true; return; }
-    section.hidden = false;
+    const rows = devPanel.querySelectorAll('.look-row');
+    if (!rows.length) return;           // suwaki skasowane - wartości zostają domyślne
+    for (const row of rows) row.hidden = !LOOK_TUNING;
+    if (!LOOK_TUNING) return;
     let timer = null;
     const show = id => {
         const input = $(id);
@@ -7702,10 +7703,9 @@ function playPipeDrop() {
 }
 
 function bindSoundToggle() {
-    const fold = $('fold-sound');
-    if (fold) fold.hidden = !SOUND_TUNING;
     const input = $('sound-pipe');
     if (!input) return;
+    input.closest('.set-row').hidden = !SOUND_TUNING;
     input.checked = !!soundOpts.pipe;
     input.addEventListener('change', () => {
         soundOpts.pipe = input.checked;
@@ -7845,53 +7845,401 @@ function bindDotOpts() {
 }
 bindDotOpts();
 
-// --- rozwijane sekcje panelu -----------------------------------------------
+// --- lista ustawień: wyszukiwarka i nagłówki z etykiet -----------------------
 //
-// Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
-// pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
-const DEV_FOLD_IDS = [
-    'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
-    'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
-    'fold-debug', 'look-section',
-    'fold-layout', 'fold-siechnice', 'fold-experiments', 'fold-version',
-];
+// Ustawień przybywa szybciej, niż da się je trzymać w sensownych kategoriach,
+// więc każdy wiersz niesie tylko etykiety (`data-labels`), a nagłówki składają
+// się z nich same, z wierszy widocznych w tej chwili: każda etykieta z co
+// najmniej trzema wierszami dostaje nagłówek, a wiersz stoi pod każdą swoją
+// etykietą. Kontrolka jest jedna (oryginał, pod pierwszym nagłówkiem) - pod
+// pozostałymi stoją kopie, które przekazują zmianę oryginałowi, więc zmiana
+// liczy się raz, a obsługa po id zostaje bez zmian. Wiersz bez nagłówka ląduje
+// w „Inne". Kolejność układa się z dziennika ostatnich zmian i jest liczona
+// tylko przy otwarciu panelu, żeby nic nie przeskakiwało pod palcem.
+const settingsList = $('settings-list');
+const settingsSearch = $('settings-search');
+const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 
-function bindDevFolds() {
-    const prefs = loadDevPrefs();
-    for (const id of DEV_FOLD_IDS) {
-        const el = $(id);
-        if (!el) continue;
-        const saved = prefs['fold:' + id];
-        if (saved !== undefined) el.open = !!saved;
-        el.addEventListener('toggle', () => saveDevPref('fold:' + id, el.open));
+for (const row of settingsRows) {
+    if (row.classList.contains('dev-only')) {
+        const badge = document.createElement('span');
+        badge.className = 'dev-badge';
+        badge.textContent = 'DEV';
+        (row.querySelector('label:not(.button), .set-title') || row).append(badge);
     }
 }
-bindDevFolds();
+
+const settingsInfo = new Map(settingsRows.map(row => {
+    const copy = row.cloneNode(true);
+    for (const skip of copy.querySelectorAll('output, .info, .dev-badge')) skip.remove();
+    const labels = (row.dataset.labels || '').split(',').map(label => label.trim()).filter(Boolean);
+    return [row, {
+        labels,
+        name: fold(copy.textContent).replace(/\s+/g, ' '),
+        folded: labels.map(fold),
+    }];
+}));
+
+const SETTINGS_SUGGEST_RECENT = 3;
+const SETTINGS_SUGGEST_FREQUENT = 5;
+
+// Dziennik z chwili otwarcia panelu: z niego liczy się kolejność aż do
+// następnego otwarcia.
+let settingsLog = {counts: new Map(), recent: [], known: null};
+
+// Najrzadszy odstęp między przeliczeniami kolejności (ustawienie w ⚙). Wyłączony
+// = przeliczanie przy każdym otwarciu panelu.
+const SETTINGS_ORDER_KEY = 'metal-planner:settings-order';
+const SETTINGS_ORDER_LIMITS = {
+    '1h': 3600e3, '1d': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3,
+};
+
+function loadSettingsOrder() {
+    try {
+        return JSON.parse(localStorage.getItem(SETTINGS_ORDER_KEY));
+    } catch {
+        return null;       // localStorage niedostępny albo zepsuty JSON
+    }
+}
+
+function snapshotSettingsLog() {
+    const limit = SETTINGS_ORDER_LIMITS[loadDevPrefs()['order-limit']];
+    const stored = loadSettingsOrder();
+    if (limit && stored && Date.now() - stored.t < limit) {
+        settingsLog = {counts: new Map(stored.counts), recent: stored.recent, known: new Set(stored.known)};
+        return;
+    }
+    const log = loadSettingsStats().log;
+    const counts = new Map();
+    for (const event of log) counts.set(event.id, (counts.get(event.id) || 0) + 1);
+    const recent = [];
+    for (const event of [...log].reverse()) {
+        if (!recent.includes(event.id)) recent.push(event.id);
+    }
+    settingsLog = {counts, recent, known: null};
+    // Zapis także przy wyłączonym limicie: włączenie go niczego wtedy nie przestawia.
+    try {
+        localStorage.setItem(SETTINGS_ORDER_KEY, JSON.stringify({
+            t: Date.now(), counts: [...counts], recent,
+            known: settingsRows.map(row => row.dataset.setting),
+        }));
+    } catch {
+        // localStorage niedostępny - kolejność po prostu liczy się za każdym razem
+    }
+}
+
+const rowScore = row => settingsLog.counts.get(row.dataset.setting) || 0;
+const rowIndex = new Map(settingsRows.map((row, i) => [row, i]));
+// Ustawienie dodane po ostatnim przeliczeniu staje na końcu wśród równych.
+const rowIsNew = row => (settingsLog.known && !settingsLog.known.has(row.dataset.setting) ? 1 : 0);
+const byScore = (a, b) => rowScore(b) - rowScore(a) || rowIsNew(a) - rowIsNew(b)
+    || rowIndex.get(a) - rowIndex.get(b);
+
+// Wiersze z suwakiem albo przełącznikiem da się skopiować; reszta (link,
+// wgranie pliku, przycisk wersji) ma swoje id i stoi tylko w jednym miejscu.
+const isCopyable = row => !!row.querySelector('input[type=checkbox], input[type=range]');
+
+let copyCounter = 0;
+function makeSettingCopy(row) {
+    const copy = row.cloneNode(true);
+    copy.classList.add('set-copy');
+    copy.classList.remove('changed');
+    copy.dataset.copyOf = row.dataset.setting;
+    delete copy.dataset.setting;
+    const renamed = new Map();
+    for (const el of copy.querySelectorAll('[id]')) {
+        if (el.tagName === 'OUTPUT') el.dataset.of = el.id;
+        else renamed.set(el.id, `${el.id}-copy-${++copyCounter}`);
+        el.removeAttribute('id');
+    }
+    for (const el of copy.querySelectorAll('input')) el.id = renamed.get(row.dataset.setting) || '';
+    for (const label of copy.querySelectorAll('label[for]')) label.htmlFor = renamed.get(label.htmlFor) || '';
+    return copy;
+}
+
+function syncSettingCopies() {
+    for (const copy of settingsList.querySelectorAll('.set-copy')) {
+        const source = $(copy.dataset.copyOf);
+        const input = copy.querySelector('input');
+        if (input.type === 'checkbox') input.checked = source.checked;
+        else input.value = source.value;
+        for (const out of copy.querySelectorAll('output')) out.textContent = $(out.dataset.of).textContent;
+    }
+}
+
+// Zmiana w kopii trafia do oryginału jak ruch w nim samym - tak działa jego
+// obsługa i liczenie zmian.
+for (const type of ['input', 'change']) {
+    devPanel.addEventListener(type, event => {
+        const copy = event.target.closest('.set-copy');
+        if (copy) {
+            const source = $(copy.dataset.copyOf);
+            if (source.type === 'checkbox') source.checked = event.target.checked;
+            else source.value = event.target.value;
+            source.dispatchEvent(new Event(type, {bubbles: true}));
+        }
+        syncSettingCopies();
+        markChangedSettings();
+    });
+}
+
+function settingGroups(visible) {
+    const byLabel = new Map();
+    for (const row of visible) {
+        for (const label of settingsInfo.get(row).labels) {
+            if (!byLabel.has(label)) byLabel.set(label, []);
+            byLabel.get(label).push(row);
+        }
+    }
+    const order = [...byLabel.keys()];
+    return [...byLabel].filter(([, rows]) => rows.length >= 3)
+        .map(([label, rows]) => ({
+            label, rows: [...rows].sort(byScore),
+            score: rows.reduce((sum, row) => sum + rowScore(row), 0),
+        }))
+        .sort((a, b) => b.score - a.score || b.rows.length - a.rows.length
+            || order.indexOf(a.label) - order.indexOf(b.label));
+}
+
+function suggestedSettings(visible) {
+    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row));
+    const recent = settingsLog.recent.filter(usable).slice(0, SETTINGS_SUGGEST_RECENT);
+    const frequent = [...settingsLog.counts.keys()]
+        .filter(id => usable(id) && !recent.includes(id))
+        .sort((a, b) => settingsLog.counts.get(b) - settingsLog.counts.get(a)
+            || settingsLog.recent.indexOf(a) - settingsLog.recent.indexOf(b))
+        .slice(0, SETTINGS_SUGGEST_FREQUENT);
+    return [...recent, ...frequent].map(usable);
+}
+
+function renderSettingsList() {
+    const needle = fold(settingsSearch.value.trim());
+    const shown = visibleSettingRows();
+    const matching = shown.filter(row => {
+        const info = settingsInfo.get(row);
+        return info.name.includes(needle) || info.folded.some(label => label.includes(needle));
+    });
+    for (const row of settingsRows) row.classList.toggle('search-miss', !matching.includes(row) && !row.hidden);
+    const prefs = loadDevPrefs();
+    const addGroup = (nodes, label, rows, openByDefault) => {
+        const group = document.createElement('details');
+        group.className = 'set-group';
+        const saved = prefs['fold:' + label];
+        group.open = saved === undefined ? openByDefault : !!saved;
+        group.append(Object.assign(document.createElement('summary'), {textContent: label}), ...rows);
+        group.addEventListener('toggle', () => saveDevPref('fold:' + label, group.open));
+        nodes.push(group);
+    };
+    const nodes = [];
+    const placed = new Set();
+    if (needle) {
+        // Wyniki jako płaska lista, każde ustawienie raz.
+        nodes.push(...matching);
+        for (const row of matching) placed.add(row);
+    } else {
+        const suggested = suggestedSettings(shown);
+        if (suggested.length) {
+            addGroup(nodes, 'Proponowane', suggested.map(makeSettingCopy), true);
+            nodes[nodes.length - 1].dataset.kind = 'suggested';
+        }
+        const changedRows = changedSettingRows(shown);
+        if (changedRows.length) nodes.push(buildChangedGroup(changedRows, prefs));
+        for (const group of settingGroups(shown)) {
+            const rows = [];
+            for (const row of group.rows) {
+                if (!placed.has(row)) rows.push(row);
+                else if (isCopyable(row)) rows.push(makeSettingCopy(row));
+                placed.add(row);
+            }
+            addGroup(nodes, group.label, rows, false);
+        }
+        const rest = shown.filter(row => !placed.has(row));
+        if (rest.length) addGroup(nodes, 'Inne', rest, false);
+        for (const row of rest) placed.add(row);
+    }
+    // Wiersze schowane z innych powodów (albo bez trafienia) zostają w DOM, na końcu.
+    nodes.push(...settingsRows.filter(row => !placed.has(row)));
+    settingsList.replaceChildren(...nodes);
+    syncSettingCopies();
+    markChangedSettings();
+}
+
+// Kolejność liczy się z dziennika przy otwarciu panelu (i przy starcie), nigdy
+// przy otwartym.
+function refreshSettingsOrder() {
+    snapshotSettingsLog();
+    renderSettingsList();
+}
+
+settingsSearch.addEventListener('input', renderSettingsList);
+// Część wierszy chowają i pokazują inne ustawienia (np. próg przesiadki bez
+// propozycji tras) - nagłówki muszą to nadążyć.
+new MutationObserver(renderSettingsList).observe(settingsList,
+    {attributes: true, attributeFilter: ['hidden'], subtree: true});
 
 // --- zmienione ustawienia i powrót do domyślnych ----------------------------
 //
 // `value`/`checked` z index.html to wartości domyślne (patrz komentarz nad
-// panelem), więc opcja różna od nich dostaje znacznik, a nagłówek sekcji -
-// liczbę takich opcji, żeby było je widać także przy zwiniętej sekcji.
+// panelem), więc opcja różna od nich dostaje znacznik.
+const differsFromDefault = input => (input.type === 'checkbox'
+    ? input.checked !== input.defaultChecked
+    : Number(input.value) !== Number(input.defaultValue));
+
+// Stała sekcja pod „Proponowane": ustawienia różne od domyślnych, zawsze z bieżącego
+// stanu (nie z migawki kolejności), więc odświeża się na żywo.
+const CHANGED_GROUP = 'Inne niż domyślne';
+
+function changedSettingRows(shown) {
+    return shown.filter(row => isCopyable(row)
+        && differsFromDefault(row.querySelector('input[type=checkbox], input[type=range]')));
+}
+
+function visibleSettingRows() {
+    return settingsRows.filter(row => !row.hidden && (devMode || !row.classList.contains('dev-only')));
+}
+
+function buildChangedGroup(rows, prefs) {
+    const saved = prefs['fold:' + CHANGED_GROUP];
+    const group = document.createElement('details');
+    group.className = 'set-group';
+    group.dataset.kind = 'changed';
+    group.dataset.ids = rows.map(row => row.dataset.setting).join(',');
+    group.open = saved === undefined ? false : !!saved;
+    const summary = Object.assign(document.createElement('summary'), {textContent: CHANGED_GROUP});
+    summary.dataset.changed = rows.length;
+    group.append(summary, ...rows.map(makeSettingCopy));
+    group.addEventListener('toggle', () => saveDevPref('fold:' + CHANGED_GROUP, group.open));
+    return group;
+}
+
+// Przy szukaniu lista jest płaska i tej sekcji nie ma.
+function refreshChangedGroup() {
+    if (settingsSearch.value.trim()) return;
+    const rows = changedSettingRows(visibleSettingRows());
+    const ids = rows.map(row => row.dataset.setting).join(',');
+    const current = settingsList.querySelector('[data-kind=changed]');
+    if ((current ? current.dataset.ids : '') === ids) return;
+    const next = rows.length ? buildChangedGroup(rows, loadDevPrefs()) : null;
+    if (current && next) current.replaceWith(next);
+    else if (current) current.remove();
+    else if (next) {
+        const anchor = [...settingsList.children].find(el => !el.dataset.kind);
+        settingsList.insertBefore(next, anchor || null);
+    }
+    syncSettingCopies();
+}
+
 function markChangedSettings() {
-    for (const fold of devPanel.querySelectorAll('.dev-fold')) {
-        let changed = 0;
-        // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
-        for (const input of fold.querySelectorAll('input:not([type=file])')) {
-            const differs = input.type === 'checkbox'
-                ? input.checked !== input.defaultChecked
-                : Number(input.value) !== Number(input.defaultValue);
-            input.closest('.field, .dev-check').classList.toggle('changed', differs);
-            if (differs) changed++;
-        }
-        const summary = fold.querySelector('summary');
-        if (changed) summary.dataset.changed = changed;
-        else delete summary.dataset.changed;
+    // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
+    for (const input of devPanel.querySelectorAll('.set-row input:not([type=file])')) {
+        input.closest('.set-row').classList.toggle('changed', differsFromDefault(input));
+    }
+    refreshChangedGroup();
+}
+markChangedSettings();
+
+// --- statystyki zmian ustawień (DEV, #404) ------------------------------------
+//
+// Tylko lokalnie: ile razy i kiedy ostatnio ktoś ruszył każde ustawienie, żeby
+// było widać, których nikt nie dotyka. Jeden nasłuch na cały panel zamiast
+// podpinania pod każde ustawienie - nowe są liczone same. Suwak liczymy na
+// `change` (po puszczeniu), nie na każdy `input`, inaczej jeden ruch dawałby
+// dziesiątki zliczeń. Klucz nie jest na liście z #dev-reset: „Przywróć
+// domyślne” ma zostawić statystyki, bo to właśnie ono jest jednym z liczonych
+// zdarzeń. Tabelę pokazuje osobna strona (/statystyki, statystyki.js).
+const SETTINGS_STATS_KEY = 'metal-planner:settings-stats';
+const SETTINGS_LOG_LIMIT = 100;
+
+function loadSettingsStats() {
+    try {
+        const stats = JSON.parse(localStorage.getItem(SETTINGS_STATS_KEY));
+        return {
+            changes: (stats && stats.changes) || {},
+            labels: (stats && stats.labels) || {},
+            values: (stats && stats.values) || {},
+            log: (stats && stats.log) || [],
+            reset: (stats && stats.reset) || {n: 0, t: null},
+        };
+    } catch {
+        return {changes: {}, labels: {}, values: {}, log: [], reset: {n: 0, t: null}};   // localStorage niedostępny albo zepsuty JSON
     }
 }
-devPanel.addEventListener('input', markChangedSettings);
-devPanel.addEventListener('change', markChangedSettings);
-markChangedSettings();
+
+function saveSettingsStats(stats) {
+    try {
+        localStorage.setItem(SETTINGS_STATS_KEY, JSON.stringify(stats));
+    } catch {
+        // localStorage niedostępny - statystyki po prostu się nie zapiszą
+    }
+}
+
+function recordSettingChange(id) {
+    const stats = loadSettingsStats();
+    const entry = stats.changes[id] || {n: 0, t: null};
+    stats.changes[id] = {n: entry.n + 1, t: Date.now()};
+    // Z ostatnich zmian układa się kolejność listy ustawień.
+    stats.log = [...stats.log, {id, t: Date.now()}].slice(-SETTINGS_LOG_LIMIT);
+    saveSettingsStats(stats);
+}
+
+function recordSettingsReset() {
+    const stats = loadSettingsStats();
+    stats.reset = {n: stats.reset.n + 1, t: Date.now()};
+    saveSettingsStats(stats);
+}
+
+function settingControls() {
+    // Kopie (`.set-copy`) tylko przekazują zmianę oryginałowi.
+    // Tylko kontrolki wierszy listy: pole wyszukiwania i przyciski akcji nie są
+    // ustawieniami. Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
+    return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy) :is(input:not([type=file]), select)');
+}
+
+// Etykieta tak, jak widać ją w panelu - bez wartości suwaka i dymka „i”.
+function settingLabel(control) {
+    const label = (control.id && devPanel.querySelector(`label[for="${control.id}"]`))
+        || control.closest('label');
+    const clone = label.cloneNode(true);
+    for (const extra of clone.querySelectorAll('output, .info, .dev-badge, input, select')) extra.remove();
+    return clone.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function settingValue(control) {
+    if (control.type === 'checkbox') return control.checked ? 'tak' : 'nie';
+    if (control.tagName === 'SELECT') return control.selectedOptions[0].textContent.trim();
+    return control.value;
+}
+
+devPanel.addEventListener('change', event => {
+    if (![...settingControls()].includes(event.target) || !event.target.id) return;
+    recordSettingChange(event.target.id);
+    syncSettingsSnapshot();
+});
+
+// Strona /statystyki nie ma panelu, więc nazwy i bieżące wartości bierze stąd.
+// Zapisujemy je dla wszystkich, żeby tabela pokazała też ustawienia, których
+// nikt nie ruszył.
+function syncSettingsSnapshot() {
+    const stats = loadSettingsStats();
+    let changed = false;
+    for (const control of settingControls()) {
+        if (!control.id) continue;
+        const label = settingLabel(control);
+        const value = settingValue(control);
+        if (stats.labels[control.id] !== label || stats.values[control.id] !== value) {
+            stats.labels[control.id] = label;
+            stats.values[control.id] = value;
+            changed = true;
+        }
+    }
+    if (changed) saveSettingsStats(stats);
+}
+syncSettingsSnapshot();
+const orderLimit = $('order-limit');
+orderLimit.value = loadDevPrefs()['order-limit'] || 'off';
+orderLimit.addEventListener('change', () => saveDevPref('order-limit', orderLimit.value));
+refreshSettingsOrder();
+devPanel.addEventListener('settings-open', refreshSettingsOrder);
 
 // --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
 //
@@ -8016,6 +8364,7 @@ document.addEventListener('scroll', () => { infoTip.hidden = true; }, true);
 // trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma własny
 // klucz, więc mapa wraca ta sama.
 $('dev-reset').addEventListener('click', () => {
+    recordSettingsReset();
     for (const key of [DEV_PREFS_KEY, TIME_PREFS_KEY, DOT_PREFS_KEY,
                        LOOK_PREFS_KEY, SOUND_PREFS_KEY, phoneLayout.PREFS_KEY]) {
         try {
@@ -8102,7 +8451,7 @@ window.plannerBridge = {
     // tablice w jednym API to zaproszenie do sięgnięcia po złą.
     LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
     prettyStopName, rawStopName,
-    suspendPlanner, resumePlanner,
+    suspendPlanner, resumePlanner, setTimeNow,
 };
 
 }
