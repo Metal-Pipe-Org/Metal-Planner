@@ -9,7 +9,10 @@ domyślne", pasek „zmienione", kopie pod nagłówkami i statystyki.
 
 import json
 import os
+import re
+from collections import Counter
 from html.parser import HTMLParser
+from pathlib import Path
 
 import pytest
 
@@ -51,10 +54,24 @@ class _Wiersze(HTMLParser):
             self._wiersz["options"].append((a["value"], "selected" in a))
 
 
-def _ustawienia():
+def _wszystkie_wiersze():
     parser = _Wiersze()
     parser.feed(_index(dev_mode=True))
-    return [w for w in parser.wiersze if w["kind"]]
+    return parser.wiersze
+
+
+def _ustawienia():
+    return [w for w in _wszystkie_wiersze() if w["kind"]]
+
+
+def _klucze_skutkow():
+    """Klucze SETTING_EFFECTS z app.js: literały w obiekcie i pętle `for (const id of [...])`."""
+    zrodlo = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(encoding="utf-8")
+    obiekt = re.search(r"const SETTING_EFFECTS = \{\n(.*?)\n\};", zrodlo, re.S).group(1)
+    klucze = re.findall(r"^    '([\w-]+)':", obiekt, re.M)
+    for lista in re.findall(r"for \(const id of \[([^\]]*)\]\) \{\s*SETTING_EFFECTS\[id\]", zrodlo):
+        klucze += re.findall(r"'([\w-]+)'", lista)
+    return klucze
 
 
 USTAWIENIA = _ustawienia()
@@ -256,3 +273,15 @@ def test_poza_trybem_deweloperskim_zapis_dev_nie_dziala(adres, przegladarka, mon
         assert not page.bledy, page.bledy
     finally:
         context.close()
+
+
+def test_kazdy_skutek_dotyczy_istniejacego_ustawienia():
+    klucze = _klucze_skutkow()
+    assert len(klucze) > 30, klucze
+    nieznane = [k for k in klucze if k not in IDS]
+    assert not nieznane, f"SETTING_EFFECTS opisuje nieistniejące ustawienia (literówka?): {nieznane}"
+
+
+def test_nazwy_data_setting_sa_unikalne():
+    powtorzone = [n for n, ile in Counter(w["id"] for w in _wszystkie_wiersze()).items() if ile > 1]
+    assert not powtorzone, f"te same data-setting w kilku wierszach: {powtorzone}"
