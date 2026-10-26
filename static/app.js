@@ -6151,8 +6151,8 @@ function locateOnce(onPoint, onError) {
     );
 }
 
-/** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
-    od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
+/** Przypisane miejsce: cel to ono. Start leci z obecnej pozycji tylko wtedy,
+    gdy pole „Skąd" jest puste (#255) - wpisanego startu skrót nie rusza. */
 function goToPlace(slot) {
     const {place} = myPlaces[slot];
     if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
@@ -6164,13 +6164,11 @@ function goToPlace(slot) {
     endInput.value = displayValue(place);
     updatePointMarker('end', place);
     restyle(...previous, sel.end);
+    if (startInput.value) { search(); return; }
     // Start idzie tą samą drogą co ◎ (łącznie z godziną „teraz" i pytaniem
     // „Stoisz na…?"), żeby oba przyciski nie rozjechały się w szczegółach.
     if (navigator.geolocation) locateStart(() => { if (startInput.value) search(); });
-    else {
-        showLocateMsg(GEO_MESSAGES[2]);
-        if (startInput.value) search();
-    }
+    else showLocateMsg(GEO_MESSAGES[2]);
 }
 
 /** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
