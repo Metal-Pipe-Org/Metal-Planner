@@ -44,3 +44,20 @@ def test_skrot_przy_pustym_starcie_bierze_start_z_lokalizacji(przegladarka, adre
         assert page.input_value("#end") == TRASA[1]
     finally:
         context.close()
+
+
+def test_skrot_odswieza_start_z_lokalizacji(przegladarka, adres):
+    context, page = _otworz_z_miejscem(przegladarka, adres)
+    try:
+        page.click("#locate")
+        page.wait_for_function("document.getElementById('start').value.startsWith('(')")
+        page.evaluate("""() => { const s = document.getElementById('start');
+            s.dataset.stary = s.value; }""")
+        context.set_geolocation({"latitude": 51.1, "longitude": 17.03})
+        page.click(".place-button.set")
+        page.wait_for_function(
+            "document.getElementById('start').value !== document.getElementById('start').dataset.stary")
+        assert page.input_value("#start") == "(51.1000, 17.0300)"
+        assert page.input_value("#end") == TRASA[1]
+    finally:
+        context.close()
