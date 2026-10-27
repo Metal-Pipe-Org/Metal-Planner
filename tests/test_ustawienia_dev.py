@@ -20,7 +20,8 @@ DEV_ROWS = {"density", "car-count", "bike-count", "time-hover", "time-ends",
             "look-label-op", "look-dump", "siechnice-file", "sw-check",
             "transfer-gain", "onboard-slack", "location-refresh", "stats",
             "order-limit", "new-map", "walking",
-            "scheme-layout"}
+            "scheme-layout", "scheme-walks-mode", "scheme-walks-count",
+            "scheme-walks-style"}
 USER_ROWS = {"time-show-headline", "tt-past", "car-vans", "walk-pace",
              "bike-kmh", "bike-overhead", "car-kmh", "car-overhead",
              "bikes-merged", "no-pull-refresh", "start-mode-switch",

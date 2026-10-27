@@ -9,7 +9,7 @@ na jego odjazd na przystanku startowym.
 from bisect import bisect_left, bisect_right
 from collections import deque
 from datetime import date, datetime, timedelta
-from math import sqrt
+from math import ceil, sqrt
 
 import bikes
 import gtfs
@@ -3990,9 +3990,30 @@ def _scheme_of_map(day, seg_list, nodes, target_set, source_stops):
         return any(other in day.siblings.get(stop, ())
                    for stop in stops_of(a) for other in stops_of(b))
 
-    return _scheme(seg_list, nodes,
-                   target_places={gtfs.place_name(day, s) for s in target_set},
-                   walkable=walkable)
+    scheme = _scheme(seg_list, nodes,
+                     target_places={gtfs.place_name(day, s) for s in target_set},
+                     walkable=walkable)
+    scheme["pairs"] = _scheme_pairs(day, scheme["nodes"], stops_of, target_set)
+    return scheme
+
+
+def _scheme_pairs(day, scheme_nodes, stops_of, target_set):
+    """Przejście pieszo między KAŻDĄ parą pudełek schematu, z czasem w pełnych
+    minutach (`min`) - to samo, co planista liczy na przesiadce
+    (gtfs.walk_seconds), z najbliższych sobie słupków obu pudełek. Pieszo
+    można iść z dowolnego przystanku na dowolny, więc schemat dostaje
+    wszystkie pary, a to, które z nich pokazać, wybiera front."""
+    def stops(node):
+        if node["role"] == "end":
+            return target_set
+        return stops_of(SCHEME_START if node["role"] == "start" else node["place"])
+
+    pairs = []
+    for i, a in enumerate(scheme_nodes):
+        for b in scheme_nodes[i + 1:]:
+            sec = min(gtfs.walk_seconds(day, x, y) for x in stops(a) for y in stops(b))
+            pairs.append({"from": a["id"], "to": b["id"], "min": ceil(sec / 60)})
+    return pairs
 
 
 def _scheme_times(scheme, journeys):
@@ -4087,6 +4108,7 @@ def _scheme_of_legs(variants):
                    "lines": [{"num": num, "kind": kind} for kind, num in sorted(lines)]}
                   for (a, b), lines in edges.items()],
         "walks": [{"from": ids[a], "to": ids[b]} for a, b in sorted(gaps)],
+        "pairs": [],
         "order": sorted([ids[a], ids[b]] for a, b in gaps),
     }
 

@@ -5752,7 +5752,107 @@ function schemeBranches(boxes, strands) {
     return out;
 }
 
-function schemeSvg(boxes, strands, walks) {
+function schemeWalkSettings() {
+    return {mode: $('scheme-walks-mode').value, count: Number($('scheme-walks-count').value),
+            style: $('scheme-walks-style').value};
+}
+
+/** Które przejścia pieszo schemat rysuje: wszystkie, tylko te przy pudełku
+    `box` (najechanym) albo `count` najkrótszych. */
+function schemeWalksOf(pairs, settings, box) {
+    if (settings.mode === 'hover') return pairs.filter(p => p.from === box || p.to === box);
+    if (settings.mode === 'few') return [...pairs].sort((a, b) => a.min - b.min).slice(0, settings.count);
+    return pairs;
+}
+
+/** Przejścia pieszo wyglądają inaczej niż linie jazd, żeby się z nimi nie
+    myliły: klamra z boku pudełek albo cienka przerywana kreska z napisem. */
+function schemeWalkLayer(boxes, walks, style) {
+    const out = {svg: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
+    const grow = (x, y) => {
+        out.minX = Math.min(out.minX, x); out.maxX = Math.max(out.maxX, x);
+        out.minY = Math.min(out.minY, y); out.maxY = Math.max(out.maxY, y);
+    };
+    // Napisy nie mogą leżeć jeden na drugim: każdy bierze pierwsze wolne miejsce
+    // z podanych, a gdy żadne nie jest wolne - pierwsze.
+    const placed = [];
+    const pill = (spots, pair) => {
+        const text = `pieszo, ${pair.min} min`, w = text.length * 5.8 + 14;
+        const free = ([x, y]) => !placed.some(o => Math.abs(o.x - x) < (o.w + w) / 2 + 2 && Math.abs(o.y - y) < 20);
+        const [cx, cy] = spots.find(free) || spots[0];
+        placed.push({x: cx, y: cy, w});
+        grow(cx - w / 2, cy - 9); grow(cx + w / 2, cy + 9);
+        return `<rect class="scheme-walk-pill" x="${cx - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
+            + `<text class="scheme-walk-text" x="${cx}" y="${cy}">${text}</text>`;
+    };
+    const centre = box => box.y + box.h / 2;
+    // Miejsca na napis wzdłuż odcinka: środek, potem na zmianę dalej w obie strony.
+    const along = (y0, y1) => {
+        const mid = (y0 + y1) / 2, half = Math.max(0, Math.abs(y1 - y0) / 2 - 9), spots = [mid];
+        for (let k = 1; k * 20 <= half; k++) spots.push(mid + k * 20, mid - k * 20);
+        return spots;
+    };
+    if (style === 'brace') {
+        const spans = walks.map(pair => {
+            const a = boxes.get(pair.from), b = boxes.get(pair.to);
+            const same = Math.abs(centre(a) - centre(b)) < 8;
+            const ya = centre(a) - (same ? 8 : 0), yb = centre(b) + (same ? 8 : 0);
+            return {pair, a, b, ya, yb, top: Math.min(ya, yb), bottom: Math.max(ya, yb)};
+        });
+        // Krótkie klamry stoją bliżej pudełek; każda następna, która zachodzi
+        // na wcześniejszą, idzie o pas dalej.
+        const lanes = [];
+        for (const span of spans.sort((p, q) => (p.bottom - p.top) - (q.bottom - q.top))) {
+            let lane = 0;
+            while (lanes.some(o => o.lane === lane && o.top < span.bottom + 16 && span.top < o.bottom + 16)) lane++;
+            span.lane = lane;
+            lanes.push(span);
+        }
+        for (const {pair, a, b, ya, yb, lane} of spans) {
+            const ra = a.x + a.w, rb = b.x + b.w, x = Math.max(ra, rb) + 24 + lane * 22;
+            const sy = yb > ya ? 1 : -1, r = Math.min(6, Math.abs(yb - ya) / 2);
+            const d = `M${ra} ${ya}H${x - r}Q${x} ${ya} ${x} ${ya + sy * r}V${yb - sy * r}Q${x} ${yb} ${x - r} ${yb}H${rb}`;
+            grow(x + 4, ya); grow(x + 4, yb);
+            out.svg += `<g class="scheme-walk scheme-walk-brace"><title>Przejście pieszo, ${pair.min} min</title>`
+                + `<path d="${d}"/><circle cx="${ra}" cy="${ya}" r="2.5"/><circle cx="${rb}" cy="${yb}" r="2.5"/>`
+                + `${pill(along(ya, yb).map(y => [x, y]), pair)}</g>`;
+        }
+    } else {
+        const slots = new Map();
+        const slot = (box, edge) => {
+            const key = `${box.x}:${box.y}:${edge}`, n = slots.get(key) || 0;
+            slots.set(key, n + 1);
+            return n;
+        };
+        for (const pair of walks) {
+            let a = boxes.get(pair.from), b = boxes.get(pair.to);
+            if (centre(b) < centre(a)) [a, b] = [b, a];
+            let d, spots;
+            if (b.y >= a.y + a.h + 6) {
+                const x0 = a.x + 12 + slot(a, 'bottom') * 9, y0 = a.y + a.h;
+                const x1 = b.x + 12 + slot(b, 'top') * 9, y1 = b.y;
+                d = curvePath([[x0, y0], [x1, y1]]);
+                spots = [0.5, 0.3, 0.7, 0.15, 0.85].map(t => {
+                    const u = 1 - t, mid = (y0 + y1) / 2;
+                    return [x0 + (x1 - x0) * t * t * (3 - 2 * t),
+                            y0 * u ** 3 + 3 * mid * u * u * t + 3 * mid * u * t * t + y1 * t ** 3];
+                });
+                grow(x0, y0); grow(x1, y1);
+            } else {
+                const left = a.x < b.x ? a : b, right = left === a ? b : a;
+                const x0 = left.x + left.w, x1 = right.x, y0 = centre(left) + slot(left, 'side') * 7, y1 = centre(right);
+                d = `M${x0} ${y0}L${x1} ${y1}`;
+                spots = [0.5, 0.3, 0.7].map(t => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]);
+                grow(x0, y0); grow(x1, y1);
+            }
+            out.svg += `<g class="scheme-walk scheme-walk-dash"><title>Przejście pieszo, ${pair.min} min</title>`
+                + `<path d="${d}"/>${pill(spots, pair)}</g>`;
+        }
+    }
+    return out;
+}
+
+function schemeSvg(boxes, strands, pairs) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -5766,6 +5866,18 @@ function schemeSvg(boxes, strands, walks) {
         }
         if (s.badge) { minX = Math.min(minX, s.badge.x); maxX = Math.max(maxX, s.badge.x + s.badge.w); }
     }
+    // Przejścia pieszo leżą pod pudełkami i kreskami jazd, żeby nie zasłaniały
+    // linii; w trybie „po najechaniu” warstwa jest pusta, ale schemat ma na nie
+    // miejsce.
+    const walkSettings = schemeWalkSettings();
+    const walkLayers = walkSettings.mode === 'hover'
+        ? [...boxes.keys()].map(id => schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings, id), walkSettings.style))
+        : [schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings), walkSettings.style)];
+    for (const layer of walkLayers) {
+        minX = Math.min(minX, layer.minX); maxX = Math.max(maxX, layer.maxX);
+        minY = Math.min(minY, layer.minY); maxY = Math.max(maxY, layer.maxY);
+    }
+    const walkLayer = walkSettings.mode === 'hover' ? '' : walkLayers[0].svg;
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
     const colors = new Set();
     const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
@@ -5817,25 +5929,12 @@ function schemeSvg(boxes, strands, walks) {
     for (const branch of branches) {
         lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch');
     }
-    // Przejście pieszo ma kreskę kropkowaną w kolorze marszu - tak jak na
-    // mapie - i bez numeru, bo nie jedzie nim żadna linia. Wychodzi z lewego
-    // brzegu pudełka, żeby nie leżało na kreskach jazd, które trzymają się
-    // jego środka.
-    for (const walk of walks) {
-        const from = boxes.get(walk.from), to = boxes.get(walk.to);
-        const x0 = from.x + 12, y0 = from.y + from.h, x1 = to.x + 12, y1 = to.y;
-        colors.add(WALK_COLOR);
-        lines += `<g class="scheme-walk"><title>Przejście pieszo</title>`
-            + `<path class="scheme-line" stroke="${WALK_COLOR}" marker-end="url(#scheme-arrow-${WALK_COLOR.slice(1)})" `
-            + `d="${curvePath([[x0, y0], [x1, y1]])}"/></g>`;
-        minX = Math.min(minX, x0 - 30, x1 - 30); maxX = Math.max(maxX, x0 + 30, x1 + 30);
-    }
     const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
         + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
         + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
-        + `${rects}${lines}${names}${labels}</svg>`;
+        + `<g id="scheme-walk-layer">${walkLayer}</g>${rects}${lines}${names}${labels}</svg>`;
 }
 
 /** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
@@ -5875,7 +5974,8 @@ function renderScheme(data) {
         schemeLast = {boxes, strands};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands, scheme.walks);
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs);
+        bindSchemeWalkHover(canvas, boxes, scheme.pairs);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
@@ -6156,6 +6256,21 @@ function placeSchemeTip(element) {
     if (top + box.height > innerHeight - 8) top = Math.max(8, node.top - box.height - 6);
     tip.style.left = `${left}px`;
     tip.style.top = `${top}px`;
+}
+
+/** Tryb „po najechaniu”: przejścia pieszo pojawiają się tylko przy najechanym
+    pudełku (myszą, jak tablica odjazdów). */
+function bindSchemeWalkHover(canvas, boxes, pairs) {
+    const settings = schemeWalkSettings();
+    if (settings.mode !== 'hover') return;
+    const layer = canvas.querySelector('#scheme-walk-layer');
+    for (const element of canvas.querySelectorAll('g.node')) {
+        element.addEventListener('pointerenter', e => {
+            if (e.pointerType !== 'mouse') return;
+            layer.innerHTML = schemeWalkLayer(boxes, schemeWalksOf(pairs, settings, element.dataset.node), settings.style).svg;
+        });
+        element.addEventListener('pointerleave', () => { layer.innerHTML = ''; });
+    }
 }
 
 function bindSchemeNodes(canvas, data) {
@@ -7361,6 +7476,28 @@ for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walkin
         saveDevPref('scheme-layout', input.value);
         if (lastSchemeData) renderScheme(lastSchemeData);
     });
+}
+
+// Przejścia pieszo na schemacie (demo do oglądania): które pokazać i jak
+// narysować. Wiersze widać tylko z nową mapą, jak układ schematu.
+{
+    const rows = ['scheme-walks-mode', 'scheme-walks-count', 'scheme-walks-style'];
+    const prefs = loadDevPrefs();
+    for (const id of rows) {
+        const input = $(id);
+        if (prefs[id] !== undefined) input.value = prefs[id];
+        input.addEventListener('change', () => {
+            saveDevPref(id, input.value);
+            if (lastSchemeData) renderScheme(lastSchemeData);
+        });
+    }
+    const showRows = () => {
+        for (const id of rows) $(`${id}-row`).hidden = !$('new-map').checked;
+        $('scheme-walks-count-row').hidden = !$('new-map').checked || $('scheme-walks-mode').value !== 'few';
+    };
+    showRows();
+    $('new-map').addEventListener('change', showRows);
+    $('scheme-walks-mode').addEventListener('change', showRows);
 }
 
 // „Stoję tutaj / Jestem w pojeździe" da się schować - kto nie jeździ

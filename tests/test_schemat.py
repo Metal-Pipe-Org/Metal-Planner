@@ -593,6 +593,7 @@ RECZNY = {
                                               {"num": "9", "kind": "bus"}]},
     ],
     "walks": [],
+    "pairs": [],
     "order": [],
 }
 
@@ -649,18 +650,78 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
     context.close()
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_przejscie_pieszo_jest_kropkowana_kreska_bez_numeru(adres, przegladarka, uklad):
+def test_kazda_para_pudelek_ma_przejscie_pieszo_z_czasem(install_day):
+    install_day(_dzien_z_przesiadka_pieszo())
+    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    n = len(scheme["nodes"])
+    assert len(scheme["pairs"]) == n * (n - 1) // 2
+    name = {x["id"]: x.get("place") or x["role"] for x in scheme["nodes"]}
+    por_nazwach = {frozenset((name[p["from"]], name[p["to"]])): p["min"] for p in scheme["pairs"]}
+    # Przejście z mapy (krawędź 120 s) liczy się tak jak planista: do pełnej minuty.
+    assert por_nazwach[frozenset(("A", "B"))] == 2
+
+
+def _przejscia(page):
+    return page.evaluate("document.querySelectorAll('g.scheme-walk').length")
+
+
+PARY = [{"from": "n0", "to": "n1", "min": 7}, {"from": "n1", "to": "n2", "min": 2},
+        {"from": "n2", "to": "n3", "min": 9}, {"from": "n1", "to": "n4", "min": 4},
+        {"from": "n0", "to": "n5", "min": 20}, {"from": "n3", "to": "n4", "min": 5}]
+
+
+def _schemat_z_parami(przegladarka, adres, uklad, tryb, styl, ile=3):
     elk = []
     context, page = _strona(przegladarka, adres, elk, uklad)
     page.evaluate("document.getElementById('new-map').checked = true")
+    page.evaluate("""([m, s, c]) => {
+        document.getElementById('scheme-walks-mode').value = m;
+        document.getElementById('scheme-walks-style').value = s;
+        document.getElementById('scheme-walks-count').value = c;
+    }""", [tryb, styl, ile])
     page.evaluate("data => renderScheme(data)",
-                  {"scheme": {**RECZNY, "walks": [{"from": "n1", "to": "n4"}]},
-                   "start": "S", "end": "E", "nodes": []})
+                  {"scheme": {**RECZNY, "pairs": PARY}, "start": "S", "end": "E", "nodes": []})
     page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
-    assert page.evaluate("document.querySelectorAll('g.scheme-walk path').length") == 1
-    assert page.evaluate("""getComputedStyle(
-        document.querySelector('g.scheme-walk path')).strokeDasharray""") != "none"
-    assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") == "#455a64"
+    return context, page
+
+
+@pytest.mark.parametrize("uklad", ["dagre", "elk"])
+@pytest.mark.parametrize("styl,klasa", [("brace", "scheme-walk-brace"), ("dash", "scheme-walk-dash")])
+def test_przejscia_pieszo_tryb_wszystkie_i_najkrotsze(adres, przegladarka, uklad, styl, klasa):
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all", styl)
+    assert page.evaluate(f"document.querySelectorAll('g.{klasa}').length") == len(PARY)
+    assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") is None
     assert page.errors == []
+    context.close()
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "few", styl, 2)
+    assert _przejscia(page) == 2
+    assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
+                                  .map(t => t.textContent)""")) == ["pieszo, 2 min", "pieszo, 4 min"]
+    assert page.errors == []
+    context.close()
+
+
+@pytest.mark.parametrize("uklad", ["dagre", "elk"])
+@pytest.mark.parametrize("styl", ["brace", "dash"])
+def test_przejscia_pieszo_po_najechaniu_na_przystanek(adres, przegladarka, uklad, styl):
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "hover", styl)
+    assert _przejscia(page) == 0
+    page.dispatch_event("g.node[data-node='n1']", "pointerenter", {"pointerType": "mouse"})
+    assert _przejscia(page) == 3
+    page.dispatch_event("g.node[data-node='n1']", "pointerleave", {"pointerType": "mouse"})
+    assert _przejscia(page) == 0
+    assert page.errors == []
+    context.close()
+
+
+@pytest.mark.parametrize("uklad", ["dagre", "elk"])
+def test_klamry_nie_nakladaja_sie_na_siebie(adres, przegladarka, uklad):
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all", "brace")
+    pionowe = page.evaluate("""[...document.querySelectorAll('g.scheme-walk-brace path')].map(p => {
+        const box = p.getBBox();
+        return {x: box.x + box.width, top: box.y, bottom: box.y + box.height};
+    })""")
+    for i, a in enumerate(pionowe):
+        for b in pionowe[i + 1:]:
+            assert not (abs(a["x"] - b["x"]) < 10 and a["top"] < b["bottom"] and b["top"] < a["bottom"])
     context.close()
