@@ -1221,6 +1221,47 @@ function startFromHere() {
     else startInput.focus();
 }
 
+// ------------------------------------------------ moja pozycja na mapie ----
+
+// Kropka „tu jesteś" (#410) rusza się razem z pasażerem, więc czyta pozycję
+// ciągłym nasłuchem, nie jednorazowym pytaniem jak ◎. Nasłuch startuje tylko
+// po udzielonej już zgodzie: samo wejście na stronę nie ma wywołać pytania.
+const youAreHere = {
+    dot: L.marker([0, 0], {
+        icon: L.divIcon({className: 'you-are-here', iconSize: [18, 18]}),
+        interactive: false, keyboard: false, zIndexOffset: 1000,
+    }),
+    accuracy: L.circle([0, 0], {radius: 0, interactive: false, color: '#1a73e8', weight: 1, opacity: 0.4,
+        fillColor: '#1a73e8', fillOpacity: 0.12}),
+};
+
+function showYouAreHere(position) {
+    const at = [position.coords.latitude, position.coords.longitude];
+    youAreHere.dot.setLatLng(at);
+    youAreHere.accuracy.setLatLng(at).setRadius(position.coords.accuracy);
+    youAreHere.accuracy.addTo(map);
+    youAreHere.dot.addTo(map);
+}
+
+function watchYouAreHere() {
+    navigator.geolocation.watchPosition(showYouAreHere, () => {},
+        {enableHighAccuracy: true, maximumAge: 5000});
+}
+
+if (navigator.geolocation && navigator.permissions) {
+    navigator.permissions.query({name: 'geolocation'}).then(status => {
+        let watching = false;
+        const sync = () => {
+            if (status.state !== 'granted' || watching) return;
+            watching = true;
+            watchYouAreHere();
+        };
+        sync();
+        // Zgoda udzielona później (np. przy pierwszym ◎) włącza kropkę bez przeładowania.
+        status.addEventListener('change', sync);
+    });
+}
+
 // ---------------------------------------------------- kadrowanie widoku ----
 
 function fitTo(points) {
