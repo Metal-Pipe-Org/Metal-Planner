@@ -58,3 +58,18 @@ def test_bez_zgody_kropki_nie_ma_i_strona_o_nic_nie_pyta(przegladarka, adres):
     assert page.query_selector(KROPKA) is None
     context.close()
     assert not bledy
+
+
+def test_przycisk_lokalizacji_przy_aktywnym_nasluchu_wypelnia_skad_bez_bledu(przegladarka, adres):
+    slupek = gtfs.all_stops_geo()[0]
+    context, page, bledy = _otworz(
+        przegladarka, adres, permissions=["geolocation"],
+        geolocation={"latitude": slupek["lat"], "longitude": slupek["lon"]})
+    page.wait_for_selector(KROPKA)
+    for _ in range(2):
+        page.click("#locate")
+        page.wait_for_function("document.getElementById('start').value !== ''", timeout=6000)
+        assert page.is_hidden("#locate-msg")
+        page.fill("#start", "")
+    context.close()
+    assert not bledy

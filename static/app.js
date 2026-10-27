@@ -1081,7 +1081,22 @@ function useMyLocation(point, {fromLink = false} = {}) {
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
+// maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie jest teraz.
+// Z minutowym zapasem iPhone oddawał zapamiętaną pozycję sprzed kilkuset metrów.
 const GEO_OPTIONS = {enableHighAccuracy: true, timeout: 10000, maximumAge: 0};
+
+/** Świeża pozycja od systemu; gdy ta zawiedzie (przy aktywnym nasłuchu kropki
+    system nie zgłasza nowej, dopóki pozycja się nie zmieni - ktoś stojący w
+    miejscu dostaje timeout), bierze ostatnią z nasłuchu. Odmowa zgody to
+    nie awaria pomiaru, więc przechodzi dalej. */
+function askPosition(onPosition, onError) {
+    // Z pozycją z nasłuchu w zapasie nie ma po co czekać pełne 10 s.
+    const options = youAreHere.last ? {...GEO_OPTIONS, timeout: 3000} : GEO_OPTIONS;
+    navigator.geolocation.getCurrentPosition(onPosition, error => {
+        if (error.code !== error.PERMISSION_DENIED && youAreHere.last) onPosition(youAreHere.last);
+        else onError(error);
+    }, options);
+}
 
 const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onboardOn;
 
@@ -1137,7 +1152,7 @@ function refreshHere() {
     if (document.body.classList.contains('searching')
             || [$('time'), $('date')].includes(document.activeElement)) return;
     const asked = sel.start;
-    navigator.geolocation.getCurrentPosition(position => {
+    askPosition(position => {
         // Start mógł się zmienić, gdy GPS mielił.
         if (sel.start !== asked) return;
         sel.start = hereStart = {lat: position.coords.latitude,
@@ -1161,7 +1176,7 @@ function refreshHere() {
         // poprzedni wynik zostaje na ekranie, a następny obrót zegara spróbuje znów.
         }).catch(() => {});
     // Brak sygnału w tle: wynik zostaje, zegar próbuje za 30 s.
-    }, () => {}, GEO_OPTIONS);
+    }, () => {});
 }
 
 document.addEventListener('visibilitychange', syncAutoRefresh);
@@ -1193,7 +1208,7 @@ function locateStart(onFail = () => {}, options = {}) {
     const textBefore = startInput.value;
     const stale = () => sel.start !== startBefore || startInput.value !== textBefore;
     const finish = () => { locateButton.disabled = false; };
-    navigator.geolocation.getCurrentPosition(
+    askPosition(
         position => {
             finish();
             if (stale()) return;
@@ -1206,10 +1221,6 @@ function locateStart(onFail = () => {}, options = {}) {
             showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
             onFail();
         },
-        // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
-        // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
-        // pozycję sprzed kilkuset metrów.
-        GEO_OPTIONS,
     );
 }
 
@@ -1227,6 +1238,7 @@ function startFromHere() {
 // ciągłym nasłuchem, nie jednorazowym pytaniem jak ◎. Nasłuch startuje tylko
 // po udzielonej już zgodzie: samo wejście na stronę nie ma wywołać pytania.
 const youAreHere = {
+    last: null,
     dot: L.marker([0, 0], {
         icon: L.divIcon({className: 'you-are-here', iconSize: [18, 18]}),
         interactive: false, keyboard: false, zIndexOffset: 1000,
@@ -1236,6 +1248,7 @@ const youAreHere = {
 };
 
 function showYouAreHere(position) {
+    youAreHere.last = position;
     const at = [position.coords.latitude, position.coords.longitude];
     youAreHere.dot.setLatLng(at);
     youAreHere.accuracy.setLatLng(at).setRadius(position.coords.accuracy);
@@ -6184,11 +6197,10 @@ function savePlace() {
 /** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
 function locateOnce(onPoint, onError) {
     if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
-    navigator.geolocation.getCurrentPosition(
+    askPosition(
         position => onPoint({lat: position.coords.latitude,
                              lon: position.coords.longitude}),
         error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
-        GEO_OPTIONS,
     );
 }
 
