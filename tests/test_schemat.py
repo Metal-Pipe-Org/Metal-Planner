@@ -650,35 +650,35 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
     context.close()
 
 
-def test_kazda_para_pudelek_ma_przejscie_pieszo_z_czasem(install_day):
+def test_kazda_para_pudelek_ma_przejscie_pieszo_z_odlegloscia(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
     scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
     n = len(scheme["nodes"])
     assert len(scheme["pairs"]) == n * (n - 1) // 2
     name = {x["id"]: x.get("place") or x["role"] for x in scheme["nodes"]}
-    por_nazwach = {frozenset((name[p["from"]], name[p["to"]])): p["min"] for p in scheme["pairs"]}
-    # Przejście z mapy (krawędź 120 s) liczy się tak jak planista: do pełnej minuty.
-    assert por_nazwach[frozenset(("A", "B"))] == 2
+    por_nazwach = {frozenset((name[p["from"]], name[p["to"]])): p["m"] for p in scheme["pairs"]}
+    # Odległość w linii prostej między słupkami, a nie czas z krawędzi mostu (120 s).
+    assert por_nazwach[frozenset(("A", "B"))] > 1000
+    assert all("min" not in p for p in scheme["pairs"])
 
 
 def _przejscia(page):
     return page.evaluate("document.querySelectorAll('g.scheme-walk').length")
 
 
-PARY = [{"from": "n0", "to": "n1", "min": 7}, {"from": "n1", "to": "n2", "min": 2},
-        {"from": "n2", "to": "n3", "min": 9}, {"from": "n1", "to": "n4", "min": 4},
-        {"from": "n0", "to": "n5", "min": 20}, {"from": "n3", "to": "n4", "min": 5}]
+PARY = [{"from": "n0", "to": "n1", "m": 740}, {"from": "n1", "to": "n2", "m": 120},
+        {"from": "n2", "to": "n3", "m": 1234}, {"from": "n1", "to": "n4", "m": 260},
+        {"from": "n0", "to": "n5", "m": 2050}, {"from": "n3", "to": "n4", "m": 405}]
 
 
-def _schemat_z_parami(przegladarka, adres, uklad, tryb, styl, ile=3):
+def _schemat_z_parami(przegladarka, adres, uklad, tryb, ile=3):
     elk = []
     context, page = _strona(przegladarka, adres, elk, uklad)
     page.evaluate("document.getElementById('new-map').checked = true")
-    page.evaluate("""([m, s, c]) => {
+    page.evaluate("""([m, c]) => {
         document.getElementById('scheme-walks-mode').value = m;
-        document.getElementById('scheme-walks-style').value = s;
         document.getElementById('scheme-walks-count').value = c;
-    }""", [tryb, styl, ile])
+    }""", [tryb, ile])
     page.evaluate("data => renderScheme(data)",
                   {"scheme": {**RECZNY, "pairs": PARY}, "start": "S", "end": "E", "nodes": []})
     page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
@@ -686,25 +686,27 @@ def _schemat_z_parami(przegladarka, adres, uklad, tryb, styl, ile=3):
 
 
 @pytest.mark.parametrize("uklad", ["dagre", "elk"])
-@pytest.mark.parametrize("styl,klasa", [("brace", "scheme-walk-brace"), ("dash", "scheme-walk-dash")])
-def test_przejscia_pieszo_tryb_wszystkie_i_najkrotsze(adres, przegladarka, uklad, styl, klasa):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all", styl)
-    assert page.evaluate(f"document.querySelectorAll('g.{klasa}').length") == len(PARY)
+def test_przejscia_pieszo_tryb_wszystkie_i_najkrotsze(adres, przegladarka, uklad):
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all")
+    assert page.evaluate("document.querySelectorAll('g.scheme-walk-brace').length") == len(PARY)
     assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") is None
+    assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
+                                  .map(t => t.textContent)""")) == sorted([
+        "pieszo, 740 m", "pieszo, 120 m", "pieszo, 1,2 km", "pieszo, 260 m",
+        "pieszo, 2,1 km", "pieszo, 410 m"])
     assert page.errors == []
     context.close()
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "few", styl, 2)
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "few", 2)
     assert _przejscia(page) == 2
     assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
-                                  .map(t => t.textContent)""")) == ["pieszo, 2 min", "pieszo, 4 min"]
+                                  .map(t => t.textContent)""")) == ["pieszo, 120 m", "pieszo, 260 m"]
     assert page.errors == []
     context.close()
 
 
 @pytest.mark.parametrize("uklad", ["dagre", "elk"])
-@pytest.mark.parametrize("styl", ["brace", "dash"])
-def test_przejscia_pieszo_po_najechaniu_na_przystanek(adres, przegladarka, uklad, styl):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "hover", styl)
+def test_przejscia_pieszo_po_najechaniu_na_przystanek(adres, przegladarka, uklad):
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "hover")
     assert _przejscia(page) == 0
     page.dispatch_event("g.node[data-node='n1']", "pointerenter", {"pointerType": "mouse"})
     assert _przejscia(page) == 3
@@ -715,13 +717,26 @@ def test_przejscia_pieszo_po_najechaniu_na_przystanek(adres, przegladarka, uklad
 
 
 @pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_klamry_nie_nakladaja_sie_na_siebie(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all", "brace")
-    pionowe = page.evaluate("""[...document.querySelectorAll('g.scheme-walk-brace path')].map(p => {
-        const box = p.getBBox();
-        return {x: box.x + box.width, top: box.y, bottom: box.y + box.height};
-    })""")
-    for i, a in enumerate(pionowe):
-        for b in pionowe[i + 1:]:
+def test_klamry_leza_na_prawo_od_wszystkiego_i_nie_nakladaja_sie(adres, przegladarka, uklad):
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all")
+    pomiar = page.evaluate("""(() => {
+        const svg = document.querySelector('#scheme-canvas svg');
+        const prawy = Math.max(...[...svg.querySelectorAll('rect.scheme-box, .scheme-line, .scheme-badge')]
+            .map(e => e.getBBox().x + e.getBBox().width));
+        const klamry = [...svg.querySelectorAll('g.scheme-walk-brace')].map(g => {
+            const pionowa = g.querySelector('path').getBBox();
+            const napis = g.querySelector('rect.scheme-walk-pill').getBBox();
+            return {x: pionowa.x + pionowa.width, top: pionowa.y, bottom: pionowa.y + pionowa.height,
+                    napis: {l: napis.x, r: napis.x + napis.width, t: napis.y, b: napis.y + napis.height}};
+        });
+        return {prawy, klamry};
+    })()""")
+    for k in pomiar["klamry"]:
+        assert k["x"] > pomiar["prawy"]
+        assert k["napis"]["l"] > pomiar["prawy"]
+    for i, a in enumerate(pomiar["klamry"]):
+        for b in pomiar["klamry"][i + 1:]:
             assert not (abs(a["x"] - b["x"]) < 10 and a["top"] < b["bottom"] and b["top"] < a["bottom"])
+            assert not (a["napis"]["l"] < b["napis"]["r"] and b["napis"]["l"] < a["napis"]["r"]
+                        and a["napis"]["t"] < b["napis"]["b"] and b["napis"]["t"] < a["napis"]["b"])
     context.close()

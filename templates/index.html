@@ -983,7 +983,7 @@
     </label>
 
     {# Tymczasowo, do porównania układów schematu (#367). #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-layout" data-labels="Eksperymenty, Mapa" id="scheme-layout-row" hidden>
+    <label class="dev-check dev-only set-row" data-setting="scheme-layout" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-layout-row" hidden>
         Układ schematu
         <select id="scheme-layout">
             <option value="dagre">dagre (krzywe)</option>
@@ -991,8 +991,8 @@
         </select>
     </label>
 
-    {# Demo (#367): ile przejść pieszo pokazać na schemacie i jak je narysować. #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-walks-mode" data-labels="Eksperymenty, Mapa" id="scheme-walks-mode-row" hidden>
+    {# Demo (#367): ile przejść pieszo pokazać na schemacie. #}
+    <label class="dev-check dev-only set-row" data-setting="scheme-walks-mode" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-walks-mode-row" hidden>
         Przejścia pieszo na schemacie
         <select id="scheme-walks-mode">
             <option value="few">najkrótsze (liczba obok)</option>
@@ -1001,17 +1001,9 @@
         </select>
     </label>
 
-    <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa" id="scheme-walks-count-row" hidden>
+    <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-walks-count-row" hidden>
         Ile najkrótszych przejść
         <input type="number" id="scheme-walks-count" min="1" max="20" step="1" value="3">
-    </label>
-
-    <label class="dev-check dev-only set-row" data-setting="scheme-walks-style" data-labels="Eksperymenty, Mapa" id="scheme-walks-style-row" hidden>
-        Styl przejść pieszo
-        <select id="scheme-walks-style">
-            <option value="brace">klamra z boku</option>
-            <option value="dash">przerywana kreska</option>
-        </select>
     </label>
 
     {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}

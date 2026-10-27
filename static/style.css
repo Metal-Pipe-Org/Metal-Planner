@@ -2327,7 +2327,6 @@ body.dev-open .scheme-panel { right: 322px; }
 .scheme-walk path { fill: none; }
 .scheme-walk-brace path { stroke: #90a4ae; stroke-width: 1.5; }
 .scheme-walk-brace circle { fill: #90a4ae; }
-.scheme-walk-dash path { stroke: #607d8b; stroke-width: 3; stroke-dasharray: 7 6; }
 .scheme-walk-pill { fill: #fff; stroke: #90a4ae; stroke-width: 1; }
 .scheme-walk-text { fill: #546e7a; font: italic 11px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
 .scheme-name.bare { fill: #6b7785; stroke: none; font-weight: 500; }

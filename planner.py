@@ -9,7 +9,7 @@ na jego odjazd na przystanku startowym.
 from bisect import bisect_left, bisect_right
 from collections import deque
 from datetime import date, datetime, timedelta
-from math import ceil, sqrt
+from math import sqrt
 
 import bikes
 import gtfs
@@ -3998,11 +3998,10 @@ def _scheme_of_map(day, seg_list, nodes, target_set, source_stops):
 
 
 def _scheme_pairs(day, scheme_nodes, stops_of, target_set):
-    """Przejście pieszo między KAŻDĄ parą pudełek schematu, z czasem w pełnych
-    minutach (`min`) - to samo, co planista liczy na przesiadce
-    (gtfs.walk_seconds), z najbliższych sobie słupków obu pudełek. Pieszo
-    można iść z dowolnego przystanku na dowolny, więc schemat dostaje
-    wszystkie pary, a to, które z nich pokazać, wybiera front."""
+    """Przejście pieszo między KAŻDĄ parą pudełek schematu, z odległością
+    w linii prostej w metrach (`m`) między najbliższymi sobie słupkami obu
+    pudełek. Pieszo można iść z dowolnego przystanku na dowolny, więc schemat
+    dostaje wszystkie pary, a to, które z nich pokazać, wybiera front."""
     def stops(node):
         if node["role"] == "end":
             return target_set
@@ -4011,8 +4010,9 @@ def _scheme_pairs(day, scheme_nodes, stops_of, target_set):
     pairs = []
     for i, a in enumerate(scheme_nodes):
         for b in scheme_nodes[i + 1:]:
-            sec = min(gtfs.walk_seconds(day, x, y) for x in stops(a) for y in stops(b))
-            pairs.append({"from": a["id"], "to": b["id"], "min": ceil(sec / 60)})
+            metres = min(gtfs._haversine_m(*day.stop_coords[x], *day.stop_coords[y])
+                         for x in stops(a) for y in stops(b))
+            pairs.append({"from": a["id"], "to": b["id"], "m": round(metres)})
     return pairs
 
 

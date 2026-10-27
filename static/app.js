@@ -5752,102 +5752,97 @@ function schemeBranches(boxes, strands) {
     return out;
 }
 
+// Pas klamr i plakietki, które omijają - ten sam układ dla trybu „po najechaniu”.
+let schemeWalkSpace = null;
+
 function schemeWalkSettings() {
-    return {mode: $('scheme-walks-mode').value, count: Number($('scheme-walks-count').value),
-            style: $('scheme-walks-style').value};
+    return {mode: $('scheme-walks-mode').value, count: Number($('scheme-walks-count').value)};
 }
 
 /** Które przejścia pieszo schemat rysuje: wszystkie, tylko te przy pudełku
     `box` (najechanym) albo `count` najkrótszych. */
 function schemeWalksOf(pairs, settings, box) {
     if (settings.mode === 'hover') return pairs.filter(p => p.from === box || p.to === box);
-    if (settings.mode === 'few') return [...pairs].sort((a, b) => a.min - b.min).slice(0, settings.count);
+    if (settings.mode === 'few') return [...pairs].sort((a, b) => a.m - b.m).slice(0, settings.count);
     return pairs;
 }
 
+/** Odległość do napisu: do 10 m poniżej kilometra, do 0,1 km powyżej. */
+function fmtWalkDistance(m) {
+    const rounded = Math.round(m / 10) * 10;
+    if (rounded < 1000) return `${rounded} m`;
+    return `${(Math.round(m / 100) / 10).toFixed(1).replace('.', ',')} km`;
+}
+
 /** Przejścia pieszo wyglądają inaczej niż linie jazd, żeby się z nimi nie
-    myliły: klamra z boku pudełek albo cienka przerywana kreska z napisem. */
-function schemeWalkLayer(boxes, walks, style) {
+    myliły: cienka klamra w osobnym pasie na prawo od wszystkiego (`laneX`
+    to jego początek), więc nie przecina jazd ani nie ściska się między
+    pudełkami. Poziome dojścia do pasa omijają plakietki numerów `badges`;
+    linie jazd mogą przejść nad nimi, bo warstwa leży pod spodem. */
+function schemeWalkLayer(boxes, walks, laneX, badges) {
     const out = {svg: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
     const grow = (x, y) => {
         out.minX = Math.min(out.minX, x); out.maxX = Math.max(out.maxX, x);
         out.minY = Math.min(out.minY, y); out.maxY = Math.max(out.maxY, y);
     };
-    // Napisy nie mogą leżeć jeden na drugim: każdy bierze pierwsze wolne miejsce
-    // z podanych, a gdy żadne nie jest wolne - pierwsze.
+    const texts = walks.map(pair => `pieszo, ${fmtWalkDistance(pair.m)}`);
+    const widthOf = text => text.length * 5.8 + 14;
+    // Napis stoi na pionowej części klamry, więc pasy są szersze od napisu:
+    // żaden napis nie przykrywa cudzej klamry ani cudzego napisu.
+    const pitch = Math.max(0, ...texts.map(widthOf)) + 12;
     const placed = [];
-    const pill = (spots, pair) => {
-        const text = `pieszo, ${pair.min} min`, w = text.length * 5.8 + 14;
-        const free = ([x, y]) => !placed.some(o => Math.abs(o.x - x) < (o.w + w) / 2 + 2 && Math.abs(o.y - y) < 20);
-        const [cx, cy] = spots.find(free) || spots[0];
-        placed.push({x: cx, y: cy, w});
-        grow(cx - w / 2, cy - 9); grow(cx + w / 2, cy + 9);
-        return `<rect class="scheme-walk-pill" x="${cx - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
-            + `<text class="scheme-walk-text" x="${cx}" y="${cy}">${text}</text>`;
+    const pill = (spots, text, x) => {
+        const w = widthOf(text);
+        const free = y => !placed.some(o => Math.abs(o.x - x) < (o.w + w) / 2 + 2 && Math.abs(o.y - y) < 20);
+        const cy = spots.find(free) ?? spots[0];
+        placed.push({x, y: cy, w});
+        grow(x - w / 2, cy - 9); grow(x + w / 2, cy + 9);
+        return `<rect class="scheme-walk-pill" x="${x - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
+            + `<text class="scheme-walk-text" x="${x}" y="${cy}">${text}</text>`;
     };
-    const centre = box => box.y + box.h / 2;
-    // Miejsca na napis wzdłuż odcinka: środek, potem na zmianę dalej w obie strony.
-    const along = (y0, y1) => {
-        const mid = (y0 + y1) / 2, half = Math.max(0, Math.abs(y1 - y0) / 2 - 9), spots = [mid];
-        for (let k = 1; k * 20 <= half; k++) spots.push(mid + k * 20, mid - k * 20);
-        return spots;
+    // Wysokość, na której klamra wychodzi z pudełka: najbliżej środka, byle
+    // poziomy odcinek do pasa nie trafił w plakietkę i nie leżał na odcinku
+    // innej klamry z tego samego pudełka.
+    const used = new Map();
+    const exit = box => {
+        const mid = box.y + box.h / 2, taken = used.get(box) || [];
+        const clear = y => !badges.some(r => r.x < laneX && r.x + r.w > box.x + box.w
+            && y > r.y - 3 && y < r.y + r.h + 3);
+        const offsets = [0, -6, 6, -12, 12, -16, 16];
+        const y = offsets.map(o => mid + o).find(c => clear(c) && !taken.some(t => Math.abs(t - c) < 4))
+            ?? offsets.map(o => mid + o).find(clear) ?? mid;
+        used.set(box, [...taken, y]);
+        return y;
     };
-    if (style === 'brace') {
-        const spans = walks.map(pair => {
-            const a = boxes.get(pair.from), b = boxes.get(pair.to);
-            const same = Math.abs(centre(a) - centre(b)) < 8;
-            const ya = centre(a) - (same ? 8 : 0), yb = centre(b) + (same ? 8 : 0);
-            return {pair, a, b, ya, yb, top: Math.min(ya, yb), bottom: Math.max(ya, yb)};
-        });
-        // Krótkie klamry stoją bliżej pudełek; każda następna, która zachodzi
-        // na wcześniejszą, idzie o pas dalej.
-        const lanes = [];
-        for (const span of spans.sort((p, q) => (p.bottom - p.top) - (q.bottom - q.top))) {
-            let lane = 0;
-            while (lanes.some(o => o.lane === lane && o.top < span.bottom + 16 && span.top < o.bottom + 16)) lane++;
-            span.lane = lane;
-            lanes.push(span);
-        }
-        for (const {pair, a, b, ya, yb, lane} of spans) {
-            const ra = a.x + a.w, rb = b.x + b.w, x = Math.max(ra, rb) + 24 + lane * 22;
-            const sy = yb > ya ? 1 : -1, r = Math.min(6, Math.abs(yb - ya) / 2);
-            const d = `M${ra} ${ya}H${x - r}Q${x} ${ya} ${x} ${ya + sy * r}V${yb - sy * r}Q${x} ${yb} ${x - r} ${yb}H${rb}`;
-            grow(x + 4, ya); grow(x + 4, yb);
-            out.svg += `<g class="scheme-walk scheme-walk-brace"><title>Przejście pieszo, ${pair.min} min</title>`
-                + `<path d="${d}"/><circle cx="${ra}" cy="${ya}" r="2.5"/><circle cx="${rb}" cy="${yb}" r="2.5"/>`
-                + `${pill(along(ya, yb).map(y => [x, y]), pair)}</g>`;
-        }
-    } else {
-        const slots = new Map();
-        const slot = (box, edge) => {
-            const key = `${box.x}:${box.y}:${edge}`, n = slots.get(key) || 0;
-            slots.set(key, n + 1);
-            return n;
-        };
-        for (const pair of walks) {
-            let a = boxes.get(pair.from), b = boxes.get(pair.to);
-            if (centre(b) < centre(a)) [a, b] = [b, a];
-            let d, spots;
-            if (b.y >= a.y + a.h + 6) {
-                const x0 = a.x + 12 + slot(a, 'bottom') * 9, y0 = a.y + a.h;
-                const x1 = b.x + 12 + slot(b, 'top') * 9, y1 = b.y;
-                d = curvePath([[x0, y0], [x1, y1]]);
-                spots = [0.5, 0.3, 0.7, 0.15, 0.85].map(t => {
-                    const u = 1 - t, mid = (y0 + y1) / 2;
-                    return [x0 + (x1 - x0) * t * t * (3 - 2 * t),
-                            y0 * u ** 3 + 3 * mid * u * u * t + 3 * mid * u * t * t + y1 * t ** 3];
-                });
-                grow(x0, y0); grow(x1, y1);
-            } else {
-                const left = a.x < b.x ? a : b, right = left === a ? b : a;
-                const x0 = left.x + left.w, x1 = right.x, y0 = centre(left) + slot(left, 'side') * 7, y1 = centre(right);
-                d = `M${x0} ${y0}L${x1} ${y1}`;
-                spots = [0.5, 0.3, 0.7].map(t => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]);
-                grow(x0, y0); grow(x1, y1);
-            }
-            out.svg += `<g class="scheme-walk scheme-walk-dash"><title>Przejście pieszo, ${pair.min} min</title>`
-                + `<path d="${d}"/>${pill(spots, pair)}</g>`;
-        }
+    const spans = walks.map((pair, i) => {
+        const a = boxes.get(pair.from), b = boxes.get(pair.to);
+        return {pair, text: texts[i], a, b, length: Math.abs((a.y + a.h / 2) - (b.y + b.h / 2))};
+    });
+    // Krótkie klamry stoją bliżej pudełek; każda następna, która zachodzi
+    // na wcześniejszą, idzie o pas dalej.
+    const lanes = [];
+    for (const span of spans.sort((p, q) => p.length - q.length)) {
+        span.ya = exit(span.a);
+        span.yb = exit(span.b);
+        span.top = Math.min(span.ya, span.yb); span.bottom = Math.max(span.ya, span.yb);
+        let lane = 0;
+        while (lanes.some(o => o.lane === lane && o.top < span.bottom + 16 && span.top < o.bottom + 16)) lane++;
+        span.lane = lane;
+        lanes.push(span);
+    }
+    for (const {pair, text, a, b, ya, yb, top, bottom, lane} of spans) {
+        const ra = a.x + a.w, rb = b.x + b.w, x = laneX + pitch / 2 + lane * pitch;
+        const sy = yb > ya ? 1 : -1, r = Math.min(6, Math.abs(yb - ya) / 2);
+        const d = `M${ra} ${ya}H${x - r}Q${x} ${ya} ${x} ${ya + sy * r}V${yb - sy * r}Q${x} ${yb} ${x - r} ${yb}H${rb}`;
+        grow(x + pitch / 2, ya); grow(x + pitch / 2, yb);
+        // Napis najchętniej w środku pionu, a gdy odcinek jest za krótki -
+        // tuż nad albo pod nim, nie na poziomych dojściach.
+        const mid = (top + bottom) / 2, spots = [mid];
+        for (let k = 1; k * 20 <= (bottom - top) / 2 - 9; k++) spots.push(mid + k * 20, mid - k * 20);
+        const clear = spots.filter(y => Math.abs(y - ya) > 11 && Math.abs(y - yb) > 11);
+        out.svg += `<g class="scheme-walk scheme-walk-brace"><title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
+            + `<path d="${d}"/><circle cx="${ra}" cy="${ya}" r="2.5"/><circle cx="${rb}" cy="${yb}" r="2.5"/>`
+            + `${pill([...clear, top - 14, bottom + 14, ...spots], text, x)}</g>`;
     }
     return out;
 }
@@ -5870,9 +5865,12 @@ function schemeSvg(boxes, strands, pairs) {
     // linii; w trybie „po najechaniu” warstwa jest pusta, ale schemat ma na nie
     // miejsce.
     const walkSettings = schemeWalkSettings();
+    const badgeRects = [...strands, ...branches].filter(s => s.badge).map(s => s.badge);
+    const laneX = maxX + 20;
+    schemeWalkSpace = {laneX, badges: badgeRects};
     const walkLayers = walkSettings.mode === 'hover'
-        ? [...boxes.keys()].map(id => schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings, id), walkSettings.style))
-        : [schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings), walkSettings.style)];
+        ? [...boxes.keys()].map(id => schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings, id), laneX, badgeRects))
+        : [schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings), laneX, badgeRects)];
     for (const layer of walkLayers) {
         minX = Math.min(minX, layer.minX); maxX = Math.max(maxX, layer.maxX);
         minY = Math.min(minY, layer.minY); maxY = Math.max(maxY, layer.maxY);
@@ -6267,7 +6265,8 @@ function bindSchemeWalkHover(canvas, boxes, pairs) {
     for (const element of canvas.querySelectorAll('g.node')) {
         element.addEventListener('pointerenter', e => {
             if (e.pointerType !== 'mouse') return;
-            layer.innerHTML = schemeWalkLayer(boxes, schemeWalksOf(pairs, settings, element.dataset.node), settings.style).svg;
+            layer.innerHTML = schemeWalkLayer(boxes, schemeWalksOf(pairs, settings, element.dataset.node),
+                                              schemeWalkSpace.laneX, schemeWalkSpace.badges).svg;
         });
         element.addEventListener('pointerleave', () => { layer.innerHTML = ''; });
     }
@@ -7481,7 +7480,7 @@ for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walkin
 // Przejścia pieszo na schemacie (demo do oglądania): które pokazać i jak
 // narysować. Wiersze widać tylko z nową mapą, jak układ schematu.
 {
-    const rows = ['scheme-walks-mode', 'scheme-walks-count', 'scheme-walks-style'];
+    const rows = ['scheme-walks-mode', 'scheme-walks-count'];
     const prefs = loadDevPrefs();
     for (const id of rows) {
         const input = $(id);
