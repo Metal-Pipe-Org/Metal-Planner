@@ -73,3 +73,49 @@ def test_przycisk_lokalizacji_przy_aktywnym_nasluchu_wypelnia_skad_bez_bledu(prz
         page.fill("#start", "")
     context.close()
     assert not bledy
+
+
+def test_przycisk_lokalizacji_przy_nasluchu_odpowiada_od_reki(przegladarka, adres):
+    slupek = gtfs.all_stops_geo()[0]
+    context, page, bledy = _otworz(
+        przegladarka, adres, permissions=["geolocation"],
+        geolocation={"latitude": slupek["lat"], "longitude": slupek["lon"]})
+    page.wait_for_selector(KROPKA)
+    page.evaluate("() => { navigator.geolocation.getCurrentPosition = () => { throw new Error('jednorazowe pytanie'); }; }")
+    for _ in range(3):
+        page.click("#locate")
+        page.wait_for_function("document.getElementById('start').value !== ''", timeout=1000)
+        page.fill("#start", "")
+    context.close()
+    assert not bledy
+
+
+def test_pierwsze_klikniecie_bez_pozycji_czeka_na_pierwsza_z_nasluchu(przegladarka, adres):
+    context, page, bledy = _otworz(przegladarka, adres)
+    page.evaluate("""() => {
+        navigator.geolocation.watchPosition = (ok, fail) => { window.__gps = {ok, fail}; return 1; };
+    }""")
+    page.click("#locate")
+    page.wait_for_function("window.__gps")
+    page.wait_for_timeout(1500)
+    assert page.input_value("#start") == ""
+    assert page.is_hidden("#locate-msg")
+    page.evaluate("window.__gps.ok({coords: {latitude: 51.1, longitude: 17.03, accuracy: 10}})")
+    page.wait_for_function("document.getElementById('start').value !== ''", timeout=1000)
+    context.close()
+    assert not bledy
+
+
+def test_odmowa_zgody_przy_pierwszym_kliknieciu_pokazuje_komunikat(przegladarka, adres):
+    context, page, bledy = _otworz(przegladarka, adres)
+    page.evaluate("""() => {
+        navigator.geolocation.watchPosition = (ok, fail) => {
+            setTimeout(() => fail({code: 1, PERMISSION_DENIED: 1}), 50);
+            return 1;
+        };
+    }""")
+    page.click("#locate")
+    page.wait_for_selector("#locate-msg:not([hidden])", timeout=2000)
+    assert "zgody" in page.inner_text("#locate-msg")
+    context.close()
+    assert not bledy

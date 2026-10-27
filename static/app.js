@@ -1081,21 +1081,48 @@ function useMyLocation(point, {fromLink = false} = {}) {
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
-// maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie jest teraz.
-// Z minutowym zapasem iPhone oddawał zapamiętaną pozycję sprzed kilkuset metrów.
-const GEO_OPTIONS = {enableHighAccuracy: true, timeout: 10000, maximumAge: 0};
+const GEO_WAIT_MS = 10000;
 
-/** Świeża pozycja od systemu; gdy ta zawiedzie (przy aktywnym nasłuchu kropki
-    system nie zgłasza nowej, dopóki pozycja się nie zmieni - ktoś stojący w
-    miejscu dostaje timeout), bierze ostatnią z nasłuchu. Odmowa zgody to
-    nie awaria pomiaru, więc przechodzi dalej. */
+// Jedno źródło pozycji dla całej strony (#410, #236): ciągły nasłuch, z którego
+// czerpią kropka, ◎, odświeżanie i zapisane miejsca. Jednorazowe pytanie
+// przy działającym nasłuchu czeka w Chromium na zmianę pozycji, więc stojący
+// pasażer nie dostawał nic; nasłuch za to oddaje każdą zmianę, więc kto klika
+// ◎ w drodze, dostaje to, gdzie jest teraz, a nie zapamiętaną pozycję.
+const positionSource = {last: null, watching: false, waiting: []};
+
+function watchPosition() {
+    if (positionSource.watching) return;
+    positionSource.watching = true;
+    const watchId = navigator.geolocation.watchPosition(position => {
+        positionSource.last = position;
+        showYouAreHere(position);
+        for (const {onPosition, timer} of positionSource.waiting.splice(0)) {
+            clearTimeout(timer);
+            onPosition(position);
+        }
+    }, error => {
+        // Brak pomiaru nie jest awarią nasłuchu - czekający odpadną po czasie.
+        if (error.code !== error.PERMISSION_DENIED) return;
+        navigator.geolocation.clearWatch(watchId);
+        positionSource.watching = false;
+        for (const {onError, timer} of positionSource.waiting.splice(0)) {
+            clearTimeout(timer);
+            onError(error);
+        }
+    }, {enableHighAccuracy: true, maximumAge: 5000});
+}
+
+/** Aktualna pozycja z nasłuchu od ręki; bez niej (pierwsze kliknięcie, zgoda
+    dopiero co udzielona) start nasłuchu woła o zgodę i czeka na pierwszą. */
 function askPosition(onPosition, onError) {
-    // Z pozycją z nasłuchu w zapasie nie ma po co czekać pełne 10 s.
-    const options = youAreHere.last ? {...GEO_OPTIONS, timeout: 3000} : GEO_OPTIONS;
-    navigator.geolocation.getCurrentPosition(onPosition, error => {
-        if (error.code !== error.PERMISSION_DENIED && youAreHere.last) onPosition(youAreHere.last);
-        else onError(error);
-    }, options);
+    if (positionSource.last) { onPosition(positionSource.last); return; }
+    const waiter = {onPosition, onError};
+    waiter.timer = setTimeout(() => {
+        positionSource.waiting.splice(positionSource.waiting.indexOf(waiter), 1);
+        onError({code: 3});
+    }, GEO_WAIT_MS);
+    positionSource.waiting.push(waiter);
+    watchPosition();
 }
 
 const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onboardOn;
@@ -1234,11 +1261,10 @@ function startFromHere() {
 
 // ------------------------------------------------ moja pozycja na mapie ----
 
-// Kropka „tu jesteś" (#410) rusza się razem z pasażerem, więc czyta pozycję
-// ciągłym nasłuchem, nie jednorazowym pytaniem jak ◎. Nasłuch startuje tylko
-// po udzielonej już zgodzie: samo wejście na stronę nie ma wywołać pytania.
+// Kropka „tu jesteś" (#410) jest jednym z odbiorców nasłuchu pozycji (patrz
+// positionSource). Nasłuch startuje przy wejściu tylko po udzielonej już zgodzie:
+// samo wejście na stronę nie ma wywołać pytania.
 const youAreHere = {
-    last: null,
     dot: L.marker([0, 0], {
         icon: L.divIcon({className: 'you-are-here', iconSize: [18, 18]}),
         interactive: false, keyboard: false, zIndexOffset: 1000,
@@ -1248,7 +1274,6 @@ const youAreHere = {
 };
 
 function showYouAreHere(position) {
-    youAreHere.last = position;
     const at = [position.coords.latitude, position.coords.longitude];
     youAreHere.dot.setLatLng(at);
     youAreHere.accuracy.setLatLng(at).setRadius(position.coords.accuracy);
@@ -1256,19 +1281,9 @@ function showYouAreHere(position) {
     youAreHere.dot.addTo(map);
 }
 
-function watchYouAreHere() {
-    navigator.geolocation.watchPosition(showYouAreHere, () => {},
-        {enableHighAccuracy: true, maximumAge: 5000});
-}
-
 if (navigator.geolocation && navigator.permissions) {
     navigator.permissions.query({name: 'geolocation'}).then(status => {
-        let watching = false;
-        const sync = () => {
-            if (status.state !== 'granted' || watching) return;
-            watching = true;
-            watchYouAreHere();
-        };
+        const sync = () => { if (status.state === 'granted') watchPosition(); };
         sync();
         // Zgoda udzielona później (np. przy pierwszym ◎) włącza kropkę bez przeładowania.
         status.addEventListener('change', sync);
@@ -6194,7 +6209,7 @@ function savePlace() {
     placeDialog.close();
 }
 
-/** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
+/** Ta sama pozycja, o którą prosi ◎. */
 function locateOnce(onPoint, onError) {
     if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
     askPosition(
