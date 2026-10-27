@@ -4,8 +4,9 @@ Schemat to ta sama mapa zdjęta z geografii: węzły to te same kropki
 przesiadek co na mapie (plus start i cel), a strzałka to jedna jazda - od
 wsiadania do wysiadania. Przystanek, który linia tylko mija, nie tnie jej
 strzałki, nawet gdy stoi na nim kropka; linie między tymi samymi węzłami są
-jedną strzałką; strzałka kończy się tam, gdzie się naprawdę wysiada, a przejść
-pieszych i Polinki schemat nie rysuje wcale. Linia jadąca przez kilka węzłów
+jedną strzałką; strzałka kończy się tam, gdzie się naprawdę wysiada, Polinki schemat nie
+rysuje wcale, a przejścia piesze, którymi mapa dochodzi do gałęzi albo do
+celu, to osobne kropkowane kreski bez numeru. Linia jadąca przez kilka węzłów
 to jedna nitka od węzła do węzła. Start stoi na samej górze,
 a cel na samym dole - pilnuje tego sam kształt grafu: start jest jedynym
 źródłem, cel jedynym ujściem.
@@ -283,6 +284,54 @@ def test_bez_chodzenia_zostaje_tylko_przejscie_miedzy_slupkami_o_tej_samej_nazwi
     assert gtfs.without_walking(day) is free
 
 
+# ------------------------------------------------- przejścia piesze ---
+
+def _dzien_z_przesiadka_pieszo(*, bezposredni=False):
+    """Z S tramwajem 1 do A; z A idzie się do B (inna nazwa, dwa kroki
+    obok siebie), skąd autobus 2 jedzie do E. Z `bezposredni` jest też
+    autobus 3 prosto z S do E, żeby mapa miała co pokazać bez chodzenia."""
+    trips = [{"trip_id": "T1", "label": "Tramwaj 1", "stops": [("S", 0, 0), ("A", 300, 300)]},
+             {"trip_id": "T2", "label": "Autobus 2", "stops": [("B", 900, 900), ("E", 1500, 1500)]}]
+    if bezposredni:
+        trips.append({"trip_id": "T3", "label": "Autobus 3", "stops": [("S", 100, 100), ("E", 1700, 1700)]})
+    return make_day(trips, siblings={"A": {"B": 120}, "B": {"A": 120}})
+
+
+def test_przejscie_pieszo_z_mapy_jest_na_schemacie(install_day):
+    install_day(_dzien_z_przesiadka_pieszo())
+    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    name = {n["id"]: n.get("place") or n["role"] for n in scheme["nodes"]}
+    assert [(name[w["from"]], name[w["to"]]) for w in scheme["walks"]] == [("A", "B")]
+    # To nie jest jazda: nie ma na nim linii i nie jest strzałką.
+    assert ("A", "B", ("1",)) not in _po_nazwach(scheme)
+    assert [name[e["from"]] + ">" + name[e["to"]] for e in scheme["edges"]] == ["S>A", "B>end"]
+
+
+def test_bez_chodzenia_schemat_nie_ma_przejsc_pieszych(install_day):
+    install_day(_dzien_z_przesiadka_pieszo(bezposredni=True))
+    bez = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, walking=False)["scheme"]
+    assert bez["walks"] == []
+
+
+def test_dojscie_do_celu_pieszo_jest_na_schemacie():
+    pieces = [_kawalek("1", "S", "A")]
+    nodes = [_wezel("S", ("1", "start"), start=True), _wezel("A", ("1", "end"))]
+    scheme = planner._scheme(pieces, nodes, target_places={"T"},
+                             walkable=lambda a, b: (a, b) == ("A", planner.SCHEME_END))
+    name = {n["id"]: n.get("place") or n["role"] for n in scheme["nodes"]}
+    assert [(name[w["from"]], name[w["to"]]) for w in scheme["walks"]] == [("A", "end")]
+    assert scheme["order"] == [[w["from"], w["to"]] for w in scheme["walks"]]
+
+
+def test_gałąź_bez_przejścia_pieszo_dostaje_tylko_niewidoczną_podpowiedź_układu():
+    pieces = [_kawalek("1", "S", "A"), _kawalek("2", "B", "C")]
+    nodes = [_wezel("S", ("1", "start"), start=True), _wezel("A", ("1", "end")),
+             _wezel("B", ("2", "start"))]
+    scheme = planner._scheme(pieces, nodes, target_places={"C"})
+    assert scheme["walks"] == []
+    assert scheme["order"]
+
+
 # ------------------------------------------------------------- strona ---
 
 # ELK z sieci podstawiony: test nie zależy od CDN i ma przewidywalny układ -
@@ -543,6 +592,7 @@ RECZNY = {
         {"from": "n0", "to": "n5", "lines": [{"num": "7", "kind": "tram"},
                                               {"num": "9", "kind": "bus"}]},
     ],
+    "walks": [],
     "order": [],
 }
 
@@ -595,5 +645,22 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
     _plakietki_na_kreskach(pomiar)
     # Miarą wyboru układu jest liczba przecięć kresek, które naprawdę rysujemy.
     assert page.evaluate("schemeCost(schemeLast.boxes, schemeLast.strands).total") >= 0
+    assert page.errors == []
+    context.close()
+
+
+@pytest.mark.parametrize("uklad", ["dagre", "elk"])
+def test_przejscie_pieszo_jest_kropkowana_kreska_bez_numeru(adres, przegladarka, uklad):
+    elk = []
+    context, page = _strona(przegladarka, adres, elk, uklad)
+    page.evaluate("document.getElementById('new-map').checked = true")
+    page.evaluate("data => renderScheme(data)",
+                  {"scheme": {**RECZNY, "walks": [{"from": "n1", "to": "n4"}]},
+                   "start": "S", "end": "E", "nodes": []})
+    page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
+    assert page.evaluate("document.querySelectorAll('g.scheme-walk path').length") == 1
+    assert page.evaluate("""getComputedStyle(
+        document.querySelector('g.scheme-walk path')).strokeDasharray""") != "none"
+    assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") == "#455a64"
     assert page.errors == []
     context.close()

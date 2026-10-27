@@ -5752,7 +5752,7 @@ function schemeBranches(boxes, strands) {
     return out;
 }
 
-function schemeSvg(boxes, strands) {
+function schemeSvg(boxes, strands, walks) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -5817,6 +5817,19 @@ function schemeSvg(boxes, strands) {
     for (const branch of branches) {
         lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch');
     }
+    // Przejście pieszo ma kreskę kropkowaną w kolorze marszu - tak jak na
+    // mapie - i bez numeru, bo nie jedzie nim żadna linia. Wychodzi z lewego
+    // brzegu pudełka, żeby nie leżało na kreskach jazd, które trzymają się
+    // jego środka.
+    for (const walk of walks) {
+        const from = boxes.get(walk.from), to = boxes.get(walk.to);
+        const x0 = from.x + 12, y0 = from.y + from.h, x1 = to.x + 12, y1 = to.y;
+        colors.add(WALK_COLOR);
+        lines += `<g class="scheme-walk"><title>Przejście pieszo</title>`
+            + `<path class="scheme-line" stroke="${WALK_COLOR}" marker-end="url(#scheme-arrow-${WALK_COLOR.slice(1)})" `
+            + `d="${curvePath([[x0, y0], [x1, y1]])}"/></g>`;
+        minX = Math.min(minX, x0 - 30, x1 - 30); maxX = Math.max(maxX, x0 + 30, x1 + 30);
+    }
     const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
         + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
@@ -5840,7 +5853,7 @@ function renderScheme(data) {
     const scheme = data.scheme;
     const strands = schemeStrands(scheme);
     const boxes = schemeBoxes(scheme, strands, data);
-    // Węzły bez strzałki między sobą (przejścia ukryte) układają się w tej
+    // Węzły bez strzałki jazdy między sobą (przejścia piesze i gałęzie bez nich) układają się w tej
     // kolejności dzięki dodatkowym, niewidocznym krawędziom.
     const hidden = (scheme.order || []).map(([from, to]) => ({from, to}));
     const graph = {
@@ -5862,7 +5875,7 @@ function renderScheme(data) {
         schemeLast = {boxes, strands};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands);
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.walks);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);

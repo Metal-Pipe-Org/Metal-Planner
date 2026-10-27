@@ -2270,7 +2270,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                                                    limit=journey_limit,
                                                    gain_sec=gain_sec, ride=ride)
             if new_map:
-                scheme = _scheme_of_map(day, seg_list, nodes, target_set)
+                scheme = _scheme_of_map(day, seg_list, nodes, target_set, source_stops)
                 _scheme_times(scheme, map_journeys if with_journeys else
                               _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                   limit=journey_limit, gain_sec=gain_sec,
@@ -3834,7 +3834,7 @@ SCHEME_START, SCHEME_END = ("start",), ("end",)
 SCHEME_HIDDEN_KINDS = {"cable"}
 
 
-def _scheme(pieces, nodes, target_places=()):
+def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
     """Graf schematu - ta sama mapa zdjęta z geografii, bez własnych decyzji.
 
     Pudełka to kropki mapy (`nodes`), start i cel; do tego miejsce, w którym
@@ -3851,9 +3851,15 @@ def _scheme(pieces, nodes, target_places=()):
     jazdę. Jazdy Polinką (SCHEME_HIDDEN_KINDS) schemat ukrywa.
 
     Linie między tymi samymi dwoma pudełkami to jedna strzałka, tak jak jedna
-    grupka numerków na mapie. `order` to niewidoczne krawędzie układu: pudełko,
-    do którego nic nie dochodzi, stoi pod startem, a to, z którego nic nie
-    wychodzi - nad celem. Pole `bare` węzła: miejsce bez kropki na mapie."""
+    grupka numerków na mapie. Mapa przejść pieszych nie rysuje: pokazuje je
+    tym, że gałąź zaczyna się obok reszty rysunku. Schemat ma to samo
+    powiedzieć wprost, więc `walks` to przejścia, którymi do pudełka bez
+    żadnej jazdy dochodzi się z innego pudełka (`walkable(a, b)` - czy z a da
+    się dojść do b) i od ostatniego pudełka bez dalszej jazdy do celu; nie są
+    strzałkami jazdy i nie mają linii. `order` to niewidoczne krawędzie
+    układu: przejścia, a dla pudełka, do którego nic nie dochodzi, nawet
+    pieszo - stanie pod startem, a to, z którego nic nie wychodzi - nad celem.
+    Pole `bare` węzła: miejsce bez kropki na mapie."""
     target_places = set(target_places)
     start_node = next((n for n in nodes if n.get("start")), None)
     start_place = start_node["place"] if start_node else None
@@ -3924,10 +3930,30 @@ def _scheme(pieces, nodes, target_places=()):
     ids = {place: f"n{i}" for i, place in enumerate(order)}
     has_in = {b for _, b in edges}
     has_out = {a for a, _ in edges}
-    hints = [[SCHEME_START, p] for p in order
-             if p not in (SCHEME_START, SCHEME_END) and p not in has_in]
-    hints += [[p, SCHEME_END] for p in order
-              if p not in (SCHEME_START, SCHEME_END) and p not in has_out]
+    inner = [p for p in order if p not in (SCHEME_START, SCHEME_END)]
+
+    def downstream(box):
+        seen, todo = set(), [box]
+        while todo:
+            at = todo.pop()
+            for a, b in edges:
+                if a == at and b not in seen:
+                    seen.add(b)
+                    todo.append(b)
+        return seen
+
+    walks = []
+    for b in inner:
+        if b not in has_in:
+            after = downstream(b)
+            walks += [(a, b) for a in order
+                      if (a == SCHEME_START or a in has_in) and a != b and a not in after
+                      and walkable(a, b)]
+    walks += [(a, SCHEME_END) for a in inner if a not in has_out and walkable(a, SCHEME_END)]
+    walked_to = {b for _, b in walks}
+    walked_from = {a for a, _ in walks}
+    hints = [[SCHEME_START, p] for p in inner if p not in has_in and p not in walked_to]
+    hints += [[p, SCHEME_END] for p in inner if p not in has_out and p not in walked_from]
     return {
         "nodes": [{"id": ids[p],
                    "role": "start" if p == SCHEME_START else "end" if p == SCHEME_END else "stop",
@@ -3940,14 +3966,33 @@ def _scheme(pieces, nodes, target_places=()):
                              for (kind, num), chain in sorted(
                                  lines.items(), key=lambda item: (item[0][0], len(item[0][1]), item[0][1]))]}
                   for (a, b), lines in sorted(edges.items(), key=lambda item: (ids[item[0][0]], ids[item[0][1]]))],
-        "order": sorted([ids[a], ids[b]] for a, b in hints),
+        "walks": [{"from": ids[a], "to": ids[b]} for a, b in walks],
+        "order": sorted([ids[a], ids[b]] for a, b in walks) + sorted([ids[a], ids[b]] for a, b in hints),
     }
 
 
-def _scheme_of_map(day, seg_list, nodes, target_set):
+def _scheme_of_map(day, seg_list, nodes, target_set, source_stops):
     """Schemat z tego, co mapa właśnie narysowała - patrz _scheme."""
+    by_name = {day.display_name[key]: ids for key, ids in day.stops_by_place.items()}
+    origin = _origin_walk(day, source_stops)
+    near_target = _target_reach(day, target_set)
+
+    def stops_of(box):
+        if box == SCHEME_START:
+            return source_stops
+        return by_name.get(box, ())
+
+    def walkable(a, b):
+        if b == SCHEME_END:
+            return any(stop in near_target for stop in stops_of(a))
+        if a == SCHEME_START:
+            return any(stop in origin for stop in stops_of(b))
+        return any(other in day.siblings.get(stop, ())
+                   for stop in stops_of(a) for other in stops_of(b))
+
     return _scheme(seg_list, nodes,
-                   target_places={gtfs.place_name(day, s) for s in target_set})
+                   target_places={gtfs.place_name(day, s) for s in target_set},
+                   walkable=walkable)
 
 
 def _scheme_times(scheme, journeys):
@@ -4016,7 +4061,9 @@ def _scheme_times(scheme, journeys):
 
 def _scheme_of_legs(variants):
     """Schemat w trybie awaryjnym mapy (węzłów wtedy nie ma): same jazdy
-    wariantów najszybszej trasy, jedna strzałka na jazdę, przejścia ukryte."""
+    wariantów najszybszej trasy, jedna strzałka na jazdę; przejścia między
+    jazdami to `walks`, dojście do pierwszej i od ostatniej zostaje w starcie
+    i celu."""
     edges, gaps = {}, set()
     for legs in variants:
         rides = [leg for leg in legs if leg["kind"] == "ride"
@@ -4039,6 +4086,7 @@ def _scheme_of_legs(variants):
         "edges": [{"from": ids[a], "to": ids[b],
                    "lines": [{"num": num, "kind": kind} for kind, num in sorted(lines)]}
                   for (a, b), lines in edges.items()],
+        "walks": [{"from": ids[a], "to": ids[b]} for a, b in sorted(gaps)],
         "order": sorted([ids[a], ids[b]] for a, b in gaps),
     }
 

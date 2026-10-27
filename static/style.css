@@ -2323,6 +2323,7 @@ body.dev-open .scheme-panel { right: 322px; }
 .scheme-box { fill: #d6eaf8; stroke: #7aa7cf; stroke-width: 1.5; cursor: pointer; }
 .scheme-box.bare { fill: none; stroke: #8a97a6; stroke-dasharray: 5 4; cursor: help; pointer-events: all; }
 .scheme-line { fill: none; stroke-width: 3; stroke-linejoin: round; pointer-events: none; }
+.scheme-walk .scheme-line { stroke-dasharray: 1 6; stroke-linecap: round; }
 .scheme-name.bare { fill: #6b7785; stroke: none; font-weight: 500; }
 .scheme-name { pointer-events: none; text-anchor: middle; dominant-baseline: central;
     font: 600 13px system-ui, sans-serif; paint-order: stroke; stroke-linejoin: round;
