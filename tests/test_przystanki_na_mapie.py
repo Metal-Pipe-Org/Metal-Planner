@@ -120,9 +120,9 @@ def test_slupki_miasta_niosa_nazwe_miejsca():
     assert slupki[-1]["kind"] == "train"
 
 
-def test_prog_nazw_jest_suwakiem_dev_z_ta_sama_wartoscia_co_front():
-    """Próg przybliżenia stoi pod ⚙ w sekcji DEV (nie w .env), a suwak
-    zaczyna od tej samej liczby, co domyślna wartość we froncie."""
+def test_prog_nazw_jest_suwakiem_dev_z_sensowna_domyslna():
+    """Próg przybliżenia stoi pod ⚙ w sekcji DEV (nie w .env), a domyślna
+    wartość suwaka (jedyne jej miejsce to index.html) mieści się w zakresie."""
     app = Flask(__name__, template_folder=str(ROOT / "templates"),
                 static_folder=str(ROOT / "static"))
     with app.test_request_context("/"):
@@ -132,7 +132,5 @@ def test_prog_nazw_jest_suwakiem_dev_z_ta_sama_wartoscia_co_front():
     wiersz = re.search(r'<div[^>]*data-setting="names-zoom"[^>]*>', html).group(0)
     assert "dev-only" in wiersz
     suwak = re.search(r'<input[^>]*id="names-zoom"[^>]*>', html).group(0)
-    app_js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
-    domyslny = re.search(r"namesZoom: (\d+)", app_js).group(1)
-    assert f'value="{domyslny}"' in suwak
-    assert 14 <= int(domyslny) <= 19
+    domyslny = int(re.search(r'value="(\d+)"', suwak).group(1))
+    assert 14 <= domyslny <= 19

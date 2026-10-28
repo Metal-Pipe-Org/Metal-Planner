@@ -58,7 +58,7 @@ def _otworz(przegladarka, adres, przelacznik=True, init=None, **opcje):
     bledy = []
     page.on("pageerror", lambda e: bledy.append(str(e)))
     page.add_init_script(
-        "localStorage.setItem('metal-planner:dev-prefs', %s)"
+        "localStorage.setItem('metal-planner:settings', %s)"
         % json.dumps(json.dumps({"location-refresh": przelacznik})))
     if init:
         page.add_init_script(init)
