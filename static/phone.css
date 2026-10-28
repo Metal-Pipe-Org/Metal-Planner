@@ -323,6 +323,9 @@ body:not(.search-collapsed) #map-dock { display: none; }
     padding: 0;
 }
 .headline-more { margin: 0; }
+/* Na tej szerokości zakres mapy i tak stoi zwykle w drugiej linijce, więc
+   kreska oddzielająca go od trasy zostawałaby na początku pustego miejsca. */
+.headline-sep { display: none; }
 
 #flow-panel,
 body.dev-open #flow-panel {

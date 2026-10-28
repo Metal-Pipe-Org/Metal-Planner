@@ -655,15 +655,15 @@ def _pary(scheme):
     return {frozenset((name[p["from"]], name[p["to"]])): p for p in scheme["pairs"]}
 
 
-def test_przejscie_ze_srodka_podrozy_jest_dodatkowe_z_odlegloscia_w_linii_prostej(install_day):
+def test_przejscie_ze_srodka_najszybszej_podrozy_jest_zawsze_z_odlegloscia_w_linii_prostej(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
     scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
     pary = _pary(scheme)
     # Tylko to jedno: nie każda para pudełek, a odległość to linia prosta
     # między słupkami (a nie czas z krawędzi mostu, 120 s).
     assert list(pary) == [frozenset(("A", "B"))]
-    assert pary[frozenset(("A", "B"))]["why"] == "extra"
-    assert pary[frozenset(("A", "B"))]["rank"] == 1
+    assert pary[frozenset(("A", "B"))]["why"] == "fastest"
+    assert "rank" not in pary[frozenset(("A", "B"))]
     assert pary[frozenset(("A", "B"))]["m"] > 1000
 
 
@@ -697,7 +697,7 @@ def test_najszybsze_jest_dojscie_pieszo_start_cel(install_day):
     # Cel o 110 m od punktu: dwie minuty marszu wygrywają z każdym kursem.
     flow = planner.plan_flow("", "E", WHEN, start_point=punkt, more=3, new_map=True)
     assert frozenset(("start", "end")) in _pary(flow["scheme"])
-    assert _pary(flow["scheme"])[frozenset(("start", "end"))]["why"] == "direct"
+    assert _pary(flow["scheme"])[frozenset(("start", "end"))]["why"] == "fastest"
 
 
 def test_dojscie_pieszo_start_cel_znika_gdy_komunikacja_jest_szybsza(install_day):
@@ -705,6 +705,34 @@ def test_dojscie_pieszo_start_cel_znika_gdy_komunikacja_jest_szybsza(install_day
     # E jest ~7 km od S, a autobus 3 jedzie 27 minut.
     flow = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)
     assert frozenset(("start", "end")) not in _pary(flow["scheme"])
+
+
+def _dzien_z_szybka_i_wolniejsza_z_przejsciem():
+    """Najszybszy jest autobus 3 prosto z S do E; wolniejsza trasa to tramwaj 1
+    do A, przejście do B i autobus 2."""
+    return make_day([
+        {"trip_id": "T1", "label": "Tramwaj 1", "stops": [("S", 0, 0), ("A", 300, 300)]},
+        {"trip_id": "T2", "label": "Autobus 2", "stops": [("B", 900, 900), ("E", 1500, 1500)]},
+        {"trip_id": "T3", "label": "Autobus 3", "stops": [("S", 100, 100), ("E", 1000, 1000)]},
+    ], siblings={"A": {"B": 120}, "B": {"A": 120}})
+
+
+def test_dodatkowe_przejscia_szuka_planner_poza_lista_wynikow(install_day):
+    install_day(_dzien_z_szybka_i_wolniejsza_z_przejsciem())
+    bez = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    assert [p for p in bez["pairs"] if p["why"] == "extra"] == []
+    z = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, scheme_extra=4)["scheme"]
+    pary = _pary(z)
+    # Najszybsza podróż nie ma przejścia, więc "fastest" nie ma nic, a wolniejsza
+    # z przejściem jest pierwszą dodatkową.
+    assert [p["why"] for p in z["pairs"]] == ["extra"]
+    assert pary[frozenset(("A", "B"))]["rank"] == 1
+
+
+def test_najszybsza_podroz_z_przejsciem_nie_liczy_sie_do_dodatkowych(install_day):
+    install_day(_dzien_z_przesiadka_pieszo())
+    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, scheme_extra=4)["scheme"]
+    assert [p["why"] for p in scheme["pairs"]] == ["fastest"]
 
 
 def _przejscia(page):
@@ -715,7 +743,7 @@ PARY = [{"from": "n0", "to": "n1", "m": 740, "why": "access"},
         {"from": "n1", "to": "n2", "m": 120, "why": "extra", "rank": 1},
         {"from": "n2", "to": "n3", "m": 1234, "why": "extra", "rank": 2},
         {"from": "n1", "to": "n4", "m": 260, "why": "extra", "rank": 3},
-        {"from": "n0", "to": "n5", "m": 2050, "why": "direct"}]
+        {"from": "n0", "to": "n5", "m": 2050, "why": "fastest"}]
 
 
 def _schemat_z_parami(przegladarka, adres, uklad, ile=3):
@@ -734,6 +762,14 @@ def test_przejscia_pieszo_dojscia_zawsze_a_dodatkowe_wedlug_ustawienia(adres, pr
     context, page = _schemat_z_parami(przegladarka, adres, uklad, 3)
     assert page.evaluate("document.querySelectorAll('g.scheme-walk-brace').length") == len(PARY)
     assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") is None
+    # Dodatkowe klamry mają inny kolor niż szare: to ustawienie debugowe.
+    kolory = page.evaluate("""[...document.querySelectorAll('g.scheme-walk-brace')].map(g => [
+        g.classList.contains('scheme-walk-extra'),
+        getComputedStyle(g.querySelector('path')).stroke,
+        getComputedStyle(g.querySelector('.scheme-walk-text')).fill])""")
+    assert sorted(k[0] for k in kolory) == [False, False, True, True, True]
+    assert {(k[1], k[2]) for k in kolory if k[0]} == {("rgb(230, 81, 0)", "rgb(230, 81, 0)")}
+    assert not {(k[1], k[2]) for k in kolory if not k[0]} & {("rgb(230, 81, 0)", "rgb(230, 81, 0)")}
     assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
                                   .map(t => t.textContent)""")) == sorted([
         "pieszo, 740 m", "pieszo, 120 m", "pieszo, 1,2 km", "pieszo, 260 m", "pieszo, 2,1 km"])

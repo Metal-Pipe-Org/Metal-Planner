@@ -699,7 +699,7 @@
       (gtfs.with_pace), więc każde tempo to jedno przeliczenie, a nie jedno
       na każde zapytanie.
     #}
-    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe">
+    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe, Chodzenie">
         <label for="walk-pace">
             Tempo marszu <output id="walk-pace-value">zwykłe</output>
             <span class="info" tabindex="0" role="button"
@@ -978,8 +978,12 @@
         <input type="checkbox" id="new-map"> Nowa mapa (eksperyment)
     </label>
 
-    <label class="dev-check dev-only set-row" data-setting="walking" data-labels="Eksperymenty, Mapa">
+    <label class="dev-check dev-only set-row" data-setting="walking" data-labels="Eksperymenty, Mapa, Chodzenie">
         <input type="checkbox" id="walking" checked> Chodzenie pieszo
+    </label>
+
+    <label class="dev-check dev-only set-row" data-setting="headline-map-range" data-labels="Eksperymenty, Mapa, Pasek">
+        <input type="checkbox" id="headline-map-range"> Pokaż zakres mapy na pasku
     </label>
 
     {# Tymczasowo, do porównania układów schematu (#367). #}
@@ -992,7 +996,7 @@
     </label>
 
     {# Demo (#367): ile najszybszych podróży z przejściem pieszo w środku dorzucić do schematu. #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-walks-count-row" hidden>
+    <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa, Schemat, Chodzenie" id="scheme-walks-count-row" hidden>
         Ile dodatkowych najszybszych przejść
         <input type="number" id="scheme-walks-count" min="0" max="20" step="1" value="2">
     </label>

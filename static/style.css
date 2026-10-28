@@ -1917,6 +1917,17 @@ body.routes-off #results .notice.loading { display: none; }
     gap: 7px;
 }
 
+/* Kreska zamiast kropki: oddziela najszybszą trasę od zakresu mapy
+   wyraźniej, a nie wygląda na kolejne słowo zdania. */
+.headline-sep {
+    align-self: stretch;
+    box-sizing: content-box;
+    width: 1px;
+    margin: 2px -2px;
+    padding: 0 3px;
+    background: var(--line) content-box;
+}
+
 /* "Pokaż więcej" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie
    jak przycisk formularza; co robi, mówi dymek. */
 .headline-more {
@@ -2318,6 +2329,11 @@ body.dev-open .scheme-panel { right: 322px; }
 .scheme-walk-brace circle { fill: #90a4ae; }
 .scheme-walk-pill { fill: #fff; stroke: #90a4ae; stroke-width: 1; }
 .scheme-walk-text { fill: #546e7a; font: italic 11px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
+/* Dodatkowe przejścia to ustawienie debugowe, więc inny kolor niż szare klamry. */
+.scheme-walk-extra path { stroke: #e65100; stroke-dasharray: 5 3; }
+.scheme-walk-extra circle { fill: #e65100; }
+.scheme-walk-extra .scheme-walk-pill { stroke: #e65100; }
+.scheme-walk-extra .scheme-walk-text { fill: #e65100; }
 .scheme-name.bare { fill: #6b7785; stroke: none; font-weight: 500; }
 .scheme-name { pointer-events: none; text-anchor: middle; dominant-baseline: central;
     font: 600 13px system-ui, sans-serif; paint-order: stroke; stroke-linejoin: round;

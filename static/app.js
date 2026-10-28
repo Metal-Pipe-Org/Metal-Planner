@@ -1798,6 +1798,11 @@ const HEADLINE_RIDE_ICON =
     + '<rect x="3" y="1.8" width="10" height="10.4" rx="2" fill="none" stroke="currentColor"'
     + ' stroke-width="1.6"/><path d="M3.4 7.4h9.2M5.4 12.2v2M10.6 12.2v2" fill="none"'
     + ' stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+const HEADLINE_MAP_ICON =
+    '<svg class="headline-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<path d="M1.8 3.6 5.8 2l4.4 1.8 4-1.6v10.2l-4 1.6-4.4-1.8-4 1.6z M5.8 2v10.2'
+    + 'M10.2 3.8V14" fill="none" stroke="currentColor" stroke-width="1.4"'
+    + ' stroke-linejoin="round"/></svg>';
 
 function renderTimeHeadline() {
     const el = $('time-headline');
@@ -1818,9 +1823,10 @@ function renderTimeHeadline() {
     // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
     // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
     // z wartości podróży wie to dopiero po szerszym szukaniu.
-    // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - przycisku
-    // jeszcze nie ma.
+    // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - zakresu mapy
+    // i przycisku jeszcze nie ma.
     const mapped = typeof flow.limit_sec === 'number';
+    const showMapRange = $('headline-map-range').checked;
     const more = mapped && flow.more < MAX_MAP_MORE
         ? '<button type="button" class="headline-more" data-tip="'
           + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
@@ -1855,9 +1861,23 @@ function renderTimeHeadline() {
                + `<b>${esc(flow.best_arrival)}</b>`)
         + ride
         + '</span>'
-        // Znacznik .headline-map mówi, że mapa już przyszła (zakresu mapy pasek
-        // nie wyświetla, ale przycisk jej należy).
-        + (mapped ? `<span class="headline-map">${more}</span>` : '');
+        // Zakres mapy i jego przycisk to jedna całość: zawinięty pasek przenosi
+        // je razem, a nie zostawia samotnego przycisku w drugiej linijce.
+        // Sam zakres jest za ustawieniem deweloperskim; znacznik .headline-map
+        // zostaje także bez niego, bo mówi, że mapa już przyszła.
+        + (mapped
+            ? '<span class="headline-map">'
+              + (showMapRange
+                  ? '<span class="headline-sep" aria-hidden="true"'
+                    + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
+                    + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
+                                              + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
+                                              + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
+                           `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
+                  : '')
+              + more
+              + '</span>'
+            : '');
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
@@ -4982,6 +5002,7 @@ function queryParams() {
         car_vans: $('car-vans').checked ? '1' : '0',
         newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
+        scheme_extra: $('scheme-walks-count').value,
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
@@ -5738,8 +5759,8 @@ function schemeBranches(boxes, strands) {
 }
 
 /** Które przejścia pieszo schemat rysuje: te, które wybrał serwer z powodu
-    dojścia (patrz planner._scheme_pairs), i przejścia z `count` najszybszych
-    podróży, które mają przejście w środku. */
+    najszybszej podróży i dojścia (patrz planner._scheme_pairs), i przejścia
+    z `count` kolejnych podróży, które mają przejście w środku. */
 function schemeWalksOf(pairs) {
     const count = Number($('scheme-walks-count').value);
     return pairs.filter(p => p.why !== 'extra' || p.rank <= count);
@@ -5818,7 +5839,7 @@ function schemeWalkLayer(boxes, walks, laneX, badges) {
         const mid = (top + bottom) / 2, spots = [mid];
         for (let k = 1; k * 20 <= (bottom - top) / 2 - 9; k++) spots.push(mid + k * 20, mid - k * 20);
         const clear = spots.filter(y => Math.abs(y - ya) > 11 && Math.abs(y - yb) > 11);
-        out.svg += `<g class="scheme-walk scheme-walk-brace"><title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
+        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}"><title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
             + `<path d="${d}"/><circle cx="${ra}" cy="${ya}" r="2.5"/><circle cx="${rb}" cy="${yb}" r="2.5"/>`
             + `${pill([...clear, top - 14, bottom + 14, ...spots], text, x)}</g>`;
     }
@@ -7415,6 +7436,17 @@ for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walkin
     });
 }
 
+// Zakres mapy na pasku to tylko podgląd: zmiana przerysowuje pasek, bez
+// nowego zapytania.
+{
+    const input = $('headline-map-range');
+    input.checked = loadDevPrefs()['headline-map-range'] === true;
+    input.addEventListener('change', () => {
+        saveDevPref('headline-map-range', input.checked);
+        renderTimeHeadline();
+    });
+}
+
 // Układ schematu (tymczasowy wybór do porównania): zmiana tylko przerysowuje
 // to, co już przyszło.
 {
@@ -7443,7 +7475,8 @@ for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walkin
     $('new-map').addEventListener('change', showRow);
     input.addEventListener('change', () => {
         saveDevPref('scheme-walks-count', input.value);
-        if (lastSchemeData) renderScheme(lastSchemeData);
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     });
 }
 
