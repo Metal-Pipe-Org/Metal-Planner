@@ -16,8 +16,8 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `stale-issues.yml` | Przypomnienie po 14 dniach ciszy, zamknięcie po kolejnych 7. Zablokowanym zdejmuje `stale` zamiast przypominać. |
 | `stale-unlabel.yml` | Zdejmuje `stale` od razu po komentarzu człowieka, ponownym otwarciu albo ręcznym nadaniu `external blocked` / `PR in progress`, tą samą decyzją co bieg dzienny (`.github/scripts/stale.sh`). Etykietę `PR in progress` nadaną przez workflow obsługuje `issue-labels.yml`. |
 | `discord.yml` | Kanał repo na Discordzie z prawdziwymi pingami. |
-| `pr-conflicts.yml` | Po pushu do `main`: autor otwartego PR-a (także wersji roboczej), który ten push wpędził w konflikt z `main`, dostaje ping na Discordzie — raz na konflikt, nie po każdym kolejnym merge'u. Czekające prośby o recenzję takiego PR-a są zdejmowane, a gotowy PR wraca do wersji roboczej. Logika w `.github/scripts/conflicts.sh`. |
-| `pr-drafts.yml` | Gotowy PR do `main` nie dostaje zmian: push, który zmienia jego zmiany względem `main`, albo konflikt z `main` przy otwarciu i przy „Ready for review” przestawia go na wersję roboczą, z komentarzem o powodzie i zdjęciem próśb o recenzję. Push, który tylko dociąga `main` (diff PR-a bez zmian), zostawia go gotowym. Wyjście z wersji roboczej uruchamia ponowną ocenę Claude'a. Logika w `.github/scripts/drafts.sh`. |
+| `pr-conflicts.yml` | Po pushu do `main`: autor otwartego PR-a (także wersji roboczej), który ten push wpędził w konflikt z `main`, dostaje ping na Discordzie — raz na konflikt, nie po każdym kolejnym merge'u. Czekające prośby o recenzję takiego PR-a są zdejmowane, a gotowy PR wraca do wersji roboczej. Logika w `.github/scripts/conflicts.sh`. Token z `contents: write` — kodu z PR-a nie uruchamia (zasada 9). |
+| `pr-drafts.yml` | Gotowy PR do `main` nie dostaje zmian: push, który zmienia jego zmiany względem `main`, albo konflikt z `main` przy otwarciu i przy „Ready for review” przestawia go na wersję roboczą, z komentarzem o powodzie i zdjęciem próśb o recenzję. Push, który tylko dociąga `main` (diff PR-a bez zmian), zostawia go gotowym. Wyjście z wersji roboczej uruchamia ponowną ocenę Claude'a. Logika w `.github/scripts/drafts.sh`. Token z `contents: write` — kodu z PR-a nie uruchamia (zasada 9). |
 | `daily-digest.yml` | Co rano na Discordzie: postęp z wczoraj po karcie na osobę, potem karta „Ogólnie” z tym, co do zrobienia, i liczbami. |
 | `tests.yml` | Testy, odpalane wyłącznie ręcznie. |
 
@@ -54,7 +54,14 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 7. Komentarze po polsku i tylko o tym, *dlaczego*; logika w bashu z `gh` i `jq`.
 8. Wszystko, co piszą ludzie (tytuły, opisy, komentarze), wchodzi do skryptu
    przez `env`, nigdy przez `${{ }}` wklejone w bash.
-9. `pull_request_target` tylko bez checkoutu kodu z PR-a.
+9. `pull_request_target` tylko bez checkoutu kodu z PR-a. Kod z PR-a nigdy
+   się nie wykonuje: skrypty idą z `main` (sparse checkout,
+   `persist-credentials: false`), a czubek PR-a co najwyżej pobieramy jako
+   obiekty gita do odczytu (`merge-tree`, `diff`, `patch-id`). Szczególnie
+   pilnuj tego w `pr-drafts.yml` i `pr-conflicts.yml`: mają `contents: write`,
+   bo bez niego GraphQL `convertPullRequestToDraft` odmawia przestawienia
+   PR-a na wersję roboczą (#417), a z takim tokenem kod z PR-a mógłby
+   pushować do gałęzi PR-ów (`main` chroni ruleset).
 10. `claude-review-pr.yml` ma kopię na `stable`, która wjeżdża tam z każdym
    wydaniem — nie edytuj jej osobno.
 11. Akcja Claude'a uruchamia się tylko z workflow identycznym jak na `main`.

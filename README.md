@@ -173,3 +173,5 @@ Cały sposób pracy opisuje [CONTRIBUTING.md](CONTRIBUTING.md).
 30. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład
     gminy Siechnice.
 31. [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — automaty GitHuba i Discord.
+
+test
