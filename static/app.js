@@ -7162,8 +7162,8 @@ function refreshChangedGroup() {
 }
 
 function markChangedSettings() {
-    // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
-    for (const input of devPanel.querySelectorAll('.set-row input:not([type=file])')) {
+    // Wiersze akcji (wgranie pliku, dostęp chroniony) to nie ustawienia z domyślną.
+    for (const input of devPanel.querySelectorAll('.set-row:not(.set-action) input')) {
         input.closest('.set-row').classList.toggle('changed', differsFromDefault(input));
     }
     refreshChangedGroup();
@@ -7223,8 +7223,8 @@ function recordSettingsReset() {
 function settingControls() {
     // Kopie (`.set-copy`) tylko przekazują zmianę oryginałowi.
     // Tylko kontrolki wierszy listy: pole wyszukiwania i przyciski akcji nie są
-    // ustawieniami (wybór osoby i kod z Discorda też nie). Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
-    return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy) :is(input:not([type=file]), select):not(#siechnice-person, #siechnice-code)');
+    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
+    return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy, .set-action) :is(input, select)');
 }
 
 // Etykieta tak, jak widać ją w panelu - bez wartości suwaka i dymka „i”.
@@ -7310,10 +7310,48 @@ function siechniceToken() {
     try { return sessionStorage.getItem(SIECHNICE_TOKEN_KEY) || ''; } catch (e) { return ''; }
 }
 
+// Chroniona kontrolka (data-protected) przy braku odblokowania jest wyłączona,
+// ma kłódkę i po kliknięciu skacze do wiersza z kodem - nowa chroniona rzecz
+// potrzebuje tylko tego atrybutu.
 function setSiechniceLocked(locked) {
-    $('siechnice-upload').hidden = locked;
-    $('siechnice-lock').hidden = !locked;
+    for (const el of document.querySelectorAll('[data-protected]')) {
+        el.classList.toggle('locked', locked);
+        el.setAttribute('aria-disabled', String(locked));
+    }
+    $('siechnice-file').disabled = locked;
+    $('access-lock').hidden = !locked;
+    $('access-unlocked').hidden = locked;
+    if (locked) setSiechniceStatus('Wgrywanie zablokowane — kłódka prowadzi do odblokowania.');
 }
+
+function setAccessStatus(text, state) {
+    const el = $('access-status');
+    el.textContent = text;
+    el.className = state ? `field-hint ${state}` : 'field-hint';
+}
+
+// Wiersz może leżeć w zwiniętej grupie albo być odfiltrowany szukaniem, więc
+// najpierw czyścimy wyszukiwarkę, a grupę rozwijamy dopiero po przerysowaniu listy.
+function jumpToSetting(id) {
+    devToggle.classList.contains('active') || devToggle.click();
+    settingsSearch.value = '';
+    renderSettingsList();
+    const row = settingsList.querySelector(`.set-row[data-setting="${id}"]`);
+    const group = row.closest('details');
+    if (group) group.open = true;
+    row.scrollIntoView({block: 'center', behavior: 'smooth'});
+    row.classList.remove('jump-flash');
+    void row.offsetWidth;
+    row.classList.add('jump-flash');
+    row.addEventListener('animationend', () => row.classList.remove('jump-flash'), {once: true});
+}
+
+document.addEventListener('click', event => {
+    const locked = event.target.closest('[data-protected].locked');
+    if (!locked) return;
+    event.preventDefault();
+    jumpToSetting('dev-access');
+});
 
 async function fetchSiechniceStatus(init = {}) {
     const response = await fetch('/api/dev/siechnice',
@@ -7362,21 +7400,19 @@ async function setupSiechniceLock() {
     const info = await (await fetch('/api/dev/kod')).json();
     if (!info.available) {
         for (const el of [person, send, code, unlock]) el.disabled = true;
-        if (!$('siechnice-lock').hidden) {
-            setSiechniceStatus('Nie da się wysłać kodu — na serwerze brak konfiguracji Discorda '
-                + '(DISCORD, data/discord.json).', 'bad');
-        }
+        setAccessStatus('Nie da się wysłać kodu — na serwerze brak konfiguracji Discorda '
+            + '(DISCORD, data/discord.json).', 'bad');
         return;
     }
     for (const login of info.people) person.add(new Option(login, login));
-    if (!$('siechnice-lock').hidden) setSiechniceStatus('Wybierz osobę i wyślij kod — dostanie go na Discordzie.');
+    setAccessStatus('Wybierz osobę i wyślij kod — dostanie go na Discordzie.');
     send.addEventListener('click', async () => {
         send.disabled = true;
         try {
             await postDevJson('/api/dev/kod', {login: person.value});
-            setSiechniceStatus(`Kod poszedł na Discorda do ${person.value}. Ważny 10 min.`, 'ok');
+            setAccessStatus(`Kod poszedł na Discorda do ${person.value}. Ważny 10 min.`, 'ok');
         } catch (e) {
-            setSiechniceStatus(`Nie wysłano kodu: ${e.message}`, 'bad');
+            setAccessStatus(`Nie wysłano kodu: ${e.message}`, 'bad');
         }
         send.disabled = false;
     });
@@ -7385,9 +7421,10 @@ async function setupSiechniceLock() {
             const {token} = await postDevJson('/api/dev/odblokuj', {code: code.value.trim()});
             try { sessionStorage.setItem(SIECHNICE_TOKEN_KEY, token); } catch (e) { /* karta bez pamięci: zostanie zablokowana */ }
             code.value = '';
+            setAccessStatus('');
             describeSiechnice(await fetchSiechniceStatus());
         } catch (e) {
-            setSiechniceStatus(`Nie odblokowano: ${e.message}`, 'bad');
+            setAccessStatus(`Nie odblokowano: ${e.message}`, 'bad');
         }
     });
 }

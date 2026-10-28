@@ -935,13 +935,22 @@
       tygodnia wgrywa się stąd (patrz siechnice.validate_snapshot). Nie jest
       ustawieniem: nic tu nie trafia do pamięci przeglądarki.
     #}
-    <div class="field dev-only set-row" data-setting="siechnice-file" data-labels="Rozkład, Aplikacja">
-        <div class="sw-row" id="siechnice-upload" hidden>
-            <label class="button" for="siechnice-file">Wgraj rozkład Siechnic</label>
+    <div class="field dev-only set-row set-action" data-setting="siechnice-file" data-labels="Rozkład, Aplikacja">
+        <div class="sw-row" id="siechnice-upload">
+            <label class="button" for="siechnice-file" data-protected>Wgraj rozkład Siechnic</label>
             <input type="file" id="siechnice-file" accept=".json,application/json" hidden>
         </div>
-        <div id="siechnice-lock" hidden>
-            <div class="set-title">Wgrywanie zablokowane</div>
+        <p class="field-hint" id="siechnice-status" role="status"></p>
+    </div>
+
+{#
+      Odblokowanie chronionych rzeczy (zgłoszenie #433): kod z Discorda ważny do
+      zamknięcia karty. Chroniona kontrolka dostaje atrybut data-protected -
+      przy braku odblokowania ma kłódkę i skacze tutaj.
+    #}
+    <div class="field dev-only set-row set-action" data-setting="dev-access" data-labels="Deweloperskie, Dostęp">
+        <div class="set-title">Dostęp chroniony (kod z Discorda)</div>
+        <div id="access-lock">
             <div class="sw-row">
                 <select id="siechnice-person" aria-label="Kto dostanie kod"></select>
                 <button type="button" id="siechnice-send" class="button">Wyślij kod</button>
@@ -952,7 +961,8 @@
                 <button type="button" id="siechnice-unlock" class="button">Odblokuj</button>
             </div>
         </div>
-        <p class="field-hint" id="siechnice-status" role="status"></p>
+        <p class="field-hint ok" id="access-unlocked" hidden>Odblokowane do zamknięcia karty.</p>
+        <p class="field-hint" id="access-status" role="status"></p>
     </div>
 
     <div class="field dev-only set-row" data-setting="sw-check" data-labels="Aplikacja" id="sw-field">

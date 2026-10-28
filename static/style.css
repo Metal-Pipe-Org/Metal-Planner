@@ -2653,6 +2653,10 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
 .sw-row select, .sw-row input[type="text"] { flex: 1; min-width: 0; }
 .sw-row .button { flex: 0 0 auto; background: var(--surface-alt); }
 .sw-row .button:hover { background: #e8edf3; }
+@keyframes jump-flash { from { background: #fff3b0; } to { background: transparent; } }
+#dev-panel .set-row.jump-flash { animation: jump-flash 1.6s ease-out; }
+.button[data-protected].locked { opacity: 0.6; }
+.button[data-protected].locked::before { content: "🔒 "; }
 .sw-row .button:disabled { opacity: 0.6; cursor: default; }
 
 /* Wynik sprawdzenia: zwykła podpowiedź, ostrzeżenie albo realny błąd. */
