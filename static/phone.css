@@ -340,6 +340,21 @@ body.dev-open #flow-panel {
     overscroll-behavior: contain;
 }
 
+/* Schemat (eksperyment „nowa mapa”) to na telefonie kolejny kawałek doku,
+   nad paskiem - mapa zostaje nad nim widoczna, a zwinięty schemat to sam
+   nagłówek. */
+.scheme-panel {
+    position: static;
+    width: 100%;
+    max-width: none;
+}
+
+.scheme-viewport { height: 38vh; }
+
+/* Tablica węzła schematu zostaje, choć dymki tablic chowa okienko w doku
+   (reguła wyżej): dotyczy węzła na schemacie, nie kropki na mapie. */
+body:has(#flow-panel:not([hidden])) .scheme-tip:not([hidden]) { display: block; }
+
 /* Tablica „godziny w wierszu linii" w doku: pełna szerokość jak reszta doku
    (na dużym ekranie okienko rośnie do treści, tu nie ma dokąd), a godziny
    zawijają się pod siebie zamiast wypychać wiersz poza ekran. */

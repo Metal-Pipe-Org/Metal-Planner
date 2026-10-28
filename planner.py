@@ -453,6 +453,89 @@ def _scan(day, source_stops, target_stops, dep_sec, banned_labels=None, deadline
     return best_stop, best_arr, journey
 
 
+def _scan_mid_walk(day, source_stops, target_stops, dep_sec, banned_labels=None,
+                   deadline=None, seated=None):
+    """Connection Scan o najwcześniejszy przyjazd TRASĄ Z PRZEJŚCIEM PIESZO
+    W ŚRODKU: między dwiema jazdami, między słupkami o różnych nazwach. Zwykły _scan nie odpowie na to pytanie - najszybsza
+    trasa rzadko ma takie przejście, a mapa i tak rysuje tylko to, co jej
+    wartość zostawiła.
+
+    Dwie warstwy stanu: 0 - przejścia jeszcze nie było, 1 - już było. Jazda
+    zostaje w swojej warstwie, a z warstwy 0 na 1 przechodzi się tylko pieszo
+    po wysiadce. Oddaje (czas przyjazdu, etapy, pary słupków przejść w środku)
+    albo None."""
+    conns = day.conns
+    earliest = ({}, {})
+    pred = ({}, {})
+    trip_board = ({}, {})
+    targets = set(target_stops)
+    near_target = _target_reach(day, targets)
+    for stop in source_stops:
+        earliest[0][stop] = dep_sec
+        pred[0][stop] = ("origin",)
+    for stop, (skad, sec) in _origin_walk(day, source_stops).items():
+        if stop not in targets:
+            earliest[0][stop] = dep_sec + sec
+            pred[0][stop] = ("walk", 0, skad)
+    best = (INF, None, None)
+    limit = INF if deadline is None else deadline
+    for i in range(bisect_left(day.dep_times, dep_sec), len(conns)):
+        dep_t, arr_t, dep_s, arr_s, trip = conns[i]
+        if dep_t > best[0] or dep_t > limit:
+            break
+        if banned_labels and day.trip_info[trip][0] in banned_labels:
+            continue
+        for layer in (0, 1):
+            if trip not in trip_board[layer]:
+                reached = earliest[layer].get(dep_s, INF)
+                if reached is INF:
+                    continue
+                if reached + _board_buffer(pred[layer][dep_s][0], trip, seated) > dep_t:
+                    continue
+                trip_board[layer][trip] = i
+            if arr_t >= earliest[layer].get(arr_s, INF):
+                continue
+            earliest[layer][arr_s] = arr_t
+            pred[layer][arr_s] = ("ride", layer, trip_board[layer][trip], i)
+            if layer == 1:
+                if arr_s in targets and arr_t < best[0]:
+                    best = (arr_t, arr_s, None)
+                blisko = near_target.get(arr_s)
+                if blisko is not None and blisko[0] and arr_t + blisko[0] < best[0]:
+                    best = (arr_t + blisko[0], blisko[1], arr_s)
+            else:
+                for sibling in day.siblings.get(arr_s, ()):
+                    if day.stop_names[sibling] == day.stop_names[arr_s]:
+                        continue
+                    walk_arr = arr_t + gtfs.walk_seconds(day, arr_s, sibling)
+                    if walk_arr < earliest[1].get(sibling, INF):
+                        earliest[1][sibling] = walk_arr
+                        pred[1][sibling] = ("walk", 0, arr_s)
+    arrival, stop, egress_from = best
+    if stop is None:
+        return None
+    legs, mid_walks = [], []
+    if egress_from is not None:
+        legs.append(_walk_leg(day, egress_from, stop))
+        stop = egress_from
+    layer = 1
+    while pred[layer][stop][0] != "origin":
+        entry = pred[layer][stop]
+        if entry[0] == "walk":
+            legs.append(_walk_leg(day, entry[2], stop))
+            if layer == 1:
+                mid_walks.append((entry[2], stop))
+            stop, layer = entry[2], 0
+        else:
+            _, _, board_i, exit_i = entry
+            board = day.conns[board_i]
+            legs.append(_ride_leg(day, board[4], board[2], board[0], stop,
+                                  day.conns[exit_i][1]))
+            stop = board[2]
+    legs.reverse()
+    return arrival, legs, mid_walks
+
+
 def _reconstruct(day, journey, last_stop, geo_db=None):
     """Odtwarza trasę od celu do startu i skleja ją w czytelne etapy.
 
@@ -992,6 +1075,8 @@ WHY_SHOWN = 3
 
 DEFAULT_JOURNEY_LIMIT = 6     # domyślnie tyle propozycji tras szukamy/pokazujemy
 MIN_JOURNEY_LIMIT = 1
+MAX_SCHEME_EXTRA = 20
+SCHEME_EXTRA_WINDOW_SEC = 7200  # skan o dodatkowe trasy nie sięga dalej niż godzinę za najszybszym przyjazdem
 MAX_JOURNEY_LIMIT = 20        # (suwak w UI go nadpisuje) - "na siłę" więcej wariantów
 MAX_JOURNEY_CHAIN_LEGS = 4    # maks. liczba etapów przejazdu w jednej propozycji
 MAX_JOURNEY_CANDIDATES = 18   # tyle łańcuchów zbieramy przed sortowaniem/ucięciem PRZY
@@ -1940,7 +2025,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                      start_point=None, end_point=None, density=None, more=None,
                      car_count=None, journey_limit=None, transfer_gain_sec=None,
                      use_bikes=False, bike_count=None, car_vans=False,
-                     new_map=False,
+                     new_map=False, walking=True, scheme_extra=0,
                      bike_electric=True, bike_regular=True,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
@@ -1989,8 +2074,14 @@ def plan_flow_stages(start_query, end_query, when=None,
     tak samo jak gęstość. bike_count - to samo dla przejazdów rowerem (osobny
     suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_vans - czy
     pokazać też dostawczaki, wybierane osobno od osobówek.
-    new_map - przełącznik eksperymentu "nowa mapa" (⚙); na razie niczego nie
-    zmienia, dalsze zmiany gałęzią się po nim.
+    walking - False: bez chodzenia pieszo (patrz gtfs.without_walking), tylko
+    z przełącznika "Chodzenie pieszo" w ⚙ → Eksperymenty.
+    scheme_extra - ile dodatkowych najszybszych tras z przejściem pieszo
+    w środku dorzucić do schematu (ustawienie deweloperskie, patrz
+    _scheme_pairs).
+    new_map - przełącznik eksperymentu "nowa mapa" (⚙); na razie dokłada do
+    etapu "map" tylko `scheme` - schemat blokowy decyzji (patrz _scheme),
+    dalsze zmiany gałęzią się po nim.
     bike_electric/bike_regular - na jaki rodzaj roweru pasażer chce wsiąść
     (dwa przyciski w pasku warstw, patrz bikes.map_places). To odsiew MIEJSC, nie zmiana wyceny przejazdu: rower
     ma jedną prędkość niezależnie od rodzaju, więc odhaczenie jednego z nich
@@ -2056,6 +2147,8 @@ def plan_flow_stages(start_query, end_query, when=None,
 
     try:
         day = gtfs.with_pace(gtfs.load_day(when.date()), walk_pace)
+        if not walking:
+            day = gtfs.without_walking(day)
     except FileNotFoundError as e:
         yield "error", {"error": str(e)}
         return
@@ -2124,6 +2217,8 @@ def plan_flow_stages(start_query, end_query, when=None,
         try:
             later = gtfs.with_pace(
                 gtfs.load_day(when.date() + timedelta(days=day_offset)), walk_pace)
+            if not walking:
+                later = gtfs.without_walking(later)
         except FileNotFoundError:
             break
         ends = _resolve_endpoints(later, start_query, end_query,
@@ -2221,6 +2316,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         why_of = chosen_map["why_of"]
         earliest, _, _ = _forward(day, source_stops, dep_sec, deadline)
         profile = _target_profile(day, target_set, dep_sec, deadline)
+        query_sec = dep_sec
         dep_sec = chosen_map["map_from"]
         degraded = False
         if kept:
@@ -2255,12 +2351,24 @@ def plan_flow_stages(start_query, end_query, when=None,
                 source_stops, why_of, late=(best_arr, late_arrival),
                 alights=_last_alights(day, chosen_map["chosen"]), target_stops=target_set)
             map_journeys = []
-            if with_journeys:
+            if with_journeys or new_map:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
                                                 target_set, dep_sec, start_reach)
+            if with_journeys:
                 map_journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                    limit=journey_limit,
                                                    gain_sec=gain_sec, ride=ride)
+            if new_map:
+                scheme_journeys = (map_journeys if with_journeys else
+                                   _enumerate_journeys(day, graph, dep_sec, geo_db,
+                                                       limit=journey_limit, gain_sec=gain_sec,
+                                                       ride=ride))
+                scheme = _scheme_of_map(day, seg_list, nodes, target_set, source_stops,
+                                        scheme_journeys, query_sec, best_arr,
+                                        start_point is not None and ride is None,
+                                        end_point is not None, best_legs, seated,
+                                        int(max(0, min(MAX_SCHEME_EXTRA, scheme_extra or 0))))
+                _scheme_times(scheme, scheme_journeys)
         else:
             # Zabezpieczenie: _scan już udowodnił, że połączenie istnieje
             # (best_stop nie jest None), więc jeśli mapa i tak nie wybrała
@@ -2310,6 +2418,8 @@ def plan_flow_stages(start_query, end_query, when=None,
                         item["arrive"] = arrival
                     seg_list.append(item)
             seg_list.sort(key=lambda seg: seg["w"])   # blade pierwsze, jaskrawe na wierzchu
+            if new_map:
+                scheme = _scheme_of_legs(warianty)
             for wariant in warianty:
                 _drop_private(wariant)
 
@@ -2408,6 +2518,9 @@ def plan_flow_stages(start_query, end_query, when=None,
             # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
             # niż zwykle - i nie brać rzadkiej mapy za "tędy nic nie jedzie".
             "degraded": degraded,
+            # Schemat blokowy obok mapy - tylko w eksperymencie „nowa mapa”;
+            # bez niego odpowiedź zostaje co do bajtu taka jak dotąd.
+            **({"scheme": scheme} if new_map else {}),
         }
 
         # Warunek na dobę: stan stojaków jest sprzed minuty i tyle jest wart -
@@ -3798,6 +3911,391 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
         _drop_private(legs)
 
     return journeys
+
+
+# Schemat blokowy mapy (eksperyment „nowa mapa”, zgłoszenie #367): ta sama
+# mapa, tylko zdjęta z geografii. Węzły to te same kropki przesiadek co na
+# mapie (_transfer_nodes) plus start i cel; strzałka to jedna jazda - od
+# miejsca, w którym się wsiada, do miejsca, w którym mapa przestaje tę linię
+# wieźć. Przystanek, który linia tylko mija, nie tnie strzałki, nawet gdy stoi
+# na nim kropka: siedzi się w tym samym pojeździe (113 z Galerii
+# Dominikańskiej to jedna strzałka do celu, a nie trzy przesiadki po drodze).
+# Ten, kto dosiada się po drodze, dostaje własną strzałkę od swojego węzła.
+SCHEME_START, SCHEME_END = ("start",), ("end",)
+
+# Polinki schemat na razie nie pokazuje (decyzja użytkownika); rowery i auta
+# nie są kawałkami mapy, więc i tak tu nie trafiają.
+SCHEME_HIDDEN_KINDS = {"cable"}
+
+
+def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
+    """Graf schematu - ta sama mapa zdjęta z geografii, bez własnych decyzji.
+
+    Pudełka to kropki mapy (`nodes`), start i cel; do tego miejsce, w którym
+    narysowana linia naprawdę się zaczyna albo kończy, choć kropki tam nie ma
+    (tam mapa ją widocznie urywa). Linia idzie od pudełka do pudełka tak, jak
+    ją mapa rysuje (`pieces` = segmenty mapy), przez pudełka, które mija,
+    prosto (`chain` po obu stronach). Schemat NIE ocenia, czy linia dokądś
+    prowadzi: nic nie jest odcinane ani zgadywane, żadnych własnych przesiadek
+    - co mapa narysowała, to jest na schemacie.
+
+    Kawałki mapy tej samej linii, które się stykają (koniec jednego to początek
+    drugiego - szew korytarza), są jedną jazdą. Start to miejsce z węzła
+    `start`: przed nim linia się nie liczy; cel (`target_places`) kończy
+    jazdę. Jazdy Polinką (SCHEME_HIDDEN_KINDS) schemat ukrywa.
+
+    Linie między tymi samymi dwoma pudełkami to jedna strzałka, tak jak jedna
+    grupka numerków na mapie. Mapa przejść pieszych nie rysuje: pokazuje je
+    tym, że gałąź zaczyna się obok reszty rysunku. Schemat ma to samo
+    powiedzieć wprost, więc `walks` to przejścia, którymi do pudełka bez
+    żadnej jazdy dochodzi się z innego pudełka (`walkable(a, b)` - czy z a da
+    się dojść do b) i od ostatniego pudełka bez dalszej jazdy do celu; nie są
+    strzałkami jazdy i nie mają linii. `order` to niewidoczne krawędzie
+    układu: przejścia, a dla pudełka, do którego nic nie dochodzi, nawet
+    pieszo - stanie pod startem, a to, z którego nic nie wychodzi - nad celem.
+    Pole `bare` węzła: miejsce bez kropki na mapie."""
+    target_places = set(target_places)
+    start_node = next((n for n in nodes if n.get("start")), None)
+    start_place = start_node["place"] if start_node else None
+    dots = {n["place"] for n in nodes}
+
+    def box_of(place):
+        if place == start_place:
+            return SCHEME_START
+        return SCHEME_END if place in target_places else place
+
+    shown = []
+    for piece in pieces:
+        if piece["kind"] in SCHEME_HIDDEN_KINDS:
+            continue
+        stops = piece["stops_n"]
+        places = [p for i, p in enumerate(stops) if i == 0 or p != stops[i - 1]]
+        if start_place in places:
+            places = places[places.index(start_place):]
+        for i, place in enumerate(places):
+            if i and place in target_places:
+                places = places[:i + 1]
+                break
+        if len(places) > 1:
+            shown.append({"line": (piece["kind"], piece["num"]), "places": places})
+
+    def follows(a, b):
+        """b jedzie dalej tam, gdzie a się kończy (a nie z powrotem)."""
+        return (a is not b and a["line"] == b["line"]
+                and a["places"][-1] == b["places"][0]
+                and not b["places"][1] == a["places"][-2])
+
+    runs = []     # (linia, [miejsca]) - kawałki sklejone na stykach
+
+    def extend(line, places, last, seen):
+        nexts = [q for q in shown if id(q) not in seen and follows(last, q)]
+        if not nexts:
+            runs.append((line, places))
+        for q in nexts:
+            extend(line, places + q["places"][1:], q, seen | {id(q)})
+
+    for piece in shown:
+        if not any(follows(q, piece) for q in shown):
+            extend(piece["line"], list(piece["places"]), piece, {id(piece)})
+
+    edges, bare = {}, set()
+    for line, places in runs:
+        last = len(places) - 1
+        marks = [i for i, p in enumerate(places)
+                 if i in (0, last) or p in dots or p == start_place or p in target_places]
+        bare.update(places[i] for i in (0, last)
+                    if places[i] not in dots and places[i] != start_place
+                    and places[i] not in target_places)
+        for i, j in zip(marks, marks[1:]):
+            a, b = box_of(places[i]), box_of(places[j])
+            if a == b:
+                continue
+            # Linia jedzie dalej przez pudełko, na którym odcinek się kończy
+            # albo od którego zaczyna.
+            chain = j < last or i > 0
+            edges.setdefault((a, b), {})
+            edges[(a, b)][line] = edges[(a, b)].get(line, False) or chain
+
+    boxes = {SCHEME_START, SCHEME_END}
+    for a, b in edges:
+        boxes.update((a, b))
+    order = ([SCHEME_START] + sorted(p for p in boxes if p not in (SCHEME_START, SCHEME_END))
+             + [SCHEME_END])
+    ids = {place: f"n{i}" for i, place in enumerate(order)}
+    has_in = {b for _, b in edges}
+    has_out = {a for a, _ in edges}
+    inner = [p for p in order if p not in (SCHEME_START, SCHEME_END)]
+
+    def downstream(box):
+        seen, todo = set(), [box]
+        while todo:
+            at = todo.pop()
+            for a, b in edges:
+                if a == at and b not in seen:
+                    seen.add(b)
+                    todo.append(b)
+        return seen
+
+    walks = []
+    for b in inner:
+        if b not in has_in:
+            after = downstream(b)
+            walks += [(a, b) for a in order
+                      if (a == SCHEME_START or a in has_in) and a != b and a not in after
+                      and walkable(a, b)]
+    walks += [(a, SCHEME_END) for a in inner if a not in has_out and walkable(a, SCHEME_END)]
+    walked_to = {b for _, b in walks}
+    walked_from = {a for a, _ in walks}
+    hints = [[SCHEME_START, p] for p in inner if p not in has_in and p not in walked_to]
+    hints += [[p, SCHEME_END] for p in inner if p not in has_out and p not in walked_from]
+    return {
+        "nodes": [{"id": ids[p],
+                   "role": "start" if p == SCHEME_START else "end" if p == SCHEME_END else "stop",
+                   **({"place": p} if p not in (SCHEME_START, SCHEME_END) else
+                      {"place": start_place} if p == SCHEME_START and start_place else {}),
+                   **({"bare": True} if p in bare else {})}
+                  for p in order],
+        "edges": [{"from": ids[a], "to": ids[b],
+                   "lines": [{"num": num, "kind": kind, **({"chain": True} if chain else {})}
+                             for (kind, num), chain in sorted(
+                                 lines.items(), key=lambda item: (item[0][0], len(item[0][1]), item[0][1]))]}
+                  for (a, b), lines in sorted(edges.items(), key=lambda item: (ids[item[0][0]], ids[item[0][1]]))],
+        "walks": [{"from": ids[a], "to": ids[b]} for a, b in walks],
+        "order": sorted([ids[a], ids[b]] for a, b in walks) + sorted([ids[a], ids[b]] for a, b in hints),
+    }
+
+
+def _scheme_of_map(day, seg_list, nodes, target_set, source_stops, journeys,
+                   query_sec, best_arr, start_is_point, end_is_point, fastest_legs, seated,
+                   extra_count):
+    """Schemat z tego, co mapa właśnie narysowała - patrz _scheme."""
+    by_name = {day.display_name[key]: ids for key, ids in day.stops_by_place.items()}
+    origin = _origin_walk(day, source_stops)
+    near_target = _target_reach(day, target_set)
+
+    def stops_of(box):
+        if box == SCHEME_START:
+            return source_stops
+        return by_name.get(box, ())
+
+    def walkable(a, b):
+        if b == SCHEME_END:
+            return any(stop in near_target for stop in stops_of(a))
+        if a == SCHEME_START:
+            return any(stop in origin for stop in stops_of(b))
+        return any(other in day.siblings.get(stop, ())
+                   for stop in stops_of(a) for other in stops_of(b))
+
+    # Dodatkowe trasy z przejściem w środku: kolejne najszybsze, każda szukana
+    # osobnym skanem (_scan_mid_walk) i na innych liniach niż poprzednie -
+    # inaczej wszystkie byłyby tą samą trasą z innym ostatnim kursem. Mapa ich
+    # nie narysowała (rysuje tylko to, co zostawiła jej wartość), więc schemat
+    # dostaje ich jazdy i pudełka jako dodatek do mapy.
+    extra_pieces, extra_nodes, extra_walks = [], [], []
+    banned = set()
+    known = {n["place"] for n in nodes}
+    place = lambda stop: gtfs.place_name(day, stop)
+    while len(extra_walks) < extra_count:
+        found = _scan_mid_walk(day, source_stops, target_set, query_sec, banned_labels=banned,
+                               deadline=best_arr + SCHEME_EXTRA_WINDOW_SEC, seated=seated)
+        if found is None:
+            break
+        _, legs, mid_walks = found
+        banned |= {leg["line"] for leg in legs if leg["kind"] == "ride"}
+        if [(leg["kind"], leg["from"], leg["to"]) for leg in legs] == \
+                [(leg["kind"], leg["from"], leg["to"]) for leg in fastest_legs]:
+            continue
+        extra_walks.append([(place(a), place(b)) for a, b in mid_walks])
+        names = {place(stop) for pair in mid_walks for stop in pair}
+        for leg in legs:
+            if leg["kind"] != "ride":
+                continue
+            _, mode = _line_parts(leg["line"])
+            extra_pieces.append({"kind": mode, "num": leg["num"],
+                                 "stops_n": [place(leg["_from_id"]), place(leg["_to_id"])]})
+            names |= {place(leg["_from_id"]), place(leg["_to_id"])}
+        extra_nodes += [{"place": name} for name in sorted(names - known)]
+        known |= names
+
+    scheme = _scheme(seg_list + extra_pieces, nodes + extra_nodes,
+                     target_places={gtfs.place_name(day, s) for s in target_set},
+                     walkable=walkable)
+    scheme["pairs"] = _scheme_pairs(day, scheme["nodes"], stops_of, target_set, journeys,
+                                    query_sec, best_arr, start_is_point, end_is_point,
+                                    fastest_legs, extra_walks)
+    return scheme
+
+
+def _scheme_pairs(day, scheme_nodes, stops_of, target_set, journeys, query_sec,
+                  best_arr, start_is_point, end_is_point, fastest_legs, extra_walks):
+    """Przejścia pieszo, które schemat ma pokazać, z odległością w linii
+    prostej w metrach (`m`) między najbliższymi sobie słupkami obu pudełek.
+    Wybiera je serwer, bo tylko on wie, którymi podróżami się jedzie:
+
+      - "fastest": przejścia z NAJSZYBSZEJ podróży (najwcześniejszy przyjazd),
+        zawsze i poza ustawieniem frontu. Gdy najszybsze jest samo dojście
+        pieszo start -> cel (dociera przed każdą podróżą komunikacją z tego
+        wyszukiwania, bo ta nigdy nie liczy marszu wprost ze startu do celu
+        - patrz _origin_walk), to ono jest tym przejściem; inaczej są to
+        przejścia w środku najszybszej podróży;
+      - "access": gdy start jest punktem - ze startu do KAŻDEGO przystanku,
+        z którego odjeżdża któraś z pokazanych podróży; gdy cel jest punktem
+        - od każdego przystanku dojazdu do celu;
+      - "extra": przejścia ze środka pozostałych podróży (nie z dojścia ze
+        startu i do celu), a `rank` to miejsce podróży wśród tych, które takie
+        przejście mają, od najszybszej, bez najszybszej podróży (`extra_walks`,
+        policzone w _scheme_of_map tyle, ile każe ustawienie).
+
+    Pary zwracamy od najmocniejszego powodu; ta sama para raz."""
+    ids = {n["place"]: n["id"] for n in scheme_nodes if "place" in n}
+    start = next((n["id"] for n in scheme_nodes if n["role"] == "start"), None)
+    end = next(n["id"] for n in scheme_nodes if n["role"] == "end")
+    node_of = {n["id"]: n for n in scheme_nodes}
+
+    def stops(node):
+        if node["role"] == "end":
+            return target_set
+        return stops_of(SCHEME_START if node["role"] == "start" else node["place"])
+
+    def metres(a, b):
+        return round(min(gtfs._haversine_m(*day.stop_coords[x], *day.stop_coords[y])
+                         for x in stops(node_of[a]) for y in stops(node_of[b])))
+
+    pairs = {}
+
+    def add(a, b, why, rank=None):
+        if a is None or b is None or a == b:
+            return
+        key = frozenset((a, b))
+        if key in pairs and (why == "extra" or pairs[key]["why"] != "extra"):
+            return
+        pairs[key] = {"from": a, "to": b, "m": metres(a, b), "why": why,
+                      **({"rank": rank} if why == "extra" else {})}
+
+    def middle_walks(legs):
+        middle = [leg for leg in legs[1:-1] if leg["kind"] == "walk"]
+        found = [(ids.get(leg["from"]), ids.get(leg["to"])) for leg in middle]
+        return [(a, b) for a, b in found if a and b and a != b]
+
+    if day.walking:
+        walk_sec = gtfs.walk_time_sec(metres(start, end), day.walk_mps)
+        direct = query_sec + walk_sec < min([best_arr] + [j["arrival_sec"] for j in journeys])
+    else:
+        direct = False
+    if direct:
+        add(start, end, "fastest")
+    else:
+        for a, b in middle_walks(fastest_legs):
+            add(a, b, "fastest")
+
+    for journey in journeys:
+        legs = journey["legs"]
+        if start_is_point and legs[0]["kind"] == "walk":
+            add(start, ids.get(legs[0]["to"]), "access")
+        if end_is_point and legs[-1]["kind"] == "walk":
+            add(ids.get(legs[-1]["from"]), end, "access")
+
+    for rank, walks in enumerate(extra_walks, 1):
+        for a, b in walks:
+            add(ids.get(a), ids.get(b), "extra", rank)
+    return list(pairs.values())
+
+
+def _scheme_times(scheme, journeys):
+    """Godziny na schemacie - z podróży, które planista naprawdę znalazł (te
+    same, co lista i tablice węzłów), a nie z osobnego liczenia.
+
+    node["arrive_sec"] - najwcześniejsza godzina, o której którakolwiek z tych
+    podróży jest w węźle (na przystanku jedzie się przez niego tak samo jak się
+    w nim wysiada); cel ma najwcześniejszy przyjazd. line["arrive_sec"] na
+    strzałce do celu - przyjazd najlepszej podróży, która kończy się tą linią.
+    edge["fast"] - strzałki najszybszej podróży (najwcześniejszy przyjazd)."""
+    by_place = {n["place"]: n["id"] for n in scheme["nodes"] if "place" in n}
+    start = next((n["id"] for n in scheme["nodes"] if n["role"] == "start"), None)
+    end = next(n["id"] for n in scheme["nodes"] if n["role"] == "end")
+    arrive = {}
+    end_by_line = {}
+    best = None
+    for journey in journeys:
+        rides = [leg for leg in journey["legs"] if leg["kind"] == "ride"]
+        paths = []
+        for leg in rides:
+            seen = [(leg["from"], leg["dep_sec"])]
+            clock = leg["dep_sec"]
+            for stop in leg.get("via", ()):
+                hours, minutes = map(int, stop["t"].split(":"))
+                t = hours * 3600 + minutes * 60
+                while t < clock:
+                    t += 86400
+                clock = t
+                seen.append((stop["name"], t))
+            seen.append((leg["to"], leg["arr_sec"]))
+            for name, t in seen[1:]:
+                node = by_place.get(name)
+                if node is not None and node != start:
+                    arrive[node] = min(arrive.get(node, t), t)
+            path = [by_place[name] for name, _ in seen if name in by_place]
+            paths.append([node for i, node in enumerate(path) if i == 0 or node != path[i - 1]])
+        if not paths:
+            continue
+        # Cel to ostatnie miejsce ostatniej jazdy, gdy żaden węzeł nim nie jest.
+        if rides[-1]["to"] not in by_place:
+            paths[-1].append(end)
+            line = rides[-1]["num"]
+            key = (paths[-1][-2], end, line) if len(paths[-1]) > 1 else None
+            if key:
+                end_by_line[key] = min(end_by_line.get(key, journey["arrival_sec"]),
+                                       journey["arrival_sec"])
+        arrive[end] = min(arrive.get(end, journey["arrival_sec"]), journey["arrival_sec"])
+        if best is None or journey["arrival_sec"] < best[0]:
+            best = (journey["arrival_sec"], rides, paths)
+    fast = set()
+    if best is not None:
+        for ride_leg, path in zip(best[1], best[2]):
+            fast.update((a, b, ride_leg["num"]) for a, b in zip(path, path[1:]))
+    for node in scheme["nodes"]:
+        if node["id"] in arrive:
+            node["arrive_sec"] = arrive[node["id"]]
+    for edge in scheme["edges"]:
+        for line in edge["lines"]:
+            key = (edge["from"], edge["to"], line["num"])
+            if key in end_by_line:
+                line["arrive_sec"] = end_by_line[key]
+            if key in fast:
+                edge["fast"] = True
+
+
+def _scheme_of_legs(variants):
+    """Schemat w trybie awaryjnym mapy (węzłów wtedy nie ma): same jazdy
+    wariantów najszybszej trasy, jedna strzałka na jazdę; przejścia między
+    jazdami to `walks`, dojście do pierwszej i od ostatniej zostaje w starcie
+    i celu."""
+    edges, gaps = {}, set()
+    for legs in variants:
+        rides = [leg for leg in legs if leg["kind"] == "ride"
+                 and _line_parts(leg["line"])[1] not in SCHEME_HIDDEN_KINDS]
+        for i, leg in enumerate(rides):
+            a = SCHEME_START if i == 0 else leg["from"]
+            b = SCHEME_END if i == len(rides) - 1 else leg["to"]
+            edges.setdefault((a, b), set()).add(_line_parts(leg["line"])[::-1])
+            if i < len(rides) - 1 and leg["to"] != rides[i + 1]["from"]:
+                gaps.add((leg["to"], rides[i + 1]["from"]))
+    order = ([SCHEME_START] + sorted({p for e in list(edges) + list(gaps) for p in e}
+                                     - {SCHEME_START, SCHEME_END})
+             + [SCHEME_END])
+    ids = {place: f"n{i}" for i, place in enumerate(order)}
+    return {
+        "nodes": [{"id": ids[p], "role": ("start" if p == SCHEME_START else "end"
+                                          if p == SCHEME_END else "stop"),
+                   **({"place": p} if p not in (SCHEME_START, SCHEME_END) else {})}
+                  for p in order],
+        "edges": [{"from": ids[a], "to": ids[b],
+                   "lines": [{"num": num, "kind": kind} for kind, num in sorted(lines)]}
+                  for (a, b), lines in edges.items()],
+        "walks": [{"from": ids[a], "to": ids[b]} for a, b in sorted(gaps)],
+        "pairs": [],
+        "order": sorted([ids[a], ids[b]] for a, b in gaps),
+    }
 
 
 # ============================================================================

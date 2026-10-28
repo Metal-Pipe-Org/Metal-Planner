@@ -63,3 +63,17 @@ def test_tablica_nie_spycha_paska(strona):
 
     assert z["bar"]["top"] == bez["bar"]["top"] == 16
     assert z["board"]["top"] >= z["bar"]["bottom"]
+
+
+def test_zakres_mapy_na_pasku_tylko_z_ustawieniem(strona):
+    page = strona
+    page.wait_for_selector("#time-headline .headline-map", state="attached", timeout=20000)
+    assert page.query_selector("#time-headline .headline-limit") is None
+    assert page.query_selector("#time-headline .headline-sep") is None
+    page.evaluate("""() => { const c = document.getElementById('headline-map-range');
+                             c.checked = true; c.dispatchEvent(new Event('change')); }""")
+    assert page.is_visible("#time-headline .headline-limit")
+    assert page.is_visible("#time-headline .headline-sep")
+    page.evaluate("""() => { const c = document.getElementById('headline-map-range');
+                             c.checked = false; c.dispatchEvent(new Event('change')); }""")
+    assert page.query_selector("#time-headline .headline-limit") is None

@@ -699,7 +699,7 @@
       (gtfs.with_pace), więc każde tempo to jedno przeliczenie, a nie jedno
       na każde zapytanie.
     #}
-    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe">
+    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe, Chodzenie">
         <label for="walk-pace">
             Tempo marszu <output id="walk-pace-value">zwykłe</output>
             <span class="info" tabindex="0" role="button"
@@ -978,6 +978,29 @@
         <input type="checkbox" id="new-map"> Nowa mapa (eksperyment)
     </label>
 
+    <label class="dev-check dev-only set-row" data-setting="walking" data-labels="Eksperymenty, Mapa, Chodzenie">
+        <input type="checkbox" id="walking" checked> Chodzenie pieszo
+    </label>
+
+    <label class="dev-check dev-only set-row" data-setting="headline-map-range" data-labels="Eksperymenty, Mapa, Pasek">
+        <input type="checkbox" id="headline-map-range"> Pokaż zakres mapy na pasku
+    </label>
+
+    {# Tymczasowo, do porównania układów schematu (#367). #}
+    <label class="dev-check dev-only set-row" data-setting="scheme-layout" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-layout-row" hidden>
+        Układ schematu
+        <select id="scheme-layout">
+            <option value="dagre">dagre (krzywe)</option>
+            <option value="elk">ELK (kąty proste)</option>
+        </select>
+    </label>
+
+    {# Demo (#367): ile najszybszych podróży z przejściem pieszo w środku dorzucić do schematu. #}
+    <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa, Schemat, Chodzenie" id="scheme-walks-count-row" hidden>
+        Ile dodatkowych najszybszych przejść
+        <input type="number" id="scheme-walks-count" min="0" max="20" step="1" value="2">
+    </label>
+
     {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
     <label class="dev-check dev-only set-row" data-setting="location-refresh" data-labels="Eksperymenty, Lokalizacja, Funkcje">
             <input type="checkbox" id="location-refresh"> Odświeżanie lokalizacji co 30 s
@@ -1015,6 +1038,28 @@
   i nachodziły na siebie.
 #}
 <div id="map-dock">
+
+    {#
+      Schemat blokowy znalezionych tras obok mapy - eksperyment „nowa mapa”
+      (⚙ → Eksperymenty, patrz renderScheme w app.js). Bez przełącznika
+      zostaje schowany i pusty.
+    #}
+    <div id="scheme-panel" class="scheme-panel" hidden>
+        <div class="scheme-head">
+            <h2>Schemat</h2>
+            <button id="scheme-fit" class="icon-button" type="button"
+                    title="Cały schemat w oknie" aria-label="Pokaż cały schemat">⤢</button>
+            <button id="scheme-toggle" class="icon-button" type="button"
+                    title="Ukryj schemat" aria-label="Ukryj schemat"
+                    aria-expanded="true">▾</button>
+        </div>
+        <div id="scheme-viewport" class="scheme-viewport">
+            <div id="scheme-canvas"></div>
+        </div>
+    </div>
+    {# Tablica odjazdów węzła schematu - poza panelem, żeby nie ucinał jej
+       brzeg okna z rysunkiem. #}
+    <div id="scheme-tip" class="timetable-tip scheme-tip" hidden></div>
 
     {#
       Pasek nad mapą: ile w ogóle trwa ta podróż (patrz renderTimeHeadline
