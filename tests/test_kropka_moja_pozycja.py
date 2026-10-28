@@ -13,6 +13,11 @@ from test_uklad_telefonu import (PUSTE_ZRODLA, _odpowiedz, adres,  # noqa: F401
                                  przegladarka)
 
 KROPKA = ".you-are-here"
+KOLO_NA_MAPIE = """() => {
+    let jest = false;
+    plannerBridge.map.eachLayer(l => { if (l instanceof L.Circle) jest = true; });
+    return jest;
+}"""
 SRODEK_JS = """() => {
     const dot = document.querySelector('.you-are-here').getBoundingClientRect();
     return [dot.x + dot.width / 2, dot.y + dot.height / 2];
@@ -142,5 +147,25 @@ def test_odebrana_zgoda_po_zapamietanej_pozycji_pokazuje_komunikat_zamiast_stare
     page.wait_for_selector("#locate-msg:not([hidden])", timeout=2000)
     assert "zgody" in page.inner_text("#locate-msg")
     assert page.input_value("#start") == ""
+    context.close()
+    assert not bledy
+
+
+def test_odebrana_zgoda_w_nasluchu_zdejmuje_kropke_i_kolo_z_mapy(przegladarka, adres):
+    context, page, bledy = _otworz(przegladarka, adres)
+    page.evaluate("""() => {
+        navigator.geolocation.watchPosition = (ok, fail) => {
+            window.__gps = {ok, fail};
+            return 1;
+        };
+    }""")
+    page.click("#locate")
+    page.wait_for_function("window.__gps")
+    page.evaluate("window.__gps.ok({coords: {latitude: 51.1, longitude: 17.03, accuracy: 10}})")
+    page.wait_for_selector(".you-are-here", timeout=1000)
+    assert page.evaluate(KOLO_NA_MAPIE)
+    page.evaluate("window.__gps.fail({code: 1, PERMISSION_DENIED: 1})")
+    page.wait_for_selector(".you-are-here", state="detached", timeout=1000)
+    assert not page.evaluate(KOLO_NA_MAPIE)
     context.close()
     assert not bledy

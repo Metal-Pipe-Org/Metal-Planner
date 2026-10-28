@@ -1107,6 +1107,9 @@ function watchPosition() {
         positionSource.watching = false;
         // Zgoda odebrana w trakcie: stara pozycja nie może dalej odpowiadać na askPosition.
         positionSource.last = null;
+        // Stara kropka wskazywałaby miejsce, którego pasażer już nie udostępnia.
+        youAreHere.dot.remove();
+        youAreHere.accuracy.remove();
         for (const {onError, timer} of positionSource.waiting.splice(0)) {
             clearTimeout(timer);
             onError(error);
