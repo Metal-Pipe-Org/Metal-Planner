@@ -1081,7 +1081,54 @@ function useMyLocation(point, {fromLink = false} = {}) {
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
-const GEO_OPTIONS = {enableHighAccuracy: true, timeout: 10000, maximumAge: 0};
+const GEO_WAIT_MS = 10000;
+
+// Jedno źródło pozycji dla całej strony (#410, #236): ciągły nasłuch, z którego
+// czerpią kropka, ◎, odświeżanie i zapisane miejsca. Jednorazowe pytanie
+// przy działającym nasłuchu czeka w Chromium na zmianę pozycji, więc stojący
+// pasażer nie dostawał nic; nasłuch za to oddaje każdą zmianę, więc kto klika
+// ◎ w drodze, dostaje to, gdzie jest teraz, a nie zapamiętaną pozycję.
+const positionSource = {last: null, watching: false, waiting: []};
+
+function watchPosition() {
+    if (positionSource.watching) return;
+    positionSource.watching = true;
+    const watchId = navigator.geolocation.watchPosition(position => {
+        positionSource.last = position;
+        showYouAreHere(position);
+        for (const {onPosition, timer} of positionSource.waiting.splice(0)) {
+            clearTimeout(timer);
+            onPosition(position);
+        }
+    }, error => {
+        // Brak pomiaru nie jest awarią nasłuchu - czekający odpadną po czasie.
+        if (error.code !== error.PERMISSION_DENIED) return;
+        navigator.geolocation.clearWatch(watchId);
+        positionSource.watching = false;
+        // Zgoda odebrana w trakcie: stara pozycja nie może dalej odpowiadać na askPosition.
+        positionSource.last = null;
+        // Stara kropka wskazywałaby miejsce, którego pasażer już nie udostępnia.
+        youAreHere.dot.remove();
+        youAreHere.accuracy.remove();
+        for (const {onError, timer} of positionSource.waiting.splice(0)) {
+            clearTimeout(timer);
+            onError(error);
+        }
+    }, {enableHighAccuracy: true, maximumAge: 5000});
+}
+
+/** Aktualna pozycja z nasłuchu od ręki; bez niej (pierwsze kliknięcie, zgoda
+    dopiero co udzielona) start nasłuchu woła o zgodę i czeka na pierwszą. */
+function askPosition(onPosition, onError) {
+    if (positionSource.last) { onPosition(positionSource.last); return; }
+    const waiter = {onPosition, onError};
+    waiter.timer = setTimeout(() => {
+        positionSource.waiting.splice(positionSource.waiting.indexOf(waiter), 1);
+        onError({code: 3});
+    }, GEO_WAIT_MS);
+    positionSource.waiting.push(waiter);
+    watchPosition();
+}
 
 const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onboardOn;
 
@@ -1137,7 +1184,7 @@ function refreshHere() {
     if (document.body.classList.contains('searching')
             || [$('time'), $('date')].includes(document.activeElement)) return;
     const asked = sel.start;
-    navigator.geolocation.getCurrentPosition(position => {
+    askPosition(position => {
         // Start mógł się zmienić, gdy GPS mielił.
         if (sel.start !== asked) return;
         sel.start = hereStart = {lat: position.coords.latitude,
@@ -1161,7 +1208,7 @@ function refreshHere() {
         // poprzedni wynik zostaje na ekranie, a następny obrót zegara spróbuje znów.
         }).catch(() => {});
     // Brak sygnału w tle: wynik zostaje, zegar próbuje za 30 s.
-    }, () => {}, GEO_OPTIONS);
+    }, () => {});
 }
 
 document.addEventListener('visibilitychange', syncAutoRefresh);
@@ -1193,7 +1240,7 @@ function locateStart(onFail = () => {}, options = {}) {
     const textBefore = startInput.value;
     const stale = () => sel.start !== startBefore || startInput.value !== textBefore;
     const finish = () => { locateButton.disabled = false; };
-    navigator.geolocation.getCurrentPosition(
+    askPosition(
         position => {
             finish();
             if (stale()) return;
@@ -1206,10 +1253,6 @@ function locateStart(onFail = () => {}, options = {}) {
             showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
             onFail();
         },
-        // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
-        // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
-        // pozycję sprzed kilkuset metrów.
-        GEO_OPTIONS,
     );
 }
 
@@ -1219,6 +1262,37 @@ function locateStart(onFail = () => {}, options = {}) {
 function startFromHere() {
     if (navigator.geolocation) locateStart(() => startInput.focus());
     else startInput.focus();
+}
+
+// ------------------------------------------------ moja pozycja na mapie ----
+
+// Kropka „tu jesteś" (#410) jest jednym z odbiorców nasłuchu pozycji (patrz
+// positionSource). Nasłuch startuje przy wejściu tylko po udzielonej już zgodzie:
+// samo wejście na stronę nie ma wywołać pytania.
+const youAreHere = {
+    dot: L.marker([0, 0], {
+        icon: L.divIcon({className: 'you-are-here', iconSize: [18, 18]}),
+        interactive: false, keyboard: false, zIndexOffset: 1000,
+    }),
+    accuracy: L.circle([0, 0], {radius: 0, interactive: false, color: '#1a73e8', weight: 1, opacity: 0.4,
+        fillColor: '#1a73e8', fillOpacity: 0.12}),
+};
+
+function showYouAreHere(position) {
+    const at = [position.coords.latitude, position.coords.longitude];
+    youAreHere.dot.setLatLng(at);
+    youAreHere.accuracy.setLatLng(at).setRadius(position.coords.accuracy);
+    youAreHere.accuracy.addTo(map);
+    youAreHere.dot.addTo(map);
+}
+
+if (navigator.geolocation && navigator.permissions) {
+    navigator.permissions.query({name: 'geolocation'}).then(status => {
+        const sync = () => { if (status.state === 'granted') watchPosition(); };
+        sync();
+        // Zgoda udzielona później (np. przy pierwszym ◎) włącza kropkę bez przeładowania.
+        status.addEventListener('change', sync);
+    });
 }
 
 // ---------------------------------------------------- kadrowanie widoku ----
@@ -6140,14 +6214,13 @@ function savePlace() {
     placeDialog.close();
 }
 
-/** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
+/** Ta sama pozycja, o którą prosi ◎. */
 function locateOnce(onPoint, onError) {
     if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
-    navigator.geolocation.getCurrentPosition(
+    askPosition(
         position => onPoint({lat: position.coords.latitude,
                              lon: position.coords.longitude}),
         error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
-        GEO_OPTIONS,
     );
 }
 

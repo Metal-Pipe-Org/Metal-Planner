@@ -43,7 +43,7 @@ def tryb_deweloperski():
         os.environ["DEV_MODE"] = stare
 
 
-def _otworz(przegladarka, adres, przelacznik=True, **opcje):
+def _otworz(przegladarka, adres, przelacznik=True, init=None, **opcje):
     slupek = next(s for s in gtfs.all_stops_geo() if s["name"] == TRASA[0])
     context = przegladarka.new_context(
         viewport={"width": 390, "height": 844}, device_scale_factor=2,
@@ -60,6 +60,8 @@ def _otworz(przegladarka, adres, przelacznik=True, **opcje):
     page.add_init_script(
         "localStorage.setItem('metal-planner:dev-prefs', %s)"
         % json.dumps(json.dumps({"location-refresh": przelacznik})))
+    if init:
+        page.add_init_script(init)
     for wzor, odpowiedz in PUSTE_ZRODLA.items():
         page.route(wzor, _odpowiedz(odpowiedz))
     page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
@@ -300,18 +302,18 @@ def test_zmiana_startu_na_przystanek_gasi_odswiezanie(przegladarka, adres):
     assert not bledy
 
 
-OPOZNIONY_GPS_JS = """() => {
-    navigator.geolocation.getCurrentPosition = (ok, fail) => {
-        window.__gps = {ok, fail};
-    };
-}"""
+OPOZNIONY_GPS_JS = """
+navigator.geolocation.watchPosition = (ok, fail) => {
+    window.__gps = {ok, fail};
+    return 1;
+};
+"""
 
 
 @pytest.mark.parametrize("wynik", ["pozycja", "blad"])
 def test_spozniony_gps_nie_nadpisuje_startu_wpisanego_w_miedzyczasie(
         przegladarka, adres, wynik):
-    context, page, bledy = _otworz(przegladarka, adres)
-    page.evaluate(OPOZNIONY_GPS_JS)
+    context, page, bledy = _otworz(przegladarka, adres, init=OPOZNIONY_GPS_JS)
     page.fill("#time", "03:33")      # wpisana przez pasażera, a nie ustawiona przez stronę
     _wybierz(page, "#end", TRASA[1])
     page.wait_for_function("window.__gps")
@@ -319,9 +321,9 @@ def test_spozniony_gps_nie_nadpisuje_startu_wpisanego_w_miedzyczasie(
     page.wait_for_selector("body:not(.searching) .journey", state="attached",
                            timeout=20000)
     if wynik == "pozycja":
-        page.evaluate("window.__gps.ok({coords: {latitude: 51.1, longitude: 17.03}})")
+        page.evaluate("window.__gps.ok({coords: {latitude: 51.1, longitude: 17.03, accuracy: 10}})")
     else:
-        page.evaluate("window.__gps.fail({code: 1})")
+        page.evaluate("window.__gps.fail({code: 1, PERMISSION_DENIED: 1})")
     page.wait_for_timeout(500)
     assert page.input_value("#start") == TRASA[0]
     assert page.input_value("#time") == "03:33"
