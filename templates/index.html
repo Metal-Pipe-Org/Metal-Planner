@@ -936,9 +936,21 @@
       ustawieniem: nic tu nie trafia do pamięci przeglądarki.
     #}
     <div class="field dev-only set-row" data-setting="siechnice-file" data-labels="Rozkład, Aplikacja">
-        <div class="sw-row">
+        <div class="sw-row" id="siechnice-upload" hidden>
             <label class="button" for="siechnice-file">Wgraj rozkład Siechnic</label>
             <input type="file" id="siechnice-file" accept=".json,application/json" hidden>
+        </div>
+        <div id="siechnice-lock" hidden>
+            <div class="set-title">Wgrywanie zablokowane</div>
+            <div class="sw-row">
+                <select id="siechnice-person" aria-label="Kto dostanie kod"></select>
+                <button type="button" id="siechnice-send" class="button">Wyślij kod</button>
+            </div>
+            <div class="sw-row">
+                <input type="text" id="siechnice-code" inputmode="numeric" maxlength="6"
+                       autocomplete="off" placeholder="Kod z Discorda">
+                <button type="button" id="siechnice-unlock" class="button">Odblokuj</button>
+            </div>
         </div>
         <p class="field-hint" id="siechnice-status" role="status"></p>
     </div>

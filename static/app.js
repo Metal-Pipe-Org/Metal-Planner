@@ -7223,8 +7223,8 @@ function recordSettingsReset() {
 function settingControls() {
     // Kopie (`.set-copy`) tylko przekazują zmianę oryginałowi.
     // Tylko kontrolki wierszy listy: pole wyszukiwania i przyciski akcji nie są
-    // ustawieniami. Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
-    return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy) :is(input:not([type=file]), select)');
+    // ustawieniami (wybór osoby i kod z Discorda też nie). Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
+    return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy) :is(input:not([type=file]), select):not(#siechnice-person, #siechnice-code)');
 }
 
 // Etykieta tak, jak widać ją w panelu - bez wartości suwaka i dymka „i”.
@@ -7290,6 +7290,8 @@ function setSiechniceStatus(text, state) {
 }
 
 function describeSiechnice(status) {
+    setSiechniceLocked(!status.unlocked);
+    if (!status.unlocked) return;
     if (!status.uploaded_at) {
         setSiechniceStatus('Nic nie wgrano — w bazie nie ma Siechnic.');
     } else if (status.rebuilding) {
@@ -7301,8 +7303,21 @@ function describeSiechnice(status) {
     }
 }
 
-async function fetchSiechniceStatus(init) {
-    const response = await fetch('/api/dev/siechnice', init);
+// Token z kodu z Discorda; sessionStorage, bo ma żyć do zamknięcia karty.
+const SIECHNICE_TOKEN_KEY = 'siechnice-token';
+
+function siechniceToken() {
+    try { return sessionStorage.getItem(SIECHNICE_TOKEN_KEY) || ''; } catch (e) { return ''; }
+}
+
+function setSiechniceLocked(locked) {
+    $('siechnice-upload').hidden = locked;
+    $('siechnice-lock').hidden = !locked;
+}
+
+async function fetchSiechniceStatus(init = {}) {
+    const response = await fetch('/api/dev/siechnice',
+        {...init, headers: {'X-Dev-Token': siechniceToken()}});
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `serwer odpowiedział ${response.status}`);
     return body;
@@ -7328,6 +7343,55 @@ async function followSiechniceRebuild() {
     }
 }
 
+async function postDevJson(url, payload) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+    return body;
+}
+
+async function setupSiechniceLock() {
+    const person = $('siechnice-person');
+    const send = $('siechnice-send');
+    const code = $('siechnice-code');
+    const unlock = $('siechnice-unlock');
+    const info = await (await fetch('/api/dev/kod')).json();
+    if (!info.available) {
+        for (const el of [person, send, code, unlock]) el.disabled = true;
+        if (!$('siechnice-lock').hidden) {
+            setSiechniceStatus('Nie da się wysłać kodu — na serwerze brak konfiguracji Discorda '
+                + '(DISCORD, data/discord.json).', 'bad');
+        }
+        return;
+    }
+    for (const login of info.people) person.add(new Option(login, login));
+    if (!$('siechnice-lock').hidden) setSiechniceStatus('Wybierz osobę i wyślij kod — dostanie go na Discordzie.');
+    send.addEventListener('click', async () => {
+        send.disabled = true;
+        try {
+            await postDevJson('/api/dev/kod', {login: person.value});
+            setSiechniceStatus(`Kod poszedł na Discorda do ${person.value}. Ważny 10 min.`, 'ok');
+        } catch (e) {
+            setSiechniceStatus(`Nie wysłano kodu: ${e.message}`, 'bad');
+        }
+        send.disabled = false;
+    });
+    unlock.addEventListener('click', async () => {
+        try {
+            const {token} = await postDevJson('/api/dev/odblokuj', {code: code.value.trim()});
+            try { sessionStorage.setItem(SIECHNICE_TOKEN_KEY, token); } catch (e) { /* karta bez pamięci: zostanie zablokowana */ }
+            code.value = '';
+            describeSiechnice(await fetchSiechniceStatus());
+        } catch (e) {
+            setSiechniceStatus(`Nie odblokowano: ${e.message}`, 'bad');
+        }
+    });
+}
+
 if (devMode) {
     const input = $('siechnice-file');
     input.addEventListener('change', async () => {
@@ -7346,7 +7410,8 @@ if (devMode) {
             setSiechniceStatus(`Nie wgrano: ${e.message}`, 'bad');
         }
     });
-    fetchSiechniceStatus().then(describeSiechnice).catch(() => {});
+    // Podpowiedź zamka po opisie stanu, żeby go nie nadpisać, gdy karta jest już odblokowana.
+    fetchSiechniceStatus().then(describeSiechnice).catch(() => {}).then(setupSiechniceLock);
 }
 
 // Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi

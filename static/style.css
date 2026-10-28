@@ -2649,6 +2649,8 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
     white-space: nowrap;
 }
 
+.sw-row[hidden] { display: none; }
+.sw-row select, .sw-row input[type="text"] { flex: 1; min-width: 0; }
 .sw-row .button { flex: 0 0 auto; background: var(--surface-alt); }
 .sw-row .button:hover { background: #e8edf3; }
 .sw-row .button:disabled { opacity: 0.6; cursor: default; }
