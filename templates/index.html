@@ -973,6 +973,11 @@
         <input type="range" id="onboard-slack" min="0" max="15" step="1" value="3">
     </div>
 
+    {# Nowa mapa rośnie za tym przełącznikiem, stara zostaje domyślna (docs/FLOW_MAP_CONTRACT_V2.md). #}
+    <label class="dev-check dev-only set-row" data-setting="new-map" data-labels="Eksperymenty, Mapa, Funkcje">
+        <input type="checkbox" id="new-map"> Nowa mapa (eksperyment)
+    </label>
+
     {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
     <label class="dev-check dev-only set-row" data-setting="location-refresh" data-labels="Eksperymenty, Lokalizacja, Funkcje">
             <input type="checkbox" id="location-refresh"> Odświeżanie lokalizacji co 30 s
