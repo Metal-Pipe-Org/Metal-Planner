@@ -991,19 +991,10 @@
         </select>
     </label>
 
-    {# Demo (#367): ile przejść pieszo pokazać na schemacie. #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-walks-mode" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-walks-mode-row" hidden>
-        Przejścia pieszo na schemacie
-        <select id="scheme-walks-mode">
-            <option value="few">najkrótsze (liczba obok)</option>
-            <option value="all">wszystkie</option>
-            <option value="hover">po najechaniu na przystanek</option>
-        </select>
-    </label>
-
+    {# Demo (#367): ile najszybszych podróży z przejściem pieszo w środku dorzucić do schematu. #}
     <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-walks-count-row" hidden>
-        Ile najkrótszych przejść
-        <input type="number" id="scheme-walks-count" min="1" max="20" step="1" value="3">
+        Ile dodatkowych najszybszych przejść
+        <input type="number" id="scheme-walks-count" min="0" max="20" step="1" value="2">
     </label>
 
     {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}

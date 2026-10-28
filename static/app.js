@@ -1798,11 +1798,6 @@ const HEADLINE_RIDE_ICON =
     + '<rect x="3" y="1.8" width="10" height="10.4" rx="2" fill="none" stroke="currentColor"'
     + ' stroke-width="1.6"/><path d="M3.4 7.4h9.2M5.4 12.2v2M10.6 12.2v2" fill="none"'
     + ' stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
-const HEADLINE_MAP_ICON =
-    '<svg class="headline-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
-    + '<path d="M1.8 3.6 5.8 2l4.4 1.8 4-1.6v10.2l-4 1.6-4.4-1.8-4 1.6z M5.8 2v10.2'
-    + 'M10.2 3.8V14" fill="none" stroke="currentColor" stroke-width="1.4"'
-    + ' stroke-linejoin="round"/></svg>';
 
 function renderTimeHeadline() {
     const el = $('time-headline');
@@ -1823,8 +1818,8 @@ function renderTimeHeadline() {
     // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
     // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
     // z wartości podróży wie to dopiero po szerszym szukaniu.
-    // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - zakresu mapy
-    // i przycisku jeszcze nie ma.
+    // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - przycisku
+    // jeszcze nie ma.
     const mapped = typeof flow.limit_sec === 'number';
     const more = mapped && flow.more < MAX_MAP_MORE
         ? '<button type="button" class="headline-more" data-tip="'
@@ -1860,19 +1855,9 @@ function renderTimeHeadline() {
                + `<b>${esc(flow.best_arrival)}</b>`)
         + ride
         + '</span>'
-        // Zakres mapy i jego przycisk to jedna całość: zawinięty pasek przenosi
-        // je razem, a nie zostawia samotnego przycisku w drugiej linijce.
-        + (mapped
-            ? '<span class="headline-map">'
-              + '<span class="headline-sep" aria-hidden="true"'
-              + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
-              + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
-                                        + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
-                                        + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
-                     `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
-              + more
-              + '</span>'
-            : '');
+        // Znacznik .headline-map mówi, że mapa już przyszła (zakresu mapy pasek
+        // nie wyświetla, ale przycisk jej należy).
+        + (mapped ? `<span class="headline-map">${more}</span>` : '');
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
@@ -5752,19 +5737,12 @@ function schemeBranches(boxes, strands) {
     return out;
 }
 
-// Pas klamr i plakietki, które omijają - ten sam układ dla trybu „po najechaniu”.
-let schemeWalkSpace = null;
-
-function schemeWalkSettings() {
-    return {mode: $('scheme-walks-mode').value, count: Number($('scheme-walks-count').value)};
-}
-
-/** Które przejścia pieszo schemat rysuje: wszystkie, tylko te przy pudełku
-    `box` (najechanym) albo `count` najkrótszych. */
-function schemeWalksOf(pairs, settings, box) {
-    if (settings.mode === 'hover') return pairs.filter(p => p.from === box || p.to === box);
-    if (settings.mode === 'few') return [...pairs].sort((a, b) => a.m - b.m).slice(0, settings.count);
-    return pairs;
+/** Które przejścia pieszo schemat rysuje: te, które wybrał serwer z powodu
+    dojścia (patrz planner._scheme_pairs), i przejścia z `count` najszybszych
+    podróży, które mają przejście w środku. */
+function schemeWalksOf(pairs) {
+    const count = Number($('scheme-walks-count').value);
+    return pairs.filter(p => p.why !== 'extra' || p.rank <= count);
 }
 
 /** Odległość do napisu: do 10 m poniżej kilometra, do 0,1 km powyżej. */
@@ -5862,20 +5840,12 @@ function schemeSvg(boxes, strands, pairs) {
         if (s.badge) { minX = Math.min(minX, s.badge.x); maxX = Math.max(maxX, s.badge.x + s.badge.w); }
     }
     // Przejścia pieszo leżą pod pudełkami i kreskami jazd, żeby nie zasłaniały
-    // linii; w trybie „po najechaniu” warstwa jest pusta, ale schemat ma na nie
-    // miejsce.
-    const walkSettings = schemeWalkSettings();
+    // linii.
     const badgeRects = [...strands, ...branches].filter(s => s.badge).map(s => s.badge);
     const laneX = maxX + 20;
-    schemeWalkSpace = {laneX, badges: badgeRects};
-    const walkLayers = walkSettings.mode === 'hover'
-        ? [...boxes.keys()].map(id => schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings, id), laneX, badgeRects))
-        : [schemeWalkLayer(boxes, schemeWalksOf(pairs, walkSettings), laneX, badgeRects)];
-    for (const layer of walkLayers) {
-        minX = Math.min(minX, layer.minX); maxX = Math.max(maxX, layer.maxX);
-        minY = Math.min(minY, layer.minY); maxY = Math.max(maxY, layer.maxY);
-    }
-    const walkLayer = walkSettings.mode === 'hover' ? '' : walkLayers[0].svg;
+    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs), laneX, badgeRects);
+    minX = Math.min(minX, walkLayer.minX); maxX = Math.max(maxX, walkLayer.maxX);
+    minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
     const colors = new Set();
     const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
@@ -5932,7 +5902,7 @@ function schemeSvg(boxes, strands, pairs) {
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
         + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
-        + `<g id="scheme-walk-layer">${walkLayer}</g>${rects}${lines}${names}${labels}</svg>`;
+        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${names}${labels}</svg>`;
 }
 
 /** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
@@ -5973,7 +5943,6 @@ function renderScheme(data) {
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
         canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs);
-        bindSchemeWalkHover(canvas, boxes, scheme.pairs);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
@@ -6254,22 +6223,6 @@ function placeSchemeTip(element) {
     if (top + box.height > innerHeight - 8) top = Math.max(8, node.top - box.height - 6);
     tip.style.left = `${left}px`;
     tip.style.top = `${top}px`;
-}
-
-/** Tryb „po najechaniu”: przejścia pieszo pojawiają się tylko przy najechanym
-    pudełku (myszą, jak tablica odjazdów). */
-function bindSchemeWalkHover(canvas, boxes, pairs) {
-    const settings = schemeWalkSettings();
-    if (settings.mode !== 'hover') return;
-    const layer = canvas.querySelector('#scheme-walk-layer');
-    for (const element of canvas.querySelectorAll('g.node')) {
-        element.addEventListener('pointerenter', e => {
-            if (e.pointerType !== 'mouse') return;
-            layer.innerHTML = schemeWalkLayer(boxes, schemeWalksOf(pairs, settings, element.dataset.node),
-                                              schemeWalkSpace.laneX, schemeWalkSpace.badges).svg;
-        });
-        element.addEventListener('pointerleave', () => { layer.innerHTML = ''; });
-    }
 }
 
 function bindSchemeNodes(canvas, data) {
@@ -7477,26 +7430,21 @@ for (const [id, domyslnie] of [['car-vans', false], ['new-map', false], ['walkin
     });
 }
 
-// Przejścia pieszo na schemacie (demo do oglądania): które pokazać i jak
-// narysować. Wiersze widać tylko z nową mapą, jak układ schematu.
+// Przejścia pieszo na schemacie (demo do oglądania): ile przejść ze środka
+// najszybszych podróży dodać do tych z dojścia. Wiersz widać tylko z nową
+// mapą, jak układ schematu.
 {
-    const rows = ['scheme-walks-mode', 'scheme-walks-count'];
+    const input = $('scheme-walks-count');
+    const row = $('scheme-walks-count-row');
     const prefs = loadDevPrefs();
-    for (const id of rows) {
-        const input = $(id);
-        if (prefs[id] !== undefined) input.value = prefs[id];
-        input.addEventListener('change', () => {
-            saveDevPref(id, input.value);
-            if (lastSchemeData) renderScheme(lastSchemeData);
-        });
-    }
-    const showRows = () => {
-        for (const id of rows) $(`${id}-row`).hidden = !$('new-map').checked;
-        $('scheme-walks-count-row').hidden = !$('new-map').checked || $('scheme-walks-mode').value !== 'few';
-    };
-    showRows();
-    $('new-map').addEventListener('change', showRows);
-    $('scheme-walks-mode').addEventListener('change', showRows);
+    if (prefs['scheme-walks-count'] !== undefined) input.value = prefs['scheme-walks-count'];
+    const showRow = () => { row.hidden = !$('new-map').checked; };
+    showRow();
+    $('new-map').addEventListener('change', showRow);
+    input.addEventListener('change', () => {
+        saveDevPref('scheme-walks-count', input.value);
+        if (lastSchemeData) renderScheme(lastSchemeData);
+    });
 }
 
 // „Stoję tutaj / Jestem w pojeździe" da się schować - kto nie jeździ

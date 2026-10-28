@@ -533,7 +533,7 @@ def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
     _wybierz(page, "#end", "Wojszyce")
     if not page.evaluate("document.body.classList.contains('searching')"):
         page.click("#search")
-    page.wait_for_selector("#time-headline .headline-limit", timeout=30000)
+    page.wait_for_selector("#time-headline .headline-map", state="attached", timeout=30000)
     if flaga:
         page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
         # Przypięta wersja biblioteki, nie „latest”.
@@ -650,35 +650,79 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
     context.close()
 
 
-def test_kazda_para_pudelek_ma_przejscie_pieszo_z_odlegloscia(install_day):
+def _pary(scheme):
+    name = {x["id"]: x.get("place") or x["role"] for x in scheme["nodes"]}
+    return {frozenset((name[p["from"]], name[p["to"]])): p for p in scheme["pairs"]}
+
+
+def test_przejscie_ze_srodka_podrozy_jest_dodatkowe_z_odlegloscia_w_linii_prostej(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
     scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
-    n = len(scheme["nodes"])
-    assert len(scheme["pairs"]) == n * (n - 1) // 2
-    name = {x["id"]: x.get("place") or x["role"] for x in scheme["nodes"]}
-    por_nazwach = {frozenset((name[p["from"]], name[p["to"]])): p["m"] for p in scheme["pairs"]}
-    # Odległość w linii prostej między słupkami, a nie czas z krawędzi mostu (120 s).
-    assert por_nazwach[frozenset(("A", "B"))] > 1000
-    assert all("min" not in p for p in scheme["pairs"])
+    pary = _pary(scheme)
+    # Tylko to jedno: nie każda para pudełek, a odległość to linia prosta
+    # między słupkami (a nie czas z krawędzi mostu, 120 s).
+    assert list(pary) == [frozenset(("A", "B"))]
+    assert pary[frozenset(("A", "B"))]["why"] == "extra"
+    assert pary[frozenset(("A", "B"))]["rank"] == 1
+    assert pary[frozenset(("A", "B"))]["m"] > 1000
+
+
+def _dzien_z_dwoma_przystankami_przy_punkcie(cel_blisko=False):
+    """Dwie linie z dwóch słupków w zasięgu jednego punktu do E, każda
+    jedzie osobno. Z `cel_blisko` E stoi tuż obok punktu."""
+    lat, lon = 51.2, 17.1
+    day = make_day([
+        {"trip_id": "P", "label": "Tramwaj 1", "stops": [("A", 600, 600), ("E", 1500, 1500)]},
+        {"trip_id": "Q", "label": "Autobus 2", "stops": [("B", 600, 600), ("E", 1600, 1600)]},
+    ])
+    day.stop_coords["A"] = (lat + 0.0020, lon)
+    day.stop_coords["B"] = (lat - 0.0020, lon)
+    day.stop_coords["E"] = (lat + 0.0010, lon) if cel_blisko else (lat + 0.2, lon + 0.2)
+    return day, (lat, lon)
+
+
+def test_start_punkt_ma_dojscie_do_kazdego_przystanku_odjazdu(install_day):
+    day, punkt = _dzien_z_dwoma_przystankami_przy_punkcie()
+    install_day(day)
+    flow = planner.plan_flow("", "E", WHEN, start_point=punkt, more=3, new_map=True)
+    pary = _pary(flow["scheme"])
+    odjazdy = {leg["to"] for j in flow["journeys"] for leg in j["legs"][:1] if leg["kind"] == "walk"}
+    assert odjazdy == {"A", "B"}
+    assert {tuple(sorted(k - {"start"})) for k, p in pary.items() if p["why"] == "access"} == {("A",), ("B",)}
+
+
+def test_najszybsze_jest_dojscie_pieszo_start_cel(install_day):
+    day, punkt = _dzien_z_dwoma_przystankami_przy_punkcie(cel_blisko=True)
+    install_day(day)
+    # Cel o 110 m od punktu: dwie minuty marszu wygrywają z każdym kursem.
+    flow = planner.plan_flow("", "E", WHEN, start_point=punkt, more=3, new_map=True)
+    assert frozenset(("start", "end")) in _pary(flow["scheme"])
+    assert _pary(flow["scheme"])[frozenset(("start", "end"))]["why"] == "direct"
+
+
+def test_dojscie_pieszo_start_cel_znika_gdy_komunikacja_jest_szybsza(install_day):
+    install_day(_dzien_z_przesiadka_pieszo(bezposredni=True))
+    # E jest ~7 km od S, a autobus 3 jedzie 27 minut.
+    flow = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)
+    assert frozenset(("start", "end")) not in _pary(flow["scheme"])
 
 
 def _przejscia(page):
     return page.evaluate("document.querySelectorAll('g.scheme-walk').length")
 
 
-PARY = [{"from": "n0", "to": "n1", "m": 740}, {"from": "n1", "to": "n2", "m": 120},
-        {"from": "n2", "to": "n3", "m": 1234}, {"from": "n1", "to": "n4", "m": 260},
-        {"from": "n0", "to": "n5", "m": 2050}, {"from": "n3", "to": "n4", "m": 405}]
+PARY = [{"from": "n0", "to": "n1", "m": 740, "why": "access"},
+        {"from": "n1", "to": "n2", "m": 120, "why": "extra", "rank": 1},
+        {"from": "n2", "to": "n3", "m": 1234, "why": "extra", "rank": 2},
+        {"from": "n1", "to": "n4", "m": 260, "why": "extra", "rank": 3},
+        {"from": "n0", "to": "n5", "m": 2050, "why": "direct"}]
 
 
-def _schemat_z_parami(przegladarka, adres, uklad, tryb, ile=3):
+def _schemat_z_parami(przegladarka, adres, uklad, ile=3):
     elk = []
     context, page = _strona(przegladarka, adres, elk, uklad)
     page.evaluate("document.getElementById('new-map').checked = true")
-    page.evaluate("""([m, c]) => {
-        document.getElementById('scheme-walks-mode').value = m;
-        document.getElementById('scheme-walks-count').value = c;
-    }""", [tryb, ile])
+    page.evaluate("""c => { document.getElementById('scheme-walks-count').value = c; }""", ile)
     page.evaluate("data => renderScheme(data)",
                   {"scheme": {**RECZNY, "pairs": PARY}, "start": "S", "end": "E", "nodes": []})
     page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
@@ -686,39 +730,30 @@ def _schemat_z_parami(przegladarka, adres, uklad, tryb, ile=3):
 
 
 @pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_przejscia_pieszo_tryb_wszystkie_i_najkrotsze(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all")
+def test_przejscia_pieszo_dojscia_zawsze_a_dodatkowe_wedlug_ustawienia(adres, przegladarka, uklad):
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, 3)
     assert page.evaluate("document.querySelectorAll('g.scheme-walk-brace').length") == len(PARY)
     assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") is None
     assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
                                   .map(t => t.textContent)""")) == sorted([
-        "pieszo, 740 m", "pieszo, 120 m", "pieszo, 1,2 km", "pieszo, 260 m",
-        "pieszo, 2,1 km", "pieszo, 410 m"])
+        "pieszo, 740 m", "pieszo, 120 m", "pieszo, 1,2 km", "pieszo, 260 m", "pieszo, 2,1 km"])
     assert page.errors == []
     context.close()
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "few", 2)
-    assert _przejscia(page) == 2
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, 1)
     assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
-                                  .map(t => t.textContent)""")) == ["pieszo, 120 m", "pieszo, 260 m"]
+                                  .map(t => t.textContent)""")) == [
+        "pieszo, 120 m", "pieszo, 2,1 km", "pieszo, 740 m"]
     assert page.errors == []
     context.close()
-
-
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_przejscia_pieszo_po_najechaniu_na_przystanek(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "hover")
-    assert _przejscia(page) == 0
-    page.dispatch_event("g.node[data-node='n1']", "pointerenter", {"pointerType": "mouse"})
-    assert _przejscia(page) == 3
-    page.dispatch_event("g.node[data-node='n1']", "pointerleave", {"pointerType": "mouse"})
-    assert _przejscia(page) == 0
+    context, page = _schemat_z_parami(przegladarka, adres, uklad, 0)
+    assert _przejscia(page) == 2
     assert page.errors == []
     context.close()
 
 
 @pytest.mark.parametrize("uklad", ["dagre", "elk"])
 def test_klamry_leza_na_prawo_od_wszystkiego_i_nie_nakladaja_sie(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, "all")
+    context, page = _schemat_z_parami(przegladarka, adres, uklad)
     pomiar = page.evaluate("""(() => {
         const svg = document.querySelector('#scheme-canvas svg');
         const prawy = Math.max(...[...svg.querySelectorAll('rect.scheme-box, .scheme-line, .scheme-badge')]

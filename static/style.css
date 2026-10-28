@@ -1917,17 +1917,6 @@ body.routes-off #results .notice.loading { display: none; }
     gap: 7px;
 }
 
-/* Kreska zamiast kropki: oddziela najszybszą trasę od zakresu mapy
-   wyraźniej, a nie wygląda na kolejne słowo zdania. */
-.headline-sep {
-    align-self: stretch;
-    box-sizing: content-box;
-    width: 1px;
-    margin: 2px -2px;
-    padding: 0 3px;
-    background: var(--line) content-box;
-}
-
 /* "Pokaż więcej" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie
    jak przycisk formularza; co robi, mówi dymek. */
 .headline-more {

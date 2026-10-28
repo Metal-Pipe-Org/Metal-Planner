@@ -2228,6 +2228,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         why_of = chosen_map["why_of"]
         earliest, _, _ = _forward(day, source_stops, dep_sec, deadline)
         profile = _target_profile(day, target_set, dep_sec, deadline)
+        query_sec = dep_sec
         dep_sec = chosen_map["map_from"]
         degraded = False
         if kept:
@@ -2270,11 +2271,15 @@ def plan_flow_stages(start_query, end_query, when=None,
                                                    limit=journey_limit,
                                                    gain_sec=gain_sec, ride=ride)
             if new_map:
-                scheme = _scheme_of_map(day, seg_list, nodes, target_set, source_stops)
-                _scheme_times(scheme, map_journeys if with_journeys else
-                              _enumerate_journeys(day, graph, dep_sec, geo_db,
-                                                  limit=journey_limit, gain_sec=gain_sec,
-                                                  ride=ride))
+                scheme_journeys = (map_journeys if with_journeys else
+                                   _enumerate_journeys(day, graph, dep_sec, geo_db,
+                                                       limit=journey_limit, gain_sec=gain_sec,
+                                                       ride=ride))
+                scheme = _scheme_of_map(day, seg_list, nodes, target_set, source_stops,
+                                        scheme_journeys, query_sec, best_arr,
+                                        start_point is not None and ride is None,
+                                        end_point is not None)
+                _scheme_times(scheme, scheme_journeys)
         else:
             # Zabezpieczenie: _scan już udowodnił, że połączenie istnieje
             # (best_stop nie jest None), więc jeśli mapa i tak nie wybrała
@@ -3971,7 +3976,8 @@ def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
     }
 
 
-def _scheme_of_map(day, seg_list, nodes, target_set, source_stops):
+def _scheme_of_map(day, seg_list, nodes, target_set, source_stops, journeys,
+                   query_sec, best_arr, start_is_point, end_is_point):
     """Schemat z tego, co mapa właśnie narysowała - patrz _scheme."""
     by_name = {day.display_name[key]: ids for key, ids in day.stops_by_place.items()}
     origin = _origin_walk(day, source_stops)
@@ -3993,27 +3999,77 @@ def _scheme_of_map(day, seg_list, nodes, target_set, source_stops):
     scheme = _scheme(seg_list, nodes,
                      target_places={gtfs.place_name(day, s) for s in target_set},
                      walkable=walkable)
-    scheme["pairs"] = _scheme_pairs(day, scheme["nodes"], stops_of, target_set)
+    scheme["pairs"] = _scheme_pairs(day, scheme["nodes"], stops_of, target_set, journeys,
+                                    query_sec, best_arr, start_is_point, end_is_point)
     return scheme
 
 
-def _scheme_pairs(day, scheme_nodes, stops_of, target_set):
-    """Przejście pieszo między KAŻDĄ parą pudełek schematu, z odległością
-    w linii prostej w metrach (`m`) między najbliższymi sobie słupkami obu
-    pudełek. Pieszo można iść z dowolnego przystanku na dowolny, więc schemat
-    dostaje wszystkie pary, a to, które z nich pokazać, wybiera front."""
+def _scheme_pairs(day, scheme_nodes, stops_of, target_set, journeys, query_sec,
+                  best_arr, start_is_point, end_is_point):
+    """Przejścia pieszo, które schemat ma pokazać, z odległością w linii
+    prostej w metrach (`m`) między najbliższymi sobie słupkami obu pudełek.
+    Wybiera je serwer, bo tylko on wie, którymi podróżami się jedzie:
+
+      - "direct": start -> cel, gdy dojście pieszo dociera przed każdą podróżą
+        komunikacją z tego wyszukiwania (ta nigdy nie liczy marszu wprost ze
+        startu do celu - patrz _origin_walk);
+      - "access": gdy start jest punktem - ze startu do KAŻDEGO przystanku,
+        z którego odjeżdża któraś z pokazanych podróży; gdy cel jest punktem
+        - od każdego przystanku dojazdu do celu;
+      - "extra": przejścia ze środka podróży (nie z dojścia ze startu i do
+        celu), a `rank` to miejsce podróży wśród tych, które takie przejście
+        mają, od najszybszej - front pokazuje tyle, ile każe ustawienie.
+
+    Pary zwracamy od najmocniejszego powodu; ta sama para raz."""
+    ids = {n["place"]: n["id"] for n in scheme_nodes if "place" in n}
+    start = next((n["id"] for n in scheme_nodes if n["role"] == "start"), None)
+    end = next(n["id"] for n in scheme_nodes if n["role"] == "end")
+    node_of = {n["id"]: n for n in scheme_nodes}
+
     def stops(node):
         if node["role"] == "end":
             return target_set
         return stops_of(SCHEME_START if node["role"] == "start" else node["place"])
 
-    pairs = []
-    for i, a in enumerate(scheme_nodes):
-        for b in scheme_nodes[i + 1:]:
-            metres = min(gtfs._haversine_m(*day.stop_coords[x], *day.stop_coords[y])
-                         for x in stops(a) for y in stops(b))
-            pairs.append({"from": a["id"], "to": b["id"], "m": round(metres)})
-    return pairs
+    def metres(a, b):
+        return round(min(gtfs._haversine_m(*day.stop_coords[x], *day.stop_coords[y])
+                         for x in stops(node_of[a]) for y in stops(node_of[b])))
+
+    pairs = {}
+
+    def add(a, b, why, rank=None):
+        if a is None or b is None or a == b:
+            return
+        key = frozenset((a, b))
+        if key in pairs and (why == "extra" or pairs[key]["why"] != "extra"):
+            return
+        pairs[key] = {"from": a, "to": b, "m": metres(a, b), "why": why,
+                      **({"rank": rank} if why == "extra" else {})}
+
+    if day.walking:
+        walk_sec = gtfs.walk_time_sec(metres(start, end), day.walk_mps)
+        if query_sec + walk_sec < min([best_arr] + [j["arrival_sec"] for j in journeys]):
+            add(start, end, "direct")
+
+    for journey in journeys:
+        legs = journey["legs"]
+        if start_is_point and legs[0]["kind"] == "walk":
+            add(start, ids.get(legs[0]["to"]), "access")
+        if end_is_point and legs[-1]["kind"] == "walk":
+            add(ids.get(legs[-1]["from"]), end, "access")
+
+    rank = 0
+    for journey in sorted(journeys, key=lambda j: (j["arrival_sec"], j["departure_sec"])):
+        legs = journey["legs"]
+        middle = [leg for leg in legs[1:-1] if leg["kind"] == "walk"]
+        found = [(ids.get(leg["from"]), ids.get(leg["to"])) for leg in middle]
+        found = [(a, b) for a, b in found if a and b and a != b]
+        if not found:
+            continue
+        rank += 1
+        for a, b in found:
+            add(a, b, "extra", rank)
+    return list(pairs.values())
 
 
 def _scheme_times(scheme, journeys):
