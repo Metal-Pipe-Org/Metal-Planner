@@ -547,14 +547,134 @@ function renderVehicles() {
             .addTo(vehiclesLayer);
         marker.tapRank = TAP_RANK.vehicle;
     }
+    for (const train of trainsOnMap()) {
+        const marker = L.marker([train.lat, train.lon], {icon: vehicleIcon(train)})
+            .bindTooltip(trainTooltipHtml(train))
+            .addTo(vehiclesLayer);
+        marker.tapRank = TAP_RANK.vehicle;
+    }
+}
+
+// --- pociągi na mapie (zgłoszenie #72) ---
+//
+// Pozycji pociągów nikt nam nie podaje, więc je szacujemy: rozkład etapu
+// (odjazd, mijane stacje, przyjazd) przesunięty o opóźnienie z /api/train_delays
+// i rozłożony wzdłuż narysowanej linii, tak jak godzina pod kursorem (patrz
+// timeAtPos). Opóźnienia przychodzą i tak razem z listą tras, więc pociąg
+// na mapie nie kosztuje ani jednego zapytania do PLK więcej (pkp_live.py
+// pilnuje limitów). Pokazujemy go tylko na odcinku, którym prowadzi trasa:
+// dalej nie mamy geometrii - i to wystarcza tam, gdzie pytanie pada
+// najczęściej, czyli w pociągu („jestem w pojeździe").
+
+/** "15:07" -> sekundy doby; pusty napis -> null. */
+function clockSec(hhmm) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '');
+    return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 : null;
+}
+
+/** Gdzie wg rozkładu i opóźnienia jest teraz pociąg z etapu `leg` - albo null,
+    gdy o `nowSec` (oś doby rozkładowej) nie jedzie tym odcinkiem.
+    `late` to {stacja: {arr, dep}} w minutach, jak w trainDelays. */
+function trainPosition(leg, nowSec, late) {
+    const path = (leg.path || []).map(([lat, lon]) => L.latLng(lat, lon));
+    if (path.length < 2) return null;
+    const cum = [0];
+    for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + path[i].distanceTo(path[i - 1]));
+
+    // Punkty kontrolne: stacja, godzina z rozkładu, miejsce na linii.
+    // Mijane stacje bez współrzędnych albo bez godziny pomijamy - między
+    // sąsiednimi znanymi i tak interpolujemy liniowo.
+    const marks = [{name: leg.from, t: leg.dep_sec, at: 0}];
+    let from = 0;
+    for (const v of leg.via || []) {
+        let t = clockSec(v.t);
+        if (t === null || v.lat == null) continue;
+        // via ma godzinę zegarową, etap - oś doby rozkładowej (po północy 24:xx)
+        while (t < marks[marks.length - 1].t) t += 86400;
+        const point = L.latLng(v.lat, v.lon);
+        let bestI = from, bestD = Infinity;
+        for (let i = from; i < path.length; i++) {
+            const d = path[i].distanceTo(point);
+            if (d < bestD) { bestD = d; bestI = i; }
+        }
+        from = bestI;
+        marks.push({name: v.name, t, at: cum[bestI]});
+    }
+    marks.push({name: leg.to, t: leg.arr_sec, at: cum[cum.length - 1]});
+
+    // Opóźnienie z ostatniej stacji, o której PLK coś wie, a którą pociąg
+    // wg rozkładu już minął - przed pierwszą taką bierzemy pierwszą znaną.
+    let delayMin = null;
+    for (const mark of marks) {
+        const known = (late || {})[mark.name];
+        const value = known ? (known.dep ?? known.arr) : null;
+        if (value == null) continue;
+        if (delayMin === null || mark.t <= nowSec - value * 60) delayMin = value;
+    }
+    const t = nowSec - (delayMin || 0) * 60;
+    if (t < marks[0].t || t > marks[marks.length - 1].t) return null;
+
+    let pos = marks[marks.length - 1].at;
+    for (let i = 1; i < marks.length; i++) {
+        if (t <= marks[i].t) {
+            const span = marks[i].t - marks[i - 1].t;
+            const f = span > 0 ? (t - marks[i - 1].t) / span : 0;
+            pos = marks[i - 1].at + f * (marks[i].at - marks[i - 1].at);
+            break;
+        }
+    }
+    for (let i = 1; i < path.length; i++) {
+        if (pos <= cum[i]) {
+            const span = cum[i] - cum[i - 1];
+            const f = span > 0 ? (pos - cum[i - 1]) / span : 0;
+            return {lat: path[i - 1].lat + f * (path[i].lat - path[i - 1].lat),
+                    lon: path[i - 1].lng + f * (path[i].lng - path[i - 1].lng),
+                    delayMin};
+        }
+    }
+    return {lat: path[path.length - 1].lat, lon: path[path.length - 1].lng, delayMin};
+}
+
+/** Pociągi z pokazanych tras (z wybranej, gdy jakaś jest wybrana), każdy kurs
+    raz, z szacowaną pozycją - do warstwy ◉. */
+function trainsOnMap() {
+    const [y, m, d] = ($('date').value || '').split('-').map(Number);
+    if (!y || !m || !d) return [];
+    const nowSec = (Date.now() - new Date(y, m - 1, d).getTime()) / 1000;
+    const shown = selectedJourney !== null && journeys[selectedJourney]
+        ? [journeys[selectedJourney]] : journeys;
+    const seen = new Set();
+    const out = [];
+    for (const leg of shown.flatMap(j => j.legs || [])) {
+        if (leg.kind !== 'ride' || leg.mode !== 'train') continue;
+        const key = leg.trip || `${leg.line} ${leg.dep_sec}`;
+        if (seen.has(key)) continue;
+        const spot = trainPosition(leg, nowSec, trainDelays[leg.trip]);
+        if (!spot) continue;
+        seen.add(key);
+        out.push({...spot, kind: 'train', line: leg.num || leg.line, headsign: leg.headsign});
+    }
+    return out;
+}
+
+function trainTooltipHtml(train) {
+    const late = train.delayMin === null
+        ? 'wg rozkładu (bez danych o opóźnieniu)'
+        : train.delayMin > 0 ? `wg rozkładu i opóźnienia +${train.delayMin} min`
+        : 'wg rozkładu, bez opóźnienia';
+    return `<b>Pociąg ${esc(train.line)}</b>`
+        + (train.headsign ? ` → ${esc(train.headsign)}` : '')
+        + `<br>Szacowane położenie: ${esc(late)}`;
 }
 
 function loadVehicles() {
     fetch('/api/vehicles').then(r => r.json()).then(data => {
-        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
-        lastVehicles = data.vehicles;
+        if (!vehiclesOn) return;
+        // Błąd - zostają ostatnie znane pozycje, ale pociągi (liczone u nas)
+        // i tak mają się przesunąć.
+        if (!data.error) lastVehicles = data.vehicles;
         renderVehicles();
-    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+    }).catch(() => { if (vehiclesOn) renderVehicles(); });   // kolejna próba za VEHICLES_REFRESH_MS
 }
 
 function setVehiclesOn(on) {
@@ -5245,7 +5365,7 @@ function loadTrainDelays() {
         .then(data => {
             if (mine !== delaysToken || !data.delays) return;
             trainDelays = data.delays;
-            if (Object.keys(trainDelays).length) renderJourneys();
+            if (Object.keys(trainDelays).length) { renderJourneys(); renderVehicles(); }
         })
         .catch(() => {});      // bez opóźnień trasa jest ta sama, co z rozkładu
 }
