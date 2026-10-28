@@ -119,3 +119,28 @@ def test_odmowa_zgody_przy_pierwszym_kliknieciu_pokazuje_komunikat(przegladarka,
     assert "zgody" in page.inner_text("#locate-msg")
     context.close()
     assert not bledy
+
+
+def test_odebrana_zgoda_po_zapamietanej_pozycji_pokazuje_komunikat_zamiast_starej_pozycji(przegladarka, adres):
+    context, page, bledy = _otworz(przegladarka, adres)
+    page.evaluate("""() => {
+        let wywolania = 0;
+        navigator.geolocation.watchPosition = (ok, fail) => {
+            wywolania += 1;
+            if (wywolania === 1) window.__gps = {ok, fail};
+            else setTimeout(() => fail({code: 1, PERMISSION_DENIED: 1}), 50);
+            return 1;
+        };
+    }""")
+    page.click("#locate")
+    page.wait_for_function("window.__gps")
+    page.evaluate("window.__gps.ok({coords: {latitude: 51.1, longitude: 17.03, accuracy: 10}})")
+    page.wait_for_function("document.getElementById('start').value !== ''", timeout=1000)
+    page.fill("#start", "")
+    page.evaluate("window.__gps.fail({code: 1, PERMISSION_DENIED: 1})")
+    page.click("#locate")
+    page.wait_for_selector("#locate-msg:not([hidden])", timeout=2000)
+    assert "zgody" in page.inner_text("#locate-msg")
+    assert page.input_value("#start") == ""
+    context.close()
+    assert not bledy

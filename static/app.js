@@ -1105,6 +1105,8 @@ function watchPosition() {
         if (error.code !== error.PERMISSION_DENIED) return;
         navigator.geolocation.clearWatch(watchId);
         positionSource.watching = false;
+        // Zgoda odebrana w trakcie: stara pozycja nie może dalej odpowiadać na askPosition.
+        positionSource.last = null;
         for (const {onError, timer} of positionSource.waiting.splice(0)) {
             clearTimeout(timer);
             onError(error);
