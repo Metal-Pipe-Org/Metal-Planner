@@ -14,15 +14,19 @@ name: "PR-y: stan"
 # a ten status — wymagany; „co najmniej jedno zatwierdzenie” zostaje
 # w regułach jak było.
 #
-# Ten sam bieg daje każdemu otwartemu PR-owi dokładnie jedną z trzech
+# Ten sam bieg daje każdemu otwartemu PR-owi dokładnie jedną z czterech
 # etykiet (#353), żeby z listy PR-ów było widać, czyj jest następny ruch:
-# `waiting for author` (wszystko, co robi autor — poprawki, `@claude`, prośba
-# o recenzję, merge), `waiting for review` (wszystko, co robi ktoś inny —
-# recenzja człowieka, ocena Claude'a) i `waiting for other PR` (gotowy PR ze
-# stosu, który czeka na resztę stosu — stos scalamy w całości, od dołu,
-# merge'em albo auto-merge'em na najwyższym PR-ze, #400, #418). Zamknięty PR
-# traci wszystkie trzy. Reguły w `labels_plan` w pr-state.sh. Zmiana jednego
-# PR-a ze stosu przelicza cały stos.
+# `waiting for author` (wszystko, co robi autor — poprawki, `@claude`,
+# decyzja po ocenie Claude'a: prośba o recenzję albo powrót do wersji
+# roboczej, merge), `waiting for claude review` (Claude ocenia — przy
+# `@claude` i ręcznym biegu etykietę od razu daje job `state`
+# w claude-review-pr.yml), `waiting for human review` (autor poprosił
+# o recenzję człowieka) i `waiting for other PR` (gotowy PR ze stosu, który
+# czeka na resztę stosu — stos scalamy w całości, od dołu, merge'em albo
+# auto-merge'em na najwyższym PR-ze, #400, #418). Zamknięty PR traci
+# wszystkie, a dawne `waiting for review` tylko zdejmujemy. Reguły
+# w `labels_plan` w pr-state.sh. Zmiana jednego PR-a ze stosu przelicza
+# cały stos.
 #
 # Stan liczymy zawsze od zera z API (pr-state.sh), więc wystarczy, że bieg
 # ruszy po każdej zmianie, która może go przestawić:

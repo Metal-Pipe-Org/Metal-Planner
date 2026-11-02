@@ -158,6 +158,58 @@ jobs:
           source .github/scripts/guard.sh
           gate_claude_call "$BODY" "$WHO"
 
+  # Etykieta „waiting for claude review” od razu przy `@claude` i ręcznym
+  # biegu. Przy otwarciu i „Ready for review” daje ją pr-state.yml, ale
+  # o tych wołaniach nie wie: status `pending` stawiamy naszym tokenem, więc
+  # nikogo nie budzi, a pr-state.yml przeliczyłby PR dopiero po końcu oceny.
+  # Osobny job, nie krok przy Claudzie: Claude ma `gh` z tokenem swojego
+  # joba, a zapisu etykiet i zgłoszeń mu nie dajemy. Wspólna grupa
+  # `concurrency` z biegami pr-state.yml dla tego PR-a — idą po kolei.
+  state:
+    needs: gate
+    if: >-
+      !cancelled()
+      && github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && (github.event_name == 'workflow_dispatch' || needs.gate.outputs.go == 'true')
+    concurrency:
+      group: pr-state-${{ github.event.issue.number || github.event.inputs.pr }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Te same co w pr-state.yml (tam uzasadnienie). Kodu z PR-a ten job nie
+    # pobiera.
+    permissions:
+      statuses: write
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Pobierz skrypty z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Przelicz stan
+        env:
+          # Numer z ręcznego biegu to tekst od człowieka — tylko przez env.
+          N: ${{ github.event.issue.number || github.event.inputs.pr }}
+        run: |
+          set -euo pipefail
+          [[ "$N" =~ ^[0-9]+$ ]] || { echo "„$N” to nie numer PR-a."; exit 1; }
+          source .discord/.github/scripts/statuses.sh
+          source .discord/.github/scripts/approvals.sh
+          source .discord/.github/scripts/pr-state.sh
+
+          # Fork, zamknięty PR czy wersja robocza — rozstrzyga pr-state.sh,
+          # tak samo jak przy otwarciu.
+          STARTING=$N pr_state "$N"
+
   review:
     needs: gate
     # `!cancelled()` jest potrzebne, bo przy `pull_request` i ręcznym biegu
@@ -556,7 +608,12 @@ jobs:
               echo
               echo '---'
               echo
-              echo "@$author — ocena gotowa. Gdy uznasz, że PR nadaje się do recenzji, poproś o nią w panelu bocznym (Reviewers); recenzent dostanie wtedy ping także na Discordzie."
+              # Po ocenie PR czeka na autora (`waiting for author`, #353) —
+              # ma od razu wiedzieć, jakie ma dwa wyjścia.
+              echo "@$author — ocena gotowa, teraz Twój ruch. Zdecyduj:"
+              echo
+              echo "- **PR jest gotowy** — poproś o recenzję człowieka w panelu bocznym (Reviewers). PR dostanie \`waiting for human review\`, a recenzent ping także na Discordzie."
+              echo "- **Chcesz coś poprawić** — przestaw PR na wersję roboczą (Convert to draft) albo po prostu wypchnij poprawki: PR sam do niej wróci. Ocena ruszy znowu po „Ready for review”."
             } > "$RUNNER_TEMP/post.md"
             kind=review
             verdict=$(grep -m1 '^## ' "$REVIEW" | sed 's/^## *//' || true)
