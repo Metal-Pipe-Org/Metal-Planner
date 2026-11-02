@@ -335,8 +335,7 @@ body.mode-timetable .tools-sep { display: none; }
     .place-button:disabled { animation: none; opacity: 0.5; }
 }
 
-/* Miasto w jednej linii z nazwą, a nie pod nią - o wiersz mniej wysokości.
-   Przed nazwą ikona aplikacji, ta sama co na ekranie telefonu. */
+/* Przed nazwą ikona aplikacji, ta sama co na ekranie telefonu. */
 .brand {
     display: flex;
     align-items: baseline;
@@ -354,12 +353,6 @@ body.mode-timetable .tools-sep { display: none; }
     font-size: 16px;
     font-weight: 700;
     letter-spacing: -0.01em;
-}
-
-.brand p {
-    margin: 0;
-    color: var(--ink-faint);
-    font-size: 12px;
 }
 
 /* Ikona z nazwą otwiera „O aplikacji” - wygląda dalej jak nazwa, nie jak
