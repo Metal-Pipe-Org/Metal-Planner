@@ -2982,6 +2982,13 @@ body.tt-searching .tt-spinner { display: inline-block; }
     white-space: nowrap;
 }
 
+.tt-repeats {
+    margin: -4px 8px 8px 2px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
+}
+
 .tt-card { margin-bottom: 10px; }
 
 .tt-card-head {

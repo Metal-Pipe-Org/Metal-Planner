@@ -19,6 +19,8 @@ interesują nas wszystkie kursy doby rozkładowej, także te wyjeżdżające po
 północy (25:10 to kurs "dzisiejszy", tak samo jak w rozkładzie na słupku).
 """
 
+import datetime
+
 import gtfs
 
 # route_type z GTFS -> rodzaj używany przez front (kolor linii, etykieta).
@@ -300,6 +302,107 @@ def _tail_from(db, data, trip, rows, board_stop, board_dep):
     return tail, _path_of(data.trip_shape.get(trip), coords, db)
 
 
+# Okno, w którym szukamy dni z tym samym rozkładem: dwa tygodnie wstecz i
+# naprzód, czyli każdy dzień tygodnia ma w nim po dwie próbki - dość, żeby
+# jednorazowe święto nie przesądzało o tym, jak rozkład wygląda "zwykle".
+REPEAT_WINDOW_DAYS = 14
+
+WEEKDAYS_ACC = ["poniedziałki", "wtorki", "środy", "czwartki", "piątki",
+                "soboty", "niedziele"]
+WEEKDAYS_GEN = ["poniedziałków", "wtorków", "śród", "czwartków", "piątków",
+                "sobót", "niedziel"]
+WEEKDAYS_SHORT = ["pon", "wt", "śr", "czw", "pt", "sob", "niedz"]
+
+
+def _board_of_day(db, day, by_service):
+    """Rozkład doby `day` jako zbiór (linia, kierunek, słupek, sekunda doby)
+    kursów usług aktywnych tego dnia. Zbiór kursów, a nie numery usług
+    z kalendarza: ten sam rozkład bywa zapisany pod różnymi service_id (np.
+    osobna usługa na każdy dzień tygodnia), a równość ma tu znaczyć "wyglądają
+    tak samo".
+
+    Ogon doby poprzedniej (kursy po północy) świadomie nie wchodzi: to on
+    sprawia, że poniedziałkowa tablica różni się od wtorkowej o pierwsze
+    godziny po północy z niedzielnego rozkładu, choć sam rozkład poniedziałku
+    jest ten sam co wtorku."""
+    board = set()
+    for service in gtfs.active_service_ids(db, day):
+        board.update(by_service.get(service, ()))
+    return frozenset(board)
+
+
+def _weekday_phrase(weekdays):
+    """Zbiór dni tygodnia (0 = pon) -> krótki polski zwrot do "obowiązuje ..."."""
+    days = sorted(weekdays)
+    if len(days) == 7:
+        return "codziennie"
+    if days == [0, 1, 2, 3, 4]:
+        return "w dni robocze"
+    if days == [5, 6]:
+        return "w weekendy"
+    if len(days) >= 5:
+        missing = [WEEKDAYS_GEN[d] for d in range(7) if d not in days]
+        return "codziennie oprócz " + " i ".join(missing)
+    if len(days) == 1:
+        return "w " + WEEKDAYS_ACC[days[0]]
+    if days == list(range(days[0], days[-1] + 1)) and len(days) >= 3:
+        return f"{WEEKDAYS_SHORT[days[0]]}–{WEEKDAYS_SHORT[days[-1]]}"
+    names = [WEEKDAYS_ACC[d] for d in days]
+    return "w " + ", ".join(names[:-1]) + " i " + names[-1]
+
+
+def repeat_note(stop_ids, day):
+    """Napis o tym, w jakie dni powtarza się rozkład pokazany na `day`, albo None
+    bez bazy kalendarza.
+
+    Reguła z danych: dzień ma TEN SAM rozkład, gdy z przystanku odjeżdżają
+    te same kursy (patrz _board_of_day). Dzień tygodnia
+    wchodzi do zwrotu, gdy w oknie większość jego dat ma ten rozkład; daty
+    o tym samym rozkładzie poza takimi dniami tygodnia (typowo święto
+    z sobotnim czy niedzielnym kursowaniem) dają dopisek "i święta"."""
+    db = gtfs._connect()
+    try:
+        marks = ",".join("?" * len(stop_ids))
+        by_service = {}
+        for service, route, headsign, stop, sec in db.execute(
+            f"SELECT t.service_id, t.route_id, t.trip_headsign, st.stop_id, st.departure_sec "
+            f"FROM stop_times st JOIN trips t ON t.trip_id = st.trip_id "
+            f"WHERE st.stop_id IN ({marks}) AND st.stop_sequence < "
+            f"(SELECT MAX(s2.stop_sequence) FROM stop_times s2 WHERE s2.trip_id = st.trip_id)",
+            stop_ids,
+        ):
+            by_service.setdefault(service, set()).add((route, headsign, stop, sec))
+
+        mine = _board_of_day(db, day, by_service)
+        window = [day + datetime.timedelta(days=i)
+                  for i in range(-REPEAT_WINDOW_DAYS, REPEAT_WINDOW_DAYS + 1)]
+        # Poza paczką GTFS nie ma usług - "ten sam rozkład" znaczyłoby tam
+        # "też pusty", a nie "ten sam".
+        first = db.execute("SELECT MIN(start_date) FROM calendar").fetchone()[0]
+        first = datetime.datetime.strptime(first, "%Y%m%d").date() if first else day
+        last = gtfs.last_service_date() or day
+        window = [d for d in window if first <= d <= last]
+        same = {d for d in window if _board_of_day(db, d, by_service) == mine}
+    finally:
+        db.close()
+
+    typical = set()
+    for weekday in range(7):
+        dates = [d for d in window if d.weekday() == weekday]
+        if dates and sum(d in same for d in dates) * 2 > len(dates):
+            typical.add(weekday)
+
+    if not typical:
+        return ("tylko w ten dzień" if same == {day}
+                else "tylko w wybrane dni")
+    phrase = _weekday_phrase(typical)
+    if any(d.weekday() not in typical for d in same):
+        phrase += " i święta"
+    elif any(d.weekday() in typical and d not in same for d in window):
+        phrase += " (z wyjątkami)"
+    return phrase
+
+
 def stop_board(query, day):
     """Tablica odjazdów z przystanku: wszystkie odjazdy doby, opisane linią
     (numer + kierunek), do której należą.
@@ -396,6 +499,7 @@ def stop_board(query, day):
     return {
         "stop": name,
         "date": day.isoformat(),
+        "repeats": repeat_note(stop_ids, day),
         "center": center,
         "points": [
             {"id": stop_id, "name": platform_of[stop_id],
