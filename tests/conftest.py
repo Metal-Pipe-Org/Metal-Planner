@@ -71,3 +71,58 @@ def _bikes_disabled_by_default(monkeypatch):
 
     bikes._cache.clear()
     monkeypatch.setattr(bikes, "_fetch", _bez_sieci)
+
+
+LEAFLET_URLS = {
+    "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js": "application/javascript",
+    "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css": "text/css",
+}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _leaflet_pobrany_raz():
+    """Strona ładuje Leaflet z CDN (templates/index.html), a każdy z setek
+    testów w przeglądarce otwiera ją od nowa. Przy tylu zapytaniach CDN
+    co jakiś czas odpowiada błędem i strona zostaje bez `L` i `map` - test
+    pada na czymś, co nie jest jego przedmiotem. Biblioteka jest więc pobrana
+    raz na przebieg i podawana z pamięci każdemu kontekstowi przeglądarki."""
+    try:
+        from playwright import sync_api
+    except ImportError:
+        yield
+        return
+    import time
+    import urllib.request
+
+    pobrane = {}
+
+    def pobierz(url):
+        if url not in pobrane:
+            for proba in range(5):
+                try:
+                    with urllib.request.urlopen(url, timeout=20) as odpowiedz:
+                        pobrane[url] = odpowiedz.read()
+                    break
+                except OSError:
+                    time.sleep(1 + proba)
+        return pobrane.get(url)
+
+    def podaj(route):
+        url = route.request.url
+        tresc = pobierz(url)
+        if tresc is None:
+            route.continue_()
+        else:
+            route.fulfill(status=200, body=tresc, content_type=LEAFLET_URLS[url])
+
+    oryginal = sync_api.Browser.new_context
+
+    def new_context(self, *args, **kwargs):
+        context = oryginal(self, *args, **kwargs)
+        for url in LEAFLET_URLS:
+            context.route(url, podaj)
+        return context
+
+    sync_api.Browser.new_context = new_context
+    yield
+    sync_api.Browser.new_context = oryginal
