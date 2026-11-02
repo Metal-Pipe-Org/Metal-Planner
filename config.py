@@ -16,12 +16,14 @@ app.py (lokalnie), gunicorn.conf.py (kontener) i update_gtfs.py (uruchamiany
 osobno przez docker/entrypoint.sh i z crona).
 """
 
+import json
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).resolve().parent / "data" / ".env"
+DISCORD_IDS_PATH = ENV_PATH.parent / "discord.json"
 
 # Brak pliku to nie błąd: na czystym klonie i w kontenerze bez sekretów
 # aplikacja ma wstać normalnie, po prostu bez klucza.
@@ -45,3 +47,29 @@ def dev_mode():
     go świadomie - lokalnie i na serwerze testowym.
     """
     return os.environ.get("DEV_MODE", "").strip() == "1"
+
+
+def discord_webhook():
+    """Adres webhooka Discorda (`DISCORD`) albo None, jeśli nie ustawiono.
+
+    To sekret: kto go zna, pisze na kanał jako webhook. Służy do wysyłania
+    kodów odblokowujących ustawienia deweloperskie (devcode.py).
+    """
+    return os.environ.get("DISCORD", "").strip() or None
+
+
+def discord_ids():
+    """Konta GitHuba na ID z Discorda z pliku data/discord.json - ten sam JSON,
+    co zmienna repo w .github/workflows/discord.yml: `{"login": "id"}`.
+
+    To zwykły plik, nie zmienna: ID z Discorda nie są tajne, a data/ i tak nie
+    trafia do repozytorium. Brak pliku, pusty albo zepsuty daje {}, a wołający
+    traktuje to jak brak konfiguracji, bo kod nie miałby komu iść.
+    """
+    try:
+        ids = json.loads(DISCORD_IDS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(ids, dict):
+        return {}
+    return {str(login): str(user_id) for login, user_id in ids.items()}

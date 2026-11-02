@@ -40,6 +40,7 @@ class _Wiersze(HTMLParser):
         if "set-row" in (a.get("class") or "").split():
             self._wiersz = {"id": a.get("data-setting"), "labels": a.get("data-labels", ""),
                             "dev": "dev-only" in a["class"].split(), "hidden": "hidden" in a,
+                            "akcja": "set-action" in a["class"].split(),
                             "kind": None, "options": []}
             self.wiersze.append(self._wiersz)
         elif self._wiersz is None:
@@ -61,7 +62,7 @@ def _wszystkie_wiersze():
 
 
 def _ustawienia():
-    return [w for w in _wszystkie_wiersze() if w["kind"]]
+    return [w for w in _wszystkie_wiersze() if w["kind"] and not w["akcja"]]
 
 
 def _klucze_skutkow():

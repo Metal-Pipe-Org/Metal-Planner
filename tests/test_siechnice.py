@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import devcode
 import gtfs
 import planner
 import siechnice
@@ -515,7 +516,11 @@ def upload(tmp_path, monkeypatch):
                         lambda: rebuilds.append(True))
     monkeypatch.setenv("DEV_MODE", "1")
 
+    # Wgrywanie wymaga tokenu odblokowanego kodem z Discorda (devcode.py).
+    monkeypatch.setattr(devcode, "_tokens", {"test-token"})
+
     client = app_module.app.test_client()
+    client.environ_base["HTTP_X_DEV_TOKEN"] = "test-token"
     client.rebuilds = rebuilds
     client.snapshot_path = siechnice.SNAPSHOT_PATH
     return client
@@ -583,7 +588,7 @@ def test_bez_trybu_deweloperskiego_wgrania_nie_ma(upload, monkeypatch):
 
 def test_stan_bez_wgranej_kopii(upload):
     assert upload.get("/api/dev/siechnice").get_json() == {
-        "uploaded_at": None, "rebuilding": False, "in_database": False,
+        "uploaded_at": None, "rebuilding": False, "in_database": False, "unlocked": True,
     }
 
 
