@@ -5,10 +5,11 @@ name: "PR-y: nowy konflikt z bazą — ping i wersja robocza"
 # więc po cichu (#245), a zatwierdzony PR mógł utknąć w konflikcie bez wiedzy
 # autora. Konflikt powstaje zwykle wtedy, gdy coś wjeżdża na `main`, więc po
 # każdym pushu do `main` sprawdzamy wszystkie otwarte PR-y do `main`, także
-# szkice. Autor dostaje ping na Discordzie tylko wtedy, gdy ten push wpędził
-# jego PR w konflikt — raz na konflikt. Czekające prośby o recenzję są przy
-# tym zdejmowane: recenzent nie traci czasu na PR, który i tak się jeszcze
-# zmieni, a autor po rozwiązaniu konfliktu prosi o recenzję od nowa.
+# szkice. Autor dostaje ping na Discordzie i komentarz pod PR-em tylko wtedy,
+# gdy ten push wpędził jego PR w konflikt — raz na konflikt. Czekające prośby
+# o recenzję są przy tym zdejmowane: recenzent nie traci czasu na PR, który
+# i tak się jeszcze zmieni, a autor po rozwiązaniu konfliktu prosi o recenzję
+# od nowa.
 #
 # Gotowy PR w konflikcie wraca do wersji roboczej (#349): rozwiązanie
 # konfliktu to zmiana jak każda inna, więc idzie przez wersję roboczą,
@@ -117,8 +118,8 @@ jobs:
 
       - name: Pinguj o nowe konflikty
         if: steps.any.outputs.go == 'true'
-        # Prośby zdejmujemy naszym tokenem, a takich zdarzeń GitHub nie
-        # przekazuje do discord.yml — na Discorda wysyłamy stąd.
+        # Prośby zdejmujemy i komentujemy naszym tokenem, a takich zdarzeń
+        # GitHub nie przekazuje do discord.yml — na Discorda wysyłamy stąd.
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}

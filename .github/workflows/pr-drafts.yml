@@ -34,6 +34,8 @@ on:
     types: [opened, reopened, ready_for_review, synchronize]
     branches-ignore: [stable]
 
+# Każde przestawienie mówi autorowi, co dalej: komentarzem pod PR-em
+# (`to_draft`) i pingiem na Discordzie.
 permissions:
   # Zdjęcie próśb o recenzję i komentarz.
   pull-requests: write
@@ -76,6 +78,15 @@ jobs:
       N: ${{ github.event.pull_request.number }}
       BASE: ${{ github.event.pull_request.base.ref }}
       GIT_REPO: .discord
+      # Przestawienie i komentarz robi nasz token, więc discord.yml się o nich
+      # nie dowie — autora pingujemy stąd, żeby instrukcja doszła do niego
+      # i na GitHubie, i na Discordzie. Tytuł to tekst od ludzi — do basha
+      # tylko przez env.
+      AUTHOR: ${{ github.event.pull_request.user.login }}
+      TITLE: ${{ github.event.pull_request.title }}
+      URL: ${{ github.event.pull_request.html_url }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
 
     steps:
       - name: Pobierz skrypty i historię main
@@ -101,6 +112,7 @@ jobs:
           AFTER: ${{ github.event.after }}
         run: |
           set -euo pipefail
+          source .discord/.github/scripts/discord.sh
           source .discord/.github/scripts/statuses.sh
           source .discord/.github/scripts/drafts.sh
 
@@ -113,15 +125,34 @@ jobs:
             carry_review_status "$N" "$BEFORE" "$AFTER"
             exit 0
           fi
-          to_draft "$N" "$DRAFT_ON_PUSH" || [ $? -eq 1 ]
+          rc=0
+          to_draft "$N" "$DRAFT_ON_PUSH" || rc=$?
+          # Kod 1: PR już był wersją roboczą — nic nie zrobiliśmy, nie ma
+          # o czym pisać. Kod 3: PR wrócił, ale komentarz nie wszedł — ping
+          # idzie i tak, a bieg kończy się na czerwono.
+          if [ "$rc" = 0 ] || [ "$rc" = 3 ]; then
+            discord_send warn "" "🚧 PR wraca do wersji roboczej: #$N $TITLE" "$URL" \
+              "Push do gotowego PR-a — po poprawkach oznacz go jako gotowy („Ready for review”), to uruchomi ponowną ocenę" \
+              "" "$AUTHOR"
+          fi
+          [ "$rc" = 0 ] || [ "$rc" = 1 ]
 
       - name: Konflikt z bazą przy otwarciu albo „Ready for review"
         if: github.event.action != 'synchronize'
         run: |
           set -euo pipefail
+          source .discord/.github/scripts/discord.sh
           source .discord/.github/scripts/drafts.sh
           source .discord/.github/scripts/conflicts.sh
 
           if conflicts_with refs/remotes/base "refs/remotes/pr/$N"; then
-            to_draft "$N" "$DRAFT_ON_CONFLICT" || [ $? -eq 1 ]
+            rc=0
+            to_draft "$N" "$DRAFT_ON_CONFLICT" || rc=$?
+            # Kody jak przy pushu wyżej.
+            if [ "$rc" = 0 ] || [ "$rc" = 3 ]; then
+              discord_send warn "" "⚔️ Konflikt z $BASE: #$N $TITLE" "$URL" \
+                "PR wraca do wersji roboczej — rozwiąż konflikt i oznacz go jako gotowy („Ready for review”)" \
+                "" "$AUTHOR"
+            fi
+            [ "$rc" = 0 ] || [ "$rc" = 1 ]
           fi

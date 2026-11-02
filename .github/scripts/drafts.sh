@@ -40,9 +40,11 @@ drop_review_requests() {
 # prośby o recenzję (w gotowym PR-ze nie może ich być przed oceną Claude'a)
 # i zostawia pod nim KOMENTARZ. Kod 1, gdy PR już jest wersją roboczą:
 # przestawił go autor albo równoległy bieg, więc drugi komentarz byłby
-# szumem. Kod 2, gdy przestawienie się nie udało — wołający woła nas w `if`
-# albo z `||`, gdzie `set -e` nie działa, więc błąd musi wyjść kodem, a nie
-# zginąć po cichu.
+# szumem. Kod 2, gdy przestawienie się nie udało. Kod 3, gdy PR jest już
+# wersją roboczą, ale komentarz nie wszedł — autor nie dowie się z GitHuba,
+# czemu PR wrócił, więc wołający ma to widzieć na czerwono. Wołający woła
+# nas w `if` albo z `||`, gdzie `set -e` nie działa, więc błąd musi wyjść
+# kodem, a nie zginąć po cichu.
 to_draft() {
   local n=$1 body=$2 json
 
@@ -58,8 +60,11 @@ to_draft() {
   drop_review_requests "$n" \
     "$(printf '%s' "$json" | jq -r '.requested_reviewers | map(.login) | join(",")')" \
     "$(printf '%s' "$json" | jq -r '.requested_teams | map(.slug) | join(",")')"
-  gh pr comment "$n" --repo "$REPO" --body "$body"
   echo "#$n: przestawiony na wersję roboczą" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  if ! gh pr comment "$n" --repo "$REPO" --body "$body"; then
+    echo "::error::#$n: nie udało się wstawić komentarza o powrocie do wersji roboczej."
+    return 3
+  fi
 }
 
 # same_changes BAZA PRZED PO — kod 0, gdy PR po pushu wnosi do BAZY te same

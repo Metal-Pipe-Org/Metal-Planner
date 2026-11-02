@@ -292,12 +292,15 @@ check_pr() {
     return 0
   fi
 
-  local drafted=0
+  local drafted=0 commented=0
   if [ "$draft" != true ]; then
     rc=0
     to_draft "$n" "$(syntax_comment_body "$key" "$author" 1)" || rc=$?
     case $rc in
-      0) drafted=1 ;;
+      0) drafted=1 commented=1 ;;
+      # PR wrócił, ale komentarz nie wszedł — próbujemy jeszcze raz niżej:
+      # bez niego autor widzi na GitHubie tylko etykietę.
+      3) drafted=1 ;;
       # Wersję roboczą zrobił w międzyczasie autor albo pr-drafts.yml —
       # komentarz o składni piszemy sami, chyba że ten powód już stoi.
       1) if [ "$last_key" = "$key" ]; then
@@ -307,8 +310,8 @@ check_pr() {
       *) fail=1 ;;
     esac
   fi
-  if [ "$drafted" != 1 ]; then
-    gh pr comment "$n" --repo "$REPO" --body "$(syntax_comment_body "$key" "$author" 0)" || fail=1
+  if [ "$commented" != 1 ]; then
+    gh pr comment "$n" --repo "$REPO" --body "$(syntax_comment_body "$key" "$author" "$drafted")" || fail=1
   fi
   echo "#$n: komentarz o błędnej składni ($key)" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
