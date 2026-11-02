@@ -252,6 +252,15 @@ def init_routes(app):
             preview=link_preview(request.args),
         )
 
+    @app.route("/statystyki")
+    def settings_stats():
+        """Zliczenia zmian ustawień - czyta je front z localStorage tej
+        przeglądarki, serwer tylko oddaje stronę. Poza trybem deweloperskim
+        strony po prostu nie ma."""
+        if not config.dev_mode():
+            abort(404)
+        return render_template("statystyki.html")
+
     @app.route("/sw.js")
     def service_worker():
         """Service worker musi jechać z korzenia - z /static/ obejmowałby

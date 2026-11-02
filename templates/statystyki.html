@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Statystyki ustawień</title>
+    <link rel="icon" href="{{ url_for('static', filename='icons/icon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="stats-page">
+
+<main class="stats-main">
+    <p><a href="/">← Planer</a></p>
+    <h1>Statystyki ustawień</h1>
+
+    {# Dane leżą w localStorage tej przeglądarki (#404) - nic nie idzie na serwer. Tabelę rysuje statystyki.js. #}
+    <div id="stats-body" class="stats-scroll"></div>
+
+    <div class="stats-actions">
+        <button type="button" id="stats-copy" class="button">Kopiuj statystyki</button>
+        <button type="button" id="stats-clear" class="button">Wyczyść statystyki</button>
+    </div>
+</main>
+
+<script src="{{ url_for('static', filename='statystyki.js') }}"></script>
+</body>
+</html>
