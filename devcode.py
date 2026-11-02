@@ -80,7 +80,7 @@ def redeem(code):
         if _pending is None or time.monotonic() > _pending["expires"]:
             _pending = None
             return None
-        if not hmac.compare_digest(_pending["code"], code):
+        if not hmac.compare_digest(_pending["code"].encode(), code.encode()):
             _pending["wrong"] += 1
             if _pending["wrong"] >= MAX_WRONG_TRIES:
                 _pending = None
@@ -93,4 +93,4 @@ def redeem(code):
 
 def valid_token(token):
     with _lock:
-        return any(hmac.compare_digest(token, known) for known in _tokens)
+        return any(hmac.compare_digest(token.encode(), known.encode()) for known in _tokens)

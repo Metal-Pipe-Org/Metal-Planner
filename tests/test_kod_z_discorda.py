@@ -176,3 +176,12 @@ def test_blad_discorda_to_502(klient, wyslane, monkeypatch):
     monkeypatch.setattr(devcode, "_post_to_discord", pada)
 
     assert klient.post("/api/dev/kod", json={"login": "Ala"}).status_code == 502
+
+
+def test_kod_i_token_z_polskimi_znakami_to_zwykla_odmowa(klient, wyslane):
+    kod = _wyslij_kod(klient, wyslane)
+
+    assert _odblokuj(klient, "zażółć").status_code == 403
+    assert _wgraj(klient, "tóken").status_code == 403
+    assert devcode._pending["wrong"] == 1
+    assert _odblokuj(klient, kod).status_code == 200
