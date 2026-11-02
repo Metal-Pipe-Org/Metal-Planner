@@ -24,14 +24,19 @@ REVIEWERS_CONTEXT="Recenzenci konieczni"
 # set_status SHA NAZWA STAN OPIS [LINK] — stawia status NAZWA na commicie.
 # STAN: pending / success / failure / error. GitHub odrzuca opis dłuższy niż
 # 140 znaków, więc przycinamy go sami — lepiej urwany opis niż brak statusu,
-# który blokuje merge. Opis może nieść tekst od ludzi (werdykt z oceny), więc
-# do API idzie wyłącznie przez jq.
+# który blokuje merge. Odrzuca też znaki zajmujące w UTF-8 4 bajty, a takie
+# są kropki werdyktu (🟢🟡🟠🔴) — podmieniamy je na symbole 3-bajtowe, a resztę
+# takich znaków wyrzucamy. Opis może nieść tekst od ludzi (werdykt z oceny),
+# więc do API idzie wyłącznie przez jq.
 set_status() {
   local sha=$1 ctx=$2 state=$3 desc=$4 url=${5:-} body
 
   body=$(jq -n --arg s "$state" --arg c "$ctx" --arg d "$desc" --arg u "$url" '
-    {state: $s, context: $c,
-     description: (if ($d | length) > 140 then $d[0:139] + "…" else $d end)}
+    ($d | gsub("🟢"; "✅") | gsub("🟡"; "⚠️") | gsub("🟠"; "❗") | gsub("🔴"; "❌")
+        | explode | map(select(. < 65536)) | implode
+        | gsub("  +"; " ") | ltrimstr(" ") | rtrimstr(" ")) as $d
+    | {state: $s, context: $c,
+       description: (if ($d | length) > 140 then $d[0:139] + "…" else $d end)}
     + (if $u != "" then {target_url: $u} else {} end)')
   if [ "${DRY_RUN:-}" = 1 ]; then
     echo "DRY_RUN: status na ${sha:0:7}: $(jq -c . <<<"$body")"
