@@ -3,8 +3,9 @@
 # (razem z discord.sh i drafts.sh) i woła `ping_new_conflicts`; resztę
 # bierze z env:
 #
-#   GH_TOKEN  token z `pull-requests: write` — zdejmuje prośby o recenzję
-#             i przestawia PR na wersję roboczą
+#   GH_TOKEN  token z `pull-requests: write` (zdejmuje prośby o recenzję)
+#             i `contents: write` (przestawia PR na wersję roboczą, #417,
+#             zob. drafts.sh); tylko w jobie, który nie uruchamia kodu z PR-ów
 #   REPO      `właściciel/repozytorium`
 #   BASE      gałąź, która dostała push; domyślnie `main`
 #   BEFORE    BASE przed pushem (`github.event.before`)
