@@ -26,6 +26,7 @@
 #             wzrokiem; ten sam rodzaj ma wszędzie tę samą ikonę:
 #               🎯 nowe zgłoszenie           📦 nowy PR
 #               🚧 nowy PR w wersji roboczej 🚀 PR wychodzi z wersji roboczej
+#               🚧 PR wraca do wersji roboczej
 #               🔄 otwarte ponownie
 #               👤 przypisanie               ↩️ zdjęte przypisanie
 #               💬 komentarz, recenzja       📝 prośba o recenzję
