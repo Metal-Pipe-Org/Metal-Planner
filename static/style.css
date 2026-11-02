@@ -1563,6 +1563,14 @@ body.routes-off #results .notice.loading { display: none; }
 .vehicle-marker.cable { background: var(--cable); }
 .vehicle-marker.other { background: var(--other); }
 
+/* Kropka „tu jesteś" (#410): niebieska z białą obwódką jak w aplikacjach map. */
+.you-are-here {
+    border-radius: 50%;
+    background: #1a73e8;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
 /* Grupka numerów wspólnego korytarza: JEDNO pudełko na cały korytarz, ze
    wszystkimi jego numerami obok siebie - nie osobna plakietka dla każdej
    linii rozrzucona gdzie indziej (patrz placeLineLabels w app.js). Kotwica
