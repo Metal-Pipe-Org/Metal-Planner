@@ -1,12 +1,15 @@
-# Ping autorów PR-ów, które push do `main` właśnie wpędził w konflikt.
-# Wołający robi `source` (razem z discord.sh i drafts.sh) i woła
-# `ping_new_conflicts`; resztę bierze z env:
+# Ping autorów PR-ów, które push do ich bazy właśnie wpędził w konflikt —
+# do `main` albo do niższego piętra stosu (#418). Wołający robi `source`
+# (razem z discord.sh i drafts.sh) i woła `ping_new_conflicts`; resztę
+# bierze z env:
 #
 #   GH_TOKEN  token z `pull-requests: write` — zdejmuje prośby o recenzję
 #             i przestawia PR na wersję roboczą
 #   REPO      `właściciel/repozytorium`
-#   BEFORE    `main` przed pushem (`github.event.before`)
-#   AFTER     `main` po pushu (`github.sha`)
+#   BASE      gałąź, która dostała push; domyślnie `main`
+#   BEFORE    BASE przed pushem (`github.event.before`)
+#   AFTER     BASE po pushu (`github.sha` przy `push`, `github.event.after`
+#             przy `synchronize` PR-a z tej gałęzi)
 #   GIT_REPO  klon repo z historią, w którym liczymy konflikty; domyślnie `.`
 #   DRY_RUN   `1` = tylko wypisz, co by poszło na Discorda, co by zdjęto
 #             i co by wróciło do wersji roboczej;
@@ -16,7 +19,7 @@
 
 # conflicts_with BAZA PR — kod 0, gdy PR ma konflikt z BAZĄ, 1, gdy nie ma.
 # Liczymy to samo, co GitHub przy merge'u, ale lokalnie i dla dowolnej bazy:
-# `mergeable` z API mówi tylko o obecnym `main`, a my porównujemy dwa stany.
+# `mergeable` z API mówi tylko o obecnej bazie, a my porównujemy dwa stany.
 # Inny błąd niż konflikt (np. brak commita) wywraca bieg pod `set -e`, zamiast
 # udawać, że konfliktu nie ma.
 conflicts_with() {
@@ -45,7 +48,7 @@ ping_conflict() {
   if [ "${DRY_RUN:-}" = 1 ]; then
     echo "[na sucho] #$n: nowy konflikt; wysłałbym:"
     echo "  @$author"
-    echo "  Konflikt z main: #$n $title"
+    echo "  Konflikt z ${BASE:-main}: #$n $title"
     [ -z "$desc" ] || echo "  $desc"
     [ "$draft" = true ] || echo "  i przestawiłbym PR na wersję roboczą"
     return 0
@@ -58,24 +61,24 @@ ping_conflict() {
     desc="PR wraca do wersji roboczej${desc:+. $desc}"
   fi
 
-  echo "#$n: nowy konflikt z main${who:+ — zdjęte prośby o recenzję: $users $teams}" \
+  echo "#$n: nowy konflikt z ${BASE:-main}${who:+ — zdjęte prośby o recenzję: $users $teams}" \
     | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-  discord_send warn "" "⚔️ Konflikt z main: #$n $title" "$url" "$desc" "" "$author"
+  discord_send warn "" "⚔️ Konflikt z ${BASE:-main}: #$n $title" "$url" "$desc" "" "$author"
 }
 
 # ping_new_conflicts
 #
-# Bierzemy wszystkie otwarte PR-y do `main`: zatwierdzony PR albo PR bez
+# Bierzemy wszystkie otwarte PR-y do BASE: zatwierdzony PR albo PR bez
 # recenzentów też ktoś chce zmergować, a w konflikcie GitHub nie puszcza jego
 # automatów (#245), więc bez pingu nikt się nie dowie. Szkice też, bo wersja
 # robocza to zwykły etap PR-a (#349): poprawki po ocenie czy recenzji, które
-# przed powrotem do gotowych i tak muszą się zmieścić na `main`.
+# przed powrotem do gotowych i tak muszą się zmieścić na bazie.
 #
-# Ping idzie tylko przy przejściu: PR nie miał konfliktu ze starym `main`,
-# a z nowym ma. Jeden konflikt to jeden ping, a nie ping po każdym kolejnym
+# Ping idzie tylko przy przejściu: PR nie miał konfliktu ze starą bazą,
+# a z nową ma. Jeden konflikt to jeden ping, a nie ping po każdym kolejnym
 # merge'u, i nie musimy niczego zapamiętywać między biegami. Oba stany liczy
 # `merge-tree` tak samo, więc przejście nie wynika z różnicy dwóch metod,
-# a bieg nie czeka, aż GitHub policzy `mergeable`. Za nowy `main` bierzemy
+# a bieg nie czeka, aż GitHub policzy `mergeable`. Za nową bazę bierzemy
 # commit z pushu, nie obecny czubek: inaczej dwa szybkie merge'e dałyby ten
 # sam konflikt w obu biegach.
 #
@@ -89,7 +92,7 @@ ping_new_conflicts() {
 
   while IFS= read -r line; do
     prs+=("$line")
-  done < <(gh api --paginate "repos/$REPO/pulls?state=open&base=main&per_page=100" --jq '.[]
+  done < <(gh api --paginate "repos/$REPO/pulls?state=open&base=$(jq -rn --arg b "${BASE:-main}" '$b | @uri')&per_page=100" --jq '.[]
     | [(.number | tostring), .title, .html_url, .user.login, (.draft | tostring),
        (.requested_reviewers | map(.login) | join(",")),
        (.requested_teams | map(.slug) | join(","))]
@@ -105,15 +108,15 @@ ping_new_conflicts() {
   done
   "${git[@]}" fetch -q --no-tags origin "$AFTER" "${refs[@]}"
 
-  # Bez starego `main` nie da się powiedzieć, co jest nowym konfliktem: przy
-  # pierwszym pushu `before` to same zera, a po nadpisaniu historii stary
-  # commit bywa już nieosiągalny. Wtedy milczymy, zamiast pingować o każdy
+  # Bez starej bazy nie da się powiedzieć, co jest nowym konfliktem: przy
+  # pierwszym pushu `before` to same zera, a po nadpisaniu historii (np.
+  # „Rebase stack”) stary commit bywa już nieosiągalny. Wtedy milczymy, zamiast pingować o każdy
   # konflikt od nowa — przegapiony ping to mniejsze zło niż powtórka dla
   # wszystkich, a GitHub i tak pokazuje konflikt na stronie PR-a.
   if [ -z "${BEFORE//0/}" ] \
       || ! "${git[@]}" fetch -q --no-tags origin "$BEFORE" 2> /dev/null \
       || ! "${git[@]}" cat-file -e "$BEFORE^{commit}" 2> /dev/null; then
-    echo "::warning::Brak poprzedniego main ($BEFORE) — nie da się ustalić nowych konfliktów, pomijam."
+    echo "::warning::Brak poprzedniego ${BASE:-main} ($BEFORE) — nie da się ustalić nowych konfliktów, pomijam."
     return 0
   fi
 

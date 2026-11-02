@@ -1,0 +1,7 @@
+# Recenzenci konieczni (#352) — loginy z GitHuba, po jednym w linijce.
+# Każdy PR musi dostać zatwierdzenie od każdego z nich (poza autorem),
+# a każdy z nich robi review każdego PR-a w ciągu 24 h. Dopisać się może
+# każdy z zespołu, PR-em; wypisuje się tak samo. Liczy się plik na `main`.
+# Czyta go `.github/scripts/pr-state.sh`; `@` przed loginem jest opcjonalne,
+# a `#` zaczyna komentarz.
+EgorexW
