@@ -19,37 +19,37 @@
 
 REVIEWERS_DOC="https://github.com/${REPO:-Metal-Pipe-Org/Metal-Planner}/blob/main/CONTRIBUTING.md#review-i-mergowanie"
 
-# codeowners_required — filtr: z treści CODEOWNERS wypisuje loginy
-# recenzentów koniecznych, po jednym w linijce. Recenzent konieczny to login
-# z linijki `*` (#352): każdy dopisuje się tam sam, PR-em, i tak samo się
-# wypisuje. Liczy się ostatnia linijka `*`, jak w samym CODEOWNERS, gdzie
-# późniejsza reguła wygrywa. Zespoły (`@org/zespół`) i adresy e-mail
-# pomijamy z ostrzeżeniem: token workflow nie widzi składu zespołów, więc nie
-# umiałby rozstrzygnąć, czy zespół już zatwierdził.
-codeowners_required() {
+# reviewers_list — filtr: z treści `.github/REQUIRED_REVIEWERS` wypisuje
+# loginy recenzentów koniecznych, po jednym w linijce (#352). Każdy dopisuje
+# się tam sam, PR-em, i tak samo się wypisuje. Plik to login w linijce,
+# z opcjonalnym `@` i komentarzami po `#`. Zespoły (`@org/zespół`) i adresy
+# e-mail pomijamy z ostrzeżeniem: token workflow nie widzi składu zespołów,
+# więc nie umiałby rozstrzygnąć, czy zespół już zatwierdził.
+reviewers_list() {
   awk '
-    { sub(/\r$/, ""); sub(/^#.*/, ""); sub(/[ \t]#.*/, "") }
-    $1 == "*" { line = $0 }
-    END {
-      n = split(line, t, /[ \t]+/)
+    { sub(/\r$/, ""); sub(/#.*/, "") }
+    {
+      n = split($0, t, /[ \t]+/)
       for (i = 1; i <= n; i++) {
-        if (t[i] == "" || t[i] == "*") continue
-        if (t[i] ~ /^@[A-Za-z0-9][A-Za-z0-9-]*$/) print substr(t[i], 2)
-        else print "::warning::CODEOWNERS: „" t[i] "” w linijce * to nie login — pomijam." > "/dev/stderr"
+        if (t[i] == "") continue
+        login = t[i]; sub(/^@/, "", login)
+        if (login ~ /^[A-Za-z0-9][A-Za-z0-9-]*$/) print login
+        else print "::warning::REQUIRED_REVIEWERS: „" t[i] "” to nie login — pomijam." > "/dev/stderr"
       }
     }'
 }
 
-# required_reviewers — recenzenci konieczni jako tablica JSON, z CODEOWNERS
-# na `main`, nie z PR-a: PR nie może sam sobie zdjąć recenzenta, a deklaracja
-# obowiązuje od merge'a PR-a, który ją wnosi. Brak pliku to pusta lista
-# (nikt się nie zadeklarował). Każdy inny błąd wywraca bieg: pusta lista
-# z błędu przepuściłaby PR bez recenzentów koniecznych.
+# required_reviewers — recenzenci konieczni jako tablica JSON,
+# z `.github/REQUIRED_REVIEWERS` na `main`, nie z PR-a: PR nie może sam sobie
+# zdjąć recenzenta, a deklaracja obowiązuje od merge'a PR-a, który ją wnosi.
+# Brak pliku to pusta lista (nikt się nie zadeklarował). Każdy inny błąd
+# wywraca bieg: pusta lista z błędu przepuściłaby PR bez recenzentów
+# koniecznych.
 required_reviewers() {
   local out err rc=0
   err=$(mktemp)
   out=$(gh api -H "Accept: application/vnd.github.raw+json" \
-    "repos/$REPO/contents/.github/CODEOWNERS?ref=main" 2> "$err") || rc=$?
+    "repos/$REPO/contents/.github/REQUIRED_REVIEWERS?ref=main" 2> "$err") || rc=$?
   if [ "$rc" -ne 0 ]; then
     if grep -q 'HTTP 404' "$err"; then
       rm -f "$err"
@@ -61,7 +61,7 @@ required_reviewers() {
     return 1
   fi
   rm -f "$err"
-  printf '%s\n' "$out" | codeowners_required | jq -R . | jq -sc 'unique'
+  printf '%s\n' "$out" | reviewers_list | jq -R . | jq -sc 'unique'
 }
 
 # reviewers_status RECENZENCI AUTOR — filtr: z tablicy recenzji PR-a liczy
@@ -69,7 +69,7 @@ required_reviewers() {
 # stoi tak samo jak w approvals.sh: ostatnia recenzja zmieniająca stan danej
 # osoby to zatwierdzenie (boty pomijamy). Autor nie zatwierdzi własnego PR-a
 # (GitHub nie pozwala), więc jego samego nie wymagamy. Loginy porównujemy bez
-# wielkości liter — w CODEOWNERS ktoś mógł je wpisać inaczej niż na koncie.
+# wielkości liter — w liście ktoś mógł je wpisać inaczej niż na koncie.
 reviewers_status() {
   jq -c --argjson req "$1" --arg author "$2" "$(_review_states_jq)"' as $last
     | ($last | map(select(.state == "APPROVED") | .user.login | ascii_downcase)) as $ok
@@ -126,7 +126,7 @@ pr_state() {
   local req prs targets n pr
 
   req=$(required_reviewers)
-  echo "Recenzenci konieczni (CODEOWNERS na main): $(jq -r 'if length == 0 then "nikt" else join(", ") end' <<<"$req")"
+  echo "Recenzenci konieczni (REQUIRED_REVIEWERS na main): $(jq -r 'if length == 0 then "nikt" else join(", ") end' <<<"$req")"
   prs=$(open_prs)
 
   if [ $# -eq 0 ] || [ "$1" = all ]; then

@@ -1,8 +1,8 @@
 name: "PR-y: stan"
 
 # Wymagany status „Recenzenci konieczni” na czubku każdego otwartego PR-a
-# (#352). Recenzent konieczny to ktoś, kto dopisał się PR-em do linijki `*`
-# w `.github/CODEOWNERS`: każdy PR musi dostać jego zatwierdzenie, a on sam
+# (#352). Recenzent konieczny to ktoś, kto dopisał się PR-em do
+# `.github/REQUIRED_REVIEWERS`: każdy PR musi dostać jego zatwierdzenie, a on sam
 # zobowiązuje się zrobić review każdego PR-a w ciągu 24 h. To deklaracja, nie
 # hierarchia — dopisać się może każdy. Status jest zielony, gdy każdy z nich
 # (poza autorem PR-a) ma stojące zatwierdzenie; inaczej czeka i w opisie
@@ -40,7 +40,7 @@ name: "PR-y: stan"
 # z gałęzią bazową, nie z PR-em. Pełne przeliczenie to kilka wywołań API na
 # PR, a pomijamy biegi, które nic nie zrobiły (`skipped` — np. komentarz bez
 # `@claude`). Push do `main` (konflikty) budzi pełne przeliczenie i tak, więc
-# nowa deklaracja w CODEOWNERS dociera do wszystkich PR-ów od razu.
+# nowa deklaracja w REQUIRED_REVIEWERS dociera do wszystkich PR-ów od razu.
 on:
   pull_request_target:
     types:
@@ -67,7 +67,7 @@ on:
 permissions:
   # Status „Recenzenci konieczni”.
   statuses: write
-  # Skrypty z `main` i CODEOWNERS z `main`.
+  # Skrypty z `main` i REQUIRED_REVIEWERS z `main`.
   contents: read
   # Lista PR-ów i ich recenzje.
   pull-requests: read
