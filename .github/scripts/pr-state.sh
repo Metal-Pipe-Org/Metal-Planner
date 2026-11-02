@@ -6,7 +6,8 @@
 #   GH_TOKEN  token ze `statuses: write`, zapisem etykiet i odczytem PR-ów
 #   REPO      `właściciel/repozytorium`
 #   STARTING  numer PR-a, którego ocena Claude'a właśnie rusza (otwarcie,
-#             ponowne otwarcie, „Ready for review”); puste, gdy żaden
+#             ponowne otwarcie, „Ready for review”, `@claude`, ręczny bieg
+#             oceny); puste, gdy żaden
 #   OLD_BASE  poprzednia gałąź bazowa PR-a, gdy zdarzeniem jest zmiana bazy
 #             (`edited`); puste w każdym innym razie
 #   DRY_RUN   `1` — tylko wypisz, co by się zmieniło; nic nie zapisuj.
@@ -29,11 +30,16 @@ REVIEWERS_DOC="https://github.com/${REPO:-Metal-Pipe-Org/Metal-Planner}/blob/mai
 # zgłoszeń (`PR in progress`, `merged - is it ok?`) to osobny zestaw
 # z issue-labels.yml — tych tu nie ruszamy.
 LABEL_AUTHOR="waiting for author"
-LABEL_REVIEW="waiting for review"
+LABEL_CLAUDE="waiting for claude review"
+LABEL_HUMAN="waiting for human review"
 LABEL_OTHER="waiting for other PR"
 LABEL_COLOR_AUTHOR="d93f0b"
-LABEL_COLOR_REVIEW="fbca04"
+LABEL_COLOR_CLAUDE="d4c5f9"
+LABEL_COLOR_HUMAN="fbca04"
 LABEL_COLOR_OTHER="c5def5"
+# Dawna wspólna etykieta dla oceny Claude'a i recenzji człowieka — tylko
+# zdejmujemy ją z PR-ów, które jeszcze ją noszą.
+LABEL_LEGACY="waiting for review"
 
 # reviewers_list — filtr: z treści `.github/REQUIRED_REVIEWERS` wypisuje
 # loginy recenzentów koniecznych, po jednym w linijce (#352). Każdy dopisuje
@@ -151,7 +157,6 @@ pr_facts() {
     --arg mergeable "$mergeable" '
     $pr | {number, draft, base: .base.ref, head: .head.ref,
            same_repo: ((.head.repo.full_name // "") == $repo),
-           labels: [.labels[]?.name],
            conflict: ($mergeable == "dirty"),
            requested: ((.requested_reviewers | length) + (.requested_teams | length)),
            review: ([$st[] | select(.context == $ctx)] | first // null),
@@ -195,22 +200,25 @@ base_seeds() {
 
 # labels_plan STARTING — filtr: z tablicy faktów (`pr_facts`) liczy, jaką
 # etykietę ma dostać każdy PR. STARTING to tablica numerów PR-ów, których
-# ocena Claude'a właśnie rusza. Na wyjściu tablica `{number, want, why,
-# labels}`, gdzie `want` to `author` / `review` / `other`. Reguły (#353) —
-# „autor” to wszystko, co musi zrobić autor, „recenzja” — wszystko, co musi
-# zrobić ktoś inny (Claude też):
+# ocena Claude'a właśnie rusza. Na wyjściu tablica `{number, want,
+# why}`, gdzie `want` to `author` / `claude` / `human` / `other`. Reguły
+# (#353) — „autor” to wszystko, co musi zrobić autor, „Claude” i „człowiek”
+# — kto inny ma teraz ruch:
 #
 #   1. wersja robocza albo konflikt z bazą → autor (poprawia i oznacza jako
 #      gotowy; konflikt zwykle i tak cofa PR do wersji roboczej),
 #   2. ocena Claude'a (PR-y z gałęzi tego repo, do każdej bazy — także PR-y
-#      w stosie, #418; PR-ów z forków Claude nie ocenia): właśnie rusza albo
-#      status czeka → recenzja; status z „@claude” w opisie (porażka, PR albo
-#      jego baza zmienia workflow oceny), inna porażka albo brak statusu, gdy
-#      ocena nie rusza → autor (`@claude`),
+#      w stosie, #418; PR-ów z forków Claude nie ocenia): właśnie rusza
+#      (także z `@claude` i ręcznego biegu) albo status czeka → Claude;
+#      status z „@claude” w opisie (porażka, PR albo jego baza zmienia
+#      workflow oceny), inna porażka albo brak statusu, gdy ocena nie rusza
+#      → autor (`@claude`),
 #   3. czekające „Request changes” → autor,
 #   4. brak pełnego zatwierdzenia (co najmniej jedno stojące zatwierdzenie
 #      człowieka i zielony „Recenzenci konieczni”): czeka prośba o recenzję
-#      (osoba albo zespół) → recenzja, nie czeka żadna → autor (prosi),
+#      (osoba albo zespół) → człowiek, nie czeka żadna → autor. Po ocenie
+#      Claude'a to autor decyduje: prosi o recenzję człowieka albo wraca
+#      do wersji roboczej (mówi mu to komentarz pod oceną),
 #   5. wszystko gotowe → autor (merguje), chyba że PR jest w stosie, a inny
 #      PR tego stosu nie jest gotowy → inny PR. Stos scalamy w całości, od
 #      dołu, merge'em albo auto-merge'em na najwyższym PR-ze (#400, #418),
@@ -228,14 +236,14 @@ labels_plan() {
       .same_repo as $claude
       | if .draft then {s: "author", why: "wersja robocza"}
         elif .conflict then {s: "author", why: "konflikt z bazą"}
-        elif $claude and (.number as $n | any($starting[]; . == $n)) then {s: "review", why: "ocena Claude'\''a rusza"}
+        elif $claude and (.number as $n | any($starting[]; . == $n)) then {s: "claude", why: "ocena Claude'\''a rusza"}
         elif $claude and .review == null then {s: "author", why: "brak statusu oceny Claude'\''a — trzeba napisać @claude"}
         elif $claude and ((.review.description // "") | test("@claude")) then {s: "author", why: "ocena Claude'\''a czeka na @claude"}
-        elif $claude and .review.state == "pending" then {s: "review", why: "Claude ocenia"}
+        elif $claude and .review.state == "pending" then {s: "claude", why: "Claude ocenia"}
         elif $claude and .review.state != "success" then {s: "author", why: "ocena Claude'\''a się nie udała"}
         elif (.changes_requested | length) > 0 then {s: "author", why: ("prośba o zmiany od " + (.changes_requested | join(", ")))}
         elif .approvals == 0 or (.reviewers_ok | not) then
-          (if .requested > 0 then {s: "review", why: "czeka na recenzję"}
+          (if .requested > 0 then {s: "human", why: "czeka na recenzję człowieka"}
            else {s: "author", why: "brak pełnego zatwierdzenia i żadnej prośby o recenzję"} end)
         else {s: "merge", why: "gotowy do merge'\''a"}
         end;
@@ -244,9 +252,8 @@ labels_plan() {
         | stack($prs; [$p.number]) as $stack
         | [ $prs[] | select(.number as $n | $n != $p.number and any($stack[]; . == $n))
             | select(.own.s != "merge") | .number ] as $blocking
-        | {number, labels,
-           want: (if $p.own.s == "review" then "review"
-                  elif $p.own.s == "author" then "author"
+        | {number,
+           want: (if $p.own.s != "merge" then $p.own.s
                   elif ($blocking | length) > 0 then "other"
                   else "author" end),
            why: (if $p.own.s == "merge" and ($blocking | length) > 0
@@ -279,22 +286,31 @@ ensure_label() {
   ENSURED="$ENSURED|$name"
 }
 
-# label_name KLUCZ — nazwa etykiety dla `author` / `review` / `other`.
+# label_name KLUCZ — nazwa etykiety dla `author` / `claude` / `human` /
+# `other`.
 label_name() {
   case "$1" in
     author) echo "$LABEL_AUTHOR" ;;
-    review) echo "$LABEL_REVIEW" ;;
+    claude) echo "$LABEL_CLAUDE" ;;
+    human) echo "$LABEL_HUMAN" ;;
     other) echo "$LABEL_OTHER" ;;
   esac
 }
 
-# set_pr_label N CHCIANA OBECNE — zostawia na PR-ze dokładnie etykietę
-# CHCIANA spośród naszych trzech (pusta — żadnej). OBECNE to tablica JSON
-# etykiet PR-a. Cudzych etykiet nie ruszamy. Etykiety PR-a idą przez API
-# zgłoszeń — dla GitHuba PR to też zgłoszenie.
+# set_pr_label N CHCIANA — zostawia na PR-ze dokładnie etykietę CHCIANA
+# spośród naszych czterech (pusta — żadnej) i zdejmuje dawną
+# LABEL_LEGACY. Cudzych etykiet nie ruszamy.
+# Etykiety PR-a idą przez API zgłoszeń — dla GitHuba PR to też zgłoszenie.
+#
+# Obecne etykiety bierzemy z API tuż przed zapisem, nie z listy PR-ów sprzed
+# przeliczenia: bieg jednego PR-a i pełne przeliczenie mają różne grupy
+# `concurrency` i potrafią iść naraz. Z etykietami sprzed chwili żaden nie
+# widział tej, którą dał drugi, i PR zostawał z dwiema (#440). Okno na to
+# zostaje, ale to już tylko chwila między odczytem a zapisem.
 set_pr_label() {
-  local n=$1 want=$2 have=$3 name
-  for name in "$LABEL_AUTHOR" "$LABEL_REVIEW" "$LABEL_OTHER"; do
+  local n=$1 want=$2 have name
+  have=$(gh api --paginate --slurp "repos/$REPO/issues/$n/labels?per_page=100" | jq -c 'add // [] | map(.name)')
+  for name in "$LABEL_AUTHOR" "$LABEL_CLAUDE" "$LABEL_HUMAN" "$LABEL_OTHER" "$LABEL_LEGACY"; do
     [ "$name" != "$want" ] || continue
     jq -e --arg l "$name" 'index($l) != null' <<<"$have" > /dev/null || continue
     if [ "${DRY_RUN:-}" = 1 ]; then
@@ -307,7 +323,8 @@ set_pr_label() {
   ! jq -e --arg l "$want" 'index($l) != null' <<<"$have" > /dev/null || return 0
   case "$want" in
     "$LABEL_AUTHOR") ensure_label "$want" "$LABEL_COLOR_AUTHOR" "PR: ruch autora — poprawki, @claude, prośba o recenzję albo merge" ;;
-    "$LABEL_REVIEW") ensure_label "$want" "$LABEL_COLOR_REVIEW" "PR: ruch kogoś innego niż autor — recenzja człowieka albo ocena Claude'a" ;;
+    "$LABEL_CLAUDE") ensure_label "$want" "$LABEL_COLOR_CLAUDE" "PR: Claude ocenia — ruch autora po ocenie" ;;
+    "$LABEL_HUMAN") ensure_label "$want" "$LABEL_COLOR_HUMAN" "PR: autor poprosił o recenzję — ruch recenzenta" ;;
     "$LABEL_OTHER") ensure_label "$want" "$LABEL_COLOR_OTHER" "PR: gotowy, ale stos scalamy raz — czeka na inny PR ze stosu" ;;
   esac
   if [ "${DRY_RUN:-}" = 1 ]; then
@@ -361,7 +378,7 @@ pr_state() {
       continue
     fi
     echo "#$n: zamknięty — zdejmuję etykiety stanu."
-    set_pr_label "$n" "" "$(jq -c '[.labels[]?.name]' <<<"$pr")"
+    set_pr_label "$n" ""
     seeds="$seeds $(stack_seeds "$pr" "$prs" | tr '\n' ' ')"
   done
   seeds="$seeds $(base_seeds "${OLD_BASE:-}" "$prs" | tr '\n' ' ')"
@@ -383,6 +400,6 @@ pr_state() {
     n=$(jq -r .number <<<"$line")
     want=$(label_name "$(jq -r .want <<<"$line")")
     echo "#$n: „$want” — $(jq -r .why <<<"$line")" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-    set_pr_label "$n" "$want" "$(jq -c .labels <<<"$line")"
+    set_pr_label "$n" "$want"
   done < <(jq -c '.[]' <<<"$plan")
 }
