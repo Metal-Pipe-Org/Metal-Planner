@@ -492,6 +492,15 @@ def init_routes(app):
             car_count=_float_arg("cars"),
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",
+            # Nowa mapa rośnie za przełącznikiem pod zębatką (sekcja DEV
+            # "Eksperymenty"); stara zostaje domyślna.
+            new_map=request.args.get("newmap") == "1",
+            # Chodzenie pieszo można wyłączyć (⚙ → Eksperymenty); bez
+            # parametru zostaje włączone.
+            walking=request.args.get("walking", "1") == "1",
+            # Ile dodatkowych tras z przejściem pieszo dołożyć do schematu
+            # (⚙ → Eksperymenty → Schemat).
+            scheme_extra=_float_arg("scheme_extra"),
             # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
             bike_count=_float_arg("bike_count"),
             # Na jaki rodzaj roweru pasażer chce wsiąść - dwa przyciski w pasku

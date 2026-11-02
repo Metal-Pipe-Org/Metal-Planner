@@ -230,7 +230,8 @@ def test_pasek_kopie_i_statystyki(w, strona):
     assert "changed" not in strona.get_attribute(wiersz, "class").split()
     assert not strona.query_selector(f'[data-kind=changed] .set-copy[data-copy-of="{w["id"]}"]')
     assert _statystyka(strona, w["id"]) == zmian + 2
-    assert strona.evaluate("window.__odswiezenia") == 1
+    # „Nowa mapa" chowa i pokazuje wiersze schematu, a to odświeża nagłówki jeszcze raz.
+    assert strona.evaluate("window.__odswiezenia") == (2 if w["id"] == "new-map" else 1)
 
 
 def test_dawne_klucze_sa_przenoszone(adres, przegladarka):
