@@ -928,12 +928,13 @@
     </div>
 
 {#
-      USTAWIENIE SCHOWANE (SOUND_TUNING = false w app.js) — na razie dźwięk po
-      prostu jest, bez ustawienia. Atrybut `hidden` wiersza to tylko stan
-      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
+      USTAWIENIE WIDOCZNE (SOUND_TUNING = true w app.js), domyślnie wyłączone
+      (zgłoszenie #447) — kto chce dźwięk rury, włącza go sam. Atrybut `hidden`
+      wiersza to tylko stan startowy: app.js zdejmuje go albo zostawia,
+      zależnie od tej stałej.
     #}
     <label class="dev-check set-row" data-setting="sound-pipe" data-labels="Dźwięk" data-tuning="sound" hidden>
-            <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
+            <input type="checkbox" id="sound-pipe"> Metalowa rura po znalezieniu trasy
         </label>
 
 {#

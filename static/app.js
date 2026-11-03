@@ -1357,9 +1357,10 @@ const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 // w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków),
 // `false` chowa ją w całości i zostawia domyślne. Kod suwaków zostaje w repo
 // celowo - patrz znaczniki TYMCZASOWE w index.html i style.css. Dźwięk działa
-// tak samo (SOUND_TUNING, wiersze z `data-tuning`).
+// tak samo (SOUND_TUNING, wiersze z `data-tuning`) - `true` pokazuje przełącznik
+// dźwięku w Ustawieniach wszystkim, nie tylko deweloperom (zgłoszenie #447).
 const LOOK_TUNING = true;
-const SOUND_TUNING = false;
+const SOUND_TUNING = true;
 const TUNING = {look: LOOK_TUNING, sound: SOUND_TUNING};
 
 const SETTINGS_KEY = 'metal-planner:settings';
@@ -7628,9 +7629,8 @@ document.documentElement.style.setProperty('--chip-scale', setting('look-label-s
 // Oba pliki ważą po ~38 kB, więc wpadają do cache'u service workera razem
 // z resztą statyki i działają offline.
 //
-// Ustawienie jest SCHOWANE (SOUND_TUNING = false) - dźwięk po prostu jest.
-// Przełącznik zostaje w kodzie i w panelu, więc pokazanie go to zmiana
-// jednej stałej (ten sam układ, co przy LOOK_TUNING).
+// Ustawienie jest WIDOCZNE (SOUND_TUNING = true, zgłoszenie #447) i domyślnie
+// wyłączone - kto chce rurę, włącza ją sam w Ustawieniach.
 
 const PIPE_SOURCES = [
     ['audio/ogg; codecs=opus', '/static/sounds/metal-pipe.ogg'],
