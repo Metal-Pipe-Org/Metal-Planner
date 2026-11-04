@@ -166,6 +166,10 @@ const L = {
     circleMarker: (latlng, options) => layerBase({
         kind: 'circleMarker', _latlng: toLatLng(latlng), options: {...(options || {})},
     }),
+    circle: (latlng, options) => layerBase({
+        kind: 'circle', _latlng: toLatLng(latlng), options: {...(options || {})},
+        setRadius(r) { this.options.radius = r; return this; },
+    }),
     marker: (latlng, options) => layerBase({
         kind: 'marker', _latlng: toLatLng(latlng), options: {...(options || {})},
     }),
@@ -305,6 +309,10 @@ function fakeElement(id) {
         },
         addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; },
         appendChild(child) { this.children.push(child); return child; },
+        replaceChildren(...nodes) { this.children = nodes; },
+        append(...nodes) { this.children.push(...nodes); },
+        prepend(...nodes) { this.children.unshift(...nodes); },
+        insertBefore(node) { this.children.push(node); return node; },
         removeChild() {}, remove() {},
         // Atrapa nie parsuje HTML-a, ale musi go SKLEIĆ we właściwej
         // kolejności - na tym stoi test "ostrzeżenie nad listą".
@@ -347,6 +355,53 @@ const document = {
     querySelectorAll: () => [],
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; },
 };
+
+// Wiersze ustawień z index.html (SETTING_ROWS, patrz test_flow_map_front.py):
+// app.js czyta wszystkie ustawienia przez setting(id), a ta mapa powstaje z
+// kontrolek tych wierszy. Kontrolka jest też pod swoim id, jak w stronie.
+const settingsListEl = document.getElementById('settings-list');
+const settingRowEls = SETTING_ROWS.map(row => {
+    const el = fakeElement('row');
+    row.classes.forEach(c => el.classList.add(c));
+    for (const [k, v] of Object.entries(row.data)) {
+        el.dataset[k.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = v;
+    }
+    el.cloneNode = () => {
+        const copy = fakeElement('copy');
+        row.classes.forEach(c => copy.classList.add(c));
+        Object.assign(copy.dataset, el.dataset);
+        return copy;
+    };
+    const c = row.control;
+    if (c) {
+        const control = c.id ? document.getElementById(c.id) : fakeElement('control');
+        control.type = c.type;
+        control.tagName = c.tag;
+        if (c.tag === 'SELECT') {
+            control.options = c.options.map(value => ({value}));
+            control.value = c.selected !== null ? c.selected : c.options[0];
+        } else {
+            control.checked = c.checked;
+            control.value = c.value;
+            control.min = c.min;
+            control.max = c.max;
+        }
+        const output = fakeElement('output');
+        const generic = el.querySelector.bind(el);
+        el.querySelector = sel => (sel === 'output' ? output
+            : sel.startsWith('input') ? control : generic(sel));
+        control.closest = sel => (sel === '.set-row' ? el : null);
+    }
+    return el;
+});
+settingsListEl.querySelectorAll = sel => (sel === '.set-row' ? settingRowEls : []);
+
+const history = {replaceState() {}, pushState() {}, state: null};
+
+class MutationObserver {
+    observe() {}
+    disconnect() {}
+}
 
 // search() ogłasza start wyszukiwania zdarzeniem na document (patrz phone.js).
 class Event {
@@ -530,7 +585,7 @@ const phoneLayout = {active: () => false, mapInsets: () => ({top: 40, bottom: 40
    flowHits/flowLabelLayer to `let`, podmieniane przy każdym rysowaniu. */
 const INJECTION = `
 ;globalThis.__app = {
-    map, look, timeOpts, LOOK_DEFAULTS,
+    map, look, setting, SETTINGS,
     lookOpacity, lookWeight, fmtClock,
     drawFlow, renderPlan, placeLineLabels, clusterBox, clusterRows, corridorOf, corridorKey,
     get resultsBox() { return resultsBox; },
@@ -538,10 +593,10 @@ const INJECTION = `
     ensurePathMetrics, projectOnPath, timeAtPos, timeAtHover,
     legLayers, detailHtml, summaryHtml, timetableHtml, hitFor, flowStopDots, keepOfferedLines,
     waitNoticeHtml, carTooltipHtml, bikeTooltipHtml,
-    timetableRows, TIMETABLE_ROWS_MAX, dotOpts, DOT_DEFAULTS,
+    timetableRows, TIMETABLE_ROWS_MAX,
     keepWithinHorizon, recentFirst,
     withArrivals, withLate, flowIcon, FLOW_ICONS,
-    playPipeDrop, wakeMixer, soundOpts, PIPE_SOURCES, PIPE_VOLUME,
+    playPipeDrop, wakeMixer, PIPE_SOURCES, PIPE_VOLUME,
     get flowHits() { return flowHits; },
     get flowLabelLayer() { return flowLabelLayer; },
     get flowPick() { return flowPick; },
@@ -567,7 +622,7 @@ const INJECTION = `
     setBikesOn, setBikeKind, setCarsOn, warnOnboardRide, obLineMode,
     missedTransfer, boardLiveHtml, boardDelays,
     set trainDelays(v) { trainDelays = v; },
-    nodePoint, dotOpts, seedStartPanel,
+    nodePoint, seedStartPanel,
     prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
     pickEndpoint,
     get startInput() { return startInput; },
@@ -613,3 +668,24 @@ function runApp(source) {
 }
 
 const app = runApp(APP_SOURCE);
+
+/* Ustawienia żyją w kontrolkach (setting(id)), a testy mówią o nich krótko:
+   app.dotOpts.ttPast = true. Te widoki czytają i zapisują wprost kontrolkę. */
+function settingView(ids) {
+    return new Proxy({}, {
+        get: (_, key) => app.setting(ids[key]),
+        set: (_, key, value) => {
+            const control = app.SETTINGS.get(ids[key]).control;
+            if (control.type === 'checkbox') control.checked = value === true;
+            else control.value = String(value);
+            return true;
+        },
+    });
+}
+app.timeOpts = settingView({hover: 'time-hover', ends: 'time-ends', chips: 'time-chips',
+                            headline: 'time-show-headline', ride: 'time-ride'});
+app.dotOpts = settingView({size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past',
+    center: 'dot-center', tipCursor: 'tip-cursor', tipPanel: 'tip-panel',
+    bikeTimes: 'bike-times', bikeRides: 'bike-rides', carTimes: 'car-times',
+    why: 'debug-why', whySeg: 'debug-why-seg', namesZoom: 'names-zoom'});
+app.soundOpts = settingView({pipe: 'sound-pipe'});
