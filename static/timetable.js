@@ -1139,7 +1139,6 @@ function renderBoard() {
             <span class="tt-title-main">${esc(B.prettyStopName(data.stop))}</span>
             <span class="tt-title-sub">${esc(dayLabel())}</span>
         </div>
-        ${data.repeats ? `<p class="tt-repeats">Ten rozkład obowiązuje ${esc(data.repeats)}.</p>` : ''}
 
         ${pointsCard(points)}
 
@@ -1173,6 +1172,7 @@ function renderBoard() {
                     z ${shown.length - page.length}
                 </button>` : ''}
             ${shown.length ? '' : '<p class="field-hint">Nic tu nie odjeżdża w tym oknie.</p>'}
+            ${data.repeats ? `<p class="field-hint tt-legend">Ten rozkład obowiązuje ${esc(data.repeats)}.</p>` : ''}
         </div>`;
 }
 
