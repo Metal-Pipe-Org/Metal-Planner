@@ -104,3 +104,13 @@ def test_dzien_z_jednorazowym_kursem_obowiazuje_tylko_raz(feed):
 ])
 def test_zwrot_o_dniach_tygodnia(days, expected):
     assert timetables._weekday_phrase(days) == expected
+
+
+def test_dzien_bez_odjazdow_nie_ma_napisu(feed):
+    """Gdy z przystanku nic nie odjeżdża, pod „Nic tu nie odjeżdża…” nie może
+    stać zdanie o obowiązywaniu pustego rozkładu."""
+    db = sqlite3.connect(feed)
+    db.execute("INSERT INTO calendar_dates VALUES ('ROBOCZY','20260818',2)")
+    db.commit()
+    db.close()
+    assert _napis(datetime.date(2026, 8, 18)) is None

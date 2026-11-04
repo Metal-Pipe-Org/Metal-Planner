@@ -314,9 +314,9 @@ WEEKDAYS_GEN = ["poniedziałków", "wtorków", "śród", "czwartków", "piątkó
 WEEKDAYS_SHORT = ["pon", "wt", "śr", "czw", "pt", "sob", "niedz"]
 
 
-def _board_of_day(db, day, by_service):
+def _board_of_day(active_services, by_service):
     """Rozkład doby `day` jako zbiór (linia, kierunek, słupek, sekunda doby)
-    kursów usług aktywnych tego dnia. Zbiór kursów, a nie numery usług
+    kursów usług aktywnych tego dnia (`active_services`). Zbiór kursów, a nie numery usług
     z kalendarza: ten sam rozkład bywa zapisany pod różnymi service_id (np.
     osobna usługa na każdy dzień tygodnia), a równość ma tu znaczyć "wyglądają
     tak samo".
@@ -326,7 +326,7 @@ def _board_of_day(db, day, by_service):
     godziny po północy z niedzielnego rozkładu, choć sam rozkład poniedziałku
     jest ten sam co wtorku."""
     board = set()
-    for service in gtfs.active_service_ids(db, day):
+    for service in active_services:
         board.update(by_service.get(service, ()))
     return frozenset(board)
 
@@ -353,14 +353,14 @@ def _weekday_phrase(weekdays):
 
 def repeat_note(stop_ids, day):
     """Napis o tym, w jakie dni powtarza się rozkład pokazany na `day`, albo None
-    bez bazy kalendarza.
+    bez bazy kalendarza i w dniu, w którym z przystanku nic nie odjeżdża.
 
     Reguła z danych: dzień ma TEN SAM rozkład, gdy z przystanku odjeżdżają
     te same kursy (patrz _board_of_day). Dzień tygodnia
     wchodzi do zwrotu, gdy w oknie większość jego dat ma ten rozkład; daty
     o tym samym rozkładzie poza takimi dniami tygodnia (typowo święto
     z sobotnim czy niedzielnym kursowaniem) dają dopisek "i święta"."""
-    db = gtfs._connect()
+    db = gtfs.open_db()
     try:
         marks = ",".join("?" * len(stop_ids))
         by_service = {}
@@ -373,7 +373,6 @@ def repeat_note(stop_ids, day):
         ):
             by_service.setdefault(service, set()).add((route, headsign, stop, sec))
 
-        mine = _board_of_day(db, day, by_service)
         window = [day + datetime.timedelta(days=i)
                   for i in range(-REPEAT_WINDOW_DAYS, REPEAT_WINDOW_DAYS + 1)]
         # Poza paczką GTFS nie ma usług - "ten sam rozkład" znaczyłoby tam
@@ -382,9 +381,14 @@ def repeat_note(stop_ids, day):
         first = datetime.datetime.strptime(first, "%Y%m%d").date() if first else day
         last = gtfs.last_service_date() or day
         window = [d for d in window if first <= d <= last]
-        same = {d for d in window if _board_of_day(db, d, by_service) == mine}
+        active = gtfs.active_service_ids_for_days(db, set(window) | {day})
+        mine = _board_of_day(active[day], by_service)
+        same = {d for d in window if _board_of_day(active[d], by_service) == mine}
     finally:
         db.close()
+
+    if not mine:
+        return None
 
     typical = set()
     for weekday in range(7):
