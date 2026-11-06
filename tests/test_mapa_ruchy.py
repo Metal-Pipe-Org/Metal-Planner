@@ -228,3 +228,86 @@ def test_ruch_nie_wjezdza_w_klamre_przejscia_innego_ruchu():
 
     assert "N" not in _nums(result)
     assert {"2", "113"} <= set(_nums(result))
+
+
+# --- schemat = dokładnie ruchy z mapy ----------------------------------------
+
+VEHICLE_LABELS = {"rower", "Traficar"}
+
+
+def _scheme_nums(result):
+    return {line["num"] for e in result["scheme"]["edges"] for line in e["lines"]}
+
+
+@pytest.mark.parametrize("start,end,day,hhmm", [
+    (None, SOSNOWIECKA, PIATEK, "19:00"),
+    (None, SKRAJNA, PIATEK, "19:00"),
+    ("KSIĘŻE MAŁE", SOSNOWIECKA, PIATEK, "19:30"),
+    ("Katedra", "Wojszyce", date(2026, 11, 10), "15:00"),
+])
+def test_schemat_ma_te_same_linie_co_mapa_nawet_z_scheme_extra(start, end, day, hhmm):
+    """Schemat powstaje z DOKŁADNIE tych ruchów, które rysuje mapa: scheme_extra
+    niczego nie dokłada, więc rozjazd jest niemożliwy z konstrukcji."""
+    result = _real(start, end, day, hhmm, scheme_extra=2)
+
+    assert _scheme_nums(result) == set(_nums(result))
+    assert 1 <= len(result["scheme"]["moves"]) <= moves.READABLE_MOVES
+
+
+def test_schemat_mowi_ile_trwa_kazdy_ruch():
+    result = _real(None, SOSNOWIECKA, PIATEK, "19:00")
+
+    for move in result["scheme"]["moves"]:
+        assert move["lines"] and move["minutes"] > 0
+        assert move["departure"] < move["arrival"] or move["arrival"] < "03:00"
+
+
+def test_przesiadka_po_marszu_o_dwie_minuty_za_krotkiej_jest_na_styk(install_day):
+    """Szacunek marszu jest luźny: do WALK_MARGIN_SEC brakującego czasu przesiadka
+    nie jest chowana, tylko ma ujemny zapas. Dłuższy brak ją odrzuca."""
+    def day_with_bus_at(second):
+        return make_day([
+            {"trip_id": "t1", "label": "Tramwaj 4", "stops": [("S", 600, 600), ("B", 900, 900)]},
+            {"trip_id": "t2", "label": "Autobus 9", "stops": [("C", second, second), ("E", second + 400, second + 400)]},
+            {"trip_id": "t3", "label": "Autobus 7", "stops": [("S", 1200, 1200), ("E", 2400, 2400)]},
+        ], names={"B": "Przystanek B", "C": "Przystanek C"}, siblings={"B": {"C": 180}, "C": {"B": 180}})
+
+    install_day(day_with_bus_at(900 + 180 - 120))
+    short = _flow("S", "E")
+    install_day(day_with_bus_at(900 + 180 - 160))
+    way_short = _flow("S", "E")
+
+    move = next(m for m in short["scheme"]["moves"] if [l["num"] for l in m["lines"]] == ["4", "9"])
+    assert move["tight"] is True and move["slack_min"] < 0
+    assert "9" not in _scheme_nums(way_short)
+
+
+def test_rower_i_traficar_z_probki_sa_odcinkami_ruchu(monkeypatch):
+    """Rower (od startu do celu) stoi na schemacie jak ruch: ma swoją linijkę
+    z czasem, a pierwszy widok nadal ma najwyżej READABLE_MOVES ruchów."""
+    if not gtfs.DB_PATH.exists():
+        pytest.skip("brak data/gtfs.sqlite")
+    probka.podlacz(monkeypatch)
+    result = _real(None, SOSNOWIECKA, PIATEK, "19:00", use_bikes=True)
+
+    labels = {line["num"] for move in result["scheme"]["moves"] for line in move["lines"]}
+    assert labels & VEHICLE_LABELS
+    assert len(result["scheme"]["moves"]) <= moves.READABLE_MOVES
+    assert _scheme_nums(result) - VEHICLE_LABELS == set(_nums(result))
+
+
+def test_start_cofa_sie_do_rownie_bliskiego_przystanku_tego_samego_kursu():
+    """Most Grunwaldzki obok Pl. Grunwaldzkiego: kurs, który mija bliższy start
+    wcześniej, rysuje się od niego (inny moment złapania tych samych linii)."""
+    day = make_day([
+        {"trip_id": "t1", "label": "Tramwaj 4",
+         "stops": [("M", 1000, 1000), ("P", 1060, 1060), ("B", 1500, 1500)]},
+    ], names={"M": "Most", "P": "Plac", "B": "Dalej"})
+    conns = day.conns
+    plac_to_b = next(i for i, c in enumerate(conns) if c[2] == "P")
+    inst = {"rides": ((plac_to_b, plac_to_b),)}
+
+    extended = moves.extend_start(day, inst, {"M": 180, "P": 180}, 0)
+
+    assert conns[extended["rides"][0][0]][2] == "M"
+    assert moves.extend_start(day, inst, {"M": 900, "P": 180}, 0)["rides"] == inst["rides"]

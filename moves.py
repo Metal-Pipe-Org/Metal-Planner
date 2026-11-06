@@ -55,6 +55,18 @@ MAX_RIDES = 3
 # nie wchodzi do pierwszego widoku.
 LONG_WALK_SEC = 15 * 60
 
+# Margines błędu odcinków pieszych (i rowerowych): szacunek chodzenia jest
+# luźny, więc przesiadka po marszu, na którą brakuje do tylu sekund, liczy się
+# jako osiągalna i wychodzi z zapasem ujemnym, czyli „na styk" - użytkownik sam
+# ocenia, czy zdąży. Godziny dojścia zostają uczciwe (nie podkręcamy prędkości).
+WALK_MARGIN_SEC = 150
+
+# „Równie blisko": dojście do przystanku nie dłuższe niż o tyle niż do wybranego
+# (marsz liczy się w pełnych minutach, więc 3 min to jedna minuta różnicy), i nie
+# dalej niż tyle przystanków wstecz po kursie.
+NEAR_EQUAL_SEC = 180
+EXTEND_STOPS_BACK = 3
+
 # Pierwszy widok nowej mapy: tyle różnych ruchów jest jeszcze czytelnych (na
 # mapie i w schemacie). Pozostałe nie są rysowane.
 READABLE_MOVES = 3
@@ -318,7 +330,8 @@ def departures_of_move(ctx, own, everything):
     return shown
 
 
-def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None):
+def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
+           origin_sec=None):
     """(ruchy do pokazania, ile ukryto): [{sig, shown: [egzemplarze], first,
     cost, far_walk}] od najlepszego. Pusta lista, gdy nic nie ma."""
     if not insts:
@@ -354,6 +367,8 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None):
             move["far_walk"] = False
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
     shown, hidden = readable(day, moves, anchor)
+    for move in shown:
+        move["first"] = extend_start(day, move["first"], origin_sec or {}, query_sec)
     return shown, hidden, any(is_safe(day, m["first"]) for m in moves)
 
 
@@ -387,12 +402,11 @@ def fastest(day, moves, prefer=None):
 
 
 def passes_and_transfers(day, rides):
-    """(miejsca, których dotyka ruch, miejsca PRZEJŚĆ pieszo między różnymi
-    miejscami). Ruch dotyka miejsca, gdy jego pojazd je mija, wsiada w nim albo
-    wysiada. Przejście między miejscami (MDK -> Dworzec Główny) to klamra na
-    schemacie, a cudza linia, która tam wjeżdża albo tamtędy przejeżdża,
-    nie daje się już narysować prosto przez pudełko; zmiana słupka w obrębie
-    jednego miejsca (tramwaj i autobus na Parku Wschodnim) nią nie jest."""
+    """(miejsca, których dotyka ruch, miejsca jego PRZESIADEK). Ruch dotyka
+    miejsca, gdy jego pojazd je mija, wsiada w nim albo wysiada. W miejscu
+    przesiadki zaczyna się cudza linia (i bywa tam klamra przejścia pieszo), a
+    linia, która tamtędy przejeżdża przelotem, nie daje się narysować na
+    schemacie prosto przez pudełko - więc dwa ruchy tak się nie dotykają."""
     conns = day.conns
     touched, walks = set(), set()
     for k, (board, alight) in enumerate(rides):
@@ -403,14 +417,44 @@ def passes_and_transfers(day, rides):
         if k:
             there = place(day, conns[board][2])
             here = place(day, conns[rides[k - 1][1]][3])
+            walks.add(there)
             if there != here:
-                walks |= {there, here}
+                walks.add(here)
     return touched, walks
 
 
 def clashes(one, other):
     """Ile razy ruch wchodzi w cudzą klamrę przejścia pieszo."""
     return len(one[0] & other[1]) + len(other[0] & one[1])
+
+
+def extend_start(day, inst, origin_sec, query_sec):
+    """Przystanki równie bliskie startu (Most Grunwaldzki obok Pl. Grunwaldzkiego,
+    230 m od siebie) są oba na mapie: pierwszy przejazd cofa się po swoim kursie
+    do najwcześniejszego przystanku, do którego dojście jest nie dłuższe niż o
+    NEAR_EQUAL_SEC i na który jeszcze się zdąży. Ten sam kurs łapie się tam
+    wcześniej, więc to inny MOMENT złapania tych samych linii."""
+    conns = day.conns
+    board, alight = inst["rides"][0]
+    idxs = gtfs.trip_conns(day, conns[board][4])
+    pos = idxs.index(board)
+    lead0 = origin_sec.get(conns[board][2], 0)
+    chosen = None
+    for k in range(pos - 1, max(-1, pos - 1 - EXTEND_STOPS_BACK), -1):
+        stop = conns[idxs[k]][2]
+        lead = origin_sec.get(stop)
+        if lead is None or lead > lead0 + NEAR_EQUAL_SEC:
+            continue
+        if conns[idxs[k]][0] - lead < query_sec - JUST_LEFT_SEC:
+            continue
+        if place(day, stop) != place(day, conns[board][2]):
+            chosen = idxs[k]
+    if chosen is None:
+        return inst
+    extended = dict(inst, rides=((chosen, alight),) + inst["rides"][1:])
+    extended.pop("slack", None)
+    extended.pop("walked", None)
+    return extended
 
 
 def variants_of(day, inst):

@@ -6007,6 +6007,19 @@ function schemeSvg(boxes, strands, pairs) {
         + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${names}${labels}</svg>`;
 }
 
+/** Pod schematem: każdy ruch w jednej linijce - linie, wyjście → cel i ile
+    to trwa. Godzin w samym rysunku nie ma (patrz schemeSvg). */
+function renderSchemeMoves(moves) {
+    const list = $('scheme-moves');
+    list.hidden = !moves.length;
+    list.innerHTML = moves.map(move => '<li>'
+        + move.lines.map(line => `<span class="badge ${esc(line.mode)}">${esc(line.num)}</span>`).join('')
+        + `<span class="scheme-moves-time">${esc(move.departure)} → ${esc(move.arrival)}`
+        + ` · ${move.minutes} min</span>`
+        + (move.tight ? `<span class="scheme-moves-tight" title="Przesiadka na styk">na styk ${move.slack_min} min</span>` : '')
+        + '</li>').join('');
+}
+
 /** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
     wyłączony albo odpowiedź schematu nie ma (null: mapa zeszła z ekranu). */
 function renderScheme(data) {
@@ -6017,9 +6030,11 @@ function renderScheme(data) {
     if (!data || !data.scheme || !$('new-map').checked) {
         panel.hidden = true;
         $('scheme-canvas').innerHTML = '';
+        $('scheme-moves').innerHTML = '';
         return;
     }
     const scheme = data.scheme;
+    renderSchemeMoves(scheme.moves || []);
     const strands = schemeStrands(scheme);
     const boxes = schemeBoxes(scheme, strands, data);
     // Węzły bez strzałki jazdy między sobą (przejścia piesze i gałęzie bez nich) układają się w tej

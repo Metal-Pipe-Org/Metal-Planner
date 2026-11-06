@@ -9,7 +9,7 @@ na jego odjazd na przystanku startowym.
 from bisect import bisect_left, bisect_right
 from collections import deque
 from datetime import date, datetime, timedelta
-from math import sqrt
+from math import floor, sqrt
 
 import bikes
 import gtfs
@@ -1283,9 +1283,10 @@ class _Label:
     dojście pieszo. Bliźniaki nie konkurują: idą jedną etykietą i razem
     trafiają na mapę - dwie linie dowożące na przesiadkę o tej samej minucie
     to wybór "wsiądź w to, co przyjedzie pierwsze", a nie jedna zbędna."""
-    __slots__ = ("ready", "arr", "dep", "rides", "lead", "parents")
+    __slots__ = ("ready", "arr", "dep", "rides", "lead", "parents", "walk")
 
-    def __init__(self, ready, arr, dep, rides, lead, parents):
+    def __init__(self, ready, arr, dep, rides, lead, parents, walk=False):
+        self.walk = walk
         self.ready = ready
         self.arr = arr
         self.dep = dep
@@ -1303,7 +1304,7 @@ def _stop_metres(day, a, b):
 
 def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
                     forgive_sec, seated=None, rides_matter=False,
-                    max_rides=VALUE_MAX_RIDES):
+                    max_rides=VALUE_MAX_RIDES, walk_margin_sec=0):
     """Wszystkie podróże od `dep_sec` z przyjazdem do `deadline`, pogrupowane
     po trzech wartościach w pokazywanej dokładności: [{key, arr, dep,
     rides, labels}, ...], `key` = (minuta w celu, minuta wyjścia, pojazdy).
@@ -1341,7 +1342,7 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
     bo pasażer już jedzie - każda podróż wychodzi o `dep_sec`."""
     conns = day.conns
     deadline = best_arr + forgive_sec
-    latest = _backward(day, target_set, dep_sec, deadline)
+    latest = _backward(day, target_set, dep_sec, deadline, walk_margin_sec)
     near_target = _target_reach(day, target_set)
 
     at_stop = {}     # słupek -> etykiety, z których da się tu wsiąść
@@ -1480,7 +1481,8 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
                     dep = dep_sec
                     if not label.rides and trip != seated:
                         rides += 1
-                if ready > dep_t or rides > max_rides:
+                if (ready > dep_t + (walk_margin_sec if label.walk else 0)
+                        or rides > max_rides):
                     continue
                 slot = rides if rides_matter else 0
                 bag = bags.setdefault(slot, {})
@@ -1498,7 +1500,9 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
         walks = []
         for sibling, sec in day.siblings.get(arr_s, {}).items():
             when = arr_t + sec
-            if when <= latest.get(sibling, -1):
+            slack = (walk_margin_sec
+                     if day.place_of.get(sibling) != day.place_of.get(arr_s) else 0)
+            if when - slack <= latest.get(sibling, -1):
                 walks.append((sibling, when, sibling in target_set,
                               twins_at.setdefault(sibling, {})))
         twins = twins_at.setdefault(arr_s, {})
@@ -1520,7 +1524,8 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
                 twin = there.get(twin_key(when, when, here.dep, here.rides))
                 if at_target or twin is None:
                     walked = _Label(when, when, here.dep, here.rides, 0,
-                                    [(here, None)])
+                                    [(here, None)],
+                                    day.place_of.get(sibling) != day.place_of.get(arr_s))
                 # Do celu idzie ta etykieta, nawet jeśli na przystanku okaże
                 # się bliźniakiem - z tą jedną drogą, nie z cudzymi.
                 if at_target:
@@ -1994,7 +1999,8 @@ def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
     forgive = int(min(MOVES_SEARCH_MAX_SEC, 2 * gain_sec + allow))
     classes = _value_journeys(day, source_stops, target_set, start, best_arr,
                               forgive, rides_matter=True,
-                              max_rides=moves.MAX_RIDES)
+                              max_rides=moves.MAX_RIDES,
+                              walk_margin_sec=moves.WALK_MARGIN_SEC)
     if not classes:
         return None
     _value_entries(classes, best_arr)
@@ -2009,8 +2015,11 @@ def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
     for cls in near:
         cls["kept"] = [(nums, rides) for nums, (_, rides) in cls["variants"].items()]
     insts = moves.instances_of(day, near, query_sec)
+    origin_sec = {stop: 0 for stop in source_stops}
+    origin_sec.update({stop: sec for stop, (_, sec)
+                       in _origin_walk(day, source_stops).items()})
     chosen, hidden, has_safe = moves.choose(day, insts, query_sec, best_arr,
-                                            gain_sec, wider, prefer)
+                                            gain_sec, wider, prefer, origin_sec)
     if not chosen:
         return None
     # Wszystko, co jest do złapania, jest na styk: bez szerszego okna nie ma
@@ -2035,6 +2044,149 @@ def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
         "chosen": pseudo,
         "moves": chosen,
     }
+
+
+def _instance_legs(day, inst, source_stops, origin_walk, near_target, geo_db):
+    """Etapy jednego egzemplarza ruchu: dojście, przejazdy, przejścia między
+    słupkami i dojście do celu - (etapy, przyjazd do celu)."""
+    conns = day.conns
+    legs = []
+    prev_exit = None
+    for k, (board, alight) in enumerate(inst["rides"]):
+        board_stop = conns[board][2]
+        if k == 0:
+            if board_stop not in source_stops:
+                legs.append(_walk_leg(day, origin_walk[board_stop][0], board_stop))
+        elif prev_exit != board_stop:
+            legs.append(_walk_leg(day, prev_exit, board_stop))
+        legs.append(_ride_leg(day, conns[board][4], board_stop, conns[board][0],
+                              conns[alight][3], conns[alight][1], geo_db))
+        prev_exit = conns[alight][3]
+    arrival = conns[inst["rides"][-1][1]][1]
+    sec, goal = near_target[prev_exit]
+    if sec:
+        legs.append(_walk_leg(day, prev_exit, goal))
+        arrival += sec
+    return legs, arrival
+
+
+def _move_journeys(day, chosen, source_stops, target_set, query_sec, geo_db):
+    """Podróże dokładnie tych ruchów, które rysuje mapa (pierwszy egzemplarz
+    każdego) - jedyne źródło schematu nowej mapy: nic, czego mapa nie rysuje,
+    nie może się w nim znaleźć."""
+    origin_walk = _origin_walk(day, source_stops)
+    near_target = _target_reach(day, target_set)
+    journeys = []
+    for move in chosen:
+        legs, arrival = _instance_legs(day, move["first"], source_stops, origin_walk,
+                                       near_target, geo_db)
+        rides = [leg for leg in legs if leg["kind"] == "ride"]
+        start_sec = None
+        if legs[0]["kind"] == "walk":
+            legs[0]["dep_sec"] = start_sec = rides[0]["dep_sec"] - legs[0]["_sec"]
+        journeys.append(_summarize_journey(legs, rides, arrival, query_sec, start_sec))
+        _drop_private(legs)
+    return journeys
+
+
+def _transit_pairs(day, journey):
+    """(wsiadanie, wysiadanie) w tablicy połączeń dla każdego przejazdu
+    komunikacją z podróży - albo None, gdy któregoś nie da się odnaleźć."""
+    pairs = []
+    for leg in journey["legs"]:
+        if leg["kind"] != "ride":
+            continue
+        idxs = list(gtfs.trip_conns(day, leg["trip"]))
+        board = next((i for i in idxs if day.conns[i][0] == leg["dep_sec"]
+                      and day.stop_names[day.conns[i][2]] == leg["from"]), None)
+        alight = next((i for i in idxs if day.conns[i][1] == leg["arr_sec"]
+                       and day.stop_names[day.conns[i][3]] == leg["to"]), None)
+        if board is None or alight is None or idxs.index(alight) < idxs.index(board):
+            return None
+        pairs.append((board, alight))
+    return pairs
+
+
+def _admit_vehicles(day, chosen_map, candidates, gain_sec, best_arr, query_sec):
+    """Rower i Traficar jako odcinki ruchu, oceniane tak samo jak reszta
+    (koszt z przesiadkami i marszem, wyparcie przez pokazane ruchy, nie
+    kolidują z cudzymi przesiadkami). Wchodzi najwyżej jedna taka podróż: gdy
+    pierwszy widok jest pełny, wypiera najsłabszy ruch (nigdy najszybszego).
+    Zwraca {"journey", "pairs", "kind"} albo None; przy wejściu przebudowuje
+    `chosen_map` (ruchy, kawałki mapy)."""
+    shown = chosen_map["moves"]
+    limit = (min(m["cost"] for m in shown)
+             + moves.reasonable_sec(best_arr, query_sec))
+    infos = [moves.passes_and_transfers(day, m["first"]["rides"]) for m in shown]
+    anchor = moves.fastest(day, shown)
+    best = None
+    for kind, journey in candidates:
+        pairs = _transit_pairs(day, journey)
+        if pairs is None:
+            continue
+        vehicles = len(pairs) + sum(1 for leg in journey["legs"]
+                                    if leg["kind"] in ("bike", "drive"))
+        walk = sum(leg["minutes"] * 60 for leg in journey["legs"] if leg["kind"] == "walk")
+        inst = {"arr": journey["arrival_sec"], "dep": journey["departure_sec"],
+                "n": vehicles, "walk": walk}
+        cost = moves.cost(inst, gain_sec)
+        if cost > limit or any(moves.dominates(m["first"], inst) for m in shown):
+            continue
+        mine = moves.passes_and_transfers(day, tuple(pairs)) if pairs else (set(), set())
+        if any(moves.clashes(mine, o) for o in infos):
+            continue
+        if best is None or cost < best[0]:
+            best = (cost, kind, journey, pairs)
+    if best is None:
+        return None
+    cost, kind, journey, pairs = best
+    if len(shown) >= moves.READABLE_MOVES:
+        weakest = max((m for m in shown if m is not anchor), key=lambda m: m["cost"],
+                      default=None)
+        if weakest is None or weakest["cost"] <= cost:
+            return None
+        chosen_map["moves"] = [m for m in shown if m is not weakest]
+    picked = [m["first"] for m in chosen_map["moves"]]
+    pseudo = [{"rides_set": set(i["rides"]), "arr": i["arr"],
+               "kept": [(i["nums"], set(i["rides"]))]} for i in picked]
+    if pairs:
+        pseudo.append({"rides_set": set(pairs), "arr": journey["arrival_sec"],
+                       "kept": [(frozenset(), set(pairs))]})
+    if pseudo:
+        segs, ranges, _hops = _value_segments(day, pseudo)
+        chosen_map.update(kept=segs, ranges=ranges, chosen=pseudo)
+    return {"journey": journey, "pairs": pairs, "kind": kind}
+
+
+def _vehicle_pieces(day, journey, start_place, end_place, start_name, end_name):
+    """Odcinki roweru i auta jako kawałki do schematu: od miejsca, z którego się
+    do nich idzie, do miejsca, w którym podróż jedzie dalej (albo do celu)."""
+    legs = journey["legs"]
+
+    def place_of(name):
+        if name == start_name:
+            return start_place
+        if name == end_name:
+            return end_place
+        ids = day.stops_by_key.get(name.casefold())
+        return gtfs.place_name(day, ids[0]) if ids else None
+
+    pieces = []
+    for k, leg in enumerate(legs):
+        if leg["kind"] not in ("bike", "drive"):
+            continue
+        before = legs[k - 1]["from"] if k and legs[k - 1]["kind"] == "walk" else leg["from"]
+        if leg["kind"] == "bike":
+            after = (legs[k + 1]["to"] if k + 1 < len(legs)
+                     and legs[k + 1]["kind"] == "walk" else leg["to"])
+        else:
+            after = end_name
+        a, b = place_of(before), place_of(after)
+        if a and b and a != b:
+            pieces.append({"kind": leg["mode"] if leg["kind"] == "bike" else "car",
+                           "num": "rower" if leg["kind"] == "bike" else "Traficar",
+                           "stops_n": [a, b]})
+    return pieces
 
 
 def _last_alights(day, chosen):
@@ -2428,10 +2580,29 @@ def plan_flow_stages(start_query, end_query, when=None,
             chosen_map = _value_map(day, source_stops, target_set, dep_sec,
                                     best_arr, frame_km2, density, more, seated)
         deadline, at_ceiling = chosen_map["deadline"], chosen_map["at_ceiling"]
-        kept, ranges = chosen_map["kept"], chosen_map["ranges"]
-        why_of = chosen_map["why_of"]
         earliest, _, _ = _forward(day, source_stops, dep_sec, deadline)
         profile = _target_profile(day, target_set, dep_sec, deadline)
+        # Rower i Traficar na tych samych zasadach co ruchy - tylko pod nową
+        # mapą i przy pytaniu o dziś (stan stojaków i aut jest żywy).
+        vehicle_move = None
+        live_today = day_offset == 0 and when.date() == date.today()
+        if "moves" in chosen_map and live_today and (use_bikes or use_cars) \
+                and with_journeys:
+            candidates = []
+            if use_bikes:
+                found, _stations = _bike_journeys(
+                    day, source_stops, target_stops, report_dep_sec, deadline, earliest,
+                    profile, geo_db, start_point, end_point, start_name, end_name,
+                    (bike_mps, bike_overhead), (bike_electric, bike_regular))
+                candidates += [("bike", journey) for journey in found]
+            if use_cars:
+                candidates += [("car", journey) for journey in _traficar_journeys(
+                    day, best_journey, report_dep_sec, deadline, end_point_ll,
+                    end_name, geo_db)]
+            vehicle_move = _admit_vehicles(day, chosen_map, candidates, gain_sec,
+                                           best_arr, dep_sec)
+        kept, ranges = chosen_map["kept"], chosen_map["ranges"]
+        why_of = chosen_map["why_of"]
         query_sec = dep_sec
         dep_sec = chosen_map["map_from"]
         degraded = False
@@ -2474,7 +2645,24 @@ def plan_flow_stages(start_query, end_query, when=None,
                 map_journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                    limit=journey_limit,
                                                    gain_sec=gain_sec, ride=ride)
-            if new_map:
+            if new_map and "moves" in chosen_map:
+                # Schemat z DOKŁADNIE tych ruchów, które rysuje mapa, bez
+                # dodatków (scheme_extra tu niczego nie dokłada).
+                scheme_journeys = _move_journeys(day, chosen_map["moves"], source_stops,
+                                                 target_set, query_sec, geo_db)
+                fastest_move = min(range(len(scheme_journeys)),
+                                   key=lambda k: scheme_journeys[k]["arrival_sec"])
+                if vehicle_move:
+                    scheme_journeys.append(vehicle_move["journey"])
+                scheme = _scheme_of_map(
+                    day, seg_list, nodes, target_set, source_stops, scheme_journeys,
+                    query_sec, best_arr, start_point is not None and ride is None,
+                    end_point is not None, scheme_journeys[fastest_move]["legs"], seated, 0,
+                    vehicle_move["journey"] if vehicle_move else None,
+                    start_name, end_name)
+                _scheme_times(scheme, scheme_journeys)
+                scheme["moves"] = _scheme_moves(day, scheme_journeys, chosen_map["moves"])
+            elif new_map:
                 scheme_journeys = (map_journeys if with_journeys else
                                    _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                        limit=journey_limit, gain_sec=gain_sec,
@@ -4183,8 +4371,9 @@ def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
 
 def _scheme_of_map(day, seg_list, nodes, target_set, source_stops, journeys,
                    query_sec, best_arr, start_is_point, end_is_point, fastest_legs, seated,
-                   extra_count):
-    """Schemat z tego, co mapa właśnie narysowała - patrz _scheme."""
+                   extra_count, vehicle_journey=None, start_name=None, end_name=None):
+    """Schemat z tego, co mapa właśnie narysowała - patrz _scheme. Rower i auto
+    (`vehicle_journey`) są odcinkami ruchu, więc stoją na schemacie tak samo."""
     by_name = {day.display_name[key]: ids for key, ids in day.stops_by_place.items()}
     origin = _origin_walk(day, source_stops)
     near_target = _target_reach(day, target_set)
@@ -4233,7 +4422,13 @@ def _scheme_of_map(day, seg_list, nodes, target_set, source_stops, journeys,
         extra_nodes += [{"place": name} for name in sorted(names - known)]
         known |= names
 
-    scheme = _scheme(seg_list + extra_pieces, nodes + extra_nodes,
+    vehicle_pieces = []
+    if vehicle_journey is not None:
+        start_place = next((n["place"] for n in nodes if n.get("start")), None)
+        end_place = gtfs.place_name(day, next(iter(target_set)))
+        vehicle_pieces = _vehicle_pieces(day, vehicle_journey, start_place, end_place,
+                                         start_name, end_name)
+    scheme = _scheme(seg_list + extra_pieces + vehicle_pieces, nodes + extra_nodes,
                      target_places={gtfs.place_name(day, s) for s in target_set},
                      walkable=walkable)
     scheme["pairs"] = _scheme_pairs(day, scheme["nodes"], stops_of, target_set, journeys,
@@ -4315,6 +4510,27 @@ def _scheme_pairs(day, scheme_nodes, stops_of, target_set, journeys, query_sec,
         for a, b in walks:
             add(ids.get(a), ids.get(b), "extra", rank)
     return list(pairs.values())
+
+
+def _scheme_moves(day, journeys, chosen):
+    """Opis każdego ruchu pod schematem: linie, godzina wyjścia i przyjazdu,
+    łączny czas i - gdy ruch ma przesiadkę na styk - jej zapas w minutach
+    (ujemny, gdy wg szacunku brakuje, a mieści się w marginesie błędu marszu,
+    moves.WALK_MARGIN_SEC). Jedna linijka na ruch, w kolejności mapy."""
+    slacks = [moves.slack_of(day, move["first"]) for move in chosen]
+    slacks += [None] * (len(journeys) - len(slacks))
+    labels = {"ride": lambda leg: leg["num"], "bike": lambda leg: "rower",
+              "drive": lambda leg: "Traficar"}
+    return [{
+        "slack_min": None if slack is None else floor(slack / 60),
+        "tight": slack is not None and slack <= moves.TIGHT_SEC,
+        "lines": [{"num": labels[leg["kind"]](leg),
+                   "mode": "car" if leg["kind"] == "drive" else leg["mode"]}
+                  for leg in journey["legs"] if leg["kind"] in labels],
+        "departure": journey["departure"],
+        "arrival": journey["arrival"],
+        "minutes": journey["duration_min"],
+    } for journey, slack in zip(journeys, slacks)]
 
 
 def _scheme_times(scheme, journeys):
@@ -4975,7 +5191,7 @@ def _forward(day, source_stops, dep_sec, deadline, seated=None):
     return earliest, arrived_by, trip_board
 
 
-def _backward(day, target_set, dep_sec, deadline):
+def _backward(day, target_set, dep_sec, deadline, walk_margin_sec=0):
     """Skan wstecz: najpóźniejszy moment na każdym przystanku, z którego
     da się jeszcze dotrzeć do celu przed deadline.
 
@@ -5022,6 +5238,8 @@ def _backward(day, target_set, dep_sec, deadline):
                 latest[dep_s] = dep_t
             for sibling in day.siblings.get(dep_s, ()):
                 walk_dep = dep_t - gtfs.walk_seconds(day, sibling, dep_s)
+                if day.place_of.get(sibling) != day.place_of.get(dep_s):
+                    walk_dep += walk_margin_sec
                 if walk_dep > on_foot.get(sibling, -1):
                     on_foot[sibling] = walk_dep
                     if walk_dep > latest.get(sibling, -1):

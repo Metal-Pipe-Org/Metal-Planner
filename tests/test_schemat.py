@@ -726,11 +726,10 @@ def test_dodatkowe_przejscia_szuka_planner_poza_lista_wynikow(install_day):
     bez = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
     assert [p for p in bez["pairs"] if p["why"] == "extra"] == []
     z = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, scheme_extra=4)["scheme"]
-    pary = _pary(z)
-    # Najszybsza podróż nie ma przejścia, więc "fastest" nie ma nic, a wolniejsza
-    # z przejściem jest pierwszą dodatkową.
-    assert [p["why"] for p in z["pairs"]] == ["extra"]
-    assert pary[frozenset(("A", "B"))]["rank"] == 1
+    # Schemat nowej mapy powstaje z ruchów, które rysuje mapa: scheme_extra
+    # niczego do niego nie dokłada (patrz planner._scheme_of_map).
+    assert [p for p in z["pairs"] if p["why"] == "extra"] == []
+    assert z == bez
 
 
 def test_najszybsza_podroz_z_przejsciem_nie_liczy_sie_do_dodatkowych(install_day):
