@@ -2009,13 +2009,13 @@ def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
     for cls in near:
         cls["kept"] = [(nums, rides) for nums, (_, rides) in cls["variants"].items()]
     insts = moves.instances_of(day, near, query_sec)
-    chosen, hidden = moves.choose(day, insts, query_sec, best_arr, gain_sec,
-                                  wider, prefer)
+    chosen, hidden, has_safe = moves.choose(day, insts, query_sec, best_arr,
+                                            gain_sec, wider, prefer)
     if not chosen:
         return None
     # Wszystko, co jest do złapania, jest na styk: bez szerszego okna nie ma
     # dokąd wrócić, gdy uciekło (heurystyka 4), więc szukamy szerzej.
-    if not wider and not any(moves.is_safe(day, move["first"]) for move in chosen):
+    if not wider and not has_safe:
         return _moves_map(day, source_stops, target_set, query_sec, best_arr,
                           gain_sec, prefer, wider=2)
     # Rysuje się jeden egzemplarz na ruch (pierwszy, na który zdążysz): zbitka

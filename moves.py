@@ -133,8 +133,10 @@ def step_same_vehicles(ctx, insts):
     i wcześniejszą wysiadką."""
     day = ctx["day"]
     best = {}
+    group = {}
     for inst in insts:
         key = tuple(day.conns[board][4] for board, _ in inst["rides"])
+        group.setdefault(key, []).append(inst["rides"])
         old = best.get(key)
         if old is None:
             best[key] = inst
@@ -146,6 +148,8 @@ def step_same_vehicles(ctx, insts):
                     walked_sec(day, i), sum(alight for _, alight in i["rides"]))
         if rank(inst) < rank(old):
             best[key] = inst
+    for key, inst in best.items():
+        inst["group"] = group[key]
     return list(best.values())
 
 
@@ -318,7 +322,7 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None):
     """(ruchy do pokazania, ile ukryto): [{sig, shown: [egzemplarze], first,
     cost, far_walk}] od najlepszego. Pusta lista, gdy nic nie ma."""
     if not insts:
-        return [], 0
+        return [], 0, True
     ctx = {"day": day, "query_sec": query_sec, "gain_sec": gain_sec,
            "reasonable_sec": reasonable_sec(best_arr, query_sec, wider)}
     ctx["pool"] = sorted(step_one_per_departure(ctx, step_same_vehicles(
@@ -349,7 +353,8 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None):
         for move in moves:
             move["far_walk"] = False
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
-    return readable(moves, anchor)
+    shown, hidden = readable(day, moves, anchor)
+    return shown, hidden, any(is_safe(day, m["first"]) for m in moves)
 
 
 def distinct_last_vehicle(day, moves, anchor):
@@ -381,13 +386,83 @@ def fastest(day, moves, prefer=None):
     return min(moves, key=lambda m: (m["first"]["arr"], nums(m) != prefer, m["cost"]))
 
 
-def readable(moves, anchor):
-    """Pierwszy widok to READABLE_MOVES różnych ruchów, od najlepszego. Dalekie
-    spacery i wszystko, co się nie mieści, nie jest rysowane - dostęp zostaje
-    przez kliknięcie w przystanek (tablica odjazdów). Zwraca (pokazane, ile
-    ukryto)."""
-    near = [m for m in moves if not m["far_walk"] and m is not anchor]
-    shown = [anchor] + near[:READABLE_MOVES - 1]
+def passes_and_transfers(day, rides):
+    """(miejsca, których dotyka ruch, miejsca PRZEJŚĆ pieszo między różnymi
+    miejscami). Ruch dotyka miejsca, gdy jego pojazd je mija, wsiada w nim albo
+    wysiada. Przejście między miejscami (MDK -> Dworzec Główny) to klamra na
+    schemacie, a cudza linia, która tam wjeżdża albo tamtędy przejeżdża,
+    nie daje się już narysować prosto przez pudełko; zmiana słupka w obrębie
+    jednego miejsca (tramwaj i autobus na Parku Wschodnim) nią nie jest."""
+    conns = day.conns
+    touched, walks = set(), set()
+    for k, (board, alight) in enumerate(rides):
+        idxs = gtfs.trip_conns(day, conns[board][4])
+        lo, hi = idxs.index(board), idxs.index(alight)
+        touched |= {place(day, conns[i][3]) for i in idxs[lo:hi + 1]}
+        touched.add(place(day, conns[board][2]))
+        if k:
+            there = place(day, conns[board][2])
+            here = place(day, conns[rides[k - 1][1]][3])
+            if there != here:
+                walks |= {there, here}
+    return touched, walks
+
+
+def clashes(one, other):
+    """Ile razy ruch wchodzi w cudzą klamrę przejścia pieszo."""
+    return len(one[0] & other[1]) + len(other[0] & one[1])
+
+
+def variants_of(day, inst):
+    """Te same pojazdy, to samo wsiadanie i ten sam przyjazd, tylko inne miejsce
+    przesiadki (Karwińska, Park Wschodni, pętla): pierwszy to wybrany."""
+    conns = day.conns
+    first, last = inst["rides"][0][0], inst["rides"][-1][1]
+    out = [inst["rides"]]
+    for rides in inst.get("group", ()):
+        if (rides not in out and rides[0][0] == first
+                and conns[rides[-1][1]][1] == conns[last][1]
+                and conns[rides[-1][1]][3] == conns[last][3]):
+            out.append(rides)
+    return out
+
+
+def readable(day, moves, anchor):
+    """Pierwszy widok to najszybszy ruch i do READABLE_MOVES - 1 kolejnych,
+    NAPRAWDĘ różnych: żaden pojazd nie mija miejsca przesiadki innego pokazanego
+    ruchu i dwa ruchy nie przesiadają się w tym samym miejscu - inaczej linie
+    przechodzą przez cudze przesiadki, a mapa i schemat zamieniają się w splot.
+    Miejsce przesiadki tych samych pojazdów wybiera się tak, żeby ruchy sobie
+    nie przeszkadzały (variants_of). Dalekie spacery i wszystko, co się nie
+    mieści, nie jest rysowane - dostęp zostaje przez kliknięcie w przystanek
+    (tablica odjazdów). Zwraca (pokazane, ile ukryto, ...)."""
+    others = [passes_and_transfers(day, m["first"]["rides"])
+              for m in moves if m is not anchor and not m["far_walk"]]
+
+    def settle(move, against):
+        inst = move["first"]
+        options = variants_of(day, inst)
+        scored = [(sum(clashes(passes_and_transfers(day, rides), o) for o in against), k, rides)
+                  for k, rides in enumerate(options)]
+        clash, _, rides = min(scored)
+        if rides != inst["rides"]:
+            move["first"] = dict(inst, rides=rides, n=len(rides))
+            move["first"].pop("slack", None)
+            move["first"].pop("walked", None)
+        return clash, passes_and_transfers(day, move["first"]["rides"])
+
+    _, anchor_info = settle(anchor, others)
+    shown, infos = [anchor], [anchor_info]
+    for move in moves:
+        if len(shown) >= READABLE_MOVES:
+            break
+        if move is anchor or move["far_walk"]:
+            continue
+        clash, info = settle(move, infos)
+        if clash:
+            continue
+        shown.append(move)
+        infos.append(info)
     shown.sort(key=lambda m: (m["far_walk"], m["cost"]))
     return shown, len(moves) - len(shown)
 

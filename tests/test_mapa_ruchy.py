@@ -217,3 +217,14 @@ def test_najszybsza_trasa_z_paska_jest_na_mapie_i_w_schemacie():
     fastest = {leg["num"] for leg in result["fastest"]["legs"] if leg.get("num")}
     assert fastest <= {s["num"] for s in result["segments"]}
     assert fastest <= {line["num"] for e in result["scheme"]["edges"] for line in e["lines"]}
+
+
+def test_ruch_nie_wjezdza_w_klamre_przejscia_innego_ruchu():
+    """Tramwaj 2 dowozi pod MDK, stamtąd 97 m pieszo na Dworzec Główny i 113.
+    Nocny N kończy się na Dworcu Głównym (a inne jadą tamtędy przelotem) - taki
+    ruch wjeżdżałby w klamrę przejścia i schemat nie narysuje go prosto przez
+    pudełko, więc w pierwszym widoku go nie ma."""
+    result = _real("Katedra", "Wojszyce", date(2026, 11, 10), "15:00", scheme_extra=2)
+
+    assert "N" not in _nums(result)
+    assert {"2", "113"} <= set(_nums(result))
