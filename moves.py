@@ -314,7 +314,7 @@ def departures_of_move(ctx, own, everything):
     return shown
 
 
-def choose(day, insts, query_sec, best_arr, gain_sec, wider=0):
+def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None):
     """(ruchy do pokazania, ile ukryto): [{sig, shown: [egzemplarze], first,
     cost, far_walk}] od najlepszego. Pusta lista, gdy nic nie ma."""
     if not insts:
@@ -341,22 +341,54 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0):
         first = next(i for i in shown if not i["just_left"])
         moves.append({"sig": sig, "shown": shown, "first": first,
                       "cost": cost(first, gain_sec)})
+    anchor = fastest(day, moves, prefer)
+    moves = distinct_last_vehicle(day, moves, anchor)
     for move in moves:
         move["far_walk"] = max(move["first"]["lead"], move["first"]["tail"]) >= LONG_WALK_SEC
     if all(move["far_walk"] for move in moves):
         for move in moves:
             move["far_walk"] = False
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
-    return readable(moves)
+    return readable(moves, anchor)
 
 
-def readable(moves):
+def distinct_last_vehicle(day, moves, anchor):
+    """Ruchy kończące się TYM SAMYM pojazdem (ten sam kurs ostatniego
+    przejazdu) to jedna podróż dowożona z różnych miejsc - nie są „naprawdę
+    różne" i na mapie leżałyby jedna na drugiej (ten sam autobus raz jako
+    kontynuacja, raz jako osobna przesiadka). Zostaje lepszy: tańszy, z równych
+    - z większym zapasem na przesiadce."""
+    best = {}
+    for move in moves:
+        first = move["first"]
+        key = day.conns[first["rides"][-1][0]][4]
+        slack = slack_of(day, first)
+        rank = (move is not anchor, move["cost"],
+                -(slack if slack is not None else 10 ** 6), -first["dep"])
+        if key not in best or rank < best[key][0]:
+            best[key] = (rank, move)
+    return [move for _, move in best.values()]
+
+
+def fastest(day, moves, prefer=None):
+    """Ruch z najwcześniejszym przyjazdem: najszybsza podróż jest na mapie
+    zawsze, bo pasek nad mapą i schemat o niej mówią. Z równych tym samym
+    przyjazdem wygrywa ta, którą pasek nazywa (`prefer` = numery jej linii po
+    kolei), potem tańsza."""
+    def nums(move):
+        return tuple(day.trip_info[day.conns[b][4]][0].rsplit(" ", 1)[-1]
+                     for b, _ in move["first"]["rides"])
+    return min(moves, key=lambda m: (m["first"]["arr"], nums(m) != prefer, m["cost"]))
+
+
+def readable(moves, anchor):
     """Pierwszy widok to READABLE_MOVES różnych ruchów, od najlepszego. Dalekie
     spacery i wszystko, co się nie mieści, nie jest rysowane - dostęp zostaje
     przez kliknięcie w przystanek (tablica odjazdów). Zwraca (pokazane, ile
     ukryto)."""
-    near = [m for m in moves if not m["far_walk"]]
-    shown = near[:READABLE_MOVES]
+    near = [m for m in moves if not m["far_walk"] and m is not anchor]
+    shown = [anchor] + near[:READABLE_MOVES - 1]
+    shown.sort(key=lambda m: (m["far_walk"], m["cost"]))
     return shown, len(moves) - len(shown)
 
 

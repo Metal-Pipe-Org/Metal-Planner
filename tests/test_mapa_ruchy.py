@@ -191,3 +191,29 @@ def test_rowery_i_traficar_z_probki_w_nowej_mapie_nie_przybywa(monkeypatch):
     assert nowa["cars"] and stara["cars"]
     assert len(nowa["cars"]) <= 3
     assert 1 <= len(nowa["bike_places"]) < len(stara["bike_places"])
+
+
+def test_ten_sam_ostatni_pojazd_to_jedna_podroz(install_day):
+    """Dwie drogi kończą się tym samym kursem autobusu, tylko wsiadanym w innym
+    miejscu: na mapie leżałyby jedna na drugiej, więc jest jedna."""
+    install_day(make_day([
+        {"trip_id": "t1", "label": "Tramwaj 5", "stops": [("S", 600, 600), ("B", 900, 900)]},
+        {"trip_id": "t2", "label": "Tramwaj 6", "stops": [("S", 610, 610), ("C", 1000, 1000)]},
+        {"trip_id": "t3", "label": "Autobus 125",
+         "stops": [("B", 1200, 1200), ("C", 1300, 1300), ("E", 1500, 1500)]},
+    ]))
+
+    result = _flow("S", "E")
+
+    assert len([s for s in result["segments"] if s["num"] == "125"]) == 1
+    assert len({s["num"] for s in result["segments"]} & {"5", "6"}) == 1
+
+
+def test_najszybsza_trasa_z_paska_jest_na_mapie_i_w_schemacie():
+    """Pasek i schemat mówią o najszybszej podróży - nowa mapa jej nie gubi,
+    nawet gdy inny ruch dowozi tą samą minutą."""
+    result = _real("Katedra", "Wojszyce", date(2026, 11, 10), "15:00")
+
+    fastest = {leg["num"] for leg in result["fastest"]["legs"] if leg.get("num")}
+    assert fastest <= {s["num"] for s in result["segments"]}
+    assert fastest <= {line["num"] for e in result["scheme"]["edges"] for line in e["lines"]}

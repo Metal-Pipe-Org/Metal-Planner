@@ -1985,7 +1985,7 @@ MOVES_SEARCH_MAX_SEC = 55 * 60
 
 
 def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
-               wider=0):
+               prefer=None, wider=0):
     """Ruchy do pokazania i mapa z nich narysowana - słownik jak z _value_map
     plus `moves`; None, gdy nic się nie znalazło (wtedy plan_flow wraca do
     _value_map)."""
@@ -2010,14 +2010,14 @@ def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
         cls["kept"] = [(nums, rides) for nums, (_, rides) in cls["variants"].items()]
     insts = moves.instances_of(day, near, query_sec)
     chosen, hidden = moves.choose(day, insts, query_sec, best_arr, gain_sec,
-                                  wider)
+                                  wider, prefer)
     if not chosen:
         return None
     # Wszystko, co jest do złapania, jest na styk: bez szerszego okna nie ma
     # dokąd wrócić, gdy uciekło (heurystyka 4), więc szukamy szerzej.
     if not wider and not any(moves.is_safe(day, move["first"]) for move in chosen):
         return _moves_map(day, source_stops, target_set, query_sec, best_arr,
-                          gain_sec, wider=2)
+                          gain_sec, prefer, wider=2)
     # Rysuje się jeden egzemplarz na ruch (pierwszy, na który zdążysz): zbitka
     # linii jednego ruchu to jeden ruch, a nie osobne nitki.
     picked = [move["first"] for move in chosen]
@@ -2421,8 +2421,9 @@ def plan_flow_stages(start_query, end_query, when=None,
         if (by_moves and ride is None
                 and not (gtfs.is_city_group(day, source_stops)
                          or gtfs.is_city_group(day, target_set))):
-            chosen_map = _moves_map(day, source_stops, target_set, dep_sec,
-                                    best_arr, gain_sec)
+            chosen_map = _moves_map(
+                day, source_stops, target_set, dep_sec, best_arr, gain_sec,
+                tuple(leg["num"] for leg in best_legs if leg["kind"] == "ride"))
         if chosen_map is None:
             chosen_map = _value_map(day, source_stops, target_set, dep_sec,
                                     best_arr, frame_km2, density, more, seated)
