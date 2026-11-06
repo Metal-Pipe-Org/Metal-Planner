@@ -382,7 +382,7 @@ def walk_seconds(day, from_stop, to_stop):
                          day.walk_mps)
 
 
-def walk_reach(day, stops, max_m=WALK_M):
+def walk_reach(day, stops, max_m=None):
     """{słupek: (sekundy dojścia, z którego ze `stops` się tam dochodzi)} -
     dokąd da się dojść pieszo z KRAŃCA relacji.
 
@@ -397,6 +397,8 @@ def walk_reach(day, stops, max_m=WALK_M):
     """
     if not day.walking:
         return {}
+    if max_m is None:
+        max_m = day.walk_radius
     key = (frozenset(stops), max_m)
     cached = day._reach.get(key)
     if cached is not None:
@@ -542,7 +544,7 @@ class DayData:
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
         "pkp_stations", "pkp_platforms", "deps_by_stop", "_reach", "walk_mps", "_paced",
-        "_searches", "_points", "walking",
+        "_searches", "_points", "walking", "walk_radius",
     )
 
     def __init__(self):
@@ -581,6 +583,9 @@ class DayData:
         self._paced = {}
         # False: dzień bez chodzenia (patrz without_walking).
         self.walking = True
+        # Promień dojścia z krańców relacji (patrz walk_reach); przesiadki między
+        # słupkami zostają przy WALK_M. Inny promień to osobna kopia dnia.
+        self.walk_radius = WALK_M
         # trip_id "PKP:..." -> [(stop_id, przyjazd, odjazd), ...] po kolei -
         # odpowiednik stop_times.txt dla kursów kolejowych (patrz pkp.py:
         # augment_day/trip_path). GTFS-owe kursy tego nie używają - mają
@@ -905,6 +910,27 @@ def with_pace(day, pace):
     }
     day._paced[pace] = paced
     return paced
+
+
+def with_walk_radius(day, radius_m):
+    """Dzień, w którym z krańców relacji dochodzi się pieszo najdalej na
+    `radius_m` (zamiast WALK_M). Zasięg przestaje być twardym progiem: kto
+    dalej ma przystanek, płaci za to minutami marszu (walk_time_sec), a o tym,
+    czy to się opłaca, rozstrzyga wybór podróży. Kopia płytka, trzymana na dniu
+    bazowym jak w with_pace."""
+    if radius_m == day.walk_radius:
+        return day
+    cached = day._paced.get(("promien", radius_m))
+    if cached is not None:
+        return cached
+    wider = copy.copy(day)
+    wider.walk_radius = radius_m
+    wider._reach = {}
+    wider._searches = {}
+    wider._paced = {}
+    wider._points = {}
+    day._paced[("promien", radius_m)] = wider
+    return wider
 
 
 def without_walking(day):

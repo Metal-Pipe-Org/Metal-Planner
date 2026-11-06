@@ -1163,6 +1163,21 @@ body.routes-off #results .notice.loading { display: none; }
     font-size: 12.5px;
 }
 
+.j-times, .j-slack {
+    margin-top: 4px;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+}
+
+.j-slack.tight {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.j-left {
+    font-style: italic;
+}
+
 /* Plakietka linii - ten sam język co numery na mapie. */
 .badge {
     display: inline-flex;

@@ -535,6 +535,9 @@ def init_routes(app):
             # Propozycje tras wyłączone pod zębatką - "0" i serwer ich nie
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",
+            # Mapa i lista z ruchów (moves.py); "0" wraca do progu tolerancji
+            # i gęstości.
+            by_moves=request.args.get("moves", "1") == "1",
         )
 
     @app.route("/api/dev/kod", methods=["GET", "POST"])
