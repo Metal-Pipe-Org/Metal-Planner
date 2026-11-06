@@ -48,10 +48,20 @@ TIGHT_SEC = 3 * 60
 # Różnica, od której jeden ruch wyraźnie bije drugi (koszt albo godzina wyjścia).
 EPSILON_SEC = 5 * 60
 
-MAX_MOVES = 14
-
 # Więcej niż tyle pojazdów w jednej podróży to objazd miasta, nie ruch.
 MAX_RIDES = 3
+
+# Dojście ze startu albo do celu dłuższe niż tyle to „daleki spacer": taki ruch
+# nie wchodzi do pierwszego widoku.
+LONG_WALK_SEC = 15 * 60
+
+# Pierwszy widok nowej mapy: tyle różnych ruchów jest jeszcze czytelnych (na
+# mapie i w schemacie). Pozostałe nie są rysowane.
+READABLE_MOVES = 3
+
+# Aut i rowerów przy mapie w pierwszym widoku (rowery i Traficar biorą zasięg z
+# narysowanych ruchów, więc im mniej ruchów, tym mniej ich w ogóle).
+FIRST_VIEW_VEHICLES = 1
 
 # Marsz liczy się w minutach przyjazdu, ale dłuższe chodzenie męczy bardziej niż
 # siedzenie: tyle razy sekundy marszu doliczają się do kosztu ponad ich wpływ
@@ -81,6 +91,8 @@ def instances_of(day, classes, query_sec):
                           if conns[a][3] != conns[b][2]))
             out.append({
                 "walk": walk,
+                "lead": first - cls["dep"],
+                "tail": cls["arr"] - conns[ordered[-1][1]][1],
                 "rides": ordered,
                 "n": len(ordered),
                 "arr": cls["arr"],
@@ -98,9 +110,9 @@ def cost(inst, gain_sec):
     return inst["arr"] + gain_sec * (inst["n"] - 1) + WALK_EXTRA * inst["walk"]
 
 
-def reasonable_sec(best_arr, query_sec, more=0):
+def reasonable_sec(best_arr, query_sec, wider=0):
     base = max(REASONABLE_MIN_SEC, REASONABLE_FRACTION * (best_arr - query_sec))
-    return base * (1 + 0.5 * more)
+    return base * (1 + 0.5 * wider)
 
 
 # --- kroki ---
@@ -127,6 +139,7 @@ def step_same_vehicles(ctx, insts):
         if old is None:
             best[key] = inst
             continue
+
         def rank(i):
             slack = slack_of(day, i)
             return (i["arr"], -i["dep"], -(slack if slack is not None else 10 ** 6),
@@ -301,13 +314,13 @@ def departures_of_move(ctx, own, everything):
     return shown
 
 
-def choose(day, insts, query_sec, best_arr, gain_sec, more=0):
-    """Ruchy do pokazania: [{sig, shown: [egzemplarze], all: [...]}], od
-    najlepszego. Pusta lista, gdy nic nie ma."""
+def choose(day, insts, query_sec, best_arr, gain_sec, wider=0):
+    """(ruchy do pokazania, ile ukryto): [{sig, shown: [egzemplarze], first,
+    cost, far_walk}] od najlepszego. Pusta lista, gdy nic nie ma."""
     if not insts:
-        return []
+        return [], 0
     ctx = {"day": day, "query_sec": query_sec, "gain_sec": gain_sec,
-           "reasonable_sec": reasonable_sec(best_arr, query_sec, more)}
+           "reasonable_sec": reasonable_sec(best_arr, query_sec, wider)}
     ctx["pool"] = sorted(step_one_per_departure(ctx, step_same_vehicles(
         ctx, step_reasonable(ctx, insts))),
                          key=lambda i: cost(i, gain_sec))
@@ -328,8 +341,23 @@ def choose(day, insts, query_sec, best_arr, gain_sec, more=0):
         first = next(i for i in shown if not i["just_left"])
         moves.append({"sig": sig, "shown": shown, "first": first,
                       "cost": cost(first, gain_sec)})
-    moves.sort(key=lambda m: (m["cost"], -m["first"]["dep"]))
-    return moves[:MAX_MOVES + 2 * more]
+    for move in moves:
+        move["far_walk"] = max(move["first"]["lead"], move["first"]["tail"]) >= LONG_WALK_SEC
+    if all(move["far_walk"] for move in moves):
+        for move in moves:
+            move["far_walk"] = False
+    moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
+    return readable(moves)
+
+
+def readable(moves):
+    """Pierwszy widok to READABLE_MOVES różnych ruchów, od najlepszego. Dalekie
+    spacery i wszystko, co się nie mieści, nie jest rysowane - dostęp zostaje
+    przez kliknięcie w przystanek (tablica odjazdów). Zwraca (pokazane, ile
+    ukryto)."""
+    near = [m for m in moves if not m["far_walk"]]
+    shown = near[:READABLE_MOVES]
+    return shown, len(moves) - len(shown)
 
 
 STEPS = [step_reasonable, step_same_vehicles, step_one_per_departure,

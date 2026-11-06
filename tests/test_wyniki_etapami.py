@@ -141,7 +141,7 @@ def test_endpoint_wysyla_etapy_linijkami(install_day, monkeypatch):
     merged = {}
     for line in lines:
         merged.update({k: v for k, v in line.items() if k != "stage"})
-    assert merged == json.loads(json.dumps(planner.plan_flow("S", "E", WHEN, by_moves=True)))
+    assert merged == json.loads(json.dumps(planner.plan_flow("S", "E", WHEN)))
 
 
 def test_przelacznik_nowej_mapy_dochodzi_do_plannera(monkeypatch):

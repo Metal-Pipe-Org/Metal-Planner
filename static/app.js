@@ -1909,7 +1909,9 @@ function renderTimeHeadline() {
     // i przycisku jeszcze nie ma.
     const mapped = typeof flow.limit_sec === 'number';
     const showMapRange = $('headline-map-range').checked;
-    const more = mapped && flow.more < MAX_MAP_MORE
+    // Nowa mapa (eksperyment) nie ma „Pokaż więcej": pokazuje kilka ruchów,
+    // resztę da się wyklikać przystankiem.
+    const more = mapped && flow.more < MAX_MAP_MORE && !$('new-map').checked
         ? '<button type="button" class="headline-more" data-tip="'
           + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
           + '"><span class="spinner" aria-hidden="true"></span>Pokaż więcej</button>'
@@ -4575,26 +4577,6 @@ function onboardNoteHtml() {
         + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
 }
 
-/** Ruch (backend: moves.py): kolejne odjazdy tego samego ruchu, zapas na
-    przesiadce na styk i kiedy następny, gdyby ten uciekł. */
-function moveHtml(move) {
-    if (!move) return '';
-    const times = move.departures.map(d => {
-        const text = `${d.departure}${d.lines ? ' (' + d.lines + ')' : ''}`;
-        return d.just_left ? `<span class="j-left" title="Odjechał przed chwilą, może być spóźniony">${esc(text)}</span>` : esc(text);
-    }).join(' · ');
-    const rows = [`<div class="j-times">Odjazdy: ${times}</div>`];
-    if (move.slack_min !== null) {
-        const next = move.if_missed
-            ? `, gdyby uciekł: ${esc(move.if_missed.line)} o ${esc(move.if_missed.departure)}`
-              + ` (za ${move.if_missed.after_min} min)`
-            : ', gdyby uciekł: dziś nic więcej';
-        rows.push(`<div class="j-slack${move.tight ? ' tight' : ''}">`
-            + `Zapas na przesiadce: ${move.slack_min} min${next}</div>`);
-    }
-    return rows.join('');
-}
-
 function renderJourneys() {
     if (!journeys.length) return;
     const cards = journeys.map((j, i) => {
@@ -4641,7 +4623,6 @@ function renderJourneys() {
                 ${exitHtml(j.onboard)}
                 <div class="j-lines">${summaryHtml(j.legs)}</div>
                 <div class="j-meta">${meta.join(' · ')}</div>
-                ${moveHtml(j.move)}
                 ${selected ? detailHtml(j) : ''}
             </li>`;
     }).join('');

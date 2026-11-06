@@ -1984,12 +1984,12 @@ MOVES_WALK_M = 1500
 MOVES_SEARCH_MAX_SEC = 55 * 60
 
 
-def _moves_map(day, source_stops, target_set, query_sec, best_arr, more, gain_sec,
-               widen=True):
+def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
+               wider=0):
     """Ruchy do pokazania i mapa z nich narysowana - słownik jak z _value_map
     plus `moves`; None, gdy nic się nie znalazło (wtedy plan_flow wraca do
     _value_map)."""
-    allow = moves.reasonable_sec(best_arr, query_sec, more)
+    allow = moves.reasonable_sec(best_arr, query_sec, wider)
     start = max(0, query_sec - moves.JUST_LEFT_SEC)
     forgive = int(min(MOVES_SEARCH_MAX_SEC, 2 * gain_sec + allow))
     classes = _value_journeys(day, source_stops, target_set, start, best_arr,
@@ -2009,114 +2009,32 @@ def _moves_map(day, source_stops, target_set, query_sec, best_arr, more, gain_se
     for cls in near:
         cls["kept"] = [(nums, rides) for nums, (_, rides) in cls["variants"].items()]
     insts = moves.instances_of(day, near, query_sec)
-    chosen = moves.choose(day, insts, query_sec, best_arr, gain_sec, more)
+    chosen, hidden = moves.choose(day, insts, query_sec, best_arr, gain_sec,
+                                  wider)
     if not chosen:
         return None
     # Wszystko, co jest do złapania, jest na styk: bez szerszego okna nie ma
     # dokąd wrócić, gdy uciekło (heurystyka 4), więc szukamy szerzej.
-    if widen and not any(moves.is_safe(day, move["first"]) for move in chosen):
+    if not wider and not any(moves.is_safe(day, move["first"]) for move in chosen):
         return _moves_map(day, source_stops, target_set, query_sec, best_arr,
-                          more + 2, gain_sec, widen=False)
-    picked = [inst for move in chosen for inst in move["shown"]]
+                          gain_sec, wider=2)
+    # Rysuje się jeden egzemplarz na ruch (pierwszy, na który zdążysz): zbitka
+    # linii jednego ruchu to jeden ruch, a nie osobne nitki.
+    picked = [move["first"] for move in chosen]
     pseudo = [{"rides_set": set(inst["rides"]), "arr": inst["arr"],
                "kept": [(inst["nums"], set(inst["rides"]))]} for inst in picked]
     segs, ranges, _hops = _value_segments(day, pseudo)
-    catch = [inst["dep"] for inst in picked if not inst["just_left"]]
+    catch = [inst["dep"] for inst in picked]
     return {
         "kept": segs,
         "ranges": ranges,
         "deadline": max(inst["arr"] for inst in picked),
         "map_from": min(catch) if catch else query_sec,
-        "at_ceiling": more >= MAX_MAP_MORE,
+        "at_ceiling": True,
         "why_of": None,
         "chosen": pseudo,
         "moves": chosen,
     }
-
-
-def _instance_legs(day, inst, source_stops, origin_walk, near_target, geo_db):
-    """Etapy jednego egzemplarza ruchu: dojście, przejazdy, przejścia między
-    słupkami i dojście do celu - (etapy, przyjazd do celu)."""
-    conns = day.conns
-    legs = []
-    prev_exit = None
-    for k, (board, alight) in enumerate(inst["rides"]):
-        board_stop = conns[board][2]
-        if k == 0:
-            if board_stop not in source_stops:
-                legs.append(_walk_leg(day, origin_walk[board_stop][0], board_stop))
-        elif prev_exit != board_stop:
-            legs.append(_walk_leg(day, prev_exit, board_stop))
-        legs.append(_ride_leg(day, conns[board][4], board_stop, conns[board][0],
-                              conns[alight][3], conns[alight][1], geo_db))
-        prev_exit = conns[alight][3]
-    arrival = conns[inst["rides"][-1][1]][1]
-    sec, goal = near_target[prev_exit]
-    if sec:
-        legs.append(_walk_leg(day, prev_exit, goal))
-        arrival += sec
-    return legs, arrival
-
-
-def _move_journeys(day, chosen, source_stops, target_set, query_sec, geo_db):
-    """Wpisy listy z wybranych ruchów: pełna trasa pierwszego odjazdu, na
-    który da się zdążyć, plus `move` - zbitka odjazdów, zapas na styk i kiedy
-    następny, gdyby ten uciekł."""
-    origin_walk = _origin_walk(day, source_stops)
-    near_target = _target_reach(day, target_set)
-    conns = day.conns
-
-    def lines(inst):
-        return " → ".join(_line_parts(day.trip_info[conns[board][4]][0])[0]
-                          for board, _ in inst["rides"])
-
-    def tightest(inst):
-        slacks = moves.transfer_slacks(day, inst)
-        return min(slacks) if slacks else None
-
-    journeys = []
-    for move in chosen:
-        inst = move["first"]
-        legs, arrival = _instance_legs(day, inst, source_stops, origin_walk,
-                                       near_target, geo_db)
-        rides = [leg for leg in legs if leg["kind"] == "ride"]
-        start_sec = None
-        if legs[0]["kind"] == "walk":
-            legs[0]["dep_sec"] = start_sec = rides[0]["dep_sec"] - legs[0]["_sec"]
-        journey = _summarize_journey(legs, rides, arrival, query_sec, start_sec)
-        _drop_private(legs)
-
-        shown = []
-        for other in move["shown"]:
-            slack = tightest(other)
-            shown.append({
-                "departure": _fmt_time(other["dep"]),
-                "arrival": _fmt_time(other["arr"]),
-                "lines": lines(other),
-                "just_left": other["just_left"],
-                "slack_min": None if slack is None else int(slack[0] // 60),
-            })
-        info = {"departures": shown, "slack_min": None, "tight": False,
-                "if_missed": None}
-        slack = tightest(inst)
-        if slack is not None:
-            sec, k = slack
-            board, alight = inst["rides"][k]
-            info["slack_min"] = int(sec // 60)
-            info["tight"] = sec <= moves.TIGHT_SEC
-            info["slack_stop"] = day.stop_names[conns[board][2]]
-            following = moves.next_departure(
-                day, moves.place(day, conns[board][2]),
-                moves.place(day, conns[alight][3]), conns[board][0])
-            if following is not None:
-                info["if_missed"] = {
-                    "departure": _fmt_time(following[0]),
-                    "after_min": round((following[0] - conns[board][0]) / 60),
-                    "line": _line_parts(following[1])[0],
-                }
-        journey["move"] = info
-        journeys.append(journey)
-    return journeys
 
 
 def _last_alights(day, chosen):
@@ -2208,7 +2126,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
                      with_journeys=True, use_cars=True,
-                     live_refreshed=None, by_moves=False):
+                     live_refreshed=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
     Odpowiedź powstaje ETAPAMI, w kolejności, w jakiej da się je policzyć
@@ -2283,11 +2201,6 @@ def plan_flow_stages(start_query, end_query, when=None,
     (`cars`) zostają w odpowiedzi - pokazuje je albo chowa sam front - a reszta
     listy jest ta sama, bo auto niczego w niej nie przestawia, tylko dopisuje.
 
-    by_moves - mapa i lista z RUCHÓW (moves.py), a nie z progu tolerancji
-    i gęstości; `density` nie ma wtedy znaczenia, a "pokaż więcej" poszerza
-    granice rozsądku. Nie dotyczy startu z pokładu ani "dowolnej stacji
-    w mieście" - tam zostaje mapa z wartości podróży.
-
     in_vehicle to start Z POKŁADU pojazdu (w API: parametry `onboard_*`,
     patrz onboard.py): {"num", "mode", "headsign", "stop"} - czym pasażer
     jedzie i który przystanek ma przed sobą. Zamiast `start_query`/
@@ -2313,6 +2226,9 @@ def plan_flow_stages(start_query, end_query, when=None,
     sekundy), za to odpowiedź jest o 40-50% mniejsza.
     """
     when = when or datetime.now()
+    # Wybór z ruchów (moves.py) żyje WYŁĄCZNIE pod „Nową mapą" (eksperyment);
+    # stara mapa jest dokładnie taka jak była. Nie dotyczy startu z pokładu.
+    by_moves = bool(new_map) and not in_vehicle
     journey_limit = (
         DEFAULT_JOURNEY_LIMIT if journey_limit is None
         else int(max(MIN_JOURNEY_LIMIT, min(MAX_JOURNEY_LIMIT, journey_limit)))
@@ -2332,7 +2248,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         day = gtfs.with_pace(gtfs.load_day(when.date()), walk_pace)
         if not walking:
             day = gtfs.without_walking(day)
-        if by_moves and not in_vehicle:
+        if by_moves:
             day = gtfs.with_walk_radius(day, MOVES_WALK_M)
     except FileNotFoundError as e:
         yield "error", {"error": str(e)}
@@ -2404,7 +2320,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                 gtfs.load_day(when.date() + timedelta(days=day_offset)), walk_pace)
             if not walking:
                 later = gtfs.without_walking(later)
-            if by_moves and not in_vehicle:
+            if by_moves:
                 later = gtfs.with_walk_radius(later, MOVES_WALK_M)
         except FileNotFoundError:
             break
@@ -2492,6 +2408,11 @@ def plan_flow_stages(start_query, end_query, when=None,
                      else int(max(MIN_MAP_CARS, min(MAX_MAP_CARS, car_count))))
         bike_count = (DEFAULT_MAP_BIKES if bike_count is None
                       else int(max(MIN_MAP_BIKES, min(MAX_MAP_BIKES, bike_count))))
+        if by_moves:
+            # Pierwszy widok nowej mapy jest skromny: po jednym aucie i jednym
+            # rowerze, resztę pokazują dopiero suwaki pod zębatką.
+            car_count = min(car_count, moves.FIRST_VIEW_VEHICLES)
+            bike_count = min(bike_count, moves.FIRST_VIEW_VEHICLES)
         # Mapa z wartości podróży (zgłoszenie #150, patrz _value_map). Liczy
         # się od godziny z pytania, bo późniejsze wyjście jest już jedną z jej
         # wartości - a z pokładu od odjazdu pojazdu (patrz _value_journeys).
@@ -2501,7 +2422,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                 and not (gtfs.is_city_group(day, source_stops)
                          or gtfs.is_city_group(day, target_set))):
             chosen_map = _moves_map(day, source_stops, target_set, dep_sec,
-                                    best_arr, more, gain_sec)
+                                    best_arr, gain_sec)
         if chosen_map is None:
             chosen_map = _value_map(day, source_stops, target_set, dep_sec,
                                     best_arr, frame_km2, density, more, seated)
@@ -2548,15 +2469,12 @@ def plan_flow_stages(start_query, end_query, when=None,
             if with_journeys or new_map:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
                                                 target_set, dep_sec, start_reach)
-            if with_journeys and "moves" in chosen_map:
-                map_journeys = _move_journeys(day, chosen_map["moves"], source_stops,
-                                              target_set, query_sec, geo_db)
-            elif with_journeys:
+            if with_journeys:
                 map_journeys = _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                    limit=journey_limit,
                                                    gain_sec=gain_sec, ride=ride)
             if new_map:
-                scheme_journeys = (map_journeys if with_journeys and "moves" not in chosen_map else
+                scheme_journeys = (map_journeys if with_journeys else
                                    _enumerate_journeys(day, graph, dep_sec, geo_db,
                                                        limit=journey_limit, gain_sec=gain_sec,
                                                        ride=ride))

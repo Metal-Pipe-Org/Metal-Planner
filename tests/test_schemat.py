@@ -78,8 +78,10 @@ def test_bez_flagi_odpowiedz_jest_taka_jak_dotad(install_day):
     z = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)
     assert "scheme" not in bez
     assert "scheme" in z
-    z.pop("scheme")
-    assert json.dumps(z, sort_keys=True) == json.dumps(bez, sort_keys=True)
+    # Nowa mapa wybiera ruchy (moves.py), więc jej mapa nie jest już kopią starej;
+    # bez flagi odpowiedź nie zależy od niczego, co jest za flagą.
+    assert json.dumps(bez, sort_keys=True) == json.dumps(
+        planner.plan_flow("S", "E", WHEN, more=3, new_map=False), sort_keys=True)
 
 
 def test_start_na_gorze_cel_na_dole(install_day):
@@ -99,11 +101,13 @@ def test_ten_sam_wybor_to_jedna_strzalka(install_day):
     install_day(_dzien())
     scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
     krawedzie = _po_nazwach(scheme)
-    # Dwójka i czwórka jadą ze startu do celu: jedna strzałka z dwiema
-    # liniami, nie dwie.
-    assert ("start", "end", ("2", "4")) in krawedzie
-    assert ("start", "B", ("5",)) in krawedzie
-    assert ("B", "end", ("17",)) in krawedzie
+    # Dwójka i czwórka jadą ze startu do celu tym samym ruchem: jedna strzałka,
+    # a z ruchu nowa mapa rysuje jedną linię (moves.py).
+    assert ("start", "end", ("2",)) in krawedzie
+    assert not [e for e in krawedzie if e[:2] == ("start", "end") and "4" in e[2]]
+    # Piątka z siedemnastką jedzie dłużej i przesiada się, a jest wyparta przez
+    # bezpośrednią dwójkę (moves.dominates) - nowa mapa jej nie rysuje.
+    assert ("start", "B", ("5",)) not in krawedzie
     # Godzin na strzałkach nie ma - są w tablicy węzła.
     assert all(set(e) - {"fast"} == {"from", "to", "lines"} for e in scheme["edges"])
 
