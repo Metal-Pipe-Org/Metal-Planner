@@ -193,6 +193,7 @@ def test_jutrzejszy_odjazd_w_oknie_jest_klikalny(przegladarka, adres):
 
 
 def _zapisz(page, klucz):
+    page.click("#dev-toggle")
     page.fill("#pushward-key", klucz)
     page.click("#pushward-save")
     page.wait_for_function("!document.getElementById('pushward-status').textContent.startsWith('Sprawdzanie')")
