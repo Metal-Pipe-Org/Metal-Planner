@@ -2230,7 +2230,9 @@ body.more-busy .headline-more { cursor: progress; }
     top: 16px;
     right: 16px;
     z-index: 1000;
-    width: 290px;
+    /* Było 290px - wiersze z polem i przyciskami się ściskały. Poszerzone w
+       lewo (prawa krawędź stoi), na telefonie phone.css i tak robi width: auto. */
+    width: 380px;
     /* Suwaków jest już tyle, że nie mieszczą się na niższym ekranie - panel
        przewija się w sobie zamiast wychodzić poza okno. */
     max-height: calc(100vh - 32px);
