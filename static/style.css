@@ -2222,6 +2222,8 @@ body.more-busy .headline-more { cursor: progress; }
     color: var(--ink-faint);
     font-weight: 600;
 }
+/* Z kluczem PushWard (#453) godzina jest przyciskiem odliczenia. */
+body.pushward-on .tt-times [data-dep-sec] { cursor: pointer; text-decoration: underline dotted; }
 
 /* ------------------------------------------------ Ustawienia Developerskie --- */
 

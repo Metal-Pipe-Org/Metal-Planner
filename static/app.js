@@ -3136,6 +3136,7 @@ if (flowPanel) $('flow-panel-close').addEventListener('click', hideSidePanel);
 // dymek przy kursorze Leaflet trzyma poza zdarzeniami myszy (pointer-events),
 // więc przycisk "trasa" jest tam schowany stylem (patrz style.css).
 if (flowPanelBody) flowPanelBody.addEventListener('click', routeClick);
+if (flowPanelBody) flowPanelBody.addEventListener('click', pushwardClick);
 
 // Odpowiedzi /api/timetable trzymamy pod (przystanek, doba, godzina) - ta
 // sama kropka pytana drugi raz (powrót kursorem, przerysowanie trasy po
@@ -3256,7 +3257,8 @@ function timetableLinesHtml(data, mapSec) {
         `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
-            `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
+            `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}` +
+            (d.flow === 'end' ? '' : departureAttrs(d, data.stop, s)) + '>' +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
             // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
             (d.trip ? `<span class="tt-live" data-trip="${escAttr(d.trip)}"`
@@ -8371,6 +8373,92 @@ if (devMode) {
     });
     // Podpowiedź zamka po opisie stanu, żeby go nie nadpisać, gdy karta jest już odblokowana.
     fetchSiechniceStatus().then(describeSiechnice).catch(() => {}).then(setupSiechniceLock);
+}
+
+// ------------------------------------- odliczenie w Dynamic Island (#453) --
+//
+// Eksperyment tylko dla dewelopera: klik w godzinę odjazdu na tablicy w rogu
+// wysyła odliczenie do aplikacji PushWard na iPhonie. Klucz integracji leży
+// wyłącznie w localStorage tej przeglądarki; bez niego nic się nie zmienia.
+// Wysyła serwer (/api/dev/pushward), nie przeglądarka - patrz pushward.py.
+const PUSHWARD_KEY = 'pushward-key';
+
+function pushwardKey() {
+    if (!devMode) return '';
+    try { return localStorage.getItem(PUSHWARD_KEY) || ''; } catch { return ''; }
+}
+
+function departureAttrs(d, stop, sec) {
+    return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
+           ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
+           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"`;
+}
+
+const PUSHWARD_ERRORS = {
+    401: 'zły albo wygasły klucz integracji',
+    403: 'klucz nie ma uprawnień do tworzenia i zmiany aktywności',
+    429: 'limit aktualizacji wyczerpany',
+    0: 'serwer PushWard nie odpowiada',
+};
+
+function describePushwardError(body) {
+    const reason = PUSHWARD_ERRORS[body.status] || body.detail || body.error
+        || `PushWard odpowiedział ${body.status}`;
+    return `${reason}${body.code ? ` (${body.code})` : ''}`;
+}
+
+async function pushwardClick(event) {
+    const hour = event.target.closest('[data-dep-sec]');
+    const key = pushwardKey();
+    if (!hour || !key) return;
+    const dep = hour.dataset;
+    if (!confirm(`Wysłać odliczenie do Dynamic Island?\n${dep.depNum} → ${dep.depHeadsign}, ${hour.textContent}`)) return;
+    try {
+        const response = await fetch('/api/dev/pushward', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-PushWard-Key': key},
+            body: JSON.stringify({
+                num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
+                stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+        alert(response.ok ? 'Wysłano odliczenie do Dynamic Island.'
+                          : `Nie wysłano: ${describePushwardError(body)}`);
+    } catch {
+        alert('Nie wysłano: brak połączenia z serwerem.');
+    }
+}
+
+if (devMode) {
+    const input = $('pushward-key');
+    const status = $('pushward-status');
+    const describe = () => {
+        const on = !!pushwardKey();
+        document.body.classList.toggle('pushward-on', on);
+        status.textContent = on ? 'Włączone — klucz zapisany na tym urządzeniu.'
+                                : 'Wyłączone — bez klucza nic się nie zmienia.';
+        status.className = on ? 'field-hint ok' : 'field-hint';
+    };
+    $('pushward-save').addEventListener('click', () => {
+        const key = input.value.trim();
+        if (!key) return;
+        try {
+            localStorage.setItem(PUSHWARD_KEY, key);
+        } catch {
+            status.textContent = 'Przeglądarka nie pozwala zapisać klucza.';
+            status.className = 'field-hint bad';
+            return;
+        }
+        input.value = '';
+        describe();
+    });
+    $('pushward-clear').addEventListener('click', () => {
+        try { localStorage.removeItem(PUSHWARD_KEY); } catch { /* i tak nie ma czego usuwać */ }
+        input.value = '';
+        describe();
+    });
+    describe();
 }
 
 // Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
