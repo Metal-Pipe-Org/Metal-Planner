@@ -8,6 +8,7 @@ północy i dla godzin rozkładu powyżej 24:00.
 """
 
 from datetime import datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -25,9 +26,19 @@ def _czas(rok, miesiac, dzien, h, m):
     return int(datetime(rok, miesiac, dzien, h, m, tzinfo=WARSAW).timestamp())
 
 
+KONIEC = _czas(2026, 1, 5, 22, 57)
+
+
+def _zamroz_czas(monkeypatch, teraz):
+    monkeypatch.setattr(pushward, "time", SimpleNamespace(time=lambda: teraz))
+
+
 @pytest.fixture
 def api(monkeypatch):
-    """Zapisuje wywołania; `odpowiedzi` to kolejka wyników (wyjątek = błąd API)."""
+    """Zapisuje wywołania; `odpowiedzi` to kolejka wyników (wyjątek = błąd API).
+
+    Czas stoi godzinę przed odjazdem z ODJAZD, żeby mieścił się w oknie 8 h."""
+    _zamroz_czas(monkeypatch, KONIEC - 3600)
     wywolania = []
     odpowiedzi = []
 
@@ -143,3 +154,109 @@ def test_poza_trybem_deweloperskim_trasy_nie_ma(monkeypatch, api):
         "/api/dev/pushward", json=ODJAZD, headers={"X-PushWard-Key": KLUCZ})
     assert odpowiedz.status_code == 404
     assert api.wywolania == []
+
+
+class _Odpowiedz:
+    def read(self):
+        return b"{}"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _blad_http(kod, tresc):
+    import io
+    import urllib.error
+    return urllib.error.HTTPError("https://api.pushward.app/x", kod, "", {}, io.BytesIO(tresc))
+
+
+def test_zapytania_ida_z_wlasnym_user_agentem(monkeypatch):
+    wyslane = []
+
+    def udawane(request, timeout):
+        wyslane.append(request)
+        return _Odpowiedz()
+
+    _zamroz_czas(monkeypatch, KONIEC - 3600)
+    monkeypatch.setattr(pushward.urllib.request, "urlopen", udawane)
+    pushward.send_departure(KLUCZ, ODJAZD)
+    pushward.account(KLUCZ)
+    assert len(wyslane) == 2
+    assert all(r.get_header("User-agent") == "Metal-Planner/1.0" for r in wyslane)
+    assert wyslane[1].get_method() == "GET" and wyslane[1].full_url.endswith("/auth/me")
+
+
+def test_blokada_cloudflare_to_blad_polaczenia_nie_brak_uprawnien(monkeypatch):
+    def udawane(request, timeout):
+        raise _blad_http(403, b"error code: 1010")
+
+    monkeypatch.setattr(pushward.urllib.request, "urlopen", udawane)
+    with pytest.raises(pushward.PushWardError) as blad:
+        pushward.account(KLUCZ)
+    assert blad.value.status == 0
+
+
+def test_prawdziwe_403_zostaje_403(monkeypatch):
+    def udawane(request, timeout):
+        raise _blad_http(403, b'{"code": "auth.forbidden", "detail": "nope"}')
+
+    monkeypatch.setattr(pushward.urllib.request, "urlopen", udawane)
+    with pytest.raises(pushward.PushWardError) as blad:
+        pushward.account(KLUCZ)
+    assert (blad.value.status, blad.value.code) == (403, "auth.forbidden")
+
+
+def test_sprawdzenie_klucza_oddaje_zuzycie_bez_klucza(klient, api):
+    api.odpowiedzi.append({"live_activity_updates_used": 12, "live_activity_updates_limit": 250,
+                           "email": "x@y.z"})
+    odpowiedz = klient.get("/api/dev/pushward/check", headers={"X-PushWard-Key": KLUCZ})
+    assert odpowiedz.get_json() == {"used": 12, "limit": 250}
+    assert api.wywolania[0][:3] == ("GET", "/auth/me", KLUCZ)
+    assert KLUCZ not in odpowiedz.get_data(as_text=True)
+
+
+def test_sprawdzenie_zlego_klucza_oddaje_status(klient, api):
+    api.odpowiedzi.append(pushward.PushWardError(401, "auth.invalid_token"))
+    odpowiedz = klient.get("/api/dev/pushward/check", headers={"X-PushWard-Key": KLUCZ})
+    assert odpowiedz.status_code == 502
+    assert odpowiedz.get_json() == {"status": 401}
+    assert KLUCZ not in odpowiedz.get_data(as_text=True)
+
+
+def test_sprawdzenie_klucza_poza_dev_nie_istnieje(monkeypatch, api):
+    monkeypatch.delenv("DEV_MODE", raising=False)
+    odpowiedz = aplikacja.app.test_client().get(
+        "/api/dev/pushward/check", headers={"X-PushWard-Key": KLUCZ})
+    assert odpowiedz.status_code == 404
+    assert api.wywolania == []
+
+
+@pytest.mark.parametrize("przed_odjazdem, wysylane", [
+    (-1, False),                # odjechał przed chwilą
+    (0, False),                 # odjeżdża dokładnie teraz
+    (1, True),
+    (8 * 3600 - 60, True),      # za 7:59
+    (8 * 3600, True),           # dokładnie 8 h
+    (8 * 3600 + 60, False),     # za 8:01
+])
+def test_okno_osmiu_godzin(klient, api, monkeypatch, przed_odjazdem, wysylane):
+    _zamroz_czas(monkeypatch, KONIEC - przed_odjazdem)
+    odpowiedz = klient.post("/api/dev/pushward", json=ODJAZD, headers={"X-PushWard-Key": KLUCZ})
+    if wysylane:
+        assert odpowiedz.status_code == 200
+        assert len(api.wywolania) == 1
+    else:
+        assert odpowiedz.status_code == 400
+        assert "8 godzin" in odpowiedz.get_json()["error"]
+        assert api.wywolania == []
+
+
+def test_jutrzejszy_odjazd_w_oknie_dziala(klient, api, monkeypatch):
+    # 23:00 w poniedziałek, odjazd we wtorek o 6:00 (doba rozkładu poniedziałku, 30:00).
+    _zamroz_czas(monkeypatch, _czas(2026, 1, 5, 23, 0))
+    odjazd = {**ODJAZD, "sec": 30 * 3600}
+    assert klient.post("/api/dev/pushward", json=odjazd,
+                       headers={"X-PushWard-Key": KLUCZ}).status_code == 200

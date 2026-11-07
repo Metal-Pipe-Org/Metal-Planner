@@ -592,9 +592,29 @@ def init_routes(app):
             })
         except (KeyError, ValueError):
             return jsonify({"error": "Niepełny opis odjazdu."}), 400
+        except pushward.OutOfWindow:
+            return jsonify({"error": "Odliczenie działa tylko dla odjazdów w ciągu najbliższych 8 godzin."}), 400
         except pushward.PushWardError as e:
             return jsonify({"status": e.status, "code": e.code, "detail": e.detail}), 502
         return jsonify({"sent": True})
+
+    @app.route("/api/dev/pushward/check", methods=["GET"])
+    def api_dev_pushward_check():
+        """Sprawdza klucz integracji i oddaje zużycie miesięcznego limitu.
+
+        Klucz tylko przechodzi do PushWard w nagłówku; nie wraca w odpowiedzi.
+        """
+        if not config.dev_mode():
+            abort(404)
+        key = request.headers.get("X-PushWard-Key", "").strip()
+        try:
+            me = pushward.account(key)
+        except pushward.PushWardError as e:
+            return jsonify({"status": e.status}), 502
+        return jsonify({
+            "used": me.get("live_activity_updates_used"),
+            "limit": me.get("live_activity_updates_limit"),
+        })
 
     @app.route("/api/dev/siechnice", methods=["GET", "POST"])
     def api_dev_siechnice():

@@ -57,9 +57,20 @@ def przegladarka():
         browser.close()
 
 
-def _strona(przegladarka, adres, klucz):
+DZIEN = "2026-01-05"
+
+
+def _strona(przegladarka, adres, klucz, teraz="2026-01-05T21:00:00+01:00", tablica=TABLICA,
+            sprawdzenie=None):
+    """`teraz` stoi w miejscu, żeby okno 8 h wokół odjazdu nie zależało od zegara.
+    `sprawdzenie` to (status, body) atrapy /api/dev/pushward/check."""
     context = przegladarka.new_context(service_workers="block")
     page = context.new_page()
+    page.clock.set_fixed_time(teraz)
+    if sprawdzenie:
+        page.route("**/api/dev/pushward/check", lambda route: route.fulfill(
+            status=sprawdzenie[0], content_type="application/json",
+            body=json.dumps(sprawdzenie[1])))
     for wzor, odpowiedz in PUSTE_ZRODLA.items():
         page.route(wzor, _odpowiedz(odpowiedz))
     page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
@@ -77,7 +88,8 @@ def _strona(przegladarka, adres, klucz):
         page.evaluate("k => localStorage.setItem('pushward-key', k)", KLUCZ)
         page.reload()
         page.wait_for_selector("#start")
-    page.evaluate(TABLICA_JS, TABLICA)
+    page.evaluate("d => { document.getElementById('date').value = d; }", DZIEN)
+    page.evaluate(TABLICA_JS, tablica)
     return page, wyslane
 
 
@@ -129,3 +141,100 @@ def test_poza_trybem_dev_klucz_nic_nie_znaczy(przegladarka, adres):
     assert _kliknij_godzine(page, potwierdzaj=True) == []
     assert wyslane == []
     assert not page.is_visible("#pushward-key")
+
+
+def _klikalne(page):
+    return page.locator("#flow-panel-body [data-dep-sec]").count()
+
+
+def _podkreslone(page):
+    return page.evaluate("""() => [...document.querySelectorAll('#flow-panel-body .tt-times > span[data-dep-sec]')]
+        .map(e => getComputedStyle(e).textDecorationLine)""")
+
+
+def _tablica(*sekundy):
+    return {**TABLICA, "departures": [
+        {"time": "x", "sec": s, "num": "5", "mode": "tram", "headsign": "Księże Małe", "trip": None}
+        for s in sekundy]}
+
+
+def test_podkreslone_tylko_odjazdy_w_oknie_osmiu_godzin(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    # Teraz 21:00: 20:59 minął, 21:01 i 04:59 w oknie, 05:01 dalej niż 8 h.
+    page, _ = _strona(przegladarka, url, klucz=True,
+                      tablica=_tablica(20 * 3600 + 59 * 60, 21 * 3600 + 60,
+                                       28 * 3600 + 59 * 60, 29 * 3600 + 60))
+    assert page.locator("#flow-panel-body .tt-times > span").count() == 4
+    assert page.locator("#flow-panel-body [data-dep-sec]").evaluate_all(
+        "els => els.map(e => Number(e.dataset.depSec))") == [21 * 3600 + 60, 28 * 3600 + 59 * 60]
+    assert _podkreslone(page) == ["underline", "underline"]
+
+
+def test_odjazd_juz_miniony_nie_jest_klikalny(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, wyslane = _strona(przegladarka, url, klucz=True, teraz="2026-01-05T23:30:00+01:00")
+    assert _klikalne(page) == 0
+    page.click("#flow-panel-body .tt-times > span")
+    page.wait_for_timeout(200)
+    assert wyslane == []
+
+
+def test_jutrzejszy_odjazd_w_oknie_jest_klikalny(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, _ = _strona(przegladarka, url, klucz=True, teraz="2026-01-05T23:00:00+01:00",
+                      tablica=_tablica(30 * 3600))
+    assert _klikalne(page) == 1
+
+
+def _zapisz(page, klucz):
+    page.fill("#pushward-key", klucz)
+    page.click("#pushward-save")
+    page.wait_for_function("!document.getElementById('pushward-status').textContent.startsWith('Sprawdzanie')")
+    return (page.inner_text("#pushward-status"),
+            page.evaluate("localStorage.getItem('pushward-key')"))
+
+
+def test_zapis_poprawnego_klucza_pokazuje_zuzycie(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, _ = _strona(przegladarka, url, klucz=False,
+                      sprawdzenie=(200, {"used": 12, "limit": 250}))
+    status, zapisany = _zapisz(page, KLUCZ)
+    assert status == "Włączone — wykorzystano 12 z 250 aktualizacji w tym miesiącu."
+    assert zapisany == KLUCZ
+
+
+def test_zapis_zlego_klucza_nic_nie_zapisuje(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, _ = _strona(przegladarka, url, klucz=False, sprawdzenie=(502, {"status": 401}))
+    status, zapisany = _zapisz(page, KLUCZ)
+    assert status == "Nieprawidłowy klucz."
+    assert zapisany is None
+
+
+def test_zapis_bez_polaczenia_nic_nie_zapisuje(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, _ = _strona(przegladarka, url, klucz=False, sprawdzenie=(502, {"status": 0}))
+    status, zapisany = _zapisz(page, KLUCZ)
+    assert "Nie dało się sprawdzić" in status
+    assert zapisany is None
+
+
+def test_zapisany_klucz_odswieza_licznik_przy_wejsciu(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, _ = _strona(przegladarka, url, klucz=True,
+                      sprawdzenie=(200, {"used": 7, "limit": 250}))
+    page.wait_for_function("document.getElementById('pushward-status').textContent.includes('7 z 250')")

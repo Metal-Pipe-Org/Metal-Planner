@@ -23,10 +23,19 @@ SLUG = "metal-planner-odjazd"
 CARD_NAME = "Odjazd"
 HTTP_TIMEOUT_SEC = 10
 THIRTY_DAYS_SEC = 30 * 24 * 3600
+WINDOW_SEC = 8 * 3600
 WARNING_SEC = 120
 DISMISSAL_SEC = 300
 ICONS = {"tram": "tram.fill", "bus": "bus.fill"}
 WARSAW = ZoneInfo("Europe/Warsaw")
+# Cloudflare przed API odrzuca domyślny User-Agent urllib kodem 403 (błąd 1010),
+# więc bez własnego nagłówka każdy poprawny klucz wyglądałby na pozbawiony uprawnień.
+USER_AGENT = "Metal-Planner/1.0"
+CLOUDFLARE_BLOCK = "error code: 1010"
+
+
+class OutOfWindow(Exception):
+    pass
 
 
 class PushWardError(Exception):
@@ -48,6 +57,11 @@ def end_date(day, sec):
     return int(noon.timestamp() - 12 * 3600 + sec)
 
 
+def in_window(ends, now):
+    """iOS kończy Live Activity po 8 h; odjazd dalszy (albo już miniony) odpada."""
+    return 0 < ends - now <= WINDOW_SEC
+
+
 def _hhmm(timestamp):
     return datetime.fromtimestamp(timestamp, WARSAW).strftime("%H:%M")
 
@@ -56,10 +70,11 @@ def _request(method, path, key, body):
     """Jedno wywołanie API; zwraca zdekodowany JSON albo rzuca PushWardError."""
     request = urllib.request.Request(
         API + path,
-        data=json.dumps(body).encode("utf-8"),
+        data=None if body is None else json.dumps(body).encode("utf-8"),
         method=method,
         headers={
             "Authorization": f"Bearer {key}",
+            "User-Agent": USER_AGENT,
             "Content-Type": "application/merge-patch+json" if method == "PATCH"
                             else "application/json",
         },
@@ -68,8 +83,11 @@ def _request(method, path, key, body):
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC) as response:
             raw = response.read()
     except urllib.error.HTTPError as e:
+        raw = e.read()
+        if e.code == 403 and CLOUDFLARE_BLOCK in raw.decode("utf-8", "replace"):
+            raise PushWardError(0) from None
         try:
-            problem = json.loads(e.read())
+            problem = json.loads(raw)
         except ValueError:
             problem = {}
         raise PushWardError(e.code, problem.get("code"), problem.get("detail")) from None
@@ -99,6 +117,8 @@ def _card_body(departure):
 
 def send_departure(key, departure):
     """Podmienia treść jedynej karty; gdy jej nie ma, tworzy ją i ponawia."""
+    if not in_window(end_date(departure["date"], departure["sec"]), time.time()):
+        raise OutOfWindow()
     body = _card_body(departure)
     path = f"/activities/{SLUG}"
     try:
@@ -115,3 +135,8 @@ def send_departure(key, departure):
             "dismissal_ttl": DISMISSAL_SEC,
         })
         _request("PATCH", path, key, body)
+
+
+def account(key):
+    """Konto właściciela klucza (/auth/me): m.in. zużycie miesięcznego limitu."""
+    return _request("GET", "/auth/me", key, None)

@@ -8388,7 +8388,33 @@ function pushwardKey() {
     try { return localStorage.getItem(PUSHWARD_KEY) || ''; } catch { return ''; }
 }
 
+// Unix-owa chwila odjazdu - to samo liczenie co pushward.end_date: doba
+// rozkładu startuje 12 h przed południem czasu warszawskiego, a godziny
+// powyżej 24:00 wypadają po północy. W południe nie ma zmiany czasu, więc
+// przesunięcie z tej chwili jest pewne.
+function warsawOffsetMs(utcMs) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Warsaw', hourCycle: 'h23', year: 'numeric', month: '2-digit',
+        day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(utcMs)).map(p => [p.type, p.value]));
+    return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - utcMs;
+}
+
+function departureEpochSec(day, sec) {
+    const [y, m, d] = day.split('-').map(Number);
+    const noonUtc = Date.UTC(y, m - 1, d, 12);
+    const noonWarsaw = noonUtc - warsawOffsetMs(noonUtc);
+    return noonWarsaw / 1000 - 12 * 3600 + sec;
+}
+
+// iOS kończy Live Activity po 8 h, więc dalszy odjazd nie doczekałby końca
+// odliczenia. Odjazd poza oknem (teraz, teraz + 8 h] nie dostaje atrybutów,
+// więc nie jest ani podkreślony, ani klikalny. Okno sprawdza też serwer.
+const PUSHWARD_WINDOW_SEC = 8 * 3600;
+
 function departureAttrs(d, stop, sec) {
+    const wait = departureEpochSec(mapDate(), sec) - Date.now() / 1000;
+    if (wait <= 0 || wait > PUSHWARD_WINDOW_SEC) return '';
     return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
            ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
            ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"`;
@@ -8398,7 +8424,7 @@ const PUSHWARD_ERRORS = {
     401: 'zły albo wygasły klucz integracji',
     403: 'klucz nie ma uprawnień do tworzenia i zmiany aktywności',
     429: 'limit aktualizacji wyczerpany',
-    0: 'serwer PushWard nie odpowiada',
+    0: 'brak połączenia z PushWard',
 };
 
 function describePushwardError(body) {
@@ -8433,31 +8459,56 @@ async function pushwardClick(event) {
 if (devMode) {
     const input = $('pushward-key');
     const status = $('pushward-status');
-    const describe = () => {
-        const on = !!pushwardKey();
-        document.body.classList.toggle('pushward-on', on);
-        status.textContent = on ? 'Włączone — klucz zapisany na tym urządzeniu.'
-                                : 'Wyłączone — bez klucza nic się nie zmienia.';
-        status.className = on ? 'field-hint ok' : 'field-hint';
+    const show = (text, kind) => {
+        status.textContent = text;
+        status.className = kind ? `field-hint ${kind}` : 'field-hint';
     };
-    $('pushward-save').addEventListener('click', () => {
+    const usage = me => me.used === null || me.limit === null ? ''
+        : ` — wykorzystano ${me.used} z ${me.limit} aktualizacji w tym miesiącu`;
+    // Serwer woła /auth/me; 401/403 to zły klucz, wszystko inne (też blokada
+    // po drodze) znaczy tylko, że nie dało się sprawdzić.
+    const check = async key => {
+        let response;
+        try {
+            response = await fetch('/api/dev/pushward/check', {headers: {'X-PushWard-Key': key}});
+        } catch {
+            return {unreachable: true};
+        }
+        const body = await response.json().catch(() => ({}));
+        if (response.ok) return {me: body};
+        return body.status === 401 || body.status === 403 ? {invalid: true} : {unreachable: true};
+    };
+    const describe = async () => {
+        const key = pushwardKey();
+        document.body.classList.toggle('pushward-on', !!key);
+        if (!key) return show('Wyłączone — bez klucza nic się nie zmienia.');
+        show('Włączone — klucz zapisany na tym urządzeniu.', 'ok');
+        const result = await check(key);
+        if (result.me && pushwardKey() === key) show(`Włączone${usage(result.me)}.`, 'ok');
+    };
+    $('pushward-save').addEventListener('click', async () => {
         const key = input.value.trim();
         if (!key) return;
+        show('Sprawdzanie klucza…');
+        const result = await check(key);
+        if (result.invalid) return show('Nieprawidłowy klucz.', 'bad');
+        if (result.unreachable) return show('Nie dało się sprawdzić klucza — klucz nie został zapisany.', 'bad');
         try {
             localStorage.setItem(PUSHWARD_KEY, key);
         } catch {
-            status.textContent = 'Przeglądarka nie pozwala zapisać klucza.';
-            status.className = 'field-hint bad';
-            return;
+            return show('Przeglądarka nie pozwala zapisać klucza.', 'bad');
         }
         input.value = '';
-        describe();
+        document.body.classList.add('pushward-on');
+        show(`Włączone${usage(result.me)}.`, 'ok');
     });
     $('pushward-clear').addEventListener('click', () => {
         try { localStorage.removeItem(PUSHWARD_KEY); } catch { /* i tak nie ma czego usuwać */ }
         input.value = '';
         describe();
     });
+    // Licznik odświeżamy przy wejściu na stronę, nie przy otwarciu panelu:
+    // ustawienia nie mają zdarzenia otwarcia, więc to najprostsze miejsce.
     describe();
 }
 
