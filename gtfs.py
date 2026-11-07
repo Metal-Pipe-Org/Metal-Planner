@@ -395,6 +395,8 @@ def walk_reach(day, stops, max_m=WALK_M):
 
     Same `stops` w wyniku nie są: na nich się już stoi.
     """
+    if not day.walking:
+        return {}
     key = (frozenset(stops), max_m)
     cached = day._reach.get(key)
     if cached is not None:
@@ -540,7 +542,7 @@ class DayData:
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
         "pkp_stations", "pkp_platforms", "deps_by_stop", "_reach", "walk_mps", "_paced",
-        "_searches", "_points",
+        "_searches", "_points", "walking",
     )
 
     def __init__(self):
@@ -577,6 +579,8 @@ class DayData:
         # osobne kopie dnia (patrz with_pace), trzymane w `_paced`.
         self.walk_mps = WALK_SPEED_MPS
         self._paced = {}
+        # False: dzień bez chodzenia (patrz without_walking).
+        self.walking = True
         # trip_id "PKP:..." -> [(stop_id, przyjazd, odjazd), ...] po kolei -
         # odpowiednik stop_times.txt dla kursów kolejowych (patrz pkp.py:
         # augment_day/trip_path). GTFS-owe kursy tego nie używają - mają
@@ -901,6 +905,35 @@ def with_pace(day, pace):
     }
     day._paced[pace] = paced
     return paced
+
+
+def without_walking(day):
+    """Dzień, w którym nie chodzi się pieszo między różnymi miejscami
+    (eksperyment "nowa mapa": schemat ma odpowiadać mapie co do joty, a dojścia
+    i przejścia piesze dodają do niego przystanki, których mapa nie rysuje).
+    Zostaje przesiadka między słupkami o TEJ SAMEJ NAZWIE - jak na początku
+    aplikacji: stały skok za WALK_MIN_SEC (3 min), bez liczenia odległości.
+    Znika wyjście ze startu na przystanki o innych nazwach, dojście do celu
+    z nich i przesiadki między różnymi nazwami (patrz walk_reach).
+    Kopia płytka i trzymana na dniu bazowym, jak w with_pace."""
+    if not day.walking:
+        return day
+    cached = day._paced.get("bez-chodzenia")
+    if cached is not None:
+        return cached
+    free = copy.copy(day)
+    free.walking = False
+    free._reach = {}
+    free._searches = {}
+    free._paced = {}
+    free._points = {}
+    free.siblings = {}
+    for ids in day.stops_by_key.values():
+        if len(ids) > 1:
+            for stop in ids:
+                free.siblings[stop] = {other: WALK_MIN_SEC for other in ids if other != stop}
+    day._paced["bez-chodzenia"] = free
+    return free
 
 
 STOP_SNAP_M = 60   # kropka na mapie stoi NA słupku, nie "gdzieś w okolicy"

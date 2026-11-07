@@ -192,7 +192,7 @@ def test_kolejne_etapy_dokladaja_sie_do_mapy(etapy, przegladarka):
     # a „Szukaj" kręci się dalej.
     etapy.pusc("fastest")
     page.wait_for_selector("#time-headline .headline-best")
-    assert not page.is_visible("#time-headline .headline-limit")
+    assert not page.is_visible("#time-headline .headline-map")
     assert _karty(page) == []
     assert page.is_visible("#results .notice.loading")
     # Przy wyłączonych propozycjach karta czeka na listę, której nie ma.
@@ -204,7 +204,7 @@ def test_kolejne_etapy_dokladaja_sie_do_mapy(etapy, przegladarka):
 
     # Mapa: mapa i lista. Wybieramy trasę i zostawiamy coś w okienku.
     etapy.pusc("map")
-    page.wait_for_selector("#time-headline .headline-limit")
+    page.wait_for_selector("#time-headline .headline-map", state="attached")
     page.wait_for_selector("#results .journey")
     przed = _karty(page)
     page.click("#results .journey >> nth=0")
@@ -282,7 +282,7 @@ def test_telefon_zwija_formularz_przy_pierwszym_wyniku(etapy, przegladarka):
     assert page.is_visible(".search-summary")
     assert page.is_visible(kolko)
     etapy.pusc("map", "extras")
-    page.wait_for_selector("#time-headline .headline-limit", state="attached")
+    page.wait_for_selector("#time-headline .headline-map", state="attached")
     assert page.is_visible(kolko)          # świeże dane jeszcze dochodzą
     etapy.pusc("fresh")
     page.wait_for_function("!document.body.classList.contains('searching')")

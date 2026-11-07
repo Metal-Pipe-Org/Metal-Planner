@@ -1,0 +1,130 @@
+name: "PR-y: składnia"
+# Nazwa jest częścią kontraktu: inne workflow mogą słuchać tego przez
+# `workflow_run` po nazwie, bo etykiety i przestawienie na wersję roboczą
+# robione naszym tokenem nie wywołują u nich żadnych zdarzeń. Nie zmieniaj
+# jej bez sprawdzenia, kto jej słucha.
+
+# PR bez zgłoszenia ma być decyzją, nie przeoczeniem (#342, #355, #356).
+# PR ma poprawną składnię, gdy:
+#
+#  a) tytuł, opis albo nazwa gałęzi wskazuje zgłoszenie dokładnie tak, jak
+#     rozpoznaje to issue-labels.yml (`Closes` / `Fixes` / `Resolves #12`,
+#     `Refs` / `Ref` / `Related to` / `Relates to` / `Part of` / `Dotyczy #12`,
+#     gałąź `claude/issue-12-…`) — regexp jest wspólny, w refs.sh, więc PR,
+#     który przeszedł sprawdzenie, na pewno nadaje zgłoszeniu etykietę stanu,
+#  b) każdy wskazany numer to istniejące zgłoszenie (nie PR), którego
+#     assignees obejmują autora PR-a — PR dotyczy tylko zgłoszeń, nad którymi
+#     jego autor pracuje.
+#
+# Etykieta `No Issue` zwalnia z obu warunków: tak autor mówi „ten PR celowo
+# nie ma zgłoszenia".
+#
+# Błędna składnia → etykieta `wrong syntax`, komentarz z regułą, która nie
+# przeszła, i z tym, co autor może zrobić, a gotowy PR wraca do wersji
+# roboczej („Syntax error → Draft" z diagramu w #342). Komentarz idzie przy
+# wejściu w błąd, przy zmianie powodu i przy każdym cofnięciu do wersji
+# roboczej — nie przy każdej edycji opisu. Poprawiona składnia → etykieta
+# schodzi, komentarz się zwija; PR jako gotowy oznacza autor sam, co jak
+# zawsze uruchamia ocenę Claude'a. Szczegóły i stan: `.github/scripts/syntax.sh`,
+# z `DRY_RUN=1` da się go puścić na prawdziwych PR-ach tokenem do odczytu.
+#
+# Znany wyścig: claude-review-pr.yml rusza przy otwarciu i przy „Ready for
+# review" równolegle z nami, więc PR, który tu wraca do wersji roboczej, może
+# jeszcze raz dostać ocenę. Nie blokujemy tego stąd — ocena to tylko
+# komentarz, a kolejna i tak przyjdzie po poprawce.
+#
+# Zakres: PR-y do `main` i PR-y piętrowe (dowolna baza) — piętrowy PR też
+# coś robi i też powinien wskazywać zgłoszenie. Pomijamy tylko wydania do
+# `stable`: niosą cudze, dawno powiązane zmiany. PR-y botów pomija skrypt.
+# Forków nie pomijamy: kodu z PR-a nie pobieramy ani nie uruchamiamy, więc
+# `pull_request_target` z tokenem z zapisem jest tu bezpieczny tak samo jak
+# dla PR-ów z repo, a reguła dotyczy wszystkich. Autor spoza zespołu nie
+# przypisze się sam — komentarz mówi mu, żeby poprosił zespół.
+on:
+  pull_request_target:
+    # `edited` łapie dopisanie `Closes #12` do opisu i zmianę bazy;
+    # `ready_for_review` — oznaczenie jako gotowy bez poprawki; `labeled`
+    # i `unlabeled` — nadanie albo zdjęcie `No Issue` (oraz ręczne zdjęcie
+    # `wrong syntax`, które wraca, gdy błąd dalej jest). `synchronize` nie
+    # trzeba: push nie zmienia ani opisu, ani nazwy gałęzi, ani przypisań.
+    types: [opened, reopened, edited, ready_for_review, labeled, unlabeled]
+    branches-ignore: [stable]
+  # Autor przypisuje się do zgłoszenia często dopiero po otwarciu PR-a,
+  # a zdjęcie przypisania psuje składnię PR-a, którego nikt nie ruszał —
+  # sprawdzamy wtedy otwarte PR-y wskazujące to zgłoszenie.
+  issues:
+    types: [assigned, unassigned]
+
+# Bez `${{ }}` w bashu: tytuł, opis i nazwę gałęzi skrypt czyta sam z API.
+permissions:
+  # Komentarz, zdjęcie próśb o recenzję, przestawienie na wersję roboczą.
+  pull-requests: write
+  # Etykiety PR-a (`wrong syntax`) i zakładanie etykiet w repo.
+  issues: write
+  # `to_draft` przestawia PR mutacją GraphQL `convertPullRequestToDraft`,
+  # a ta odrzuca token bez `contents: write` (#417). To bezpieczne mimo
+  # `pull_request_target`: job nigdy nie pobiera ani nie uruchamia kodu
+  # z PR-a, a jedyne skrypty bierze z `main` (sparse checkout bez
+  # zapisanego tokena).
+  contents: write
+
+jobs:
+  check:
+    # Nazwa repozytorium na sztywno: forki kopiują workflow razem z kodem.
+    # Spośród zmian etykiet obchodzą nas tylko nasze dwie — reszta nie
+    # zmienia wyniku, a odpalałaby bieg przy każdej etykiecie. Nazwy wpisane
+    # tu na sztywno, bo w `if` joba nie ma `env`; muszą się zgadzać
+    # z LABEL_NO_ISSUE i LABEL_WRONG poniżej.
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && (
+        github.event_name == 'issues'
+        || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
+        || github.event.label.name == 'No Issue'
+        || github.event.label.name == 'wrong syntax'
+      )
+    # Po kolei dla jednego PR-a (albo jednego zgłoszenia), żeby dwa biegi nie
+    # napisały tego samego komentarza. Czekający bieg może zostać zastąpiony
+    # nowszym — to w porządku, bo każdy czyta aktualny stan z API, nie
+    # z treści zdarzenia. Bieg od zgłoszenia i bieg od PR-a mogą się minąć;
+    # najgorsze, co wtedy wychodzi, to podwójny komentarz.
+    concurrency:
+      group: pr-syntax-${{ github.event.pull_request.number || format('issue-{0}', github.event.issue.number) }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      LABEL_WRONG: "wrong syntax"
+      LABEL_NO_ISSUE: "No Issue"
+
+    steps:
+      - name: Pobierz skrypty z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Sprawdź składnię
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          ISSUE: ${{ github.event.issue.number }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/discord.sh
+          source .discord/.github/scripts/guard.sh
+          source .discord/.github/scripts/drafts.sh
+          source .discord/.github/scripts/refs.sh
+          source .discord/.github/scripts/syntax.sh
+
+          if [ -n "$PR" ]; then
+            check_pr "$PR"
+          else
+            check_prs_for_issue "$ISSUE"
+          fi

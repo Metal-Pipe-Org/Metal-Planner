@@ -26,13 +26,15 @@
 #             wzrokiem; ten sam rodzaj ma wszędzie tę samą ikonę:
 #               🎯 nowe zgłoszenie           📦 nowy PR
 #               🚧 nowy PR w wersji roboczej 🚀 PR wychodzi z wersji roboczej
+#               🚧 PR wraca do wersji roboczej
 #               🔄 otwarte ponownie
 #               👤 przypisanie               ↩️ zdjęte przypisanie
 #               💬 komentarz, recenzja       📝 prośba o recenzję
 #               ✅ PR zatwierdzony           🛠️ prośba o zmiany
 #               🔀 PR zmergowany             🔒 zgłoszenie zamknięte jako zrobione
 #               🚫 nie robimy / PR zamknięty bez merge'a
-#               📑 duplikat                  ⚔️ konflikt z main
+#               📑 duplikat                  ⚔️ konflikt z bazą
+#               🏷️ błędna składnia PR-a
 #               ⏳ cisza w zgłoszeniu        💤 zamknięte po ciszy
 #               🤖 Claude skończył / ocenił  ⚠️ Claude nie dał rady
 #               📊 podsumowanie dnia         📋 ogólnie — do zrobienia
