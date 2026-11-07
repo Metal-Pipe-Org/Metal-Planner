@@ -2753,7 +2753,7 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
 }
 
 .sw-row[hidden] { display: none; }
-.sw-row select, .sw-row input[type="text"] { flex: 1; min-width: 0; }
+.sw-row select, .sw-row input[type="text"], .sw-row input[type="password"] { flex: 1; min-width: 0; }
 .sw-row .button { flex: 0 0 auto; background: var(--surface-alt); }
 .sw-row .button:hover { background: #e8edf3; }
 @keyframes jump-flash { from { background: #fff3b0; } to { background: transparent; } }

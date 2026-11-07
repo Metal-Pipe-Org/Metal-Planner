@@ -194,11 +194,25 @@ def test_jutrzejszy_odjazd_w_oknie_jest_klikalny(przegladarka, adres):
 
 def _zapisz(page, klucz):
     page.click("#dev-toggle")
+    # Wiersz leży w zwiniętej grupie „Eksperymenty”; użytkownik znajduje go szukajką.
+    page.fill("#settings-search", "PushWard")
     page.fill("#pushward-key", klucz)
     page.click("#pushward-save")
     page.wait_for_function("!document.getElementById('pushward-status').textContent.startsWith('Sprawdzanie')")
     return (page.inner_text("#pushward-status"),
             page.evaluate("localStorage.getItem('pushward-key')"))
+
+
+def test_przyciski_klucza_mieszcza_sie_w_panelu_ustawien(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, _ = _strona(przegladarka, url, klucz=False)
+    page.click("#dev-toggle")
+    page.fill("#settings-search", "PushWard")
+    panel = page.locator("#dev-panel").bounding_box()
+    przycisk = page.locator("#pushward-clear").bounding_box()
+    assert przycisk["x"] + przycisk["width"] <= panel["x"] + panel["width"]
 
 
 def test_zapis_poprawnego_klucza_pokazuje_zuzycie(przegladarka, adres):
