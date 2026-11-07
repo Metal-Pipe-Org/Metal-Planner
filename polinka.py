@@ -20,7 +20,7 @@ reguła co przy rowerze (bikes.map_places).
 
 PRZEPRAWA. Kabiny jeżdżą w kółko, więc nie ma na co czekać: przeprawa trwa
 RIDE_SEC w godzinach otwarcia. PWr podaje „poniżej trzech minut", więc trzy
-minuty mylą się w bezpieczną stronę (zasada 2 w docs/PRINCIPLES.md).
+minuty mylą się w bezpieczną stronę (zasada 3 w docs/PRINCIPLES.md).
 
 KIEDY. Według PWr: od poniedziałku do piątku 7:00-18:00, z przerwą
 13:30-14:00; w weekendy i święta nieczynna. Przestoje z powodu pogody (burza,

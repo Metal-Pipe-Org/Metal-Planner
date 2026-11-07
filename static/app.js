@@ -135,19 +135,8 @@ $('sidebar-toggle').addEventListener('click', () => {
     saveUiState({sidebarHidden: hidden});
 });
 
-// Poza trybem deweloperskim (DEV_MODE, patrz config.dev_mode) sekcje DEV
-// panelu ⚙ są schowane, więc z pamięci bierze się tylko to, co użytkownik
-// w nim widzi - schowanej opcji nie miałby czym cofnąć, wraca więc do
-// domyślnej (zgłoszenie #175). Schowana wartość jest tylko pomijana, nie
-// kasowana: zapis dokłada się do tego, co już leży w pamięci, więc po
-// ponownym włączeniu DEV_MODE wraca.
+// Czy strona jest w trybie deweloperskim (DEV_MODE, patrz config.dev_mode).
 const devMode = document.body.classList.contains('dev-mode');
-
-function visiblePrefs(prefs, userKeys) {
-    if (devMode) return prefs;
-    return Object.fromEntries(Object.entries(prefs).filter(([key]) =>
-        userKeys.includes(key) || key.startsWith('fold:')));
-}
 
 // Ustawienia są schowane za przyciskiem, a strojenie algorytmu siedzi
 // w nich, w sekcjach DEV.
@@ -162,6 +151,7 @@ if (devPanel) {
         // odsuwa okienko, żeby dało się widzieć oba naraz (jego własne
         // przełączniki siedzą właśnie w tym panelu).
         document.body.classList.toggle('dev-open', open);
+        if (open) devPanel.dispatchEvent(new Event('settings-open'));
         if (persist) saveUiState({devOpen: open});
     };
     // Na telefonie panel przykrywa cały ekran - otwarty sam po odświeżeniu
@@ -221,7 +211,12 @@ if (dayPanel && dayToggle) {
 // regionalnych systemu i ignoruje atrybut lang strony, więc format 24h nie
 // dało się wymusić inaczej niż samodzielnym formatowaniem.
 const timeInput = $('time');
+// Godzina i data wpisane przez pasażera zostają, jak je ustawił. Wszystko inne
+// to „teraz": formularz otwarty od godziny nie ma szukać od godziny temu.
+let timeChosen = false;
+$('date').addEventListener('input', () => { timeChosen = true; });
 timeInput.addEventListener('input', () => {
+    timeChosen = true;
     let digits = timeInput.value.replace(/\D/g, '').slice(0, 4);
     if (digits.length > 2) digits = digits.slice(0, 2) + ':' + digits.slice(2);
     timeInput.value = digits;
@@ -709,7 +704,7 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup(flowBikeMarkers(
             lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
-        if (dotOpts.bikeRides) showAllBikeRides(lastFlow.bike_places);
+        if (setting('bike-rides')) showAllBikeRides(lastFlow.bike_places);
         return;
     }
     loadCityBikes();
@@ -1054,32 +1049,75 @@ function focusEnd() {
 
 /** Przycisk ◎ - w przeciwieństwie do kliknięcia w mapę nadpisuje start, który
     już był (o to się prosi, klikając go), ale celu nie rusza. */
-function useMyLocation(point) {
+function useMyLocation(point, {fromLink = false} = {}) {
     const previous = sel.start;
     hideRecallOffer();
     sel.start = hereStart = point;
-    // Pozycja „teraz" bez godziny „teraz" liczyłaby trasę z miejsca, w którym
-    // ktoś stoi, na chwilę, w której już go tam nie ma (#267).
-    if (locateSetsTime.checked) setTimeNow();
     startInput.value = displayValue(point);
     updatePointMarker('start', point);
     restyle(previous, sel.start);
     offerNearestStop(point);
     if (endInput.value) {
-        search();
+        search({fromLink});
     } else {
         map.setView([point.lat, point.lon], 15);   // stąd wybiera się cel
         focusEnd();
     }
 }
 
-// ◎ ustawia też godzinę „teraz" (opcja w „Wyglądzie aplikacji") - kto planuje
-// z pozycji na inną godzinę, wyłącza to i ◎ rusza sam start.
-const locateSetsTime = $('locate-sets-time');
+// Pozycja nie dotyka godziny: nieruszana jest „teraz" przy każdym szukaniu
+// (patrz queryParams, #267), a wpisanej ręcznie nikt nie ma kasować po cichu.
 
 const locatePeek = $('locate-peek');
 const AUTO_REFRESH_MS = 30000;
-const GEO_OPTIONS = {enableHighAccuracy: true, timeout: 10000, maximumAge: 0};
+const GEO_WAIT_MS = 10000;
+
+// Jedno źródło pozycji dla całej strony (#410, #236): ciągły nasłuch, z którego
+// czerpią kropka, ◎, odświeżanie i zapisane miejsca. Jednorazowe pytanie
+// przy działającym nasłuchu czeka w Chromium na zmianę pozycji, więc stojący
+// pasażer nie dostawał nic; nasłuch za to oddaje każdą zmianę, więc kto klika
+// ◎ w drodze, dostaje to, gdzie jest teraz, a nie zapamiętaną pozycję.
+const positionSource = {last: null, watching: false, waiting: []};
+
+function watchPosition() {
+    if (positionSource.watching) return;
+    positionSource.watching = true;
+    const watchId = navigator.geolocation.watchPosition(position => {
+        positionSource.last = position;
+        showYouAreHere(position);
+        for (const {onPosition, timer} of positionSource.waiting.splice(0)) {
+            clearTimeout(timer);
+            onPosition(position);
+        }
+    }, error => {
+        // Brak pomiaru nie jest awarią nasłuchu - czekający odpadną po czasie.
+        if (error.code !== error.PERMISSION_DENIED) return;
+        navigator.geolocation.clearWatch(watchId);
+        positionSource.watching = false;
+        // Zgoda odebrana w trakcie: stara pozycja nie może dalej odpowiadać na askPosition.
+        positionSource.last = null;
+        // Stara kropka wskazywałaby miejsce, którego pasażer już nie udostępnia.
+        youAreHere.dot.remove();
+        youAreHere.accuracy.remove();
+        for (const {onError, timer} of positionSource.waiting.splice(0)) {
+            clearTimeout(timer);
+            onError(error);
+        }
+    }, {enableHighAccuracy: true, maximumAge: 5000});
+}
+
+/** Aktualna pozycja z nasłuchu od ręki; bez niej (pierwsze kliknięcie, zgoda
+    dopiero co udzielona) start nasłuchu woła o zgodę i czeka na pierwszą. */
+function askPosition(onPosition, onError) {
+    if (positionSource.last) { onPosition(positionSource.last); return; }
+    const waiter = {onPosition, onError};
+    waiter.timer = setTimeout(() => {
+        positionSource.waiting.splice(positionSource.waiting.indexOf(waiter), 1);
+        onError({code: 3});
+    }, GEO_WAIT_MS);
+    positionSource.waiting.push(waiter);
+    watchPosition();
+}
 
 const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onboardOn;
 
@@ -1087,16 +1125,18 @@ const hereIsStart = () => sel.start !== null && sel.start === hereStart && !onbo
     „moja pozycja" i karta jest widoczna. Odświeżanie ma sens tylko przy takim
     starcie, więc jego utrata gasi też sam przycisk. */
 function syncAutoRefresh() {
-    if (!hereIsStart()) autoRefreshOn = false;
+    // Funkcja ukryta za przełącznikiem DEV (#379); bez niego ◎ tylko ustawia start.
+    const allowed = $('location-refresh').checked;
+    if (!hereIsStart() || !allowed) autoRefreshOn = false;
     const hint = autoRefreshOn ? 'Wyłącz odświeżanie'
-        : hereIsStart() ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
+        : hereIsStart() && allowed ? 'Odświeżaj co 30 s' : 'Użyj mojej lokalizacji';
     const label = autoRefreshOn
         ? 'Wyłącz odświeżanie mojej lokalizacji'
-        : hereIsStart() ? 'Odświeżaj moją lokalizację co 30 sekund'
+        : hereIsStart() && allowed ? 'Odświeżaj moją lokalizację co 30 sekund'
                         : 'Ustaw start na mojej lokalizacji';
     // Drugi ◎ siedzi w zwiniętej karcie telefonu (patrz phone.css) i pokazuje
     // to samo, co pierwszy - tylko przy starcie z mojej pozycji.
-    document.body.classList.toggle('here-start', hereIsStart());
+    document.body.classList.toggle('here-start', hereIsStart() && allowed);
     for (const button of [locateButton, locatePeek]) {
         button.classList.toggle('active', autoRefreshOn);
         button.setAttribute('aria-pressed', String(autoRefreshOn));
@@ -1133,14 +1173,13 @@ function refreshHere() {
     if (document.body.classList.contains('searching')
             || [$('time'), $('date')].includes(document.activeElement)) return;
     const asked = sel.start;
-    navigator.geolocation.getCurrentPosition(position => {
+    askPosition(position => {
         // Start mógł się zmienić, gdy GPS mielił.
         if (sel.start !== asked) return;
         sel.start = hereStart = {lat: position.coords.latitude,
                                  lon: position.coords.longitude};
         startInput.value = displayValue(sel.start);
         updatePointMarker('start', sel.start);
-        if (locateSetsTime.checked) setTimeNow();
         if (!endInput.value) return;
         const kept = selectedJourney === null ? null
             : journeySignature(journeys[selectedJourney]);
@@ -1158,7 +1197,7 @@ function refreshHere() {
         // poprzedni wynik zostaje na ekranie, a następny obrót zegara spróbuje znów.
         }).catch(() => {});
     // Brak sygnału w tle: wynik zostaje, zegar próbuje za 30 s.
-    }, () => {}, GEO_OPTIONS);
+    }, () => {});
 }
 
 document.addEventListener('visibilitychange', syncAutoRefresh);
@@ -1172,7 +1211,7 @@ if (!navigator.geolocation) {
     locateButton.addEventListener('click', () => {
         // Drugie kliknięcie, gdy start już jest moją pozycją, nie pyta GPS-a o
         // start, tylko przełącza odświeżanie - pierwsze ma zostać zwykłym ◎.
-        if (hereIsStart()) {
+        if (hereIsStart() && $('location-refresh').checked) {
             toggleAutoRefresh();
             return;
         }
@@ -1180,7 +1219,7 @@ if (!navigator.geolocation) {
     });
 }
 
-function locateStart(onFail = () => {}) {
+function locateStart(onFail = () => {}, options = {}) {
     showLocateMsg('');
     hideLocateOffer();
     locateButton.disabled = true;      // GPS potrafi mielić kilka sekund
@@ -1190,12 +1229,12 @@ function locateStart(onFail = () => {}) {
     const textBefore = startInput.value;
     const stale = () => sel.start !== startBefore || startInput.value !== textBefore;
     const finish = () => { locateButton.disabled = false; };
-    navigator.geolocation.getCurrentPosition(
+    askPosition(
         position => {
             finish();
             if (stale()) return;
             useMyLocation({lat: position.coords.latitude,
-                           lon: position.coords.longitude});
+                           lon: position.coords.longitude}, options);
         },
         error => {
             finish();
@@ -1203,10 +1242,6 @@ function locateStart(onFail = () => {}) {
             showLocateMsg(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]);
             onFail();
         },
-        // maximumAge: 0 (#236) - kto klika ◎ w drodze, prosi o to, gdzie
-        // jest teraz. Z minutowym zapasem iPhone oddawał zapamiętaną
-        // pozycję sprzed kilkuset metrów.
-        GEO_OPTIONS,
     );
 }
 
@@ -1216,6 +1251,37 @@ function locateStart(onFail = () => {}) {
 function startFromHere() {
     if (navigator.geolocation) locateStart(() => startInput.focus());
     else startInput.focus();
+}
+
+// ------------------------------------------------ moja pozycja na mapie ----
+
+// Kropka „tu jesteś" (#410) jest jednym z odbiorców nasłuchu pozycji (patrz
+// positionSource). Nasłuch startuje przy wejściu tylko po udzielonej już zgodzie:
+// samo wejście na stronę nie ma wywołać pytania.
+const youAreHere = {
+    dot: L.marker([0, 0], {
+        icon: L.divIcon({className: 'you-are-here', iconSize: [18, 18]}),
+        interactive: false, keyboard: false, zIndexOffset: 1000,
+    }),
+    accuracy: L.circle([0, 0], {radius: 0, interactive: false, color: '#1a73e8', weight: 1, opacity: 0.4,
+        fillColor: '#1a73e8', fillOpacity: 0.12}),
+};
+
+function showYouAreHere(position) {
+    const at = [position.coords.latitude, position.coords.longitude];
+    youAreHere.dot.setLatLng(at);
+    youAreHere.accuracy.setLatLng(at).setRadius(position.coords.accuracy);
+    youAreHere.accuracy.addTo(map);
+    youAreHere.dot.addTo(map);
+}
+
+if (navigator.geolocation && navigator.permissions) {
+    navigator.permissions.query({name: 'geolocation'}).then(status => {
+        const sync = () => { if (status.state === 'granted') watchPosition(); };
+        sync();
+        // Zgoda udzielona później (np. przy pierwszym ◎) włącza kropkę bez przeładowania.
+        status.addEventListener('change', sync);
+    });
 }
 
 // ---------------------------------------------------- kadrowanie widoku ----
@@ -1232,7 +1298,9 @@ function fitTo(points) {
         options.paddingBottomRight = [gutter, inset.bottom];
     } else {
         options.paddingTopLeft = [panelVisible ? sidebar.offsetWidth + gutter : gutter, gutter];
-        options.paddingBottomRight = [gutter, gutter];
+        // Schemat (eksperyment „nowa mapa”) stoi po prawej - trasa ma się
+        // zmieścić obok niego, nie pod nim.
+        options.paddingBottomRight = [gutter + schemeInset(), gutter];
     }
     map.fitBounds(L.latLngBounds(points), options);
 }
@@ -1273,48 +1341,156 @@ function endpointPoints() {
 // niosło samo krycie; przy szerokim oknie setka bladych kresek o tej samej
 // grubości sumowała się w plamę cięższą niż korytarz, który naprawdę
 // prowadzi do celu.
-const LOOK_DEFAULTS = {
-    minOpacity: 0.3,      // krycie najbledszego kawałka (w=0)
-    maxOpacity: 1,        // krycie najjaśniejszego (w=1)
-    minWeight: 2,         // grubość najbledszego kawałka [px]
-    maxWeight: 3,         // grubość najjaśniejszego [px]
-    casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
-    dimFactor: 0.22,      // ile zostaje z krycia, gdy wybrana jest jedna trasa
-    labelStep: 200,       // co tyle pikseli korytarza staje kolejna grupka numerów
-    labelScale: 0.8,      // wielkość numerów (1 = jak w CSS)
-    labelOpacity: 1,      // mnożnik krycia grupek numerów
-};
+// --- USTAWIENIA: jeden opis, jeden zapis -------------------------------------
+//
+// Ustawienie to wiersz `.set-row` w index.html i NIC więcej nie trzeba opisywać:
+// rodzaj wynika z kontrolki (przełącznik, suwak, lista wyboru), wartość
+// domyślna z jej `checked`/`value`/`selected` w HTML-u, etykiety z `data-labels`,
+// "tylko DEV" z klasy `dev-only`. Zapamiętywanie, przywracanie, pasek
+// "zmienione", kopie pod nagłówkami i statystyki działają na tym opisie
+// jednakowo dla każdego rodzaju. Aplikacja czyta wartość przez setting(id) w
+// chwili użycia; skutek zmiany (jeśli jest) wpisuje się w SETTING_EFFECTS.
+const settingsList = $('settings-list');
+const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 
 // JEDYNY przełącznik strojenia wyglądu: `true` pokazuje sekcję „Wygląd mapy"
-// w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków w
-// localStorage), `false` chowa ją w całości i zostawia same wartości wyżej.
-// Kod suwaków zostaje w repo celowo - patrz znaczniki TYMCZASOWE w
-// index.html i style.css.
+// w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków),
+// `false` chowa ją w całości i zostawia domyślne. Kod suwaków zostaje w repo
+// celowo - patrz znaczniki TYMCZASOWE w index.html i style.css. Dźwięk działa
+// tak samo (SOUND_TUNING, wiersze z `data-tuning`).
 const LOOK_TUNING = true;
-const LOOK_PREFS_KEY = 'metal-planner:look-prefs';
+const SOUND_TUNING = false;
+const TUNING = {look: LOOK_TUNING, sound: SOUND_TUNING};
 
-function loadLookPrefs() {
+const SETTINGS_KEY = 'metal-planner:settings';
+
+const readControl = control => (control.type === 'checkbox' ? control.checked
+    : control.tagName === 'SELECT' ? control.value : Number(control.value));
+
+function writeControl(control, value) {
+    if (control.type === 'checkbox') control.checked = value === true;
+    else if (control.tagName !== 'SELECT') control.value = String(value);
+    // Zapamiętana opcja mogła zniknąć z listy.
+    else if ([...control.options].some(option => option.value === value)) control.value = value;
+}
+
+const SETTINGS = new Map();
+const SETTING_BY_CONTROL = new Map();
+for (const row of settingsRows) {
+    // Wybór pliku, przyciski i odnośniki to akcje, nie ustawienia z wartością;
+    // wiersz akcji może mieć w środku select (wybór osoby), który też nim nie jest.
+    if (row.classList.contains('set-action')) continue;
+    const control = row.querySelector('input:not([type=file]), select');
+    if (!control) continue;
+    const info = {
+        id: row.dataset.setting, row, control,
+        kind: control.tagName === 'SELECT' ? 'select' : control.type,
+        dflt: readControl(control),
+        devOnly: row.classList.contains('dev-only'),
+    };
+    SETTINGS.set(info.id, info);
+    SETTING_BY_CONTROL.set(control, info);
+}
+
+const setting = id => readControl(SETTINGS.get(id).control);
+
+// Wartość suwaka podpisana w `<output>`, jeśli ma inną postać niż liczba.
+const SETTING_FORMATS = {'walk-pace': value => WALK_PACE_LABELS[value]};
+
+function paintSettingOutput(info) {
+    const out = info.row.querySelector('output');
+    if (out) out.textContent = (SETTING_FORMATS[info.id] || String)(readControl(info.control));
+}
+
+function readStored(key) {
     try {
-        return JSON.parse(localStorage.getItem(LOOK_PREFS_KEY)) || {};
+        return JSON.parse(localStorage.getItem(key)) || {};
     } catch {
-        return {};
+        return {};       // localStorage niedostępny (tryb prywatny) albo zepsuty JSON
     }
 }
 
-// Przy schowanych suwakach zapamiętane wartości są celowo POMIJANE - inaczej
-// czyjeś stare ustawienia z localStorage przykryłyby domyślne na zawsze, bez
-// żadnej kontrolki, którą dałoby się je cofnąć.
-//
-// Z pamięci bierze się też tylko to, co ma jeszcze suwak (LOOK_TUNED) - te
-// same obawy dotyczą suwaków skasowanych.
-const LOOK_TUNED = ['maxWeight', 'dimFactor', 'labelStep', 'labelScale',
-                    'labelOpacity'];
-const look = {...LOOK_DEFAULTS, ...(LOOK_TUNING && devMode ? Object.fromEntries(
-    Object.entries(loadLookPrefs()).filter(([key]) => LOOK_TUNED.includes(key)))
-    : {})};
+// Dawne klucze, zanim wszystko zeszło się w jednym: klucz -> {pole -> id
+// ustawienia}; null znaczy, że pola już nazywają się jak id.
+const LEGACY_SETTINGS_KEYS = {
+    'metal-planner:dev-prefs': null,
+    'metal-planner:time-prefs': {
+        hover: 'time-hover', ends: 'time-ends', chips: 'time-chips',
+        headline: 'time-show-headline', ride: 'time-ride',
+    },
+    'metal-planner:dot-prefs': {
+        size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past', center: 'dot-center',
+        tipCursor: 'tip-cursor', tipPanel: 'tip-panel', bikeTimes: 'bike-times',
+        bikeRides: 'bike-rides', carTimes: 'car-times', why: 'debug-why',
+        whySeg: 'debug-why-seg', namesZoom: 'names-zoom',
+    },
+    'metal-planner:look-prefs': {
+        maxWeight: 'look-weight', dimFactor: 'look-dim', labelStep: 'look-label-step',
+        labelScale: 'look-label-size', labelOpacity: 'look-label-op',
+    },
+    'metal-planner:sound-prefs': {pipe: 'sound-pipe'},
+};
+
+// Jednorazowo: kto miał ustawienia pod dawnymi kluczami, nie traci ich.
+function migrateLegacySettings() {
+    try {
+        if (localStorage.getItem(SETTINGS_KEY) !== null) return;
+        const legacy = Object.keys(LEGACY_SETTINGS_KEYS);
+        if (legacy.every(key => localStorage.getItem(key) === null)) return;
+        const merged = {};
+        for (const [key, names] of Object.entries(LEGACY_SETTINGS_KEYS)) {
+            for (const [name, value] of Object.entries(readStored(key))) {
+                const id = names ? names[name] : name;
+                if (id) merged[id] = value;
+            }
+        }
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+        for (const key of legacy) localStorage.removeItem(key);
+    } catch {
+        // localStorage niedostępny - i tak nie ma czego przenosić
+    }
+}
+
+const storedSettings = () => readStored(SETTINGS_KEY);
+
+function storeSetting(key, value) {
+    const stored = storedSettings();
+    stored[key] = value;
+    try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(stored));
+    } catch {
+        // localStorage niedostępny - ustawienie działa dalej, po prostu się nie zapamięta
+    }
+}
+
+// Poza trybem deweloperskim (DEV_MODE, patrz config.dev_mode) wiersze DEV są
+// schowane, więc z pamięci bierze się tylko to, co użytkownik w panelu widzi -
+// schowanej opcji nie miałby czym cofnąć (zgłoszenie #175). Schowana wartość
+// jest tylko pomijana, nie kasowana: po ponownym włączeniu DEV_MODE wraca.
+// To samo dotyczy strojeń wyłączonych stałymi (TUNING).
+function restoreSettings() {
+    const stored = storedSettings();
+    for (const info of SETTINGS.values()) {
+        const row = info.row;
+        if (stored[info.id] === undefined || (info.devOnly && !devMode)
+            || (row.dataset.tuning && !TUNING[row.dataset.tuning])) continue;
+        writeControl(info.control, stored[info.id]);
+    }
+}
+migrateLegacySettings();
+restoreSettings();
+
+const differsFromDefault = info => readControl(info.control) !== info.dflt;
+
+const look = {
+    minOpacity: 0.3,      // krycie najbledszego kawałka (w=0)
+    maxOpacity: 1,        // krycie najjaśniejszego (w=1)
+    minWeight: 2,         // grubość najbledszego kawałka [px]
+    casingFrom: 0.45,     // od tej jasności kawałek dostaje białą otoczkę (1 = nigdy)
+};
 
 const lookOpacity = rel => look.minOpacity + (look.maxOpacity - look.minOpacity) * rel;
-const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * rel;
+const lookWeight = rel => look.minWeight + (setting('look-weight') - look.minWeight) * rel;
 
 // --- CZAS NA MAPIE ---------------------------------------------------------
 //
@@ -1331,95 +1507,6 @@ const lookWeight = rel => look.minWeight + (look.maxWeight - look.minWeight) * r
 // sasiednimi godzinami tego samego kursu, proporcjonalnie do przebytej drogi.
 // Nic poza tym - zadnej sredniej predkosci, zadnego sklejania kursow.
 //
-// Kazda rzecz siedzi na wlasnym przelaczniku w Ustawieniach Developerskich - to
-// wciaz szukanie formy, a nie gotowa decyzja.
-const TIME_DEFAULTS = {
-    hover: true,        // godzina w punkcie pod kursorem + przyjazd do celu
-    ends: false,        // kropka dokladnie w punkcie, ktorego dotyczy godzina
-    chips: false,       // godzina malym drukiem pod numerkiem w grupce
-    headline: true,     // pasek nad mapa: najszybciej tyle, pokazane do tyle
-    ride: false,        // ...i w nim sam czas jazdy obok "za ile tam bedziesz"
-};
-
-const TIME_PREFS_KEY = 'metal-planner:time-prefs';
-
-function loadTimePrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(TIME_PREFS_KEY)) || {};
-    } catch {
-        return {};
-    }
-}
-
-const TIME_PREFS_USER = ['headline'];
-const timeOpts = {...TIME_DEFAULTS, ...visiblePrefs(loadTimePrefs(), TIME_PREFS_USER)};
-
-// Kropki przystanków i to, gdzie ląduje ich rozkład. Osobny klucz od
-// TIME_PREFS_KEY, bo tamto jest eksperymentem na czas strojenia, a to nie.
-// Wartości dobrane na żywo, na realnej mapie (2026-08-30).
-const DOT_DEFAULTS = {
-    size: 8,           // promień kropki na wybranej trasie [px]; wachlarz ma o 1 mniej
-    rows: 20,          // ile odjazdów wypisuje tablica pod kropką
-    ttPast: true,      // szare godziny sprzed chwili z mapy (timetableLinesHtml)
-    center: true,      // kropka węzła: środek wszystkich słupków zamiast peronu
-    tipCursor: true,   // dymek przy kursorze
-    tipPanel: true,    // okienko w rogu ekranu, zostaje po zejściu kursora
-    // Godziny SAMEGO przejazdu rowerem - domyślnie zgaszone. Godzina "jesteś
-    // przy rowerze" pochodzi z rozkładu i jest pokazywana zawsze; ta druga
-    // jest jedyną liczbą na tej mapie, której w żadnym rozkładzie nie ma.
-    // Odległość obok mówi to samo, nie udając odczytanej.
-    bikeTimes: false,
-    // Kreski wybranych przejazdów rowerem i ich stacje końcowe na stałe,
-    // a nie tylko pod kursorem - domyślnie zgaszone.
-    bikeRides: false,
-    // Szacowany przyjazd autem do celu w dymku auta - domyślnie zgaszony, z tego
-    // samego powodu co godziny roweru: policzony, nie odczytany. Auta wybiera
-    // się nim zawsze (zgłoszenie #150), przełącznik mówi tylko, czy go pokazać.
-    carTimes: false,
-    // Debug: dlaczego rower i auto przeszły wybór (pole `why` z serwera).
-    why: false,
-    // Debug: dlaczego kawałek jest na mapie (pole `why` kawałka, patrz
-    // planner._value_map).
-    whySeg: false,
-    // Od tego przybliżenia mapa podpisuje przystanki nazwami (zgłoszenia #252
-    // i #253): przy narysowanej trasie tylko te, przez które jedzie któraś
-    // z jej linii, bez trasy - wszystkie w kadrze. Zmierzone 2026-10-09: przy
-    // 16 nazwy całego centrum już się nie zderzają, ale numery linii i kropki
-    // zabierają im miejsce, więc domyślnie o jeden stopień bliżej.
-    namesZoom: 17,
-};
-
-const DOT_PREFS_KEY = 'metal-planner:dot-prefs';
-
-function loadDotPrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(DOT_PREFS_KEY)) || {};
-    } catch {
-        return {};
-    }
-}
-
-const DOT_PREFS_USER = ['ttPast'];
-const dotOpts = {...DOT_DEFAULTS, ...visiblePrefs(loadDotPrefs(), DOT_PREFS_USER)};
-
-function saveDotPrefs() {
-    try {
-        localStorage.setItem(DOT_PREFS_KEY, JSON.stringify(
-            {...loadDotPrefs(), ...visiblePrefs(dotOpts, DOT_PREFS_USER)}));
-    } catch {
-        // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
-    }
-}
-
-function saveTimePrefs() {
-    try {
-        localStorage.setItem(TIME_PREFS_KEY, JSON.stringify(
-            {...loadTimePrefs(), ...visiblePrefs(timeOpts, TIME_PREFS_USER)}));
-    } catch {
-        // localStorage niedostepny - przelaczniki dzialaja dalej, tylko sie nie zapamietaja
-    }
-}
-
 /** Sekundy -> "8 min" / "1 h 3 min". */
 function fmtMins(sec) {
     const total = Math.round(sec / 60);
@@ -1804,7 +1891,7 @@ function renderTimeHeadline() {
     if (!el) return;
     hideHeadlineTip();
     const flow = headlineFlow;
-    if (!timeOpts.headline || !flow || typeof flow.best_sec !== 'number') {
+    if (!setting('time-show-headline') || !flow || typeof flow.best_sec !== 'number') {
         el.hidden = true;
         el.innerHTML = '';
         hideFastest();
@@ -1821,13 +1908,14 @@ function renderTimeHeadline() {
     // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - zakresu mapy
     // i przycisku jeszcze nie ma.
     const mapped = typeof flow.limit_sec === 'number';
+    const showMapRange = $('headline-map-range').checked;
     const more = mapped && flow.more < MAX_MAP_MORE
         ? '<button type="button" class="headline-more" data-tip="'
           + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
           + '"><span class="spinner" aria-hidden="true"></span>Pokaż więcej</button>'
         : '';
     // Sama jazda to osobna liczba na życzenie.
-    const ride = timeOpts.ride && typeof flow.ride_sec === 'number'
+    const ride = setting('time-ride') && typeof flow.ride_sec === 'number'
         ? item('', `Sama jazda: ${fmtMins(flow.ride_sec)}, od odjazdu pierwszego pojazdu`
                    + ' do celu, bez czekania na niego.',
                `${HEADLINE_RIDE_ICON}<b>${esc(fmtMins(flow.ride_sec))}</b>`)
@@ -1857,14 +1945,18 @@ function renderTimeHeadline() {
         + '</span>'
         // Zakres mapy i jego przycisk to jedna całość: zawinięty pasek przenosi
         // je razem, a nie zostawia samotnego przycisku w drugiej linijce.
+        // Sam zakres jest za ustawieniem deweloperskim; znacznik .headline-map
+        // zostaje także bez niego, bo mówi, że mapa już przyszła.
         + (mapped
             ? '<span class="headline-map">'
-              + '<span class="headline-sep" aria-hidden="true"'
-              + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
-              + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
-                                        + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
-                                        + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
-                     `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
+              + (showMapRange
+                  ? '<span class="headline-sep" aria-hidden="true"'
+                    + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
+                    + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
+                                              + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
+                                              + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
+                           `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
+                  : '')
               + more
               + '</span>'
             : '');
@@ -2034,11 +2126,11 @@ if (devPanel) devPanel.addEventListener('transitionend', placeTimeHeadline);
 // rzadkiej okolicy potrafił zejść z 57% opisanych korytarzy na 14%, nie
 // oszczędzając ani procenta ekranu. Blade korytarze dostają więc numer wtedy,
 // gdy zostało dla niego miejsce - i tylko trochę bledszy.
-// Odstęp grupek i ich wielkość siedzą na suwakach (look.labelStep/labelScale) -
+// Odstęp grupek i ich wielkość siedzą na suwakach (look-label-step, look-label-size) -
 // "co ile numerów" i "jak duże numery" to dokładnie te dwie rzeczy, którymi
 // reguluje się, jak natrętne są numery na mapie.
-const labelStepPx = () => look.labelStep;
-const labelRepeatPx = () => look.labelStep * 1.6;  // ten sam skład nie częściej niż co tyle
+const labelStepPx = () => setting('look-label-step');
+const labelRepeatPx = () => setting('look-label-step') * 1.6;  // ten sam skład nie częściej niż co tyle
 const LABEL_EDGE_PX = 14;        // margines kadru - grupka nie może wystawać za mapę
 const LABEL_GAP_PX = 4;          // odstęp między sąsiednimi grupkami
 const LABEL_MAX = 60;            // sufit, żeby mapa nie zamieniła się w ścianę liczb
@@ -2068,14 +2160,14 @@ function clusterRows(roster) {
     pojedynczy numer. */
 function clusterBox(roster) {
     const rows = clusterRows(roster);
-    const scale = look.labelScale;   // numery rosną razem z suwakiem - i tak samo ich kolizje
+    const scale = setting('look-label-size');   // numery rosną razem z suwakiem - i tak samo ich kolizje
     // Czas pod numerkiem powiększa grupkę w obu wymiarach, więc musi wejść
     // do POMIARU, nie tylko do rysowania - inaczej grupki zaczęłyby na siebie
     // wchodzić (kolizje liczą się z tego pudełka, patrz placeLineLabels).
-    const chars = l => (timeOpts.chips
+    const chars = l => (setting('time-chips')
         ? Math.max(String(l.num).length, 5)   // "16:04" bywa szersze niż sam numer
         : String(l.num).length);
-    const rowPx = CHIP_ROW_PX + (timeOpts.chips ? CHIP_TIME_ROW_PX : 0);
+    const rowPx = CHIP_ROW_PX + (setting('time-chips') ? CHIP_TIME_ROW_PX : 0);
     let width = 0;
     for (const row of rows) {
         let w = 2 * CLUSTER_PAD_PX;
@@ -2162,7 +2254,7 @@ function placeLineLabels() {
         if (same) same.push(c.at); else byKey.set(c.key, [c.at]);
         markers.push(clusterMarker(
             map.containerPointToLatLng(c.at), c.roster, c.w,
-            timeOpts.chips ? chipTimesAt(c.at, c.roster) : null,
+            setting('time-chips') ? chipTimesAt(c.at, c.roster) : null,
         ));
     }
 
@@ -2231,7 +2323,7 @@ function clusterMarker(at, roster, weight, times) {
             iconSize: null,
         }),
         keyboard: false,
-        opacity: (flowDimmed ? 0.25 : 0.65 + 0.35 * weight) * look.labelOpacity,
+        opacity: (flowDimmed ? 0.25 : 0.65 + 0.35 * weight) * setting('look-label-op'),
     });
     marker.roster = roster;
     return marker;
@@ -2258,7 +2350,7 @@ let flowDimmed = false;
 function dimFlow(dim) {
     flowDimmed = dim;
     for (const part of flowParts) {
-        part.layer.setStyle({opacity: dim ? part.opacity * look.dimFactor : part.opacity});
+        part.layer.setStyle({opacity: dim ? part.opacity * setting('look-dim') : part.opacity});
     }
     // Wybrana trasa ma własne kropki na swoich przystankach - te z wachlarza
     // leżałyby na nich i pytały o to samo dwa razy.
@@ -2386,7 +2478,7 @@ function flowPickHtml(when) {
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
-    if (dotOpts.whySeg && sel.hit && sel.hit.seg.why) {
+    if (setting('debug-why-seg') && sel.hit && sel.hit.seg.why) {
         html += segWhyHtml(sel.hit.seg.why);
     }
     return html;
@@ -2458,7 +2550,7 @@ function segWhyHtml(why) {
     ta sama liczba, z ktorej policzona jest jasnosc tego kawalka, wiec kolor
     i godzina nigdy nie moga powiedziec czegos innego. */
 function flowTipTimeHtml(when) {
-    if (!timeOpts.hover || !when) return '';
+    if (!setting('time-hover') || !when) return '';
     let html = '<span class="flow-tip-time">'
         + `<b>${esc(fmtClock(when.now))}</b>`
         + '<span class="flow-tip-what">tu jesteś'
@@ -2480,7 +2572,7 @@ function flowTipTimeHtml(when) {
 // miejsca NA torze.
 function showTimeDot(when) {
     hideTimeDot();
-    if (!timeOpts.ends || !when) return;
+    if (!setting('time-ends') || !when) return;
     flowSpanLayer = L.circleMarker(when.at, {
         radius: 5, color: '#111', weight: 2, opacity: 0.9,
         fillColor: '#fff', fillOpacity: 1, interactive: false,
@@ -2532,10 +2624,10 @@ function renderFlowPick() {
     if (sel.hit) showLineHighlight(sel.num, sel.kind);
     else hideLineHighlight();
     // Liczone RAZ: ta sama chwila opisuje i dymek, i kropke na linii.
-    const when = timeOpts.hover ? timeAtHover(sel.hit, flowPickPoint) : null;
+    const when = setting('time-hover') ? timeAtHover(sel.hit, flowPickPoint) : null;
     showTimeDot(when);
     const html = flowPickHtml(when);
-    if (dotOpts.tipCursor) {
+    if (setting('tip-cursor')) {
         if (!flowTooltip) {
             // setLatLng MUSI być przed addTo: Leaflet przy dodawaniu od razu liczy
             // pozycję dymka i bez współrzędnych rzuca wyjątkiem w środku addTo -
@@ -2618,7 +2710,7 @@ function pickFromCluster(marker, index) {
 // kropki są mniejsze i lżejsze od kropek przesiadek i nie mają tablicy
 // odjazdów - tylko nazwę i godzinę, jak przystanki linii w rozkładach.
 // Widać je pod kursorem na wskazanej linii, a od przybliżenia
-// dotOpts.namesZoom - wszystkie, razem z nazwami. Pozostałe słupki miasta
+// ustawienia „Nazwy przystanków od przybliżenia" - wszystkie, razem z nazwami. Pozostałe słupki miasta
 // zostają blade i bez nazw: mówią o czymś innym niż ta mapa (ta sama zasada,
 // co przy ◉). Nic z tego nie rusza samych linii.
 
@@ -2780,7 +2872,7 @@ function placeStopNames() {
     if (flowStopsLayer) { map.removeLayer(flowStopsLayer); flowStopsLayer = null; }
     if (stopNameLayer) { map.removeLayer(stopNameLayer); stopNameLayer = null; }
     if (hoveredLineStop && !flowLineStopLayer) hoveredLineStop = null;
-    if (map.getZoom() < dotOpts.namesZoom) return;
+    if (map.getZoom() < setting('names-zoom')) return;
     // Wybrana trasa ma własne przystanki po drodze - nazwy wachlarza
     // opisywałyby to, co jest właśnie przygaszone.
     if (lastFlow && flowDimmed) return;
@@ -3000,7 +3092,7 @@ const flowPanel = $('flow-panel');
 const flowPanelBody = $('flow-panel-body');
 
 function showSidePanel(html) {
-    if (!flowPanel || !dotOpts.tipPanel) return;
+    if (!flowPanel || !setting('tip-panel')) return;
     flowPanelBody.innerHTML = html;
     flowPanel.hidden = false;
     placeTimeHeadline();    // okienko stoi obok paska i zmienia wysokość z treścią
@@ -3023,7 +3115,7 @@ function hideSidePanel() {
     więc pytanie ich o cokolwiek pokazywałoby rozkład punktu, którego nie
     widać. */
 function seedStartPanel() {
-    if (!dotOpts.tipPanel || !flowPanel) return;
+    if (!setting('tip-panel') || !flowPanel) return;
     // Nie wyrywamy okienka spod ręki: przerysowanie w trakcie najeżdżania
     // (suwaki wyglądu) ma zostawić to, na co użytkownik właśnie patrzy.
     if (hoveredStopDot || flowPick) return;
@@ -3060,8 +3152,8 @@ const STOP_DOT_STYLE = {radius: 5, weight: 3, color: '#263238',
 
 const journeyDotStyle = () => ({
     ...STOP_DOT_STYLE,
-    radius: dotOpts.size,
-    weight: Math.min(4, Math.max(2, Math.round(dotOpts.size * 0.5))),
+    radius: setting('dot-size'),
+    weight: Math.min(4, Math.max(2, Math.round(setting('dot-size') * 0.5))),
 });
 
 const TIP_LOADING = '<div class="tt-note">Ładowanie…</div>';
@@ -3119,7 +3211,7 @@ function timetableHtml(data, mapSec) {
     Bez "za ile", bez "co N min" i bez godziny w nagłówku: takt z trzech
     kursów pod rząd mylił ("co 2 min"), a rząd godzin mówi to samo bez
     uogólniania. Godziny sprzed chwili z mapy są szare, a bez nich (ustawienie
-    „Szare godziny w tablicy", dotOpts.ttPast) tablica zaczyna się od tej
+    „Szare godziny w tablicy") tablica zaczyna się od tej
     chwili. */
 function timetableLinesHtml(data, mapSec) {
     const head = `<div class="tip-head"><span class="tip-stop">${esc(data.stop)}</span></div>`;
@@ -3140,7 +3232,7 @@ function timetableLinesHtml(data, mapSec) {
         // z wiersza (Lutosławskiego: sześć szarych 310, żadnej na czas).
         // Spóźniony kurs (#238, patrz withLate) to też szara godzina - z obu
         // rodzajów razem zostaje najpóźniejsza.
-        const szare = dotOpts.ttPast ? przed.slice(-1) : [];
+        const szare = setting('tt-past') ? przed.slice(-1) : [];
         const miejsce = TT_TIMES_MAX - szare.length;
         const ciete = po.length > miejsce;
         const pokazane = [...szare, ...(ciete ? po.slice(0, miejsce - 1) : po)];
@@ -3185,12 +3277,9 @@ const TT_TIMES_MAX = 6;
 const TIMETABLE_ROWS_MAX = 20;  // wyżej dymek przykrywa mapę, o którą się pyta
 const TIMETABLE_FETCH = 40;     // ...a tyle pobieramy, bo część odsiewamy
 
-/** Suwak ma swój sufit w atrybucie, ale wartość wraca też z localStorage -
-    a tam może leżeć cokolwiek, również z czasów, gdy zakres był inny. */
+/** Suwak ma swój sufit w atrybucie, ale ten tutaj bywa niższy. */
 function timetableRows() {
-    const rows = Math.round(Number(dotOpts.rows));
-    if (!Number.isFinite(rows)) return DOT_DEFAULTS.rows;
-    return Math.max(1, Math.min(rows, TIMETABLE_ROWS_MAX));
+    return Math.max(1, Math.min(Math.round(setting('dot-rows')), TIMETABLE_ROWS_MAX));
 }
 
 const lineKey = l => `${l.kind} ${l.num} ${l.headsign}`;
@@ -3277,7 +3366,7 @@ function withArrivals(data, lines) {
     Wiersz dostaje `flow` linii z mapy, jeśli ją mapa proponuje - inaczej
     stanąłby jako osobny wiersz obok jej odjazdów. */
 function withLate(data, where) {
-    if (!dotOpts.ttPast || !where.late) return data;
+    if (!setting('tt-past') || !where.late) return data;
     const flow = new Map((where.lines || []).filter(l => l.flow !== 'end')
         .map(l => [lineKey(l), l.flow]));
     const key = d => `${lineKey({kind: d.mode, num: d.num, headsign: d.headsign})}@${d.sec}`;
@@ -3490,7 +3579,7 @@ function stopDot(point, where, sec, style) {
     // dymek sam, na mouseover, więc "nie pokazuj go" nie da się zrobić inaczej
     // niż nie wiążąc go wcale. Przełącznik przerysowuje mapę (patrz applyDots),
     // więc kropki powstają od nowa z aktualnym ustawieniem.
-    if (dotOpts.tipCursor) {
+    if (setting('tip-cursor')) {
         dot.bindTooltip(TIP_LOADING, {
             direction: 'top', offset: [0, -6], opacity: 1,
             className: 'timetable-tip',
@@ -3546,8 +3635,8 @@ const flowDotStyle = (w = 1) => {
     const krycie = lookOpacity(Math.max(0, Math.min(1, Number(w) || 0)));
     return {
         ...FLOW_DOT_STYLE,
-        radius: Math.max(2, dotOpts.size - 1),
-        weight: Math.min(3, Math.max(1.5, Math.round(dotOpts.size * 0.4))),
+        radius: Math.max(2, setting('dot-size') - 1),
+        weight: Math.min(3, Math.max(1.5, Math.round(setting('dot-size') * 0.4))),
         opacity: krycie,
         fillOpacity: krycie,
     };
@@ -3618,7 +3707,7 @@ function endpointDot(name, style) {
     godzina, `clat`/`clon` - środek wszystkich słupków tego miejsca.
     Przełącznik tylko wybiera, bo nie ma tu czego dopytywać. */
 function nodePoint(node) {
-    return dotOpts.center && node.clat !== undefined
+    return setting('dot-center') && node.clat !== undefined
         ? [node.clat, node.clon]
         : [node.lat, node.lon];
 }
@@ -3673,13 +3762,13 @@ function carTooltipHtml(car) {
         ...(lastFlow.cars_dest_in_zone === false ? [
             '<b>⚠ Cel poza strefą Traficara — tam auta nie oddasz</b>',
         ] : []),
-        ...(dotOpts.carTimes ? [
+        ...(setting('car-times') ? [
             `W celu ok. ${fmtClock(car.arrival)} — ${fmtMins(car.drive_sec)} ` +
             'jazdy z ruszeniem i parkowaniem',
         ] : []),
         `Paliwo ${car.fuel}%, zasięg ${car.range} km`,
         ogarniamText(car.ogarniam),
-        ...(dotOpts.why && car.why ? [
+        ...(setting('debug-why') && car.why ? [
             whyText(car.why),
         ] : []),
     ].join('<br>');
@@ -3744,7 +3833,7 @@ const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
 
     Sam przejazd domyślnie nie jest narysowany na stałe: dwie kropki mówią to
     samo, co kreska między nimi. Kreski pojawiają się pod kursorem, a na stałe
-    - po zapaleniu przełącznika pod zębatką (dotOpts.bikeRides). */
+    - po zapaleniu przełącznika pod zębatką. */
 function flowBikeMarkers(places, live) {
     return (places || []).map(place => {
         const dot = L.circleMarker([place.lat, place.lon],
@@ -3754,7 +3843,7 @@ function flowBikeMarkers(places, live) {
         dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
-            if (!dotOpts.bikeRides) clearBikeRides();
+            if (!setting('bike-rides')) clearBikeRides();
             else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
         });
         return dot;
@@ -3777,7 +3866,7 @@ function bikeTooltipHtml(place, live) {
     rows.push(live ? bikeCountText(place)
                    : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
                      'jest z tej chwili, a pytasz o inny dzień');
-    if (dotOpts.why && place.why) {
+    if (setting('debug-why') && place.why) {
         // Wybór przechodzi STACJA (punkt 16), więc powód stoi przy niej, a pod
         // nim podróże, które stacja pokazuje - każda ze swoimi trzema liczbami.
         rows.push(whyText(place.why));
@@ -3869,14 +3958,14 @@ function bikeRideLayers(place, labels) {
     jest policzona, nie odczytana - wraca przełącznikiem pod zębatką. */
 function bikeRideLabel(ride) {
     const parts = [];
-    if (dotOpts.bikeTimes) parts.push(fmtClock(ride.at));
+    if (setting('bike-times')) parts.push(fmtClock(ride.at));
     parts.push(fmtDist(ride.m));
     return parts.join(' · ');
 }
 
 function bikeRideTooltipHtml(ride) {
     const rows = [`<b>${esc(ride.name)}</b>`];
-    rows.push(dotOpts.bikeTimes
+    rows.push(setting('bike-times')
         ? `Stąd ${fmtDist(ride.m)} w linii prostej — ${fmtMins(ride.sec)} ` +
           `z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
         : `Stąd ${fmtDist(ride.m)} w linii prostej`);
@@ -4958,6 +5047,7 @@ function resetResults() {
     clearFlow();
     hideObWarn();
     renderVehicles();
+    renderScheme(null);
     resultsBox.innerHTML = '';
     setTabCount(0);
 }
@@ -4981,6 +5071,7 @@ const WALK_PACES = ['wolno', 'zwykle', 'szybko'];
 const WALK_PACE_LABELS = ['wolne', 'zwykłe', 'szybkie'];
 
 function queryParams() {
+    if (!timeChosen) setTimeNow();
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
@@ -4988,6 +5079,9 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
+        newmap: $('new-map').checked ? '1' : '0',
+        walking: $('walking').checked ? '1' : '0',
+        scheme_extra: $('scheme-walks-count').value,
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
@@ -5057,6 +5151,7 @@ function adoptNames(data) {
     // już przygaszona, setBaseDim wychodzi od razu i stare podświetlenie
     // zostawało na mapie na zawsze.
     restyle(...previous, sel.start, sel.end);
+    syncAddress();
 }
 
 /** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
@@ -5207,6 +5302,1047 @@ function renderPlan(data, refit) {
     renderVehicles();            // nowa mapa - inne linie, inne pojazdy
     renderList(data);
     warnOnboardRide(data.onboard);
+    renderScheme(data);
+}
+
+// ------------------------------------------- schemat obok mapy (#367) --
+//
+// Eksperyment „nowa mapa”: ta sama mapa zdjęta z geografii - te same kropki
+// przesiadek, start na górze, cel na dole, jedna linia to jedna jazda od
+// wsiadania do wysiadania. Graf składa serwer (pole `scheme`, patrz
+// planner._scheme), bo tylko on wie, gdzie podróże z mapy wysiadają i dokąd
+// dochodzą pieszo. Biblioteka ELK liczy tylko położenie pudełek, a kreski
+// i napisy rysujemy sami: linia, która przez węzeł tylko przejeżdża, ma
+// iść przez jego pudełko jedną ciągłą kreską, a to nie jest coś, co układacz
+// strzałek umie narysować. ELK przychodzi z sieci dopiero przy pierwszym
+// schemacie - bez przełącznika strona go w ogóle nie pobiera.
+const ELK_URL = 'https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js';
+const DAGRE_URL = 'https://cdn.jsdelivr.net/npm/@dagrejs/dagre@1.1.4/dist/dagre.min.js';
+let elkReady = null;
+let dagreReady = null;
+let lastSchemeData = null;
+let schemeLast = null;
+let schemeToken = 0;
+let schemeCollapsed = !!uiState.schemeCollapsed;
+// Przybliżenie i przesunięcie rysunku w panelu: rysunek po „Pokaż więcej”
+// bywa kilka razy szerszy niż panel, więc trzeba go dać obejrzeć z bliska.
+const schemeView = {scale: 1, x: 0, y: 0};
+const SCHEME_MIN_SCALE = 0.1;
+const SCHEME_MAX_SCALE = 4;
+// Węzeł, którego tablica jest teraz w dymku (patrz showSchemeTip).
+let schemeTipOwner = null;
+
+const SCHEME_TRIALS = 24;     // ile układów dagre sprawdzamy (patrz layoutDagre)
+const SCHEME_BOX_H = 38;
+const SCHEME_LANE = 30;       // odstęp między sąsiednimi liniami przy pudełku
+const SCHEME_MARGIN = 28;
+
+function loadElk() {
+    if (!elkReady) {
+        elkReady = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = ELK_URL;
+            script.onload = () => resolve(new ELK());
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+    return elkReady;
+}
+
+function loadDagre() {
+    if (!dagreReady) {
+        dagreReady = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = DAGRE_URL;
+            script.onload = () => resolve(dagre);
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+    return dagreReady;
+}
+
+let schemeMeasure = null;
+function schemeTextWidth(text) {
+    schemeMeasure = schemeMeasure || document.createElement('canvas').getContext('2d');
+    schemeMeasure.font = '600 13px system-ui, sans-serif';
+    return schemeMeasure.measureText(text).width;
+}
+
+const schemeKey = line => `${line.kind}|${line.num}`;
+
+/** Jedna kreska na jednym odcinku między dwoma węzłami: wszystkie linie
+    jadące tym odcinkiem naraz (tak jak jedna grupka numerków na mapie).
+    Linie, które w węźle jadą dalej (serwer oznacza to `chain` po obu stronach
+    węzła), idą przez jego pudełko prostą kreską do następnego odcinka -
+    także gdy skład grupy się tam zmienia (`through`). Linie, które w tym
+    węźle wysiadają, odchodzą od kreski krótką odnogą ze strzałką w pudełko
+    (`alight`, patrz schemeBranches); strzałką kończy się cały odcinek tylko
+    wtedy, gdy nic nie jedzie dalej. */
+/** Linie jadą jedną kreską tylko wtedy, gdy mają ten sam los przy następnym
+    pudełku (jadą dalej tą samą krawędzią albo wysiadają) i to samo
+    pochodzenie przy poprzednim - inaczej wysiadająca 18 i jadąca dalej 145
+    byłyby jedną kreską, która w pudełku się rozdwaja. */
+function schemeSplitEdges(scheme) {
+    const edges = scheme.edges;
+    // Rekord na każdą linię każdego odcinka: jej następnik i poprzednik, czyli
+    // ta sama linia (`chain` po obu stronach węzła) na odcinku za węzłem albo
+    // przed nim.
+    const records = edges.map((edge, e) => edge.lines.map(line => ({e, line, group: ''})));
+    const find = (edge, line, dir) => {
+        const f = edges.findIndex(o => (dir === 'dst' ? o.from === edge.to : o.to === edge.from)
+            && o.lines.some(m => m.chain && schemeKey(m) === schemeKey(line)));
+        return f < 0 ? null : records[f].find(r => schemeKey(r.line) === schemeKey(line));
+    };
+    for (const list of records) {
+        for (const r of list) {
+            r.next = r.line.chain ? find(edges[r.e], r.line, 'dst') : null;
+            r.prev = r.line.chain ? find(edges[r.e], r.line, 'src') : null;
+            r.group = `${r.next ? r.next.e : -1}|${r.prev ? r.prev.e : -1}`;
+        }
+    }
+    // Grupa, której linie jadą dalej w różne grupy (albo skądś zbiegają się
+    // z różnych grup), rozpada się na osobne kreski - inaczej w pudełku
+    // trzeba by ją łączyć bokiem. Wysiadanie i wsiadanie tu nie liczą się:
+    // dla nich jest odnoga. Do skutku, bo rozpad idzie wzdłuż całej jazdy.
+    for (let pass = 0; pass < 24; pass++) {
+        let changed = false;
+        for (const list of records) {
+            const groups = new Map();
+            for (const r of list) {
+                if (!groups.has(r.group)) groups.set(r.group, []);
+                groups.get(r.group).push(r);
+            }
+            for (const [group, members] of groups) {
+                const nexts = [...new Set(members.filter(r => r.next).map(r => `${r.next.e}:${r.next.group}`))];
+                const prevs = [...new Set(members.filter(r => r.prev).map(r => `${r.prev.e}:${r.prev.group}`))];
+                if (nexts.length < 2 && prevs.length < 2) continue;
+                for (const r of members) {
+                    const n = r.next ? `${r.next.e}:${r.next.group}` : nexts[0];
+                    const pv = r.prev ? `${r.prev.e}:${r.prev.group}` : prevs[0];
+                    r.group = `${group}#${nexts.length > 1 ? n : ''}#${prevs.length > 1 ? pv : ''}`;
+                }
+                changed = true;
+            }
+        }
+        if (!changed) break;
+    }
+    const out = [];
+    records.forEach((list, e) => {
+        const groups = new Map();
+        for (const r of list) {
+            if (!groups.has(r.group)) groups.set(r.group, []);
+            groups.get(r.group).push(r.line);
+        }
+        for (const lines of groups.values()) out.push({...edges[e], lines});
+    });
+    return out;
+}
+
+function schemeStrands(scheme) {
+    const strands = schemeSplitEdges(scheme).map(edge => ({
+        from: edge.from, to: edge.to, lines: edge.lines, next: null, prev: null,
+        label: edge.lines.map(line => line.num).join(' '),
+    }));
+    const pairs = [];
+    for (const a of strands) {
+        for (const b of strands) {
+            if (b.from !== a.to) continue;
+            const shared = a.lines.filter(line => line.chain
+                && b.lines.some(o => o.chain && schemeKey(o) === schemeKey(line)));
+            if (shared.length) pairs.push({a, b, shared});
+        }
+    }
+    // Najwięcej wspólnych linii pierwsze: to ona jest „główną” kreską przez węzeł.
+    pairs.sort((p, q) => q.shared.length - p.shared.length);
+    for (const strand of strands) strand.merges = [];
+    for (const {a, b, shared} of pairs) {
+        if (a.next || b.prev) {
+            // Druga linia „na wprost” przez ten sam węzeł (dwie grupy zlewają
+            // się albo rozchodzą): krótkie łączenie przez pudełko.
+            a.merges.push({to: b, lines: shared});
+            continue;
+        }
+        a.next = b;
+        b.prev = a;
+        a.through = shared;
+    }
+    for (const strand of strands) {
+        strand.alight = strand.lines.filter(line => !(line.chain && strands.some(other =>
+            other.from === strand.to
+            && other.lines.some(o => o.chain && schemeKey(o) === schemeKey(line)))));
+        strand.arrow = !strand.next && !strand.merges.length && strand.alight.length > 0;
+    }
+    return strands;
+}
+
+function schemeBoxes(scheme, strands, data) {
+    const boxes = new Map();
+    for (const node of scheme.nodes) {
+        const label = node.role === 'start' ? 'Start: ' + displayValue(data.start)
+            : node.role === 'end' ? 'Cel: ' + displayValue(data.end)
+            : prettyStopName(node.place);
+        // Przejazd przez węzeł zajmuje jedno miejsce na górze i na dole naraz.
+        const lanes = strands.filter(s => s.to === node.id && !s.next).length
+            + strands.filter(s => s.from === node.id).length;
+        const slots = Math.max(1, lanes);
+        // Odstęp kresek przy pudełku z najszerszego numeru, który przy nim stoi.
+        const lane = Math.max(SCHEME_LANE, ...strands.filter(s => s.from === node.id)
+            .map(s => schemeTextWidth(s.label) * 0.9 + 16));
+        boxes.set(node.id, {node, label, lane, w: Math.ceil(Math.max(schemeTextWidth(label) + 28,
+                                                                     slots * lane + 16)),
+                            h: SCHEME_BOX_H, x: 0, y: 0});
+    }
+    return boxes;
+}
+
+/** Miejsca linii przy pudełkach: u góry kończące się i przejeżdżające, u dołu
+    zaczynające się i przejeżdżające - przejazd ma ten sam x z obu stron,
+    żeby kreska szła przez pudełko prosto. Kolejność od lewej wg tego, gdzie
+    linia dalej biegnie, żeby kreski się nie plątały. */
+function assignPorts(boxes, strands, refine = false) {
+    const center = id => boxes.get(id).x + boxes.get(id).w / 2;
+    // Po pierwszym przydziale znamy miejsca po drugiej stronie kresek, więc
+    // kolejność przy pudełku idzie za nimi, a nie za środkami pudełek: dwie
+    // kreski do tego samego pudełka też mają swoją kolejność.
+    const from = s => refine && s.xs !== undefined ? s.xs : center(s.from);
+    const to = s => refine && s.xt !== undefined ? s.xt : center(s.to);
+    for (const [id, box] of boxes) {
+        const items = [];
+        for (const s of strands) {
+            if (s.to === id) {
+                items.push({top: s, bottom: s.next, key: s.next ? (from(s) + to(s.next)) / 2 : from(s)});
+            } else if (s.from === id && !s.prev) {
+                items.push({top: null, bottom: s, key: to(s)});
+            }
+        }
+        items.sort((a, b) => a.key - b.key);
+        // Miejsca jak najbliżej tego, dokąd kreska dalej biegnie (a nie równo
+        // rozłożone na całą szerokość pudełka), z zachowaniem odstępu: kreski
+        // nie pętlą się w bok. Najmniejsze kwadraty przy zachowanej kolejności
+        // (izotoniczna regresja po odjęciu i * lane).
+        const place = (list, set) => {
+            const q = list.map((item, i) => item.key - i * box.lane);
+            const blocks = [];
+            for (const value of q) {
+                blocks.push({sum: value, n: 1});
+                while (blocks.length > 1) {
+                    const last = blocks[blocks.length - 1], prev = blocks[blocks.length - 2];
+                    if (last.sum / last.n >= prev.sum / prev.n) break;
+                    blocks.splice(-2, 2, {sum: prev.sum + last.sum, n: prev.n + last.n});
+                }
+            }
+            const xs = blocks.flatMap(block => Array(block.n).fill(block.sum / block.n))
+                .map((value, i) => value + i * box.lane);
+            // Każde miejsce wciśnięte w pudełko, z zachowaniem odstępu.
+            const left = box.x + 10, right = box.x + box.w - 10, n = xs.length;
+            list.forEach((item, i) => set(item, Math.min(Math.max(xs[i], left + i * box.lane),
+                                                         right - (n - 1 - i) * box.lane)));
+        };
+        // Bez przejazdu przez pudełko wejścia i wyjścia nie muszą się
+        // zgadzać co do x, więc każda strona rozkłada się sama, wyśrodkowana.
+        if (items.some(item => item.top && item.bottom)) {
+            place(items, (item, x) => {
+                if (item.top) item.top.xt = x;
+                if (item.bottom) item.bottom.xs = x;
+            });
+        } else {
+            place(items.filter(item => item.top), (item, x) => { item.top.xt = x; });
+            place(items.filter(item => item.bottom), (item, x) => { item.bottom.xs = x; });
+        }
+    }
+}
+
+/** Kolumny pudełek (warstwy) po ich górnej krawędzi: indeks warstwy węzła
+    i pas wolny od pudełek pod każdą warstwą, w którym biegną poziome
+    odcinki kresek. */
+function schemeLayers(boxes) {
+    const tops = [...new Set([...boxes.values()].map(b => Math.round(b.y)))].sort((a, b) => a - b);
+    const layerOf = new Map();
+    const gaps = tops.map(() => ({top: -Infinity, bottom: Infinity, used: 0, seen: 0}));
+    for (const [id, box] of boxes) {
+        const layer = tops.indexOf(Math.round(box.y));
+        layerOf.set(id, layer);
+        gaps[layer].top = Math.max(gaps[layer].top, box.y + box.h);
+        if (layer > 0) gaps[layer - 1].bottom = Math.min(gaps[layer - 1].bottom, box.y);
+    }
+    return {layerOf, gaps};
+}
+
+/** Droga linii od dołu pudełka źródła do góry pudełka celu: w dół, poziomy
+    skok w pasie pod źródłem, w dół korytarzem wolnym od pudełek, poziomy
+    skok w pasie nad celem, w dół. Linie jednej strzałki (te same dwa węzły)
+    idą razem jak tęcza - ta, która ma dalej do celu, skacze najniżej - więc
+    nie przecinają się nawzajem. Poziomy skoków przydziela schemeRoutes,
+    gdy wiadomo, ile ich jest w pasie. */
+function planRoutes(boxes, strands, hintX) {
+    const {layerOf, gaps} = schemeLayers(boxes);
+    const all = [...boxes.values()];
+    const MARGIN = 10, STEP = 7;
+    const clear = (x, from, to) => all.every(b => b.y + b.h + 2 < from || b.y - 2 > to
+        || b.x - MARGIN > x || b.x + b.w + MARGIN < x);
+    const groups = new Map();
+    for (const s of strands) {
+        const key = `${s.from}>${s.to}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(s);
+    }
+    const taken = [];
+    const mean = values => values.reduce((a, b) => a + b, 0) / values.length;
+    for (const group of groups.values()) {
+        group.sort((p, q) => p.xs - q.xs);
+        const src = boxes.get(group[0].from), dst = boxes.get(group[0].to);
+        const gapA = layerOf.get(group[0].from), gapB = layerOf.get(group[0].to) - 1;
+        const meanS = mean(group.map(s => s.xs)), meanT = mean(group.map(s => s.xt));
+        const spread = (group.length - 1) / 2 * STEP;
+        let base = meanT;
+        if (gapB > gapA) {
+            const from = gaps[gapA].top, to = gaps[gapB].bottom;
+            const candidates = [meanS, meanT, ...group.flatMap(s => hintX.get(s) || [])];
+            for (const b of all) candidates.push(b.x - MARGIN - 8, b.x + b.w + MARGIN + 8);
+            candidates.sort((p, q) => Math.abs(p - meanS) + Math.abs(p - meanT)
+                                    - Math.abs(q - meanS) - Math.abs(q - meanT));
+            const fits = x => clear(x - spread, from, to) && clear(x + spread, from, to);
+            base = candidates.find(fits);
+            // Dwie grupy jednym korytarzem nie mogą leżeć na sobie.
+            for (const shift of [0, 40, -40, 80, -80]) {
+                if (fits(base + shift) && !taken.some(t => Math.abs(t.x - (base + shift)) < 2 * spread + 10
+                                                         && t.from < to && t.to > from)) {
+                    base += shift;
+                    break;
+                }
+            }
+            taken.push({x: base, from, to});
+        }
+        group.forEach((s, i) => {
+            s.start = [s.xs, src.y + src.h];
+            s.end = [s.xt, dst.y];
+            s.gapA = gapA;
+            s.gapB = gapB;
+            s.xc = base + (i - (group.length - 1) / 2) * STEP;
+            s.rank = meanT >= meanS ? -i : i;
+            s.groupX = meanS;
+        });
+    }
+    return gaps;
+}
+
+function schemeRoutes(boxes, strands, hintX) {
+    const gaps = planRoutes(boxes, strands, hintX);
+    // Skoki w jednym pasie od góry do dołu: grupy od lewej, a w grupie tak,
+    // żeby się nie przecinały (patrz planRoutes).
+    const jogs = gaps.map(() => []);
+    for (const s of strands) {
+        const [xs] = s.start, [xt] = s.end;
+        if (s.gapB > s.gapA) {
+            jogs[s.gapA].push({s, which: 'yA'});
+            jogs[s.gapB].push({s, which: 'yB'});
+        } else if (Math.abs(xs - xt) >= 0.5) {
+            jogs[s.gapA].push({s, which: 'yA'});
+        }
+    }
+    jogs.forEach((list, g) => {
+        list.sort((p, q) => p.s.groupX - q.s.groupX || p.s.rank - q.s.rank);
+        const top = gaps[g].top + 26, bottom = gaps[g].bottom - 14;
+        list.forEach(({s, which}, k) => { s[which] = top + (bottom - top) * (k + 1) / (list.length + 1); });
+    });
+    for (const s of strands) {
+        const [xs, ys] = s.start, [xt, yt] = s.end;
+        let points;
+        if (s.gapB > s.gapA) {
+            points = [[xs, ys], [xs, s.yA], [s.xc, s.yA], [s.xc, s.yB], [xt, s.yB], [xt, yt]];
+        } else if (Math.abs(xs - xt) < 0.5) {
+            points = [[xs, ys], [xt, yt]];
+        } else {
+            points = [[xs, ys], [xs, s.yA], [xt, s.yA], [xt, yt]];
+        }
+        s.points = points.filter((p, i) => i === 0 || p[0] !== points[i - 1][0] || p[1] !== points[i - 1][1]);
+    }
+}
+
+/** Krzywa przez punkty, pionowa w każdym z nich. */
+function curvePath(points) {
+    let d = `M${points[0][0].toFixed(1)} ${points[0][1].toFixed(1)}`;
+    for (let i = 1; i < points.length; i++) {
+        const [x0, y0] = points[i - 1], [x1, y1] = points[i];
+        const mid = (y0 + y1) / 2;
+        d += `C${x0.toFixed(1)} ${mid.toFixed(1)} ${x1.toFixed(1)} ${mid.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    return d;
+}
+
+/** Punkty kreski gęsto, do liczenia drogi po niej: krzywa jak w curvePath,
+    łamana jak jest. */
+function strandSamples(s, steps = 24) {
+    if (!s.curved) return s.points;
+    const out = [s.points[0]];
+    for (let i = 1; i < s.points.length; i++) {
+        const [x0, y0] = s.points[i - 1], [x1, y1] = s.points[i];
+        const mid = (y0 + y1) / 2;
+        for (let k = 1; k <= steps; k++) {
+            const t = k / steps, u = 1 - t;
+            out.push([u * u * u * x0 + 3 * u * u * t * x0 + 3 * u * t * t * x1 + t * t * t * x1,
+                      u * u * u * y0 + 3 * u * u * t * mid + 3 * u * t * t * mid + t * t * t * y1]);
+        }
+    }
+    return out;
+}
+
+/** Koszt układu schematu, po którym go wybieramy: przecięcia kresek (te
+    w pudełkach liczą się czterokrotnie), kreski wchodzące w pudełka, przez
+    które nie przejeżdżają, i boczne łączenia w pudełkach. Liczone na tym, co
+    naprawdę rysujemy: kreskach, prostych przejazdach przez pudełka,
+    łączeniach i odnogach. */
+function schemeCost(boxes, strands) {
+    const boxList = [...boxes.values()];
+    const items = [];
+    const add = (points, owner, skip, kind) => items.push({points, owner, skip, kind});
+    for (const s of strands) {
+        add(strandSamples(s, 8), s, [s.from, s.to], 'strand');
+        const [x, top] = s.points[s.points.length - 1];
+        if (s.next) add([[x, top], [x, boxes.get(s.to).y + boxes.get(s.to).h]], s, [s.to], 'through');
+        for (const merge of s.merges) {
+            const target = merge.to.points[0];
+            add(strandSamples({curved: true, points: [[x, top], target]}, 8), s, [s.to], 'merge');
+        }
+    }
+    for (const branch of schemeBranches(boxes, strands)) {
+        add(strandSamples(branch, 8), branch.owner, [branch.owner.to], 'branch');
+    }
+    const orient = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+    const inside = (x, y) => boxList.some(b => x > b.x + 1 && x < b.x + b.w - 1
+        && y > b.y + 1 && y < b.y + b.h - 1);
+    const cost = {cross: 0, inBox: 0, foreign: 0, merges: 0, total: 0};
+    for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+            const p = items[i], q = items[j];
+            if (p.owner === q.owner || p.owner.next === q.owner || q.owner.next === p.owner) continue;
+            for (let a = 1; a < p.points.length; a++) {
+                for (let b = 1; b < q.points.length; b++) {
+                    const [p1, p2, q1, q2] = [p.points[a - 1], p.points[a], q.points[b - 1], q.points[b]];
+                    if (orient(p1, p2, q1) * orient(p1, p2, q2) >= 0
+                        || orient(q1, q2, p1) * orient(q1, q2, p2) >= 0) continue;
+                    const d = (q2[0] - q1[0]) * (p2[1] - p1[1]) - (q2[1] - q1[1]) * (p2[0] - p1[0]);
+                    const t = ((q1[0] - p1[0]) * (q2[1] - q1[1]) - (q1[1] - p1[1]) * (q2[0] - q1[0])) / d;
+                    if (inside(p1[0] + t * (p2[0] - p1[0]), p1[1] + t * (p2[1] - p1[1]))) cost.inBox++;
+                    else cost.cross++;
+                }
+            }
+        }
+        const item = items[i];
+        if (item.kind === 'merge') {
+            const [x0] = item.points[0], [x1] = item.points[item.points.length - 1];
+            cost.merges += 2 + Math.abs(x1 - x0) / 30;
+        }
+        if (item.kind === 'strand' || item.kind === 'branch') {
+            for (const b of boxList) {
+                if (item.skip.includes([...boxes].find(([, box]) => box === b)[0])) continue;
+                if (item.points.some(([x, y]) => x > b.x - 2 && x < b.x + b.w + 2
+                                                 && y > b.y - 2 && y < b.y + b.h + 2)) cost.foreign++;
+            }
+        }
+    }
+    cost.total = cost.cross + 4 * cost.inBox + 6 * cost.foreign + cost.merges;
+    return cost;
+}
+
+function pointAlong(samples, fraction) {
+    const lengths = samples.slice(1).map((p, i) => Math.hypot(p[0] - samples[i][0], p[1] - samples[i][1]));
+    let left = lengths.reduce((a, b) => a + b, 0) * fraction;
+    for (let i = 0; i < lengths.length; i++) {
+        if (left <= lengths[i] || i === lengths.length - 1) {
+            const k = lengths[i] ? Math.min(1, left / lengths[i]) : 0;
+            return [samples[i][0] + (samples[i + 1][0] - samples[i][0]) * k,
+                    samples[i][1] + (samples[i + 1][1] - samples[i][1]) * k];
+        }
+        left -= lengths[i];
+    }
+    return samples[0];
+}
+
+/** Numery każdej grupy jako biała plakietka NA kresce, jak grupka numerów na
+    mapie (.line-cluster): numer stoi na swojej kresce, więc nie da się go
+    pomylić z sąsiednią. Plakietka szuka miejsca wzdłuż kreski tak, żeby nie
+    leżała na pudełku ani na innej plakietce. */
+function schemeBadges(boxes, strands, branches) {
+    const PAD = 5, GAP = 4, H = 19;
+    const placed = [];
+    const all = [...boxes.values()];
+    const hits = (a, b, margin) => a.x - margin < b.x + b.w && a.x + a.w + margin > b.x
+        && a.y - margin < b.y + b.h && a.y + a.h + margin > b.y;
+    let out = '';
+    // Odnogi pierwsze: mają najmniej miejsca do wyboru.
+    for (const s of [...branches, ...strands].filter(item => !item.noBadge)) {
+        const widths = s.lines.map(line => schemeBadgeWidth(line.num));
+        const w = widths.reduce((a, b) => a + b, 0) + GAP * (widths.length - 1) + 2 * PAD;
+        const samples = strandSamples(s);
+        const rectAt = fraction => {
+            const [cx, cy] = pointAlong(samples, fraction);
+            return {x: cx - w / 2, y: cy - H / 2, w, h: H, cx, cy};
+        };
+        const others = [...strands, ...branches].filter(o => o !== s).flatMap(strandSamples);
+        const onOther = r => others.some(([x, y]) => x > r.x - 3 && x < r.x + r.w + 3
+            && y > r.y - 3 && y < r.y + r.h + 3);
+        const free = r => !all.some(b => hits(r, b, 2)) && !placed.some(b => hits(r, b, 2));
+        const fractions = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9, 0.05, 0.95, 0.35, 0.65, 0.25, 0.75];
+        // Najpierw miejsce bez cudzych kresek pod plakietką, potem choćby wolne od pudełek.
+        const spot = fractions.map(rectAt).find(r => free(r) && !onOther(r))
+            || fractions.map(rectAt).find(free) || rectAt(0.5);
+        placed.push(spot);
+        s.badge = spot;
+        let x = spot.x + PAD;
+        const texts = s.lines.map((line, i) => {
+            const t = `<text class="scheme-num" fill="${LINE_COLORS[line.kind] || LINE_COLORS.other}" `
+                + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`;
+            x += widths[i] + GAP;
+            return t;
+        }).join('');
+        out += `<g class="scheme-badge" data-lines="${escAttr(s.label)}" data-cx="${spot.cx.toFixed(1)}" `
+            + `data-cy="${spot.cy.toFixed(1)}"><rect x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" `
+            + `width="${w.toFixed(1)}" height="${H}" rx="9"/>${texts}</g>`;
+    }
+    return out;
+}
+
+function schemeBadgeWidth(text) {
+    schemeMeasure = schemeMeasure || document.createElement('canvas').getContext('2d');
+    schemeMeasure.font = '700 11px system-ui, sans-serif';
+    return schemeMeasure.measureText(text).width + 6;
+}
+
+/** Odnoga linii, które wysiadają w pudełku, przez które reszta grupy jedzie
+    dalej: odchodzi od kreski kawałek nad pudełkiem w bok i kończy się strzałką
+    w jego górną krawędź. Ma własną plakietkę z numerami wysiadających. */
+function schemeBranches(boxes, strands) {
+    const out = [];
+    for (const s of strands) {
+        if ((!s.next && !s.merges.length) || !s.alight.length) continue;
+        const box = boxes.get(s.to);
+        const [xt, top] = s.points[s.points.length - 1];
+        const half = (s.alight.reduce((sum, line) => sum + schemeBadgeWidth(line.num) + 4, 0) + 10) / 2;
+        const dx = half + 16;
+        const side = xt + dx <= box.x + box.w - 8 ? xt + dx : xt - dx;
+        const xe = Math.max(box.x + 8, Math.min(box.x + box.w - 8, side));
+        // Odnoga startuje z samej kreski (jej krzywa nie jest nad pudełkiem
+        // pionowa), nie z punktu nad pudełkiem.
+        const samples = strandSamples(s);
+        let start = samples[0];
+        for (let i = samples.length - 1; i >= 0; i--) {
+            if (samples[i][1] <= top - 44) { start = samples[i]; break; }
+        }
+        out.push({lines: s.alight, label: s.alight.map(line => line.num).join(' '), curved: true,
+                  points: [start, [xe, top]], owner: s});
+    }
+    return out;
+}
+
+/** Które przejścia pieszo schemat rysuje: te, które wybrał serwer z powodu
+    najszybszej podróży i dojścia (patrz planner._scheme_pairs), i przejścia
+    z `count` kolejnych podróży, które mają przejście w środku. */
+function schemeWalksOf(pairs) {
+    const count = Number($('scheme-walks-count').value);
+    return pairs.filter(p => p.why !== 'extra' || p.rank <= count);
+}
+
+/** Odległość do napisu: do 10 m poniżej kilometra, do 0,1 km powyżej. */
+function fmtWalkDistance(m) {
+    const rounded = Math.round(m / 10) * 10;
+    if (rounded < 1000) return `${rounded} m`;
+    return `${(Math.round(m / 100) / 10).toFixed(1).replace('.', ',')} km`;
+}
+
+/** Przejścia pieszo wyglądają inaczej niż linie jazd, żeby się z nimi nie
+    myliły: cienka klamra w osobnym pasie na prawo od wszystkiego (`laneX`
+    to jego początek), więc nie przecina jazd ani nie ściska się między
+    pudełkami. Poziome dojścia do pasa omijają plakietki numerów `badges`;
+    linie jazd mogą przejść nad nimi, bo warstwa leży pod spodem. */
+function schemeWalkLayer(boxes, walks, laneX, badges) {
+    const out = {svg: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
+    const grow = (x, y) => {
+        out.minX = Math.min(out.minX, x); out.maxX = Math.max(out.maxX, x);
+        out.minY = Math.min(out.minY, y); out.maxY = Math.max(out.maxY, y);
+    };
+    const texts = walks.map(pair => `pieszo, ${fmtWalkDistance(pair.m)}`);
+    const widthOf = text => text.length * 5.8 + 14;
+    // Napis stoi na pionowej części klamry, więc pasy są szersze od napisu:
+    // żaden napis nie przykrywa cudzej klamry ani cudzego napisu.
+    const pitch = Math.max(0, ...texts.map(widthOf)) + 12;
+    const placed = [];
+    const pill = (spots, text, x) => {
+        const w = widthOf(text);
+        const free = y => !placed.some(o => Math.abs(o.x - x) < (o.w + w) / 2 + 2 && Math.abs(o.y - y) < 20);
+        const cy = spots.find(free) ?? spots[0];
+        placed.push({x, y: cy, w});
+        grow(x - w / 2, cy - 9); grow(x + w / 2, cy + 9);
+        return `<rect class="scheme-walk-pill" x="${x - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
+            + `<text class="scheme-walk-text" x="${x}" y="${cy}">${text}</text>`;
+    };
+    // Wysokość, na której klamra wychodzi z pudełka: najbliżej środka, byle
+    // poziomy odcinek do pasa nie trafił w plakietkę i nie leżał na odcinku
+    // innej klamry z tego samego pudełka.
+    const used = new Map();
+    const exit = box => {
+        const mid = box.y + box.h / 2, taken = used.get(box) || [];
+        const clear = y => !badges.some(r => r.x < laneX && r.x + r.w > box.x + box.w
+            && y > r.y - 3 && y < r.y + r.h + 3);
+        const offsets = [0, -6, 6, -12, 12, -16, 16];
+        const y = offsets.map(o => mid + o).find(c => clear(c) && !taken.some(t => Math.abs(t - c) < 4))
+            ?? offsets.map(o => mid + o).find(clear) ?? mid;
+        used.set(box, [...taken, y]);
+        return y;
+    };
+    const spans = walks.map((pair, i) => {
+        const a = boxes.get(pair.from), b = boxes.get(pair.to);
+        return {pair, text: texts[i], a, b, length: Math.abs((a.y + a.h / 2) - (b.y + b.h / 2))};
+    });
+    // Krótkie klamry stoją bliżej pudełek; każda następna, która zachodzi
+    // na wcześniejszą, idzie o pas dalej.
+    const lanes = [];
+    for (const span of spans.sort((p, q) => p.length - q.length)) {
+        span.ya = exit(span.a);
+        span.yb = exit(span.b);
+        span.top = Math.min(span.ya, span.yb); span.bottom = Math.max(span.ya, span.yb);
+        let lane = 0;
+        while (lanes.some(o => o.lane === lane && o.top < span.bottom + 16 && span.top < o.bottom + 16)) lane++;
+        span.lane = lane;
+        lanes.push(span);
+    }
+    for (const {pair, text, a, b, ya, yb, top, bottom, lane} of spans) {
+        const ra = a.x + a.w, rb = b.x + b.w, x = laneX + pitch / 2 + lane * pitch;
+        const sy = yb > ya ? 1 : -1, r = Math.min(6, Math.abs(yb - ya) / 2);
+        const d = `M${ra} ${ya}H${x - r}Q${x} ${ya} ${x} ${ya + sy * r}V${yb - sy * r}Q${x} ${yb} ${x - r} ${yb}H${rb}`;
+        grow(x + pitch / 2, ya); grow(x + pitch / 2, yb);
+        // Napis najchętniej w środku pionu, a gdy odcinek jest za krótki -
+        // tuż nad albo pod nim, nie na poziomych dojściach.
+        const mid = (top + bottom) / 2, spots = [mid];
+        for (let k = 1; k * 20 <= (bottom - top) / 2 - 9; k++) spots.push(mid + k * 20, mid - k * 20);
+        const clear = spots.filter(y => Math.abs(y - ya) > 11 && Math.abs(y - yb) > 11);
+        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}"><title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
+            + `<path d="${d}"/><circle cx="${ra}" cy="${ya}" r="2.5"/><circle cx="${rb}" cy="${yb}" r="2.5"/>`
+            + `${pill([...clear, top - 14, bottom + 14, ...spots], text, x)}</g>`;
+    }
+    return out;
+}
+
+function schemeSvg(boxes, strands, pairs) {
+    const branches = schemeBranches(boxes, strands);
+    const labels = schemeBadges(boxes, strands, branches);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const b of boxes.values()) {
+        minX = Math.min(minX, b.x); maxX = Math.max(maxX, b.x + b.w);
+        minY = Math.min(minY, b.y); maxY = Math.max(maxY, b.y + b.h);
+    }
+    for (const s of [...strands, ...branches]) {
+        for (const [x, y] of s.points) {
+            minX = Math.min(minX, x - 30); maxX = Math.max(maxX, x + 30);
+        }
+        if (s.badge) { minX = Math.min(minX, s.badge.x); maxX = Math.max(maxX, s.badge.x + s.badge.w); }
+    }
+    // Przejścia pieszo leżą pod pudełkami i kreskami jazd, żeby nie zasłaniały
+    // linii.
+    const badgeRects = [...strands, ...branches].filter(s => s.badge).map(s => s.badge);
+    const laneX = maxX + 20;
+    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs), laneX, badgeRects);
+    minX = Math.min(minX, walkLayer.minX); maxX = Math.max(maxX, walkLayer.maxX);
+    minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
+    const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
+    const colors = new Set();
+    const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
+    const DASH = 9;
+    let rects = '', lines = '', names = '';
+    for (const [id, b] of boxes) {
+        // Miejsce, w którym mapa urywa linię, ale nie stawia kropki: ramka
+        // kreskowana, bez wypełnienia, z podpowiedzią.
+        const bare = b.node.bare ? ' bare' : '';
+        const title = b.node.bare
+            ? '<title>Tu linia kończy się na mapie, ale mapa nie stawia tu kropki</title>' : '';
+        rects += `<g class="node${bare}" data-node="${id}">${title}<rect class="scheme-box${bare}" `
+            + `x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12"/></g>`;
+        names += `<text class="scheme-name${bare}" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+    }
+    // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
+    // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
+    const stroke = (group, label, d, arrow, extra = '') => {
+        const kinds = [...new Set(group.map(line => line.kind))].sort();
+        const tint = kinds.length === 1 ? colorOf(kinds[0]) : WALK_COLOR;
+        const marker = arrow ? ` marker-end="url(#scheme-arrow-${tint.slice(1)})"` : '';
+        if (arrow) colors.add(tint);
+        const strokes = kinds.map((kind, i) => kinds.length === 1
+            ? `<path class="scheme-line" stroke="${colorOf(kind)}"${marker} d="${d}"/>`
+            : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
+              + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
+              + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
+        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}">${strokes}</g>`;
+    };
+    const pathOf = (curved, points) => curved ? curvePath(points)
+        : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
+    for (const s of strands) {
+        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow);
+        if (s.next) {
+            // Linie jadące dalej przechodzą przez pudełko jedną prostą kreską.
+            const [x, top] = s.points[s.points.length - 1];
+            const box = boxes.get(s.to);
+            lines += stroke(s.through, s.through.map(line => line.num).join(' '),
+                            `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(box.y + box.h).toFixed(1)}`,
+                            false, ' scheme-through');
+        }
+        for (const merge of s.merges) {
+            const [x, top] = s.points[s.points.length - 1];
+            const [x2, bottom] = merge.to.points[0];
+            lines += stroke(merge.lines, merge.lines.map(line => line.num).join(' '),
+                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge');
+        }
+    }
+    for (const branch of branches) {
+        lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch');
+    }
+    const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
+        + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
+        + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
+        + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
+        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${names}${labels}</svg>`;
+}
+
+/** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
+    wyłączony albo odpowiedź schematu nie ma (null: mapa zeszła z ekranu). */
+function renderScheme(data) {
+    lastSchemeData = data;
+    const panel = $('scheme-panel');
+    const mine = ++schemeToken;
+    hideSchemeTip();
+    if (!data || !data.scheme || !$('new-map').checked) {
+        panel.hidden = true;
+        $('scheme-canvas').innerHTML = '';
+        return;
+    }
+    const scheme = data.scheme;
+    const strands = schemeStrands(scheme);
+    const boxes = schemeBoxes(scheme, strands, data);
+    // Węzły bez strzałki jazdy między sobą (przejścia piesze i gałęzie bez nich) układają się w tej
+    // kolejności dzięki dodatkowym, niewidocznym krawędziom.
+    const hidden = (scheme.order || []).map(([from, to]) => ({from, to}));
+    const graph = {
+        id: 'root',
+        layoutOptions: {
+            'elk.algorithm': 'layered',
+            'elk.direction': 'DOWN',
+            'elk.edgeRouting': 'POLYLINE',
+            'elk.spacing.nodeNode': '56',
+            'elk.layered.spacing.nodeNodeBetweenLayers': '110',
+            'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+        },
+        children: [...boxes].map(([id, b]) => ({id, width: b.w, height: b.h})),
+        edges: [...scheme.edges, ...hidden].map((e, i) => ({
+            id: `e${i}`, sources: [e.from], targets: [e.to],
+        })),
+    };
+    const finish = (boxes, strands) => {
+        schemeLast = {boxes, strands};
+        window.schemeLast = schemeLast;
+        const canvas = $('scheme-canvas');
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs);
+        panel.hidden = false;
+        setSchemeCollapsed(schemeCollapsed);
+        bindSchemeNodes(canvas, data);
+        fitScheme();
+    };
+    if ($('scheme-layout').value === 'dagre') {
+        loadDagre().then(lib => {
+            if (mine !== schemeToken) return;
+            let best = null;
+            for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
+                const trialStrands = schemeStrands(scheme);
+                const trialBoxes = schemeBoxes(scheme, trialStrands, data);
+                layoutDagre(lib, scheme, trialBoxes, trialStrands, seed);
+                const cost = schemeCost(trialBoxes, trialStrands).total;
+                if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost};
+                if (!cost) break;
+            }
+            finish(best.boxes, best.strands);
+        });
+        return;
+    }
+    loadElk()
+        .then(elk => elk.layout(graph))
+        .then(laid => {
+            if (mine !== schemeToken) return;
+            for (const child of laid.children) {
+                // Całkowite współrzędne pudełek: kreski kończą się dokładnie na ich krawędziach.
+                Object.assign(boxes.get(child.id), {x: Math.round(child.x), y: Math.round(child.y)});
+            }
+            // Zakręty, którymi ELK obszedł pudełka długiej krawędzi, to
+            // gotowe korytarze wolne od pudełek.
+            const hintX = new Map();
+            for (const s of strands) {
+                const routed = (laid.edges || []).find(e => e.sources[0] === s.from && e.targets[0] === s.to);
+                const bends = routed && routed.sections && routed.sections[0].bendPoints;
+                if (bends) hintX.set(s, bends.map(p => p.x));
+            }
+            assignPorts(boxes, strands);
+            schemeRoutes(boxes, strands, hintX);
+            finish(boxes, strands);
+        });
+}
+
+/** Kreski tych samych dwóch węzłów, które nie mają nic do powiedzenia po
+    drodze, zbiegają się w połowie odcinka w jedną z plakietką wszystkich
+    numerów (N i 145 pod Morwową). */
+function schemeMergeSiblings(strands) {
+    const groups = new Map();
+    for (const s of strands) {
+        const key = `${s.from}>${s.to}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(s);
+    }
+    for (const group of groups.values()) {
+        if (group.length < 2 || group.some(s => s.points.length !== 2 || s.next || s.merges.length)) continue;
+        const xt = group[0].points[1][0], y1 = group[0].points[1][1];
+        const top = Math.max(...group.map(s => s.points[0][1]));
+        const ym = top + 0.55 * (y1 - top);
+        const lines = group.flatMap(s => s.lines);
+        strands.push({from: group[0].from, to: group[0].to, lines,
+                      label: lines.map(line => line.num).join(' '), next: null, prev: null,
+                      merges: [], alight: [], arrow: group.some(s => s.arrow), curved: true,
+                      points: [[xt, ym], [xt, y1]]});
+        for (const s of group) {
+            s.points = [s.points[0], [xt, ym]];
+            s.arrow = false;
+            s.noBadge = true;
+        }
+    }
+}
+
+/** Układ dagre (ten sam, którego używa Mermaid) ze zwartymi odstępami,
+    a kreski jako gładkie krzywe: każdy odcinek wychodzi z pudełka i wchodzi
+    do następnego pionowo, więc kreska przejeżdżająca przez pudełko idzie przez
+    nie prosto. Pośrednie punkty dagre długiej krawędzi to punkty, przez
+    które krzywa ma przejść, żeby ominąć pudełka warstw pomiędzy. */
+function layoutDagre(lib, scheme, boxes, strands, seed = 0) {
+    const g = new lib.graphlib.Graph();
+    g.setGraph({rankdir: 'TB', nodesep: 40,
+                ranksep: 100, marginx: 0, marginy: 0});
+    g.setDefaultEdgeLabel(() => ({}));
+    // Kolejność wstawiania wpływa na to, w którym lokalnym optimum utknie
+    // heurystyka dagre; renderScheme próbuje kilku i wybiera najmniej
+    // przecięć kresek, które naprawdę rysujemy.
+    let state = seed * 2654435761 + 1;
+    const shuffled = list => {
+        if (!seed) return list;
+        const out = [...list];
+        for (let i = out.length - 1; i > 0; i--) {
+            state = (state * 1664525 + 1013904223) >>> 0;
+            const j = state % (i + 1);
+            [out[i], out[j]] = [out[j], out[i]];
+        }
+        return out;
+    };
+    for (const [id, b] of shuffled([...boxes])) g.setNode(id, {width: b.w, height: b.h});
+    for (const [from, to] of shuffled([...(scheme.order || []),
+                                       ...strands.map(s => [s.from, s.to])])) g.setEdge(from, to);
+    lib.layout(g);
+    for (const [id, b] of boxes) {
+        const node = g.node(id);
+        b.x = Math.round(node.x - b.w / 2);
+        b.y = Math.round(node.y - b.h / 2);
+    }
+    assignPorts(boxes, strands);
+    for (let sweep = 0; sweep < 3; sweep++) assignPorts(boxes, strands, true);
+    const {layerOf} = schemeLayers(boxes);
+    for (const s of strands) {
+        const src = boxes.get(s.from), dst = boxes.get(s.to);
+        const points = g.edge(s.from, s.to).points || [];
+        const long = layerOf.get(s.to) - layerOf.get(s.from) > 1;
+        s.points = [[s.xs, src.y + src.h],
+                    ...(long ? points.slice(1, -1).map(p => [p.x, p.y]) : []),
+                    [s.xt, dst.y]];
+        s.curved = true;
+    }
+    schemeMergeSiblings(strands);
+}
+
+function setSchemeCollapsed(collapsed) {
+    schemeCollapsed = collapsed;
+    const panel = $('scheme-panel');
+    panel.classList.toggle('collapsed', collapsed);
+    const toggle = $('scheme-toggle');
+    const label = `${collapsed ? 'Pokaż' : 'Ukryj'} schemat`;
+    toggle.textContent = collapsed ? '▸' : '▾';
+    toggle.title = label;
+    toggle.setAttribute('aria-label', label);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    if (collapsed) hideSchemeTip();
+}
+
+setSchemeCollapsed(schemeCollapsed);
+
+/** Ile miejsca po prawej zabiera schemat na szerokim ekranie - ta sama
+    szerokość co .scheme-panel w style.css: min(560px, 45vw) i 16 px od
+    brzegu. Liczona z reguły, a nie z panelu, bo przy pierwszym wyszukaniu
+    mapa kadruje się, zanim schemat zdąży się pokazać. */
+function schemeInset() {
+    if (!$('new-map').checked || $('scheme-panel').classList.contains('collapsed')) return 0;
+    return Math.min(560, innerWidth * 0.45) + 16;
+}
+
+$('scheme-toggle').addEventListener('click', () => {
+    setSchemeCollapsed(!schemeCollapsed);
+    saveUiState({schemeCollapsed});
+    if (!schemeCollapsed) fitScheme();
+});
+$('scheme-fit').addEventListener('click', fitScheme);
+
+function applySchemeView() {
+    const svg = $('scheme-canvas').querySelector('svg');
+    if (!svg) return;
+    svg.style.transform = `translate(${schemeView.x}px, ${schemeView.y}px) scale(${schemeView.scale})`;
+}
+
+/** Cały schemat w oknie panelu, ale nie większy niż naturalny - mały
+    schemat nie puchnie, a duży da się potem przybliżyć. */
+function fitScheme() {
+    const viewport = $('scheme-viewport');
+    const svg = viewport.querySelector('svg');
+    if (!svg || schemeCollapsed) return;
+    const box = svg.viewBox.baseVal;
+    svg.setAttribute('width', box.width);
+    svg.setAttribute('height', box.height);
+    svg.style.maxWidth = 'none';
+    const scale = Math.min(1, viewport.clientWidth / box.width, viewport.clientHeight / box.height);
+    schemeView.scale = scale;
+    schemeView.x = (viewport.clientWidth - box.width * scale) / 2;
+    schemeView.y = Math.max(0, (viewport.clientHeight - box.height * scale) / 2);
+    applySchemeView();
+}
+
+function zoomSchemeAt(px, py, factor) {
+    const scale = Math.min(SCHEME_MAX_SCALE,
+                           Math.max(SCHEME_MIN_SCALE, schemeView.scale * factor));
+    const k = scale / schemeView.scale;
+    schemeView.x = px - (px - schemeView.x) * k;
+    schemeView.y = py - (py - schemeView.y) * k;
+    schemeView.scale = scale;
+    applySchemeView();
+}
+
+(() => {
+    const viewport = $('scheme-viewport');
+    const local = e => {
+        const rect = viewport.getBoundingClientRect();
+        return [e.clientX - rect.left, e.clientY - rect.top];
+    };
+    viewport.addEventListener('wheel', e => {
+        e.preventDefault();
+        hideSchemeTip();
+        zoomSchemeAt(...local(e), Math.exp(-e.deltaY * 0.0015));
+    }, {passive: false});
+
+    // Przeciąganie jednym palcem (myszą) przesuwa, dwoma - przybliża. Kursor
+    // łapiemy dopiero po kilku pikselach ruchu: inaczej dotknięcie węzła,
+    // które ma otworzyć tablicę, stawałoby się początkiem przeciągania.
+    const pointers = new Map();
+    let dragging = false;
+    viewport.addEventListener('pointerdown', e => {
+        pointers.set(e.pointerId, local(e));
+        dragging = false;
+    });
+    viewport.addEventListener('pointermove', e => {
+        const last = pointers.get(e.pointerId);
+        if (!last) return;
+        const now = local(e);
+        if (pointers.size === 1) {
+            const dx = now[0] - last[0], dy = now[1] - last[1];
+            if (!dragging && Math.hypot(dx, dy) < 4) return;
+            if (!dragging) {
+                dragging = true;
+                viewport.setPointerCapture(e.pointerId);
+                hideSchemeTip();
+            }
+            schemeView.x += dx;
+            schemeView.y += dy;
+            applySchemeView();
+        } else if (pointers.size === 2) {
+            const other = [...pointers.entries()].find(([id]) => id !== e.pointerId)[1];
+            const before = Math.hypot(last[0] - other[0], last[1] - other[1]);
+            const after = Math.hypot(now[0] - other[0], now[1] - other[1]);
+            dragging = true;
+            hideSchemeTip();
+            if (before > 0) {
+                zoomSchemeAt((now[0] + other[0]) / 2, (now[1] + other[1]) / 2, after / before);
+            }
+        }
+        pointers.set(e.pointerId, now);
+    });
+    const release = e => { pointers.delete(e.pointerId); };
+    viewport.addEventListener('pointerup', release);
+    viewport.addEventListener('pointercancel', release);
+    // Klik po przeciągnięciu to koniec przeciągania, nie wybór węzła.
+    viewport.addEventListener('click', e => {
+        if (dragging) { e.stopPropagation(); dragging = false; return; }
+        if (!e.target.closest('g.node')) hideSchemeTip();
+    }, true);
+})();
+
+// --- tablica odjazdów węzła ---------------------------------------------
+//
+// Ta sama tablica co pod kropką przesiadki na mapie (loadTimetable) - węzeł
+// schematu JEST tą kropką. Pokazuje się po najechaniu, a na telefonie po
+// dotknięciu, tak jak na mapie.
+
+function hideSchemeTip() {
+    schemeTipOwner = null;
+    $('scheme-tip').hidden = true;
+}
+
+function showSchemeTip(element, where, sec) {
+    const tip = $('scheme-tip');
+    const owner = {
+        // Udaje kropkę mapy na tyle, ile loadTimetable jej potrzebuje: dymek,
+        // do którego wpisuje się tablica, gdy dojdzie z sieci.
+        getTooltip: () => true,
+        setTooltipContent: html => {
+            if (schemeTipOwner !== owner) return;
+            tip.innerHTML = html;
+            placeSchemeTip(element);
+        },
+    };
+    schemeTipOwner = owner;
+    tip.hidden = false;
+    loadTimetable(owner, where, sec);
+}
+
+/** Pod węzłem, a gdy tam brak miejsca - nad nim; zawsze w oknie. */
+function placeSchemeTip(element) {
+    const tip = $('scheme-tip');
+    const node = element.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(innerWidth - box.width - 8,
+                                      node.left + node.width / 2 - box.width / 2));
+    let top = node.bottom + 6;
+    if (top + box.height > innerHeight - 8) top = Math.max(8, node.top - box.height - 6);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+}
+
+function bindSchemeNodes(canvas, data) {
+    const byId = new Map(data.scheme.nodes.map(node => [node.id, node]));
+    const mapNodes = new Map((data.nodes || []).map(node => [node.place, node]));
+    for (const element of canvas.querySelectorAll('g.node')) {
+        const node = byId.get(element.dataset.node);
+        const mapNode = node && node.place && mapNodes.get(node.place);
+        if (!mapNode) continue;
+        const where = {name: mapNode.name, lines: mapNode.lines, deadline: data.deadline_sec,
+                       start: mapNode.start, late: mapNode.late};
+        const show = () => showSchemeTip(element, where, mapNode.sec);
+        // Najechanie i zjechanie tylko myszą: palec po dotknięciu też
+        // „zjeżdża” z węzła i tablica znikałaby, zanim się pokaże.
+        element.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(); });
+        element.addEventListener('pointerleave', e => {
+            if (e.pointerType === 'mouse') hideSchemeTip();
+        });
+        element.addEventListener('click', show);
+    }
 }
 
 /** Tożsamość trasy na liście: te same przejazdy tymi samymi kursami i te
@@ -5259,6 +6395,7 @@ function renderList(data) {
     przepływów - do tego czasu lista mówi, że szuka. */
 function renderHeadlineOnly(data) {
     clearFlow(false);
+    renderScheme(null);
     headlineFlow = data;
     renderTimeHeadline();
 }
@@ -5325,6 +6462,7 @@ function loadPlan(kind, onMapped) {
         onMapped,
     };
     showBusy(run.busy);
+    syncAddress();
     return Promise.all([fetch('/api/flow?' + queryParams(), {signal: run.abort.signal}),
                         stopsReady])
         .then(([response]) => readLines(response, data => {
@@ -5344,6 +6482,7 @@ function applyStage(run, data) {
     if (data.error) {
         clearFlow();
         hideObWarn();
+        renderScheme(null);
         showError(data.error, data.suggestions);
         return;
     }
@@ -5411,14 +6550,21 @@ function replanInPlace() {
 
 const LAST_SEARCH_KEY = 'metal-planner:last-search';
 
+// Jedno miejsce na przedawnienie ostatniej trasy RAZEM z jej godziną.
+// Infinity - dziś trasa nie wygasa; skończony czas w ms wygasza obie naraz.
+const LAST_SEARCH_MAX_AGE_MS = Infinity;
+
 function saveLastSearch() {
     // Podróży z pokładu nie zapamiętujemy: kurs, którym się jechało, dawno
     // odjechał, a przywrócona po godzinie linia z przystankiem byłaby
     // odpowiedzią na pytanie, którego już nikt nie zadaje.
     if (onboardOn) { forgetLastSearch(); return; }
     try {
+        // Godzina i data wracają z trasą tylko wtedy, gdy pasażer sam je wpisał -
+        // „teraz" z formularza po godzinie przestałoby nim być.
         localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
-            start: sel.start, end: sel.end,
+            start: sel.start, end: sel.end, savedAt: Date.now(),
+            ...(timeChosen ? {time: $('time').value, date: $('date').value} : {}),
         }));
     } catch {
         // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
@@ -5457,6 +6603,7 @@ function restoreLastSearch() {
         return;
     }
     if (!saved || !saved.start || !saved.end) return;
+    if (Date.now() - (saved.savedAt || 0) > LAST_SEARCH_MAX_AGE_MS) return;
     recalled = saved;
     // Każdy koniec w osobnym kawałku, który się nie łamie - linia może pęknąć
     // tylko przed strzałką, a nie w środku nazwy ("Iwiny -" / "nr" / "127").
@@ -5467,8 +6614,22 @@ function restoreLastSearch() {
         return span;
     };
     $('recall-offer-name').replaceChildren(
-        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)));
+        end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)),
+        ...(saved.time ? [' ', end('· ' + recalledTimeLabel(saved))] : []));
     recallOffer.hidden = false;
+}
+
+/** „8:00" dla dzisiaj, „jutro 8:00" albo „24.10 8:00" - co wróci z trasą. */
+function recalledTimeLabel(saved) {
+    const clock = saved.time.replace(/^0/, '');
+    const day = new Date();
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                   + `-${String(d.getDate()).padStart(2, '0')}`;
+    if (saved.date === iso(day)) return clock;
+    day.setDate(day.getDate() + 1);
+    if (saved.date === iso(day)) return `jutro ${clock}`;
+    const [, month, date] = saved.date.split('-');
+    return `${Number(date)}.${month} ${clock}`;
 }
 
 function applyLastSearch(saved) {
@@ -5476,8 +6637,12 @@ function applyLastSearch(saved) {
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
     endInput.value = displayValue(sel.end);
-    // Godzina zostaje "teraz" (już ustawiona przez serwer przy renderowaniu
-    // strony) - nie przywracamy tu starej godziny z poprzedniego wyszukiwania.
+    // Wraca tylko godzina wpisana ręcznie; bez niej zostaje „teraz".
+    if (saved.time) {
+        timeInput.value = saved.time;
+        $('date').value = saved.date;
+        timeChosen = true;
+    }
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
     restyle(sel.start, sel.end);
@@ -5512,7 +6677,11 @@ function setSearching(on) {
     resultsBox.setAttribute('aria-busy', String(on));
 }
 
-function search() {
+/** `fromLink`: to wyszukiwanie wywołał link (patrz applyLink). Idzie tylko
+    jako argument, nigdy jako stan modułu - inaczej wyszukiwanie, którego link
+    nie uruchomił (np. `from=gps` bez `to`), odziedziczyłoby je po późniejszym
+    ręcznym szukaniu. */
+function search({fromLink = false} = {}) {
     // Z pokładu pola "skąd" nie ma - kompletem jest linia, kierunek
     // i przystanek (patrz onboardReady).
     if (!endInput.value) return;
@@ -5529,9 +6698,13 @@ function search() {
     resultsBox.innerHTML =
         '<div class="notice loading"><span class="spinner" aria-hidden="true"></span>' +
         'Szukam połączeń…</div>';
-    saveLastSearch();
-    if (!onboardOn) rememberPlace('start', startInput.value);
-    rememberPlace('end', endInput.value);
+    // Trasa z cudzego linku nie jest wyborem pasażera: nie wypiera jego
+    // ostatniej trasy ani nie trafia do jego podpowiedzi.
+    if (!fromLink) {
+        saveLastSearch();
+        if (!onboardOn) rememberPlace('start', startInput.value);
+        rememberPlace('end', endInput.value);
+    }
     // Widoku nie przełączamy sami - kto szuka z mapy, ten chce zostać na
     // mapie i zobaczyć na niej przebieg. Że wyniki są, mówi licznik przy
     // zakładce „Trasy". Rura spada przy pierwszym wyniku WYSZUKANIA, nie po
@@ -5540,6 +6713,132 @@ function search() {
 }
 
 $('search').addEventListener('click', search);
+
+// ------------------------------------------------------------------ link ----
+//
+// Wyszukiwanie jako zwykły tekst po „?": ?from=Katedra&to=Wojszyce&time=17:40.
+// Ten sam adres leży w pasku przeglądarki po każdym wyszukaniu (syncAddress),
+// więc kopiowanie z paska działa jak udostępnianie.
+// Czego link NIE niesie, a czemu: patrz linkParams.
+
+const POINT_PARAM = /^(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)$/;
+const pointParam = point => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`;
+
+function placeFromParam(text) {
+    const match = text.match(POINT_PARAM);
+    return match ? {lat: Number(match[1]), lon: Number(match[2])} : text;
+}
+
+const todayIso = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+         + `-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+/** Parametry linku dla tego, co jest teraz w formularzu.
+
+    Niesie: skąd i dokąd, godzinę i datę (tylko gdy wybrane ręcznie - „teraz"
+    u nadawcy znaczy „teraz" u odbiorcy). Nic więcej: ani filtrów, ani
+    ustawień z ⚙, ani startu z pokładu pojazdu (kurs, którym się jechało, odjechał).
+    Start z ◎ (też z zapisanego miejsca) to `from=gps`: odbiorca szuka ze SWOJEJ
+    pozycji, a pozycja nadawcy nie jest nikomu do udostępnienia. */
+function linkParams() {
+    const params = new URLSearchParams();
+    if (onboardOn || (!startInput.value && !endInput.value)) return params;
+    if (hereIsStart()) params.set('from', 'gps');
+    else if (startInput.value) {
+        params.set('from', isPoint(sel.start) ? pointParam(sel.start) : startInput.value);
+    }
+    if (endInput.value) {
+        params.set('to', isPoint(sel.end) ? pointParam(sel.end) : endInput.value);
+    }
+    if (timeChosen) {
+        params.set('time', $('time').value);
+        if ($('date').value !== todayIso()) params.set('date', $('date').value);
+    }
+    return params;
+}
+
+// Dwukropek i przecinek są w zapytaniu legalne, a "17%3A40" nie jest czytelne.
+const readableQuery = params => params.toString().replace(/%3A/gi, ':').replace(/%2C/gi, ',');
+
+function syncAddress() {
+    const params = linkParams();
+    const query = params ? readableQuery(params) : '';
+    history.replaceState(null, '', query ? '?' + query : location.pathname);
+}
+
+const SHARE_DONE_MS = 1500;
+let shareDoneTimer = null;
+
+/** Arkusz udostępniania tam, gdzie system go ma (telefony, Safari), a poza
+    tym schowek - z cichym potwierdzeniem na samej ikonie. */
+$('share').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (navigator.share) {
+        try {
+            await navigator.share({title: 'Metal Planner', url: location.href});
+            return;
+        } catch (error) {
+            if (error.name === 'AbortError') return;
+        }
+    }
+    try {
+        await navigator.clipboard.writeText(location.href);
+    } catch {
+        // schowek zablokowany (np. strona po http) - zostaje ręczne kopiowanie
+        window.prompt('Skopiuj link:', location.href);
+        return;
+    }
+    button.textContent = '✓';
+    button.title = 'Skopiowano';
+    clearTimeout(shareDoneTimer);
+    shareDoneTimer = setTimeout(() => {
+        button.textContent = '⤴';
+        button.title = 'Udostępnij link do tej trasy';
+    }, SHARE_DONE_MS);
+});
+
+/** Wchodząc z linku: formularz wypełnia się tak, jakby pasażer to wpisał,
+    a gdy są oba końce, od razu szuka. Brakujący koniec zostaje pusty z kursorem
+    w nim; jedynym wyjątkiem jest `from=gps` - lokalizacja odbiorcy. */
+function applyLink() {
+    const query = new URLSearchParams(location.search);
+    const from = query.get('from');
+    // Cel z lokalizacji nie istnieje, więc `to=gps` zostawia „Dokąd" puste.
+    const to = query.get('to') === 'gps' ? null : query.get('to');
+    if (!from && !to) return;
+    if (/^\d{1,2}:\d{2}$/.test(query.get('time'))) {
+        $('time').value = query.get('time').padStart(5, '0');
+        timeChosen = true;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(query.get('date'))) {
+        $('date').value = query.get('date');
+        timeChosen = true;
+        if (dayPanel.classList.contains('hidden')) dayToggle.click();
+    }
+    const fill = (side, text) => {
+        const place = placeFromParam(text);
+        if (isPoint(place)) { sel[side] = place; updatePointMarker(side, place); }
+        (side === 'start' ? startInput : endInput).value = displayValue(place);
+    };
+    if (from && from !== 'gps') fill('start', from);
+    if (to) fill('end', to);
+    restyle(sel.start, sel.end);
+    // Puste pole zostaje puste: link nie szuka za pasażera ani nie sięga
+    // po lokalizację bez `from=gps`.
+    if (from === 'gps') {
+        // Szuka sam useMyLocation, gdy cel jest wpisany.
+        if (navigator.geolocation) locateStart(undefined, {fromLink: true});
+        else startInput.focus();
+        focusEnd();
+    } else if (from && to) {
+        search({fromLink: true});
+    } else if (to) startInput.focus();
+    else focusEnd();
+}
+
+stopsReady.then(applyLink);
 stopsReady.then(restoreLastSearch);
 
 // Ręczne wpisanie w pole tekstowe wychodzi z trybu "wybrany punkt" - dalej
@@ -5817,11 +7116,18 @@ $('swap').addEventListener('click', () => {
 // „teraz" to CHWILA, nie sama godzina: przy dacie zostawionej na innym dniu
 // sama godzina opisywałaby 17:40 w przyszły wtorek, a nie ten moment.
 function setTimeNow() {
+    timeChosen = false;
     const now = new Date();
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
 }
+
+// Powrót do aplikacji z tła: pole ma pokazywać dzisiejszą chwilę, zanim
+// pasażer kliknie Szukaj. Ręcznie ustawionej godziny nie ruszamy.
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !timeChosen) setTimeNow();
+});
 
 $('time-now').addEventListener('click', () => {
     setTimeNow();
@@ -5845,6 +7151,7 @@ $('clear').addEventListener('click', () => {
     restyle(...previous);
     setView('map');       // nową relację wybiera się na mapie
     forgetLastSearch();
+    syncAddress();
 });
 
 // ----------------------------------------------------------- moje miejsca ----
@@ -5966,20 +7273,20 @@ function savePlace() {
     placeDialog.close();
 }
 
-/** Ta sama pozycja, o którą prosi ◎ (maximumAge: 0 - patrz locateButton). */
+/** Ta sama pozycja, o którą prosi ◎. */
 function locateOnce(onPoint, onError) {
     if (!navigator.geolocation) { onError(GEO_MESSAGES[2]); return; }
-    navigator.geolocation.getCurrentPosition(
+    askPosition(
         position => onPoint({lat: position.coords.latitude,
                              lon: position.coords.longitude}),
         error => onError(GEO_MESSAGES[error.code] || GEO_MESSAGES[2]),
-        GEO_OPTIONS,
     );
 }
 
-/** Przypisane miejsce: cel to ono, start - obecna pozycja. Cel wpisuje się
-    od razu, start dopiero z GPS; bez GPS zostaje start, który już był. */
-function goToPlace(slot, button) {
+/** Przypisane miejsce: cel to ono. Start leci z obecnej pozycji tylko wtedy,
+    gdy „Skąd" jest puste albo samo pochodzi z lokalizacji (#255, #429) -
+    start wpisany albo wybrany ręcznie skrót zostawia. */
+function goToPlace(slot) {
     const {place} = myPlaces[slot];
     if (onboardOn) setStartMode(false, false);   // start to „tu stoję", nie pojazd
     hideRecallOffer();
@@ -5990,21 +7297,11 @@ function goToPlace(slot, button) {
     endInput.value = displayValue(place);
     updatePointMarker('end', place);
     restyle(...previous, sel.end);
-    button.disabled = true;               // GPS potrafi mielić kilka sekund
-    locateOnce(point => {
-        button.disabled = false;
-        const before = sel.start;
-        sel.start = point;
-        startInput.value = displayValue(point);
-        updatePointMarker('start', point);
-        restyle(before);
-        offerNearestStop(point);
-        search();
-    }, message => {
-        button.disabled = false;
-        showLocateMsg(message);
-        if (startInput.value) search();
-    });
+    if (startInput.value && !hereIsStart()) { search(); return; }
+    // Start idzie tą samą drogą co ◎ (łącznie z godziną „teraz" i pytaniem
+    // „Stoisz na…?"), żeby oba przyciski nie rozjechały się w szczegółach.
+    if (navigator.geolocation) locateStart(() => { if (startInput.value) search(); });
+    else showLocateMsg(GEO_MESSAGES[2]);
 }
 
 /** Klik w mapę albo w słupek, gdy okno czeka na wskazanie miejsca. */
@@ -6029,7 +7326,7 @@ placesBar.addEventListener('click', event => {
     // Przytrzymanie już otworzyło okno - puszczenie palca to nie klik.
     if (placeLongPress) { placeLongPress = false; return; }
     const slot = Number(button.dataset.slot);
-    if (myPlaces[slot]) goToPlace(slot, button);
+    if (myPlaces[slot]) goToPlace(slot);
     else openPlaceDialog(slot);
 });
 
@@ -6107,269 +7404,217 @@ placeDialog.addEventListener('close', () => { placeLongPress = false; });
 
 renderPlaces();
 
+// Co zmiana ustawienia robi poza zapamiętaniem. Zapamiętuje, przywraca i
+// pokazuje wartość wspólny mechanizm (patrz „USTAWIENIA" wyżej); tu zostaje
+// tylko skutek dla reszty aplikacji: `paint` rysuje stan i odpala się też na
+// starcie, `react` tylko po ruchu użytkownika. Ustawienie, które nic nie robi
+// samo (aplikacja czyta je przez setting() w chwili użycia), nie ma tu wpisu.
+//
 // Suwaki Ustawień Developerskich: etykieta od razu, mapa i lista propozycji
 // po krótkim debounce (odpowiedź z ciepłym cache to ~10 ms, więc działa
 // "na żywo"). Jedno wspólne zapytanie (loadPlan) niesie obie rzeczy naraz,
 // więc każdy suwak siłą rzeczy odświeża i mapę, i listę - nie ma już
 // suwaków "tylko dla mapy".
-//
-// Wartości suwaków zapamiętujemy w localStorage (jeden klucz, mały JSON) -
-// przeżywają odświeżenie strony i nowe wizyty, więc nie trzeba ustawiać
-// preferencji od nowa za każdym razem.
-const DEV_PREFS_KEY = 'metal-planner:dev-prefs';
-const DEV_SLIDER_IDS = ['density', 'car-count', 'bike-count', 'transfer-gain',
-                        'walk-pace', 'bike-kmh', 'bike-overhead',
-                        'car-kmh', 'car-overhead', 'onboard-slack'];
-
-// To, co z tego klucza widać w ⚙ także bez DEV_MODE (patrz visiblePrefs).
-const DEV_PREFS_USER = ['walk-pace', 'bike-kmh', 'bike-overhead',
-                        'car-kmh', 'car-overhead', 'car-vans', 'bikes-merged',
-                        'no-pull-refresh', 'start-mode-switch', 'routes-on',
-                        'via-open', 'locate-sets-time'];
-
-function storedDevPrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(DEV_PREFS_KEY)) || {};
-    } catch {
-        return {};       // localStorage niedostępny (tryb prywatny) albo zepsuty JSON
-    }
-}
-
-function loadDevPrefs() {
-    return visiblePrefs(storedDevPrefs(), DEV_PREFS_USER);
-}
-
-function saveDevPref(id, value) {
-    const prefs = storedDevPrefs();
-    prefs[id] = value;
-    try {
-        localStorage.setItem(DEV_PREFS_KEY, JSON.stringify(prefs));
-    } catch {
-        // localStorage niedostępny - suwak działa dalej, po prostu się nie zapamięta
-    }
-}
-
-function applyStoredDevPrefs() {
-    const prefs = loadDevPrefs();
-    for (const id of DEV_SLIDER_IDS) {
-        if (prefs[id] === undefined) continue;
-        const input = $(id);
-        const valueEl = $(id + '-value');
-        if (!input) continue;
-        input.value = prefs[id];
-        if (valueEl) valueEl.textContent = prefs[id];
-    }
-}
-
-function liveSlider(inputId, valueId, resetsMore) {
-    const input = $(inputId);
-    const valueEl = $(valueId);
+function debounced(run, wait) {
     let timer = null;
-    input.addEventListener('input', () => {
-        valueEl.textContent = input.value;
-        // Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
-        // z "pokaż więcej" liczyłaby się inaczej od starej i suwak
-        // wyglądałby na zepsuty.
-        if (resetsMore) mapMore = 0;
-        saveDevPref(inputId, input.value);
+    return (...args) => {
         clearTimeout(timer);
-        timer = setTimeout(() => {
-            // Start z pokładu nie ma pola „skąd" - o komplecie pytania mówi
-            // tam wybór pojazdu (patrz onboardReady).
-            if (!endInput.value || (onboardOn ? !onboardReady() : !startInput.value)) return;
-            loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
-        }, 200);
-    });
+        timer = setTimeout(() => run(...args), wait);
+    };
 }
-applyStoredDevPrefs();
-liveSlider('density', 'density-value', true);
-liveSlider('car-count', 'car-count-value', true);
-liveSlider('bike-count', 'bike-count-value', true);
-liveSlider('transfer-gain', 'transfer-gain-value');
-liveSlider('walk-pace', 'walk-pace-value');
-liveSlider('bike-kmh', 'bike-kmh-value');
-liveSlider('bike-overhead', 'bike-overhead-value');
-liveSlider('car-kmh', 'car-kmh-value');
-liveSlider('car-overhead', 'car-overhead-value');
-liveSlider('onboard-slack', 'onboard-slack-value');
 
-function showWalkPace() {
-    $('walk-pace-value').textContent = WALK_PACE_LABELS[$('walk-pace').value];
+function replanQuietly() {
+    // Start z pokładu nie ma pola „skąd" - o komplecie pytania mówi
+    // tam wybór pojazdu (patrz onboardReady).
+    if (!endInput.value || (onboardOn ? !onboardReady() : !startInput.value)) return;
+    loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
-$('walk-pace').addEventListener('input', showWalkPace);
-showWalkPace();
 
-// Dostawczaki i rodzaj roweru zmieniają odpowiedź serwera, więc jak suwak:
-// pamiętane w tym samym kluczu i od razu nowe zapytanie.
-// Rodzaje roweru są domyślnie WŁĄCZONE - bez ruszania czegokolwiek mapa
-// wygląda tak, jak wyglądała przed zgłoszeniem #147.
-for (const [id, domyslnie] of [['car-vans', false]]) {
-    const input = $(id);
-    const zapisane = loadDevPrefs()[id];
-    input.checked = zapisane === undefined ? domyslnie : zapisane === true;
-    input.addEventListener('change', () => {
-        mapMore = 0;
-        saveDevPref(id, input.checked);
-        if (id === 'car-vans' && !flowOnScreen()) refreshCarLayer();
-        if (!startInput.value || !endInput.value) return;
-        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
-    });
+// Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
+// z "pokaż więcej" liczyłaby się inaczej od starej i suwak
+// wyglądałby na zepsuty.
+function replanSoon(resetsMore) {
+    const later = debounced(replanQuietly, 200);
+    return () => {
+        if (resetsMore) mapMore = 0;
+        later();
+    };
 }
 
 // „Stoję tutaj / Jestem w pojeździe" da się schować - kto nie jeździ
 // z pokładu, ma o jeden rząd formularza mniej. Bez przełącznika nie byłoby
 // jak wrócić z trybu pojazdu, więc start jest wtedy zawsze stojącym miejscem.
-const startModeSwitch = $('start-mode-switch');
-
 function showStartMode(on) {
     document.body.classList.toggle('start-mode-off', !on);
     if (!on && onboardOn) setStartMode(false);
 }
 
-const bikesMergedInput = $('bikes-merged');
-bikesMergedInput.checked = loadDevPrefs()['bikes-merged'] === true;
-paintBikeButtons();
-bikesMergedInput.addEventListener('change', () => {
-    saveDevPref('bikes-merged', bikesMergedInput.checked);
-    paintBikeButtons();
-});
-
 // Propozycje tras da się wyłączyć w całości (sekcja „Wygląd aplikacji") -
 // zostaje sama mapa, a serwer listy w ogóle nie składa (patrz queryParams).
 // Znika lista, jej nagłówek ze strzałką i karta „Szukam połączeń…” (czeka
 // na listę), ale nie błędy w tym samym miejscu: te mówią o wyszukiwaniu. Na telefonie znika też zakładka „Trasy".
-const routesOn = $('routes-on');
-
 function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
-    $('fold-transfer').hidden = !on;
+    $('transfer-gain').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
 }
-
-routesOn.checked = loadDevPrefs()['routes-on'] !== false;
-showRoutes(routesOn.checked);
 // Widok telefonu wraca na ostatnią zakładkę dopiero pod koniec wczytywania -
 // wtedy okazuje się, czy nie stoi się na schowanej „Trasy".
-document.addEventListener('DOMContentLoaded', () => showRoutes(routesOn.checked));
-routesOn.addEventListener('change', () => {
-    saveDevPref('routes-on', routesOn.checked);
-    showRoutes(routesOn.checked);
-    // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
-    // tak jak propozycje z rowerem (patrz replanInPlace).
-    if (routesOn.checked) replanInPlace();
-});
+document.addEventListener('DOMContentLoaded', () => showRoutes(setting('routes-on')));
 
-// Gest „pociągnij w dół, żeby odświeżyć" (opcja w „Wyglądzie aplikacji”) - overscroll-behavior
-// na <html> (patrz style.css) gasi go bez ruszania zwykłego przewijania.
-const noPullRefresh = $('no-pull-refresh');
-noPullRefresh.checked = loadDevPrefs()['no-pull-refresh'] === true;
-document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
-noPullRefresh.addEventListener('change', () => {
-    saveDevPref('no-pull-refresh', noPullRefresh.checked);
-    document.documentElement.classList.toggle('no-pull-refresh', noPullRefresh.checked);
-});
-
-// Przystanki po drodze rozwinięte od razu (opcja w „Wyglądzie aplikacji",
-// zgłoszenie #169). Zmiana zaczyna od nowa - także tam, gdzie listę
-// przełączono kliknięciem - i od razu przerysowuje otwartą propozycję.
-const viaOpenInput = $('via-open');
-viaOpenInput.checked = loadDevPrefs()['via-open'] === true;
-viaOpenInput.addEventListener('change', () => {
-    saveDevPref('via-open', viaOpenInput.checked);
-    viaShown = new WeakMap();
-    if (selectedJourney !== null) renderJourneys();
-});
-
-// Przycisk strefy Traficara (🅿) - domyślnie go nie ma, strefa pokazuje się
-// wtedy tylko pod kursorem (patrz refreshZoneLayer).
-const zoneButton = $('zone-button');
-zoneButton.checked = loadDevPrefs()['zone-button'] === true;
-zoneButton.addEventListener('change', () => {
-    saveDevPref('zone-button', zoneButton.checked);
-    refreshZoneLayer();
-});
-
-locateSetsTime.checked = loadDevPrefs()['locate-sets-time'] !== false;
-locateSetsTime.addEventListener('change', () => {
-    saveDevPref('locate-sets-time', locateSetsTime.checked);
-});
-
-startModeSwitch.checked = loadDevPrefs()['start-mode-switch'] !== false;
-showStartMode(startModeSwitch.checked);
-startModeSwitch.addEventListener('change', () => {
-    saveDevPref('start-mode-switch', startModeSwitch.checked);
-    showStartMode(startModeSwitch.checked);
-});
-
-// --- suwaki wyglądu mapy (schowane, patrz LOOK_TUNING) ---------------------
-//
-// Te suwaki nie dotykają serwera - kręcą wyłącznie liczbami z LOOK_DEFAULTS,
-// więc mapa przemalowuje się natychmiast, z ostatniej odpowiedzi (lastFlow),
-// bez ponownego zapytania. Wartości są już dobrane (siedzą w LOOK_DEFAULTS),
-// więc cała sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca
-// ją, gdyby trzeba było stroić od nowa.
-// Grubość linii to grubość najjaśniejszej: każda linia jest najjaśniejsza
-// (patrz look-weight w index.html).
-const LOOK_KNOBS = {
-    'look-weight': 'maxWeight',
-    'look-dim': 'dimFactor',
-    'look-label-step': 'labelStep',
-    'look-label-size': 'labelScale',
-    'look-label-op': 'labelOpacity',
-};
-
-function saveLookPrefs() {
-    try {
-        localStorage.setItem(LOOK_PREFS_KEY, JSON.stringify(
-            {...loadLookPrefs(), ...visiblePrefs(look, [])}));
-    } catch {
-        // localStorage niedostępny - suwaki działają dalej, po prostu się nie zapamiętają
+// W pamięci leży GOTOWY html tablicy, przycięty do starej liczby wierszy i
+// starych szarych godzin - bez czyszczenia ustawienie działałoby dopiero na
+// kropkach jeszcze nietkniętych.
+function reloadTimetable() {
+    timetableCache.clear();
+    if (timetableTarget) {
+        loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
     }
 }
+
+// Układ schematu i liczba dodatkowych przejść mają sens tylko z nową mapą.
+function showSchemeRows() {
+    const on = setting('new-map');
+    $('scheme-layout-row').hidden = !on;
+    $('scheme-walks-count-row').hidden = !on;
+}
+
+// Zmiana rysuje stan (`paint`, też na starcie) i/albo coś robi po ruchu (`react`).
+const SETTING_EFFECTS = {
+    'density': {react: replanSoon(true)},
+    'car-count': {react: replanSoon(true)},
+    'bike-count': {react: replanSoon(true)},
+    'transfer-gain': {react: replanSoon(false)},
+    'walk-pace': {react: replanSoon(false)},
+    'bike-kmh': {react: replanSoon(false)},
+    'bike-overhead': {react: replanSoon(false)},
+    'car-kmh': {react: replanSoon(false)},
+    'car-overhead': {react: replanSoon(false)},
+    'onboard-slack': {react: replanSoon(false)},
+    // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
+    'car-vans': {react: () => {
+        mapMore = 0;
+        if (!flowOnScreen()) refreshCarLayer();
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
+    // Nowa mapa zmienia odpowiedź serwera, więc jak dostawczaki: od razu nowe zapytanie.
+    // Wiersze ustawień schematu widać tylko z nową mapą.
+    'new-map': {paint: showSchemeRows, react: () => {
+        showSchemeRows();
+        mapMore = 0;
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
+    // Chodzenie pieszo zmienia odpowiedź serwera, jak dostawczaki.
+    'walking': {react: () => {
+        mapMore = 0;
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
+    // Zakres mapy na pasku to tylko podgląd: zmiana przerysowuje pasek, bez nowego zapytania.
+    'headline-map-range': {react: () => renderTimeHeadline()},
+    // Układ schematu (tymczasowy wybór do porównania): zmiana tylko przerysowuje to, co już przyszło.
+    'scheme-layout': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
+    // Przejścia pieszo na schemacie (demo): ile przejść ze środka najszybszych podróży dodać do tych z dojścia.
+    'scheme-walks-count': {react: replanSoon(false)},
+    'bikes-merged': {paint: () => paintBikeButtons()},
+    'start-mode-switch': {paint: showStartMode},
+    'routes-on': {paint: showRoutes, react: on => {
+        // Ostatnia odpowiedź przyszła bez listy - po włączeniu trzeba ją doliczyć,
+        // tak jak propozycje z rowerem (patrz replanInPlace).
+        if (on) replanInPlace();
+    }},
+    // Gest „pociągnij w dół, żeby odświeżyć" - overscroll-behavior na <html>
+    // (patrz style.css) gasi go bez ruszania zwykłego przewijania.
+    'no-pull-refresh': {paint: on => document.documentElement.classList.toggle('no-pull-refresh', on)},
+    'location-refresh': {react: () => syncAutoRefresh()},
+    // Zmiana zaczyna od nowa - także tam, gdzie listę przełączono kliknięciem -
+    // i od razu przerysowuje otwartą propozycję.
+    'via-open': {react: () => {
+        viaShown = new WeakMap();
+        if (selectedJourney !== null) renderJourneys();
+    }},
+    // Bez przycisku strefa pokazuje się tylko pod kursorem (patrz refreshZoneLayer).
+    'zone-button': {react: () => refreshZoneLayer()},
+    'sound-pipe': {react: on => {
+        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
+        // co się właśnie włączyło.
+        if (on) playPipeDrop();
+    }},
+    'dot-size': {react: debounced(() => applyDotOpts(), 60)},   // przeciąganie suwaka: jedno przemalowanie na klatkę
+    'dot-rows': {react: reloadTimetable},
+    'tt-past': {react: reloadTimetable},
+    'names-zoom': {react: () => placeStopNames()},
+    // Te suwaki nie dotykają serwera - mapa przemalowuje się natychmiast,
+    // z ostatniej odpowiedzi (lastFlow), bez ponownego zapytania.
+    'look-weight': {react: debounced(() => applyLook(), 60)},
+    'look-dim': {react: debounced(() => applyLook(), 60)},
+    'look-label-step': {react: debounced(() => applyLook(), 60)},
+    'look-label-size': {react: debounced(() => applyLook(), 60)},
+    'look-label-op': {react: debounced(() => applyLook(), 60)},
+};
+// Przełączniki, które tylko przemalowują z lastFlow, bez zapytania do serwera.
+for (const id of ['time-hover', 'time-ends', 'time-chips', 'time-show-headline', 'time-ride']) {
+    SETTING_EFFECTS[id] = {react: () => applyTimeOpts()};
+}
+for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-rides',
+                  'car-times', 'debug-why', 'debug-why-seg']) {
+    SETTING_EFFECTS[id] = {react: () => applyDotOpts()};
+}
+
+// Strojenia schowane stałymi (LOOK_TUNING, SOUND_TUNING) nie mają wiersza w panelu.
+for (const row of settingsRows) {
+    if (row.dataset.tuning) row.hidden = !TUNING[row.dataset.tuning];
+}
+
+for (const info of SETTINGS.values()) {
+    paintSettingOutput(info);
+    const effect = SETTING_EFFECTS[info.id];
+    if (effect && effect.paint) effect.paint(setting(info.id));
+}
+
+for (const type of ['input', 'change']) {
+    devPanel.addEventListener(type, event => {
+        const info = SETTING_BY_CONTROL.get(event.target);
+        if (!info) return;
+        const value = readControl(info.control);
+        storeSetting(info.id, value);
+        paintSettingOutput(info);
+        if (type !== (info.kind === 'range' ? 'input' : 'change')) return;
+        const effect = SETTING_EFFECTS[info.id];
+        if (effect && effect.react) effect.react(value);
+    }, true);   // faza przechwytywania: działa też dla zdarzeń, które nie bąblują
+}
+
+// --- wygląd mapy: przemalowanie suwakami (schowane, patrz LOOK_TUNING) -----
+//
+// Wartości są już dobrane (siedzą w index.html jako domyślne), więc cała
+// sekcja jest domyślnie schowana - `LOOK_TUNING = true` przywraca ją, gdyby
+// trzeba było stroić od nowa.
+// Grubość linii to grubość najjaśniejszej: każda linia jest najjaśniejsza
+// (patrz look-weight w index.html).
 
 /** Przemalowanie z ostatniej odpowiedzi - bez zapytania do serwera. Wybrana
     trasa rysuje się na nowo NA WIERZCHU przemalowanego wachlarza (kolejność
     warstw w canvasie to kolejność dokładania). */
 function applyLook() {
-    document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+    document.documentElement.style.setProperty('--chip-scale', setting('look-label-size'));
     if (lastFlow) drawFlow(lastFlow, false);
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
     const dump = $('look-dump');
     if (dump) {
-        dump.textContent = Object.entries(look)
-            .map(([k, v]) => `${k}: ${v}`).join(', ');
+        dump.textContent = [
+            ...Object.entries(look),
+            ...[...SETTINGS.keys()].filter(id => id.startsWith('look-') && SETTINGS.get(id).kind === 'range')
+                .map(id => [id, setting(id)]),
+        ].map(([k, v]) => `${k}: ${v}`).join(', ');
     }
 }
-
-function bindLookSliders() {
-    const section = $('look-section');
-    if (!section) return;               // sekcja skasowana - wartości zostają domyślne
-    if (!LOOK_TUNING) { section.hidden = true; return; }
-    section.hidden = false;
-    let timer = null;
-    const show = id => {
-        const input = $(id);
-        const out = $(id + '-value');
-        if (out) out.textContent = input.value;
-    };
-    for (const [id, key] of Object.entries(LOOK_KNOBS)) {
-        const input = $(id);
-        input.value = look[key];        // źródłem prawdy jest LOOK_DEFAULTS + localStorage
-        show(id);
-        input.addEventListener('input', () => {
-            look[key] = Number(input.value);
-            show(id);
-            saveLookPrefs();
-            clearTimeout(timer);        // przeciąganie suwaka: jedno przemalowanie na klatkę
-            timer = setTimeout(applyLook, 60);
-        });
-    }
-}
-bindLookSliders();
-document.documentElement.style.setProperty('--chip-scale', look.labelScale);
+document.documentElement.style.setProperty('--chip-scale', setting('look-label-size'));
 
 // --- dźwięk: spadająca metalowa rura ---------------------------------------
 //
@@ -6387,8 +7632,6 @@ document.documentElement.style.setProperty('--chip-scale', look.labelScale);
 // Przełącznik zostaje w kodzie i w panelu, więc pokazanie go to zmiana
 // jednej stałej (ten sam układ, co przy LOOK_TUNING).
 
-const SOUND_TUNING = false;      // czy pokazywać sekcję "Dźwięk" w panelu ⚙
-
 const PIPE_SOURCES = [
     ['audio/ogg; codecs=opus', '/static/sounds/metal-pipe.ogg'],
     ['audio/mp4; codecs="mp4a.40.2"', '/static/sounds/metal-pipe.m4a'],
@@ -6403,33 +7646,6 @@ const PIPE_SOURCES = [
 // swoją głośność. Cena na iPhonie: dźwięk z miksera milknie przy włączonym
 // wyciszeniu telefonu - dla żartu w tle to raczej zaleta.
 const PIPE_VOLUME = 0.175;
-
-const SOUND_DEFAULTS = {
-    pipe: true,
-};
-
-const SOUND_PREFS_KEY = 'metal-planner:sound-prefs';
-
-function loadSoundPrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(SOUND_PREFS_KEY)) || {};
-    } catch {
-        return {};
-    }
-}
-
-// Zapamiętany wybór czytamy tylko wtedy, gdy przełącznik jest widoczny -
-// inaczej ktoś, kto wyłączył dźwięk, gdy sekcja była na wierzchu, zostałby
-// z ciszą i bez czegokolwiek, czym da się ją cofnąć.
-const soundOpts = {...SOUND_DEFAULTS, ...(SOUND_TUNING ? loadSoundPrefs() : {})};
-
-function saveSoundPrefs() {
-    try {
-        localStorage.setItem(SOUND_PREFS_KEY, JSON.stringify(soundOpts));
-    } catch {
-        // localStorage niedostępny - przełącznik działa dalej, tylko się nie zapamięta
-    }
-}
 
 let pipeAudio = null;
 let soundMixer = null;
@@ -6513,7 +7729,7 @@ function playPipeBuffer() {
 // go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
 // z powrotem, gdy strona zejdzie w tło.
 function wakeMixer() {
-    if (!soundOpts.pipe) return;
+    if (!setting('sound-pipe')) return;
     const ctx = mixer();
     if (!ctx) return;
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
@@ -6546,7 +7762,7 @@ function prefersLessMotion() {
 /** Cicho, gdy przełącznik wyłączony, gdy system prosi o ograniczenie
     animacji albo gdy przeglądarka nie umie żadnego z formatów. */
 function playPipeDrop() {
-    if (!soundOpts.pipe || prefersLessMotion()) return;
+    if (!setting('sound-pipe') || prefersLessMotion()) return;
     if (mixer()) {
         if (pipeBuffer) playPipeBuffer();
         else { pipePending = true; loadPipe(); }
@@ -6564,197 +7780,420 @@ function playPipeDrop() {
     if (started && started.catch) started.catch(() => {});
 }
 
-function bindSoundToggle() {
-    const fold = $('fold-sound');
-    if (fold) fold.hidden = !SOUND_TUNING;
-    const input = $('sound-pipe');
-    if (!input) return;
-    input.checked = !!soundOpts.pipe;
-    input.addEventListener('change', () => {
-        soundOpts.pipe = input.checked;
-        saveSoundPrefs();
-        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
-        // co się właśnie włączyło.
-        if (input.checked) playPipeDrop();
-    });
-}
-bindSoundToggle();
-
 // --- przełączniki "czasu na mapie" -----------------------------------------
 //
 // Nic tu nie rusza serwera: wszystkie liczby są już w ostatniej odpowiedzi
 // (lastFlow), więc przełącznik przemalowuje mapę natychmiast, bez zapytania.
-const TIME_TOGGLES = {
-    'time-hover': 'hover',
-    'time-ends': 'ends',
-    'time-chips': 'chips',
-    'time-show-headline': 'headline',
-    'time-ride': 'ride',
-};
-
 function applyTimeOpts() {
     if (lastFlow) drawFlow(lastFlow, false);   // grupki i pasek liczą się od nowa
     else renderTimeHeadline();
     renderFlowPick();                          // dymek pod kursorem, jeśli akurat wisi
 }
 
-function bindTimeToggles() {
-    for (const [id, key] of Object.entries(TIME_TOGGLES)) {
-        const input = $(id);
-        if (!input) continue;
-        input.checked = !!timeOpts[key];
-        input.addEventListener('change', () => {
-            timeOpts[key] = input.checked;
-            saveTimePrefs();
-            applyTimeOpts();
-        });
-    }
-}
-bindTimeToggles();
-
 // --- kropki przystanków i miejsce na rozkład -------------------------------
 //
 // Też bez zapytania do serwera: obie współrzędne węzła i cała tablica odjazdów
 // są już w odpowiedziach, więc wystarczy przemalować z lastFlow i przerysować
 // wybraną trasę w miejscu (keepView - kadr ma się nie ruszyć).
-const DOT_TOGGLES = {
-    'dot-center': 'center',
-    'tip-cursor': 'tipCursor',
-    'tip-panel': 'tipPanel',
-    'bike-times': 'bikeTimes',
-    'bike-rides': 'bikeRides',
-    'car-times': 'carTimes',
-    'debug-why': 'why',
-    'debug-why-seg': 'whySeg',
-};
-
 function applyDotOpts() {
     restyle(sel.start, sel.end);
     if (lastFlow) drawFlow(lastFlow, false);
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
-    if (!dotOpts.tipPanel) hideSidePanel();
-    if (!dotOpts.tipCursor && flowTooltip) {
+    if (!setting('tip-panel')) hideSidePanel();
+    if (!setting('tip-cursor') && flowTooltip) {
         map.removeLayer(flowTooltip);
         flowTooltip = null;
     }
 }
 
-function bindDotOpts() {
-    const size = $('dot-size');
-    const sizeOut = $('dot-size-value');
-    if (size) {
-        size.value = dotOpts.size;
-        if (sizeOut) sizeOut.textContent = size.value;
-        let timer = null;
-        size.addEventListener('input', () => {
-            dotOpts.size = Number(size.value);
-            if (sizeOut) sizeOut.textContent = size.value;
-            saveDotPrefs();
-            clearTimeout(timer);      // przeciąganie suwaka: jedno przemalowanie na klatkę
-            timer = setTimeout(applyDotOpts, 60);
-        });
-    }
-    const rows = $('dot-rows');
-    const rowsOut = $('dot-rows-value');
-    if (rows) {
-        rows.value = dotOpts.rows;
-        if (rowsOut) rowsOut.textContent = rows.value;
-        rows.addEventListener('input', () => {
-            dotOpts.rows = Number(rows.value);
-            if (rowsOut) rowsOut.textContent = rows.value;
-            saveDotPrefs();
-            // W pamięci leży GOTOWY html, przycięty do starej liczby wierszy -
-            // bez tego suwak działałby dopiero na kropkach jeszcze nietkniętych.
-            timetableCache.clear();
-            if (timetableTarget) {
-                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
-            }
-        });
-    }
-    const namesZoom = $('names-zoom');
-    const namesZoomOut = $('names-zoom-value');
-    if (namesZoom) {
-        namesZoom.value = dotOpts.namesZoom;
-        if (namesZoomOut) namesZoomOut.textContent = namesZoom.value;
-        namesZoom.addEventListener('input', () => {
-            dotOpts.namesZoom = Number(namesZoom.value);
-            if (namesZoomOut) namesZoomOut.textContent = namesZoom.value;
-            saveDotPrefs();
-            placeStopNames();
-        });
-    }
-    const ttPast = $('tt-past');
-    if (ttPast) {
-        ttPast.checked = dotOpts.ttPast;
-        ttPast.addEventListener('change', () => {
-            dotOpts.ttPast = ttPast.checked;
-            saveDotPrefs();
-            timetableCache.clear();
-            if (timetableTarget) {
-                loadTimetable(timetableTarget, timetableTarget.where, timetableTarget.sec);
-            }
-        });
-    }
-    for (const [id, key] of Object.entries(DOT_TOGGLES)) {
-        const input = $(id);
-        if (!input) continue;
-        input.checked = !!dotOpts[key];
-        input.addEventListener('change', () => {
-            dotOpts[key] = input.checked;
-            saveDotPrefs();
-            applyDotOpts();
-        });
-    }
-}
-bindDotOpts();
-
-// --- rozwijane sekcje panelu -----------------------------------------------
+// --- lista ustawień: wyszukiwarka i nagłówki z etykiet -----------------------
 //
-// Opcji zrobiło się tyle, że panel przewijał się dłużej niż ekran. Sekcje
-// pamiętają, czy były rozwinięte - w tym samym kluczu co suwaki.
-const DEV_FOLD_IDS = [
-    'fold-map', 'fold-time', 'fold-window', 'fold-transfer', 'fold-onboard',
-    'fold-sound', 'fold-places', 'fold-vehicles', 'fold-assumptions',
-    'fold-debug', 'look-section',
-    'fold-layout', 'fold-siechnice', 'fold-version',
-];
+// Ustawień przybywa szybciej, niż da się je trzymać w sensownych kategoriach,
+// więc każdy wiersz niesie tylko etykiety (`data-labels`), a nagłówki składają
+// się z nich same, z wierszy widocznych w tej chwili: każda etykieta z co
+// najmniej trzema wierszami dostaje nagłówek, a wiersz stoi pod każdą swoją
+// etykietą. Kontrolka jest jedna (oryginał, pod pierwszym nagłówkiem) - pod
+// pozostałymi stoją kopie, które przekazują zmianę oryginałowi, więc zmiana
+// liczy się raz, a obsługa po id zostaje bez zmian. Wiersz bez nagłówka ląduje
+// w „Inne". Kolejność układa się z dziennika ostatnich zmian i jest liczona
+// tylko przy otwarciu panelu, żeby nic nie przeskakiwało pod palcem.
+const settingsSearch = $('settings-search');
 
-function bindDevFolds() {
-    const prefs = loadDevPrefs();
-    for (const id of DEV_FOLD_IDS) {
-        const el = $(id);
-        if (!el) continue;
-        const saved = prefs['fold:' + id];
-        if (saved !== undefined) el.open = !!saved;
-        el.addEventListener('toggle', () => saveDevPref('fold:' + id, el.open));
+for (const row of settingsRows) {
+    if (row.classList.contains('dev-only')) {
+        const badge = document.createElement('span');
+        badge.className = 'dev-badge';
+        badge.textContent = 'DEV';
+        (row.querySelector('label:not(.button), .set-title') || row).append(badge);
     }
 }
-bindDevFolds();
+
+const settingsInfo = new Map(settingsRows.map(row => {
+    const copy = row.cloneNode(true);
+    for (const skip of copy.querySelectorAll('output, .info, .dev-badge')) skip.remove();
+    const labels = (row.dataset.labels || '').split(',').map(label => label.trim()).filter(Boolean);
+    return [row, {
+        labels,
+        name: fold(copy.textContent).replace(/\s+/g, ' '),
+        folded: labels.map(fold),
+    }];
+}));
+
+const SETTINGS_SUGGEST_RECENT = 3;
+const SETTINGS_SUGGEST_FREQUENT = 5;
+
+// Dziennik z chwili otwarcia panelu: z niego liczy się kolejność aż do
+// następnego otwarcia.
+let settingsLog = {counts: new Map(), recent: [], known: null};
+
+// Najrzadszy odstęp między przeliczeniami kolejności (ustawienie w ⚙). Wyłączony
+// = przeliczanie przy każdym otwarciu panelu.
+const SETTINGS_ORDER_KEY = 'metal-planner:settings-order';
+const SETTINGS_ORDER_LIMITS = {
+    '1h': 3600e3, '1d': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3,
+};
+
+function loadSettingsOrder() {
+    try {
+        return JSON.parse(localStorage.getItem(SETTINGS_ORDER_KEY));
+    } catch {
+        return null;       // localStorage niedostępny albo zepsuty JSON
+    }
+}
+
+function snapshotSettingsLog() {
+    const limit = SETTINGS_ORDER_LIMITS[setting('order-limit')];
+    const stored = loadSettingsOrder();
+    if (limit && stored && Date.now() - stored.t < limit) {
+        settingsLog = {counts: new Map(stored.counts), recent: stored.recent, known: new Set(stored.known)};
+        return;
+    }
+    const log = loadSettingsStats().log;
+    const counts = new Map();
+    for (const event of log) counts.set(event.id, (counts.get(event.id) || 0) + 1);
+    const recent = [];
+    for (const event of [...log].reverse()) {
+        if (!recent.includes(event.id)) recent.push(event.id);
+    }
+    settingsLog = {counts, recent, known: null};
+    // Zapis także przy wyłączonym limicie: włączenie go niczego wtedy nie przestawia.
+    try {
+        localStorage.setItem(SETTINGS_ORDER_KEY, JSON.stringify({
+            t: Date.now(), counts: [...counts], recent,
+            known: settingsRows.map(row => row.dataset.setting),
+        }));
+    } catch {
+        // localStorage niedostępny - kolejność po prostu liczy się za każdym razem
+    }
+}
+
+const rowScore = row => settingsLog.counts.get(row.dataset.setting) || 0;
+const rowIndex = new Map(settingsRows.map((row, i) => [row, i]));
+// Ustawienie dodane po ostatnim przeliczeniu staje na końcu wśród równych.
+const rowIsNew = row => (settingsLog.known && !settingsLog.known.has(row.dataset.setting) ? 1 : 0);
+const byScore = (a, b) => rowScore(b) - rowScore(a) || rowIsNew(a) - rowIsNew(b)
+    || rowIndex.get(a) - rowIndex.get(b);
+
+// Wiersze z suwakiem albo przełącznikiem da się skopiować; reszta (link,
+// wgranie pliku, przycisk wersji) ma swoje id i stoi tylko w jednym miejscu.
+const isCopyable = row => SETTINGS.has(row.dataset.setting);
+
+let copyCounter = 0;
+function makeSettingCopy(row) {
+    const copy = row.cloneNode(true);
+    copy.classList.add('set-copy');
+    copy.classList.remove('changed');
+    copy.dataset.copyOf = row.dataset.setting;
+    delete copy.dataset.setting;
+    const renamed = new Map();
+    for (const el of copy.querySelectorAll('[id]')) {
+        if (el.tagName === 'OUTPUT') el.dataset.of = el.id;
+        else renamed.set(el.id, `${el.id}-copy-${++copyCounter}`);
+        el.removeAttribute('id');
+    }
+    for (const el of copy.querySelectorAll('input, select')) el.id = renamed.get(row.dataset.setting) || '';
+    for (const label of copy.querySelectorAll('label[for]')) label.htmlFor = renamed.get(label.htmlFor) || '';
+    return copy;
+}
+
+function syncSettingCopies() {
+    for (const copy of settingsList.querySelectorAll('.set-copy')) {
+        const source = $(copy.dataset.copyOf);
+        const input = copy.querySelector('input, select');
+        if (input.type === 'checkbox') input.checked = source.checked;
+        else input.value = source.value;
+        for (const out of copy.querySelectorAll('output')) out.textContent = $(out.dataset.of).textContent;
+    }
+}
+
+// Zmiana w kopii trafia do oryginału jak ruch w nim samym - tak działa jego
+// obsługa i liczenie zmian.
+for (const type of ['input', 'change']) {
+    devPanel.addEventListener(type, event => {
+        const copy = event.target.closest('.set-copy');
+        if (copy) {
+            const source = $(copy.dataset.copyOf);
+            if (source.type === 'checkbox') source.checked = event.target.checked;
+            else source.value = event.target.value;
+            // Odświeżenie zrobi ten sam nasłuch przy zdarzeniu oryginału, raz.
+            source.dispatchEvent(new Event(type, {bubbles: true}));
+            return;
+        }
+        syncSettingCopies();
+        markChangedSettings();
+    });
+}
+
+function settingGroups(visible) {
+    const byLabel = new Map();
+    for (const row of visible) {
+        for (const label of settingsInfo.get(row).labels) {
+            if (!byLabel.has(label)) byLabel.set(label, []);
+            byLabel.get(label).push(row);
+        }
+    }
+    const order = [...byLabel.keys()];
+    return [...byLabel].filter(([, rows]) => rows.length >= 3)
+        .map(([label, rows]) => ({
+            label, rows: [...rows].sort(byScore),
+            score: rows.reduce((sum, row) => sum + rowScore(row), 0),
+        }))
+        .sort((a, b) => b.score - a.score || b.rows.length - a.rows.length
+            || order.indexOf(a.label) - order.indexOf(b.label));
+}
+
+function suggestedSettings(visible) {
+    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row));
+    const recent = settingsLog.recent.filter(usable).slice(0, SETTINGS_SUGGEST_RECENT);
+    const frequent = [...settingsLog.counts.keys()]
+        .filter(id => usable(id) && !recent.includes(id))
+        .sort((a, b) => settingsLog.counts.get(b) - settingsLog.counts.get(a)
+            || settingsLog.recent.indexOf(a) - settingsLog.recent.indexOf(b))
+        .slice(0, SETTINGS_SUGGEST_FREQUENT);
+    return [...recent, ...frequent].map(usable);
+}
+
+function renderSettingsList() {
+    const needle = fold(settingsSearch.value.trim());
+    const shown = visibleSettingRows();
+    const matching = shown.filter(row => {
+        const info = settingsInfo.get(row);
+        return info.name.includes(needle) || info.folded.some(label => label.includes(needle));
+    });
+    for (const row of settingsRows) row.classList.toggle('search-miss', !matching.includes(row) && !row.hidden);
+    const prefs = storedSettings();
+    const addGroup = (nodes, label, rows, openByDefault) => {
+        const group = document.createElement('details');
+        group.className = 'set-group';
+        const saved = prefs['fold:' + label];
+        group.open = saved === undefined ? openByDefault : !!saved;
+        group.append(Object.assign(document.createElement('summary'), {textContent: label}), ...rows);
+        group.addEventListener('toggle', () => storeSetting('fold:' + label, group.open));
+        nodes.push(group);
+    };
+    const nodes = [];
+    const placed = new Set();
+    if (needle) {
+        // Wyniki jako płaska lista, każde ustawienie raz.
+        nodes.push(...matching);
+        for (const row of matching) placed.add(row);
+    } else {
+        const suggested = suggestedSettings(shown);
+        if (suggested.length) {
+            addGroup(nodes, 'Proponowane', suggested.map(makeSettingCopy), true);
+            nodes[nodes.length - 1].dataset.kind = 'suggested';
+        }
+        const changedRows = changedSettingRows(shown);
+        if (changedRows.length) nodes.push(buildChangedGroup(changedRows, prefs));
+        for (const group of settingGroups(shown)) {
+            const rows = [];
+            for (const row of group.rows) {
+                if (!placed.has(row)) rows.push(row);
+                else if (isCopyable(row)) rows.push(makeSettingCopy(row));
+                placed.add(row);
+            }
+            addGroup(nodes, group.label, rows, false);
+        }
+        const rest = shown.filter(row => !placed.has(row));
+        if (rest.length) addGroup(nodes, 'Inne', rest, false);
+        for (const row of rest) placed.add(row);
+    }
+    // Wiersze schowane z innych powodów (albo bez trafienia) zostają w DOM, na końcu.
+    nodes.push(...settingsRows.filter(row => !placed.has(row)));
+    settingsList.replaceChildren(...nodes);
+    syncSettingCopies();
+    markChangedSettings();
+}
+
+// Kolejność liczy się z dziennika przy otwarciu panelu (i przy starcie), nigdy
+// przy otwartym.
+function refreshSettingsOrder() {
+    snapshotSettingsLog();
+    renderSettingsList();
+}
+
+settingsSearch.addEventListener('input', renderSettingsList);
+// Część wierszy chowają i pokazują inne ustawienia (np. próg przesiadki bez
+// propozycji tras) - nagłówki muszą to nadążyć.
+new MutationObserver(renderSettingsList).observe(settingsList,
+    {attributes: true, attributeFilter: ['hidden'], subtree: true});
 
 // --- zmienione ustawienia i powrót do domyślnych ----------------------------
 //
-// `value`/`checked` z index.html to wartości domyślne (patrz komentarz nad
-// panelem), więc opcja różna od nich dostaje znacznik, a nagłówek sekcji -
-// liczbę takich opcji, żeby było je widać także przy zwiniętej sekcji.
+// Wartości domyślne to te z index.html (SETTINGS[...].dflt), więc opcja różna od
+// nich dostaje znacznik.
+
+// Stała sekcja pod „Proponowane": ustawienia różne od domyślnych, zawsze z bieżącego
+// stanu (nie z migawki kolejności), więc odświeża się na żywo.
+const CHANGED_GROUP = 'Inne niż domyślne';
+
+function changedSettingRows(shown) {
+    return shown.filter(row => isCopyable(row) && differsFromDefault(SETTINGS.get(row.dataset.setting)));
+}
+
+function visibleSettingRows() {
+    return settingsRows.filter(row => !row.hidden && (devMode || !row.classList.contains('dev-only')));
+}
+
+function buildChangedGroup(rows, prefs) {
+    const saved = prefs['fold:' + CHANGED_GROUP];
+    const group = document.createElement('details');
+    group.className = 'set-group';
+    group.dataset.kind = 'changed';
+    group.dataset.ids = rows.map(row => row.dataset.setting).join(',');
+    group.open = saved === undefined ? false : !!saved;
+    const summary = Object.assign(document.createElement('summary'), {textContent: CHANGED_GROUP});
+    summary.dataset.changed = rows.length;
+    group.append(summary, ...rows.map(makeSettingCopy));
+    group.addEventListener('toggle', () => storeSetting('fold:' + CHANGED_GROUP, group.open));
+    return group;
+}
+
+// Przy szukaniu lista jest płaska i tej sekcji nie ma.
+function refreshChangedGroup() {
+    if (settingsSearch.value.trim()) return;
+    const rows = changedSettingRows(visibleSettingRows());
+    const ids = rows.map(row => row.dataset.setting).join(',');
+    const current = settingsList.querySelector('[data-kind=changed]');
+    if ((current ? current.dataset.ids : '') === ids) return;
+    const next = rows.length ? buildChangedGroup(rows, storedSettings()) : null;
+    if (current && next) current.replaceWith(next);
+    else if (current) current.remove();
+    else if (next) {
+        const anchor = [...settingsList.children].find(el => !el.dataset.kind);
+        settingsList.insertBefore(next, anchor || null);
+    }
+    syncSettingCopies();
+}
+
 function markChangedSettings() {
-    for (const fold of devPanel.querySelectorAll('.dev-fold')) {
-        let changed = 0;
-        // Wybór pliku (rozkład Siechnic) to akcja, nie ustawienie z domyślną.
-        for (const input of fold.querySelectorAll('input:not([type=file])')) {
-            const differs = input.type === 'checkbox'
-                ? input.checked !== input.defaultChecked
-                : Number(input.value) !== Number(input.defaultValue);
-            input.closest('.field, .dev-check').classList.toggle('changed', differs);
-            if (differs) changed++;
-        }
-        const summary = fold.querySelector('summary');
-        if (changed) summary.dataset.changed = changed;
-        else delete summary.dataset.changed;
+    for (const row of settingsList.querySelectorAll('.set-row')) {
+        const info = SETTINGS.get(row.dataset.setting || row.dataset.copyOf);
+        if (info) row.classList.toggle('changed', differsFromDefault(info));
+    }
+    refreshChangedGroup();
+}
+markChangedSettings();
+
+// --- statystyki zmian ustawień (DEV, #404) ------------------------------------
+//
+// Tylko lokalnie: ile razy i kiedy ostatnio ktoś ruszył każde ustawienie, żeby
+// było widać, których nikt nie dotyka. Jeden nasłuch na cały panel zamiast
+// podpinania pod każde ustawienie - nowe są liczone same. Suwak liczymy na
+// `change` (po puszczeniu), nie na każdy `input`, inaczej jeden ruch dawałby
+// dziesiątki zliczeń. Klucz nie jest na liście z #dev-reset: „Przywróć
+// domyślne” ma zostawić statystyki, bo to właśnie ono jest jednym z liczonych
+// zdarzeń. Tabelę pokazuje osobna strona (/statystyki, statystyki.js).
+const SETTINGS_STATS_KEY = 'metal-planner:settings-stats';
+const SETTINGS_LOG_LIMIT = 100;
+
+function loadSettingsStats() {
+    try {
+        const stats = JSON.parse(localStorage.getItem(SETTINGS_STATS_KEY));
+        return {
+            changes: (stats && stats.changes) || {},
+            labels: (stats && stats.labels) || {},
+            values: (stats && stats.values) || {},
+            log: (stats && stats.log) || [],
+            reset: (stats && stats.reset) || {n: 0, t: null},
+        };
+    } catch {
+        return {changes: {}, labels: {}, values: {}, log: [], reset: {n: 0, t: null}};   // localStorage niedostępny albo zepsuty JSON
     }
 }
-devPanel.addEventListener('input', markChangedSettings);
-devPanel.addEventListener('change', markChangedSettings);
-markChangedSettings();
+
+function saveSettingsStats(stats) {
+    try {
+        localStorage.setItem(SETTINGS_STATS_KEY, JSON.stringify(stats));
+    } catch {
+        // localStorage niedostępny - statystyki po prostu się nie zapiszą
+    }
+}
+
+function recordSettingChange(id) {
+    const stats = loadSettingsStats();
+    const entry = stats.changes[id] || {n: 0, t: null};
+    stats.changes[id] = {n: entry.n + 1, t: Date.now()};
+    // Z ostatnich zmian układa się kolejność listy ustawień.
+    stats.log = [...stats.log, {id, t: Date.now()}].slice(-SETTINGS_LOG_LIMIT);
+    saveSettingsStats(stats);
+}
+
+function recordSettingsReset() {
+    const stats = loadSettingsStats();
+    stats.reset = {n: stats.reset.n + 1, t: Date.now()};
+    saveSettingsStats(stats);
+}
+
+function settingControls() {
+    // Kopie (`.set-copy`) tylko przekazują zmianę oryginałowi.
+    // Tylko kontrolki wierszy listy: pole wyszukiwania i przyciski akcji nie są
+    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
+    return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy, .set-action) :is(input, select)');
+}
+
+// Etykieta tak, jak widać ją w panelu - bez wartości suwaka i dymka „i”.
+function settingLabel(control) {
+    const label = (control.id && devPanel.querySelector(`label[for="${control.id}"]`))
+        || control.closest('label');
+    const clone = label.cloneNode(true);
+    for (const extra of clone.querySelectorAll('output, .info, .dev-badge, input, select')) extra.remove();
+    return clone.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function settingValue(control) {
+    if (control.type === 'checkbox') return control.checked ? 'tak' : 'nie';
+    if (control.tagName === 'SELECT') return control.selectedOptions[0].textContent.trim();
+    return control.value;
+}
+
+devPanel.addEventListener('change', event => {
+    if (![...settingControls()].includes(event.target) || !event.target.id) return;
+    recordSettingChange(event.target.id);
+    syncSettingsSnapshot();
+});
+
+// Strona /statystyki nie ma panelu, więc nazwy i bieżące wartości bierze stąd.
+// Zapisujemy je dla wszystkich, żeby tabela pokazała też ustawienia, których
+// nikt nie ruszył.
+function syncSettingsSnapshot() {
+    const stats = loadSettingsStats();
+    let changed = false;
+    for (const control of settingControls()) {
+        if (!control.id) continue;
+        const label = settingLabel(control);
+        const value = settingValue(control);
+        if (stats.labels[control.id] !== label || stats.values[control.id] !== value) {
+            stats.labels[control.id] = label;
+            stats.values[control.id] = value;
+            changed = true;
+        }
+    }
+    if (changed) saveSettingsStats(stats);
+}
+syncSettingsSnapshot();
+refreshSettingsOrder();
+devPanel.addEventListener('settings-open', refreshSettingsOrder);
 
 // --- wgranie rozkładu Siechnic (DEV) -----------------------------------------
 //
@@ -6773,6 +8212,8 @@ function setSiechniceStatus(text, state) {
 }
 
 function describeSiechnice(status) {
+    setSiechniceLocked(!status.unlocked);
+    if (!status.unlocked) return;
     if (!status.uploaded_at) {
         setSiechniceStatus('Nic nie wgrano — w bazie nie ma Siechnic.');
     } else if (status.rebuilding) {
@@ -6784,8 +8225,59 @@ function describeSiechnice(status) {
     }
 }
 
-async function fetchSiechniceStatus(init) {
-    const response = await fetch('/api/dev/siechnice', init);
+// Token z kodu z Discorda; sessionStorage, bo ma żyć do zamknięcia karty.
+const SIECHNICE_TOKEN_KEY = 'siechnice-token';
+
+function siechniceToken() {
+    try { return sessionStorage.getItem(SIECHNICE_TOKEN_KEY) || ''; } catch (e) { return ''; }
+}
+
+// Chroniona kontrolka (data-protected) przy braku odblokowania jest wyłączona,
+// ma kłódkę i po kliknięciu skacze do wiersza z kodem - nowa chroniona rzecz
+// potrzebuje tylko tego atrybutu.
+function setSiechniceLocked(locked) {
+    for (const el of document.querySelectorAll('[data-protected]')) {
+        el.classList.toggle('locked', locked);
+        el.setAttribute('aria-disabled', String(locked));
+    }
+    $('siechnice-file').disabled = locked;
+    $('access-lock').hidden = !locked;
+    $('access-unlocked').hidden = locked;
+    if (locked) setSiechniceStatus('Wgrywanie zablokowane — kłódka prowadzi do odblokowania.');
+}
+
+function setAccessStatus(text, state) {
+    const el = $('access-status');
+    el.textContent = text;
+    el.className = state ? `field-hint ${state}` : 'field-hint';
+}
+
+// Wiersz może leżeć w zwiniętej grupie albo być odfiltrowany szukaniem, więc
+// najpierw czyścimy wyszukiwarkę, a grupę rozwijamy dopiero po przerysowaniu listy.
+function jumpToSetting(id) {
+    devToggle.classList.contains('active') || devToggle.click();
+    settingsSearch.value = '';
+    renderSettingsList();
+    const row = settingsList.querySelector(`.set-row[data-setting="${id}"]`);
+    const group = row.closest('details');
+    if (group) group.open = true;
+    row.scrollIntoView({block: 'center', behavior: 'smooth'});
+    row.classList.remove('jump-flash');
+    void row.offsetWidth;
+    row.classList.add('jump-flash');
+    row.addEventListener('animationend', () => row.classList.remove('jump-flash'), {once: true});
+}
+
+document.addEventListener('click', event => {
+    const locked = event.target.closest('[data-protected].locked');
+    if (!locked) return;
+    event.preventDefault();
+    jumpToSetting('dev-access');
+});
+
+async function fetchSiechniceStatus(init = {}) {
+    const response = await fetch('/api/dev/siechnice',
+        {...init, headers: {'X-Dev-Token': siechniceToken()}});
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `serwer odpowiedział ${response.status}`);
     return body;
@@ -6811,6 +8303,54 @@ async function followSiechniceRebuild() {
     }
 }
 
+async function postDevJson(url, payload) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+    return body;
+}
+
+async function setupSiechniceLock() {
+    const person = $('siechnice-person');
+    const send = $('siechnice-send');
+    const code = $('siechnice-code');
+    const unlock = $('siechnice-unlock');
+    const info = await (await fetch('/api/dev/kod')).json();
+    if (!info.available) {
+        for (const el of [person, send, code, unlock]) el.disabled = true;
+        setAccessStatus('Nie da się wysłać kodu — na serwerze brak konfiguracji Discorda '
+            + '(DISCORD, data/discord.json).', 'bad');
+        return;
+    }
+    for (const login of info.people) person.add(new Option(login, login));
+    setAccessStatus('Wybierz osobę i wyślij kod — dostanie go na Discordzie.');
+    send.addEventListener('click', async () => {
+        send.disabled = true;
+        try {
+            await postDevJson('/api/dev/kod', {login: person.value});
+            setAccessStatus(`Kod poszedł na Discorda do ${person.value}. Ważny 10 min.`, 'ok');
+        } catch (e) {
+            setAccessStatus(`Nie wysłano kodu: ${e.message}`, 'bad');
+        }
+        send.disabled = false;
+    });
+    unlock.addEventListener('click', async () => {
+        try {
+            const {token} = await postDevJson('/api/dev/odblokuj', {code: code.value.trim()});
+            try { sessionStorage.setItem(SIECHNICE_TOKEN_KEY, token); } catch (e) { /* karta bez pamięci: zostanie zablokowana */ }
+            code.value = '';
+            setAccessStatus('');
+            describeSiechnice(await fetchSiechniceStatus());
+        } catch (e) {
+            setAccessStatus(`Nie odblokowano: ${e.message}`, 'bad');
+        }
+    });
+}
+
 if (devMode) {
     const input = $('siechnice-file');
     input.addEventListener('change', async () => {
@@ -6829,7 +8369,8 @@ if (devMode) {
             setSiechniceStatus(`Nie wgrano: ${e.message}`, 'bad');
         }
     });
-    fetchSiechniceStatus().then(describeSiechnice).catch(() => {});
+    // Podpowiedź zamka po opisie stanu, żeby go nie nadpisać, gdy karta jest już odblokowana.
+    fetchSiechniceStatus().then(describeSiechnice).catch(() => {}).then(setupSiechniceLock);
 }
 
 // Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
@@ -6874,13 +8415,13 @@ document.addEventListener('click', event => {
 document.addEventListener('scroll', () => { infoTip.hidden = true; }, true);
 
 // Jeden przycisk na cały panel: kasuje wszystkie zapamiętane ustawienia
-// i przeładowuje stronę, więc każda wartość wraca z *_DEFAULTS tą samą drogą,
-// co przy pierwszej wizycie - bez osobnego "przywróć" dla każdej sekcji, które
-// trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma własny
-// klucz, więc mapa wraca ta sama.
+// i przeładowuje stronę, więc każda wartość wraca z index.html tą samą drogą,
+// co przy pierwszej wizycie - bez osobnego "przywróć" dla każdego ustawienia,
+// które trzeba by pilnować przy każdej nowej opcji. Ostatnie wyszukiwanie ma
+// własny klucz, więc mapa wraca ta sama.
 $('dev-reset').addEventListener('click', () => {
-    for (const key of [DEV_PREFS_KEY, TIME_PREFS_KEY, DOT_PREFS_KEY,
-                       LOOK_PREFS_KEY, SOUND_PREFS_KEY, phoneLayout.PREFS_KEY]) {
+    recordSettingsReset();
+    for (const key of [SETTINGS_KEY, phoneLayout.PREFS_KEY]) {
         try {
             localStorage.removeItem(key);
         } catch {
@@ -6965,7 +8506,7 @@ window.plannerBridge = {
     // tablice w jednym API to zaproszenie do sięgnięcia po złą.
     LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
     prettyStopName, rawStopName,
-    suspendPlanner, resumePlanner,
+    suspendPlanner, resumePlanner, setTimeNow,
 };
 
 }

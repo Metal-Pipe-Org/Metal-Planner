@@ -2079,7 +2079,7 @@ checks.etapy_pasek_najpierw_auta_bez_przerwy = (() => {
     app.applyStage(szukanie, {stage: 'fastest', ...fastest});
     const poPierwszym = {mapa: !!app.flowLayer, auta: znaczniki(),
                          pasek: pasek().includes('headline-best'),
-                         zakres: pasek().includes('headline-limit')};
+                         zakres: pasek().includes('headline-map')};
     app.applyStage(szukanie, {stage: 'map', ...bezAut, more: 0});
     const poMapie = {mapa: !!app.flowLayer, auta: znaczniki()};
     app.applyStage(szukanie, {stage: 'extras', cars: [auto('A', 51.09)],

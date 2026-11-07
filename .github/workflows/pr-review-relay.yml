@@ -1,0 +1,32 @@
+name: "PR-y: recenzja (przekaźnik)"
+
+# Sam przekaźnik: po recenzji PR-a (wystawionej albo cofniętej przez
+# człowieka) kończy bieg, a jego zakończenie budzi pr-state.yml przez
+# `workflow_run`. Nie liczy niczego sam, bo `pull_request_review` bierze
+# workflow z commitu scalenia PR-a — PR mógłby go podmienić — a przy PR-ach
+# z forków daje token tylko do odczytu. `workflow_run` biegnie zawsze
+# z `main` i z naszym tokenem, a pr-state.yml nie bierze stąd żadnych danych:
+# sam z API ustala, co się zmieniło. Dlatego ten plik nie ma żadnych
+# uprawnień i nie pobiera nic, a podmieniony w PR-ze najwyżej nie obudzi
+# przeliczenia — status wtedy nie zzielenieje, czyli nic się nie otworzy.
+#
+# Cofnięć zatwierdzeń robionych naszym tokenem (po ocenie Claude'a) GitHub
+# tu nie zgłosi — te łapie pr-state.yml po biegu oceny.
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  relay:
+    if: github.repository == 'Metal-Pipe-Org/Metal-Planner'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Przekaż dalej
+        env:
+          N: ${{ github.event.pull_request.number }}
+          STATE: ${{ github.event.review.state }}
+        run: |
+          echo "Recenzja PR-a #$N ($STATE) — stan przeliczy „PR-y: stan”."

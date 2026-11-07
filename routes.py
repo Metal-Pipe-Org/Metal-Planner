@@ -2,6 +2,7 @@ import hashlib
 import http.client
 import json
 import math
+import re
 import sys
 from datetime import datetime
 from functools import partial
@@ -12,6 +13,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
 import config
+import devcode
 import gtfs
 import naming
 import onboard
@@ -35,6 +37,45 @@ LIVE_REFRESH_WAIT_SEC = 20
 # Tydzień rozkładu Siechnic to ~3 MB; sufit tylko po to, żeby przypadkowo
 # wybrany duży plik nie lądował cały w pamięci workera.
 SIECHNICE_MAX_BYTES = 30 * 1024 * 1024
+
+
+_LINK_POINT = re.compile(r"^-?\d{1,3}\.\d+,-?\d{1,3}\.\d+$")
+_LINK_TIME = re.compile(r"^\d{1,2}:\d{2}$")
+_LINK_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def link_preview(args):
+    """Tytuł i opis podglądu linku w komunikatorach (og:title, og:description)
+    z samych parametrów adresu - bez liczenia trasy, bo podgląd pobiera bot
+    przy każdym wklejeniu. Data jest bezwzględna ("22.10"), nigdy "jutro":
+    komunikatory trzymają podgląd w pamięci. Brak godziny to "teraz" i nie
+    ma o czym pisać, więc opis bywa pusty. Bez from i to None."""
+    def place(name):
+        return "punkt na mapie" if _LINK_POINT.match(name) else name
+
+    start = args.get("from", "").strip()
+    end = args.get("to", "").strip()
+    if end == "gps":     # cel z lokalizacji nie istnieje - pole zostaje puste
+        end = ""
+    if not start and not end:
+        return None
+    start_text = "Z Twojej lokalizacji" if start == "gps" else place(start)
+    if start and end:
+        title = f"{start_text} → {place(end)}"
+    elif end:
+        title = f"Trasa do: {place(end)}"
+    else:
+        title = f"Trasa z: {place(start)}" if start != "gps" else start_text
+    when = []
+    date = _LINK_DATE.match(args.get("date", ""))
+    if date:
+        when.append(f"{int(date.group(3))}.{date.group(2)}")
+    if _LINK_TIME.match(args.get("time", "")):
+        when.append(args["time"])
+    return {
+        "title": title,
+        "description": " · ".join(when),
+    }
 
 
 def _frontend_digest(app):
@@ -217,7 +258,17 @@ def init_routes(app):
             # do serwera wcale.
             form_date=datetime.now().strftime("%Y-%m-%d"),
             dev_mode=config.dev_mode(),
+            preview=link_preview(request.args),
         )
+
+    @app.route("/statystyki")
+    def settings_stats():
+        """Zliczenia zmian ustawień - czyta je front z localStorage tej
+        przeglądarki, serwer tylko oddaje stronę. Poza trybem deweloperskim
+        strony po prostu nie ma."""
+        if not config.dev_mode():
+            abort(404)
+        return render_template("statystyki.html")
 
     @app.route("/sw.js")
     def service_worker():
@@ -452,6 +503,15 @@ def init_routes(app):
             car_count=_float_arg("cars"),
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",
+            # Nowa mapa rośnie za przełącznikiem pod zębatką (sekcja DEV
+            # "Eksperymenty"); stara zostaje domyślna.
+            new_map=request.args.get("newmap") == "1",
+            # Chodzenie pieszo można wyłączyć (⚙ → Eksperymenty); bez
+            # parametru zostaje włączone.
+            walking=request.args.get("walking", "1") == "1",
+            # Ile dodatkowych tras z przejściem pieszo dołożyć do schematu
+            # (⚙ → Eksperymenty → Schemat).
+            scheme_extra=_float_arg("scheme_extra"),
             # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
             bike_count=_float_arg("bike_count"),
             # Na jaki rodzaj roweru pasażer chce wsiąść - dwa przyciski w pasku
@@ -488,6 +548,38 @@ def init_routes(app):
             with_journeys=request.args.get("routes", "1") == "1",
         )
 
+    @app.route("/api/dev/kod", methods=["GET", "POST"])
+    def api_dev_kod():
+        """Kod odblokowujący wgrywanie Siechnic: GET mówi, czy da się go
+        wysłać i komu; POST {"login"} wysyła go na Discorda z pingiem tej osoby."""
+        if not config.dev_mode():
+            abort(404)
+
+        if request.method == "GET":
+            return jsonify({"available": devcode.available(), "people": devcode.people()})
+
+        if not devcode.available():
+            return jsonify({"error": "Brak konfiguracji Discorda na serwerze (DISCORD, data/discord.json)."}), 503
+        login = (request.get_json(silent=True) or {}).get("login")
+        if login not in devcode.people():
+            return jsonify({"error": "Nie ma takiej osoby na liście."}), 400
+        try:
+            devcode.send_code(login)
+        except OSError:
+            return jsonify({"error": "Discord nie przyjął wiadomości z kodem."}), 502
+        return jsonify({"sent": True})
+
+    @app.route("/api/dev/odblokuj", methods=["POST"])
+    def api_dev_odblokuj():
+        """Kod z Discorda za token sesji, którym karta wgrywa Siechnice."""
+        if not config.dev_mode():
+            abort(404)
+        code = (request.get_json(silent=True) or {}).get("code")
+        token = devcode.redeem(code) if isinstance(code, str) else None
+        if token is None:
+            return jsonify({"error": "Zły, zużyty albo przeterminowany kod."}), 403
+        return jsonify({"token": token})
+
     @app.route("/api/dev/siechnice", methods=["GET", "POST"])
     def api_dev_siechnice():
         """Wgranie kopii rozkładu Siechnic (⚙ → „Wgraj rozkład Siechnic”).
@@ -499,7 +591,12 @@ def init_routes(app):
         if not config.dev_mode():
             abort(404)
 
+        token = request.headers.get("X-Dev-Token", "")
+        unlocked = devcode.valid_token(token)
+
         if request.method == "POST":
+            if not unlocked:
+                return jsonify({"error": "Wgrywanie jest zablokowane - odblokuj je kodem z Discorda."}), 403
             # Limit tylko na tej trasie, nie na całej aplikacji. Werkzeug pilnuje go
             # przy czytaniu strumienia, więc nie obejdzie go ani zaniżony
             # Content-Length, ani kodowanie chunked.
@@ -522,4 +619,5 @@ def init_routes(app):
             "uploaded_at": uploaded and datetime.fromtimestamp(uploaded).isoformat(timespec="seconds"),
             "rebuilding": update_gtfs.update_running(),
             "in_database": bool(uploaded and built and built >= uploaded),
+            "unlocked": unlocked,
         })
