@@ -213,10 +213,10 @@ def init_routes(app):
             stops = gtfs.all_stop_names()
             lines = timetables.all_lines()
             data_error = None
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             stops = []
             lines = []
-            data_error = str(e)
+            data_error = gtfs.MISSING_DB_MESSAGE
 
         # Stacje PKP (patrz pkp.py) w tej samej liście podpowiedzi co
         # przystanki MPK - to jedyne miejsce, gdzie formularz w ogóle
