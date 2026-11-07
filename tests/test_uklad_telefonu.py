@@ -534,6 +534,13 @@ def _panel_ustawien(przegladarka, adres, viewport, **opcje):
     page.goto(adres)
     page.wait_for_selector("#start")
     page.click("#dev-toggle")
+    # Panel się wysuwa (transform + opacity) - mierzy się dopiero po animacji.
+    page.wait_for_function("""() => {
+        const panel = document.getElementById('dev-panel');
+        const css = getComputedStyle(panel);
+        return !panel.classList.contains('hidden') && css.opacity === '1'
+            && (css.transform === 'none' || css.transform === 'matrix(1, 0, 0, 1, 0, 0)');
+    }""")
     box = page.evaluate("""() => {
         const b = document.getElementById('dev-panel').getBoundingClientRect();
         return {left: b.left, right: b.right, width: b.width, W: innerWidth};
