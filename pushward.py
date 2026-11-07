@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, time as clock
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 API = "https://api.pushward.app"
@@ -96,9 +97,18 @@ def _request(method, path, key, body):
     return json.loads(raw) if raw else {}
 
 
+def _tap_url(link):
+    """Link tylko http(s) z hostem; PushWard odrzuca resztę, a to nie powód, by nie wysłać odliczenia."""
+    try:
+        parts = urlsplit(link)
+        return link if parts.scheme in ("http", "https") and parts.hostname else None
+    except (ValueError, AttributeError):
+        return None
+
+
 def _card_body(departure):
     ends = end_date(departure["date"], departure["sec"])
-    return {
+    body = {
         "state": "ONGOING",
         "dismissal_ttl": DISMISSAL_SEC,
         "content": {
@@ -113,6 +123,10 @@ def _card_body(departure):
             "completion_message": "Odjeżdża",
         },
     }
+    tap = _tap_url(departure.get("link"))
+    if tap:
+        body["content"]["tap_action"] = {"url": tap, "foreground": True}
+    return body
 
 
 def send_departure(key, departure):

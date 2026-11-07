@@ -8433,6 +8433,17 @@ function describePushwardError(body) {
     return `${reason}${body.code ? ` (${body.code})` : ''}`;
 }
 
+// Karta ma otwierać aplikację na telefonie, a tam localhost i adresy sieci
+// domowej nie działają, więc z nich link idzie na wdrożoną kopię (main, README).
+const PUBLIC_ORIGIN = 'https://metal-testing.sze.one';
+const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|.+\.local)$/i;
+
+function pushwardLink() {
+    const origin = LOCAL_HOST.test(location.hostname) ? PUBLIC_ORIGIN : location.origin;
+    const query = readableQuery(linkParams());
+    return origin + location.pathname + (query ? '?' + query : '');
+}
+
 async function pushwardClick(event) {
     const hour = event.target.closest('[data-dep-sec]');
     const key = pushwardKey();
@@ -8446,6 +8457,7 @@ async function pushwardClick(event) {
             body: JSON.stringify({
                 num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
                 stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
+                link: pushwardLink(),
             }),
         });
         const body = await response.json().catch(() => ({}));

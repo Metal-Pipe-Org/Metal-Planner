@@ -117,6 +117,20 @@ def test_z_kluczem_klik_pyta_i_wysyla(przegladarka, adres):
     assert wyslane[0][1]["sec"] == 82620
 
 
+def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    page, wyslane = _strona(przegladarka, url, klucz=True)
+    # Strona stoi na 127.0.0.1, więc link ma iść na wdrożoną kopię, nie na localhost.
+    page.evaluate("""() => {
+        document.getElementById('start').value = 'Sosnowiecka';
+        document.getElementById('end').value = 'Wojszyce';
+    }""")
+    _kliknij_godzine(page, potwierdzaj=True)
+    assert wyslane[0][1]["link"] == "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce"
+
+
 def test_odmowa_w_potwierdzeniu_nic_nie_wysyla(przegladarka, adres):
     dev, url = adres
     if not dev:

@@ -589,6 +589,7 @@ def init_routes(app):
                 "stop": str(departure["stop"]),
                 "date": str(departure["date"]),
                 "sec": int(departure["sec"]),
+                "link": departure.get("link"),
             })
         except (KeyError, ValueError):
             return jsonify({"error": "Niepełny opis odjazdu."}), 400

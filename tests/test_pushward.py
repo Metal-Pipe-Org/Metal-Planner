@@ -107,6 +107,28 @@ def test_tresc_karty(api):
     assert tresc["subtitle"] == "Pl. Grunwaldzki · 22:57"
 
 
+def test_link_trafia_do_karty_jako_tap_action(api):
+    link = "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce&time=22:00"
+    pushward.send_departure(KLUCZ, {**ODJAZD, "link": link})
+    assert api.wywolania[0][3]["content"]["tap_action"] == {"url": link, "foreground": True}
+
+
+@pytest.mark.parametrize("zly", [None, "", "javascript:alert(1)", "ftp://host/", "https://",
+                                 "/?from=A", "metal.sze.one", 5])
+def test_zly_link_pomija_tap_action_ale_wysyla(api, zly):
+    pushward.send_departure(KLUCZ, {**ODJAZD, "link": zly})
+    assert len(api.wywolania) == 1
+    assert "tap_action" not in api.wywolania[0][3]["content"]
+
+
+def test_trasa_przekazuje_link(klient, api):
+    link = "http://192.168.1.5:5001/?from=A&to=B"
+    odpowiedz = klient.post("/api/dev/pushward", json={**ODJAZD, "link": link},
+                            headers={"X-PushWard-Key": KLUCZ})
+    assert odpowiedz.status_code == 200
+    assert api.wywolania[0][3]["content"]["tap_action"]["url"] == link
+
+
 def test_autobus_dostaje_ikone_autobusu(api):
     pushward.send_departure(KLUCZ, {**ODJAZD, "mode": "bus"})
     assert api.wywolania[0][3]["content"]["icon"] == "bus.fill"
