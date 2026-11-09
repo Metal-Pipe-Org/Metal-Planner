@@ -62,7 +62,10 @@ const CDN_URLS = [
     'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
 ];
 
-const isTile = url => url.hostname.endsWith('tile.openstreetmap.org');
+// Sam koniec nazwy przepuściłby też np. "eviltile.openstreetmap.org" -
+// porównujemy całe człony domeny.
+const isTile = url => url.hostname === 'tile.openstreetmap.org'
+    || url.hostname.endsWith('.tile.openstreetmap.org');
 
 /* Kafelki i Leaflet lecą z obcego serwera bez CORS, więc dostajemy odpowiedź
    "opaque": status 0 i żadnego wglądu w treść. Taką też trzeba zapisać,
