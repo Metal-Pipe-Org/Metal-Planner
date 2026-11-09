@@ -5,8 +5,9 @@ name: "PR-y: stan"
 # `.github/REQUIRED_REVIEWERS`: każdy PR musi dostać jego zatwierdzenie, a on sam
 # zobowiązuje się zrobić review każdego PR-a w ciągu 24 h. To deklaracja, nie
 # hierarchia — dopisać się może każdy. Status jest zielony, gdy każdy z nich
-# (poza autorem PR-a) ma stojące zatwierdzenie; inaczej czeka i w opisie
-# mówi, na kogo.
+# (poza autorem PR-a) ma stojące zatwierdzenie albo gdy od wyjścia PR-a
+# z wersji roboczej minęły 3 dni (#427); inaczej czeka i w opisie mówi, na
+# kogo i do kiedy.
 #
 # Czemu nie wbudowane „Require review from Code Owners”: przy kilku ownerach
 # jednej ścieżki GitHub zadowala się zatwierdzeniem jednego z nich, a my
@@ -55,6 +56,10 @@ name: "PR-y: stan"
 # PR, a pomijamy biegi, które nic nie zrobiły (`skipped` — np. komentarz bez
 # `@claude`). Push do `main` (konflikty) budzi pełne przeliczenie i tak, więc
 # nowa deklaracja w REQUIRED_REVIEWERS dociera do wszystkich PR-ów od razu.
+#
+# Upływ 3 dni na review nie jest żadnym zdarzeniem, więc co godzinę biegnie
+# też pełne przeliczenie z `schedule` (z `main`, jak wszystko tutaj). GitHub
+# potrafi odpalić je z opóźnieniem — status zielenieje najwyżej tyle później.
 on:
   pull_request_target:
     types:
@@ -77,6 +82,8 @@ on:
       - "PR-y: składnia"
       - "PR-y: recenzja (przekaźnik)"
     types: [completed]
+  schedule:
+    - cron: "17 * * * *"
 
 permissions:
   # Status „Recenzenci konieczni”.
@@ -142,6 +149,6 @@ jobs:
           source .discord/.github/scripts/approvals.sh
           source .discord/.github/scripts/pr-state.sh
 
-          # `pull_request_target` dotyczy jednego PR-a, `workflow_run` —
-          # wszystkich otwartych (patrz nagłówek).
+          # `pull_request_target` dotyczy jednego PR-a, `workflow_run`
+          # i `schedule` — wszystkich otwartych (patrz nagłówek).
           pr_state "${N:-all}"

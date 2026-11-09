@@ -86,20 +86,41 @@ required_reviewers() {
   printf '%s\n' "$out" | reviewers_list | jq -R . | jq -sc 'unique'
 }
 
-# reviewers_status RECENZENCI AUTOR — filtr: z tablicy recenzji PR-a liczy
-# status „Recenzenci konieczni” jako `{state, description}`. Zatwierdzenie
-# stoi tak samo jak w approvals.sh: ostatnia recenzja zmieniająca stan danej
-# osoby to zatwierdzenie (boty pomijamy). Autor nie zatwierdzi własnego PR-a
-# (GitHub nie pozwala), więc jego samego nie wymagamy. Loginy porównujemy bez
-# wielkości liter — w liście ktoś mógł je wpisać inaczej niż na koncie.
+# Ile dni recenzenci konieczni mają na review (#427). Po tym czasie od
+# wyjścia PR-a z wersji roboczej status zielenieje bez ich zatwierdzenia —
+# zostaje „co najmniej jedno zatwierdzenie” z reguł `main`, a czekające
+# „Request changes” dalej blokuje merge.
+REVIEW_WINDOW_DAYS=3
+
+# reviewers_status RECENZENCI AUTOR OD TERAZ — filtr: z tablicy recenzji PR-a
+# liczy status „Recenzenci konieczni” jako `{state, description}`.
+# Zatwierdzenie stoi tak samo jak w approvals.sh: ostatnia recenzja
+# zmieniająca stan danej osoby to zatwierdzenie (boty pomijamy). Autor nie
+# zatwierdzi własnego PR-a (GitHub nie pozwala), więc jego samego nie
+# wymagamy. Loginy porównujemy bez wielkości liter — w liście ktoś mógł je
+# wpisać inaczej niż na koncie.
+#
+# OD to chwila (ISO 8601), od której PR czeka na review (`ready_since`),
+# a pusta — zegar nie biegnie (wersja robocza). TERAZ to sekundy od epoki.
+# Po REVIEW_WINDOW_DAYS dniach od OD brak zatwierdzeń recenzentów
+# koniecznych już nie blokuje (#427). Termin jest w opisie statusu, żeby
+# autor i recenzent wiedzieli, do kiedy.
 reviewers_status() {
-  jq -c --argjson req "$1" --arg author "$2" "$(_review_states_jq)"' as $last
+  jq -c --argjson req "$1" --arg author "$2" --arg since "$3" --argjson now "$4" \
+    --argjson days "$REVIEW_WINDOW_DAYS" "$(_review_states_jq)"' as $last
     | ($last | map(select(.state == "APPROVED") | .user.login | ascii_downcase)) as $ok
     | [ $req[]
         | select(ascii_downcase != ($author | ascii_downcase))
         | select(ascii_downcase as $r | any($ok[]; . == $r) | not) ] as $missing
-    | if ($missing | length) > 0
-        then {state: "pending", description: ("Czeka na: " + ($missing | join(", ")))}
+    | (if $since == "" then null else ($since | fromdateiso8601) + $days * 86400 end) as $deadline
+    | if ($missing | length) > 0 and $deadline != null and $now >= $deadline
+        then {state: "success",
+              description: ("Minęły \($days) dni bez zatwierdzenia od: " + ($missing | join(", ")))}
+      elif ($missing | length) > 0
+        then {state: "pending",
+              description: ("Czeka na: " + ($missing | join(", "))
+                + (if $deadline == null then ""
+                   else " (najdłużej do " + ($deadline | strftime("%d.%m %H:%M")) + " UTC)" end))}
       elif ($req | length) == 0
         then {state: "success", description: "Nikt nie jest zadeklarowany jako recenzent konieczny"}
       else {state: "success", description: "Zatwierdzili wszyscy recenzenci konieczni"}
@@ -113,6 +134,22 @@ review_summary() {
   jq -c "$(_review_states_jq)"' as $last
     | {approvals: ($last | map(select(.state == "APPROVED")) | length),
        changes_requested: ($last | map(select(.state == "CHANGES_REQUESTED") | .user.login))}'
+}
+
+# ready_since PR — chwila, od której PR (obiekt z listy PR-ów z API) czeka
+# na review: ostatnie „Ready for review” z osi czasu, a gdy go nie było —
+# otwarcie PR-a. Wersja robocza nie czeka na nikogo: pusto. Push do
+# gotowego PR-a i tak cofa go do wersji roboczej (pr-drafts.yml), więc nowe
+# zmiany dają recenzentom nowe dni.
+ready_since() {
+  local pr=$1 n
+  if [ "$(jq -r .draft <<<"$pr")" = true ]; then
+    return 0
+  fi
+  n=$(jq -r .number <<<"$pr")
+  gh api --paginate --slurp "repos/$REPO/issues/$n/timeline?per_page=100" \
+    | jq -r --arg opened "$(jq -r .created_at <<<"$pr")" \
+        '[add // [] | .[] | select(.event == "ready_for_review") | .created_at] | max // $opened'
 }
 
 # put_status SHA NAZWA NOWY STATUSY — stawia status NOWY (`{state,
@@ -130,7 +167,8 @@ put_status() {
 
 # pr_facts PR REQUIRED — dla jednego otwartego PR-a (obiekt z listy PR-ów
 # z API) stawia status „Recenzenci konieczni” i wypisuje jedną linijkę JSON
-# ze wszystkim, czego potrzebuje `labels_plan`. Trzy wywołania API na PR.
+# ze wszystkim, czego potrzebuje `labels_plan`. Cztery wywołania API na PR
+# (oś czasu tylko dla gotowych).
 #
 # `mergeable_state` jest tylko w pojedynczym PR-ze, lista PR-ów go nie ma —
 # stąd osobne pytanie. Konflikt powinien i tak cofnąć PR do wersji roboczej
@@ -148,7 +186,7 @@ pr_facts() {
   statuses=$(commit_statuses "$sha")
   mergeable=$(gh api "repos/$REPO/pulls/$n" --jq '.mergeable_state // ""')
 
-  reviewers=$(reviewers_status "$req" "$author" <<<"$reviews")
+  reviewers=$(reviewers_status "$req" "$author" "$(ready_since "$pr")" "$(date +%s)" <<<"$reviews")
   echo "#$n (${sha:0:7}): $REVIEWERS_CONTEXT → $(jq -r '"\(.state): \(.description)"' <<<"$reviewers")" >&2
   put_status "$sha" "$REVIEWERS_CONTEXT" "$reviewers" "$statuses" >&2
 
