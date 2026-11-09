@@ -87,7 +87,8 @@ required_reviewers() {
 }
 
 # Ile dni recenzenci konieczni mają na review (#427). Po tym czasie od
-# wyjścia PR-a z wersji roboczej status zielenieje bez ich zatwierdzenia —
+# ostatniej prośby o review (kogokolwiek) status zielenieje bez ich
+# zatwierdzenia —
 # zostaje „co najmniej jedno zatwierdzenie” z reguł `main`, a czekające
 # „Request changes” dalej blokuje merge.
 REVIEW_WINDOW_DAYS=3
@@ -100,8 +101,8 @@ REVIEW_WINDOW_DAYS=3
 # wymagamy. Loginy porównujemy bez wielkości liter — w liście ktoś mógł je
 # wpisać inaczej niż na koncie.
 #
-# OD to chwila (ISO 8601), od której PR czeka na review (`ready_since`),
-# a pusta — zegar nie biegnie (wersja robocza). TERAZ to sekundy od epoki.
+# OD to chwila (ISO 8601), od której biegnie zegar (`review_clock_since`),
+# a pusta — zegar nie biegnie. TERAZ to sekundy od epoki.
 # Po REVIEW_WINDOW_DAYS dniach od OD brak zatwierdzeń recenzentów
 # koniecznych już nie blokuje (#427). Termin jest w opisie statusu, żeby
 # autor i recenzent wiedzieli, do kiedy.
@@ -136,20 +137,30 @@ review_summary() {
        changes_requested: ($last | map(select(.state == "CHANGES_REQUESTED") | .user.login))}'
 }
 
-# ready_since PR — chwila, od której PR (obiekt z listy PR-ów z API) czeka
-# na review: ostatnie „Ready for review” z osi czasu, a gdy go nie było —
-# otwarcie PR-a. Wersja robocza nie czeka na nikogo: pusto. Push do
-# gotowego PR-a i tak cofa go do wersji roboczej (pr-drafts.yml), więc nowe
-# zmiany dają recenzentom nowe dni.
-ready_since() {
+# review_clock_since PR — chwila, od której biegnie zegar 3 dni (#427) dla
+# PR-a (obiekt z listy PR-ów z API): ostatnia prośba o review kogokolwiek
+# (osoby albo zespołu, także dodana przez GitHuba z CODEOWNERS) z osi czasu.
+# Każda kolejna prośba zaczyna liczenie od nowa. Wersja robocza kasuje
+# zegar: w wersji roboczej pusto, a po wyjściu z niej liczą się tylko
+# prośby późniejsze niż ostatnie przestawienie na wersję roboczą. Bez
+# takiej prośby — pusto, zegar nie biegnie.
+review_clock_since() {
   local pr=$1 n
   if [ "$(jq -r .draft <<<"$pr")" = true ]; then
     return 0
   fi
   n=$(jq -r .number <<<"$pr")
-  gh api --paginate --slurp "repos/$REPO/issues/$n/timeline?per_page=100" \
-    | jq -r --arg opened "$(jq -r .created_at <<<"$pr")" \
-        '[add // [] | .[] | select(.event == "ready_for_review") | .created_at] | max // $opened'
+  gh api --paginate --slurp "repos/$REPO/issues/$n/timeline?per_page=100" | review_clock_jq
+}
+
+# review_clock_jq — filtr: z osi czasu (strony z `--slurp`) wypisuje chwilę
+# startu zegara albo pusto (zasady wyżej). Daty z API są w jednym formacie
+# ISO 8601 UTC, więc porównujemy je jak tekst.
+review_clock_jq() {
+  jq -r 'add // []
+    | ([.[] | select(.event == "convert_to_draft") | .created_at] | max // "") as $draft
+    | [.[] | select(.event == "review_requested" and .created_at > $draft) | .created_at]
+    | max // ""'
 }
 
 # put_status SHA NAZWA NOWY STATUSY — stawia status NOWY (`{state,
@@ -186,7 +197,7 @@ pr_facts() {
   statuses=$(commit_statuses "$sha")
   mergeable=$(gh api "repos/$REPO/pulls/$n" --jq '.mergeable_state // ""')
 
-  reviewers=$(reviewers_status "$req" "$author" "$(ready_since "$pr")" "$(date +%s)" <<<"$reviews")
+  reviewers=$(reviewers_status "$req" "$author" "$(review_clock_since "$pr")" "$(date +%s)" <<<"$reviews")
   echo "#$n (${sha:0:7}): $REVIEWERS_CONTEXT → $(jq -r '"\(.state): \(.description)"' <<<"$reviewers")" >&2
   put_status "$sha" "$REVIEWERS_CONTEXT" "$reviewers" "$statuses" >&2
 

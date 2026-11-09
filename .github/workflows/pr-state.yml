@@ -5,9 +5,9 @@ name: "PR-y: stan"
 # `.github/REQUIRED_REVIEWERS`: każdy PR musi dostać jego zatwierdzenie, a on sam
 # zobowiązuje się zrobić review każdego PR-a w ciągu 24 h. To deklaracja, nie
 # hierarchia — dopisać się może każdy. Status jest zielony, gdy każdy z nich
-# (poza autorem PR-a) ma stojące zatwierdzenie albo gdy od wyjścia PR-a
-# z wersji roboczej minęły 3 dni (#427); inaczej czeka i w opisie mówi, na
-# kogo i do kiedy.
+# (poza autorem PR-a) ma stojące zatwierdzenie albo gdy od ostatniej prośby
+# o review kogokolwiek minęły 3 dni (#427; wersja robocza kasuje zegar);
+# inaczej czeka i w opisie mówi, na kogo i do kiedy.
 #
 # Czemu nie wbudowane „Require review from Code Owners”: przy kilku ownerach
 # jednej ścieżki GitHub zadowala się zatwierdzeniem jednego z nich, a my
