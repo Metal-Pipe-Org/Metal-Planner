@@ -719,8 +719,9 @@ checks.dzwiek_nie_zatrzymuje_muzyki = (() => {
 
 checks.nagranie_nie_gra_na_pelnej_glosnosci = (() => {
     // Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm, nie żart.
-    const {max, quiet} = app.PIPE_VOLUMES;
-    return {ok: max < 0.8 && quiet / max > 0.25 && quiet / max < 0.3, glosnosc: app.PIPE_VOLUMES};
+    const {normal, quiet} = app.PIPE_VOLUMES;
+    return {ok: normal === 0.175 && quiet / normal >= 0.25 && quiet / normal <= 0.35,
+            glosnosc: app.PIPE_VOLUMES};
 })();
 
 /* --- kropki węzłów: gdzie stoją i która jest startowa ------------------- */

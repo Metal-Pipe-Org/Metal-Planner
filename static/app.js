@@ -7583,6 +7583,9 @@ let soundLevelBefore = setting('sound-level');
 function acceptSoundLevel(info, value) {
     soundLevelBefore = value;
     storeSetting(info.id, value);
+    // Zliczamy tu, nie na zdarzeniu `change`: anulowane wyłączenie nie jest zmianą.
+    recordSettingChange(info.id);
+    syncSettingsSnapshot();
     SETTING_EFFECTS[info.id].react(value);
 }
 
@@ -7696,15 +7699,16 @@ const PIPE_SOURCES = [
 ];
 
 // Nagranie jest głośne (szczyt ponad 0 dBFS), a to ma być żart w tle,
-// nie alarm, więc nawet "na maksa" nie jest pełnym wzmocnieniem. "Po cichutku"
-// (domyślne, #447) to ok. 29% tego: wyraźnie ciszej, ale wciąż słychać.
+// nie alarm. 0.175 ("normalnie") to głośność, którą użytkownik już uznał za
+// górną granicę. "Po cichutku" (domyślne, #447) to ok. 29% tego: wyraźnie
+// ciszej, ale wciąż słychać.
 //
 // Głośność idzie przez mikser przeglądarki (Web Audio), nie przez
 // `volume` elementu audio: iOS tego pola nie słucha i gra zawsze głośnością
 // systemu. Wzmocnienie miksera słucha wszędzie, więc każdy efekt może mieć
 // swoją głośność. Cena na iPhonie: dźwięk z miksera milknie przy włączonym
 // wyciszeniu telefonu - dla żartu w tle to raczej zaleta.
-const PIPE_VOLUMES = {max: 0.7, quiet: 0.2};
+const PIPE_VOLUMES = {normal: 0.175, quiet: 0.05};
 const pipeVolume = () => PIPE_VOLUMES[setting('sound-level')];
 
 let pipeAudio = null;
@@ -8229,6 +8233,7 @@ function settingValue(control) {
 
 devPanel.addEventListener('change', event => {
     if (![...settingControls()].includes(event.target) || !event.target.id) return;
+    if (event.target.id === 'sound-level') return;
     recordSettingChange(event.target.id);
     syncSettingsSnapshot();
 });
