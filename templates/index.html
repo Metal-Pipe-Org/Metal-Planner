@@ -173,6 +173,14 @@
                         Metal Planner
                     </button>
                 </h1>
+                {# Tylko w DEV_MODE (#446): kiedy wstała ta wersja - w kontenerze czas
+                   budowy obrazu, lokalnie start serwera (patrz config.deployed_at). #}
+                {% if deployed %}
+                <time class="deployed-at" datetime="{{ deployed.isoformat(timespec='seconds') }}">
+                    {#- Dzień bez zera z .day, bo %-d nie działa na Windowsie. -#}
+                    {{- 'Deployed ' ~ deployed.day ~ deployed.strftime('.%m.%Y, %H:%M') -}}
+                </time>
+                {% endif %}
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
                     aria-label="Zainstaluj aplikację" hidden>⤓</button>

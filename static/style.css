@@ -338,8 +338,18 @@ body.mode-timetable .tools-sep { display: none; }
 /* Przed nazwą ikona aplikacji, ta sama co na ekranie telefonu. */
 .brand {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+/* Pod nazwą, tylko w DEV_MODE (#446): kiedy wstała ta wersja. Wcięte o ikonę
+   z odstępem (22 + 8 px), żeby stało pod napisem, a nie pod ikoną. */
+.deployed-at {
+    padding-left: 30px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--ink-soft);
+    white-space: nowrap;
 }
 
 .brand-icon {

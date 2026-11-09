@@ -150,3 +150,6 @@ CLAUDE.md
 .claude/*
 !.claude/commands/
 /.mcp.json
+
+# Czas budowy obrazu (Dockerfile, #446) - lokalnie go nie ma.
+DEPLOYED_AT

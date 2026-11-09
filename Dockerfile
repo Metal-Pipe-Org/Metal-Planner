@@ -21,6 +21,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Czas budowy - pod nazwą aplikacji w DEV_MODE jako data deployu (#446, patrz
+# config.deployed_at). Stoi po COPY, więc liczy się od nowa przy każdym nowym
+# commicie; deploy tego samego commita z cache'em zostawia poprzednią datę.
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > DEPLOYED_AT
+
 RUN useradd --create-home --uid 10001 app \
  && mkdir -p /app/data \
  && chmod +x /app/docker/entrypoint.sh \

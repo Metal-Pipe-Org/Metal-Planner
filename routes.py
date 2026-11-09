@@ -251,6 +251,7 @@ def init_routes(app):
             # do serwera wcale.
             form_date=datetime.now().strftime("%Y-%m-%d"),
             dev_mode=config.dev_mode(),
+            deployed=config.deployed_at() if config.dev_mode() else None,
             preview=link_preview(request.args),
         )
 
