@@ -1172,6 +1172,7 @@ function renderBoard() {
                     z ${shown.length - page.length}
                 </button>` : ''}
             ${shown.length ? '' : '<p class="field-hint">Nic tu nie odjeżdża w tym oknie.</p>'}
+            ${data.repeats ? `<p class="field-hint tt-legend">Ten rozkład obowiązuje ${esc(data.repeats)}.</p>` : ''}
         </div>`;
 }
 
