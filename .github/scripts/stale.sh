@@ -1,6 +1,6 @@
-LABEL_STALE="stale"
-DAYS_QUIET=14
-DAYS_GRACE=7
+# Progi ciszy (DAYS_QUIET, DAYS_GRACE), etykieta LABEL_STALE i etykiety stanu
+# PR-a (LABEL_PR_AUTHOR, LABEL_PR_HUMAN) są w config.sh.
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 # Niewidoczny znacznik, po którym rozpoznajemy własne przypomnienie wśród
 # innych komentarzy bota.
 MARKER="<!-- stale-ping -->"
@@ -9,9 +9,7 @@ MARKER="<!-- stale-ping -->"
 # i zamknięciem dotyczy tylko PR-ów, w których ruch ma autor. PR czekający na
 # recenzję człowieka dostaje same przypomnienia na Discordzie — to recenzent
 # zwleka, więc nie ma powodu straszyć autora zamknięciem. Uzasadnienie
-# w stale-prs.yml.
-LABEL_PR_AUTHOR="waiting for author"
-LABEL_PR_HUMAN="waiting for human review"
+# w stale-prs.yml. Etykiety: LABEL_PR_AUTHOR i LABEL_PR_HUMAN z config.sh.
 
 # Ostatnia aktywność (sekundy od epoki) — wspólna definicja dla
 # `stale_action` i `quiet_days`. Aktywność to założenie, wpis człowieka, PR,

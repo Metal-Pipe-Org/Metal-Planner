@@ -23,16 +23,18 @@
 # Zapisujemy tylko to, co się zmieniło: GitHub trzyma najwyżej tysiąc
 # statusów jednej nazwy na commicie, a przeliczeń jest dużo.
 
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+
 REVIEWERS_DOC="https://github.com/${REPO:-Metal-Pipe-Org/Metal-Planner}/blob/main/CONTRIBUTING.md#review-i-mergowanie"
 
 # Etykiety stanu PR-a (#353): dokładnie jedna na otwartym PR-ze, żadna na
 # zamkniętym. Nazwy po angielsku, jak reszta etykiet w repo. Etykiety
 # zgłoszeń (`PR in progress`, `merged - is it ok?`) to osobny zestaw
-# z issue-labels.yml — tych tu nie ruszamy.
-LABEL_AUTHOR="waiting for author"
-LABEL_CLAUDE="waiting for claude review"
-LABEL_HUMAN="waiting for human review"
-LABEL_OTHER="waiting for other PR"
+# z issue-labels.yml — tych tu nie ruszamy. Nazwy są w config.sh.
+LABEL_AUTHOR=$LABEL_PR_AUTHOR
+LABEL_CLAUDE=$LABEL_PR_CLAUDE
+LABEL_HUMAN=$LABEL_PR_HUMAN
+LABEL_OTHER=$LABEL_PR_OTHER
 LABEL_COLOR_AUTHOR="d93f0b"
 LABEL_COLOR_CLAUDE="d4c5f9"
 LABEL_COLOR_HUMAN="fbca04"

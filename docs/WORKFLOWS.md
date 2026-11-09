@@ -25,6 +25,13 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `pr-review-relay.yml` | Przekaźnik bez uprawnień: po recenzji PR-a tylko kończy bieg, żeby obudzić `pr-state.yml` przez `workflow_run`. `pull_request_review` bierze workflow z PR-a, więc niczego tu nie liczymy. |
 | `tests.yml` | Testy, odpalane wyłącznie ręcznie. |
 
+Progi czasowe stale, nazwy etykiet, wołanie
+`@claude`, przedrostek gałęzi solvera i słowa wskazujące zgłoszenie
+(`Closes`, `Refs`…) stoją w jednym miejscu: `.github/scripts/config.sh`.
+Działają po merge'u do `main`. Godziny biegów (`cron:`) i kopia literału we
+wstępnym sicie `if:` zostają w workflowach — tę drugą pilnuje
+`tests/test_konfiguracja_automatow.py`.
+
 ## Discord
 
 1. Kanał zasila `discord.yml`. We wbudowanym webhooku GitHuba (Settings →

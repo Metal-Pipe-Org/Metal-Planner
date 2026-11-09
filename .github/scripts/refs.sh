@@ -11,7 +11,21 @@
 # sprawdzenie składni mówi o nim autorowi). Wołający robi `source`; tekst od
 # ludzi podaje z env, nigdy przez `${{ }}` wklejone w bash.
 #
-# Wołający pobiera ten plik z `main`, tak jak skrypt Discorda.
+# Wołający pobiera ten plik z `main`, tak jak skrypt Discorda. Słowa
+# i przedrostek gałęzi solvera są w config.sh.
+
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+
+# _refs_words_re SŁOWA — lista z config.sh (`a|b c`) jako alternatywa dla
+# `grep -E`: spacja w słowie łapie dowolny odstęp.
+_refs_words_re() {
+  printf '%s' "$1" | sed -E 's/[[:space:]]+/[[:space:]]+/g'
+}
+
+# refs_words_md SŁOWA — ta sama lista do komentarza: `a`, `b c`.
+refs_words_md() {
+  printf '%s' "$1" | sed -E 's/^/`/; s/$/`/; s/\|/`, `/g'
+}
 
 # keyword_refs TYTUŁ OPIS GAŁĄŹ — ścieżka A: numery po `Closes` / `Fixes` /
 # `Resolves` (z odmianami, bez względu na wielkość liter) w tytule i opisie
@@ -20,10 +34,10 @@
 keyword_refs() {
   {
     printf '%s\n%s\n' "$1" "$2" \
-      | grep -oiE '(^|[^[:alnum:]])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]:]*#[0-9]+' \
+      | grep -oiE "(^|[^[:alnum:]])($(_refs_words_re "$REFS_CLOSE_WORDS"))[[:space:]:]*#[0-9]+" \
       | grep -oE '[0-9]+' || true
     printf '%s\n' "$3" \
-      | grep -oE '^claude/issue-[0-9]+' \
+      | grep -oE "^${CLAUDE_BRANCH_PREFIX}[0-9]+" \
       | grep -oE '[0-9]+' || true
   } | sort -u
 }
@@ -34,6 +48,6 @@ keyword_refs() {
 # PR-a nie odejmujemy — to decyzja wołającego.
 mention_refs() {
   printf '%s\n%s\n' "$1" "$2" \
-    | grep -oiE '(^|[^[:alnum:]])(refs?|relate[sd][[:space:]]+to|part[[:space:]]+of|dotyczy)[[:space:]:]*#[0-9]+' \
+    | grep -oiE "(^|[^[:alnum:]])($(_refs_words_re "$REFS_MENTION_WORDS"))[[:space:]:]*#[0-9]+" \
     | grep -oE '[0-9]+' | sort -u || true
 }

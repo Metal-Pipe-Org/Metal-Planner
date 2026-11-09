@@ -93,7 +93,8 @@ jobs:
       - name: Ustal gałąź bazową i posprzątaj gałęzie robocze
         id: base
         run: |
-          ISSUE_BRANCH="claude/issue-${N}"
+          source .github/scripts/config.sh
+          ISSUE_BRANCH="${CLAUDE_BRANCH_PREFIX}${N}"
           echo "issue_branch=$ISSUE_BRANCH" >> "$GITHUB_OUTPUT"
 
           if ! git ls-remote --exit-code --heads origin "$ISSUE_BRANCH" >/dev/null 2>&1; then
@@ -134,9 +135,10 @@ jobs:
           # Bez `track_progress` akcja pracuje w trybie agenta, który sam gałęzi
           # nie zakłada (tryb ze śledzeniem to robił) — Claude dostaje więc
           # gałąź od nas, odciętą od gałęzi zgłoszenia albo od `main`.
-          # Przedrostek `claude/issue-N-` jest tym, po czym sprzątają
-          # gałęzie robocze kroki wyżej i niżej.
-          TMP="claude/issue-${N}-run${GITHUB_RUN_ID}"
+          # Przedrostek `claude/issue-N-` (CLAUDE_BRANCH_PREFIX z config.sh)
+          # jest tym, po czym sprzątają gałęzie robocze kroki wyżej i niżej.
+          source .github/scripts/config.sh
+          TMP="${CLAUDE_BRANCH_PREFIX}${N}-run${GITHUB_RUN_ID}"
           git checkout -b "$TMP" "origin/$BASE"
           echo "branch=$TMP" >> "$GITHUB_OUTPUT"
 
@@ -192,7 +194,7 @@ jobs:
 
             Gałąź, na której pracujesz (`${{ steps.work.outputs.branch }}`), jest
             tymczasowa. Trwałą gałęzią tego
-            zgłoszenia jest `claude/issue-${{ github.event.issue.number }}`
+            zgłoszenia jest `${{ steps.base.outputs.issue_branch }}`
             i workflow przeniesie tam Twoje commity, gdy skończysz. Jeśli
             zastajesz w drzewie roboczym poprawki dotyczące tego zgłoszenia, to
             Twoja własna praca z wcześniejszego wpisu w tym wątku — dopracuj ją
