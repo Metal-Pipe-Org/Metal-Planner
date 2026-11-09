@@ -131,8 +131,8 @@ def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(pr
     assert wyslane[0][1]["link"] == "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce"
 
 
-def _link_z_klikniecia(przegladarka, url, stop_id, zewnetrzny):
-    tablica = {**TABLICA, "departures": [{**TABLICA["departures"][0], "stop_id": stop_id}]}
+def _link_z_klikniecia(przegladarka, url, kurs, zewnetrzny):
+    tablica = {**TABLICA, "departures": [{**TABLICA["departures"][0], **kurs}]}
     page, wyslane = _strona(przegladarka, url, klucz=True, tablica=tablica)
     if zewnetrzny:
         page.evaluate("document.getElementById('pushward-link').checked = true")
@@ -140,22 +140,29 @@ def _link_z_klikniecia(przegladarka, url, stop_id, zewnetrzny):
     return wyslane[0][1]["link"]
 
 
-@pytest.mark.parametrize("stop_id, link", [
-    ("1605", "https://czynaczas.pl/wroclaw?przystanek=1605"),
-    ("SIE:30329:54854", "https://siechnice.kiedyprzyjedzie.pl/#/stops/30329:54854/departures"),
+@pytest.mark.parametrize("kurs, link", [
+    ({"stop_id": "1605"}, "https://czynaczas.pl/wroclaw?przystanek=1605"),
+    # Kurs gminy na słupku wspólnym z MPK (810 na Kościuszki): liczy kurs, nie słupek.
+    ({"stop_id": "886", "siechnice_stop": "30307:54819"},
+     "https://siechnice.kiedyprzyjedzie.pl/#/stops/30307:54819/departures"),
+    ({"stop_id": "SIE:30329:54854", "siechnice_stop": "30329:54854"},
+     "https://siechnice.kiedyprzyjedzie.pl/#/stops/30329:54854/departures"),
+    # Słupka gminnego kursu nie ustalono: Czy na czas go nie zna, więc link do Metal-Plannera.
+    ({"stop_id": "886", "siechnice_stop": None}, "https://metal-testing.sze.one/"),
 ])
-def test_wlaczone_ustawienie_wysyla_link_do_przystanku(przegladarka, adres, stop_id, link):
+def test_wlaczone_ustawienie_wysyla_link_do_przystanku(przegladarka, adres, kurs, link):
     dev, url = adres
     if not dev:
         pytest.skip("sprawdzane w trybie dev")
-    assert _link_z_klikniecia(przegladarka, url, stop_id, zewnetrzny=True) == link
+    wyslany = _link_z_klikniecia(przegladarka, url, kurs, zewnetrzny=True)
+    assert wyslany.startswith(link)
 
 
 def test_wylaczone_ustawienie_zostawia_link_do_metal_plannera(przegladarka, adres):
     dev, url = adres
     if not dev:
         pytest.skip("sprawdzane w trybie dev")
-    link = _link_z_klikniecia(przegladarka, url, "1605", zewnetrzny=False)
+    link = _link_z_klikniecia(przegladarka, url, {"stop_id": "1605"}, zewnetrzny=False)
     assert link.startswith("https://metal-testing.sze.one/")
 
 

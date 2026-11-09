@@ -15,6 +15,7 @@ import bikes
 import gtfs
 import onboard
 import polinka
+import siechnice
 import traficar
 
 # Przesiadka na DOKŁADNIE tym samym słupku - bez marszu, więc nie wycenia się
@@ -168,6 +169,12 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             "stop_id": _stop_id,
             **({"platform": platform}
                if (platform := _platform(day, trip, _stop_id)) else {}),
+            # Kurs Siechnic ma własny serwis, a wspólny słupek we Wrocławiu
+            # nosi wrocławski stop_id - po nim nie widać, że kurs jest gminny.
+            # None = kurs gminny, ale słupka w ich serwisie nie ustalono.
+            **({"siechnice_stop": siechnice.post_of(
+                    _stop_id, day.stop_names[_stop_id], *day.stop_coords[_stop_id], num)}
+               if trip.startswith(siechnice.ID_PREFIX) else {}),
             # Kurs kolejowy niesie identyfikator - po nim front dopytuje
             # o opóźnienie na żywo (zgłoszenie #71, patrz pkp_live.py).
             # Razem z nazwą stacji, przy której stoi - tablica bywa MIEJSCEM

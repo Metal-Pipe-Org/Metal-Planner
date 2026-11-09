@@ -8418,7 +8418,8 @@ function departureAttrs(d, stop, sec) {
     return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
            ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
            ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"` +
-           ` data-dep-stop-id="${escAttr(d.stop_id)}"`;
+           ` data-dep-stop-id="${escAttr(d.stop_id)}"` +
+           ('siechnice_stop' in d ? ` data-dep-siechnice-stop="${escAttr(d.siechnice_stop || '')}"` : '');
 }
 
 const PUSHWARD_ERRORS = {
@@ -8446,11 +8447,15 @@ function pushwardLink() {
 }
 
 // Opcjonalnie klik w kartę otwiera przystanek (ten słupek) w zewnętrznym
-// rozkładzie: Siechnice mają własny serwis, reszta jest w Czy na czas.
-function pushwardStopLink(stopId) {
-    if (stopId.startsWith('SIE:'))
-        return `https://siechnice.kiedyprzyjedzie.pl/#/stops/${stopId.slice(4)}/departures`;
-    return `https://czynaczas.pl/wroclaw?przystanek=${encodeURIComponent(stopId)}`;
+// rozkładzie. Wybiera kurs, nie przystanek: kurs Siechnic ma własny serwis
+// także na słupku wspólnym z MPK we Wrocławiu, reszta jest w Czy na czas.
+// Kursu gminnego bez ustalonego słupka nie wysyłamy do Czy na czas, bo tam go nie ma.
+function pushwardStopLink(dep) {
+    if (dep.depSiechniceStop !== undefined)
+        return dep.depSiechniceStop
+            ? `https://siechnice.kiedyprzyjedzie.pl/#/stops/${dep.depSiechniceStop}/departures`
+            : pushwardLink();
+    return `https://czynaczas.pl/wroclaw?przystanek=${encodeURIComponent(dep.depStopId)}`;
 }
 
 async function pushwardClick(event) {
@@ -8466,7 +8471,7 @@ async function pushwardClick(event) {
             body: JSON.stringify({
                 num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
                 stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
-                link: setting('pushward-link') ? pushwardStopLink(dep.depStopId) : pushwardLink(),
+                link: setting('pushward-link') ? pushwardStopLink(dep) : pushwardLink(),
             }),
         });
         const body = await response.json().catch(() => ({}));

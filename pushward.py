@@ -8,8 +8,9 @@ w nagłówku wychodzącego zapytania: nie trafia do logów, plików ani odpowied
 
 Tytuł karty (`name`) iOS ustala przy starcie Live Activity i PATCH go nie
 zmieni, a tytuł ma mówić, jaka to linia i dokąd. Dlatego każdy przejazd
-zaczyna od skasowania poprzedniej karty (stały slug, więc na serwerze jest
-najwyżej jedna) i założenia nowej z aktualnym tytułem.
+dostaje własną, nową kartę z własnym slugiem. Poprzednich nie kasujemy ani nie
+kończymy: kasowanie zdejmowałoby z ekranu kartę, którą pasażer może jeszcze
+śledzić, a stare i tak znikają same po `ended_ttl`.
 """
 
 import json
@@ -21,9 +22,9 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 API = "https://api.pushward.app"
-SLUG = "metal-planner-odjazd"
+SLUG_PREFIX = "metal-planner-"
 HTTP_TIMEOUT_SEC = 10
-ENDED_TTL_SEC = 3600
+ENDED_TTL_SEC = 600
 WINDOW_SEC = 8 * 3600
 WARNING_SEC = 120
 DISMISSAL_SEC = 300
@@ -125,23 +126,18 @@ def _card_body(departure):
 
 
 def send_departure(key, departure):
-    """Kasuje poprzednią kartę, zakłada nową z tytułem tego odjazdu i wypełnia ją."""
+    """Zakłada nową kartę z tytułem tego odjazdu i wypełnia ją."""
     if not in_window(end_date(departure["date"], departure["sec"]), time.time()):
         raise OutOfWindow()
     body = _card_body(departure)
-    path = f"/activities/{SLUG}"
-    try:
-        _request("DELETE", path, key, None)
-    except PushWardError as e:
-        if e.status != 404:
-            raise
+    slug = f"{SLUG_PREFIX}{int(time.time())}"
     _request("POST", "/activities", key, {
-        "slug": SLUG,
+        "slug": slug,
         "name": f'{departure["num"]} → {departure["headsign"]}',
         "ended_ttl": ENDED_TTL_SEC,
         "dismissal_ttl": DISMISSAL_SEC,
     })
-    _request("PATCH", path, key, body)
+    _request("PATCH", f"/activities/{slug}", key, body)
 
 
 def account(key):
