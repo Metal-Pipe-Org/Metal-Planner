@@ -177,7 +177,8 @@
                    budowy obrazu, lokalnie start serwera (patrz config.deployed_at). #}
                 {% if deployed %}
                 <time class="deployed-at" datetime="{{ deployed.isoformat(timespec='seconds') }}">
-                    {{- 'Deployed ' ~ deployed.strftime('%-d.%m.%Y, %H:%M') -}}
+                    {#- Dzień bez zera z .day, bo %-d nie działa na Windowsie. -#}
+                    {{- 'Deployed ' ~ deployed.day ~ deployed.strftime('.%m.%Y, %H:%M') -}}
                 </time>
                 {% endif %}
             </div>
