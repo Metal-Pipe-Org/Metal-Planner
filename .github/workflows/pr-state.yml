@@ -57,9 +57,19 @@ name: "PR-y: stan"
 # `@claude`). Push do `main` (konflikty) budzi pełne przeliczenie i tak, więc
 # nowa deklaracja w REQUIRED_REVIEWERS dociera do wszystkich PR-ów od razu.
 #
-# Upływ 3 dni na review nie jest żadnym zdarzeniem, więc co godzinę biegnie
-# też pełne przeliczenie z `schedule` (z `main`, jak wszystko tutaj). GitHub
-# potrafi odpalić je z opóźnieniem — status zielenieje najwyżej tyle później.
+# Upływ 3 dni na review nie jest żadnym zdarzeniem, więc biegnie też pełne
+# przeliczenie z `schedule` (z `main`, jak wszystko tutaj): co godzinę i raz
+# o północy. Tryb eco to wyłączenie biegu co godzinę (przełącznik niżej, przy
+# `schedule`) — zostaje tylko północ. Wtedy PR przestaje czekać na recenzentów
+# koniecznych przy pierwszym przeliczeniu po 3 dniach: o północy albo
+# wcześniej, gdy ruszy go jakieś zdarzenie z listy wyżej — czyli realnie po
+# 3–4 dniach, a termin w opisie statusu jest najwcześniejszym możliwym.
+# GitHub potrafi odpalić `schedule` z opóźnieniem — status zielenieje
+# najwyżej tyle później.
+#
+# Czemu przełącznik to linijka, a nie zmienna: `on:` nie czyta żadnych
+# zmiennych, a warunek `if:` przy jobie nie widzi `env`. Sprawdzanie trybu
+# w kroku nic by nie oszczędziło — runner i tak by wstawał co godzinę.
 on:
   pull_request_target:
     types:
@@ -83,7 +93,11 @@ on:
       - "PR-y: recenzja (przekaźnik)"
     types: [completed]
   schedule:
+    # TRYB ECO: zakomentuj tę linijkę (bieg co godzinę). Przy włączonej
+    # północny bieg niżej jest zbędny, ale nic nie psuje.
     - cron: "17 * * * *"
+    # Północ czasu polskiego zimą (cron jest w UTC; latem to 1:00).
+    - cron: "3 23 * * *"
 
 permissions:
   # Status „Recenzenci konieczni”.
