@@ -7579,6 +7579,9 @@ for (const info of SETTINGS.values()) {
 
 // Poprzedni wybór, do którego wraca lista po anulowaniu któregoś z okien.
 let soundLevelBefore = setting('sound-level');
+// Natywna lista ma już wartość „Wyłączony”, zanim padnie pierwsze pytanie, więc
+// do czasu odpowiedzi wiersz nie może zmienić grupy.
+let soundLevelConfirming = false;
 
 function acceptSoundLevel(info, value) {
     soundLevelBefore = value;
@@ -7637,12 +7640,11 @@ for (const type of ['input', 'change']) {
                 return;
             }
             const previous = soundLevelBefore;
+            soundLevelConfirming = true;
             confirmPipeOff().then(confirmed => {
-                if (confirmed) {
-                    acceptSoundLevel(info, value);
-                    return;
-                }
-                info.control.value = previous;
+                soundLevelConfirming = false;
+                if (confirmed) acceptSoundLevel(info, value);
+                else info.control.value = previous;
                 syncSettingCopies();
                 markChangedSettings();
             });
@@ -8004,6 +8006,7 @@ for (const type of ['input', 'change']) {
             source.dispatchEvent(new Event(type, {bubbles: true}));
             return;
         }
+        if (soundLevelConfirming) return;
         syncSettingCopies();
         markChangedSettings();
     });
