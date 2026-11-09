@@ -165,6 +165,7 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             "num": num,
             "mode": mode,
             "headsign": headsign,
+            "stop_id": _stop_id,
             **({"platform": platform}
                if (platform := _platform(day, trip, _stop_id)) else {}),
             # Kurs kolejowy niesie identyfikator - po nim front dopytuje

@@ -8417,7 +8417,8 @@ function departureAttrs(d, stop, sec) {
     if (wait <= 0 || wait > PUSHWARD_WINDOW_SEC) return '';
     return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
            ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
-           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"`;
+           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"` +
+           ` data-dep-stop-id="${escAttr(d.stop_id)}"`;
 }
 
 const PUSHWARD_ERRORS = {
@@ -8444,6 +8445,14 @@ function pushwardLink() {
     return origin + location.pathname + (query ? '?' + query : '');
 }
 
+// Opcjonalnie klik w kartę otwiera przystanek (ten słupek) w zewnętrznym
+// rozkładzie: Siechnice mają własny serwis, reszta jest w Czy na czas.
+function pushwardStopLink(stopId) {
+    if (stopId.startsWith('SIE:'))
+        return `https://siechnice.kiedyprzyjedzie.pl/#/stops/${stopId.slice(4)}/departures`;
+    return `https://czynaczas.pl/wroclaw?przystanek=${encodeURIComponent(stopId)}`;
+}
+
 async function pushwardClick(event) {
     const hour = event.target.closest('[data-dep-sec]');
     const key = pushwardKey();
@@ -8457,7 +8466,7 @@ async function pushwardClick(event) {
             body: JSON.stringify({
                 num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
                 stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
-                link: pushwardLink(),
+                link: setting('pushward-link') ? pushwardStopLink(dep.depStopId) : pushwardLink(),
             }),
         });
         const body = await response.json().catch(() => ({}));

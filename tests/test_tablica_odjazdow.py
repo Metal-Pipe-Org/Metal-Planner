@@ -94,7 +94,7 @@ def test_wiersz_odjazdu(install_day):
 
     assert wynik["departures"][0] == {
         "time": "00:16", "sec": 1000, "line": "Autobus 100",
-        "num": "100", "mode": "bus", "headsign": "PÓŁNOC",
+        "num": "100", "mode": "bus", "headsign": "PÓŁNOC", "stop_id": "W1",
     }
     # `sec` jest po to, żeby dało się porównać odjazd z horyzontem mapy -
     # "00:16" po północy zawija się i do porównań się nie nadaje.

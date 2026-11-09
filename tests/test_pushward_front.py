@@ -15,7 +15,7 @@ from tests.test_uklad_telefonu import PUSTE_ZRODLA, _chromium, _odpowiedz
 KLUCZ = "hlk_testowy"
 TABLICA = {"stop": "Pl. Grunwaldzki", "from_time": "22:00", "departures": [
     {"time": "22:57", "sec": 82620, "num": "5", "mode": "tram",
-     "headsign": "Księże Małe", "trip": None},
+     "headsign": "Księże Małe", "trip": None, "stop_id": "1605"},
 ]}
 
 TABLICA_JS = """(data) => {
@@ -129,6 +129,34 @@ def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(pr
     }""")
     _kliknij_godzine(page, potwierdzaj=True)
     assert wyslane[0][1]["link"] == "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce"
+
+
+def _link_z_klikniecia(przegladarka, url, stop_id, zewnetrzny):
+    tablica = {**TABLICA, "departures": [{**TABLICA["departures"][0], "stop_id": stop_id}]}
+    page, wyslane = _strona(przegladarka, url, klucz=True, tablica=tablica)
+    if zewnetrzny:
+        page.evaluate("document.getElementById('pushward-link').checked = true")
+    _kliknij_godzine(page, potwierdzaj=True)
+    return wyslane[0][1]["link"]
+
+
+@pytest.mark.parametrize("stop_id, link", [
+    ("1605", "https://czynaczas.pl/wroclaw?przystanek=1605"),
+    ("SIE:30329:54854", "https://siechnice.kiedyprzyjedzie.pl/#/stops/30329:54854/departures"),
+])
+def test_wlaczone_ustawienie_wysyla_link_do_przystanku(przegladarka, adres, stop_id, link):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    assert _link_z_klikniecia(przegladarka, url, stop_id, zewnetrzny=True) == link
+
+
+def test_wylaczone_ustawienie_zostawia_link_do_metal_plannera(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    link = _link_z_klikniecia(przegladarka, url, "1605", zewnetrzny=False)
+    assert link.startswith("https://metal-testing.sze.one/")
 
 
 def test_odmowa_w_potwierdzeniu_nic_nie_wysyla(przegladarka, adres):

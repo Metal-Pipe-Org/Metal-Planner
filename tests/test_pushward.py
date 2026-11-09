@@ -2,8 +2,8 @@
 
 Bez sieci i bez prawdziwego klucza: wywołania HTTP (`pushward._request`) są
 podmienione na zapis tego, co poszłoby do API. Pilnujemy trzech rzeczy:
-karta powstaje tylko wtedy, gdy jej nie ma; każdy przejazd to jeden PATCH;
-a `end_date` to dokładnie ta chwila, w którą odjeżdża pojazd - także po
+każdy przejazd kasuje poprzednią kartę i zakłada nową z tytułem tego odjazdu
+(DELETE, POST, PATCH); a `end_date` to dokładnie ta chwila, w którą odjeżdża pojazd - także po
 północy i dla godzin rozkładu powyżej 24:00.
 """
 
@@ -72,27 +72,28 @@ def test_end_date_w_dobie_zmiany_czasu_liczy_prawdziwe_sekundy():
     assert pushward.end_date("2026-03-29", 8 * 3600) == _czas(2026, 3, 29, 8, 0)
 
 
-def test_pierwszy_przejazd_tworzy_karte_i_aktualizuje_ja(api):
-    api.odpowiedzi.extend([pushward.PushWardError(404, "activity.not_found"), {}, {}])
+def test_przejazd_kasuje_stara_karte_zaklada_nowa_i_wypelnia_ja(api):
     pushward.send_departure(KLUCZ, ODJAZD)
-    metody = [(m, p) for m, p, _, _ in api.wywolania]
-    assert metody == [("PATCH", "/activities/metal-planner-odjazd"),
-                      ("POST", "/activities"),
-                      ("PATCH", "/activities/metal-planner-odjazd")]
+    assert [(m, p) for m, p, _, _ in api.wywolania] == [
+        ("DELETE", "/activities/metal-planner-odjazd"),
+        ("POST", "/activities"),
+        ("PATCH", "/activities/metal-planner-odjazd")]
     tworzenie = api.wywolania[1][3]
     assert tworzenie["slug"] == "metal-planner-odjazd"
-    assert tworzenie["ended_ttl"] == 30 * 24 * 3600
-    assert api.wywolania[0][3] == api.wywolania[2][3]
+    assert tworzenie["name"] == "5 → Księże Małe"
+    assert tworzenie["ended_ttl"] == 3600
+    assert tworzenie["dismissal_ttl"] == 300
 
 
-def test_kolejny_przejazd_to_jeden_patch(api):
+def test_brak_starej_karty_nie_przerywa_przejazdu(api):
+    api.odpowiedzi.append(pushward.PushWardError(404, "activity.not_found"))
     pushward.send_departure(KLUCZ, ODJAZD)
-    assert [(m, p) for m, p, _, _ in api.wywolania] == [("PATCH", "/activities/metal-planner-odjazd")]
+    assert [m for m, _, _, _ in api.wywolania] == ["DELETE", "POST", "PATCH"]
 
 
 def test_tresc_karty(api):
     pushward.send_departure(KLUCZ, ODJAZD)
-    _, _, klucz, body = api.wywolania[0]
+    _, _, klucz, body = api.wywolania[-1]
     tresc = body["content"]
     assert klucz == KLUCZ
     assert body["state"] == "ONGOING"
@@ -103,22 +104,23 @@ def test_tresc_karty(api):
     assert tresc["warning_threshold"] == 120
     assert tresc["completion_message"] == "Odjeżdża"
     assert tresc["icon"] == "tram.fill"
-    assert tresc["state"] == "5 → Księże Małe"
-    assert tresc["subtitle"] == "Pl. Grunwaldzki · 22:57"
+    assert tresc["state"] == "Pl. Grunwaldzki"
+    assert "subtitle" not in tresc
+    assert "accent_color" not in tresc
 
 
 def test_link_trafia_do_karty_jako_tap_action(api):
     link = "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce&time=22:00"
     pushward.send_departure(KLUCZ, {**ODJAZD, "link": link})
-    assert api.wywolania[0][3]["content"]["tap_action"] == {"url": link, "foreground": True}
+    assert api.wywolania[-1][3]["content"]["tap_action"] == {"url": link, "foreground": True}
 
 
 @pytest.mark.parametrize("zly", [None, "", "javascript:alert(1)", "ftp://host/", "https://",
                                  "/?from=A", "metal.sze.one", 5])
 def test_zly_link_pomija_tap_action_ale_wysyla(api, zly):
     pushward.send_departure(KLUCZ, {**ODJAZD, "link": zly})
-    assert len(api.wywolania) == 1
-    assert "tap_action" not in api.wywolania[0][3]["content"]
+    assert len(api.wywolania) == 3
+    assert "tap_action" not in api.wywolania[-1][3]["content"]
 
 
 def test_trasa_przekazuje_link(klient, api):
@@ -126,20 +128,24 @@ def test_trasa_przekazuje_link(klient, api):
     odpowiedz = klient.post("/api/dev/pushward", json={**ODJAZD, "link": link},
                             headers={"X-PushWard-Key": KLUCZ})
     assert odpowiedz.status_code == 200
-    assert api.wywolania[0][3]["content"]["tap_action"]["url"] == link
+    assert api.wywolania[-1][3]["content"]["tap_action"]["url"] == link
+
+
+@pytest.mark.parametrize("link", [
+    "https://siechnice.kiedyprzyjedzie.pl/#/stops/30329:54854/departures",
+    "https://czynaczas.pl/wroclaw?przystanek=1605",
+])
+def test_link_do_zewnetrznego_rozkladu_przechodzi_z_fragmentem(api, link):
+    pushward.send_departure(KLUCZ, {**ODJAZD, "link": link})
+    assert api.wywolania[-1][3]["content"]["tap_action"]["url"] == link
 
 
 def test_autobus_dostaje_ikone_autobusu(api):
     pushward.send_departure(KLUCZ, {**ODJAZD, "mode": "bus"})
-    assert api.wywolania[0][3]["content"]["icon"] == "bus.fill"
+    assert api.wywolania[-1][3]["content"]["icon"] == "bus.fill"
 
 
-def test_godzina_po_dobie_w_podtytule_jest_zegarowa(api):
-    pushward.send_departure(KLUCZ, {**ODJAZD, "sec": 25 * 3600 + 10 * 60})
-    assert api.wywolania[0][3]["content"]["subtitle"] == "Pl. Grunwaldzki · 01:10"
-
-
-def test_inny_blad_niz_brak_karty_nie_tworzy_jej(api):
+def test_inny_blad_niz_brak_karty_przerywa_przejazd(api):
     api.odpowiedzi.append(pushward.PushWardError(429, "rate_limited"))
     with pytest.raises(pushward.PushWardError) as blad:
         pushward.send_departure(KLUCZ, ODJAZD)
@@ -206,9 +212,9 @@ def test_zapytania_ida_z_wlasnym_user_agentem(monkeypatch):
     monkeypatch.setattr(pushward.urllib.request, "urlopen", udawane)
     pushward.send_departure(KLUCZ, ODJAZD)
     pushward.account(KLUCZ)
-    assert len(wyslane) == 2
+    assert len(wyslane) == 4
     assert all(r.get_header("User-agent") == "Metal-Planner/1.0" for r in wyslane)
-    assert wyslane[1].get_method() == "GET" and wyslane[1].full_url.endswith("/auth/me")
+    assert wyslane[3].get_method() == "GET" and wyslane[3].full_url.endswith("/auth/me")
 
 
 def test_blokada_cloudflare_to_blad_polaczenia_nie_brak_uprawnien(monkeypatch):
@@ -269,7 +275,7 @@ def test_okno_osmiu_godzin(klient, api, monkeypatch, przed_odjazdem, wysylane):
     odpowiedz = klient.post("/api/dev/pushward", json=ODJAZD, headers={"X-PushWard-Key": KLUCZ})
     if wysylane:
         assert odpowiedz.status_code == 200
-        assert len(api.wywolania) == 1
+        assert len(api.wywolania) == 3
     else:
         assert odpowiedz.status_code == 400
         assert "8 godzin" in odpowiedz.get_json()["error"]
