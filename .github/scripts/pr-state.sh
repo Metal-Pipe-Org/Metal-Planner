@@ -213,7 +213,11 @@ base_seeds() {
 #      status z „@claude” w opisie (porażka, PR albo jego baza zmienia
 #      workflow oceny), inna porażka albo brak statusu, gdy ocena nie rusza
 #      → autor (`@claude`),
-#   3. czekające „Request changes” → autor,
+#   3. czekające „Request changes”: czeka prośba o recenzję (kogokolwiek,
+#      także ponowna do tego, kto prosił o zmiany) → człowiek, nie czeka
+#      żadna → autor. „Request changes” zostaje, aż ta osoba zrobi nową
+#      recenzję, więc bez tego PR po poprawkach i ponownej prośbie dalej
+#      wisiałby na autorze,
 #   4. brak pełnego zatwierdzenia (co najmniej jedno stojące zatwierdzenie
 #      człowieka i zielony „Recenzenci konieczni”): czeka prośba o recenzję
 #      (osoba albo zespół) → człowiek, nie czeka żadna → autor. Po ocenie
@@ -241,7 +245,9 @@ labels_plan() {
         elif $claude and ((.review.description // "") | test("@claude")) then {s: "author", why: "ocena Claude'\''a czeka na @claude"}
         elif $claude and .review.state == "pending" then {s: "claude", why: "Claude ocenia"}
         elif $claude and .review.state != "success" then {s: "author", why: "ocena Claude'\''a się nie udała"}
-        elif (.changes_requested | length) > 0 then {s: "author", why: ("prośba o zmiany od " + (.changes_requested | join(", ")))}
+        elif (.changes_requested | length) > 0 then
+          (if .requested > 0 then {s: "human", why: ("prośba o zmiany od " + (.changes_requested | join(", ")) + ", ale czeka prośba o recenzję")}
+           else {s: "author", why: ("prośba o zmiany od " + (.changes_requested | join(", ")))} end)
         elif .approvals == 0 or (.reviewers_ok | not) then
           (if .requested > 0 then {s: "human", why: "czeka na recenzję człowieka"}
            else {s: "author", why: "brak pełnego zatwierdzenia i żadnej prośby o recenzję"} end)
