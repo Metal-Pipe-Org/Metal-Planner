@@ -1,0 +1,163 @@
+name: "PR-y: przypomnienie i zamykanie po ciszy"
+
+# Cisza w PR-ze (#445). Co z nią robimy, zależy od tego, czyj jest ruch —
+# mówi to etykieta stanu z pr-state.yml:
+#
+#  • "waiting for author" (także wersje robocze i konflikty) — to samo co
+#    stale-issues.yml: 14 dni bez niczyjego ruchu → komentarz z pytaniem, czy
+#    PR jest nadal potrzebny, etykieta "stale" i ping na Discordzie; kolejne
+#    7 dni ciszy → zamykamy PR (bez merge'a, gałąź zostaje), "stale" zostaje.
+#    Woła autora i przypisanych.
+#  • "waiting for human review" — tylko przypomnienie na Discordzie dla
+#    poproszonych o recenzję: po 14 dniach ciszy i potem co 7 dni, dopóki
+#    ktoś się nie ruszy. Bez komentarza, bez etykiety i bez zamykania: PR
+#    stoi na recenzencie, więc autor nie powinien tracić PR-a przez cudzą
+#    zwłokę. Podsumowanie dnia i tak pinguje recenzentów codziennie; to
+#    przypomnienie mówi dodatkowo, że czekanie się przeciągnęło.
+#  • każdy inny stan ("waiting for claude review", "waiting for other PR",
+#    brak etykiety) i "external blocked" — nic; ruch ma ktoś inny albo PR
+#    czeka na coś poza sobą. Zostawioną tam "stale" zdejmujemy: ma sens tylko
+#    tam, gdzie zamknięcie grozi autorowi.
+#
+# Aktywność w PR-ze to wszystko, co liczy się w zgłoszeniu, plus recenzja
+# i komentarz w kodzie człowieka, commit, force push, „Ready for review”
+# i prośba o recenzję (`last_active` w .github/scripts/stale.sh). Zmiany
+# etykiet stanu, statusy i oceny Claude'a to boty — nie liczą się, bo inaczej
+# pr-state.yml odkładałby przypomnienie w nieskończoność. Progi, znacznik
+# i decyzja są wspólne ze zgłoszeniami.
+#
+# Etykietę "stale" zdejmujemy tylko wtedy, gdy jest nasze przypomnienie
+# i ktoś po nim się ruszył albo PR przestał czekać na autora. Zwykle robi to
+# od razu stale-unlabel.yml; bieg dzienny łapie to, co tamten przegapił.
+#
+# Bieg raz dziennie, w UTC, kilka minut po biegu zgłoszeń. Rytm „co 7 dni”
+# liczymy z dni ciszy, więc bieg, którego GitHub nie odpali, przesuwa
+# przypomnienie o tydzień — przy codziennym pingu w podsumowaniu dnia to
+# nic nie psuje. Działa z `main`.
+on:
+  schedule:
+    - cron: "47 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  # Komentarz i etykieta idą przez API zgłoszeń, zamknięcie przez API PR-ów.
+  issues: write
+  pull-requests: write
+  # Tylko na skrypty z `main`. Kodu z PR-a nie pobieramy.
+  contents: read
+
+jobs:
+  stale:
+    if: github.repository == 'Metal-Pipe-Org/Metal-Planner'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Pobierz skrypty z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Przypomnij albo zamknij
+        # Przypomnienie i zamknięcie robimy naszym tokenem, a takich zdarzeń
+        # GitHub nie przekazuje do discord.yml — na Discorda wysyłamy stąd.
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/discord.sh
+          source .discord/.github/scripts/stale.sh
+
+          gh label create "$LABEL_STALE" --repo "$REPO" --color EDEDED \
+            --description "Cisza w zgłoszeniu — przypomnienie wysłane albo zamknięte po ciszy" || true
+
+          # Stan z etykiety: author / human / skip.
+          gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '.[]' \
+            | jq -r --arg author "$LABEL_PR_AUTHOR" --arg human "$LABEL_PR_HUMAN" '
+                [.labels[].name] as $l
+                | (if $l | index("external blocked") then "skip"
+                   elif $l | index($author) then "author"
+                   elif $l | index($human) then "human"
+                   else "skip" end) as $state
+                | "\(.number) \($state) \($l | index("stale") != null)"' \
+            > "$RUNNER_TEMP/open.txt"
+
+          # Pętla czyta z fd 3, żeby żadne `gh` w środku nie zjadło jej wejścia.
+          while read -r n state labeled <&3; do
+            if [ "$state" != author ] && [ "$labeled" = true ]; then
+              remove_stale "$n"
+              echo "#$n: nie czeka na autora — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+            [ "$state" = skip ] && continue
+
+            gh api "repos/$REPO/pulls/$n" > "$RUNNER_TEMP/pr.json"
+            gh api --paginate "repos/$REPO/issues/$n/timeline?per_page=100" --jq '.[]' \
+              | jq -s . > "$RUNNER_TEMP/timeline.json"
+            title=$(jq -r .title "$RUNNER_TEMP/pr.json")
+            url=$(jq -r .html_url "$RUNNER_TEMP/pr.json")
+
+            if [ "$state" = human ]; then
+              days=$(quiet_days "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/timeline.json")
+              if [ "$days" -lt "$DAYS_QUIET" ] || [ $(( (days - DAYS_QUIET) % DAYS_GRACE )) -ne 0 ]; then
+                continue
+              fi
+              # Sami poproszeni o recenzję — to na nich czeka PR. Zespołów
+              # nie wołamy: na Discordzie ping zespołu nie ma adresata.
+              reviewers=$(jq -r '[.requested_reviewers[] | select(.type != "Bot") | .login] | join(" ")' \
+                "$RUNNER_TEMP/pr.json")
+              [ -z "$reviewers" ] && continue
+              author=$(jq -r .user.login "$RUNNER_TEMP/pr.json")
+              echo "#$n: przypomnienie o recenzji do $reviewers ($days dni)" | tee -a "$GITHUB_STEP_SUMMARY"
+              discord_send warn "" "👀 Recenzja czeka od ${days} dni: #$n $title" "$url" \
+                "PR od **$author** od ${days} dni czeka na recenzję i nic się w nim nie dzieje. Zrób recenzję albo napisz pod PR-em, co go blokuje." \
+                "" "$reviewers"
+              continue
+            fi
+
+            action=$(stale_action "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/timeline.json" \
+              "$MARKER" "$LABEL_STALE" "$DAYS_QUIET" "$DAYS_GRACE")
+
+            # Autor i przypisani — to ich ruch. Boty nie odpowiedzą.
+            who=$(jq -r '[.user, .assignees[]]
+                         | map(select(.type != "Bot") | .login) | unique
+                         | map("@" + .) | join(" ")' "$RUNNER_TEMP/pr.json")
+
+            case "$action" in
+              ping)
+                gh pr comment "$n" --repo "$REPO" --body "$MARKER
+          $who od ${DAYS_QUIET} dni nic się tu nie dzieje, a PR czeka na Twój ruch. Czy jest nadal potrzebny?
+
+          1. **Tak** — wystarczy ruch: push, komentarz albo prośba o recenzję. Etykieta \"$LABEL_STALE\" zniknie, a licznik ruszy od nowa.
+          2. **Nie** — zamknij go od razu przyciskiem „Close pull request”. Przypomnienia ustaną.
+
+          Bez odpowiedzi zamknę go sam za ${DAYS_GRACE} dni, bez merge'a. Nic nie ginie: gałąź zostaje, PR da się odnaleźć po etykiecie \"$LABEL_STALE\" i otworzyć ponownie jednym kliknięciem."
+                gh pr edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
+                echo "#$n: przypomnienie do $who" | tee -a "$GITHUB_STEP_SUMMARY"
+                discord_send warn "" "⏳ PR bez ruchu od ${DAYS_QUIET} dni: #$n $title" "$url" \
+                  "Czy ten PR jest nadal potrzebny?
+          1. **Tak** — push, komentarz albo prośba o recenzję.
+          2. **Nie** — zamknij go, a przypomnienia ustaną.
+          Bez odpowiedzi zamknie się sam za ${DAYS_GRACE} dni." "" "${who//@/}"
+                ;;
+              close)
+                gh pr comment "$n" --repo "$REPO" --body \
+                  "Brak odpowiedzi przez ${DAYS_GRACE} dni — zamykam bez merge'a. Gałąź zostaje; gdy temat wróci, wystarczy otworzyć ponownie."
+                gh pr edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
+                gh pr close "$n" --repo "$REPO"
+                echo "#$n: zamknięty po ciszy" | tee -a "$GITHUB_STEP_SUMMARY"
+                discord_send grey "" "💤 PR zamknięty po ciszy: #$n $title" "$url" "" "" "${who//@/}"
+                ;;
+              unlabel)
+                remove_stale "$n"
+                echo "#$n: ktoś się ruszył — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+                ;;
+            esac
+          done 3< "$RUNNER_TEMP/open.txt"
