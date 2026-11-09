@@ -115,6 +115,7 @@ def test_z_kluczem_klik_pyta_i_wysyla(przegladarka, adres):
     assert "5 → Księże Małe, 22:57" in pytania[0]
     assert wyslane[0][0] == KLUCZ
     assert wyslane[0][1]["sec"] == 82620
+    assert len(pytania) == 1
 
 
 def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(przegladarka, adres):

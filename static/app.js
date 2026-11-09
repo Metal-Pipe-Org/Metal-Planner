@@ -8475,8 +8475,7 @@ async function pushwardClick(event) {
             }),
         });
         const body = await response.json().catch(() => ({}));
-        alert(response.ok ? 'Wysłano odliczenie do Dynamic Island.'
-                          : `Nie wysłano: ${describePushwardError(body)}`);
+        if (!response.ok) alert(`Nie wysłano: ${describePushwardError(body)}`);
     } catch {
         alert('Nie wysłano: brak połączenia z serwerem.');
     }
