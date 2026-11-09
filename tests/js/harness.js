@@ -596,7 +596,7 @@ const INJECTION = `
     timetableRows, TIMETABLE_ROWS_MAX,
     keepWithinHorizon, recentFirst,
     withArrivals, withLate, flowIcon, FLOW_ICONS,
-    playPipeDrop, wakeMixer, PIPE_SOURCES, PIPE_VOLUME,
+    playPipeDrop, wakeMixer, PIPE_SOURCES, PIPE_VOLUMES,
     get flowHits() { return flowHits; },
     get flowLabelLayer() { return flowLabelLayer; },
     get flowPick() { return flowPick; },
@@ -688,4 +688,4 @@ app.dotOpts = settingView({size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past'
     center: 'dot-center', tipCursor: 'tip-cursor', tipPanel: 'tip-panel',
     bikeTimes: 'bike-times', bikeRides: 'bike-rides', carTimes: 'car-times',
     why: 'debug-why', whySeg: 'debug-why-seg', namesZoom: 'names-zoom'});
-app.soundOpts = settingView({pipe: 'sound-pipe'});
+app.soundOpts = settingView({level: 'sound-level'});
