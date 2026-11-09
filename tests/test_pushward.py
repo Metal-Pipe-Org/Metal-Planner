@@ -85,6 +85,12 @@ def test_przejazd_zaklada_nowa_karte_i_wypelnia_ja_bez_kasowania(api):
     assert tworzenie["dismissal_ttl"] == 300
 
 
+@pytest.mark.parametrize("num,oczekiwany", [("A", "A"), ("149", "149"), ("810+81", "810+")])
+def test_numer_linii_w_wyspie_ma_najwyzej_cztery_znaki(api, num, oczekiwany):
+    pushward.send_departure(KLUCZ, {**ODJAZD, "num": num})
+    assert api.wywolania[-1][3]["content"]["compact_label"] == oczekiwany
+
+
 def test_kolejne_przejazdy_dostaja_rozne_karty(api, monkeypatch):
     pushward.send_departure(KLUCZ, ODJAZD)
     _zamroz_czas(monkeypatch, KONIEC - 3000)
@@ -106,6 +112,7 @@ def test_tresc_karty(api):
     assert tresc["warning_threshold"] == 120
     assert tresc["completion_message"] == "Odjeżdża"
     assert tresc["icon"] == "tram.fill"
+    assert tresc["compact_label"] == "5"
     assert tresc["state"] == "Pl. Grunwaldzki"
     assert "subtitle" not in tresc
     assert "accent_color" not in tresc

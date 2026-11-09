@@ -112,6 +112,8 @@ def _card_body(departure):
             "template": "countdown",
             "state": departure["stop"],
             "icon": ICONS.get(departure["mode"], "bus.fill"),
+            # limit 4 znaków po stronie PushWard; dłuższy numer (np. "810+81") ucinamy, by karta nie została odrzucona
+            "compact_label": departure["num"][:4],
             "show_ruler": False,
             "start_date": int(time.time()),
             "end_date": ends,
