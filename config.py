@@ -18,12 +18,17 @@ osobno przez docker/entrypoint.sh i z crona).
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).resolve().parent / "data" / ".env"
 DISCORD_IDS_PATH = ENV_PATH.parent / "discord.json"
+# Czas budowy obrazu, zapisywany przez Dockerfile (#446). Poza kontenerem pliku
+# nie ma i wtedy liczy się start procesu - patrz deployed_at().
+DEPLOYED_AT_PATH = Path(__file__).resolve().parent / "DEPLOYED_AT"
+_STARTED_AT = datetime.now(timezone.utc)
 
 # Brak pliku to nie błąd: na czystym klonie i w kontenerze bez sekretów
 # aplikacja ma wstać normalnie, po prostu bez klucza.
@@ -47,6 +52,26 @@ def dev_mode():
     go świadomie - lokalnie i na serwerze testowym.
     """
     return os.environ.get("DEV_MODE", "").strip() == "1"
+
+
+def deployed_at():
+    """Kiedy wstała ta wersja aplikacji - do napisu pod nazwą w DEV_MODE (#446).
+
+    Zwraca czas w strefie serwera. W kontenerze to czas
+    budowy obrazu z pliku DEPLOYED_AT: obraz buduje się przy każdym deployu
+    z nowym commitem, a restart kontenera go nie zmienia. Lokalnie, przy
+    `python app.py`, pliku nie ma i zastępstwem deployu jest start serwera -
+    reloader i tak wstaje od nowa po każdej zmianie kodu. Zepsuty plik
+    traktujemy jak brak, żeby napis nie wywracał strony.
+    """
+    try:
+        text = DEPLOYED_AT_PATH.read_text(encoding="utf-8").strip()
+        when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return when.astimezone()
+    except (OSError, ValueError):
+        return _STARTED_AT.astimezone()
 
 
 def discord_webhook():
