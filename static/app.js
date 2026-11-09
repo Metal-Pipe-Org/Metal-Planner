@@ -7590,7 +7590,7 @@ function acceptSoundLevel(info, value) {
 }
 
 const PIPE_OFF_STEPS = [
-    {text: 'Czy na pewno jesteś świadom, że chcesz to zrobić?', ok: 'Tak'},
+    {text: 'Czy jesteś w pełni przekonany, że chcesz wyłączyć ten przepiękny element aplikacji?', ok: 'Tak'},
     {text: 'Czy wiesz, że to Ci zepsuje experience aplikacji?', ok: 'Tak'},
     {text: 'Czy wiesz, że badania amerykańskich naukowców stwierdziły, że słuchanie Metal Pipe\'a pozwala zachować dobry słuch nawet w wieku 100 lat?',
      ok: 'Wyłącz mimo to', joke: true},
@@ -7599,27 +7599,28 @@ const PIPE_OFF_STEPS = [
 /** Trzy okna z rzędu; true tylko, gdy użytkownik przeszedł wszystkie. */
 async function confirmPipeOff() {
     const dialog = $('pipe-off-dialog');
+    let confirmed = true;
+    // To samo okno stoi otwarte przez wszystkie kroki i zamykamy je raz, na
+    // końcu: `close` odpala się asynchronicznie, więc zamknięcie między krokami
+    // uruchomiłoby obsługę następnego kroku jako anulowanie.
+    dialog.showModal();
     for (const step of PIPE_OFF_STEPS) {
         $('pipe-off-text').textContent = step.text;
         $('pipe-off-ok').textContent = step.ok;
         $('pipe-off-joke').hidden = !step.joke;
-        const confirmed = await new Promise(resolve => {
-            const finish = answer => {
-                $('pipe-off-ok').onclick = $('pipe-off-cancel').onclick = null;
-                dialog.onclose = dialog.onclick = null;
-                if (dialog.open) dialog.close();
-                resolve(answer);
-            };
-            $('pipe-off-ok').onclick = () => finish(true);
-            $('pipe-off-cancel').onclick = () => finish(false);
-            // Esc i klik w tło to anulowanie.
-            dialog.onclose = () => finish(false);
-            dialog.onclick = e => { if (e.target === dialog) finish(false); };
-            dialog.showModal();
+        confirmed = await new Promise(resolve => {
+            $('pipe-off-ok').onclick = () => resolve(true);
+            $('pipe-off-cancel').onclick = () => resolve(false);
+            // Esc zamyka okno samo, klik w tło zamykamy tu - oba to anulowanie.
+            dialog.onclose = () => resolve(false);
+            dialog.onclick = e => { if (e.target === dialog) resolve(false); };
         });
-        if (!confirmed) return false;
+        if (!confirmed) break;
     }
-    return true;
+    $('pipe-off-ok').onclick = $('pipe-off-cancel').onclick = null;
+    dialog.onclose = dialog.onclick = null;
+    if (dialog.open) dialog.close();
+    return confirmed;
 }
 
 for (const type of ['input', 'change']) {
