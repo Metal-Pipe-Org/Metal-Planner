@@ -96,7 +96,7 @@ syntax_key() {
 syntax_problem_lines() {
   local key=$1 author=$2 p
   if [ "$key" = no-ref ]; then
-    echo "- W tytule, opisie ani nazwie gałęzi nie ma odwołania do zgłoszenia w formie, którą rozpoznaje automat: \`Closes #12\` (także \`Fixes\`, \`Resolves\`), \`Refs #12\` (także \`Ref\`, \`Related to\`, \`Relates to\`, \`Part of\`, \`Dotyczy\`) albo gałąź \`claude/issue-12-…\`. Gołe \`#12\` się nie liczy."
+    echo "- W tytule, opisie ani nazwie gałęzi nie ma odwołania do zgłoszenia w formie, którą rozpoznaje automat: \`Closes #12\` (albo inne słowo zamykające: $(refs_words_md "$REFS_CLOSE_WORDS")), \`Refs #12\` (albo inne słowo wskazujące: $(refs_words_md "$REFS_MENTION_WORDS")) albo gałąź \`${CLAUDE_BRANCH_PREFIX}12-…\`. Gołe \`#12\` się nie liczy."
     return 0
   fi
   for p in $(tr , ' ' <<<"${key#bad:}"); do
