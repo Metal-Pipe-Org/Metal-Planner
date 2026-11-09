@@ -1,59 +1,79 @@
-name: "Zgłoszenia: zdjęcie stale od razu"
+name: "Zgłoszenia i PR-y: zdjęcie stale od razu"
 
-# Bieg dzienny (stale-issues.yml) zdejmuje etykietę "stale" dopiero następnego
-# dnia. Tu robimy to w chwili, gdy:
+# Biegi dzienne (stale-issues.yml, stale-prs.yml) zdejmują etykietę "stale"
+# dopiero następnego dnia. Tu robimy to w chwili, gdy:
 #
-#  • człowiek odpisze pod zgłoszeniem albo otworzy je ponownie — decyzję i
-#    definicję aktywności bierzemy z tego samego skryptu co bieg dzienny
-#    (.github/scripts/stale.sh), więc oba biegi nie rozjadą się w tym, co
+#  • człowiek odpisze pod zgłoszeniem albo PR-em albo otworzy je ponownie —
+#    decyzję i definicję aktywności bierzemy z tego samego skryptu co biegi
+#    dzienne (.github/scripts/stale.sh), więc nie rozjadą się w tym, co
 #    liczy się jako odpowiedź,
+#  • w PR-ze człowiek wypchnie zmiany, oznaczy go jako gotowy, poprosi
+#    o recenzję albo ją wystawi (recenzję łapiemy przez przekaźnik
+#    pr-review-relay.yml i `workflow_run`, zasada 15 w docs/WORKFLOWS.md),
 #  • człowiek da zgłoszeniu etykietę "external blocked" albo "PR in progress"
-#    (zablokowane nie powinno nosić "stale"; PR to aktywność),
-#  • zgłoszenie jest zablokowane przez inne ("Blocked by") i ktoś pod nim
-#    napisze — "stale" nie ma tam czego szukać.
+#    (zablokowane nie powinno nosić "stale"; PR to aktywność), a PR-owi
+#    "external blocked",
+#  • zgłoszenie jest zablokowane przez inne ("Blocked by") albo PR nie czeka
+#    już na autora (np. czeka na recenzję) i coś go tu obudzi — "stale" nie
+#    ma tam czego szukać.
 #
 # Czego GitHub nie zamienia na zdarzenie workflow: dodania GitHubowego
 # „Blocked by" (nie ma takiego zdarzenia wśród wyzwalaczy Actions). Tu "stale"
-# zdejmie dopiero bieg dzienny. Commit wskazujący na zgłoszenie nie jest
-# aktywnością w ogóle. Etykietę "PR in progress" nadaną przez workflow zdejmuje z "stale"
-# sam issue-labels.yml, bo etykiety nadane tokenem workflow nie budzą innych.
+# zdejmie dopiero bieg dzienny. Tak samo ze zmianą etykiety stanu PR-a —
+# robi ją pr-state.yml naszym tokenem, a to nie budzi innych workflow. Commit
+# wskazujący na zgłoszenie nie jest aktywnością w ogóle. Etykietę
+# "PR in progress" nadaną przez workflow zdejmuje z "stale" sam
+# issue-labels.yml.
 #
-# Wpisy botów nie uruchamiają nic: bieg dzienny też ich nie liczy jako
+# Wpisy botów nie uruchamiają nic: biegi dzienne też ich nie liczą jako
 # aktywności. Samo zdjęcie etykiety nie jest wśród wyzwalaczy, więc pętli nie
 # ma. Rodzica z otwartymi pod-zgłoszeniami zostawiamy tak samo jak bieg
 # dzienny.
+#
+# `pull_request_target`, bo bierze workflow z `main` i daje token z zapisem
+# także przy PR-ach z forków. Kodu z PR-a nie pobieramy — tylko skrypt z `main`.
 on:
   issue_comment:
     types: [created]
   issues:
     types: [reopened, labeled]
+  pull_request_target:
+    types: [reopened, labeled, synchronize, ready_for_review, review_requested]
+  workflow_run:
+    workflows: ["PR-y: recenzja (przekaźnik)"]
+    types: [completed]
 
 permissions:
   issues: write
+  pull-requests: write
   contents: read
 
 jobs:
   unlabel:
+    # Przy `workflow_run` nie wiemy, którego PR-a dotyczyła recenzja (zasada
+    # 15), więc sprawdzamy wszystkie otwarte PR-y z "stale" — to zwykle kilka.
     if: >-
       github.repository == 'Metal-Pipe-Org/Metal-Planner'
-      && !github.event.issue.pull_request
-      && github.event.sender.type != 'Bot'
-      && contains(github.event.issue.labels.*.name, 'stale')
-      && (github.event.action != 'labeled'
-          || github.event.label.name == 'external blocked'
-          || github.event.label.name == 'PR in progress')
+      && (github.event_name == 'workflow_run'
+          || (github.event.sender.type != 'Bot'
+              && (contains(github.event.issue.labels.*.name, 'stale')
+                  || contains(github.event.pull_request.labels.*.name, 'stale'))
+              && (github.event.action != 'labeled'
+                  || github.event.label.name == 'external blocked'
+                  || (github.event.label.name == 'PR in progress' && !github.event.pull_request))))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Dwa wpisy pod rząd nie mogą się mijać na jednym zgłoszeniu.
     concurrency:
-      group: stale-unlabel-${{ github.event.issue.number }}
+      group: stale-unlabel-${{ github.event.issue.number || github.event.pull_request.number || 'all' }}
       cancel-in-progress: false
 
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      N: ${{ github.event.issue.number }}
+      N: ${{ github.event.issue.number || github.event.pull_request.number }}
       LABELED: ${{ github.event.label.name }}
+      EVENT: ${{ github.event_name }}
 
     steps:
       - name: Pobierz skrypt z main
@@ -64,33 +84,50 @@ jobs:
           sparse-checkout: .github/scripts
           persist-credentials: false
 
-      - name: Zdejmij stale, jeśli ktoś odpisał po przypomnieniu
+      - name: Zdejmij stale, jeśli ktoś się ruszył po przypomnieniu
         run: |
           set -euo pipefail
           source .scripts/.github/scripts/stale.sh
 
-          gh api "repos/$REPO/issues/$N" > "$RUNNER_TEMP/issue.json"
-
-          # Zablokowane albo z PR-em: zdejmujemy bez oglądania osi czasu.
-          if [ "$LABELED" = 'external blocked' ] || [ "$LABELED" = 'PR in progress' ] \
-             || [ "$(jq '[.labels[].name] | index("external blocked") != null or (.issue_dependencies_summary.blocked_by // 0) > 0' "$RUNNER_TEMP/issue.json")" = true ]; then
-            remove_stale "$N"
-            echo "#$N: zablokowane albo z PR-em — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+          if [ "$EVENT" = workflow_run ]; then
+            gh pr list --repo "$REPO" --state open --label "$LABEL_STALE" --limit 100 \
+              --json number --jq '.[].number' > "$RUNNER_TEMP/numbers.txt"
+          else
+            echo "$N" > "$RUNNER_TEMP/numbers.txt"
           fi
 
-          if [ -n "$(gh api --paginate "repos/$REPO/issues/$N/sub_issues?per_page=100" \
-               --jq '.[] | select(.state == "open") | .number')" ]; then
-            echo "Są otwarte pod-zgłoszenia — zostawiam."; exit 0
-          fi
+          while read -r n <&3; do
+            # API zgłoszeń daje to samo i dla PR-a: `created_at`, etykiety,
+            # a `pull_request` mówi, czym jest.
+            gh api "repos/$REPO/issues/$n" > "$RUNNER_TEMP/issue.json"
+            is_pr=$(jq '.pull_request != null' "$RUNNER_TEMP/issue.json")
 
-          gh api --paginate "repos/$REPO/issues/$N/timeline?per_page=100" --jq '.[]' \
-            | jq -s . > "$RUNNER_TEMP/timeline.json"
+            # Zablokowane, zgłoszenie z PR-em albo PR, który nie czeka na
+            # autora (stale z zamknięciem dotyczy tylko PR-ów autora,
+            # stale-prs.yml): zdejmujemy bez oglądania osi czasu.
+            if [ "$LABELED" = 'external blocked' ] || [ "$LABELED" = 'PR in progress' ] \
+               || [ "$(jq --arg author "$LABEL_PR_AUTHOR" '[.labels[].name] as $l
+                           | ($l | index("external blocked") != null)
+                             or (.pull_request != null and ($l | index($author)) == null)
+                             or (.issue_dependencies_summary.blocked_by // 0) > 0' "$RUNNER_TEMP/issue.json")" = true ]; then
+              remove_stale "$n"
+              echo "#$n: zablokowane, z PR-em albo nie czeka na autora — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
 
-          action=$(stale_action "$RUNNER_TEMP/issue.json" "$RUNNER_TEMP/timeline.json" \
-            "$MARKER" "$LABEL_STALE" "$DAYS_QUIET" "$DAYS_GRACE")
+            if [ "$is_pr" = false ] && [ -n "$(gh api --paginate "repos/$REPO/issues/$n/sub_issues?per_page=100" \
+                 --jq '.[] | select(.state == "open") | .number')" ]; then
+              echo "#$n: są otwarte pod-zgłoszenia — zostawiam."; continue
+            fi
 
-          if [ "$action" = unlabel ]; then
-            remove_stale "$N"
-            echo "#$N: ktoś odpisał — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
+            gh api --paginate "repos/$REPO/issues/$n/timeline?per_page=100" --jq '.[]' \
+              | jq -s . > "$RUNNER_TEMP/timeline.json"
+
+            action=$(stale_action "$RUNNER_TEMP/issue.json" "$RUNNER_TEMP/timeline.json" \
+              "$MARKER" "$LABEL_STALE" "$DAYS_QUIET" "$DAYS_GRACE")
+
+            if [ "$action" = unlabel ]; then
+              remove_stale "$n"
+              echo "#$n: ktoś się ruszył — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done 3< "$RUNNER_TEMP/numbers.txt"
