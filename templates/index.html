@@ -971,6 +971,23 @@
         <p class="field-hint" id="access-status" role="status"></p>
     </div>
 
+{#
+      Eksperyment (#453): odliczenie do odjazdu w Dynamic Island przez PushWard.
+      Klucz zapisuje app.js w localStorage - to nie ustawienie, więc set-action.
+    #}
+    <div class="field dev-only set-row set-action" data-setting="pushward" data-labels="Eksperymenty, Dynamic Island, PushWard">
+        <div class="set-title">Dynamic Island (PushWard)
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Klik w godzinę odjazdu na tablicy przystanku wysyła odliczenie do Dynamic Island i na ekran blokady iPhone'a. Wymaga darmowej aplikacji PushWard na iPhonie (App Store). Klucz: w PushWard wejdź w Ustawienia → Integration Key. Darmowy limit to 250 aktualizacji miesięcznie, a jeden przejazd zużywa zwykle jedną. Godziny pochodzą z rozkładu, bez opóźnień na żywo. Klucz zostaje na tym urządzeniu, w tej przeglądarce. Usunięcie klucza wyłącza funkcję.">?</span>
+        </div>
+        <div class="sw-row">
+            <input type="password" id="pushward-key" autocomplete="off" placeholder="Klucz integracji (hlk_…)" aria-label="Klucz integracji PushWard">
+            <button type="button" id="pushward-save" class="button">Zapisz</button>
+            <button type="button" id="pushward-clear" class="button">Usuń</button>
+        </div>
+        <p class="field-hint" id="pushward-status" role="status"></p>
+    </div>
+
     <div class="field dev-only set-row" data-setting="sw-check" data-labels="Aplikacja" id="sw-field">
         <div class="set-title">Wersja aplikacji</div>
         <div class="sw-row">

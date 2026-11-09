@@ -19,6 +19,7 @@ import onboard
 import pkp
 import pkp_live
 import polinka
+import pushward
 import siechnice
 import timetables
 import traficar
@@ -568,6 +569,53 @@ def init_routes(app):
         if token is None:
             return jsonify({"error": "Zły, zużyty albo przeterminowany kod."}), 403
         return jsonify({"token": token})
+
+    @app.route("/api/dev/pushward", methods=["POST"])
+    def api_dev_pushward():
+        """Odliczanie do odjazdu w Dynamic Island (patrz pushward.py).
+
+        Klucz integracji przychodzi w nagłówku i idzie dalej do PushWard;
+        nigdzie go nie zapisujemy ani nie logujemy.
+        """
+        if not config.dev_mode():
+            abort(404)
+        key = request.headers.get("X-PushWard-Key", "").strip()
+        departure = request.get_json(silent=True) or {}
+        try:
+            pushward.send_departure(key, {
+                "num": str(departure["num"]),
+                "headsign": str(departure["headsign"]),
+                "mode": str(departure.get("mode", "")),
+                "stop": str(departure["stop"]),
+                "date": str(departure["date"]),
+                "sec": int(departure["sec"]),
+                "link": departure.get("link"),
+            })
+        except (KeyError, ValueError):
+            return jsonify({"error": "Niepełny opis odjazdu."}), 400
+        except pushward.OutOfWindow:
+            return jsonify({"error": "Odliczenie działa tylko dla odjazdów w ciągu najbliższych 8 godzin."}), 400
+        except pushward.PushWardError as e:
+            return jsonify({"status": e.status, "code": e.code, "detail": e.detail}), 502
+        return jsonify({"sent": True})
+
+    @app.route("/api/dev/pushward/check", methods=["GET"])
+    def api_dev_pushward_check():
+        """Sprawdza klucz integracji i oddaje zużycie miesięcznego limitu.
+
+        Klucz tylko przechodzi do PushWard w nagłówku; nie wraca w odpowiedzi.
+        """
+        if not config.dev_mode():
+            abort(404)
+        key = request.headers.get("X-PushWard-Key", "").strip()
+        try:
+            me = pushward.account(key)
+        except pushward.PushWardError as e:
+            return jsonify({"status": e.status}), 502
+        return jsonify({
+            "used": me.get("live_activity_updates_used"),
+            "limit": me.get("live_activity_updates_limit"),
+        })
 
     @app.route("/api/dev/siechnice", methods=["GET", "POST"])
     def api_dev_siechnice():
