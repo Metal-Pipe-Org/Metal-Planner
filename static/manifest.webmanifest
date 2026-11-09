@@ -9,7 +9,7 @@
     "scope": "/",
     "display": "standalone",
     "orientation": "portrait",
-    "theme_color": "#2563eb",
+    "theme_color": "#362768",
     "background_color": "#e9edf2",
     "categories": ["navigation", "travel", "utilities"],
     "icons": [
