@@ -678,7 +678,7 @@ function nagrajDzwiek(fn) {
 checks.dzwiek_wybiera_format_ktory_przegladarka_umie = (() => {
     // Emulator udaje przeglądarkę bez Ogg Opus, ale z AAC - czyli Safari.
     // Ma sięgnąć po drugi plik, a nie po pierwszy z listy.
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     const w = nagrajDzwiek(() => app.playPipeDrop());
     return {
         ok: w.zagrane === 1 && /metal-pipe\.m4a$/.test(w.zrodlo || ''),
@@ -690,13 +690,13 @@ checks.dzwiek_wybiera_format_ktory_przegladarka_umie = (() => {
 checks.dzwiek_gra_od_poczatku_przy_powtorzeniu = (() => {
     // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać od nowa,
     // a nie zostać po cichu pominięte.
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     const w = nagrajDzwiek(() => { app.playPipeDrop(); app.playPipeDrop(); });
     return {ok: w.zagrane === 2 && w.przewiniete === 2, ...w};
 })();
 
 checks.dzwiek_milczy_przy_ograniczonym_ruchu = (() => {
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     globalThis.__mniejRuchu = true;
     const w = nagrajDzwiek(() => app.playPipeDrop());
     globalThis.__mniejRuchu = false;
@@ -704,9 +704,9 @@ checks.dzwiek_milczy_przy_ograniczonym_ruchu = (() => {
 })();
 
 checks.dzwiek_milczy_gdy_wylaczony = (() => {
-    app.soundOpts.pipe = false;
+    app.soundOpts.level = 'off';
     const w = nagrajDzwiek(() => app.playPipeDrop());
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     return {ok: w.zagrane === 0, ...w};
 })();
 
@@ -719,7 +719,9 @@ checks.dzwiek_nie_zatrzymuje_muzyki = (() => {
 
 checks.nagranie_nie_gra_na_pelnej_glosnosci = (() => {
     // Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm, nie żart.
-    return {ok: app.PIPE_VOLUME > 0 && app.PIPE_VOLUME < 0.6, glosnosc: app.PIPE_VOLUME};
+    const {normal, quiet} = app.PIPE_VOLUMES;
+    return {ok: normal === 0.175 && quiet / normal >= 0.25 && quiet / normal <= 0.35,
+            glosnosc: app.PIPE_VOLUMES};
 })();
 
 /* --- kropki węzłów: gdzie stoją i która jest startowa ------------------- */

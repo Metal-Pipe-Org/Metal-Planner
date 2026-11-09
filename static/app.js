@@ -1357,10 +1357,9 @@ const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 // w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków),
 // `false` chowa ją w całości i zostawia domyślne. Kod suwaków zostaje w repo
 // celowo - patrz znaczniki TYMCZASOWE w index.html i style.css. Dźwięk działa
-// tak samo (SOUND_TUNING, wiersze z `data-tuning`).
+// tak samo (wiersze z `data-tuning`).
 const LOOK_TUNING = true;
-const SOUND_TUNING = false;
-const TUNING = {look: LOOK_TUNING, sound: SOUND_TUNING};
+const TUNING = {look: LOOK_TUNING};
 
 const SETTINGS_KEY = 'metal-planner:settings';
 
@@ -1428,7 +1427,6 @@ const LEGACY_SETTINGS_KEYS = {
         maxWeight: 'look-weight', dimFactor: 'look-dim', labelStep: 'look-label-step',
         labelScale: 'look-label-size', labelOpacity: 'look-label-op',
     },
-    'metal-planner:sound-prefs': {pipe: 'sound-pipe'},
 };
 
 // Jednorazowo: kto miał ustawienia pod dawnymi kluczami, nie traci ich.
@@ -7542,10 +7540,10 @@ const SETTING_EFFECTS = {
     }},
     // Bez przycisku strefa pokazuje się tylko pod kursorem (patrz refreshZoneLayer).
     'zone-button': {react: () => refreshZoneLayer()},
-    'sound-pipe': {react: on => {
-        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
-        // co się właśnie włączyło.
-        if (on) playPipeDrop();
+    'sound-level': {react: level => {
+        // Zmiana od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
+        // jak brzmi wybrana głośność.
+        if (level !== 'off') playPipeDrop();
     }},
     'dot-size': {react: debounced(() => applyDotOpts(), 60)},   // przeciąganie suwaka: jedno przemalowanie na klatkę
     'dot-rows': {react: reloadTimetable},
@@ -7568,7 +7566,7 @@ for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-r
     SETTING_EFFECTS[id] = {react: () => applyDotOpts()};
 }
 
-// Strojenia schowane stałymi (LOOK_TUNING, SOUND_TUNING) nie mają wiersza w panelu.
+// Strojenia schowane stałą (LOOK_TUNING) nie mają wiersza w panelu.
 for (const row of settingsRows) {
     if (row.dataset.tuning) row.hidden = !TUNING[row.dataset.tuning];
 }
@@ -7579,11 +7577,79 @@ for (const info of SETTINGS.values()) {
     if (effect && effect.paint) effect.paint(setting(info.id));
 }
 
+// Poprzedni wybór, do którego wraca lista po anulowaniu któregoś z okien.
+let soundLevelBefore = setting('sound-level');
+// Natywna lista ma już wartość „Wyłączony”, zanim padnie pierwsze pytanie, więc
+// do czasu odpowiedzi wiersz nie może zmienić grupy.
+let soundLevelConfirming = false;
+
+function acceptSoundLevel(info, value) {
+    soundLevelBefore = value;
+    storeSetting(info.id, value);
+    // Zliczamy tu, nie na zdarzeniu `change`: anulowane wyłączenie nie jest zmianą.
+    recordSettingChange(info.id);
+    syncSettingsSnapshot();
+    SETTING_EFFECTS[info.id].react(value);
+}
+
+const PIPE_OFF_STEPS = [
+    {text: 'Czy jesteś w pełni przekonany, że chcesz wyłączyć ten przepiękny element aplikacji?', ok: 'Tak'},
+    {text: 'Czy wiesz, że to Ci zepsuje experience aplikacji?', ok: 'Tak'},
+    {text: 'Czy wiesz, że badania amerykańskich naukowców stwierdziły, że słuchanie Metal Pipe\'a pozwala zachować dobry słuch nawet w wieku 100 lat?',
+     ok: 'Wyłącz mimo to', joke: true},
+];
+
+/** Trzy okna z rzędu; true tylko, gdy użytkownik przeszedł wszystkie. */
+async function confirmPipeOff() {
+    const dialog = $('pipe-off-dialog');
+    let confirmed = true;
+    // To samo okno stoi otwarte przez wszystkie kroki i zamykamy je raz, na
+    // końcu: `close` odpala się asynchronicznie, więc zamknięcie między krokami
+    // uruchomiłoby obsługę następnego kroku jako anulowanie.
+    dialog.showModal();
+    for (const step of PIPE_OFF_STEPS) {
+        $('pipe-off-text').textContent = step.text;
+        $('pipe-off-ok').textContent = step.ok;
+        $('pipe-off-joke').hidden = !step.joke;
+        confirmed = await new Promise(resolve => {
+            $('pipe-off-ok').onclick = () => resolve(true);
+            $('pipe-off-cancel').onclick = () => resolve(false);
+            // Esc zamyka okno samo, klik w tło zamykamy tu - oba to anulowanie.
+            dialog.onclose = () => resolve(false);
+            dialog.onclick = e => { if (e.target === dialog) resolve(false); };
+        });
+        if (!confirmed) break;
+    }
+    $('pipe-off-ok').onclick = $('pipe-off-cancel').onclick = null;
+    dialog.onclose = dialog.onclick = null;
+    if (dialog.open) dialog.close();
+    return confirmed;
+}
+
 for (const type of ['input', 'change']) {
     devPanel.addEventListener(type, event => {
         const info = SETTING_BY_CONTROL.get(event.target);
         if (!info) return;
         const value = readControl(info.control);
+        if (info.id === 'sound-level') {
+            // `input` leci też przy przewijaniu listy klawiaturą, a okna
+            // potwierdzeń nie mają się mnożyć.
+            if (type === 'input') return;
+            if (value !== 'off') {
+                acceptSoundLevel(info, value);
+                return;
+            }
+            const previous = soundLevelBefore;
+            soundLevelConfirming = true;
+            confirmPipeOff().then(confirmed => {
+                soundLevelConfirming = false;
+                if (confirmed) acceptSoundLevel(info, value);
+                else info.control.value = previous;
+                syncSettingCopies();
+                markChangedSettings();
+            });
+            return;
+        }
         storeSetting(info.id, value);
         paintSettingOutput(info);
         if (type !== (info.kind === 'range' ? 'input' : 'change')) return;
@@ -7629,10 +7695,6 @@ document.documentElement.style.setProperty('--chip-scale', setting('look-label-s
 // przeglądarki - ta kłamie, a canPlayType odpowiada za konkretny dekoder.
 // Oba pliki ważą po ~38 kB, więc wpadają do cache'u service workera razem
 // z resztą statyki i działają offline.
-//
-// Ustawienie jest SCHOWANE (SOUND_TUNING = false) - dźwięk po prostu jest.
-// Przełącznik zostaje w kodzie i w panelu, więc pokazanie go to zmiana
-// jednej stałej (ten sam układ, co przy LOOK_TUNING).
 
 const PIPE_SOURCES = [
     ['audio/ogg; codecs=opus', '/static/sounds/metal-pipe.ogg'],
@@ -7640,14 +7702,17 @@ const PIPE_SOURCES = [
 ];
 
 // Nagranie jest głośne (szczyt ponad 0 dBFS), a to ma być żart w tle,
-// nie alarm. 0.35 wciąż było za głośno - połowa tego.
+// nie alarm. 0.175 ("normalnie") to głośność, którą użytkownik już uznał za
+// górną granicę. "Po cichutku" (domyślne, #447) to ok. 29% tego: wyraźnie
+// ciszej, ale wciąż słychać.
 //
 // Głośność idzie przez mikser przeglądarki (Web Audio), nie przez
 // `volume` elementu audio: iOS tego pola nie słucha i gra zawsze głośnością
 // systemu. Wzmocnienie miksera słucha wszędzie, więc każdy efekt może mieć
 // swoją głośność. Cena na iPhonie: dźwięk z miksera milknie przy włączonym
 // wyciszeniu telefonu - dla żartu w tle to raczej zaleta.
-const PIPE_VOLUME = 0.175;
+const PIPE_VOLUMES = {normal: 0.175, quiet: 0.05};
+const pipeVolume = () => PIPE_VOLUMES[setting('sound-level')];
 
 let pipeAudio = null;
 let soundMixer = null;
@@ -7716,7 +7781,7 @@ function playPipeBuffer() {
     // a nie nałożyć się na poprzednie.
     if (pipeVoice) pipeVoice.stop();
     const gain = ctx.createGain();
-    gain.gain.value = PIPE_VOLUME;
+    gain.gain.value = pipeVolume();
     gain.connect(ctx.destination);
     const voice = ctx.createBufferSource();
     voice.buffer = pipeBuffer;
@@ -7731,7 +7796,7 @@ function playPipeBuffer() {
 // go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
 // z powrotem, gdy strona zejdzie w tło.
 function wakeMixer() {
-    if (!setting('sound-pipe')) return;
+    if (setting('sound-level') === 'off') return;
     const ctx = mixer();
     if (!ctx) return;
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
@@ -7751,7 +7816,6 @@ function pipeElement() {
     const element = document.createElement('audio');
     element.src = url;
     element.preload = 'auto';
-    element.volume = PIPE_VOLUME;
     pipeAudio = element;
     return pipeAudio;
 }
@@ -7761,10 +7825,10 @@ function prefersLessMotion() {
               && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
-/** Cicho, gdy przełącznik wyłączony, gdy system prosi o ograniczenie
+/** Cicho, gdy dźwięk wyłączony, gdy system prosi o ograniczenie
     animacji albo gdy przeglądarka nie umie żadnego z formatów. */
 function playPipeDrop() {
-    if (!setting('sound-pipe') || prefersLessMotion()) return;
+    if (setting('sound-level') === 'off' || prefersLessMotion()) return;
     if (mixer()) {
         if (pipeBuffer) playPipeBuffer();
         else { pipePending = true; loadPipe(); }
@@ -7774,6 +7838,7 @@ function playPipeDrop() {
     if (!audio) return;
     // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,
     // a nie zostać po cichu pominięte.
+    audio.volume = pipeVolume();
     audio.currentTime = 0;
     const started = audio.play();
     // Przeglądarka odmawia, dopóki strona nie dostała gestu. Tu zawsze
@@ -7941,6 +8006,7 @@ for (const type of ['input', 'change']) {
             source.dispatchEvent(new Event(type, {bubbles: true}));
             return;
         }
+        if (soundLevelConfirming) return;
         syncSettingCopies();
         markChangedSettings();
     });
@@ -8150,7 +8216,7 @@ function recordSettingsReset() {
 function settingControls() {
     // Kopie (`.set-copy`) tylko przekazują zmianę oryginałowi.
     // Tylko kontrolki wierszy listy: pole wyszukiwania i przyciski akcji nie są
-    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
+    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze nic nie zmienią, więc ich nie ma.
     return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy, .set-action) :is(input, select)');
 }
 
@@ -8171,6 +8237,7 @@ function settingValue(control) {
 
 devPanel.addEventListener('change', event => {
     if (![...settingControls()].includes(event.target) || !event.target.id) return;
+    if (event.target.id === 'sound-level') return;
     recordSettingChange(event.target.id);
     syncSettingsSnapshot();
 });

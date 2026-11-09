@@ -533,6 +533,19 @@
 </nav>
 
 {#
+  Wyłączenie dźwięku rury wymaga trzech potwierdzeń z rzędu (#447); jedno okno
+  służy za wszystkie trzy, treść i przyciski podmienia app.js.
+#}
+<dialog id="pipe-off-dialog" class="card" aria-labelledby="pipe-off-text">
+    <span id="pipe-off-joke" class="joke-badge" hidden>joke</span>
+    <p id="pipe-off-text"></p>
+    <div class="pipe-off-actions">
+        <button type="button" id="pipe-off-cancel" class="button">Anuluj</button>
+        <button type="button" id="pipe-off-ok" class="button primary"></button>
+    </div>
+</dialog>
+
+{#
   Pod ikoną, a nie na pasku: to rzeczy o samej aplikacji, do których zagląda
   się raz - kto szuka, ten znajdzie, a pasek zostaje dla mapy (zgłoszenie #173).
 #}
@@ -685,8 +698,7 @@
       kopie pod nagłówkami i statystyki dostaje każde takie ustawienie samo
       (blok „USTAWIENIA" w app.js). Aplikacja czyta wartość przez setting(id);
       jeśli zmiana ma coś zrobić od razu, wpis dopisuje się w SETTING_EFFECTS.
-      `data-tuning` oznacza strojenie, które chowa stała w app.js (LOOK_TUNING,
-      SOUND_TUNING).
+      `data-tuning` oznacza strojenie, które chowa stała w app.js (LOOK_TUNING).
     #}
     <input type="search" id="settings-search" class="settings-search"
            placeholder="Szukaj ustawienia" aria-label="Szukaj ustawienia" autocomplete="off">
@@ -935,14 +947,14 @@
         </p>
     </div>
 
-{#
-      USTAWIENIE SCHOWANE (SOUND_TUNING = false w app.js) — na razie dźwięk po
-      prostu jest, bez ustawienia. Atrybut `hidden` wiersza to tylko stan
-      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
-    #}
-    <label class="dev-check set-row" data-setting="sound-pipe" data-labels="Dźwięk" data-tuning="sound" hidden>
-            <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
-        </label>
+<label class="dev-check set-row" data-setting="sound-level" data-labels="Dźwięk">
+        Metalowa rura po znalezieniu trasy
+        <select id="sound-level">
+            <option value="normal">Normalnie</option>
+            <option value="quiet" selected>Po cichutku</option>
+            <option value="off">Wyłączony</option>
+        </select>
+    </label>
 
 {#
       Rozkładu Siechnic nie ma w repo ani serwer go nie pobiera - kopię
