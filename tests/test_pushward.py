@@ -7,6 +7,7 @@ każdy przejazd zakłada nową kartę z własnym slugiem i tytułem tego odjazdu
 północy i dla godzin rozkładu powyżej 24:00.
 """
 
+import re
 from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -74,12 +75,12 @@ def test_end_date_w_dobie_zmiany_czasu_liczy_prawdziwe_sekundy():
 
 def test_przejazd_zaklada_nowa_karte_i_wypelnia_ja_bez_kasowania(api):
     pushward.send_departure(KLUCZ, ODJAZD)
-    slug = f"metal-planner-{KONIEC - 3600}"
+    tworzenie = api.wywolania[0][3]
+    slug = tworzenie["slug"]
+    assert re.fullmatch(rf"metal-planner-{(KONIEC - 3600) * 1000}-[0-9a-f]{{6}}", slug)
     assert [(m, p) for m, p, _, _ in api.wywolania] == [
         ("POST", "/activities"),
         ("PATCH", f"/activities/{slug}")]
-    tworzenie = api.wywolania[0][3]
-    assert tworzenie["slug"] == slug
     assert tworzenie["name"] == "5 → Księże Małe"
     assert tworzenie["ended_ttl"] == 600
     assert tworzenie["dismissal_ttl"] == 300
@@ -297,3 +298,9 @@ def test_jutrzejszy_odjazd_w_oknie_dziala(klient, api, monkeypatch):
     odjazd = {**ODJAZD, "sec": 30 * 3600}
     assert klient.post("/api/dev/pushward", json=odjazd,
                        headers={"X-PushWard-Key": KLUCZ}).status_code == 200
+
+
+def test_dwa_przejazdy_w_tej_samej_sekundzie_dostaja_rozne_karty(api):
+    pushward.send_departure(KLUCZ, ODJAZD)
+    pushward.send_departure(KLUCZ, ODJAZD)
+    assert api.wywolania[0][3]["slug"] != api.wywolania[2][3]["slug"]

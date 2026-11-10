@@ -14,6 +14,7 @@ kończymy: kasowanie zdejmowałoby z ekranu kartę, którą pasażer może jeszc
 """
 
 import json
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -132,7 +133,7 @@ def send_departure(key, departure):
     if not in_window(end_date(departure["date"], departure["sec"]), time.time()):
         raise OutOfWindow()
     body = _card_body(departure)
-    slug = f"{SLUG_PREFIX}{int(time.time())}"
+    slug = f"{SLUG_PREFIX}{int(time.time() * 1000)}-{secrets.token_hex(3)}"
     _request("POST", "/activities", key, {
         "slug": slug,
         "name": f'{departure["num"]} → {departure["headsign"]}',
