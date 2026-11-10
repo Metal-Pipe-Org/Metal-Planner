@@ -986,7 +986,7 @@
     <div class="field dev-only set-row set-action" data-setting="pushward" data-labels="Eksperymenty, Dynamic Island, PushWard">
         <div class="set-title">Dynamic Island (PushWard)
             <span class="info" tabindex="0" role="button"
-                  data-tip="Klik w godzinę odjazdu na tablicy przystanku wysyła odliczenie do Dynamic Island i na ekran blokady iPhone'a. Wymaga darmowej aplikacji PushWard na iPhonie (App Store). Klucz: w PushWard wejdź w Ustawienia → Integration Key. Darmowy limit to 250 aktualizacji miesięcznie, a jeden przejazd zużywa zwykle jedną. Godziny pochodzą z rozkładu, bez opóźnień na żywo. Klucz zostaje na tym urządzeniu, w tej przeglądarce. Usunięcie klucza wyłącza funkcję.">?</span>
+                  data-tip="Klik w godzinę odjazdu na tablicy przystanku wysyła odliczenie do Dynamic Island i na ekran blokady iPhone'a. Wymaga darmowej aplikacji PushWard na iPhonie (App Store). Klucz: w PushWard wejdź w Ustawienia → Integration Key. Darmowy limit to 250 aktualizacji miesięcznie, a jeden przejazd zużywa dwie. Godziny pochodzą z rozkładu, bez opóźnień na żywo. Klucz zostaje na tym urządzeniu, w tej przeglądarce. Usunięcie klucza wyłącza funkcję.">?</span>
         </div>
         <div class="sw-row">
             <input type="password" id="pushward-key" autocomplete="off" placeholder="Klucz integracji (hlk_…)" aria-label="Klucz integracji PushWard">
@@ -995,6 +995,12 @@
         </div>
         <p class="field-hint" id="pushward-status" role="status"></p>
     </div>
+
+    <label class="dev-check dev-only set-row" data-setting="pushward-link" data-labels="Eksperymenty, Dynamic Island, PushWard">
+        <input type="checkbox" id="pushward-link"> Klik w kartę otwiera przystanek w Kiedy przyjedzie / Czy na czas (zamiast Metal-Plannera)
+        <span class="info" tabindex="0" role="button"
+              data-tip="Wyłączone: klik w kartę Dynamic Island otwiera Metal-Planner z tą trasą. Włączone: otwiera tablicę tego przystanku w zewnętrznym rozkładzie. Kursy z Siechnic otwierają Kiedy przyjedzie, wszystkie pozostałe Czy na czas.">?</span>
+    </label>
 
     <div class="field dev-only set-row" data-setting="sw-check" data-labels="Aplikacja" id="sw-field">
         <div class="set-title">Wersja aplikacji</div>

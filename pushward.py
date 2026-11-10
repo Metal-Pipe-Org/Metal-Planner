@@ -6,12 +6,15 @@ PushWard (https://api.pushward.app). Przejście przez nasz serwer jest dlatego,
 (CORS), a sprawdzić tego bez prawdziwego klucza się nie da. Klucz jest tylko
 w nagłówku wychodzącego zapytania: nie trafia do logów, plików ani odpowiedzi.
 
-Jedna karta (stały slug) służy za każdym razem: darmowy plan to 250
-aktualizacji miesięcznie, więc przejazd ma kosztować jeden PATCH, a nie
-tworzenie karty od zera. Karta powstaje tylko wtedy, gdy PATCH odpowie 404.
+Tytuł karty (`name`) iOS ustala przy starcie Live Activity i PATCH go nie
+zmieni, a tytuł ma mówić, jaka to linia i dokąd. Dlatego każdy przejazd
+dostaje własną, nową kartę z własnym slugiem. Poprzednich nie kasujemy ani nie
+kończymy: kasowanie zdejmowałoby z ekranu kartę, którą pasażer może jeszcze
+śledzić, a stare i tak znikają same po `ended_ttl`.
 """
 
 import json
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -20,10 +23,9 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 API = "https://api.pushward.app"
-SLUG = "metal-planner-odjazd"
-CARD_NAME = "Odjazd"
+SLUG_PREFIX = "metal-planner-"
 HTTP_TIMEOUT_SEC = 10
-THIRTY_DAYS_SEC = 30 * 24 * 3600
+ENDED_TTL_SEC = 600
 WINDOW_SEC = 8 * 3600
 WARNING_SEC = 120
 DISMISSAL_SEC = 300
@@ -61,10 +63,6 @@ def end_date(day, sec):
 def in_window(ends, now):
     """iOS kończy Live Activity po 8 h; odjazd dalszy (albo już miniony) odpada."""
     return 0 < ends - now <= WINDOW_SEC
-
-
-def _hhmm(timestamp):
-    return datetime.fromtimestamp(timestamp, WARSAW).strftime("%H:%M")
 
 
 def _request(method, path, key, body):
@@ -113,9 +111,10 @@ def _card_body(departure):
         "dismissal_ttl": DISMISSAL_SEC,
         "content": {
             "template": "countdown",
-            "state": f'{departure["num"]} → {departure["headsign"]}',
-            "subtitle": f'{departure["stop"]} · {_hhmm(ends)}',
+            "state": departure["stop"],
             "icon": ICONS.get(departure["mode"], "bus.fill"),
+            # limit 4 znaków po stronie PushWard; dłuższy numer (np. "810+81") ucinamy, by karta nie została odrzucona
+            "compact_label": departure["num"][:4],
             "show_ruler": False,
             "start_date": int(time.time()),
             "end_date": ends,
@@ -130,25 +129,18 @@ def _card_body(departure):
 
 
 def send_departure(key, departure):
-    """Podmienia treść jedynej karty; gdy jej nie ma, tworzy ją i ponawia."""
+    """Zakłada nową kartę z tytułem tego odjazdu i wypełnia ją."""
     if not in_window(end_date(departure["date"], departure["sec"]), time.time()):
         raise OutOfWindow()
     body = _card_body(departure)
-    path = f"/activities/{SLUG}"
-    try:
-        _request("PATCH", path, key, body)
-    except PushWardError as e:
-        if e.status != 404:
-            raise
-        # ended_ttl na maksimum: serwer skasowałby zakończoną kartę po krótkim
-        # czasie, a każde ponowne tworzenie to dodatkowa aktualizacja z limitu.
-        _request("POST", "/activities", key, {
-            "slug": SLUG,
-            "name": CARD_NAME,
-            "ended_ttl": THIRTY_DAYS_SEC,
-            "dismissal_ttl": DISMISSAL_SEC,
-        })
-        _request("PATCH", path, key, body)
+    slug = f"{SLUG_PREFIX}{int(time.time() * 1000)}-{secrets.token_hex(3)}"
+    _request("POST", "/activities", key, {
+        "slug": slug,
+        "name": f'{departure["num"]} → {departure["headsign"]}',
+        "ended_ttl": ENDED_TTL_SEC,
+        "dismissal_ttl": DISMISSAL_SEC,
+    })
+    _request("PATCH", f"/activities/{slug}", key, body)
 
 
 def account(key):

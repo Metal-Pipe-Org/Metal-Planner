@@ -8417,7 +8417,9 @@ function departureAttrs(d, stop, sec) {
     if (wait <= 0 || wait > PUSHWARD_WINDOW_SEC) return '';
     return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
            ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
-           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"`;
+           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"` +
+           ` data-dep-stop-id="${escAttr(d.stop_id)}"` +
+           ('siechnice_stop' in d ? ` data-dep-siechnice-stop="${escAttr(d.siechnice_stop || '')}"` : '');
 }
 
 const PUSHWARD_ERRORS = {
@@ -8444,6 +8446,18 @@ function pushwardLink() {
     return origin + location.pathname + (query ? '?' + query : '');
 }
 
+// Opcjonalnie klik w kartę otwiera przystanek (ten słupek) w zewnętrznym
+// rozkładzie. Wybiera kurs, nie przystanek: kurs Siechnic ma własny serwis
+// także na słupku wspólnym z MPK we Wrocławiu, reszta jest w Czy na czas.
+// Kursu gminnego bez ustalonego słupka nie wysyłamy do Czy na czas, bo tam go nie ma.
+function pushwardStopLink(dep) {
+    if (dep.depSiechniceStop !== undefined)
+        return dep.depSiechniceStop
+            ? `https://siechnice.kiedyprzyjedzie.pl/#/stops/${dep.depSiechniceStop}/departures`
+            : pushwardLink();
+    return `https://czynaczas.pl/wroclaw?przystanek=${encodeURIComponent(dep.depStopId)}`;
+}
+
 async function pushwardClick(event) {
     const hour = event.target.closest('[data-dep-sec]');
     const key = pushwardKey();
@@ -8457,12 +8471,11 @@ async function pushwardClick(event) {
             body: JSON.stringify({
                 num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
                 stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
-                link: pushwardLink(),
+                link: setting('pushward-link') ? pushwardStopLink(dep) : pushwardLink(),
             }),
         });
         const body = await response.json().catch(() => ({}));
-        alert(response.ok ? 'Wysłano odliczenie do Dynamic Island.'
-                          : `Nie wysłano: ${describePushwardError(body)}`);
+        if (!response.ok) alert(`Nie wysłano: ${describePushwardError(body)}`);
     } catch {
         alert('Nie wysłano: brak połączenia z serwerem.');
     }
