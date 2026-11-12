@@ -17,9 +17,13 @@ name: "Zgłoszenia: przypomnienie i zamykanie po ciszy"
 # i daje autorowi pełne 14 dni od nowa.
 #
 # Nie ruszamy:
-#  • zgłoszeń z etykietą "external blocked" albo zablokowanych przez inne,
-#    wciąż otwarte zgłoszenie (GitHubowe „Blocked by") — czekają na coś poza
-#    nimi, więc cisza jest tam spodziewana; jeśli mają "stale", zdejmujemy ją,
+#  • zgłoszeń z etykietą "external blocked", zablokowanych przez inne,
+#    wciąż otwarte zgłoszenie (GitHubowe „Blocked by") ani przypiętych do
+#    otwartego kamienia milowego, czyli sprintu (#473) — czekają na coś poza
+#    nimi albo mają zaplanowaną pracę, więc cisza jest tam spodziewana; jeśli
+#    mają "stale", zdejmujemy ją. Po zamknięciu sprintu wracają pod zwykłą
+#    zasadę, a licznik liczy od ostatniej aktywności: samo przypięcie do
+#    sprintu aktywnością nie jest,
 #  • rodziców z otwartymi pod-zgłoszeniami — praca toczy się w dzieciach,
 #    a do rodzica nikt nie pisze. Gdy ostatnie dziecko się zamknie, rodzic
 #    wraca pod zwykłą zasadę od razu: jeśli sam milczy od 14 dni, dostaje
@@ -76,14 +80,15 @@ jobs:
           gh label create "$LABEL_STALE" --repo "$REPO" --color EDEDED \
             --description "Cisza w zgłoszeniu — przypomnienie wysłane albo zamknięte po ciszy" || true
 
-          # Zablokowane ("external blocked" albo GitHubowe „Blocked by") czekają
-          # na coś poza sobą, więc nie dostają przypomnień, a "stale" im
-          # zdejmujemy: ma sens tylko tam, gdzie cisza jest niespodziewana.
+          # Zablokowane ("external blocked" albo GitHubowe „Blocked by") i ze
+          # sprintem (otwarty kamień milowy) nie dostają przypomnień, a "stale"
+          # im zdejmujemy: ma sens tylko tam, gdzie cisza jest niespodziewana.
           gh api --paginate "repos/$REPO/issues?state=open&per_page=100" \
             --jq '.[]
                   | select(.pull_request | not)
                   | (any(.labels[]; .name == "external blocked")
-                     or (.issue_dependencies_summary.blocked_by // 0) > 0) as $blocked
+                     or (.issue_dependencies_summary.blocked_by // 0) > 0
+                     or .milestone.state == "open") as $blocked
                   | "\(.number) \(.sub_issues_summary.total // 0) \($blocked) \(any(.labels[]; .name == "stale"))"' \
             > "$RUNNER_TEMP/open.txt"
 
@@ -94,7 +99,7 @@ jobs:
             if [ "$blocked" = true ]; then
               if [ "$labeled" = true ]; then
                 remove_stale "$n"
-                echo "#$n: zablokowane — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+                echo "#$n: zablokowane albo w sprincie — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
               fi
               continue
             fi
