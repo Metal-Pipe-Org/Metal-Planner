@@ -18,6 +18,10 @@ name: "Zgłoszenia i PR-y: zdjęcie stale od razu"
 #  • PR czeka na recenzję człowieka: "stale" ma tam wtedy, gdy recenzja się
 #    spóźnia (cisza co najmniej DAYS_REVIEW, #427), więc zdejmujemy ją dopiero
 #    po ruchu, który tę ciszę przerwie,
+#  • zgłoszenie zostanie zamknięte jako ukończone ("completed") — praca jest
+#    skończona, więc "stale" nie ma już czego mówić. Zamknięte jako „not
+#    planned" zostawiamy: tak zamyka bieg dzienny i etykieta ma tam zostać,
+#    po niej odnajduje się zamknięte po ciszy (PR-ów to nie dotyczy),
 #  • zgłoszenie jest zablokowane przez inne ("Blocked by") albo PR nie czeka
 #    już na autora (np. czeka na recenzję) i coś go tu obudzi — "stale" nie
 #    ma tam czego szukać.
@@ -35,18 +39,23 @@ name: "Zgłoszenia i PR-y: zdjęcie stale od razu"
 # ma. Rodzica z otwartymi pod-zgłoszeniami zostawiamy tak samo jak bieg
 # dzienny.
 #
+# Zamknięte wcześniej, zanim to zdarzenie doszło, sprzątnie jednorazowo ręczny
+# bieg (`workflow_dispatch`): biegi dzienne patrzą tylko na otwarte, więc same
+# by ich nie ruszyły.
+#
 # `pull_request_target`, bo bierze workflow z `main` i daje token z zapisem
 # także przy PR-ach z forków. Kodu z PR-a nie pobieramy — tylko skrypt z `main`.
 on:
   issue_comment:
     types: [created]
   issues:
-    types: [reopened, labeled, milestoned]
+    types: [reopened, labeled, milestoned, closed]
   pull_request_target:
     types: [reopened, labeled, milestoned, synchronize, ready_for_review, review_requested]
   workflow_run:
     workflows: ["PR-y: recenzja (przekaźnik)"]
     types: [completed]
+  workflow_dispatch:
 
 permissions:
   issues: write
@@ -63,6 +72,7 @@ jobs:
           || (github.event.sender.type != 'Bot'
               && (contains(github.event.issue.labels.*.name, 'stale')
                   || contains(github.event.pull_request.labels.*.name, 'stale'))
+              && (github.event.action != 'closed' || github.event.issue.state_reason == 'completed')
               && (github.event.action != 'labeled'
                   || github.event.label.name == 'external blocked'
                   || (github.event.label.name == 'PR in progress' && !github.event.pull_request))))
@@ -79,6 +89,7 @@ jobs:
       N: ${{ github.event.issue.number || github.event.pull_request.number }}
       LABELED: ${{ github.event.label.name }}
       EVENT: ${{ github.event_name }}
+      ACTION: ${{ github.event.action }}
 
     steps:
       - name: Pobierz skrypt z main
@@ -107,7 +118,8 @@ jobs:
             gh api "repos/$REPO/issues/$n" > "$RUNNER_TEMP/issue.json"
             is_pr=$(jq '.pull_request != null' "$RUNNER_TEMP/issue.json")
 
-            # Zablokowane, w sprincie, zgłoszenie z PR-em albo PR, który nie czeka
+            # Zamknięte jako ukończone (`if:` wyżej przepuszcza tylko takie),
+            # zablokowane, w sprincie, zgłoszenie z PR-em albo PR, który nie czeka
             # ani na autora, ani na recenzję (stale z zamknięciem dotyczy tylko
             # PR-ów autora, stale-prs.yml): zdejmujemy bez oglądania osi czasu.
             # PR czekający na recenzję ("human"): niżej decyduje cisza.
@@ -120,7 +132,7 @@ jobs:
                      and ($l | index($author)) == null then "human"
                 elif .pull_request != null and ($l | index($author)) == null then "remove"
                 else "check" end' "$RUNNER_TEMP/issue.json")
-            if [ "$LABELED" = 'external blocked' ] || [ "$LABELED" = 'PR in progress' ] \
+            if [ "$ACTION" = closed ] || [ "$LABELED" = 'external blocked' ] || [ "$LABELED" = 'PR in progress' ] \
                || [ "$verdict" = remove ]; then
               remove_stale "$n"
               echo "#$n: zablokowane, w sprincie, z PR-em albo nie czeka na autora — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -150,4 +162,42 @@ jobs:
               remove_stale "$n"
               echo "#$n: ktoś się ruszył — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
             fi
+          done 3< "$RUNNER_TEMP/numbers.txt"
+
+  # Jednorazowe sprzątanie: zgłoszenia zamknięte jako ukończone, zanim
+  # zdarzenie `closed` zaczęło zdejmować "stale". Bieg ręczny z zakładki Actions.
+  sweep-closed:
+    if: github.repository == 'Metal-Pipe-Org/Metal-Planner' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: stale-unlabel-sweep
+      cancel-in-progress: false
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Pobierz skrypt z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .scripts
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Zdejmij stale z zamkniętych jako ukończone
+        run: |
+          set -euo pipefail
+          source .scripts/.github/scripts/stale.sh
+
+          # `gh issue list` nie zwraca PR-ów, a o te nie chodzi.
+          gh issue list --repo "$REPO" --state closed --label "$LABEL_STALE" --limit 1000 \
+            --json number,stateReason --jq '.[] | select(.stateReason == "COMPLETED") | .number' \
+            > "$RUNNER_TEMP/numbers.txt"
+
+          while read -r n <&3; do
+            remove_stale "$n"
+            echo "#$n: zamknięte jako ukończone — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
           done 3< "$RUNNER_TEMP/numbers.txt"
