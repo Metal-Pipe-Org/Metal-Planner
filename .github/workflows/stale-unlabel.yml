@@ -13,6 +13,11 @@ name: "Zgłoszenia i PR-y: zdjęcie stale od razu"
 #  • człowiek da zgłoszeniu etykietę "external blocked" albo "PR in progress"
 #    (zablokowane nie powinno nosić "stale"; PR to aktywność), a PR-owi
 #    "external blocked",
+#  • człowiek podepnie zgłoszenie albo PR pod otwarty kamień milowy (sprint,
+#    #473) — chroni tak samo jak "external blocked",
+#  • PR czeka na recenzję człowieka: "stale" ma tam wtedy, gdy recenzja się
+#    spóźnia (cisza co najmniej DAYS_REVIEW, #427), więc zdejmujemy ją dopiero
+#    po ruchu, który tę ciszę przerwie,
 #  • zgłoszenie jest zablokowane przez inne ("Blocked by") albo PR nie czeka
 #    już na autora (np. czeka na recenzję) i coś go tu obudzi — "stale" nie
 #    ma tam czego szukać.
@@ -36,9 +41,9 @@ on:
   issue_comment:
     types: [created]
   issues:
-    types: [reopened, labeled]
+    types: [reopened, labeled, milestoned]
   pull_request_target:
-    types: [reopened, labeled, synchronize, ready_for_review, review_requested]
+    types: [reopened, labeled, milestoned, synchronize, ready_for_review, review_requested]
   workflow_run:
     workflows: ["PR-y: recenzja (przekaźnik)"]
     types: [completed]
@@ -102,16 +107,23 @@ jobs:
             gh api "repos/$REPO/issues/$n" > "$RUNNER_TEMP/issue.json"
             is_pr=$(jq '.pull_request != null' "$RUNNER_TEMP/issue.json")
 
-            # Zablokowane, zgłoszenie z PR-em albo PR, który nie czeka na
-            # autora (stale z zamknięciem dotyczy tylko PR-ów autora,
-            # stale-prs.yml): zdejmujemy bez oglądania osi czasu.
+            # Zablokowane, w sprincie, zgłoszenie z PR-em albo PR, który nie czeka
+            # ani na autora, ani na recenzję (stale z zamknięciem dotyczy tylko
+            # PR-ów autora, stale-prs.yml): zdejmujemy bez oglądania osi czasu.
+            # PR czekający na recenzję ("human"): niżej decyduje cisza.
+            verdict=$(jq -r --arg author "$LABEL_PR_AUTHOR" --arg human "$LABEL_PR_HUMAN" '
+              [.labels[].name] as $l
+              | if ($l | index("external blocked") != null)
+                   or .milestone.state == "open"
+                   or (.issue_dependencies_summary.blocked_by // 0) > 0 then "remove"
+                elif .pull_request != null and ($l | index($human)) != null
+                     and ($l | index($author)) == null then "human"
+                elif .pull_request != null and ($l | index($author)) == null then "remove"
+                else "check" end' "$RUNNER_TEMP/issue.json")
             if [ "$LABELED" = 'external blocked' ] || [ "$LABELED" = 'PR in progress' ] \
-               || [ "$(jq --arg author "$LABEL_PR_AUTHOR" '[.labels[].name] as $l
-                           | ($l | index("external blocked") != null)
-                             or (.pull_request != null and ($l | index($author)) == null)
-                             or (.issue_dependencies_summary.blocked_by // 0) > 0' "$RUNNER_TEMP/issue.json")" = true ]; then
+               || [ "$verdict" = remove ]; then
               remove_stale "$n"
-              echo "#$n: zablokowane, z PR-em albo nie czeka na autora — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "#$n: zablokowane, w sprincie, z PR-em albo nie czeka na autora — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
@@ -122,6 +134,14 @@ jobs:
 
             gh api --paginate "repos/$REPO/issues/$n/timeline?per_page=100" --jq '.[]' \
               | jq -s . > "$RUNNER_TEMP/timeline.json"
+
+            if [ "$verdict" = human ]; then
+              if [ "$(quiet_days "$RUNNER_TEMP/issue.json" "$RUNNER_TEMP/timeline.json")" -lt "$DAYS_REVIEW" ]; then
+                remove_stale "$n"
+                echo "#$n: recenzja nie jest już spóźniona — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
 
             action=$(stale_action "$RUNNER_TEMP/issue.json" "$RUNNER_TEMP/timeline.json" \
               "$MARKER" "$LABEL_STALE" "$DAYS_QUIET" "$DAYS_GRACE")

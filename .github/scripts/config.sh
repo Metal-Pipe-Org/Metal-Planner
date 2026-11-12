@@ -19,9 +19,12 @@
 # stale-unlabel.yml, issue-labels.yml) ---
 # Po tylu dniach ciszy przypomnienie i etykieta…
 DAYS_QUIET=14
-# …a po tylu kolejnych bez odpowiedzi zamknięcie (PR czekający na recenzję
-# dostaje w tym rytmie kolejne pingi na Discordzie, bez zamykania).
+# …a po tylu kolejnych bez odpowiedzi zamknięcie.
 DAYS_GRACE=7
+# PR czekający na recenzję człowieka (LABEL_PR_HUMAN) ma osobny, krótszy próg:
+# po tylu dniach ciszy dostaje etykietę, jednorazowy komentarz z @-oznaczeniem
+# recenzentów, a potem codzienny ping na Discordzie. Nigdy nie jest zamykany.
+DAYS_REVIEW=3
 LABEL_STALE="stale"
 
 # --- Etykiety stanu PR-a (pr-state.sh, stale.sh) ---
