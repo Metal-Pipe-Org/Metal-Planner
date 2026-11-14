@@ -568,8 +568,9 @@ function loadVehicles() {
         if (data.error) return vehiclesFailed();   // zostają ostatnie znane pozycje
         lastVehicles = data.vehicles;
         renderVehicles();
-        vehiclesFreshAt = Date.now() - data.stale_sec * 1000;
-        setVehiclesStale(data.stale_sec > VEHICLES_STALE_SEC ? data.stale_sec : null);
+        const staleSec = data.stale_sec ?? 0;   // brak pola = dane uznajemy za świeże
+        vehiclesFreshAt = Date.now() - staleSec * 1000;
+        setVehiclesStale(staleSec > VEHICLES_STALE_SEC ? staleSec : null);
     }).catch(() => {
         if (vehiclesOn) vehiclesFailed();
     });   // kolejna próba za VEHICLES_REFRESH_MS
@@ -589,6 +590,7 @@ function setVehiclesOn(on) {
     }
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
+    vehiclesFreshAt = null;
     setVehiclesStale(null);
     if (on) {
         vehiclesLayer.addTo(map);
