@@ -18,6 +18,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 
 8. Wszystko, co zajmie dłużej niż ok. 30 s, robi agent. W tym czasie użytkownik dostaje następną sprawę.
 10. Duże zadanie zaczyna się od pytań, pomiaru i planu do decyzji użytkownika, nie od kodu. Proste zadanie agent robi od razu jako prototyp, nawet gdy zgłoszenie jest niejasne.
+29. Przy większych zmianach, które użytkownik ogląda w pierwszej kolejności (np. wygląd), agent robi najpierw tani prototyp do obejrzenia. Dopracowanie i dopięcie (przypadki brzegowe, testy, zgodność) przychodzi dopiero po akceptacji prototypu.
 11. Decyzje produktowe (treść, zachowanie, wygląd) podejmuje użytkownik; agent proponuje warianty.
 12. Kod zmieniają tylko agenci, każdy w swoim worktree. Agent robi commit po każdej wersji do obejrzenia; projekt użytkownika przesuwam na ten commit i wypycham gałąź.
 25. Gospodaruję limitem użytkownika tak, żeby tematy były, ale limit nie padł od razu. Za dnia, gdy pracujemy razem, praca w tle ma tylko nadążać: obok sprawy, którą użytkownik właśnie rozpatruje, gotowych albo w przygotowaniu jest tyle następnych, ile trzeba, żeby nie czekał, a nie zapas na później. Gdy żadna nie czeka, pytam, co przygotowujemy dalej, i nie wybieram sam. Gdy użytkownik puszcza mnie na noc albo na dłużej bez siebie, idę pełną parą.
