@@ -121,11 +121,14 @@ def get_vehicles():
         try:
             raw = _fetch_raw(fields)
         except (OSError, ValueError) as e:
-            serverlog.get_logger().error("Pozycje pojazdów z MPK: pobranie nie powiodło się - %s", _failure_reason(e))
+            reason = _failure_reason(e)
+            serverlog.log_repeating_error(reason, f"Pozycje pojazdów z MPK: pobranie nie powiodło się - {reason}")
             raise
         vehicles = _parse(raw)
         if not vehicles:
-            serverlog.get_logger().error("Pozycje pojazdów z MPK: pobranie nie powiodło się - pusta odpowiedź")
+            serverlog.log_repeating_error("pusta odpowiedź", "Pozycje pojazdów z MPK: pobranie nie powiodło się - pusta odpowiedź")
+        else:
+            serverlog.close_error_streak()
         # MPK potrafi zamilknąć i oddawać w kółko te same pozycje - bez śladu
         # po tym wyglądałoby to jak żywe dane, więc pamiętamy, od kiedy
         # odpowiedź jest identyczna.

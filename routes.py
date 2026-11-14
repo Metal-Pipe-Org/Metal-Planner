@@ -7,7 +7,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from flask import Response, send_file, abort, jsonify, render_template, request
+from flask import Response, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
