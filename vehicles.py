@@ -58,8 +58,8 @@ def _query_fields():
     return fields
 
 
-def _fetch_raw():
-    body = urllib.parse.urlencode(_query_fields()).encode()
+def _fetch_raw(fields):
+    body = urllib.parse.urlencode(fields).encode()
     request = urllib.request.Request(
         VEHICLES_URL, data=body, headers={"User-Agent": "Metal-Planner/0.1"}
     )
@@ -116,8 +116,10 @@ def get_vehicles():
     with _lock:
         if _cache["vehicles"] is not None and time.monotonic() - _cache["at"] < CACHE_SEC:
             return _cache["vehicles"]
+        # Poza try: brak bazy rozkładów to nie błąd MPK i ma polecieć z własnym komunikatem.
+        fields = _query_fields()
         try:
-            raw = _fetch_raw()
+            raw = _fetch_raw(fields)
         except (OSError, ValueError) as e:
             serverlog.get_logger().error("Pozycje pojazdów z MPK: pobranie nie powiodło się - %s", _failure_reason(e))
             raise
