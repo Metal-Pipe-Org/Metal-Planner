@@ -20,12 +20,16 @@ app.js) biłoby wprost w cudzy serwer.
 
 import json
 import math
+import socket
+import ssl
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
 import gtfs
+import serverlog
 
 VEHICLES_URL = "https://mpk.wroc.pl/bus_position"
 
@@ -90,6 +94,20 @@ def _parse(raw_results):
     return parsed
 
 
+def _failure_reason(error):
+    """Krótka przyczyna do logu serwera - bez treści zapytania i odpowiedzi."""
+    cause = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(error, urllib.error.HTTPError):
+        return f"błąd HTTP {error.code}"
+    if isinstance(cause, ssl.SSLError):
+        return f"błąd certyfikatu/TLS ({type(cause).__name__})"
+    if isinstance(cause, (socket.timeout, TimeoutError)):
+        return "timeout"
+    if isinstance(error, ValueError):
+        return "odpowiedź nie jest poprawnym JSON-em"
+    return f"{type(cause).__name__}"
+
+
 def get_vehicles():
     """Aktualne pozycje pojazdów, z krótkim cache (CACHE_SEC) - patrz docstring
     modułu. Rzuca wyjątkiem sieciowym (OSError, w tym urllib.error.URLError
@@ -98,7 +116,14 @@ def get_vehicles():
     with _lock:
         if _cache["vehicles"] is not None and time.monotonic() - _cache["at"] < CACHE_SEC:
             return _cache["vehicles"]
-        vehicles = _parse(_fetch_raw())
+        try:
+            raw = _fetch_raw()
+        except (OSError, ValueError) as e:
+            serverlog.get_logger().error("Pozycje pojazdów z MPK: pobranie nie powiodło się - %s", _failure_reason(e))
+            raise
+        vehicles = _parse(raw)
+        if not vehicles:
+            serverlog.get_logger().error("Pozycje pojazdów z MPK: pobranie nie powiodło się - pusta odpowiedź")
         # MPK potrafi zamilknąć i oddawać w kółko te same pozycje - bez śladu
         # po tym wyglądałoby to jak żywe dane, więc pamiętamy, od kiedy
         # odpowiedź jest identyczna.

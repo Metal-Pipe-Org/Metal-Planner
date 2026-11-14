@@ -8312,6 +8312,26 @@ document.addEventListener('click', event => {
     jumpToSetting('dev-access');
 });
 
+$('server-logs-download').addEventListener('click', async event => {
+    if (event.currentTarget.classList.contains('locked')) return;
+    const status = $('server-logs-status');
+    status.textContent = '';
+    try {
+        const response = await fetch('/api/dev/logi', {headers: {'X-Dev-Token': siechniceToken()}});
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+        }
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(await response.blob());
+        link.download = 'metal-planner-server.log';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    } catch (e) {
+        status.textContent = `Nie udało się pobrać logów: ${e.message}`;
+    }
+});
+
 async function fetchSiechniceStatus(init = {}) {
     const response = await fetch('/api/dev/siechnice',
         {...init, headers: {'X-Dev-Token': siechniceToken()}});

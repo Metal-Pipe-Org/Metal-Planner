@@ -982,6 +982,17 @@
     </div>
 
 {#
+      Log serwera (zgłoszenie #285): plik z zapisem zdarzeń po stronie serwera,
+      za tym samym odblokowaniem co Siechnice (data-protected).
+    #}
+    <div class="field dev-only set-row set-action" data-setting="server-logs" data-labels="Deweloperskie, Logi">
+        <div class="sw-row">
+            <button type="button" id="server-logs-download" class="button" data-protected>Pobierz logi</button>
+        </div>
+        <p class="field-hint" id="server-logs-status" role="status"></p>
+    </div>
+
+{#
       Eksperyment (#453): odliczenie do odjazdu w Dynamic Island przez PushWard.
       Klucz zapisuje app.js w localStorage - to nie ustawienie, więc set-action.
     #}
