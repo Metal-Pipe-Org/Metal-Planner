@@ -254,6 +254,8 @@
         </div>
     </header>
 
+    <div id="vehicles-note" class="vehicles-note" role="status" hidden></div>
+
     {% if data_error %}
 
     <div class="card"><div class="notice error">{{ data_error }}</div></div>
@@ -658,8 +660,6 @@
             aria-label="Anuluj wskazywanie">✕</button>
 </div>
 {% endif %}
-
-<div id="vehicles-note" class="toast" role="status" hidden></div>
 
 <div id="dev-panel" class="card hidden">
 
