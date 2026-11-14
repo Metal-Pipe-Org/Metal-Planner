@@ -3517,3 +3517,11 @@ ul.tt-legend {
 .leaflet-tooltip-right::before {
     margin-top: calc(-6px - var(--tip-shift, 0px));
 }
+
+.scheme-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.scheme-halo { fill: none; stroke: #43a047; stroke-width: 9; stroke-linecap: round; opacity: 0.4; pointer-events: none; }
+.scheme-stop-dot { fill: #fff; stroke-width: 3; pointer-events: none; }
+.scheme-tip .scheme-tip-row { background: #fff; border-radius: 8px; padding: 6px 10px; margin-bottom: 3px; font: 12px system-ui, sans-serif; color: #263238; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); white-space: nowrap; }
+.scheme-tip .scheme-tip-row.soonest { border-left: 4px solid #43a047; }
+.scheme-walk-brace path { stroke-dasharray: 5 4; }
+.scheme-tip .scheme-tip-row { white-space: normal; max-width: 320px; }

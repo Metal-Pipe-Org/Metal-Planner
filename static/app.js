@@ -5854,80 +5854,29 @@ function fmtWalkDistance(m) {
     return `${(Math.round(m / 100) / 10).toFixed(1).replace('.', ',')} km`;
 }
 
-/** Przejścia pieszo wyglądają inaczej niż linie jazd, żeby się z nimi nie
-    myliły: cienka klamra w osobnym pasie na prawo od wszystkiego (`laneX`
-    to jego początek), więc nie przecina jazd ani nie ściska się między
-    pudełkami. Poziome dojścia do pasa omijają plakietki numerów `badges`;
-    linie jazd mogą przejść nad nimi, bo warstwa leży pod spodem. */
-function schemeWalkLayer(boxes, walks, laneX, badges) {
+/** Przejście pieszo: przerywana kreska między pudełkami z podpisem „pieszo,
+    N min” (czas z odległości w linii prostej, liczy serwer). Leży pod
+    pudełkami i kreskami jazd. */
+function schemeWalkLayer(boxes, walks) {
     const out = {svg: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
-    const grow = (x, y) => {
-        out.minX = Math.min(out.minX, x); out.maxX = Math.max(out.maxX, x);
-        out.minY = Math.min(out.minY, y); out.maxY = Math.max(out.maxY, y);
-    };
-    const texts = walks.map(pair => `pieszo, ${fmtWalkDistance(pair.m)}`);
-    const widthOf = text => text.length * 5.8 + 14;
-    // Napis stoi na pionowej części klamry, więc pasy są szersze od napisu:
-    // żaden napis nie przykrywa cudzej klamry ani cudzego napisu.
-    const pitch = Math.max(0, ...texts.map(widthOf)) + 12;
-    const placed = [];
-    const pill = (spots, text, x) => {
-        const w = widthOf(text);
-        const free = y => !placed.some(o => Math.abs(o.x - x) < (o.w + w) / 2 + 2 && Math.abs(o.y - y) < 20);
-        const cy = spots.find(free) ?? spots[0];
-        placed.push({x, y: cy, w});
-        grow(x - w / 2, cy - 9); grow(x + w / 2, cy + 9);
-        return `<rect class="scheme-walk-pill" x="${x - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
-            + `<text class="scheme-walk-text" x="${x}" y="${cy}">${text}</text>`;
-    };
-    // Wysokość, na której klamra wychodzi z pudełka: najbliżej środka, byle
-    // poziomy odcinek do pasa nie trafił w plakietkę i nie leżał na odcinku
-    // innej klamry z tego samego pudełka.
-    const used = new Map();
-    const exit = box => {
-        const mid = box.y + box.h / 2, taken = used.get(box) || [];
-        const clear = y => !badges.some(r => r.x < laneX && r.x + r.w > box.x + box.w
-            && y > r.y - 3 && y < r.y + r.h + 3);
-        const offsets = [0, -6, 6, -12, 12, -16, 16];
-        const y = offsets.map(o => mid + o).find(c => clear(c) && !taken.some(t => Math.abs(t - c) < 4))
-            ?? offsets.map(o => mid + o).find(clear) ?? mid;
-        used.set(box, [...taken, y]);
-        return y;
-    };
-    const spans = walks.map((pair, i) => {
-        const a = boxes.get(pair.from), b = boxes.get(pair.to);
-        return {pair, text: texts[i], a, b, length: Math.abs((a.y + a.h / 2) - (b.y + b.h / 2))};
-    });
-    // Krótkie klamry stoją bliżej pudełek; każda następna, która zachodzi
-    // na wcześniejszą, idzie o pas dalej.
-    const lanes = [];
-    for (const span of spans.sort((p, q) => p.length - q.length)) {
-        span.ya = exit(span.a);
-        span.yb = exit(span.b);
-        span.top = Math.min(span.ya, span.yb); span.bottom = Math.max(span.ya, span.yb);
-        let lane = 0;
-        while (lanes.some(o => o.lane === lane && o.top < span.bottom + 16 && span.top < o.bottom + 16)) lane++;
-        span.lane = lane;
-        lanes.push(span);
-    }
-    for (const {pair, text, a, b, ya, yb, top, bottom, lane} of spans) {
-        const ra = a.x + a.w, rb = b.x + b.w, x = laneX + pitch / 2 + lane * pitch;
-        const sy = yb > ya ? 1 : -1, r = Math.min(6, Math.abs(yb - ya) / 2);
-        const d = `M${ra} ${ya}H${x - r}Q${x} ${ya} ${x} ${ya + sy * r}V${yb - sy * r}Q${x} ${yb} ${x - r} ${yb}H${rb}`;
-        grow(x + pitch / 2, ya); grow(x + pitch / 2, yb);
-        // Napis najchętniej w środku pionu, a gdy odcinek jest za krótki -
-        // tuż nad albo pod nim, nie na poziomych dojściach.
-        const mid = (top + bottom) / 2, spots = [mid];
-        for (let k = 1; k * 20 <= (bottom - top) / 2 - 9; k++) spots.push(mid + k * 20, mid - k * 20);
-        const clear = spots.filter(y => Math.abs(y - ya) > 11 && Math.abs(y - yb) > 11);
-        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}"><title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
-            + `<path d="${d}"/><circle cx="${ra}" cy="${ya}" r="2.5"/><circle cx="${rb}" cy="${yb}" r="2.5"/>`
-            + `${pill([...clear, top - 14, bottom + 14, ...spots], text, x)}</g>`;
+    for (const pair of walks) {
+        let a = boxes.get(pair.from), b = boxes.get(pair.to);
+        if (a.y > b.y) [a, b] = [b, a];
+        const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+        const text = `pieszo, ${pair.min} min`;
+        const w = text.length * 5.8 + 14, cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+        out.minX = Math.min(out.minX, x1, x2, cx - w / 2); out.maxX = Math.max(out.maxX, x1, x2, cx + w / 2);
+        out.minY = Math.min(out.minY, y1); out.maxY = Math.max(out.maxY, y2);
+        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}">`
+            + `<title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
+            + `<path d="M${x1} ${y1}L${x2} ${y2}"/><circle cx="${x1}" cy="${y1}" r="2.5"/><circle cx="${x2}" cy="${y2}" r="2.5"/>`
+            + `<rect class="scheme-walk-pill" x="${cx - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
+            + `<text class="scheme-walk-text" x="${cx}" y="${cy}">${text}</text></g>`;
     }
     return out;
 }
 
-function schemeSvg(boxes, strands, pairs) {
+function schemeSvg(boxes, strands, pairs, soonest = new Set()) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -5943,16 +5892,14 @@ function schemeSvg(boxes, strands, pairs) {
     }
     // Przejścia pieszo leżą pod pudełkami i kreskami jazd, żeby nie zasłaniały
     // linii.
-    const badgeRects = [...strands, ...branches].filter(s => s.badge).map(s => s.badge);
-    const laneX = maxX + 20;
-    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs), laneX, badgeRects);
+    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs));
     minX = Math.min(minX, walkLayer.minX); maxX = Math.max(maxX, walkLayer.maxX);
     minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
     const colors = new Set();
     const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
     const DASH = 9;
-    let rects = '', lines = '', names = '';
+    let rects = '', lines = '', names = '', dots = '';
     for (const [id, b] of boxes) {
         // Miejsce, w którym mapa urywa linię, ale nie stawia kropki: ramka
         // kreskowana, bez wypełnienia, z podpowiedzią.
@@ -5975,7 +5922,10 @@ function schemeSvg(boxes, strands, pairs) {
             : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
               + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
               + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
-        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}">${strokes}</g>`;
+        const soon = group.some(line => soonest.has(line.num));
+        const halo = soon ? `<path class="scheme-halo" d="${d}"/>` : '';
+        return `<g class="scheme-stroke${extra}${soon ? ' scheme-soonest' : ''}" data-lines="${escAttr(label)}">`
+            + `${halo}${strokes}<path class="scheme-hit" d="${d}"/></g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
         : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
@@ -5988,6 +5938,9 @@ function schemeSvg(boxes, strands, pairs) {
             lines += stroke(s.through, s.through.map(line => line.num).join(' '),
                             `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(box.y + box.h).toFixed(1)}`,
                             false, ' scheme-through');
+            const tint = s.through.length && new Set(s.through.map(line => line.kind)).size === 1
+                ? colorOf(s.through[0].kind) : WALK_COLOR;
+            dots += `<circle class="scheme-stop-dot" cx="${x.toFixed(1)}" cy="${(box.y + box.h / 2).toFixed(1)}" r="5" stroke="${tint}"/>`;
         }
         for (const merge of s.merges) {
             const [x, top] = s.points[s.points.length - 1];
@@ -6004,20 +5957,58 @@ function schemeSvg(boxes, strands, pairs) {
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
         + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
-        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${names}${labels}</svg>`;
+        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${dots}${names}${labels}</svg>`;
 }
 
-/** Pod schematem: każdy ruch w jednej linijce - linie, wyjście → cel i ile
-    to trwa. Godzin w samym rysunku nie ma (patrz schemeSvg). */
+function soonestNums(moves) {
+    const move = (moves || []).find(m => m.soonest);
+    return new Set(move ? move.lines.map(line => line.num) : []);
+}
+
+/** Pod schematem nie ma już listy ruchów: godziny są w samym rysunku (patrz
+    bindSchemeLines), a ruch, który odjeżdża najszybciej, jest zaznaczony
+    kolorem. */
+let schemeMoves = [];
 function renderSchemeMoves(moves) {
+    schemeMoves = moves;
     const list = $('scheme-moves');
-    list.hidden = !moves.length;
-    list.innerHTML = moves.map(move => '<li>'
-        + move.lines.map(line => `<span class="badge ${esc(line.mode)}">${esc(line.num)}</span>`).join('')
-        + `<span class="scheme-moves-time">${esc(move.departure)} → ${esc(move.arrival)}`
-        + ` · ${move.minutes} min</span>`
-        + (move.tight ? `<span class="scheme-moves-tight" title="Przesiadka na styk">na styk ${move.slack_min} min</span>` : '')
-        + '</li>').join('');
+    list.hidden = true;
+    list.innerHTML = '';
+}
+
+/** Najechanie na linię (dotknięcie na telefonie) mówi, kiedy ta linia odjeżdża
+    w każdym ruchu, który ją zawiera, i o której ten ruch jest w celu. */
+function bindSchemeLines(canvas) {
+    const tip = $('scheme-tip');
+    for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
+        const nums = element.dataset.lines.split(' ');
+        const show = e => {
+            const rows = [];
+            for (const num of nums) {
+                for (const move of schemeMoves) {
+                    const line = move.lines.find(l => l.num === num);
+                    if (!line) continue;
+                    rows.push(`<div class="scheme-tip-row${move.soonest ? ' soonest' : ''}"><b>${esc(num)}</b> `
+                        + `odjazd <b>${esc(line.dep)}</b> z ${esc(prettyStopName(line.from))}`
+                        + ` · w celu ${esc(move.arrival)} (${move.minutes} min)`
+                        + (move.soonest ? ' · <i>odjeżdża najszybciej</i>' : '')
+                        + (move.tight ? ' · przesiadka na styk' : '') + '</div>');
+                }
+            }
+            if (!rows.length) return;
+            schemeTipOwner = null;
+            tip.innerHTML = rows.join('');
+            tip.hidden = false;
+            const at = {getBoundingClientRect: () => ({left: e.clientX, top: e.clientY - 6,
+                                                      bottom: e.clientY + 6, width: 0, height: 12})};
+            placeSchemeTip(at);
+        };
+        element.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
+        element.addEventListener('pointerleave', e => {
+            if (e.pointerType === 'mouse') hideSchemeTip();
+        });
+        element.addEventListener('click', show);
+    }
 }
 
 /** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
@@ -6059,10 +6050,11 @@ function renderScheme(data) {
         schemeLast = {boxes, strands};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs);
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, soonestNums(scheme.moves));
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
+        bindSchemeLines(canvas);
         fitScheme();
     };
     if ($('scheme-layout').value === 'dagre') {

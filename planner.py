@@ -2107,6 +2107,9 @@ def _transit_pairs(day, journey):
     return pairs
 
 
+BIKE_SOON_SEC = 10 * 60   # autobus odjeżdżający w tym czasie wypiera wolniejszy rower
+
+
 def _admit_vehicles(day, chosen_map, candidates, gain_sec, best_arr, query_sec):
     """Rower i Traficar jako odcinki ruchu, oceniane tak samo jak reszta
     (koszt z przesiadkami i marszem, wyparcie przez pokazane ruchy, nie
@@ -2131,6 +2134,12 @@ def _admit_vehicles(day, chosen_map, candidates, gain_sec, best_arr, query_sec):
                 "n": vehicles, "walk": walk}
         cost = moves.cost(inst, gain_sec)
         if cost > limit or any(moves.dominates(m["first"], inst) for m in shown):
+            continue
+        # Rower jest wart pokazania, gdy dorównuje komunikacji; gdy autobus
+        # odjeżdża zaraz i dowiezie nie później, rower tylko zaśmiecałby mapę.
+        if kind == "bike" and any(
+                not m["first"]["just_left"] and m["first"]["first"] - query_sec <= BIKE_SOON_SEC
+                and m["first"]["arr"] <= journey["arrival_sec"] for m in shown):
             continue
         mine = moves.passes_and_transfers(day, tuple(pairs)) if pairs else (set(), set())
         if any(moves.clashes(mine, o) for o in infos):
@@ -4480,7 +4489,9 @@ def _scheme_pairs(day, scheme_nodes, stops_of, target_set, journeys, query_sec,
         key = frozenset((a, b))
         if key in pairs and (why == "extra" or pairs[key]["why"] != "extra"):
             return
-        pairs[key] = {"from": a, "to": b, "m": metres(a, b), "why": why,
+        m = metres(a, b)
+        pairs[key] = {"from": a, "to": b, "m": m, "why": why,
+                      "min": max(1, round(gtfs.walk_time_sec(m, day.walk_mps) / 60)),
                       **({"rank": rank} if why == "extra" else {})}
 
     def middle_walks(legs):
@@ -4521,16 +4532,22 @@ def _scheme_moves(day, journeys, chosen):
     slacks += [None] * (len(journeys) - len(slacks))
     labels = {"ride": lambda leg: leg["num"], "bike": lambda leg: "rower",
               "drive": lambda leg: "Traficar"}
-    return [{
+    out = [{
         "slack_min": None if slack is None else floor(slack / 60),
         "tight": slack is not None and slack <= moves.TIGHT_SEC,
         "lines": [{"num": labels[leg["kind"]](leg),
-                   "mode": "car" if leg["kind"] == "drive" else leg["mode"]}
+                   "mode": "car" if leg["kind"] == "drive" else leg["mode"],
+                   "dep": _fmt_time(leg["dep_sec"]), "from": leg["from"]}
                   for leg in journey["legs"] if leg["kind"] in labels],
+        "board_sec": next(leg["dep_sec"] for leg in journey["legs"] if leg["kind"] in labels),
         "departure": journey["departure"],
         "arrival": journey["arrival"],
         "minutes": journey["duration_min"],
     } for journey, slack in zip(journeys, slacks)]
+    soonest = min(out, key=lambda move: move["board_sec"])
+    for move in out:
+        move["soonest"] = move is soonest
+    return out
 
 
 def _scheme_times(scheme, journeys):
