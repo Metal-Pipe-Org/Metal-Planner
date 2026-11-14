@@ -37,22 +37,38 @@ def get_logger():
 # Przy długiej awarii zewnętrznego źródła ten sam błąd wpadałby co kilka sekund
 # i rotacja wypychałaby z pliku starsze, ważniejsze wpisy - dlatego powtórki
 # tej samej przyczyny tylko liczymy, a przy końcu serii zapisujemy jedno podsumowanie.
-_streak = {"reason": None, "message": None, "count": 0, "since": 0.0}
+# Przy restarcie procesu w trakcie serii licznik przepada, więc co godzinę
+# zostawiamy w logu wpis "nadal", żeby ślad po długiej awarii nie zniknął.
+_STREAK_REMINDER_SECONDS = 3600
+_streak = {"reason": None, "message": None, "count": 0, "since": 0.0, "logged": 0.0}
 
 
 def log_repeating_error(reason, message):
     """Pierwszy błąd danej przyczyny idzie do logu, kolejne tylko się liczą."""
+    now = time.monotonic()
     if _streak["reason"] == reason:
         _streak["count"] += 1
+        if now - _streak["logged"] >= _STREAK_REMINDER_SECONDS:
+            _streak["logged"] = now
+            get_logger().error(
+                "%s - nadal: powtórzone %d razy przez %d min",
+                _streak["message"], _streak["count"], _streak_minutes(now),
+            )
         return
     close_error_streak()
-    _streak.update(reason=reason, message=message, count=0, since=time.monotonic())
+    _streak.update(reason=reason, message=message, count=0, since=now, logged=now)
     get_logger().error(message)
+
+
+def _streak_minutes(now):
+    return max(1, round((now - _streak["since"]) / 60))
 
 
 def close_error_streak():
     """Zapisuje podsumowanie powtórek (tylko gdy jakieś były) i kończy serię."""
     if _streak["reason"] is not None and _streak["count"] > 0:
-        minutes = max(1, round((time.monotonic() - _streak["since"]) / 60))
-        get_logger().error("%s - powtórzone %d razy przez %d min", _streak["message"], _streak["count"], minutes)
+        get_logger().error(
+            "%s - powtórzone %d razy przez %d min",
+            _streak["message"], _streak["count"], _streak_minutes(time.monotonic()),
+        )
     _streak.update(reason=None, message=None, count=0)
