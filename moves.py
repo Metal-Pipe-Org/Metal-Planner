@@ -80,6 +80,13 @@ FIRST_VIEW_VEHICLES = 1
 # na przyjazd (heurystyka 6: bez twardego limitu, ale z ceną).
 WALK_EXTRA = 1.0
 
+# Dojścia do tego samego ostatniego pojazdu (ten sam kurs, to samo wsiadanie)
+# to gałęzie jednej podróży, nie osobne ruchy: tyle ich najwyżej dochodzi do
+# ruchu, a zapas na przesiadce do ostatniego pojazdu nie może być większy niż
+# tyle (dłuższe czekanie to już inny pomysł na wieczór, nie dojście).
+BRANCH_MAX = 3
+BRANCH_MAX_SLACK_SEC = 20 * 60
+
 # Wariant „ten sam pojazd jedzie dalej" może dowozić później niż ruch na styk,
 # ale nie o więcej niż tyle.
 FALLBACK_LATER_SEC = 15 * 60
@@ -116,6 +123,18 @@ def instances_of(day, classes, query_sec):
                 "just_left": cls["dep"] < query_sec,
             })
     return out
+
+
+def rides_key(day, rides):
+    """Tożsamość przejazdów niezależna od indeksów w tablicy: kurs, godzina
+    wsiadania i wysiadania - tak samo opisuje je etap trasy z paska."""
+    conns = day.conns
+    return tuple((conns[b][4], conns[b][0], conns[a][1]) for b, a in rides)
+
+
+def is_exact(ctx, inst):
+    """Czy egzemplarz to dokładnie najszybsza podróż z paska nad mapą."""
+    return ctx["exact"] is not None and rides_key(ctx["day"], inst["rides"]) == ctx["exact"]
 
 
 def cost(inst, gain_sec):
@@ -156,7 +175,8 @@ def step_same_vehicles(ctx, insts):
 
         def rank(i):
             slack = slack_of(day, i)
-            return (i["arr"], -i["dep"], -(slack if slack is not None else 10 ** 6),
+            return (not is_exact(ctx, i), i["arr"], -i["dep"],
+                    -(slack if slack is not None else 10 ** 6),
                     walked_sec(day, i), sum(alight for _, alight in i["rides"]))
         if rank(inst) < rank(old):
             best[key] = inst
@@ -172,7 +192,8 @@ def step_one_per_departure(ctx, insts):
     for inst in insts:
         key = (inst["sig"], inst["first"])
         old = best.get(key)
-        if old is None or (inst["arr"], inst["n"]) < (old["arr"], old["n"]):
+        if old is None or (not is_exact(ctx, inst), inst["arr"], inst["n"]) < \
+                (not is_exact(ctx, old), old["arr"], old["n"]):
             best[key] = inst
     return list(best.values())
 
@@ -331,13 +352,16 @@ def departures_of_move(ctx, own, everything):
 
 
 def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
-           origin_sec=None):
+           origin_sec=None, exact=None):
     """(ruchy do pokazania, ile ukryto): [{sig, shown: [egzemplarze], first,
-    cost, far_walk}] od najlepszego. Pusta lista, gdy nic nie ma."""
+    cost, far_walk, branches}] od najlepszego. `exact` to najszybsza podróż
+    z paska (patrz rides_key): jest kręgosłupem - ruch z jej sygnaturą ma ją
+    za `first` dokładnie w tej postaci, a reszta się do niej dokleja."""
     if not insts:
         return [], 0, True
     ctx = {"day": day, "query_sec": query_sec, "gain_sec": gain_sec,
-           "reasonable_sec": reasonable_sec(best_arr, query_sec, wider)}
+           "reasonable_sec": reasonable_sec(best_arr, query_sec, wider),
+           "exact": tuple(exact) if exact else None}
     ctx["pool"] = sorted(step_one_per_departure(ctx, step_same_vehicles(
         ctx, step_reasonable(ctx, insts))),
                          key=lambda i: cost(i, gain_sec))
@@ -350,15 +374,27 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
     by_sig = {}
     for inst in chosen:
         by_sig.setdefault(inst["sig"], []).append(inst)
+    spine = None
+    if ctx["exact"] is not None:
+        spine = next((i for i in insts if is_exact(ctx, i)), None)
+        if spine is not None and spine["sig"] not in by_sig:
+            by_sig[spine["sig"]] = [spine]
     moves = []
     for sig, own in by_sig.items():
+        if spine is not None and sig == spine["sig"] and spine not in own:
+            own = own + [spine]
         shown = departures_of_move(ctx, own, by_sig_all[sig])
+        if spine is not None and sig == spine["sig"] and spine not in shown:
+            shown = sorted(shown + [spine], key=lambda i: i["dep"])
         if not shown:
             continue
-        first = next(i for i in shown if not i["just_left"])
+        first = spine if spine is not None and sig == spine["sig"] \
+            else next(i for i in shown if not i["just_left"])
         moves.append({"sig": sig, "shown": shown, "first": first,
                       "cost": cost(first, gain_sec)})
     anchor = fastest(day, moves, prefer)
+    if spine is not None:
+        anchor = next(m for m in moves if m["first"] is spine)
     moves = distinct_last_vehicle(day, moves, anchor)
     for move in moves:
         move["far_walk"] = max(move["first"]["lead"], move["first"]["tail"]) >= LONG_WALK_SEC
@@ -368,8 +404,55 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
     shown, hidden = readable(day, moves, anchor)
     for move in shown:
-        move["first"] = extend_start(day, move["first"], origin_sec or {}, query_sec)
-    return shown, hidden, any(is_safe(day, m["first"]) for m in moves)
+        if move is not anchor:
+            move["first"] = extend_start(day, move["first"], origin_sec or {}, query_sec)
+    add_branches(ctx, shown, insts, origin_sec or {})
+    return shown, hidden, any(is_safe(day, i) for m in shown for i in [m["first"], *m["branches"]])
+
+
+def add_branches(ctx, shown, insts, origin_sec):
+    """Dojścia do TEGO SAMEGO ostatniego pojazdu (ten sam kurs, to samo
+    wsiadanie i wysiadanie) są gałęziami jednej podróży: na schemacie to dopływy
+    do jednego przystanku przesiadkowego, nie osobne ruchy. Do ruchu dochodzi
+    najwyżej BRANCH_MAX gałęzi, od najtańszej; gałąź wsiada na innym przystanku
+    albo dojeżdża do ostatniego pojazdu z innego miejsca niż to, co już jest. Przesiadka na styk
+    jest gałęzią jak każda - tylko oznaczoną."""
+    day, gain = ctx["day"], ctx["gain_sec"]
+    by_last = {}
+    for inst in insts:
+        if inst["n"] >= 2 and not inst["just_left"]:
+            by_last.setdefault(inst["rides"][-1], []).append(inst)
+    for move in shown:
+        main = move["first"]
+        move["branches"] = []
+        if main["n"] < 2:
+            continue
+        taken_boards = {main["sig"][0][0]}
+        taken_ins = {main["sig"][-2][1]}
+        limit = move["cost"] + ctx["reasonable_sec"]
+        pool = [i for i in by_last.get(main["rides"][-1], ())
+                if i["arr"] <= main["arr"] and cost(i, gain) <= limit
+                and _last_slack(day, i) <= BRANCH_MAX_SLACK_SEC
+                and i["rides"][:-1] != main["rides"][:-1]
+                and origin_sec.get(day.conns[i["rides"][0][0]][2], 10 ** 6)
+                <= origin_sec.get(day.conns[main["rides"][0][0]][2], 0) + NEAR_EQUAL_SEC]
+        pool.sort(key=lambda i: (i["n"], cost(i, gain), not is_safe(day, i), -i["dep"]))
+        while pool and len(move["branches"]) < BRANCH_MAX:
+            def novelty(i):
+                return 2 * (i["sig"][-2][1] in taken_ins) + (i["sig"][0][0] in taken_boards)
+            inst = min(pool, key=lambda i: (novelty(i) >= 3, novelty(i), i["n"] > main["n"], i["n"], cost(i, gain),
+                                            not is_safe(day, i), -i["dep"]))
+            if novelty(inst) >= 3:
+                break
+            move["branches"].append(inst)
+            taken_boards.add(inst["sig"][0][0])
+            taken_ins.add(inst["sig"][-2][1])
+            pool.remove(inst)
+
+
+def _last_slack(day, inst):
+    """Zapas przed ostatnim pojazdem w sekundach."""
+    return transfer_slacks(day, inst)[-1][0]
 
 
 def distinct_last_vehicle(day, moves, anchor):
@@ -424,8 +507,11 @@ def passes_and_transfers(day, rides):
 
 
 def clashes(one, other):
-    """Ile razy ruch wchodzi w cudzą klamrę przejścia pieszo."""
-    return len(one[0] & other[1]) + len(other[0] & one[1])
+    """Ile razy dwa ruchy przesiadają się w tym samym miejscu. Linia, która
+    tylko mija cudzą przesiadkę, nie przeszkadza: najszybsza podróż z paska
+    jest kręgosłupem w dokładnie swojej postaci i inne ruchy nie mogą jej
+    z niej wypchnąć."""
+    return len(one[1] & other[1])
 
 
 def extend_start(day, inst, origin_sec, query_sec):
@@ -480,12 +566,20 @@ def readable(day, moves, anchor):
     nie przeszkadzały (variants_of). Dalekie spacery i wszystko, co się nie
     mieści, nie jest rysowane - dostęp zostaje przez kliknięcie w przystanek
     (tablica odjazdów). Zwraca (pokazane, ile ukryto, ...)."""
-    others = [passes_and_transfers(day, m["first"]["rides"])
-              for m in moves if m is not anchor and not m["far_walk"]]
 
     def settle(move, against):
         inst = move["first"]
-        options = variants_of(day, inst)
+        # Inne miejsce przesiadki tych samych pojazdów jest do wyboru tylko,
+        # gdy nie każe więcej chodzić ani nie zmniejsza zapasu: wysiadka
+        # wcześniej i marsz do przystanku obok, gdy ten sam pojazd jedzie
+        # tam sam, nie jest przesiadką, której pasażer szukał.
+        base = walked_sec(day, inst)
+        base_slack = slack_of(day, inst)
+        options = [rides for rides in variants_of(day, inst)
+                   if rides == inst["rides"]
+                   or (walked_sec(day, {"rides": rides}) <= base
+                       and min((s for s, _ in transfer_slacks(day, {"rides": rides})),
+                               default=10 ** 6) >= (10 ** 6 if base_slack is None else base_slack))]
         scored = [(sum(clashes(passes_and_transfers(day, rides), o) for o in against), k, rides)
                   for k, rides in enumerate(options)]
         clash, _, rides = min(scored)
@@ -495,8 +589,7 @@ def readable(day, moves, anchor):
             move["first"].pop("walked", None)
         return clash, passes_and_transfers(day, move["first"]["rides"])
 
-    _, anchor_info = settle(anchor, others)
-    shown, infos = [anchor], [anchor_info]
+    shown, infos = [anchor], [passes_and_transfers(day, anchor["first"]["rides"])]
     for move in moves:
         if len(shown) >= READABLE_MOVES:
             break

@@ -3519,9 +3519,16 @@ ul.tt-legend {
 }
 
 .scheme-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
-.scheme-halo { fill: none; stroke: #43a047; stroke-width: 9; stroke-linecap: round; opacity: 0.4; pointer-events: none; }
 .scheme-stop-dot { fill: #fff; stroke-width: 3; pointer-events: none; }
 .scheme-tip .scheme-tip-row { background: #fff; border-radius: 8px; padding: 6px 10px; margin-bottom: 3px; font: 12px system-ui, sans-serif; color: #263238; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); white-space: nowrap; }
-.scheme-tip .scheme-tip-row.soonest { border-left: 4px solid #43a047; }
+#scheme-canvas.has-pick g.scheme-stroke:not(.scheme-pick) { opacity: 0.25; }
+#scheme-canvas g.scheme-pick .scheme-line { stroke-width: 6; }
+.scheme-tight { font: 700 11px system-ui, sans-serif; fill: #e65100; pointer-events: none; }
+.move-tip { background: #fff; border-radius: 8px; padding: 6px 10px; font: 12px system-ui, sans-serif; color: #263238; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+.move-tip-row { margin: 2px 0; white-space: nowrap; }
+.move-tip-goal { font-size: 14px; }
+.move-tip-icon { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.move-tip-note { color: #e65100; font-weight: 600; }
 .scheme-walk-brace path { stroke-dasharray: 5 4; }
 .scheme-tip .scheme-tip-row { white-space: normal; max-width: 320px; }
+.leaflet-tooltip .move-tip { padding: 0; box-shadow: none; }

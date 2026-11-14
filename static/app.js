@@ -1966,6 +1966,14 @@ function renderTimeHeadline() {
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
     best.addEventListener('mouseleave', hideFastest);
+    const fastestNums = () => ((headlineFlow && headlineFlow.fastest && headlineFlow.fastest.legs) || [])
+        .filter(leg => leg.kind !== 'walk').map(leg => leg.num);
+    best.addEventListener('mouseenter', () => highlightSchemeLines(fastestNums()));
+    best.addEventListener('mouseleave', clearSchemeHighlight);
+    for (const chip of best.querySelectorAll('.line-chip')) {
+        chip.addEventListener('mouseenter', () => highlightSchemeLines([chip.textContent]));
+        chip.addEventListener('mouseleave', () => highlightSchemeLines(fastestNums()));
+    }
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
     const moreBtn = el.querySelector('.headline-more');
@@ -2471,6 +2479,8 @@ function flowPickHtml(when) {
     const options = flowPick.options;
     const sel = options[flowPick.index];
     if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
+    const moveTip = mapMoveTip(sel, when);
+    if (moveTip) return moveTip;
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
     let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
@@ -5876,7 +5886,7 @@ function schemeWalkLayer(boxes, walks) {
     return out;
 }
 
-function schemeSvg(boxes, strands, pairs, soonest = new Set()) {
+function schemeSvg(boxes, strands, pairs) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -5909,10 +5919,13 @@ function schemeSvg(boxes, strands, pairs, soonest = new Set()) {
         rects += `<g class="node${bare}" data-node="${id}">${title}<rect class="scheme-box${bare}" `
             + `x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12"/></g>`;
         names += `<text class="scheme-name${bare}" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+        if (b.node.tight) {
+            names += `<text class="scheme-tight" x="${b.x + b.w - 6}" y="${b.y - 5}" text-anchor="end">na styk</text>`;
+        }
     }
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
-    const stroke = (group, label, d, arrow, extra = '') => {
+    const stroke = (group, label, d, arrow, extra = '', from = '') => {
         const kinds = [...new Set(group.map(line => line.kind))].sort();
         const tint = kinds.length === 1 ? colorOf(kinds[0]) : WALK_COLOR;
         const marker = arrow ? ` marker-end="url(#scheme-arrow-${tint.slice(1)})"` : '';
@@ -5922,22 +5935,20 @@ function schemeSvg(boxes, strands, pairs, soonest = new Set()) {
             : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
               + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
               + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
-        const soon = group.some(line => soonest.has(line.num));
-        const halo = soon ? `<path class="scheme-halo" d="${d}"/>` : '';
-        return `<g class="scheme-stroke${extra}${soon ? ' scheme-soonest' : ''}" data-lines="${escAttr(label)}">`
-            + `${halo}${strokes}<path class="scheme-hit" d="${d}"/></g>`;
+        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}" data-from="${escAttr(from)}">`
+            + `${strokes}<path class="scheme-hit" d="${d}"/></g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
         : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
     for (const s of strands) {
-        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow);
+        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow, '', s.from);
         if (s.next) {
             // Linie jadące dalej przechodzą przez pudełko jedną prostą kreską.
             const [x, top] = s.points[s.points.length - 1];
             const box = boxes.get(s.to);
             lines += stroke(s.through, s.through.map(line => line.num).join(' '),
                             `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(box.y + box.h).toFixed(1)}`,
-                            false, ' scheme-through');
+                            false, ' scheme-through', s.to);
             const tint = s.through.length && new Set(s.through.map(line => line.kind)).size === 1
                 ? colorOf(s.through[0].kind) : WALK_COLOR;
             dots += `<circle class="scheme-stop-dot" cx="${x.toFixed(1)}" cy="${(box.y + box.h / 2).toFixed(1)}" r="5" stroke="${tint}"/>`;
@@ -5946,11 +5957,12 @@ function schemeSvg(boxes, strands, pairs, soonest = new Set()) {
             const [x, top] = s.points[s.points.length - 1];
             const [x2, bottom] = merge.to.points[0];
             lines += stroke(merge.lines, merge.lines.map(line => line.num).join(' '),
-                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge');
+                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge', s.to);
         }
     }
     for (const branch of branches) {
-        lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch');
+        lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch',
+                        branch.owner.from);
     }
     const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
         + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
@@ -5960,14 +5972,8 @@ function schemeSvg(boxes, strands, pairs, soonest = new Set()) {
         + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${dots}${names}${labels}</svg>`;
 }
 
-function soonestNums(moves) {
-    const move = (moves || []).find(m => m.soonest);
-    return new Set(move ? move.lines.map(line => line.num) : []);
-}
-
 /** Pod schematem nie ma już listy ruchów: godziny są w samym rysunku (patrz
-    bindSchemeLines), a ruch, który odjeżdża najszybciej, jest zaznaczony
-    kolorem. */
+    bindSchemeLines). */
 let schemeMoves = [];
 function renderSchemeMoves(moves) {
     schemeMoves = moves;
@@ -5976,25 +5982,70 @@ function renderSchemeMoves(moves) {
     list.innerHTML = '';
 }
 
-/** Najechanie na linię (dotknięcie na telefonie) mówi, kiedy ta linia odjeżdża
-    w każdym ruchu, który ją zawiera, i o której ten ruch jest w celu. */
+/** Okienko po najechaniu na linię - JEDNO dla mapy i schematu: (1) linia
+    i godzina odjazdu, (2) godzina u celu, (3) uwaga, np. „na styk". Obie
+    strony różni tylko to, skąd bierze się odjazd (patrz mapMoveTip i
+    schemeMoveTip). Dane to ruchy ze schematu (planner._scheme_moves). */
+const GOAL_ICON =
+    '<svg class="move-tip-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<path d="M3.5 14V2.2M3.5 2.8h8.6l-2 3 2 3H3.5" fill="none" stroke="currentColor"'
+    + ' stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function moveTipHtml(line, depSec, depName, move) {
+    const note = line.tight
+        ? (line.slack_min < 0 ? `na styk - wg szacunku brakuje ${-line.slack_min} min`
+                              : `na styk - zapas ${line.slack_min} min`)
+        : '';
+    return '<div class="move-tip">'
+        + `<div class="move-tip-row"><span class="line-chip ${esc(line.mode)}">${esc(line.num)}</span> `
+        + `odjazd <b>${esc(fmtClock(depSec))}</b> z ${esc(prettyStopName(depName))}</div>`
+        + `<div class="move-tip-row move-tip-goal">${GOAL_ICON}<b>${esc(move.arrival)}</b> u celu</div>`
+        + (note ? `<div class="move-tip-row move-tip-note">${esc(note)}</div>` : '')
+        + '</div>';
+}
+
+/** Mapa: odjazd z przystanku, który leży najbliżej (z tyłu) punktu pod
+    kursorem - poprzedniego realnego przystanku tej linii. */
+function mapMoveTip(sel, when) {
+    if (!when) return null;
+    for (const move of schemeMoves) {
+        for (const line of move.lines) {
+            if (line.num !== sel.num || !line.stops) continue;
+            const last = line.stops[line.stops.length - 1];
+            if (when.now < line.stops[0][1] - 30 || when.now > last[1] + 30) continue;
+            let at = line.stops[0];
+            for (const stop of line.stops) {
+                if (stop !== last && stop[1] <= when.now + 30) at = stop;
+            }
+            return moveTipHtml(line, at[1], at[0], move);
+        }
+    }
+    return null;
+}
+
+/** Schemat: odjazd z ostatniego przystanku pokazanego w schemacie przed tym
+    odcinkiem (początek kreski). */
+function schemeMoveTip(num, fromPlace) {
+    for (const move of schemeMoves) {
+        for (const line of move.lines) {
+            if (line.num !== num || !line.stops) continue;
+            const i = line.stops.findIndex(stop => stop[0] === fromPlace);
+            if (i < 0 || i === line.stops.length - 1) continue;
+            return moveTipHtml(line, line.stops[i][1], fromPlace, move);
+        }
+    }
+    return null;
+}
+
+/** Najechanie na linię (dotknięcie na telefonie) pokazuje okienko ruchu. */
 function bindSchemeLines(canvas) {
     const tip = $('scheme-tip');
     for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
         const nums = element.dataset.lines.split(' ');
+        const box = schemeLast && schemeLast.boxes.get(element.dataset.from);
+        const place = box && box.node.place;
         const show = e => {
-            const rows = [];
-            for (const num of nums) {
-                for (const move of schemeMoves) {
-                    const line = move.lines.find(l => l.num === num);
-                    if (!line) continue;
-                    rows.push(`<div class="scheme-tip-row${move.soonest ? ' soonest' : ''}"><b>${esc(num)}</b> `
-                        + `odjazd <b>${esc(line.dep)}</b> z ${esc(prettyStopName(line.from))}`
-                        + ` · w celu ${esc(move.arrival)} (${move.minutes} min)`
-                        + (move.soonest ? ' · <i>odjeżdża najszybciej</i>' : '')
-                        + (move.tight ? ' · przesiadka na styk' : '') + '</div>');
-                }
-            }
+            const rows = nums.map(num => schemeMoveTip(num, place)).filter(Boolean);
             if (!rows.length) return;
             schemeTipOwner = null;
             tip.innerHTML = rows.join('');
@@ -6009,6 +6060,26 @@ function bindSchemeLines(canvas) {
         });
         element.addEventListener('click', show);
     }
+}
+
+/** Pozycja paska nad mapą podświetla swoje linie w schemacie (pasek zostaje). */
+function highlightSchemeLines(nums) {
+    const canvas = $('scheme-canvas');
+    clearSchemeHighlight();
+    let any = false;
+    for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
+        if (element.dataset.lines.split(' ').some(num => nums.includes(num))) {
+            element.classList.add('scheme-pick');
+            any = true;
+        }
+    }
+    canvas.classList.toggle('has-pick', any);
+}
+
+function clearSchemeHighlight() {
+    const canvas = $('scheme-canvas');
+    canvas.classList.remove('has-pick');
+    for (const element of canvas.querySelectorAll('g.scheme-pick')) element.classList.remove('scheme-pick');
 }
 
 /** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
@@ -6050,7 +6121,7 @@ function renderScheme(data) {
         schemeLast = {boxes, strands};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, soonestNums(scheme.moves));
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
@@ -6337,12 +6408,13 @@ function placeSchemeTip(element) {
 function bindSchemeNodes(canvas, data) {
     const byId = new Map(data.scheme.nodes.map(node => [node.id, node]));
     const mapNodes = new Map((data.nodes || []).map(node => [node.place, node]));
+    const endNode = (data.nodes || []).find(node => node.end);
     for (const element of canvas.querySelectorAll('g.node')) {
         const node = byId.get(element.dataset.node);
-        const mapNode = node && node.place && mapNodes.get(node.place);
+        const mapNode = node && (node.role === 'end' ? endNode : node.place && mapNodes.get(node.place));
         if (!mapNode) continue;
         const where = {name: mapNode.name, lines: mapNode.lines, deadline: data.deadline_sec,
-                       start: mapNode.start, late: mapNode.late};
+                       start: mapNode.start, end: mapNode.end, late: mapNode.late};
         const show = () => showSchemeTip(element, where, mapNode.sec);
         // Najechanie i zjechanie tylko myszą: palec po dotknięciu też
         // „zjeżdża” z węzła i tablica znikałaby, zanim się pokaże.
