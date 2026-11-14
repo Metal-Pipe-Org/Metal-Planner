@@ -538,13 +538,42 @@ function renderVehicles() {
     }
 }
 
+// Po tylu sekundach bez ruchu w danych MPK uznajemy je za nieświeże. Normalnie
+// pozycje zmieniają się co ~20 s; kanał potrafi zamilknąć na kilkanaście minut.
+const VEHICLES_STALE_SEC = 90;
+const vehiclesNote = $('vehicles-note');
+
+function setVehiclesNote(text) {
+    if (!vehiclesNote) return;
+    vehiclesNote.textContent = text || '';
+    vehiclesNote.hidden = !text;
+}
+
 function loadVehicles() {
     fetch('/api/vehicles').then(r => r.json()).then(data => {
-        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
+        if (!vehiclesOn) return;
+        if (data.error) {   // zostają ostatnie znane pozycje, ale mówimy, że to nie bieżące dane
+            setVehiclesNote('Nie udało się pobrać pozycji pojazdów - widać ostatnie znane.');
+            return;
+        }
         lastVehicles = data.vehicles;
         renderVehicles();
-    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+        if (data.stale_sec > VEHICLES_STALE_SEC) {
+            setVehiclesNote(`MPK od ${Math.round(data.stale_sec / 60)} min nie odświeża pozycji - to dane sprzed tego czasu.`);
+        } else if (!lastVehicles.length) {
+            setVehiclesNote('MPK nie przysyła teraz pozycji pojazdów.');
+        } else {
+            setVehiclesNote('');
+        }
+    }).catch(() => {
+        if (vehiclesOn) setVehiclesNote('Brak połączenia - widać ostatnie znane pozycje pojazdów.');
+    });   // kolejna próba za VEHICLES_REFRESH_MS
 }
+
+// Karta w tle ma przycinane timery - po powrocie nie czekamy na następny tik.
+document.addEventListener('visibilitychange', () => {
+    if (vehiclesOn && !document.hidden) loadVehicles();
+});
 
 function setVehiclesOn(on) {
     vehiclesOn = on;
@@ -555,6 +584,7 @@ function setVehiclesOn(on) {
     }
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
+    setVehiclesNote('');
     if (on) {
         vehiclesLayer.addTo(map);
         loadVehicles();

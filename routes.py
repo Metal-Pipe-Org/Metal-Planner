@@ -312,7 +312,8 @@ def init_routes(app):
         dany pojazd jedzie, czeka zakomentowane w vehicles.py.
         """
         try:
-            return jsonify({"vehicles": vehicles.get_vehicles()})
+            found = vehicles.get_vehicles()
+            return jsonify({"vehicles": found, "stale_sec": vehicles.stale_sec()})
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
         except (OSError, ValueError) as e:

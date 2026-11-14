@@ -511,7 +511,8 @@ body.mode-timetable .tools-sep { display: none; }
 #place-remove[hidden] { display: none; }
 
 /* .toast ma display: flex, który bije domyślne [hidden]. */
-#place-pick-hint[hidden] { display: none; }
+#place-pick-hint[hidden],
+#vehicles-note[hidden] { display: none; }
 
 .search-card { flex: 0 0 auto; }
 
