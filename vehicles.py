@@ -144,6 +144,8 @@ STEP_M = 30                   # krótsze przesunięcie to szum GPS
 VETO_DEG = 90
 STRAIGHT_DEG = 30
 AT_STOP_M = 25
+ROUTE_NEAR_M = 100            # kropka tak blisko odcinka wariantu trasy ...
+ROUTE_DEG = 45                # ... a odcinek biegnie tak zgodnie z ruchem: pasuje
 TRACK_TTL_SEC = 300
 
 _TRIP_ID = re.compile(r"\d+_\d+")
@@ -349,26 +351,60 @@ def _add_courses(vehicles):
             where = _locate(trip, (v["lat"], v["lon"]), db)
             if claims[trip["id"]] == 1 and where is not None and where[0] <= ON_ROUTE_M:
                 v["course"] = (trip, _trip_stops(trip, db)[where[1]])
+        _add_routes(vehicles, trips, db)
     finally:
         db.close()
 
 
+def _add_routes(vehicles, trips, db):
+    """Pojazdom bez kursu, ale z wiarygodnym ruchem: v["route"] = (cel, następny
+    przystanek), gdy wszystkie warianty trasy tej linii, które mijają kropkę
+    (≤ ROUTE_NEAR_M) w kierunku zgodnym z ruchem (< ROUTE_DEG), mają ten sam cel
+    i ten sam następny przystanek. Pętla, rozjazd albo brak dopasowania - nic."""
+    variants = {}
+    for t in trips:
+        stops = _trip_stops(t, db)
+        key = (t["route"], t["type"], t["headsign"], len(stops), stops[0][:2], stops[-1][:2])
+        variants.setdefault(key, t)
+    by_line = {}
+    for (route, kind, *_), t in variants.items():
+        by_line.setdefault((route, kind), []).append(t)
+    for v in vehicles:
+        steps = v["steps"]
+        if "course" in v or len(steps) != 2 or _angle_diff(steps[0], steps[1]) >= STRAIGHT_DEG:
+            continue
+        point = (v["lat"], v["lon"])
+        found = set()
+        for t in by_line.get((v["line"], _ROUTE_TYPE[v["kind"]]), []):
+            stops = _trip_stops(t, db)
+            for j in range(len(stops) - 1):
+                if (_seg_distance(point, stops[j][:2], stops[j + 1][:2]) <= ROUTE_NEAR_M
+                        and _angle_diff(steps[1], _bearing(stops[j][:2], stops[j + 1][:2])) < ROUTE_DEG):
+                    nxt = j + 1
+                    if nxt + 1 < len(stops) and _metres(point, stops[nxt][:2]) < AT_STOP_M:
+                        nxt += 1
+                    found.add((t["headsign"], stops[nxt][3], stops[nxt][0], stops[nxt][1]))
+        if len({f[:2] for f in found}) == 1:
+            headsign, name, lat, lon = next(iter(found))
+            v["route"] = (headsign, (lat, lon, None, name))
+
+
 def _add_headings(vehicles):
-    """Składa z kursu i ruchu to, co dostaje front: heading (stopnie) i source
-    ("trip"/"motion"), a przy kursie też to (cel) i next (następny przystanek)."""
+    """Składa z kursu (albo wariantu trasy) i ruchu to, co dostaje front: heading
+    (stopnie), source ("trip"/"route") oraz to (cel) i next (następny przystanek).
+    Strzałka jest tylko tam, gdzie znamy cel - bez celu pojazd ma samo kółko."""
     for v in vehicles:
         steps = v.pop("steps")
         course = v.pop("course", None)
+        route = v.pop("route", None)
         v["heading"] = v["source"] = None
-        if course:
-            trip, stop = course
+        if course or route:
+            headsign, stop = (course[0]["headsign"], course[1]) if course else route
             bearing = _bearing((v["lat"], v["lon"]), stop[:2])
             if steps and _angle_diff(steps[-1], bearing) > VETO_DEG:
                 continue
-            v["heading"], v["source"] = round(bearing), "trip"
-            v["to"], v["next"] = trip["headsign"], stop[3]
-        elif len(steps) == 2 and _angle_diff(steps[0], steps[1]) < STRAIGHT_DEG:
-            v["heading"], v["source"] = round(steps[1]), "motion"
+            v["heading"], v["source"] = round(bearing), "trip" if course else "route"
+            v["to"], v["next"] = headsign, stop[3]
 
 
 # ------------------------------------------- którym kursem to właściwie jedzie ---

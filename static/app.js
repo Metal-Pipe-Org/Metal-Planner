@@ -506,8 +506,7 @@ function vehicleIcon(v) {
 }
 
 function vehicleTooltipHtml(v) {
-    if (v.to) return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
-    return `<b>${esc(v.line)}</b>`;
+    return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
 }
 
 const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();
@@ -533,9 +532,8 @@ function renderVehicles() {
     const only = vehiclesFilter();
     for (const v of lastVehicles) {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
-        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
-            .bindTooltip(vehicleTooltipHtml(v))
-            .addTo(vehiclesLayer);
+        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)}).addTo(vehiclesLayer);
+        if (v.to) marker.bindTooltip(vehicleTooltipHtml(v));
         marker.tapRank = TAP_RANK.vehicle;
     }
 }
