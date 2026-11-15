@@ -18,6 +18,7 @@ import time
 import urllib.request
 
 import config
+import tls
 
 CODE_TTL_SEC = 10 * 60
 # Sześć cyfr to milion możliwości; bez limitu prób dałoby się je przejść
@@ -50,7 +51,7 @@ def _post_to_discord(content, user_id):
         headers={"Content-Type": "application/json",
                  "User-Agent": "Metal-Planner/0.1 (+https://metal.sze.one)"},
     )
-    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC):
+    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC, context=tls.SSL_CONTEXT):
         pass
 
 

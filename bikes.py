@@ -48,6 +48,7 @@ import time
 import urllib.request
 
 import gtfs
+import tls
 import warmup
 
 GBFS_BASE = os.environ.get(
@@ -159,7 +160,7 @@ def _fetch(url):
     request = urllib.request.Request(
         url, headers={"User-Agent": "Metal-Planner/0.1 (+https://metal.sze.one)"}
     )
-    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC) as response:
+    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC, context=tls.SSL_CONTEXT) as response:
         return json.load(response)
 
 

@@ -35,6 +35,7 @@ from pathlib import Path
 # procesem serwera - musi wczytać data/.env na własną rękę.
 import config  # noqa: F401
 import siechnice
+import tls
 
 # Portal Otwarte Dane Wrocław publikuje kolejne paczki GTFS nazwane datą
 # początku obowiązywania (GTFS_DDMMRRRR). Ta strona listuje je wszystkie:
@@ -151,7 +152,7 @@ def batched_insert(db, sql, rows, batch_size=50_000):
 
 def _fetch(url):
     request = urllib.request.Request(url, headers={"User-Agent": "Metal-Planner/0.1"})
-    return urllib.request.urlopen(request, timeout=120)
+    return urllib.request.urlopen(request, timeout=120, context=tls.SSL_CONTEXT)
 
 
 def find_current_feed_url(today=None):

@@ -41,6 +41,7 @@ import time
 import urllib.request
 
 import gtfs
+import tls
 import warmup
 
 ZONE_ID = 3          # Wrocław (GET /api/v1/zones)
@@ -129,7 +130,7 @@ def enabled():
 
 def _fetch(url):
     request = urllib.request.Request(url, headers={"User-Agent": "Metal-Planner/0.1"})
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=10, context=tls.SSL_CONTEXT) as response:
         return json.load(response)
 
 
