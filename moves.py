@@ -81,9 +81,10 @@ FIRST_VIEW_VEHICLES = 1
 WALK_EXTRA = 1.0
 
 # Dojścia do tego samego ostatniego pojazdu (ten sam kurs, to samo wsiadanie)
-# to gałęzie jednej podróży, nie osobne ruchy, a zapas na przesiadce do
-# ostatniego pojazdu nie może być większy niż tyle (dłuższe czekanie to już
-# inny pomysł na wieczór, nie dojście).
+# to gałęzie jednej podróży, nie osobne ruchy: tyle ich najwyżej dochodzi do
+# ruchu, a zapas na przesiadce do ostatniego pojazdu nie może być większy niż
+# tyle (dłuższe czekanie to już inny pomysł na wieczór, nie dojście).
+BRANCH_MAX = 2
 BRANCH_MAX_SLACK_SEC = 20 * 60
 
 # Wariant „ten sam pojazd jedzie dalej" może dowozić później niż ruch na styk,
@@ -394,6 +395,7 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
     anchor = fastest(day, moves, prefer)
     if spine is not None:
         anchor = next(m for m in moves if m["first"] is spine)
+    ctx["spine_boards"] = {board for board, _ in anchor["first"]["sig"]}
     moves = distinct_last_vehicle(day, moves, anchor)
     for move in moves:
         move["far_walk"] = max(move["first"]["lead"], move["first"]["tail"]) >= LONG_WALK_SEC
@@ -413,11 +415,12 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
 def add_branches(ctx, shown, insts, origin_sec):
     """Dojścia do TEGO SAMEGO ostatniego pojazdu (ten sam kurs, to samo
     wsiadanie i wysiadanie) są gałęziami jednej podróży: na schemacie to dopływy
-    do jednego przystanku przesiadkowego, nie osobne ruchy. Do ruchu dochodzą
-    wszystkie takie dojścia (od najtańszego), po jednym na każdy sposób
-    dojazdu (te same linie na tych samych przystankach to jedna gałąź, nie
-    kolejne odjazdy). Przesiadka na styk jest gałęzią jak każda - tylko
-    oznaczoną."""
+    do jednego przystanku przesiadkowego, nie osobne ruchy. Do ruchu dochodzi
+    najwyżej BRANCH_MAX gałęzi, od najtańszej. Gałąź wchodzi tylko, gdy daje
+    NOWY przystanek wsiadania (inny niż w tej podróży, w kręgosłupie i w już
+    wziętych gałęziach) - kolejna linia z tego samego miejsca to nie nowe
+    dojście - i nie ma więcej jazd niż podróż, do której dołącza. Przesiadka na
+    styk jest gałęzią jak każda - tylko oznaczoną."""
     day, gain = ctx["day"], ctx["gain_sec"]
     by_last = {}
     for inst in insts:
@@ -429,6 +432,7 @@ def add_branches(ctx, shown, insts, origin_sec):
         move["safe_alt"] = False
         if main["n"] < 2:
             continue
+        taken_boards = set(ctx["spine_boards"]) | {board for board, _ in main["sig"]}
         limit = move["cost"] + ctx["reasonable_sec"]
         pool = [i for i in by_last.get(main["rides"][-1], ())
                 if i["arr"] <= main["arr"] and cost(i, gain) <= limit
@@ -440,14 +444,15 @@ def add_branches(ctx, shown, insts, origin_sec):
         # przystanku), nadal jest dokąd wrócić, gdy uciekło: nie wymusza
         # szerszego szukania (heurystyka 4).
         move["safe_alt"] = any(is_safe(day, i) for i in pool)
-        taken = {(main["sig"], main["nums"])}
-        while pool:
-            inst = min(pool, key=lambda i: (cost(i, gain), not is_safe(day, i), -i["dep"]))
-            pool.remove(inst)
-            if (inst["sig"], inst["nums"]) in taken:
-                continue
-            taken.add((inst["sig"], inst["nums"]))
+        pool = [i for i in pool if i["n"] <= main["n"]]
+        while len(move["branches"]) < BRANCH_MAX:
+            fresh = [i for i in pool if i["sig"][0][0] not in taken_boards]
+            if not fresh:
+                break
+            inst = min(fresh, key=lambda i: (i["n"], cost(i, gain), not is_safe(day, i), -i["dep"]))
             move["branches"].append(inst)
+            taken_boards.update(board for board, _ in inst["sig"])
+            pool.remove(inst)
 
 
 def _last_slack(day, inst):

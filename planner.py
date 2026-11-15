@@ -4320,7 +4320,7 @@ def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False, anchor
         last = len(places) - 1
         meets = set().union(*(e for j, e in enumerate(ends) if j != k)) if len(runs) > 1 else set()
         marks = [i for i, p in enumerate(places)
-                 if i in (0, last) or p in dots or p == start_place or p in target_places
+                 if i in (0, last) or (p in dots and not anchors) or p == start_place or p in target_places
                  or p in anchors or p in meets]
         bare.update(places[i] for i in (0, last)
                     if places[i] not in dots and places[i] != start_place
@@ -4670,6 +4670,8 @@ def _scheme_pairs(day, scheme_nodes, stops_of, target_set, journeys, query_sec,
             add(start, ids.get(legs[0]["to"]), "access")
         if end_is_point and legs[-1]["kind"] == "walk":
             add(ids.get(legs[-1]["from"]), end, "access")
+        for a, b in middle_walks(legs):
+            add(a, b, "access")
 
     for rank, walks in enumerate(extra_walks, 1):
         for a, b in walks:
