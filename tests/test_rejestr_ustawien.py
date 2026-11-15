@@ -141,8 +141,8 @@ def test_obsolete_ignoruje_zwykle_tagi_ale_nie_dev(rejestr):
     assert not widok["expired"]
     assert widok["issue_url"].startswith("https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new?title=")
     assert parse_qs(urlparse(widok["issue_url"]).query) == {
-        "title": ['"X" nie powinno byc obsolete'],
-        "body": ["<Wpisz dlaczego wazne>\n\nId ustawienia: x\nObsolete od: 2026-11-15"],
+        "title": ['"X" nie powinno być obsolete'],
+        "body": ["<Wpisz dlaczego ważne>\n\nId ustawienia: x\nObsolete od: 2026-11-15"],
         "labels": ["to discuss"],
     }
 

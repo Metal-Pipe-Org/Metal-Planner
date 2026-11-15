@@ -7978,7 +7978,7 @@ function settingGroups(visible) {
 }
 
 function suggestedSettings(visible) {
-    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row));
+    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row) && !isObsolete(row));
     const recent = settingsLog.recent.filter(usable).slice(0, SETTINGS_SUGGEST_RECENT);
     const frequent = [...settingsLog.counts.keys()]
         .filter(id => usable(id) && !recent.includes(id))

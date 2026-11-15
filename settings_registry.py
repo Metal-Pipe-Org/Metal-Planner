@@ -30,8 +30,8 @@ def one_month_later(day):
 
 
 def issue_link(entry):
-    title = f"\"{entry['name']}\" nie powinno byc obsolete"
-    body = f"<Wpisz dlaczego wazne>\n\nId ustawienia: {entry['id']}\nObsolete od: {entry['obsolete']}"
+    title = f"\"{entry['name']}\" nie powinno być obsolete"
+    body = f"<Wpisz dlaczego ważne>\n\nId ustawienia: {entry['id']}\nObsolete od: {entry['obsolete']}"
     return f"{ISSUE_URL}?{urlencode({'title': title, 'body': body, 'labels': 'to discuss'})}"
 
 
