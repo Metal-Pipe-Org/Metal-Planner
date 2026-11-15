@@ -540,9 +540,11 @@ def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
     page.wait_for_selector("#time-headline .headline-map", state="attached", timeout=30000)
     if flaga:
         page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
-        # Przypięta wersja biblioteki, nie „latest”.
-        biblioteka = "/npm/@dagrejs/dagre@1.1.4/" if uklad == "dagre" else "/npm/elkjs@0.9.3/"
-        assert len(elk) == 1 and biblioteka in elk[0]
+        # Układ warstwowy nie ciągnie nic z sieci; ELK ma przypiętą wersję, nie „latest”.
+        if uklad == "dagre":
+            assert elk == []
+        else:
+            assert len(elk) == 1 and "/npm/elkjs@0.9.3/" in elk[0]
         pomiar = page.evaluate(POMIAR)
         _plakietki_na_kreskach(pomiar)
         napisy = page.evaluate("[...document.querySelectorAll('.scheme-name')].map(t => t.textContent)")

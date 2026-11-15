@@ -4459,6 +4459,34 @@ def _scheme_of_map(day, seg_list, nodes, target_set, source_stops, journeys,
     scheme["pairs"] = _scheme_pairs(day, scheme["nodes"], stops_of, target_set, journeys,
                                     query_sec, best_arr, start_is_point, end_is_point,
                                     fastest_legs, extra_walks)
+    return _scheme_prune(scheme)
+
+
+def _scheme_prune(scheme):
+    """Ślepe odnogi znikają ze schematu: każda pokazana jazda ma prowadzić do
+    celu - dalszą jazdą albo przejściem pieszo (dojście do celu, przejście do
+    pudełka, z którego jedzie się dalej) od swojego końca. Pudełko, z którego
+    nic nie prowadzi do celu, znika razem z kreskami, które do niego dochodzą
+    i z niego wychodzą (a z nim przystanki, które istniały tylko dla niej)."""
+    start = next((n["id"] for n in scheme["nodes"] if n["role"] == "start"), None)
+    end = next(n["id"] for n in scheme["nodes"] if n["role"] == "end")
+    forward = [(e["from"], e["to"]) for e in scheme["edges"]]
+    forward += [(w["from"], w["to"]) for w in scheme["walks"]]
+    forward += [(p["from"], p["to"]) for p in scheme["pairs"]]
+    alive = {end}
+    grown = True
+    while grown:
+        grown = False
+        for a, b in forward:
+            if b in alive and a not in alive:
+                alive.add(a)
+                grown = True
+    alive.add(start)
+    scheme["nodes"] = [n for n in scheme["nodes"] if n["id"] in alive]
+    scheme["edges"] = [e for e in scheme["edges"] if e["from"] in alive and e["to"] in alive]
+    scheme["walks"] = [w for w in scheme["walks"] if w["from"] in alive and w["to"] in alive]
+    scheme["pairs"] = [p for p in scheme["pairs"] if p["from"] in alive and p["to"] in alive]
+    scheme["order"] = [o for o in scheme["order"] if o[0] in alive and o[1] in alive]
     return scheme
 
 

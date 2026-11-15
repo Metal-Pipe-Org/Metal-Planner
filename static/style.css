@@ -3531,6 +3531,7 @@ ul.tt-legend {
 .move-tip-note { color: #e65100; font-weight: 600; }
 .scheme-walk-brace path { stroke-dasharray: 5 4; }
 .scheme-tip .scheme-tip-row { white-space: normal; max-width: 320px; }
-.leaflet-tooltip .move-tip { padding: 0; box-shadow: none; }
+.leaflet-tooltip .move-tip,
+.scheme-tip .move-tip { padding: 0; box-shadow: none; background: none; border-radius: 0; }
 .move-tip .tt-rows.tt-lines { grid-template-columns: minmax(34px, max-content) max-content max-content; margin-bottom: 2px; }
 .move-tip .tt-rows.tt-lines li { border-bottom: 0; padding: 0; }

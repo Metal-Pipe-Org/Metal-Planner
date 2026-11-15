@@ -5323,9 +5323,7 @@ function renderPlan(data, refit) {
 // strzałek umie narysować. ELK przychodzi z sieci dopiero przy pierwszym
 // schemacie - bez przełącznika strona go w ogóle nie pobiera.
 const ELK_URL = 'https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js';
-const DAGRE_URL = 'https://cdn.jsdelivr.net/npm/@dagrejs/dagre@1.1.4/dist/dagre.min.js';
 let elkReady = null;
-let dagreReady = null;
 let lastSchemeData = null;
 let schemeLast = null;
 let schemeToken = 0;
@@ -5338,7 +5336,7 @@ const SCHEME_MAX_SCALE = 4;
 // Węzeł, którego tablica jest teraz w dymku (patrz showSchemeTip).
 let schemeTipOwner = null;
 
-const SCHEME_TRIALS = 24;     // ile układów dagre sprawdzamy (patrz layoutDagre)
+const SCHEME_TRIALS = 24;     // ile układów sprawdzamy (patrz layoutLayers)
 const SCHEME_BOX_H = 38;
 const SCHEME_LANE = 30;       // odstęp między sąsiednimi liniami przy pudełku
 const SCHEME_MARGIN = 28;
@@ -5354,19 +5352,6 @@ function loadElk() {
         });
     }
     return elkReady;
-}
-
-function loadDagre() {
-    if (!dagreReady) {
-        dagreReady = new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = DAGRE_URL;
-            script.onload = () => resolve(dagre);
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
-    }
-    return dagreReady;
 }
 
 let schemeMeasure = null;
@@ -5858,29 +5843,33 @@ function fmtWalkDistance(m) {
     return `${(Math.round(m / 100) / 10).toFixed(1).replace('.', ',')} km`;
 }
 
-/** Przejście pieszo: przerywana kreska między pudełkami z podpisem „pieszo,
-    N min” (czas z odległości w linii prostej, liczy serwer). Leży pod
-    pudełkami i kreskami jazd. */
-function schemeWalkLayer(boxes, walks) {
+/** Przejście pieszo: przerywana kreska w dół od jednego pudełka do drugiego
+    z małą etykietą minut (czas z odległości w linii prostej, liczy serwer).
+    Przejście dłuższe niż jeden rząd idzie krzywą przez punkty, które układ
+    zostawił wolne od pudełek (`routes`). Leży pod pudełkami i kreskami jazd. */
+function schemeWalkLayer(boxes, walks, routes = new Map()) {
     const out = {svg: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
     for (const pair of walks) {
         let a = boxes.get(pair.from), b = boxes.get(pair.to);
         if (a.y > b.y) [a, b] = [b, a];
-        const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
-        const text = `pieszo, ${pair.min} min`;
-        const w = text.length * 5.8 + 14, cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+        const points = [[a.x + a.w / 2, a.y + a.h], ...(routes.get(pair) || []), [b.x + b.w / 2, b.y]];
+        const d = points.length > 2 ? curvePath(points) : `M${points[0][0]} ${points[0][1]}L${points[1][0]} ${points[1][1]}`;
+        const [x1, y1] = points[0], [x2, y2] = points[points.length - 1];
+        const text = `${pair.min} min`;
+        const w = text.length * 5.8 + 14;
+        const [cx, cy] = pointAlong(strandSamples({curved: points.length > 2, points}), 0.6);
         out.minX = Math.min(out.minX, x1, x2, cx - w / 2); out.maxX = Math.max(out.maxX, x1, x2, cx + w / 2);
         out.minY = Math.min(out.minY, y1); out.maxY = Math.max(out.maxY, y2);
         out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}">`
             + `<title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
-            + `<path d="M${x1} ${y1}L${x2} ${y2}"/><circle cx="${x1}" cy="${y1}" r="2.5"/><circle cx="${x2}" cy="${y2}" r="2.5"/>`
+            + `<path d="${d}"/><circle cx="${x1}" cy="${y1}" r="2.5"/><circle cx="${x2}" cy="${y2}" r="2.5"/>`
             + `<rect class="scheme-walk-pill" x="${cx - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
             + `<text class="scheme-walk-text" x="${cx}" y="${cy}">${text}</text></g>`;
     }
     return out;
 }
 
-function schemeSvg(boxes, strands, pairs) {
+function schemeSvg(boxes, strands, pairs, routes = new Map()) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -5896,7 +5885,7 @@ function schemeSvg(boxes, strands, pairs) {
     }
     // Przejścia pieszo leżą pod pudełkami i kreskami jazd, żeby nie zasłaniały
     // linii.
-    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs));
+    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs).filter(p => boxes.has(p.from) && boxes.has(p.to)), routes);
     minX = Math.min(minX, walkLayer.minX); maxX = Math.max(maxX, walkLayer.maxX);
     minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
@@ -6122,11 +6111,11 @@ function renderScheme(data) {
             id: `e${i}`, sources: [e.from], targets: [e.to],
         })),
     };
-    const finish = (boxes, strands) => {
-        schemeLast = {boxes, strands};
+    const finish = (boxes, strands, routes = new Map()) => {
+        schemeLast = {boxes, strands, scheme, routes};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs);
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, routes);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
@@ -6134,19 +6123,17 @@ function renderScheme(data) {
         fitScheme();
     };
     if ($('scheme-layout').value === 'dagre') {
-        loadDagre().then(lib => {
-            if (mine !== schemeToken) return;
-            let best = null;
-            for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
-                const trialStrands = schemeStrands(scheme);
-                const trialBoxes = schemeBoxes(scheme, trialStrands, data);
-                layoutDagre(lib, scheme, trialBoxes, trialStrands, seed);
-                const cost = schemeCost(trialBoxes, trialStrands).total;
-                if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost};
-                if (!cost) break;
-            }
-            finish(best.boxes, best.strands);
-        });
+        const walkPairs = schemeWalksOf(scheme.pairs).filter(p => boxes.has(p.from) && boxes.has(p.to));
+        let best = null;
+        for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
+            const trialStrands = schemeStrands(scheme);
+            const trialBoxes = schemeBoxes(scheme, trialStrands, data);
+            const routes = layoutLayers(scheme, trialBoxes, trialStrands, walkPairs, seed);
+            const cost = schemeCost(trialBoxes, trialStrands).total;
+            if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost, routes};
+            if (!cost) break;
+        }
+        finish(best.boxes, best.strands, best.routes);
         return;
     }
     loadElk()
@@ -6199,52 +6186,186 @@ function schemeMergeSiblings(strands) {
     }
 }
 
-/** Układ dagre (ten sam, którego używa Mermaid) ze zwartymi odstępami,
-    a kreski jako gładkie krzywe: każdy odcinek wychodzi z pudełka i wchodzi
-    do następnego pionowo, więc kreska przejeżdżająca przez pudełko idzie przez
-    nie prosto. Pośrednie punkty dagre długiej krawędzi to punkty, przez
-    które krzywa ma przejść, żeby ominąć pudełka warstw pomiędzy. */
-function layoutDagre(lib, scheme, boxes, strands, seed = 0) {
-    const g = new lib.graphlib.Graph();
-    g.setGraph({rankdir: 'TB', nodesep: 40,
-                ranksep: 100, marginx: 0, marginy: 0});
-    g.setDefaultEdgeLabel(() => ({}));
-    // Kolejność wstawiania wpływa na to, w którym lokalnym optimum utknie
-    // heurystyka dagre; renderScheme próbuje kilku i wybiera najmniej
-    // przecięć kresek, które naprawdę rysujemy.
-    let state = seed * 2654435761 + 1;
-    const shuffled = list => {
-        if (!seed) return list;
-        const out = [...list];
-        for (let i = out.length - 1; i > 0; i--) {
-            state = (state * 1664525 + 1013904223) >>> 0;
-            const j = state % (i + 1);
-            [out[i], out[j]] = [out[j], out[i]];
-        }
-        return out;
+/** Układ warstwowy schematu: start sam w pierwszym rzędzie, cel sam w ostatnim,
+    przepływ tylko z góry w dół. Rząd węzła to najdłuższa droga do niego
+    (jazdą albo dojściem), więc kolejne rzędy to kolejne przesiadki; kolejność
+    w rzędzie dobiera barycentrum (kilka przebiegów góra-dół i dół-góra), z tym,
+    że kreska dłuższa niż jeden rząd ma w każdym rzędzie pośrednim punkt
+    przejścia, który też się układa (i omija pudełka). Zwraca trasy przejść
+    pieszych dłuższych niż jeden rząd (para -> punkty pośrednie). */
+function layoutLayers(scheme, boxes, strands, walkPairs, seed = 0) {
+    let rng = seed * 2654435761 + 1;
+    const random = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 4294967296; };
+    const startId = [...boxes.values()].find(b => b.node.role === 'start').node.id;
+    const endId = [...boxes.values()].find(b => b.node.role === 'end').node.id;
+    const links = new Map();
+    const link = (from, to) => {
+        if (from === to || from === endId || to === startId || !boxes.has(from) || !boxes.has(to)) return;
+        const key = `${from}>${to}`;
+        if (!links.has(key)) links.set(key, {from, to});
     };
-    for (const [id, b] of shuffled([...boxes])) g.setNode(id, {width: b.w, height: b.h});
-    for (const [from, to] of shuffled([...(scheme.order || []),
-                                       ...strands.map(s => [s.from, s.to])])) g.setEdge(from, to);
-    lib.layout(g);
-    for (const [id, b] of boxes) {
-        const node = g.node(id);
-        b.x = Math.round(node.x - b.w / 2);
-        b.y = Math.round(node.y - b.h / 2);
+    for (const s of strands) link(s.from, s.to);
+    for (const [from, to] of scheme.order || []) link(from, to);
+    for (const pair of walkPairs) {
+        if (pair.to === startId || pair.from === endId) link(pair.to, pair.from);
+        else link(pair.from, pair.to);
     }
+    // Rzędy: najdłuższa droga od startu, krawędzie zawracające (cykl) pomijamy.
+    const ids = [...boxes.keys()];
+    const out = new Map(ids.map(id => [id, []]));
+    for (const l of links.values()) out.get(l.from).push(l);
+    const rank = new Map(), seen = new Map(), topo = [];
+    const visit = id => {
+        seen.set(id, 1);
+        const outs = out.get(id);
+        if (seed) outs.sort(() => random() - 0.5);
+        for (const l of outs) {
+            if (seen.get(l.to) === 1) l.back = true;
+            else if (!seen.has(l.to)) visit(l.to);
+        }
+        seen.set(id, 2);
+        topo.push(id);
+    };
+    for (const id of [startId, ...ids]) if (!seen.has(id)) visit(id);
+    for (const id of ids) rank.set(id, id === startId ? 0 : 1);
+    for (const id of topo.reverse()) {
+        for (const l of out.get(id)) {
+            if (!l.back && l.to !== endId) rank.set(l.to, Math.max(rank.get(l.to), rank.get(id) + 1));
+        }
+    }
+    let last = 0;
+    for (const id of ids) if (id !== endId) last = Math.max(last, rank.get(id));
+    rank.set(endId, last + 1);
+    // Warstwy z punktami przejścia dla kresek dłuższych niż rząd.
+    const layers = Array.from({length: last + 2}, () => []);
+    const items = new Map();
+    for (const id of ids) {
+        const item = {id, w: boxes.get(id).w, up: [], down: []};
+        items.set(id, item);
+        layers[rank.get(id)].push(item);
+    }
+    const chains = new Map();
+    const segments = [];
+    for (const l of links.values()) {
+        const from = rank.get(l.from), to = rank.get(l.to);
+        if (to <= from) continue;
+        const chain = [items.get(l.from)];
+        for (let r = from + 1; r < to; r++) {
+            const dummy = {id: null, w: 22, up: [], down: []};
+            layers[r].push(dummy);
+            chain.push(dummy);
+        }
+        chain.push(items.get(l.to));
+        chains.set(`${l.from}>${l.to}`, chain);
+        chain.slice(1).forEach((item, i) => {
+            segments.push([chain[i], item]);
+            chain[i].down.push(item);
+            item.up.push(chain[i]);
+        });
+    }
+    if (seed) layers.forEach(layer => layer.sort(() => random() - 0.5));
+    const crossings = () => {
+        let n = 0;
+        for (let r = 0; r + 1 < layers.length; r++) {
+            const idx = new Map();
+            layers[r].forEach((item, i) => idx.set(item, i));
+            layers[r + 1].forEach((item, i) => idx.set(item, i));
+            const segs = segments.filter(([a]) => idx.has(a) && layers[r].includes(a));
+            for (let i = 0; i < segs.length; i++) {
+                for (let j = i + 1; j < segs.length; j++) {
+                    const d = (idx.get(segs[i][0]) - idx.get(segs[j][0])) * (idx.get(segs[i][1]) - idx.get(segs[j][1]));
+                    if (d < 0) n++;
+                }
+            }
+        }
+        return n;
+    };
+    const sweep = (r, side) => {
+        const layer = layers[r];
+        const pos = new Map();
+        layers[r + (side === 'up' ? -1 : 1)].forEach((item, i) => pos.set(item, i));
+        const key = new Map(layer.map((item, i) => {
+            const near = item[side === 'up' ? 'up' : 'down'];
+            return [item, near.length ? near.reduce((sum, o) => sum + pos.get(o), 0) / near.length : i];
+        }));
+        layer.sort((a, b) => key.get(a) - key.get(b));
+    };
+    let bestOrder = layers.map(layer => [...layer]), best = crossings();
+    for (let pass = 0; pass < 12 && best; pass++) {
+        if (pass % 2 === 0) for (let r = 1; r < layers.length; r++) sweep(r, 'up');
+        else for (let r = layers.length - 2; r >= 0; r--) sweep(r, 'down');
+        const now = crossings();
+        if (now < best) { best = now; bestOrder = layers.map(layer => [...layer]); }
+    }
+    bestOrder.forEach((layer, r) => { layers[r] = layer; });
+    // Położenie w poziomie: kolejność zachowana, stały odstęp, środek jak
+    // najbliżej środków sąsiadów (regresja izotoniczna po odjęciu odstępów).
+    const GAP = 34;
+    const cx = new Map();
+    layers.forEach(layer => {
+        let x = 0;
+        for (const item of layer) { cx.set(item, x + item.w / 2); x += item.w + GAP; }
+    });
+    const settle = (layer, want) => {
+        const offsets = [];
+        let at = 0;
+        for (const item of layer) { offsets.push(at); at += item.w + GAP; }
+        const q = layer.map((item, i) => want(item) - item.w / 2 - offsets[i]);
+        const blocks = [];
+        for (const value of q) {
+            blocks.push({sum: value, n: 1});
+            while (blocks.length > 1) {
+                const tail = blocks[blocks.length - 1], prev = blocks[blocks.length - 2];
+                if (tail.sum / tail.n >= prev.sum / prev.n) break;
+                blocks.splice(-2, 2, {sum: prev.sum + tail.sum, n: prev.n + tail.n});
+            }
+        }
+        const fit = blocks.flatMap(block => Array(block.n).fill(block.sum / block.n));
+        layer.forEach((item, i) => cx.set(item, fit[i] + offsets[i] + item.w / 2));
+    };
+    const mean = (list, fallback) => list.length ? list.reduce((sum, o) => sum + cx.get(o), 0) / list.length : fallback;
+    for (let pass = 0; pass < 16; pass++) {
+        const dir = pass % 4;
+        const order = dir < 2 ? layers.map((_, r) => r) : layers.map((_, r) => layers.length - 1 - r);
+        for (const r of order) {
+            settle(layers[r], item => {
+                const here = cx.get(item);
+                if (dir === 0 || dir === 2) return item.up.length ? mean(item.up, here) : mean(item.down, here);
+                return item.down.length ? mean(item.down, here) : mean(item.up, here);
+            });
+        }
+    }
+    // Start i cel stoją na środku reszty rysunku.
+    const inner = [...cx].filter(([item]) => item.id !== startId && item.id !== endId);
+    const lo = Math.min(...inner.map(([item, x]) => x - item.w / 2));
+    const hi = Math.max(...inner.map(([item, x]) => x + item.w / 2));
+    cx.set(items.get(startId), (lo + hi) / 2);
+    cx.set(items.get(endId), (lo + hi) / 2);
+    const ROW = SCHEME_BOX_H + 100;
+    for (const [id, box] of boxes) {
+        box.x = Math.round(cx.get(items.get(id)) - box.w / 2 - lo);
+        box.y = rank.get(id) * ROW;
+    }
+    const rowMid = r => r * ROW + SCHEME_BOX_H / 2;
+    const viaOf = key => {
+        const chain = chains.get(key) || [];
+        return chain.slice(1, -1).map((item, i) => [Math.round(cx.get(item) - lo), rowMid(rank.get(chain[0].id) + 1 + i)]);
+    };
     assignPorts(boxes, strands);
-    for (let sweep = 0; sweep < 3; sweep++) assignPorts(boxes, strands, true);
-    const {layerOf} = schemeLayers(boxes);
+    for (let pass = 0; pass < 3; pass++) assignPorts(boxes, strands, true);
     for (const s of strands) {
         const src = boxes.get(s.from), dst = boxes.get(s.to);
-        const points = g.edge(s.from, s.to).points || [];
-        const long = layerOf.get(s.to) - layerOf.get(s.from) > 1;
-        s.points = [[s.xs, src.y + src.h],
-                    ...(long ? points.slice(1, -1).map(p => [p.x, p.y]) : []),
-                    [s.xt, dst.y]];
+        s.points = [[s.xs, src.y + src.h], ...viaOf(`${s.from}>${s.to}`), [s.xt, dst.y]];
         s.curved = true;
     }
     schemeMergeSiblings(strands);
+    const routes = new Map();
+    for (const pair of walkPairs) {
+        const [a, b] = rank.get(pair.from) <= rank.get(pair.to) ? [pair.from, pair.to] : [pair.to, pair.from];
+        const via = viaOf(`${a}>${b}`);
+        if (via.length) routes.set(pair, via);
+    }
+    return routes;
 }
 
 function setSchemeCollapsed(collapsed) {
