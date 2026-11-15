@@ -45,6 +45,9 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
+from flask import Flask, render_template
+
+import settings_registry
 
 ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = ROOT / "tests" / "js"
@@ -88,7 +91,13 @@ class _SettingRows(HTMLParser):
 
 def _setting_rows():
     parser = _SettingRows()
-    parser.feed((ROOT / "templates" / "index.html").read_text(encoding="utf-8"))
+    # Nazwy, tagi i DEV wstawia do szablonu rejestr ustawień, więc czytamy stronę wyrenderowaną.
+    app = Flask(__name__, template_folder=str(ROOT / "templates"),
+                static_folder=str(ROOT / "static"))
+    with app.test_request_context("/"):
+        parser.feed(render_template("index.html", stops=[], abbreviations={}, lines=[],
+                                    data_error=None, form_time="12:00", form_date="2026-10-01",
+                                    settings=settings_registry.view(), dev_mode=True))
     return parser.rows
 
 

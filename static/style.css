@@ -2515,7 +2515,8 @@ body:not(.dev-mode) .dev-only { display: none; }
 #dev-panel .field.compact { margin-top: 10px; }
 
 /* Opis w ⓘ (#225): skrajnie z prawej wiersza, dymek tylko z samej ikonki. */
-.info {
+.info,
+.obsolete-info {
     float: right;
     flex: none;
     display: inline-grid;
@@ -2530,7 +2531,12 @@ body:not(.dev-mode) .dev-only { display: none; }
     cursor: help;
 }
 .info:hover,
-.info:focus-visible { color: var(--ink); outline: none; }
+.info:focus-visible,
+.obsolete-info:hover,
+.obsolete-info:focus-visible { color: var(--ink); outline: none; }
+.obsolete-info { text-decoration: none; cursor: pointer; }
+.info + .obsolete-info { margin-left: 4px; }
+.set-row[data-expired] { display: none !important; }
 
 .info-tip {
     position: fixed;

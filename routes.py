@@ -20,6 +20,7 @@ import pkp
 import pkp_live
 import polinka
 import pushward
+import settings_registry
 import siechnice
 import timetables
 import traficar
@@ -93,6 +94,7 @@ def _frontend_digest(app):
     """
     files = sorted(Path(app.static_folder).rglob("*"))
     files.append(Path(app.root_path) / "templates" / "index.html")
+    files.append(settings_registry.REGISTRY_FILE)
 
     digest = hashlib.sha256()
     for path in files:
@@ -250,6 +252,7 @@ def init_routes(app):
             # formacie dziennym pole zostawało puste i data nie docierała
             # do serwera wcale.
             form_date=datetime.now().strftime("%Y-%m-%d"),
+            settings=settings_registry.view(),
             dev_mode=config.dev_mode(),
             deployed=config.deployed_at() if config.dev_mode() else None,
             preview=link_preview(request.args),
