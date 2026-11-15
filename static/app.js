@@ -1966,14 +1966,8 @@ function renderTimeHeadline() {
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
     best.addEventListener('mouseleave', hideFastest);
-    const fastestNums = () => ((headlineFlow && headlineFlow.fastest && headlineFlow.fastest.legs) || [])
-        .filter(leg => leg.kind !== 'walk').map(leg => leg.num);
-    best.addEventListener('mouseenter', () => highlightSchemeLines(fastestNums()));
+    best.addEventListener('mouseenter', highlightSchemeFastest);
     best.addEventListener('mouseleave', clearSchemeHighlight);
-    for (const chip of best.querySelectorAll('.line-chip')) {
-        chip.addEventListener('mouseenter', () => highlightSchemeLines([chip.textContent]));
-        chip.addEventListener('mouseleave', () => highlightSchemeLines(fastestNums()));
-    }
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
     const moreBtn = el.querySelector('.headline-more');
@@ -5925,7 +5919,7 @@ function schemeSvg(boxes, strands, pairs) {
     }
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
-    const stroke = (group, label, d, arrow, extra = '', from = '') => {
+    const stroke = (group, label, d, arrow, extra = '', from = '', edge = '') => {
         const kinds = [...new Set(group.map(line => line.kind))].sort();
         const tint = kinds.length === 1 ? colorOf(kinds[0]) : WALK_COLOR;
         const marker = arrow ? ` marker-end="url(#scheme-arrow-${tint.slice(1)})"` : '';
@@ -5935,20 +5929,20 @@ function schemeSvg(boxes, strands, pairs) {
             : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
               + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
               + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
-        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}" data-from="${escAttr(from)}">`
+        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}" data-from="${escAttr(from)}" data-edge="${escAttr(edge)}">`
             + `${strokes}<path class="scheme-hit" d="${d}"/></g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
         : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
     for (const s of strands) {
-        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow, '', s.from);
+        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow, '', s.from, `${s.from}>${s.to}`);
         if (s.next) {
             // Linie jadące dalej przechodzą przez pudełko jedną prostą kreską.
             const [x, top] = s.points[s.points.length - 1];
             const box = boxes.get(s.to);
             lines += stroke(s.through, s.through.map(line => line.num).join(' '),
                             `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(box.y + box.h).toFixed(1)}`,
-                            false, ' scheme-through', s.to);
+                            false, ' scheme-through', s.to, `${s.from}>${s.to}`);
             const tint = s.through.length && new Set(s.through.map(line => line.kind)).size === 1
                 ? colorOf(s.through[0].kind) : WALK_COLOR;
             dots += `<circle class="scheme-stop-dot" cx="${x.toFixed(1)}" cy="${(box.y + box.h / 2).toFixed(1)}" r="5" stroke="${tint}"/>`;
@@ -5957,12 +5951,13 @@ function schemeSvg(boxes, strands, pairs) {
             const [x, top] = s.points[s.points.length - 1];
             const [x2, bottom] = merge.to.points[0];
             lines += stroke(merge.lines, merge.lines.map(line => line.num).join(' '),
-                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge', s.to);
+                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge', s.to,
+                            `${s.from}>${s.to}`);
         }
     }
     for (const branch of branches) {
         lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch',
-                        branch.owner.from);
+                        branch.owner.from, `${branch.owner.from}>${branch.owner.to}`);
     }
     const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
         + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
@@ -5996,9 +5991,14 @@ function moveTipHtml(line, depSec, depName, move) {
         ? (line.slack_min < 0 ? `na styk - wg szacunku brakuje ${-line.slack_min} min`
                               : `na styk - zapas ${line.slack_min} min`)
         : '';
+    // Pierwszy wiersz to wiersz tablicy odjazdów (patrz timetableLinesHtml):
+    // ta sama plakietka, kierunek i godzina.
     return '<div class="move-tip">'
-        + `<div class="move-tip-row"><span class="line-chip ${esc(line.mode)}">${esc(line.num)}</span> `
-        + `odjazd <b>${esc(fmtClock(depSec))}</b> z ${esc(prettyStopName(depName))}</div>`
+        + '<ul class="tt-rows tt-lines"><li>'
+        + `<span class="badge ${escClass(line.mode)}">${esc(line.num)}</span>`
+        + `<span class="tip-dir">${esc(line.headsign || '')}</span>`
+        + `<span class="tt-times"><span>${esc(fmtClock(depSec))}</span></span>`
+        + '</li></ul>'
         + `<div class="move-tip-row move-tip-goal">${GOAL_ICON}<b>${esc(move.arrival)}</b> u celu</div>`
         + (note ? `<div class="move-tip-row move-tip-note">${esc(note)}</div>` : '')
         + '</div>';
@@ -6062,13 +6062,18 @@ function bindSchemeLines(canvas) {
     }
 }
 
-/** Pozycja paska nad mapą podświetla swoje linie w schemacie (pasek zostaje). */
-function highlightSchemeLines(nums) {
+/** Najechanie na najszybszą trasę na pasku podświetla w schemacie CAŁĄ tę
+    podróż: tylko jej odcinki (skąd, dokąd, numer), nie każde wystąpienie
+    numeru linii na innych ruchach i gałęziach. */
+function highlightSchemeFastest() {
     const canvas = $('scheme-canvas');
     clearSchemeHighlight();
+    const edges = lastSchemeData && lastSchemeData.scheme && lastSchemeData.scheme.fastest_edges;
+    if (!edges) return;
+    const keys = new Set(edges.map(([from, to, num]) => `${from}>${to}|${num}`));
     let any = false;
     for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
-        if (element.dataset.lines.split(' ').some(num => nums.includes(num))) {
+        if (element.dataset.lines.split(' ').some(num => keys.has(`${element.dataset.edge}|${num}`))) {
             element.classList.add('scheme-pick');
             any = true;
         }

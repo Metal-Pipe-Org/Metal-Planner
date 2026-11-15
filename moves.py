@@ -84,7 +84,7 @@ WALK_EXTRA = 1.0
 # to gałęzie jednej podróży, nie osobne ruchy: tyle ich najwyżej dochodzi do
 # ruchu, a zapas na przesiadce do ostatniego pojazdu nie może być większy niż
 # tyle (dłuższe czekanie to już inny pomysł na wieczór, nie dojście).
-BRANCH_MAX = 3
+BRANCH_MAX = 2
 BRANCH_MAX_SLACK_SEC = 20 * 60
 
 # Wariant „ten sam pojazd jedzie dalej" może dowozić później niż ruch na styk,
@@ -395,6 +395,7 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
     anchor = fastest(day, moves, prefer)
     if spine is not None:
         anchor = next(m for m in moves if m["first"] is spine)
+    ctx["spine_boards"] = {board for board, _ in anchor["first"]["sig"]}
     moves = distinct_last_vehicle(day, moves, anchor)
     for move in moves:
         move["far_walk"] = max(move["first"]["lead"], move["first"]["tail"]) >= LONG_WALK_SEC
@@ -407,16 +408,19 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
         if move is not anchor:
             move["first"] = extend_start(day, move["first"], origin_sec or {}, query_sec)
     add_branches(ctx, shown, insts, origin_sec or {})
-    return shown, hidden, any(is_safe(day, i) for m in shown for i in [m["first"], *m["branches"]])
+    return shown, hidden, any(m["safe_alt"] or is_safe(day, i)
+                          for m in shown for i in [m["first"], *m["branches"]])
 
 
 def add_branches(ctx, shown, insts, origin_sec):
     """Dojścia do TEGO SAMEGO ostatniego pojazdu (ten sam kurs, to samo
     wsiadanie i wysiadanie) są gałęziami jednej podróży: na schemacie to dopływy
     do jednego przystanku przesiadkowego, nie osobne ruchy. Do ruchu dochodzi
-    najwyżej BRANCH_MAX gałęzi, od najtańszej; gałąź wsiada na innym przystanku
-    albo dojeżdża do ostatniego pojazdu z innego miejsca niż to, co już jest. Przesiadka na styk
-    jest gałęzią jak każda - tylko oznaczoną."""
+    najwyżej BRANCH_MAX gałęzi, od najtańszej. Gałąź wchodzi tylko, gdy daje
+    NOWY przystanek wsiadania (inny niż w tej podróży, w kręgosłupie i w już
+    wziętych gałęziach) - kolejna linia z tego samego miejsca to nie nowe
+    dojście - i nie ma więcej jazd niż podróż, do której dołącza. Przesiadka na
+    styk jest gałęzią jak każda - tylko oznaczoną."""
     day, gain = ctx["day"], ctx["gain_sec"]
     by_last = {}
     for inst in insts:
@@ -425,10 +429,10 @@ def add_branches(ctx, shown, insts, origin_sec):
     for move in shown:
         main = move["first"]
         move["branches"] = []
+        move["safe_alt"] = False
         if main["n"] < 2:
             continue
-        taken_boards = {main["sig"][0][0]}
-        taken_ins = {main["sig"][-2][1]}
+        taken_boards = set(ctx["spine_boards"]) | {board for board, _ in main["sig"]}
         limit = move["cost"] + ctx["reasonable_sec"]
         pool = [i for i in by_last.get(main["rides"][-1], ())
                 if i["arr"] <= main["arr"] and cost(i, gain) <= limit
@@ -436,17 +440,18 @@ def add_branches(ctx, shown, insts, origin_sec):
                 and i["rides"][:-1] != main["rides"][:-1]
                 and origin_sec.get(day.conns[i["rides"][0][0]][2], 10 ** 6)
                 <= origin_sec.get(day.conns[main["rides"][0][0]][2], 0) + NEAR_EQUAL_SEC]
-        pool.sort(key=lambda i: (i["n"], cost(i, gain), not is_safe(day, i), -i["dep"]))
-        while pool and len(move["branches"]) < BRANCH_MAX:
-            def novelty(i):
-                return 2 * (i["sig"][-2][1] in taken_ins) + (i["sig"][0][0] in taken_boards)
-            inst = min(pool, key=lambda i: (novelty(i) >= 3, novelty(i), i["n"] > main["n"], i["n"], cost(i, gain),
-                                            not is_safe(day, i), -i["dep"]))
-            if novelty(inst) >= 3:
+        # Dojście z zapasem, którego schemat nie rysuje (nie daje nowego
+        # przystanku), nadal jest dokąd wrócić, gdy uciekło: nie wymusza
+        # szerszego szukania (heurystyka 4).
+        move["safe_alt"] = any(is_safe(day, i) for i in pool)
+        pool = [i for i in pool if i["n"] <= main["n"]]
+        while len(move["branches"]) < BRANCH_MAX:
+            fresh = [i for i in pool if i["sig"][0][0] not in taken_boards]
+            if not fresh:
                 break
+            inst = min(fresh, key=lambda i: (i["n"], cost(i, gain), not is_safe(day, i), -i["dep"]))
             move["branches"].append(inst)
-            taken_boards.add(inst["sig"][0][0])
-            taken_ins.add(inst["sig"][-2][1])
+            taken_boards.update(board for board, _ in inst["sig"])
             pool.remove(inst)
 
 

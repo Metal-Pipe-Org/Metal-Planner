@@ -4558,6 +4558,7 @@ def _scheme_moves(day, journeys, insts):
             if leg["kind"] not in labels:
                 continue
             entry = {"num": labels[leg["kind"]](leg),
+                     "headsign": leg.get("headsign", ""),
                      "mode": "car" if leg["kind"] == "drive" else leg["mode"],
                      "dep": _fmt_time(leg["dep_sec"]), "from": leg["from"]}
             if leg["kind"] == "ride":
@@ -4634,8 +4635,13 @@ def _scheme_times(scheme, journeys):
                 end_by_line[key] = min(end_by_line.get(key, journey["arrival_sec"]),
                                        journey["arrival_sec"])
         arrive[end] = min(arrive.get(end, journey["arrival_sec"]), journey["arrival_sec"])
+        # Krawędzie schematu tej jednej podróży (skąd, dokąd, numer): tylko te
+        # odcinki, nie każde wystąpienie numeru linii.
+        edges_of = [[a, b, leg["num"]] for leg, path in zip(rides, paths)
+                    for a, b in zip(path, path[1:])]
         if best is None or journey["arrival_sec"] < best[0]:
             best = (journey["arrival_sec"], rides, paths)
+            scheme["fastest_edges"] = edges_of
     for node in scheme["nodes"]:
         if node["id"] in arrive:
             node["arrive_sec"] = arrive[node["id"]]
