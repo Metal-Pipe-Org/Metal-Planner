@@ -7463,6 +7463,7 @@ function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
     $('transfer-gain').closest('.set-row').hidden = !on;
+    $('via-open').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();

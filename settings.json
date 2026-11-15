@@ -72,7 +72,8 @@
     {
       "id": "via-open",
       "name": "Zawsze pokazuj przystanki po drodze",
-      "tags": ["Przystanki","Mapa"]
+      "description": "Przystanki między wsiadaniem a wysiadaniem są w szczegółach trasy od razu rozwinięte, zamiast zwinięte za przyciskiem.",
+      "tags": ["Propozycje tras", "Przystanki"]
     },
     {
       "id": "density",
