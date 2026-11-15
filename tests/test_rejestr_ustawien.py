@@ -27,15 +27,62 @@ def _wiersze_szablonu():
     return re.findall(r"\{\{ attrs\('([^']+)'\) \}\}", szablon)
 
 
-def test_rejestr_jest_poprawnym_jsonem():
-    wpisy = json.loads((ROOT / "settings.json").read_text(encoding="utf-8"))
-    assert wpisy
-    for wpis in wpisy:
-        assert wpis["id"] and wpis["name"], wpis
-        assert isinstance(wpis["tags"], list) and all(isinstance(t, str) for t in wpis["tags"]), wpis
-        assert set(wpis) <= {"id", "name", "description", "tags", "obsolete"}, wpis
-    ids = [w["id"] for w in wpisy]
-    assert len(ids) == len(set(ids))
+def _bledy(wartosc, schema, sciezka="$"):
+    """Sprawdza wartość względem schemy w zakresie, którego używa settings.schema.json
+    (type, required, properties, additionalProperties, items, minLength, pattern) - bez
+    biblioteki jsonschema, której nie ma w venv."""
+    typy = {"object": dict, "array": list, "string": str}
+    if not isinstance(wartosc, typy[schema["type"]]):
+        return [f"{sciezka}: zły typ"]
+    bledy = []
+    if isinstance(wartosc, str):
+        if len(wartosc) < schema.get("minLength", 0):
+            bledy.append(f"{sciezka}: pusty napis")
+        if "pattern" in schema and not re.search(schema["pattern"], wartosc):
+            bledy.append(f"{sciezka}: nie pasuje do wzorca {schema['pattern']}")
+    elif isinstance(wartosc, list):
+        for i, element in enumerate(wartosc):
+            bledy += _bledy(element, schema["items"], f"{sciezka}[{i}]")
+    else:
+        bledy += [f"{sciezka}: brak pola {k}" for k in schema.get("required", []) if k not in wartosc]
+        for klucz, element in wartosc.items():
+            if klucz in schema["properties"]:
+                bledy += _bledy(element, schema["properties"][klucz], f"{sciezka}.{klucz}")
+            elif schema.get("additionalProperties") is False:
+                bledy.append(f"{sciezka}: nieznane pole {klucz}")
+    return bledy
+
+
+def test_rejestr_jest_poprawnym_jsonem_zgodnym_ze_schema():
+    rejestr = json.loads((ROOT / "settings.json").read_text(encoding="utf-8"))
+    schema = json.loads((ROOT / "settings.schema.json").read_text(encoding="utf-8"))
+    assert rejestr["$schema"] == "settings.schema.json"
+    assert (ROOT / rejestr["$schema"]).is_file()
+    assert _bledy(rejestr, schema) == []
+    ids = [w["id"] for w in rejestr["settings"]]
+    assert ids and len(ids) == len(set(ids))
+
+
+def test_schema_opisuje_kazde_pole_po_polsku():
+    schema = json.loads((ROOT / "settings.schema.json").read_text(encoding="utf-8"))
+    wpis = schema["properties"]["settings"]["items"]["properties"]
+    assert set(wpis) == {"id", "name", "description", "tags", "obsolete"}
+    for nazwa, pole in wpis.items():
+        assert pole["description"], nazwa
+
+
+def test_schema_odrzuca_bledne_wpisy():
+    schema = json.loads((ROOT / "settings.schema.json").read_text(encoding="utf-8"))
+    dobry = {"id": "x", "name": "X", "tags": ["Mapa"]}
+
+    def wpis(**zmiany):
+        return {"settings": [{**dobry, **zmiany}]}
+
+    assert _bledy(wpis(), schema) == []
+    assert _bledy(wpis(obsolete="2026-11-15"), schema) == []
+    assert _bledy(wpis(obsolete="15.11.2026"), schema)
+    assert _bledy(wpis(nieznane=1), schema)
+    assert _bledy({"settings": [{"id": "x", "name": "X"}]}, schema)
 
 
 def test_kazdy_wiersz_ma_wpis_i_odwrotnie():

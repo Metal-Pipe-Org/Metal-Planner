@@ -14,12 +14,13 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 REGISTRY_FILE = Path(__file__).resolve().parent / "settings.json"
+SCHEMA_FILE = REGISTRY_FILE.with_name("settings.schema.json")
 ISSUE_URL = "https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new"
 
 
 def load():
-    """Wpisy rejestru w kolejności z pliku."""
-    return json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
+    """Wpisy rejestru w kolejności z pliku (pole `$schema` służy tylko edytorowi)."""
+    return json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))["settings"]
 
 
 def one_month_later(day):
