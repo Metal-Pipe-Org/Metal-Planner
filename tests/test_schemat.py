@@ -218,6 +218,29 @@ def test_kawalki_tej_samej_linii_na_szwie_to_jedna_jazda():
     assert not [n for n in scheme["nodes"] if n.get("bare")]
 
 
+def test_ta_sama_linia_w_tym_samym_kierunku_to_jedna_kreska_od_najwczesniejszego_wsiadania():
+    # 4 wsiadana na Pl. (P) i na Moście (M) to jedna kreska od P przez M:
+    # pudełko M zostaje, bo wsiada się tu (kotwica), a drugiej "4" nie ma.
+    scheme = planner._scheme(
+        pieces=[_kawalek("4", "P", "M", "W"), _kawalek("4", "M", "W")],
+        nodes=[_wezel("P", ("4", "start"), start=True)],
+        target_places={"E"},
+        anchors={"P", "M", "W"},
+    )
+    assert _po_nazwach(scheme) == {("start", "M", ("4",)), ("M", "W", ("4",))}
+
+
+def test_ta_sama_linia_w_przeciwnych_kierunkach_to_dwie_kreski():
+    scheme = planner._scheme(
+        pieces=[_kawalek("4", "P", "M", "W"), _kawalek("4", "M", "P", "K")],
+        nodes=[_wezel("S", ("4", "start"), start=True)],
+        target_places={"E"},
+        anchors={"P", "M", "W", "K"},
+    )
+    lines = [line for e in scheme["edges"] for line in e["lines"]]
+    assert {line["run"] for line in lines} == {0, 1}
+
+
 def _podroz(*rides, arrival):
     """Podróż jak z planisty: rides to (numer, [(przystanek, godzina_s), ...])."""
     legs = []
@@ -559,8 +582,10 @@ def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
         # n0 to start, ostatni - cel; między nimi węzły przesiadek.
         page.locator("#scheme-canvas g.node").nth(1).hover()
         page.wait_for_selector("#scheme-tip:not([hidden]) .tip-head", timeout=15000)
-        # Panel zwija się do nagłówka, jak lista propozycji.
-        page.click("#scheme-toggle")
+        # Panel zwija się do nagłówka, jak lista propozycji. Tablica węzła
+        # otwarta najechaniem potrafi wisieć nad przyciskiem (schemat bywa
+        # gęsty), więc klik idzie wprost w przycisk.
+        page.dispatch_event("#scheme-toggle", "click")
         assert not page.is_visible("#scheme-viewport")
         assert page.is_visible("#scheme-toggle")
     else:

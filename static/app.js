@@ -5361,7 +5361,7 @@ function schemeTextWidth(text) {
     return schemeMeasure.measureText(text).width;
 }
 
-const schemeKey = line => `${line.kind}|${line.num}`;
+const schemeKey = line => `${line.kind}|${line.num}|${line.run === undefined ? '' : line.run}`;
 
 /** Jedna kreska na jednym odcinku między dwoma węzłami: wszystkie linie
     jadące tym odcinkiem naraz (tak jak jedna grupka numerków na mapie).
@@ -5595,7 +5595,9 @@ function planRoutes(boxes, strands, hintX) {
             candidates.sort((p, q) => Math.abs(p - meanS) + Math.abs(p - meanT)
                                     - Math.abs(q - meanS) - Math.abs(q - meanT));
             const fits = x => clear(x - spread, from, to) && clear(x + spread, from, to);
-            base = candidates.find(fits);
+            // Gdy w gęstym rysunku żaden korytarz nie jest wolny, kreska idzie
+            // najbliższym (przez pudełko), a nie znika w NaN.
+            base = candidates.find(fits) ?? candidates[0];
             // Dwie grupy jednym korytarzem nie mogą leżeć na sobie.
             for (const shift of [0, 40, -40, 80, -80]) {
                 if (fits(base + shift) && !taken.some(t => Math.abs(t.x - (base + shift)) < 2 * spread + 10
@@ -5692,7 +5694,7 @@ function schemeCost(boxes, strands) {
     for (const s of strands) {
         add(strandSamples(s, 8), s, [s.from, s.to], 'strand');
         const [x, top] = s.points[s.points.length - 1];
-        if (s.next) add([[x, top], [x, boxes.get(s.to).y + boxes.get(s.to).h]], s, [s.to], 'through');
+        if (s.next) add([[x, top], [x, s.up ? boxes.get(s.to).y : boxes.get(s.to).y + boxes.get(s.to).h]], s, [s.to], 'through');
         for (const merge of s.merges) {
             const target = merge.to.points[0];
             add(strandSamples({curved: true, points: [[x, top], target]}, 8), s, [s.to], 'merge');
@@ -5819,8 +5821,9 @@ function schemeBranches(boxes, strands) {
         // pionowa), nie z punktu nad pudełkiem.
         const samples = strandSamples(s);
         let start = samples[0];
+        const sign = s.up ? -1 : 1;
         for (let i = samples.length - 1; i >= 0; i--) {
-            if (samples[i][1] <= top - 44) { start = samples[i]; break; }
+            if (sign * samples[i][1] <= sign * top - 44) { start = samples[i]; break; }
         }
         out.push({lines: s.alight, label: s.alight.map(line => line.num).join(' '), curved: true,
                   points: [start, [xe, top]], owner: s});
@@ -5892,7 +5895,7 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
     const colors = new Set();
     const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
     const DASH = 9;
-    let rects = '', lines = '', names = '', dots = '';
+    let rects = '', lines = '', names = '';
     for (const [id, b] of boxes) {
         // Miejsce, w którym mapa urywa linię, ale nie stawia kropki: ramka
         // kreskowana, bez wypełnienia, z podpowiedzią.
@@ -5902,13 +5905,10 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
         rects += `<g class="node${bare}" data-node="${id}">${title}<rect class="scheme-box${bare}" `
             + `x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12"/></g>`;
         names += `<text class="scheme-name${bare}" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
-        if (b.node.tight) {
-            names += `<text class="scheme-tight" x="${b.x + b.w - 6}" y="${b.y - 5}" text-anchor="end">na styk</text>`;
-        }
     }
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
-    const stroke = (group, label, d, arrow, extra = '', from = '', edge = '') => {
+    const stroke = (group, label, d, arrow, extra = '', from = '', edge = '', to = '') => {
         const kinds = [...new Set(group.map(line => line.kind))].sort();
         const tint = kinds.length === 1 ? colorOf(kinds[0]) : WALK_COLOR;
         const marker = arrow ? ` marker-end="url(#scheme-arrow-${tint.slice(1)})"` : '';
@@ -5918,23 +5918,20 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
             : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
               + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
               + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
-        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}" data-from="${escAttr(from)}" data-edge="${escAttr(edge)}">`
+        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}" data-from="${escAttr(from)}" data-to="${escAttr(to)}" data-edge="${escAttr(edge)}">`
             + `${strokes}<path class="scheme-hit" d="${d}"/></g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
         : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
     for (const s of strands) {
-        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow, '', s.from, `${s.from}>${s.to}`);
+        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow, '', s.from, `${s.from}>${s.to}`, s.to);
         if (s.next) {
             // Linie jadące dalej przechodzą przez pudełko jedną prostą kreską.
             const [x, top] = s.points[s.points.length - 1];
             const box = boxes.get(s.to);
             lines += stroke(s.through, s.through.map(line => line.num).join(' '),
-                            `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(box.y + box.h).toFixed(1)}`,
+                            `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(s.up ? box.y : box.y + box.h).toFixed(1)}`,
                             false, ' scheme-through', s.to, `${s.from}>${s.to}`);
-            const tint = s.through.length && new Set(s.through.map(line => line.kind)).size === 1
-                ? colorOf(s.through[0].kind) : WALK_COLOR;
-            dots += `<circle class="scheme-stop-dot" cx="${x.toFixed(1)}" cy="${(box.y + box.h / 2).toFixed(1)}" r="5" stroke="${tint}"/>`;
         }
         for (const merge of s.merges) {
             const [x, top] = s.points[s.points.length - 1];
@@ -5946,14 +5943,14 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
     }
     for (const branch of branches) {
         lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch',
-                        branch.owner.from, `${branch.owner.from}>${branch.owner.to}`);
+                        branch.owner.from, `${branch.owner.from}>${branch.owner.to}`, branch.owner.to);
     }
     const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
         + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
         + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
-        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${dots}${names}${labels}</svg>`;
+        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${names}${labels}</svg>`;
 }
 
 /** Pod schematem nie ma już listy ruchów: godziny są w samym rysunku (patrz
@@ -6012,14 +6009,19 @@ function mapMoveTip(sel, when) {
     return null;
 }
 
-/** Schemat: odjazd z ostatniego przystanku pokazanego w schemacie przed tym
-    odcinkiem (początek kreski). */
-function schemeMoveTip(num, fromPlace) {
+/** Schemat: odjazd z przystanku, od którego zaczyna się ten odcinek kreski,
+    kursem, który jedzie tym odcinkiem W TĘ STRONĘ: jego przystanek końca
+    odcinka leży za przystankiem początku (`toPlace` null - odcinek wewnątrz
+    pudełka, 'end' - cel, do którego kurs dojeżdża końcem jazdy). Sam numer
+    i początek nie rozróżniają kierunków tej samej linii. */
+function schemeMoveTip(num, fromPlace, toPlace) {
     for (const move of schemeMoves) {
         for (const line of move.lines) {
             if (line.num !== num || !line.stops) continue;
             const i = line.stops.findIndex(stop => stop[0] === fromPlace);
             if (i < 0 || i === line.stops.length - 1) continue;
+            if (toPlace && toPlace !== 'end'
+                && !line.stops.some((stop, j) => j > i && stop[0] === toPlace)) continue;
             return moveTipHtml(line, line.stops[i][1], fromPlace, move);
         }
     }
@@ -6033,8 +6035,10 @@ function bindSchemeLines(canvas) {
         const nums = element.dataset.lines.split(' ');
         const box = schemeLast && schemeLast.boxes.get(element.dataset.from);
         const place = box && box.node.place;
+        const toBox = element.dataset.to && schemeLast && schemeLast.boxes.get(element.dataset.to);
+        const toPlace = toBox ? (toBox.node.role === 'end' ? 'end' : toBox.node.place) : null;
         const show = e => {
-            const rows = nums.map(num => schemeMoveTip(num, place)).filter(Boolean);
+            const rows = nums.map(num => schemeMoveTip(num, place, toPlace)).filter(Boolean);
             if (!rows.length) return;
             schemeTipOwner = null;
             tip.innerHTML = rows.join('');
@@ -6169,7 +6173,7 @@ function schemeMergeSiblings(strands) {
         groups.get(key).push(s);
     }
     for (const group of groups.values()) {
-        if (group.length < 2 || group.some(s => s.points.length !== 2 || s.next || s.merges.length)) continue;
+        if (group.length < 2 || group.some(s => s.up || s.points.length !== 2 || s.next || s.merges.length)) continue;
         const xt = group[0].points[1][0], y1 = group[0].points[1][1];
         const top = Math.max(...group.map(s => s.points[0][1]));
         const ym = top + 0.55 * (y1 - top);
@@ -6355,7 +6359,13 @@ function layoutLayers(scheme, boxes, strands, walkPairs, seed = 0) {
     for (let pass = 0; pass < 3; pass++) assignPorts(boxes, strands, true);
     for (const s of strands) {
         const src = boxes.get(s.from), dst = boxes.get(s.to);
-        s.points = [[s.xs, src.y + src.h], ...viaOf(`${s.from}>${s.to}`), [s.xt, dst.y]];
+        // Kreska w górę (linia jedzie w stronę przeciwną do przepływu rysunku,
+        // np. ta sama linia w obu kierunkach między dwoma przystankami)
+        // zaczyna się na górnej krawędzi swojego pudełka i kończy na dolnej
+        // krawędzi pudełka celu: obie końcówki leżą na pudełkach.
+        s.up = rank.get(s.from) >= rank.get(s.to);
+        s.points = s.up ? [[s.xs, src.y], [s.xt, dst.y + dst.h]]
+                        : [[s.xs, src.y + src.h], ...viaOf(`${s.from}>${s.to}`), [s.xt, dst.y]];
         s.curved = true;
     }
     schemeMergeSiblings(strands);

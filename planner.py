@@ -2666,7 +2666,9 @@ def plan_flow_stages(start_query, end_query, when=None,
             if new_map and "moves" in chosen_map:
                 # Schemat z DOKŁADNIE tych ruchów, które rysuje mapa, bez
                 # dodatków (scheme_extra tu niczego nie dokłada).
-                drawn_insts = _drawn(chosen_map["moves"])
+                drawn_insts = _extend_boardings(
+                    day, _drawn(chosen_map["moves"]), source_stops,
+                    _origin_walk(day, source_stops), query_sec)
                 scheme_journeys = _move_journeys(day, drawn_insts, source_stops,
                                                  target_set, query_sec, geo_db)
                 fastest_move = min(range(len(scheme_journeys)),
@@ -2678,15 +2680,9 @@ def plan_flow_stages(start_query, end_query, when=None,
                     query_sec, best_arr, start_point is not None and ride is None,
                     end_point is not None, best_legs, seated, 0,
                     vehicle_move["journey"] if vehicle_move else None,
-                    start_name, end_name)
+                    start_name, end_name, from_journeys=True)
                 _scheme_times(scheme, scheme_journeys)
                 scheme["moves"] = _scheme_moves(day, scheme_journeys, drawn_insts)
-                tight_at = {before["stops"][-1][0] for move in scheme["moves"]
-                            for before, line in zip(move["lines"], move["lines"][1:])
-                            if line.get("tight") and before.get("stops")}
-                for node in scheme["nodes"]:
-                    if node.get("place") in tight_at:
-                        node["tight"] = True
             elif new_map:
                 scheme_journeys = (map_journeys if with_journeys else
                                    _enumerate_journeys(day, graph, dep_sec, geo_db,
@@ -4257,7 +4253,7 @@ SCHEME_START, SCHEME_END = ("start",), ("end",)
 SCHEME_HIDDEN_KINDS = {"cable"}
 
 
-def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
+def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False, anchors=()):
     """Graf schematu - ta sama mapa zdjęta z geografii, bez własnych decyzji.
 
     Pudełka to kropki mapy (`nodes`), start i cel; do tego miejsce, w którym
@@ -4268,8 +4264,14 @@ def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
     prowadzi: nic nie jest odcinane ani zgadywane, żadnych własnych przesiadek
     - co mapa narysowała, to jest na schemacie.
 
-    Kawałki mapy tej samej linii, które się stykają (koniec jednego to początek
-    drugiego - szew korytarza), są jedną jazdą. Start to miejsce z węzła
+    Jednostką jest linia w danym kierunku: kawałki tej samej linii, które jadą
+    w tę samą stronę i mają wspólny przystanek (szew korytarza, dwie podróże
+    wsiadające w różnych miejscach tej samej linii), składają się w JEDNĄ
+    kreskę od najwcześniejszego do najpóźniejszego z ich przystanków - ta sama
+    linia nie powtarza się. Linia w przeciwną stronę to osobna kreska. Pudełka
+    na takiej kresce to jej początek i koniec, kropki mapy, start, cel,
+    `anchors` (przystanki wsiadania i wysiadania pokazanych podróży) i miejsca,
+    w których zaczyna się albo kończy inna kreska. Start to miejsce z węzła
     `start`: przed nim linia się nie liczy; cel (`target_places`) kończy
     jazdę. Jazdy Polinką (SCHEME_HIDDEN_KINDS) schemat ukrywa.
 
@@ -4308,33 +4310,22 @@ def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
         if len(places) > 1:
             shown.append({"line": (piece["kind"], piece["num"]), "places": places})
 
-    def follows(a, b):
-        """b jedzie dalej tam, gdzie a się kończy (a nie z powrotem)."""
-        return (a is not b and a["line"] == b["line"]
-                and a["places"][-1] == b["places"][0]
-                and not b["places"][1] == a["places"][-2])
-
-    runs = []     # (linia, [miejsca]) - kawałki sklejone na stykach
-
-    def extend(line, places, last, seen):
-        nexts = [q for q in shown if id(q) not in seen and follows(last, q)]
-        if not nexts:
-            runs.append((line, places))
-        for q in nexts:
-            extend(line, places + q["places"][1:], q, seen | {id(q)})
-
-    for piece in shown:
-        if not any(follows(q, piece) for q in shown):
-            extend(piece["line"], list(piece["places"]), piece, {id(piece)})
+    runs = _scheme_runs(shown)
+    ends = [{places[0], places[-1]} for _, places in runs]
+    anchors = set(anchors)
+    multi = {line for line, _ in runs if sum(1 for l, _ in runs if l == line) > 1}
 
     edges, bare = {}, set()
-    for line, places in runs:
+    for k, (line, places) in enumerate(runs):
         last = len(places) - 1
+        meets = set().union(*(e for j, e in enumerate(ends) if j != k)) if len(runs) > 1 else set()
         marks = [i for i, p in enumerate(places)
-                 if i in (0, last) or p in dots or p == start_place or p in target_places]
+                 if i in (0, last) or p in dots or p == start_place or p in target_places
+                 or p in anchors or p in meets]
         bare.update(places[i] for i in (0, last)
                     if places[i] not in dots and places[i] != start_place
                     and places[i] not in target_places)
+        key = (*line, k) if line in multi else line
         for i, j in zip(marks, marks[1:]):
             a, b = box_of(places[i]), box_of(places[j])
             if a == b:
@@ -4343,7 +4334,7 @@ def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
             # albo od którego zaczyna.
             chain = j < last or i > 0
             edges.setdefault((a, b), {})
-            edges[(a, b)][line] = edges[(a, b)].get(line, False) or chain
+            edges[(a, b)][key] = edges[(a, b)].get(key, False) or chain
 
     boxes = {SCHEME_START, SCHEME_END}
     for a, b in edges:
@@ -4385,20 +4376,85 @@ def _scheme(pieces, nodes, target_places=(), walkable=lambda a, b: False):
                    **({"bare": True} if p in bare else {})}
                   for p in order],
         "edges": [{"from": ids[a], "to": ids[b],
-                   "lines": [{"num": num, "kind": kind, **({"chain": True} if chain else {})}
-                             for (kind, num), chain in sorted(
-                                 lines.items(), key=lambda item: (item[0][0], len(item[0][1]), item[0][1]))]}
+                   "lines": [{"num": key[1], "kind": key[0], **({"run": key[2]} if len(key) > 2 else {}),
+                              **({"chain": True} if chain else {})}
+                             for key, chain in sorted(
+                                 lines.items(), key=lambda item: (item[0][0], len(item[0][1]), item[0][1],
+                                                                  item[0][2:]))]}
                   for (a, b), lines in sorted(edges.items(), key=lambda item: (ids[item[0][0]], ids[item[0][1]]))],
         "walks": [{"from": ids[a], "to": ids[b]} for a, b in walks],
         "order": sorted([ids[a], ids[b]] for a, b in walks) + sorted([ids[a], ids[b]] for a, b in hints),
     }
 
 
+def _scheme_runs(shown):
+    """Kawałki tej samej linii jadące w tę samą stronę i stykające się
+    wspólnym przystankiem to jedna kreska (suma ich przystanków w kolejności
+    jazdy); kawałki w przeciwną stronę albo rozjeżdżające się po wspólnym
+    przystanku zostają osobnymi kreskami. Zwraca [(linia, [miejsca])]."""
+    runs = []
+    for piece in shown:
+        runs.append((piece["line"], list(piece["places"])))
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(runs)):
+            for j in range(i + 1, len(runs)):
+                if runs[i][0] != runs[j][0]:
+                    continue
+                union = _union_places(runs[i][1], runs[j][1])
+                if union is not None:
+                    runs[i] = (runs[i][0], union)
+                    del runs[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    return runs
+
+
+def _union_places(a, b):
+    """Suma dwóch przebiegów tej samej linii w jednej kolejności jazdy albo
+    None, gdy to nie jest ten sam kierunek (wspólne przystanki w innej
+    kolejności), przebiegi nie mają wspólnej jazdy (jeden wspólny przystanek
+    to nie szew) albo po wspólnym przystanku jadą w różne strony."""
+    common = [p for p in a if p in b]
+    if not common or [p for p in b if p in a] != common:
+        return None
+    if len(common) == 1 and not (a[-1] == b[0] or b[-1] == a[0]):
+        return None
+    ia = [a.index(p) for p in common]
+    ib = [b.index(p) for p in common]
+
+    def inside(small, big):
+        it = iter(big)
+        return all(p in it for p in small)
+
+    def gaps(x, at):
+        return ([x[:at[0]]] + [x[at[k] + 1:at[k + 1]] for k in range(len(at) - 1)]
+                + [x[at[-1] + 1:]])
+
+    out = []
+    for k, (ga, gb) in enumerate(zip(gaps(a, ia), gaps(b, ib))):
+        if ga and gb and ga != gb:
+            if inside(ga, gb):
+                ga = gb
+            elif not inside(gb, ga):
+                return None
+        out += ga or gb
+        if k < len(common):
+            out.append(common[k])
+    return out
+
+
 def _scheme_of_map(day, seg_list, nodes, target_set, source_stops, journeys,
                    query_sec, best_arr, start_is_point, end_is_point, fastest_legs, seated,
-                   extra_count, vehicle_journey=None, start_name=None, end_name=None):
+                   extra_count, vehicle_journey=None, start_name=None, end_name=None,
+                   from_journeys=False):
     """Schemat z tego, co mapa właśnie narysowała - patrz _scheme. Rower i auto
-    (`vehicle_journey`) są odcinkami ruchu, więc stoją na schemacie tak samo."""
+    (`vehicle_journey`) są odcinkami ruchu, więc stoją na schemacie tak samo.
+    `from_journeys`: kreski składa się z jazd podróży (`journeys` to dokładnie
+    narysowane ruchy), a nie z kawałków mapy."""
     by_name = {day.display_name[key]: ids for key, ids in day.stops_by_place.items()}
     origin = _origin_walk(day, source_stops)
     near_target = _target_reach(day, target_set)
@@ -4453,13 +4509,67 @@ def _scheme_of_map(day, seg_list, nodes, target_set, source_stops, journeys,
         end_place = gtfs.place_name(day, next(iter(target_set)))
         vehicle_pieces = _vehicle_pieces(day, vehicle_journey, start_place, end_place,
                                          start_name, end_name)
+    anchors = set()
+    if from_journeys:
+        seg_list, anchors = _journey_pieces(day, journeys)
     scheme = _scheme(seg_list + extra_pieces + vehicle_pieces, nodes + extra_nodes,
                      target_places={gtfs.place_name(day, s) for s in target_set},
-                     walkable=walkable)
+                     walkable=walkable, anchors=anchors)
     scheme["pairs"] = _scheme_pairs(day, scheme["nodes"], stops_of, target_set, journeys,
                                     query_sec, best_arr, start_is_point, end_is_point,
                                     fastest_legs, extra_walks)
     return _scheme_prune(scheme)
+
+
+def _journey_pieces(day, journeys):
+    """Jazdy podróży jako kawałki do schematu (linia, jej miejsca od wsiadania
+    do wysiadania) i miejsca wsiadania i wysiadania, które są na schemacie
+    pudełkami."""
+    def place_of(name):
+        return gtfs.place_name(day, day.stops_by_key[name.casefold()][0])
+
+    pieces, anchors = [], set()
+    for journey in journeys:
+        for leg in journey["legs"]:
+            if leg["kind"] != "ride":
+                continue
+            names = [leg["from"], *(stop["name"] for stop in leg.get("via", ())), leg["to"]]
+            places = [place_of(name) for name in names]
+            pieces.append({"kind": leg["mode"], "num": leg["num"], "stops_n": places})
+            anchors.update((places[0], places[-1]))
+    return pieces, anchors
+
+
+def _extend_boardings(day, insts, source_stops, origin_walk, query_sec):
+    """Linia zaczyna się na najwcześniejszym przystanku swojego kursu, na
+    którym da się do niej wsiąść spośród pokazanych: przystanku, z którego
+    pieszo ze startu zaczyna się któryś z pokazanych ruchów i na który jeszcze
+    się zdąży (145 jedzie przez Pl. Grunwaldzki, więc zaczyna się tam, a nie
+    dopiero na Moście Grunwaldzkim)."""
+    conns = day.conns
+    boards = {gtfs.place_name(day, conns[inst["rides"][0][0]][2]) for inst in insts}
+    out = []
+    for inst in insts:
+        board, alight = inst["rides"][0]
+        idxs = gtfs.trip_conns(day, conns[board][4])
+        chosen = None
+        for k in range(idxs.index(board)):
+            stop = conns[idxs[k]][2]
+            if gtfs.place_name(day, stop) not in boards:
+                continue
+            lead = 0 if stop in source_stops else origin_walk.get(stop, (None, None))[1]
+            if lead is not None and conns[idxs[k]][0] - lead >= query_sec:
+                chosen = idxs[k]
+                break
+        if chosen is None or (gtfs.place_name(day, conns[chosen][2])
+                              == gtfs.place_name(day, conns[board][2])):
+            out.append(inst)
+            continue
+        extended = dict(inst, rides=((chosen, alight),) + inst["rides"][1:])
+        extended.pop("slack", None)
+        extended.pop("walked", None)
+        out.append(extended)
+    return out
 
 
 def _scheme_prune(scheme):

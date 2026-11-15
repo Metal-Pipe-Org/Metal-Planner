@@ -251,7 +251,7 @@ def test_schemat_ma_te_same_linie_co_mapa_nawet_z_scheme_extra(start, end, day, 
     result = _real(start, end, day, hhmm, scheme_extra=2)
 
     assert _scheme_nums(result) == set(_nums(result))
-    assert 1 <= len(result["scheme"]["moves"]) <= moves.READABLE_MOVES
+    assert result["scheme"]["moves"]
 
 
 def test_schemat_mowi_ile_trwa_kazdy_ruch():

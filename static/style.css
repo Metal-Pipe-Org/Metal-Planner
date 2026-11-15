@@ -3519,11 +3519,9 @@ ul.tt-legend {
 }
 
 .scheme-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
-.scheme-stop-dot { fill: #fff; stroke-width: 3; pointer-events: none; }
 .scheme-tip .scheme-tip-row { background: #fff; border-radius: 8px; padding: 6px 10px; margin-bottom: 3px; font: 12px system-ui, sans-serif; color: #263238; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); white-space: nowrap; }
 #scheme-canvas.has-pick g.scheme-stroke:not(.scheme-pick) { opacity: 0.25; }
 #scheme-canvas g.scheme-pick .scheme-line { stroke-width: 6; }
-.scheme-tight { font: 700 11px system-ui, sans-serif; fill: #e65100; pointer-events: none; }
 .move-tip { background: #fff; border-radius: 8px; padding: 6px 10px; font: 12px system-ui, sans-serif; color: #263238; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
 .move-tip-row { margin: 2px 0; white-space: nowrap; }
 .move-tip-goal { font-size: 14px; }
