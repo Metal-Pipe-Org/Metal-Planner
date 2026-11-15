@@ -506,9 +506,8 @@ function vehicleIcon(v) {
 }
 
 function vehicleTooltipHtml(v) {
-    const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
     if (v.to) return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
-    return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
+    return `<b>${esc(v.line)}</b>`;
 }
 
 const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();

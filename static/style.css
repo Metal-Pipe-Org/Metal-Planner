@@ -1546,7 +1546,7 @@ body.routes-off #results .notice.loading { display: none; }
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
    linii, nie pigułka jak .line-badge: użytkownik prosił wprost o kropki. */
 .vehicle-box {
-    position: relative;
+    position: absolute;
 }
 
 .vehicle-box .vehicle-marker {
