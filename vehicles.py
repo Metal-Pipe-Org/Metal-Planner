@@ -20,6 +20,7 @@ app.js) biłoby wprost w cudzy serwer.
 
 import json
 import math
+import re
 import threading
 import time
 import urllib.parse
@@ -145,6 +146,7 @@ STRAIGHT_DEG = 30
 AT_STOP_M = 25
 TRACK_TTL_SEC = 300
 
+_TRIP_ID = re.compile(r"\d+_\d+")
 WARSAW = ZoneInfo("Europe/Warsaw")
 _ROUTE_TYPE = {"tram": 0, "bus": 3}
 
@@ -204,8 +206,11 @@ def _day_trips(day, db):
             GROUP BY t.trip_id""",
         tuple(services),
     ).fetchall()
+    # Doklejone kursy z innych źródeł (np. "SIE:friday:35169589") nie mają
+    # numeru, który dałoby się porównać z kluczem - po kluczu ich nie wiążemy.
     trips = [{"id": i, "num": int(i.split("_")[1]), "route": n, "type": ty,
-              "headsign": h, "first": f, "last": la} for i, n, ty, h, f, la in rows]
+              "headsign": h, "first": f, "last": la}
+             for i, n, ty, h, f, la in rows if _TRIP_ID.fullmatch(i)]
     for old in [k for k in _window_cache if k[1] != key[1] or abs((k[0] - day).days) > 1]:
         del _window_cache[old]
     if not _window_cache:
