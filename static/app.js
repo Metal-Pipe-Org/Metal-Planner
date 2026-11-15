@@ -7828,16 +7828,22 @@ const settingsSearch = $('settings-search');
 for (const row of settingsRows) {
     const tag = row.dataset.obsolete !== undefined ? 'obsolete' : row.classList.contains('dev-only') ? 'DEV' : '';
     if (tag) {
-        const badge = document.createElement('span');
+        const badge = document.createElement(tag === 'DEV' ? 'span' : 'a');
         badge.className = tag === 'DEV' ? 'dev-badge' : 'dev-badge obsolete-badge';
         badge.textContent = tag;
+        if (tag === 'obsolete') {
+            badge.href = row.dataset.issueUrl;
+            badge.target = '_blank';
+            badge.rel = 'noopener';
+            badge.dataset.tip = 'Korzystasz z tego? Kliknij, żeby dać znać, że jest ważne (otworzy się zgłoszenie na GitHubie)';
+        }
         (row.querySelector('label:not(.button), .set-title') || row).append(badge);
     }
 }
 
 const settingsInfo = new Map(settingsRows.map(row => {
     const copy = row.cloneNode(true);
-    for (const skip of copy.querySelectorAll('output, .info, .obsolete-info, .dev-badge')) skip.remove();
+    for (const skip of copy.querySelectorAll('output, .info, .dev-badge')) skip.remove();
     const labels = (row.dataset.labels || '').split(',').map(label => label.trim()).filter(Boolean);
     return [row, {
         labels,
@@ -8170,7 +8176,7 @@ function settingLabel(control) {
     const label = (control.id && devPanel.querySelector(`label[for="${control.id}"]`))
         || control.closest('label');
     const clone = label.cloneNode(true);
-    for (const extra of clone.querySelectorAll('output, .info, .obsolete-info, .dev-badge, input, select')) extra.remove();
+    for (const extra of clone.querySelectorAll('output, .info, .dev-badge, input, select')) extra.remove();
     return clone.textContent.replace(/\s+/g, ' ').trim();
 }
 
@@ -8555,18 +8561,18 @@ function showInfoTip(icon) {
 }
 
 document.addEventListener('mouseover', event => {
-    const icon = event.target.closest('.info, .obsolete-info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('mouseout', event => {
-    if (event.target.closest('.info, .obsolete-info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('focusin', event => {
-    const icon = event.target.closest('.info, .obsolete-info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('focusout', event => {
-    if (event.target.closest('.info, .obsolete-info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('click', event => {
     const icon = event.target.closest('.info');

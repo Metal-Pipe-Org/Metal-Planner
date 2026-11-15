@@ -2,6 +2,7 @@
 
 import json
 import re
+import warnings
 from datetime import date
 from pathlib import Path
 
@@ -31,7 +32,7 @@ def _bledy(wartosc, schema, sciezka="$"):
     """Sprawdza wartość względem schemy w zakresie, którego używa settings.schema.json
     (type, required, properties, additionalProperties, items, minLength, pattern) - bez
     biblioteki jsonschema, której nie ma w venv."""
-    typy = {"object": dict, "array": list, "string": str}
+    typy = {"object": dict, "array": list, "string": str, "boolean": bool}
     if not isinstance(wartosc, typy[schema["type"]]):
         return [f"{sciezka}: zły typ"]
     bledy = []
@@ -43,7 +44,7 @@ def _bledy(wartosc, schema, sciezka="$"):
     elif isinstance(wartosc, list):
         for i, element in enumerate(wartosc):
             bledy += _bledy(element, schema["items"], f"{sciezka}[{i}]")
-    else:
+    elif schema["type"] == "object":
         bledy += [f"{sciezka}: brak pola {k}" for k in schema.get("required", []) if k not in wartosc]
         for klucz, element in wartosc.items():
             if klucz in schema["properties"]:
@@ -66,7 +67,7 @@ def test_rejestr_jest_poprawnym_jsonem_zgodnym_ze_schema():
 def test_schema_opisuje_kazde_pole_po_polsku():
     schema = json.loads((ROOT / "settings.schema.json").read_text(encoding="utf-8"))
     wpis = schema["properties"]["settings"]["items"]["properties"]
-    assert set(wpis) == {"id", "name", "description", "tags", "obsolete"}
+    assert set(wpis) == {"id", "name", "description", "tags", "dev", "obsolete"}
     for nazwa, pole in wpis.items():
         assert pole["description"], nazwa
 
@@ -80,6 +81,8 @@ def test_schema_odrzuca_bledne_wpisy():
 
     assert _bledy(wpis(), schema) == []
     assert _bledy(wpis(obsolete="2026-11-15"), schema) == []
+    assert _bledy(wpis(dev=True), schema) == []
+    assert _bledy(wpis(dev="tak"), schema)
     assert _bledy(wpis(obsolete="15.11.2026"), schema)
     assert _bledy(wpis(nieznane=1), schema)
     assert _bledy({"settings": [{"id": "x", "name": "X"}]}, schema)
@@ -90,6 +93,12 @@ def test_kazdy_wiersz_ma_wpis_i_odwrotnie():
     ids = [w["id"] for w in settings_registry.load()]
     assert sorted(wiersze) == sorted(ids)
     assert wiersze == ids, "kolejność wpisów ma być kolejnością wierszy"
+
+
+def test_dev_jest_osobnym_polem_i_nie_ma_go_w_tagach():
+    for wpis in settings_registry.load():
+        assert "dev" not in wpis["tags"], wpis["id"]
+        assert wpis.get("dev", True) is True, f"{wpis['id']}: brak pola dev znaczy false, nie wpisuj false"
 
 
 def test_obsolete_ma_poprawna_date():
@@ -103,8 +112,8 @@ def test_teksty_na_stronie_pochodza_z_rejestru():
     html = _strona()
     assert "Szare godziny w tablicy" in html
     assert 'data-tip="Odjazdy, na które już nie zdążysz' in html
-    assert re.search(r'class="[^"]*dev-only[^"]*" data-setting="density" data-labels="Zagęszczenie, Mapa"', html)
-    assert 'data-setting="tt-past" data-labels="Rozkład, Czas"' in html
+    assert re.search(r'class="[^"]*dev-only[^"]*" data-setting="density" data-labels="Mapa"', html)
+    assert 'data-setting="tt-past" data-labels="Przystanki, Czas"' in html
 
 
 @pytest.fixture
@@ -115,17 +124,19 @@ def rejestr(monkeypatch):
 
 
 def test_nowy_tag_trafia_do_etykiet_bez_zmian_w_kodzie(rejestr):
-    rejestr({"id": "x", "name": "X", "tags": ["Mapa", "rare", "dev"]})
+    rejestr({"id": "x", "name": "X", "tags": ["Mapa", "rare"], "dev": True})
     widok = settings_registry.view(date(2026, 1, 1))["x"]
     assert widok["labels"] == "Mapa, rare"
     assert widok["dev"] is True
+    rejestr({"id": "x", "name": "X", "tags": ["Mapa"]})
+    assert settings_registry.view(date(2026, 1, 1))["x"]["dev"] is False
 
 
-def test_obsolete_ignoruje_inne_tagi_i_dev(rejestr):
-    rejestr({"id": "x", "name": "X", "tags": ["Mapa", "dev"], "obsolete": "2026-11-15"})
+def test_obsolete_ignoruje_zwykle_tagi_ale_nie_dev(rejestr):
+    rejestr({"id": "x", "name": "X", "tags": ["Mapa"], "dev": True, "obsolete": "2026-11-15"})
     widok = settings_registry.view(date(2026, 11, 15))["x"]
     assert widok["labels"] == "obsolete"
-    assert widok["dev"] is False
+    assert widok["dev"] is True
     assert not widok["expired"]
     assert widok["issue_url"].startswith("https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new?title=")
     assert "Do+dyskusji%3A+ustawienie+X+oznaczone+jako+obsolete" in widok["issue_url"]
@@ -155,12 +166,62 @@ def _strona_z_obsolete(monkeypatch, dzis):
     return _strona(dzis=dzis)
 
 
-def test_strona_obsolete_widoczny_z_ikonka_potem_schowany(monkeypatch):
+def test_strona_obsolete_widoczny_z_odnosnikiem_potem_schowany(monkeypatch):
     html = _strona_z_obsolete(monkeypatch, date(2026, 11, 15))
     wiersz = re.search(r'<label[^>]*data-setting="tt-past"[^>]*>', html).group(0)
     assert 'data-obsolete="2026-11-15"' in wiersz and "hidden" not in wiersz
-    assert "dev-only" not in wiersz
-    assert 'class="obsolete-info"' in html and 'target="_blank"' in html
+    assert "dev-only" not in wiersz, "tt-past nie jest deweloperskie"
+    assert re.search(r'data-issue-url="https://github.com/Metal-Pipe-Org/Metal-Planner/issues/new\?title=', wiersz)
+    assert "obsolete-info" not in html
     html = _strona_z_obsolete(monkeypatch, date(2026, 12, 20))
     wiersz = re.search(r'<label[^>]*data-setting="tt-past"[^>]*>', html).group(0)
     assert "data-expired" in wiersz and "hidden" in wiersz
+
+
+def _id_z_kodu():
+    """id ustawień, o które pyta kod: id -> skąd je wzięto."""
+    znalezione = {}
+    for js in sorted((ROOT / "static").glob("*.js")):
+        kod = js.read_text(encoding="utf-8")
+        for id_ in re.findall(r"\bsetting\('([^']+)'\)", kod):
+            znalezione.setdefault(id_, f"setting() w {js.name}")
+        for id_ in re.findall(r"SETTINGS\.(?:get|has)\('([^']+)'\)", kod):
+            znalezione.setdefault(id_, f"SETTINGS.get() w {js.name}")
+        for id_ in re.findall(r"jumpToSetting\('([^']+)'\)", kod):
+            znalezione.setdefault(id_, f"jumpToSetting() w {js.name}")
+        for lista in re.findall(r"for \(const id of \[([^\]]*)\]\) \{\s*SETTING_EFFECTS\[id\]", kod):
+            for id_ in re.findall(r"'([^']+)'", lista):
+                znalezione.setdefault(id_, f"lista id przy SETTING_EFFECTS w {js.name}")
+        efekty = re.search(r"const SETTING_EFFECTS = \{\n(.*?)\n\};", kod, re.S)
+        if efekty:
+            for id_ in re.findall(r"^    '([^']+)': \{", efekty.group(1), re.M):
+                znalezione.setdefault(id_, f"klucz SETTING_EFFECTS w {js.name}")
+        dawne = re.search(r"const LEGACY_SETTINGS_KEYS = \{\n(.*?)\n\};", kod, re.S)
+        if dawne:
+            for id_ in re.findall(r": '([^']+)'(?=[,}\s])", dawne.group(1)):
+                znalezione.setdefault(id_, f"LEGACY_SETTINGS_KEYS w {js.name}")
+    return znalezione
+
+
+def test_kod_pyta_tylko_o_ustawienia_z_rejestru():
+    ids = {w["id"] for w in settings_registry.load()}
+    znalezione = _id_z_kodu()
+    assert len(znalezione) > 30, "wzorce przestały cokolwiek znajdować - popraw test"
+    brakuje = {id_: skad for id_, skad in znalezione.items() if id_ not in ids}
+    assert not brakuje, f"kod pyta o ustawienia, których nie ma w settings.json: {brakuje}"
+
+
+def test_ustawienie_czytane_gdziekolwiek_poza_wierszem_szablonu():
+    """Ostrzeżenie, nie błąd: wpis, którego id nie pada nigdzie w kodzie poza własnym
+    wierszem, bywa w porządku (obsługuje je ogólny mechanizm), ale częściej jest martwy."""
+    szablon = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    szablon = re.sub(r"\{\{ (?:attrs|name|info)\('[^']*'\)[^}]*\}\}|\{\{ dev\('[^']*'\) \}\}", "", szablon)
+    kod = szablon
+    for sciezka in [*(ROOT / "static").glob("*.js"), *ROOT.glob("*.py")]:
+        if sciezka.name != "settings_registry.py":
+            kod += sciezka.read_text(encoding="utf-8")
+    for wpis in settings_registry.load():
+        id_ = wpis["id"]
+        wiersz = re.compile(rf'\b(?:id|for|name)="{re.escape(id_)}"')
+        if not re.search(rf"""['"`]{re.escape(id_)}['"`]""", wiersz.sub("", kod)):
+            warnings.warn(f"ustawienie {id_} jest w rejestrze, ale jego id nie pada w kodzie poza wierszem w szablonie")

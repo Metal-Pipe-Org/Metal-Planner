@@ -677,18 +677,27 @@
       Nagłówki grup składa app.js z `data-labels` widocznych wierszy, więc nowe
       ustawienie wymaga tylko tagów, nie miejsca w jakiejś sekcji.
 
-      Nazwy, opisy (ikonka „i"), tagi i „tylko DEV" stoją w settings.json
-      (czytane przez settings_registry.py, przekazane tu jako `settings`),
-      NIE tutaj. Wiersz tylko stawia kontrolkę i wywołuje makra z rejestru:
-      dev(id) dokłada klasę `dev-only` (tag `dev`), attrs(id) daje
-      `data-setting` i `data-labels` (tagi inne niż `dev`), name(id) nazwę,
-      info(id) ikonkę z opisem. Ustawienie z polem `obsolete` w rejestrze
-      dostaje tu samo tag „obsolete", ikonkę z odnośnikiem do zgłoszenia, a po
-      miesiącu od daty wiersz zostaje w DOM, ale jest schowany
-      (`data-expired`), a jego zapamiętana wartość nie działa.
+      Rejestr settings.json trzyma tylko to, co da się zmienić bez ruszania
+      kodu: nazwę, opis (ikonka „i"), tagi, `dev` („tylko DEV") i `obsolete`.
+      Czyta go settings_registry.py i przekazuje tu jako `settings`. Typ
+      kontrolki, wartość domyślna i zakres zostają TUTAJ, a nie w rejestrze,
+      bo kod aplikacji musi z nimi współgrać: zmiana któregoś z nich samym
+      wpisem w rejestrze rozjechałaby się z kodem i psuła aplikację.
+      Wiersz tylko stawia kontrolkę i wywołuje makra z rejestru:
+      dev(id) dokłada klasę `dev-only` (pole `dev`), attrs(id) daje
+      `data-setting` i `data-labels` (tagi), name(id) nazwę, info(id) ikonkę
+      z opisem. Ustawienie z polem `obsolete` dostaje tu samo tag „obsolete"
+      (pole `dev` zostaje: takie ustawienie widać nadal tylko w trybie
+      deweloperskim), klikalny znaczek „obsolete" z odnośnikiem do zgłoszenia
+      (`data-issue-url`, znaczek dokłada app.js), a po miesiącu od daty wiersz
+      zostaje w DOM, ale jest schowany (`data-expired`), a jego zapamiętana
+      wartość nie działa.
+
+      Grupa z nagłówkiem w ⚙ powstaje od 3 ustawień z tym samym tagiem;
+      rzadsze tagi działają tylko w wyszukiwarce.
 
       Nowe ustawienie: wpis w settings.json (id, name, opcjonalnie description,
-      tags) i wiersz tutaj. Wiersz jest opisem KONTROLKI: rodzaj wynika z niej
+      tags, dev) i wiersz tutaj. Wiersz jest opisem KONTROLKI: rodzaj wynika z niej
       (przełącznik, suwak albo lista wyboru), `value`/`checked`/`selected` to
       wartość DOMYŚLNA (z nią porównuje pasek „zmienione", do niej wraca
       „Przywróć domyślne"), a `data-setting` musi być równe id kontrolki
@@ -704,13 +713,12 @@
     {% macro dev(id) -%}{% if settings[id].dev %} dev-only{% endif %}{%- endmacro %}
     {% macro attrs(id) -%}
         data-setting="{{ id }}" data-labels="{{ settings[id].labels }}"
-        {%- if settings[id].obsolete %} data-obsolete="{{ settings[id].obsolete }}"{% endif %}
+        {%- if settings[id].obsolete %} data-obsolete="{{ settings[id].obsolete }}" data-issue-url="{{ settings[id].issue_url }}"{% endif %}
         {%- if settings[id].expired %} data-expired hidden{% endif %}
     {%- endmacro %}
     {% macro name(id) -%}{{ settings[id].name }}{%- endmacro %}
     {% macro info(id, glyph='i') -%}
         {%- if settings[id].description %}<span class="info" tabindex="0" role="button" data-tip="{{ settings[id].description }}">{{ glyph }}</span>{% endif -%}
-        {%- if settings[id].obsolete %}<a class="obsolete-info" href="{{ settings[id].issue_url }}" target="_blank" rel="noopener" data-tip="Korzystasz z tego? Kliknij, żeby dać znać, że jest ważne (otworzy się zgłoszenie na GitHubie)">!</a>{% endif -%}
     {%- endmacro %}
     <div id="settings-list">
 
