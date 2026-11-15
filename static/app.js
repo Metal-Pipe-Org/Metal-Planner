@@ -7827,8 +7827,10 @@ function applyDotOpts() {
 const settingsSearch = $('settings-search');
 
 for (const row of settingsRows) {
-    const tag = row.dataset.obsolete !== undefined ? 'obsolete' : row.classList.contains('dev-only') ? 'DEV' : '';
-    if (tag) {
+    const tags = [];
+    if (row.classList.contains('dev-only')) tags.push('DEV');
+    if (row.dataset.obsolete !== undefined) tags.push('obsolete');
+    for (const tag of tags) {
         const badge = document.createElement(tag === 'DEV' ? 'span' : 'a');
         badge.className = tag === 'DEV' ? 'dev-badge' : 'dev-badge obsolete-badge';
         badge.textContent = tag;

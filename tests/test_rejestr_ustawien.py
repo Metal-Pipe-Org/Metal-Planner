@@ -183,6 +183,18 @@ def test_strona_obsolete_widoczny_z_odnosnikiem_potem_schowany(monkeypatch):
     assert "data-expired" in wiersz and "hidden" in wiersz
 
 
+def test_strona_dev_i_obsolete_niesie_oba_znaczniki(monkeypatch):
+    wpisy = settings_registry.load()
+    for wpis in wpisy:
+        if wpis["id"] == "density":
+            wpis["obsolete"] = "2026-11-15"
+    monkeypatch.setattr(settings_registry, "load", lambda: wpisy)
+    wiersz = re.search(r'<div[^>]*data-setting="density"[^>]*>', _strona(dzis=date(2026, 11, 15))).group(0)
+    assert "dev-only" in wiersz and 'data-obsolete="2026-11-15"' in wiersz
+    kod = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    assert re.search(r"if \(row\.classList\.contains\('dev-only'\)\) tags\.push\('DEV'\);\s*if \(row\.dataset\.obsolete !== undefined\) tags\.push\('obsolete'\);", kod)
+
+
 def _id_z_kodu():
     """id ustawień, o które pyta kod: id -> skąd je wzięto."""
     znalezione = {}
