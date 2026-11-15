@@ -495,16 +495,19 @@ let vehiclesTimer = null;
 const VEHICLES_REFRESH_MS = 15000;
 
 function vehicleIcon(v) {
+    const arrow = v.heading == null ? '' :
+        `<div class="vehicle-arrow ${esc(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
-        className: `vehicle-marker ${esc(v.kind)}`,
-        html: esc(v.line),
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
+        className: 'vehicle-box',
+        html: `<div class="vehicle-marker ${esc(v.kind)}">${esc(v.line)}</div>${arrow}`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
     });
 }
 
 function vehicleTooltipHtml(v) {
     const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
+    if (v.to) return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
     return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
 }
 

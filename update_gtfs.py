@@ -85,6 +85,10 @@ CREATE TABLE trips (
     trip_headsign TEXT,
     shape_id      TEXT
 );
+CREATE TABLE trip_brigades (
+    trip_id    TEXT PRIMARY KEY,
+    brigade_id TEXT NOT NULL
+);
 CREATE TABLE shapes (
     shape_id TEXT NOT NULL,
     seq      INTEGER NOT NULL,
@@ -227,6 +231,17 @@ def build_database(zip_path, db_path):
             ),
         )
         print(f"  trips: {n}")
+
+        n = batched_insert(
+            db,
+            "INSERT OR REPLACE INTO trip_brigades VALUES (?, ?)",
+            (
+                (r["trip_id"], r["brigade_id"].strip())
+                for r in read_csv(zf, "trips.txt")
+                if (r.get("brigade_id") or "").strip()
+            ),
+        )
+        print(f"  trip_brigades: {n}")
 
         n = batched_insert(
             db,
