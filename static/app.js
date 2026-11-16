@@ -5863,7 +5863,8 @@ function schemeWalkLayer(boxes, walks, routes = new Map()) {
         const [cx, cy] = pointAlong(strandSamples({curved: points.length > 2, points}), 0.6);
         out.minX = Math.min(out.minX, x1, x2, cx - w / 2); out.maxX = Math.max(out.maxX, x1, x2, cx + w / 2);
         out.minY = Math.min(out.minY, y1); out.maxY = Math.max(out.maxY, y2);
-        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}">`
+        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}" `
+            + `data-walk="${escAttr(`${pair.from}>${pair.to}`)}">`
             + `<title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
             + `<path d="${d}"/><circle cx="${x1}" cy="${y1}" r="2.5"/><circle cx="${x2}" cy="${y2}" r="2.5"/>`
             + `<rect class="scheme-walk-pill" x="${cx - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
@@ -5897,14 +5898,9 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
     const DASH = 9;
     let rects = '', lines = '', names = '';
     for (const [id, b] of boxes) {
-        // Miejsce, w którym mapa urywa linię, ale nie stawia kropki: ramka
-        // kreskowana, bez wypełnienia, z podpowiedzią.
-        const bare = b.node.bare ? ' bare' : '';
-        const title = b.node.bare
-            ? '<title>Tu linia kończy się na mapie, ale mapa nie stawia tu kropki</title>' : '';
-        rects += `<g class="node${bare}" data-node="${id}">${title}<rect class="scheme-box${bare}" `
+        rects += `<g class="node" data-node="${id}"><rect class="scheme-box" `
             + `x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12"/></g>`;
-        names += `<text class="scheme-name${bare}" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+        names += `<text class="scheme-name" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
     }
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
@@ -5950,7 +5946,7 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
         + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
-        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${names}${labels}</svg>`;
+        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${lines}${rects}${names}${labels}</svg>`;
 }
 
 /** Pod schematem nie ma już listy ruchów: godziny są w samym rysunku (patrz
@@ -6064,6 +6060,19 @@ function highlightSchemeFastest() {
     const edges = lastSchemeData && lastSchemeData.scheme && lastSchemeData.scheme.fastest_edges;
     if (!edges) return;
     const keys = new Set(edges.map(([from, to, num]) => `${from}>${to}|${num}`));
+    // Przejścia tej podróży: dojście ze startu do pierwszego przystanku, każde
+    // przejście między jazdami i dojście do celu - tak jak kropki na mapie.
+    const nodes = lastSchemeData.scheme.nodes;
+    const start = (nodes.find(n => n.role === 'start') || {}).id;
+    const end = (nodes.find(n => n.role === 'end') || {}).id;
+    const stops = [start, ...edges.flatMap(([from, to]) => [from, to]), end];
+    const walks = new Set();
+    for (let i = 0; i + 1 < stops.length; i += 2) {
+        if (stops[i] !== stops[i + 1]) walks.add(`${stops[i]}>${stops[i + 1]}`);
+    }
+    for (const element of canvas.querySelectorAll('g.scheme-walk')) {
+        if (walks.has(element.dataset.walk)) element.classList.add('scheme-pick');
+    }
     let any = false;
     for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
         if (element.dataset.lines.split(' ').some(num => keys.has(`${element.dataset.edge}|${num}`))) {

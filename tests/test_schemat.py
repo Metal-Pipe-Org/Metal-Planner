@@ -101,10 +101,9 @@ def test_ten_sam_wybor_to_jedna_strzalka(install_day):
     install_day(_dzien())
     scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
     krawedzie = _po_nazwach(scheme)
-    # Dwójka i czwórka jadą ze startu do celu tym samym ruchem: jedna strzałka,
-    # a z ruchu nowa mapa rysuje jedną linię (moves.py).
-    assert ("start", "end", ("2",)) in krawedzie
-    assert not [e for e in krawedzie if e[:2] == ("start", "end") and "4" in e[2]]
+    # Dwójka i czwórka jadą ze startu do celu tym samym ruchem: jedna strzałka
+    # z oboma numerami (moves.py).
+    assert ("start", "end", ("2", "4")) in krawedzie
     # Piątka z siedemnastką jedzie dłużej i przesiada się, a jest wyparta przez
     # bezpośrednią dwójkę (moves.dominates) - nowa mapa jej nie rysuje.
     assert ("start", "B", ("5",)) not in krawedzie

@@ -26,11 +26,11 @@ JUST_LEFT_SEC = 2 * 60
 
 # „W granicach rozsądku" (heurystyki 2 i 3): podróż jest do pokazania, gdy jej
 # koszt - przyjazd plus kara za każdą przesiadkę - nie przekracza kosztu
-# najlepszej o więcej niż ułamek jej długości, nie mniej niż minimum.
+# najlepszej o więcej niż tyle. Okno nie rośnie z długością podróży: na
+# dłuższej trasie pół godziny później w celu to dalej pół godziny później.
 # Kara za przesiadkę to ta sama TRANSFER_GAIN_SEC co na liście propozycji:
 # jazda bez przesiadki liczy się sama w sobie.
 REASONABLE_MIN_SEC = 20 * 60
-REASONABLE_FRACTION = 0.6
 
 # Duża przerwa między odjazdami ruchu (heurystyka 2): dłuższa od minimum
 # i od wielokrotności przerw dotychczasowej zbitki. Częste linie (co 5 min)
@@ -62,10 +62,8 @@ LONG_WALK_SEC = 15 * 60
 WALK_MARGIN_SEC = 150
 
 # „Równie blisko": dojście do przystanku nie dłuższe niż o tyle niż do wybranego
-# (marsz liczy się w pełnych minutach, więc 3 min to jedna minuta różnicy), i nie
-# dalej niż tyle przystanków wstecz po kursie.
+# (marsz liczy się w pełnych minutach, więc 3 min to jedna minuta różnicy).
 NEAR_EQUAL_SEC = 180
-EXTEND_STOPS_BACK = 3
 
 # Pierwszy widok nowej mapy: tyle różnych ruchów jest jeszcze czytelnych (na
 # mapie i w schemacie). Pozostałe nie są rysowane.
@@ -80,12 +78,14 @@ FIRST_VIEW_VEHICLES = 1
 # na przyjazd (heurystyka 6: bez twardego limitu, ale z ceną).
 WALK_EXTRA = 1.0
 
-# Dojścia do tego samego ostatniego pojazdu (ten sam kurs, to samo wsiadanie)
-# to gałęzie jednej podróży, nie osobne ruchy: tyle ich najwyżej dochodzi do
-# ruchu, a zapas na przesiadce do ostatniego pojazdu nie może być większy niż
-# tyle (dłuższe czekanie to już inny pomysł na wieczór, nie dojście).
-BRANCH_MAX = 2
+# Inne dojścia do tego samego ostatniego pojazdu (ten sam kurs) to gałęzie
+# jednej podróży, nie osobne ruchy; zapas na przesiadce do ostatniego pojazdu
+# nie może być większy niż tyle (dłuższe czekanie to już inny pomysł na
+# wieczór, nie dojście).
 BRANCH_MAX_SLACK_SEC = 20 * 60
+# Inna linia tego samego ruchu dopisuje się do kreski, gdy po niej nie czeka
+# się na dalszy pojazd dłużej niż tyle.
+LINE_MAX_SLACK_SEC = 15 * 60
 
 # Wariant „ten sam pojazd jedzie dalej" może dowozić później niż ruch na styk,
 # ale nie o więcej niż tyle.
@@ -142,8 +142,7 @@ def cost(inst, gain_sec):
 
 
 def reasonable_sec(best_arr, query_sec, wider=0):
-    base = max(REASONABLE_MIN_SEC, REASONABLE_FRACTION * (best_arr - query_sec))
-    return base * (1 + 0.5 * wider)
+    return REASONABLE_MIN_SEC * (1 + 0.5 * wider)
 
 
 # --- kroki ---
@@ -404,55 +403,153 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
             move["far_walk"] = False
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
     shown, hidden = readable(day, moves, anchor)
-    for move in shown:
-        if move is not anchor:
-            move["first"] = extend_start(day, move["first"], origin_sec or {}, query_sec)
-    add_branches(ctx, shown, insts, origin_sec or {})
+    add_branches(ctx, shown, insts, by_sig_all, origin_sec or {})
     return shown, hidden, any(m["safe_alt"] or is_safe(day, i)
                           for m in shown for i in [m["first"], *m["branches"]])
 
 
-def add_branches(ctx, shown, insts, origin_sec):
-    """Dojścia do TEGO SAMEGO ostatniego pojazdu (ten sam kurs, to samo
-    wsiadanie i wysiadanie) są gałęziami jednej podróży: na schemacie to dopływy
-    do jednego przystanku przesiadkowego, nie osobne ruchy. Do ruchu dochodzi
-    najwyżej BRANCH_MAX gałęzi, od najtańszej. Gałąź wchodzi tylko, gdy daje
-    NOWY przystanek wsiadania (inny niż w tej podróży, w kręgosłupie i w już
-    wziętych gałęziach) - kolejna linia z tego samego miejsca to nie nowe
-    dojście - i nie ma więcej jazd niż podróż, do której dołącza. Przesiadka na
-    styk jest gałęzią jak każda - tylko oznaczoną."""
+def add_branches(ctx, shown, insts, by_sig, origin_sec):
+    """Co poza pierwszym egzemplarzem ruchu rysuje się jako część tej samej
+    sieci (`branches`):
+
+    - inne LINIE tego samego ruchu - z tego samego miejsca w to samo, na ten
+      sam dalszy pojazd (145, 146 i 149 na ten sam autobus ze Skweru): jedna
+      kreska z kilkoma numerami;
+    - inne DOJŚCIA do tego samego ostatniego pojazdu (ten sam kurs), które
+      zaczynają się inaczej - szesnastką na Kościuszki zamiast 145 na Skwer -
+      i nie każą wyjść wyraźnie wcześniej niż ostatnie złapanie tego pojazdu
+      samym ruchem. Ten sam kurs łapany z innego przystanku to nie inne
+      dojście (rysuje się od najbliższego), a dojście z marszem między
+      przystankami odpada, gdy do tego pojazdu da się dojechać bez marszu.
+
+    Przesiadka na styk jest gałęzią jak każda - tylko oznaczoną."""
     day, gain = ctx["day"], ctx["gain_sec"]
+    conns = day.conns
+
+    def trips_of(inst):
+        return tuple(conns[board][4] for board, _ in inst["rides"])
+
+    def lead_of(inst):
+        return origin_sec.get(conns[inst["rides"][0][0]][2], 0)
+
+    def line_of(inst):
+        return day.trip_info[conns[inst["rides"][0][0]][4]][0]
+
+    def place_walks(inst):
+        """Przesiadki z przejściem do INNEGO miejsca (słupek obok na tym samym
+        przystanku to nie marsz)."""
+        return sum(1 for (_, a), (b, _) in zip(inst["rides"], inst["rides"][1:])
+                   if place(day, conns[a][3]) != place(day, conns[b][2]))
+
+    def way_of(inst):
+        board, alight = inst["rides"][0]
+        idxs = gtfs.trip_conns(day, conns[board][4])
+        return [place(day, conns[i][3]) for i in idxs[idxs.index(board):idxs.index(alight) + 1]]
+
+    def same_way(one, other):
+        """Czy dwie linie jadą pierwszy odcinek tą samą drogą (jedna może
+        pomijać przystanki drugiej)."""
+        short, long = sorted((way_of(one), way_of(other)), key=len)
+        rest = iter(long)
+        return all(stop in rest for stop in short)
+
+    def other_lines(main, taken):
+        """Po jednym egzemplarzu na każdą inną linię pierwszej jazdy tego
+        samego ruchu, która jedzie tą samą drogą i dowozi na ten sam dalszy
+        pojazd."""
+        best = {}
+        for inst in by_sig.get(main["sig"], ()):
+            if (inst["just_left"] or inst["rides"][1:] != main["rides"][1:]
+                    or inst["n"] != main["n"] or (main["n"] == 1 and inst["arr"] > main["arr"]
+                                                  + EPSILON_SEC)):
+                continue
+            line = line_of(inst)
+            if line in taken or (inst["n"] > 1
+                                 and _last_slack(day, inst) > LINE_MAX_SLACK_SEC):
+                continue
+            if (line not in best or inst["dep"] < best[line]["dep"]) and same_way(main, inst):
+                best[line] = inst
+        taken.update(best)
+        return list(best.values())
+
     by_last = {}
     for inst in insts:
         if inst["n"] >= 2 and not inst["just_left"]:
-            by_last.setdefault(inst["rides"][-1], []).append(inst)
+            by_last.setdefault(conns[inst["rides"][-1][0]][4], []).append(inst)
+    starts = {move["first"]["sig"][0] for move in shown}
     for move in shown:
         main = move["first"]
-        move["branches"] = []
+        move["branches"] = other_lines(main, {line_of(main)})
         move["safe_alt"] = False
         if main["n"] < 2:
             continue
-        taken_boards = set(ctx["spine_boards"]) | {board for board, _ in main["sig"]}
+        latest = max(i["dep"] for i in [main, *move["branches"]])
         limit = move["cost"] + ctx["reasonable_sec"]
-        pool = [i for i in by_last.get(main["rides"][-1], ())
+        pool = [i for i in by_last.get(conns[main["rides"][-1][0]][4], ())
                 if i["arr"] <= main["arr"] and cost(i, gain) <= limit
                 and _last_slack(day, i) <= BRANCH_MAX_SLACK_SEC
                 and i["rides"][:-1] != main["rides"][:-1]
-                and origin_sec.get(day.conns[i["rides"][0][0]][2], 10 ** 6)
-                <= origin_sec.get(day.conns[main["rides"][0][0]][2], 0) + NEAR_EQUAL_SEC]
-        # Dojście z zapasem, którego schemat nie rysuje (nie daje nowego
-        # przystanku), nadal jest dokąd wrócić, gdy uciekło: nie wymusza
-        # szerszego szukania (heurystyka 4).
+                and lead_of(i) <= lead_of(main) + NEAR_EQUAL_SEC]
+        # Dojście z zapasem, którego schemat nie rysuje, nadal jest dokąd
+        # wrócić, gdy uciekło: nie wymusza szerszego szukania (heurystyka 4).
         move["safe_alt"] = any(is_safe(day, i) for i in pool)
-        pool = [i for i in pool if i["n"] <= main["n"]]
-        while len(move["branches"]) < BRANCH_MAX:
-            fresh = [i for i in pool if i["sig"][0][0] not in taken_boards]
-            if not fresh:
-                break
-            inst = min(fresh, key=lambda i: (i["n"], cost(i, gain), not is_safe(day, i), -i["dep"]))
+        pool = [i for i in pool if i["n"] <= main["n"] and i["sig"] != main["sig"]
+                and i["dep"] >= latest - EPSILON_SEC]
+        if any(not place_walks(i) for i in [main, *pool]):
+            pool = [i for i in pool if not place_walks(i)]
+        # Te same pojazdy łapane gdzie indziej to to samo dojście: zostaje
+        # złapanie z najbliższego przystanku, a z równych - tańsze.
+        seen = {trips_of(main)} | {trips_of(i) for i in move["branches"]}
+        feeders = {}
+        for inst in sorted(pool, key=lambda i: (lead_of(i), cost(i, gain), -i["dep"])):
+            trips = trips_of(inst)
+            if trips in seen:
+                continue
+            seen.add(trips)
+            old = feeders.get(inst["sig"])
+            if old is None or (cost(inst, gain), not is_safe(day, inst), -inst["dep"]) < \
+                    (cost(old, gain), not is_safe(day, old), -old["dep"]):
+                feeders[inst["sig"]] = inst
+        # Dojście, które pierwszym pojazdem jedzie tak samo jak coś już
+        # pokazanego (to samo wsiadanie i wysiadanie), a różni się dopiero
+        # dalej, nie zaczyna się inaczej - to nie nowe dojście.
+        for inst in sorted(feeders.values(), key=lambda i: (cost(i, gain), -i["dep"])):
+            if inst["sig"][0] in starts:
+                continue
+            starts.add(inst["sig"][0])
             move["branches"].append(inst)
-            taken_boards.update(board for board, _ in inst["sig"])
-            pool.remove(inst)
+            move["branches"] += other_lines(inst, {line_of(inst)})
+    for move in shown:
+        move["branches"] += [other for inst in [move["first"], *move["branches"]]
+                             for other in near_boardings(day, inst, origin_sec,
+                                                         ctx["query_sec"])]
+
+
+def near_boardings(day, inst, origin_sec, query_sec):
+    """Ten sam egzemplarz łapany na DALSZYCH przystankach pierwszego pojazdu,
+    do których ze startu jest równie blisko (Most Grunwaldzki za Pl.
+    Grunwaldzkim, 230 m od siebie) i na których jeszcze się zdąży: oba
+    przystanki są na mapie i w schemacie miejscem wsiadania. Wstecz po kursie
+    się nie szuka - iść dalej po pojazd, który i tak zaraz stanie bliżej, nic
+    nie daje."""
+    conns = day.conns
+    board, alight = inst["rides"][0]
+    idxs = gtfs.trip_conns(day, conns[board][4])
+    lead0 = origin_sec.get(conns[board][2], 0)
+    here = place(day, conns[board][2])
+    out = []
+    for i in idxs[idxs.index(board) + 1:idxs.index(alight) + 1]:
+        stop = conns[i][2]
+        lead = origin_sec.get(stop)
+        if (lead is None or lead > lead0 + NEAR_EQUAL_SEC
+                or conns[i][0] - lead < query_sec or place(day, stop) == here):
+            continue
+        other = dict(inst, rides=((i, alight),) + inst["rides"][1:],
+                     lead=lead, dep=conns[i][0] - lead)
+        other.pop("slack", None)
+        other.pop("walked", None)
+        out.append(other)
+    return out
 
 
 def _last_slack(day, inst):
@@ -517,35 +614,6 @@ def clashes(one, other):
     jest kręgosłupem w dokładnie swojej postaci i inne ruchy nie mogą jej
     z niej wypchnąć."""
     return len(one[1] & other[1])
-
-
-def extend_start(day, inst, origin_sec, query_sec):
-    """Przystanki równie bliskie startu (Most Grunwaldzki obok Pl. Grunwaldzkiego,
-    230 m od siebie) są oba na mapie: pierwszy przejazd cofa się po swoim kursie
-    do najwcześniejszego przystanku, do którego dojście jest nie dłuższe niż o
-    NEAR_EQUAL_SEC i na który jeszcze się zdąży. Ten sam kurs łapie się tam
-    wcześniej, więc to inny MOMENT złapania tych samych linii."""
-    conns = day.conns
-    board, alight = inst["rides"][0]
-    idxs = gtfs.trip_conns(day, conns[board][4])
-    pos = idxs.index(board)
-    lead0 = origin_sec.get(conns[board][2], 0)
-    chosen = None
-    for k in range(pos - 1, max(-1, pos - 1 - EXTEND_STOPS_BACK), -1):
-        stop = conns[idxs[k]][2]
-        lead = origin_sec.get(stop)
-        if lead is None or lead > lead0 + NEAR_EQUAL_SEC:
-            continue
-        if conns[idxs[k]][0] - lead < query_sec - JUST_LEFT_SEC:
-            continue
-        if place(day, stop) != place(day, conns[board][2]):
-            chosen = idxs[k]
-    if chosen is None:
-        return inst
-    extended = dict(inst, rides=((chosen, alight),) + inst["rides"][1:])
-    extended.pop("slack", None)
-    extended.pop("walked", None)
-    return extended
 
 
 def variants_of(day, inst):

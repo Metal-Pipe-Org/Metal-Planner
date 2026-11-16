@@ -1372,13 +1372,20 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
         if spread is None:
             spread_at[stop] = [dep, dep]
         else:
+            # Te same warunki co `beats`, rozpisane w miejscu i od najtańszego:
+            # ta pętla to większość czasu wyszukiwania przy długim czekaniu.
+            ready, arr, rides = label.ready, label.arr, label.rides
             if spread[0] - dep > limit:
                 for other in bag:
-                    if other.rides and beats(other, label):
+                    if (other.dep is not None and other.dep - dep > limit
+                            and other.rides and other.ready <= ready and other.arr <= arr
+                            and not (rides_matter and other.rides > rides)):
                         return
             if dep - spread[1] > limit:
                 beaten = [other for other in bag
-                          if other.rides and beats(label, other)]
+                          if other.dep is not None and dep - other.dep > limit
+                          and other.rides and ready <= other.ready and arr <= other.arr
+                          and not (rides_matter and rides > other.rides)]
                 if beaten:
                     gone = set(map(id, beaten))
                     bag[:] = [other for other in bag if id(other) not in gone]
@@ -1583,10 +1590,25 @@ def _label_variants(day, label, memo, ride_metres, pick, precise=False):
         # przegra w celu (_same_numbers_best) i tak. Odcięty tu nie mnoży się
         # przez kolejne przesiadki: bez tego przy samych minutach wieczorny
         # Rynek liczył się minutami.
-        memo[key] = {nums: value for nums, value in out.items()
-                     if not any(other < nums for other in out)}
-        memo["cut", key] = [(nums, value[1], next(other for other in memo[key]
-                                                  if other < nums))
+        # Podzbiorów szuka się przez jeden wspólny numer (każdy niepusty
+        # podzbiór ma swój pierwszy numer w nadzbiorze), nie przez porównanie
+        # każdego z każdym - to porównanie było większością czasu wyszukiwania.
+        position = {nums: k for k, nums in enumerate(out)}
+        by_mark = {}
+        for nums in out:
+            if nums:
+                by_mark.setdefault(next(iter(nums)), []).append(nums)
+        smaller = {}
+        for nums in out:
+            found_in = [other for mark in nums for other in by_mark.get(mark, ())
+                        if other < nums]
+            if nums and frozenset() in out:
+                found_in.append(frozenset())
+            smaller[nums] = found_in
+        memo[key] = {nums: value for nums, value in out.items() if not smaller[nums]}
+        memo["cut", key] = [(nums, value[1], min((other for other in smaller[nums]
+                                                  if other in memo[key]),
+                                                 key=position.__getitem__))
                             for nums, value in out.items()
                             if nums not in memo[key]]
     return memo[key]
@@ -2654,7 +2676,9 @@ def plan_flow_stages(start_query, end_query, when=None,
             seg_list, nodes = _finalize_segments(
                 day, kept, ranges, geo_db, earliest, profile[2], deadline,
                 source_stops, why_of, late=(best_arr, late_arrival),
-                alights=_last_alights(day, chosen_map["chosen"]), target_stops=target_set)
+                alights=_last_alights(day, chosen_map["chosen"]), target_stops=target_set,
+                boards={day.conns[inst["rides"][0][0]][2]
+                        for inst in _drawn(chosen_map.get("moves", ()))})
             map_journeys = []
             if with_journeys or new_map:
                 graph = _extract_transfer_graph(day, kept, ranges, anchor_stops,
@@ -2666,9 +2690,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             if new_map and "moves" in chosen_map:
                 # Schemat z DOKŁADNIE tych ruchów, które rysuje mapa, bez
                 # dodatków (scheme_extra tu niczego nie dokłada).
-                drawn_insts = _extend_boardings(
-                    day, _drawn(chosen_map["moves"]), source_stops,
-                    _origin_walk(day, source_stops), query_sec)
+                drawn_insts = _drawn(chosen_map["moves"])
                 scheme_journeys = _move_journeys(day, drawn_insts, source_stops,
                                                  target_set, query_sec, geo_db)
                 fastest_move = min(range(len(scheme_journeys)),
@@ -3504,7 +3526,8 @@ def _drawn_onward(day, runs, target_set):
 
 def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
                        board_value=None, deadline=None, source_stops=None,
-                       why_of=None, late=None, alights=None, target_stops=None):
+                       why_of=None, late=None, alights=None, target_stops=None,
+                       boards=None):
     """Tnie każdy narysowany kurs na kawałki tam, gdzie zmienia się zestaw
     linii dzielących ten sam odcinek ulicy/torów (patrz
     _membership_boundaries) - kawałek niesie jeden skład korytarza na całej
@@ -3626,7 +3649,7 @@ def _finalize_segments(day, kept, ranges, geo_db, earliest=None,
         seg_list.append(item)
     return seg_list, _transfer_nodes(day, pieces, earliest, board_value, deadline,
                                     source_stops, late=late, alights=alights,
-                                    target_stops=target_stops)
+                                    target_stops=target_stops, boards=boards)
 
 
 def _rides_back(earliest, board, alight):
@@ -3712,7 +3735,8 @@ def _place_center(day, place_key, fallback_stop):
 
 
 def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
-                    source_stops=None, late=None, alights=None, target_stops=None):
+                    source_stops=None, late=None, alights=None, target_stops=None,
+                    boards=None):
     """Węzły przesiadkowe mapy - to, na czym front stawia kropki z tablicą
     odjazdów.
 
@@ -3738,7 +3762,9 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     Przystanek, przez który wszystko tylko przejeżdża, kropki nie dostaje,
     choćby leżał na styku dwóch narysowanych kawałków. Kropkę ma też każde
     miejsce z `alights` - tam podróż z mapy kończy ostatni przejazd, choćby
-    nie dało się tam już w nic wsiąść (zgłoszenie #266). Miejsce celu
+    nie dało się tam już w nic wsiąść (zgłoszenie #266) - i z `boards`: tam
+    podróż z mapy wsiada po dojściu ze startu, choćby linia jechała już
+    wcześniej (drugi, równie bliski przystanek). Miejsce celu
     (`target_stops`) dostaje `end`, jak start `start`.
 
     Czytane z KAŻDEGO przystanku kawałka, nie tylko z jego końców. Kawałek
@@ -3784,6 +3810,7 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
     start_places = {day.place_of.get(s, s) for s in (source_stops or ())}
     end_places = {day.place_of.get(s, s) for s in (target_stops or ())}
     alight_places = {day.place_of.get(s, s) for s in (alights or ())}
+    alight_places |= {day.place_of.get(s, s) for s in (boards or ())}
 
     # Każde dotknięcie przystanku przez narysowany kawałek: (miejsce, linia,
     # słupek, godzina, czy wiezie DALEJ, czy dowozi TU, czy to koniec kawałka).
@@ -4538,38 +4565,6 @@ def _journey_pieces(day, journeys):
             pieces.append({"kind": leg["mode"], "num": leg["num"], "stops_n": places})
             anchors.update((places[0], places[-1]))
     return pieces, anchors
-
-
-def _extend_boardings(day, insts, source_stops, origin_walk, query_sec):
-    """Linia zaczyna się na najwcześniejszym przystanku swojego kursu, na
-    którym da się do niej wsiąść spośród pokazanych: przystanku, z którego
-    pieszo ze startu zaczyna się któryś z pokazanych ruchów i na który jeszcze
-    się zdąży (145 jedzie przez Pl. Grunwaldzki, więc zaczyna się tam, a nie
-    dopiero na Moście Grunwaldzkim)."""
-    conns = day.conns
-    boards = {gtfs.place_name(day, conns[inst["rides"][0][0]][2]) for inst in insts}
-    out = []
-    for inst in insts:
-        board, alight = inst["rides"][0]
-        idxs = gtfs.trip_conns(day, conns[board][4])
-        chosen = None
-        for k in range(idxs.index(board)):
-            stop = conns[idxs[k]][2]
-            if gtfs.place_name(day, stop) not in boards:
-                continue
-            lead = 0 if stop in source_stops else origin_walk.get(stop, (None, None))[1]
-            if lead is not None and conns[idxs[k]][0] - lead >= query_sec:
-                chosen = idxs[k]
-                break
-        if chosen is None or (gtfs.place_name(day, conns[chosen][2])
-                              == gtfs.place_name(day, conns[board][2])):
-            out.append(inst)
-            continue
-        extended = dict(inst, rides=((chosen, alight),) + inst["rides"][1:])
-        extended.pop("slack", None)
-        extended.pop("walked", None)
-        out.append(extended)
-    return out
 
 
 def _scheme_prune(scheme):

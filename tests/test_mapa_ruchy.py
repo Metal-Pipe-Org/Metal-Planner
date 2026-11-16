@@ -47,15 +47,16 @@ def _trips(label, rows, prefix, via=None):
 
 
 def test_zbitka_linii_jednego_ruchu_to_jedna_nitka(install_day):
-    """Trzy linie z S do E jadą tym samym ruchem - na mapie jest jedna z nich,
-    nie trzy nitki ułożone na sobie."""
+    """Trzy linie z S do E jadą tym samym ruchem i tą samą drogą - to jeden
+    ruch, a kreska niesie wszystkie trzy numery."""
     install_day(make_day(
         _trips("Autobus 1", [(2, 20)], "a") + _trips("Autobus 2", [(3, 20)], "b")
         + _trips("Autobus 3", [(4, 20)], "c")))
 
     result = _flow("S", "E")
 
-    assert len(_nums(result)) == 1
+    assert _nums(result) == ["1", "2", "3"]
+    assert len(result["scheme"]["edges"]) == 1
 
 
 def test_stara_mapa_rysuje_wszystkie_bliznicze_linie(install_day):
@@ -195,7 +196,8 @@ def test_rowery_i_traficar_z_probki_w_nowej_mapie_nie_przybywa(monkeypatch):
 
 def test_ten_sam_ostatni_pojazd_to_jedna_podroz(install_day):
     """Dwie drogi kończą się tym samym kursem autobusu, tylko wsiadanym w innym
-    miejscu: na mapie leżałyby jedna na drugiej, więc jest jedna."""
+    miejscu: autobus jest na mapie raz, a oba dojścia do niego zaczynają się
+    inaczej, więc są oba."""
     install_day(make_day([
         {"trip_id": "t1", "label": "Tramwaj 5", "stops": [("S", 600, 600), ("B", 900, 900)]},
         {"trip_id": "t2", "label": "Tramwaj 6", "stops": [("S", 610, 610), ("C", 1000, 1000)]},
@@ -206,7 +208,7 @@ def test_ten_sam_ostatni_pojazd_to_jedna_podroz(install_day):
     result = _flow("S", "E")
 
     assert len([s for s in result["segments"] if s["num"] == "125"]) == 1
-    assert len({s["num"] for s in result["segments"]} & {"5", "6"}) == 1
+    assert {s["num"] for s in result["segments"]} & {"5", "6"} == {"5", "6"}
 
 
 def test_najszybsza_trasa_z_paska_jest_na_mapie_i_w_schemacie():
@@ -296,18 +298,20 @@ def test_rower_i_traficar_z_probki_sa_odcinkami_ruchu(monkeypatch):
     assert _scheme_nums(result) - VEHICLE_LABELS == set(_nums(result))
 
 
-def test_start_cofa_sie_do_rownie_bliskiego_przystanku_tego_samego_kursu():
-    """Most Grunwaldzki obok Pl. Grunwaldzkiego: kurs, który mija bliższy start
-    wcześniej, rysuje się od niego (inny moment złapania tych samych linii)."""
+def test_rownie_bliski_dalszy_przystanek_tego_samego_kursu_tez_jest_wsiadaniem():
+    """Most Grunwaldzki za Pl. Grunwaldzkim: kurs, który po bliższym przystanku
+    staje na równie bliskim, da się złapać na obu. Wstecz po kursie się nie
+    szuka."""
     day = make_day([
         {"trip_id": "t1", "label": "Tramwaj 4",
-         "stops": [("M", 1000, 1000), ("P", 1060, 1060), ("B", 1500, 1500)]},
-    ], names={"M": "Most", "P": "Plac", "B": "Dalej"})
+         "stops": [("W", 940, 940), ("P", 1000, 1000), ("M", 1060, 1060), ("B", 1500, 1500)]},
+    ], names={"W": "Wcześniej", "P": "Plac", "M": "Most", "B": "Dalej"})
     conns = day.conns
-    plac_to_b = next(i for i, c in enumerate(conns) if c[2] == "P")
-    inst = {"rides": ((plac_to_b, plac_to_b),)}
+    plac = next(i for i, c in enumerate(conns) if c[2] == "P")
+    last = next(i for i, c in enumerate(conns) if c[3] == "B")
+    inst = {"rides": ((plac, last),)}
 
-    extended = moves.extend_start(day, inst, {"M": 180, "P": 180}, 0)
+    near = moves.near_boardings(day, inst, {"W": 180, "P": 180, "M": 240}, 0)
 
-    assert conns[extended["rides"][0][0]][2] == "M"
-    assert moves.extend_start(day, inst, {"M": 900, "P": 180}, 0)["rides"] == inst["rides"]
+    assert [conns[i["rides"][0][0]][2] for i in near] == ["M"]
+    assert moves.near_boardings(day, inst, {"W": 180, "P": 180, "M": 900}, 0) == []
