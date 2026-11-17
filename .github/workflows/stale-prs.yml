@@ -8,16 +8,22 @@ name: "PR-y: przypomnienie i zamykanie po ciszy"
 #    PR jest nadal potrzebny, etykieta "stale" i ping na Discordzie; kolejne
 #    7 dni ciszy → zamykamy PR (bez merge'a, gałąź zostaje), "stale" zostaje.
 #    Woła autora i przypisanych.
-#  • "waiting for human review" — tylko przypomnienie na Discordzie dla
-#    poproszonych o recenzję: po 14 dniach ciszy i potem co 7 dni, dopóki
-#    ktoś się nie ruszy. Bez komentarza, bez etykiety i bez zamykania: PR
-#    stoi na recenzencie, więc autor nie powinien tracić PR-a przez cudzą
-#    zwłokę. Podsumowanie dnia i tak pinguje recenzentów codziennie; to
-#    przypomnienie mówi dodatkowo, że czekanie się przeciągnęło.
+#  • "waiting for human review" (#427) — po DAYS_REVIEW (3) dniach ciszy PR
+#    dostaje "stale", a poproszeni o recenzję jeden komentarz z @-oznaczeniem
+#    (w chwili nadania etykiety, czyli raz na epizod spóźnienia). Potem przy
+#    każdym biegu dziennym, dopóki cisza trwa, ping recenzentów na Discordzie.
+#    Nigdy nie zamykamy: PR stoi na recenzencie, więc autor nie powinien
+#    tracić PR-a przez cudzą zwłokę. "stale" znika, gdy cisza spadnie poniżej
+#    progu (recenzja, komentarz człowieka) albo PR przestanie czekać na
+#    recenzję. Bez poproszonych recenzentów nie ma komentarza ani pingu, bo
+#    nie ma kogo wołać. Komentarz ma własny znacznik (MARKER_REVIEW), żeby
+#    logika autora (zamykanie po MARKER) nie wzięła go za swoje przypomnienie.
 #  • każdy inny stan ("waiting for claude review", "waiting for other PR",
 #    brak etykiety) i "external blocked" — nic; ruch ma ktoś inny albo PR
 #    czeka na coś poza sobą. Zostawioną tam "stale" zdejmujemy: ma sens tylko
-#    tam, gdzie zamknięcie grozi autorowi.
+#    tam, gdzie ruch należy do autora albo do recenzenta, który zwleka.
+#  • PR z otwartym kamieniem milowym (sprintem) — jak "external blocked": nic,
+#    "stale" zdejmujemy. Sprint znaczy, że praca jest zaplanowana.
 #
 # Aktywność w PR-ze to wszystko, co liczy się w zgłoszeniu, plus recenzja
 # i komentarz w kodzie człowieka, commit, force push, „Ready for review”
@@ -30,10 +36,9 @@ name: "PR-y: przypomnienie i zamykanie po ciszy"
 # i ktoś po nim się ruszył albo PR przestał czekać na autora. Zwykle robi to
 # od razu stale-unlabel.yml; bieg dzienny łapie to, co tamten przegapił.
 #
-# Bieg raz dziennie, w UTC, kilka minut po biegu zgłoszeń. Rytm „co 7 dni”
-# liczymy z dni ciszy, więc bieg, którego GitHub nie odpali, przesuwa
-# przypomnienie o tydzień — przy codziennym pingu w podsumowaniu dnia to
-# nic nie psuje. Działa z `main`.
+# Bieg raz dziennie, w UTC, kilka minut po biegu zgłoszeń. Ping recenzentów
+# idzie przy każdym biegu, więc bieg, którego GitHub nie odpali, gubi tylko
+# jedno przypomnienie. Działa z `main`.
 on:
   schedule:
     - cron: "47 6 * * *"
@@ -79,11 +84,12 @@ jobs:
           gh label create "$LABEL_STALE" --repo "$REPO" --color EDEDED \
             --description "Cisza w zgłoszeniu — przypomnienie wysłane albo zamknięte po ciszy" || true
 
-          # Stan z etykiety: author / human / skip.
+          # Stan z etykiety: author / human / skip. Otwarty sprint chroni jak
+          # "external blocked".
           gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '.[]' \
             | jq -r --arg author "$LABEL_PR_AUTHOR" --arg human "$LABEL_PR_HUMAN" '
                 [.labels[].name] as $l
-                | (if $l | index("external blocked") then "skip"
+                | (if ($l | index("external blocked")) or .milestone.state == "open" then "skip"
                    elif $l | index($author) then "author"
                    elif $l | index($human) then "human"
                    else "skip" end) as $state
@@ -92,9 +98,11 @@ jobs:
 
           # Pętla czyta z fd 3, żeby żadne `gh` w środku nie zjadło jej wejścia.
           while read -r n state labeled <&3; do
-            if [ "$state" != author ] && [ "$labeled" = true ]; then
+            # Etykieta przy "human" należy się przy trwającym spóźnieniu, więc
+            # o niej decyduje niżej cisza, nie sam stan.
+            if [ "$state" != author ] && [ "$state" != human ] && [ "$labeled" = true ]; then
               remove_stale "$n"
-              echo "#$n: nie czeka na autora — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "#$n: nie czeka na autora ani na recenzję — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
             fi
             [ "$state" = skip ] && continue
 
@@ -106,13 +114,29 @@ jobs:
 
             if [ "$state" = human ]; then
               days=$(quiet_days "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/timeline.json")
-              if [ "$days" -lt "$DAYS_QUIET" ] || [ $(( (days - DAYS_QUIET) % DAYS_GRACE )) -ne 0 ]; then
+              if [ "$days" -lt "$DAYS_REVIEW" ]; then
+                if [ "$labeled" = true ]; then
+                  remove_stale "$n"
+                  echo "#$n: recenzja nie jest już spóźniona — zdjęto \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+                fi
                 continue
               fi
               # Sami poproszeni o recenzję — to na nich czeka PR. Zespołów
               # nie wołamy: na Discordzie ping zespołu nie ma adresata.
               reviewers=$(jq -r '[.requested_reviewers[] | select(.type != "Bot") | .login] | join(" ")' \
                 "$RUNNER_TEMP/pr.json")
+              # Komentarz tylko w chwili nadania etykiety, czyli raz na epizod
+              # spóźnienia; kolejne dni to już same pingi na Discordzie.
+              if [ "$labeled" != true ]; then
+                gh pr edit "$n" --repo "$REPO" --add-label "$LABEL_STALE"
+                if [ -n "$reviewers" ]; then
+                  mentions=$(jq -r '[.requested_reviewers[] | select(.type != "Bot") | "@" + .login] | join(" ")' \
+                    "$RUNNER_TEMP/pr.json")
+                  gh pr comment "$n" --repo "$REPO" --body "$(printf '%s\n%s recenzja czeka od %s dni. PR nie zostanie zamknięty, a etykieta "%s" zniknie po recenzji.' \
+                    "$MARKER_REVIEW" "$mentions" "$days" "$LABEL_STALE")"
+                fi
+                echo "#$n: recenzja czeka od $days dni — nadano \"$LABEL_STALE\"" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
               [ -z "$reviewers" ] && continue
               author=$(jq -r .user.login "$RUNNER_TEMP/pr.json")
               echo "#$n: przypomnienie o recenzji do $reviewers ($days dni)" | tee -a "$GITHUB_STEP_SUMMARY"

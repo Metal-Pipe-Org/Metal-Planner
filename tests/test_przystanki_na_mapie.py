@@ -12,6 +12,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import settings_registry
 from flask import Flask, render_template
 
 import gtfs
@@ -128,7 +129,7 @@ def test_prog_nazw_jest_suwakiem_dev_z_sensowna_domyslna():
     with app.test_request_context("/"):
         html = render_template("index.html", stops=[], abbreviations={},
                                lines=[], data_error=None, form_time="12:00",
-                               form_date="2026-10-01", dev_mode=True)
+                               form_date="2026-10-01", settings=settings_registry.view(), dev_mode=True)
     wiersz = re.search(r'<div[^>]*data-setting="names-zoom"[^>]*>', html).group(0)
     assert "dev-only" in wiersz
     suwak = re.search(r'<input[^>]*id="names-zoom"[^>]*>', html).group(0)
