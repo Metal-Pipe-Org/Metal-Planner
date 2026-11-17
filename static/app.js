@@ -495,17 +495,18 @@ let vehiclesTimer = null;
 const VEHICLES_REFRESH_MS = 15000;
 
 function vehicleIcon(v) {
+    const arrow = v.heading == null ? '' :
+        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
-        className: `vehicle-marker ${esc(v.kind)}`,
-        html: esc(v.line),
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
+        className: 'vehicle-box',
+        html: `<div class="vehicle-marker ${escAttr(v.kind)}">${esc(v.line)}</div>${arrow}`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
     });
 }
 
 function vehicleTooltipHtml(v) {
-    const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
-    return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
+    return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
 }
 
 const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();
@@ -525,17 +526,74 @@ function vehiclesFilter() {
     return lines;
 }
 
+/** Przystanki, które mapa rysuje każdej linii (klucz linii -> zbiór "lat,lon").
+    Linia bez przystanków w odpowiedzi nie trafia do mapy: nie ma jak sprawdzić
+    jej kierunku. W rozkładach nie ma podróży, więc nie ma i kierunku. */
+function vehicleDrawnStops() {
+    const drawn = new Map();
+    if (window.timetableMode && window.timetableMode.vehicleLines()) return drawn;
+    for (const hit of flowHits) {
+        if (!hit.seg.num || !hit.seg.stops_t) continue;
+        const key = vehicleKey(hit.seg.kind, hit.seg.num);
+        if (!drawn.has(key)) drawn.set(key, new Set());
+        for (const [lat, lon] of hit.seg.stops_t) drawn.get(key).add(lat + ',' + lon);
+    }
+    return drawn;
+}
+
+/** Jedzie w naszą stronę, gdy jego dalsza trasa (v.rest) mija przystanek
+    narysowany na mapie tej linii. Bez rozpoznanego kursu - nie wiemy, więc
+    zostaje. */
+function vehicleGoesOurWay(v, drawn) {
+    const stops = drawn.get(vehicleKey(v.kind, v.line));
+    if (!stops || !v.rest) return true;
+    return v.rest.some(([lat, lon]) => stops.has(lat + ',' + lon));
+}
+
+let vehicleStatsBox = null;
+
+/** Statystyki warstwy pojazdów (ustawienie developerskie "vehicles-stats"):
+    tylko to, co front już wie z odpowiedzi serwera. */
+function showVehicleStats(shown, hiddenByDirection) {
+    if (!vehiclesOn || !setting('vehicles-stats')) {
+        if (vehicleStatsBox) vehicleStatsBox.hidden = true;
+        return;
+    }
+    if (!vehicleStatsBox) {
+        vehicleStatsBox = document.createElement('div');
+        vehicleStatsBox.className = 'vehicle-stats';
+        map.getContainer().appendChild(vehicleStatsBox);
+    }
+    const count = pick => lastVehicles.filter(pick).length;
+    const withArrow = count(v => v.heading != null);
+    const lines = [
+        `Z kanału: ${lastVehicles.length}`,
+        `ze strzałką: ${withArrow} (z kursu ${count(v => v.source === 'trip')}, z ruchu ${count(v => v.source === 'route')})`,
+        `bez kierunku: ${lastVehicles.length - withArrow}`,
+        `Pokazane: ${shown.length}, w tym ze strzałką ${shown.filter(v => v.heading != null).length}`,
+    ];
+    if (setting('vehicles-direction')) lines.push(`ukryte filtrem kierunku: ${hiddenByDirection}`);
+    vehicleStatsBox.innerHTML = lines.map(esc).join('<br>');
+    vehicleStatsBox.hidden = false;
+}
+
 function renderVehicles() {
     vehiclesLayer.clearLayers();
-    if (!vehiclesOn) return;
+    if (!vehiclesOn) { showVehicleStats([], 0); return; }
     const only = vehiclesFilter();
+    const byDirection = setting('vehicles-direction');
+    const drawn = byDirection ? vehicleDrawnStops() : new Map();
+    const shown = [];
+    let hiddenByDirection = 0;
     for (const v of lastVehicles) {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
-        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
-            .bindTooltip(vehicleTooltipHtml(v))
-            .addTo(vehiclesLayer);
+        if (!vehicleGoesOurWay(v, drawn)) { hiddenByDirection++; continue; }
+        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)}).addTo(vehiclesLayer);
+        if (v.to) marker.bindTooltip(vehicleTooltipHtml(v));
         marker.tapRank = TAP_RANK.vehicle;
+        shown.push(v);
     }
+    showVehicleStats(shown, hiddenByDirection);
 }
 
 function loadVehicles() {
@@ -7562,6 +7620,9 @@ const SETTING_EFFECTS = {
 // Przełączniki, które tylko przemalowują z lastFlow, bez zapytania do serwera.
 for (const id of ['time-hover', 'time-ends', 'time-chips', 'time-show-headline', 'time-ride']) {
     SETTING_EFFECTS[id] = {react: () => applyTimeOpts()};
+}
+for (const id of ['vehicles-direction', 'vehicles-stats']) {
+    SETTING_EFFECTS[id] = {react: () => renderVehicles()};
 }
 for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-rides',
                   'car-times', 'debug-why', 'debug-why-seg']) {
