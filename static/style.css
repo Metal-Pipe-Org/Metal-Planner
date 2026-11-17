@@ -1581,6 +1581,40 @@ body.routes-off #results .notice.loading { display: none; }
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
    linii, nie pigułka jak .line-badge: użytkownik prosił wprost o kropki. */
+.vehicle-box {
+    position: absolute;
+}
+
+.vehicle-box .vehicle-marker {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    width: 26px;
+    height: 26px;
+    box-sizing: border-box;
+}
+
+/* Klin na obwodzie kółka, w kolorze kółka; biała poświata czyni go czytelnym
+   na jasnej i ciemnej mapie. */
+.vehicle-arrow {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    margin: -4.5px 0 0 -5px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 9px solid;
+    filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+}
+
+.vehicle-arrow.tram { color: var(--tram); }
+.vehicle-arrow.bus { color: var(--bus); }
+.vehicle-arrow.train { color: var(--train); }
+.vehicle-arrow.cable { color: var(--cable); }
+.vehicle-arrow.other { color: var(--other); }
+
 .vehicle-marker {
     display: flex;
     align-items: center;
@@ -2509,6 +2543,18 @@ body:not(.dev-mode) .dev-only { display: none; }
     letter-spacing: 0.06em;
 }
 
+/* Znaczek obsolete jest odnośnikiem do zgłoszenia: żółty z ciemnym tekstem,
+   czytelny na jasnym i na ciemnym tle panelu. */
+.obsolete-badge {
+    background: #ffd54f;
+    color: #3d2e00;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+.obsolete-badge:hover,
+.obsolete-badge:focus-visible { background: #ffca28; outline: 2px solid #3d2e00; outline-offset: 1px; }
+
 #dev-panel .dev-check {
     display: flex;
     align-items: center;
@@ -2567,6 +2613,7 @@ body:not(.dev-mode) .dev-only { display: none; }
 }
 .info:hover,
 .info:focus-visible { color: var(--ink); outline: none; }
+.set-row[data-expired] { display: none !important; }
 
 .info-tip {
     position: fixed;
@@ -3533,4 +3580,19 @@ ul.tt-legend {
 .leaflet-tooltip-left::before,
 .leaflet-tooltip-right::before {
     margin-top: calc(-6px - var(--tip-shift, 0px));
+}
+
+.vehicle-stats {
+    position: absolute;
+    right: 56px;
+    bottom: 28px;
+    z-index: 800;
+    padding: 4px 7px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #333;
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 6px;
+    pointer-events: none;
+    white-space: nowrap;
 }
