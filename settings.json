@@ -272,6 +272,12 @@
       "dev": true
     },
     {
+      "id": "server-logs",
+      "name": "Pobierz logi",
+      "tags": ["Logi"],
+      "dev": true
+    },
+    {
       "id": "pushward",
       "name": "Dynamic Island (PushWard)",
       "description": "Klik w godzinę odjazdu na tablicy przystanku wysyła odliczenie do Dynamic Island i na ekran blokady iPhone'a. Wymaga darmowej aplikacji PushWard na iPhonie (App Store). Klucz: w PushWard wejdź w Ustawienia → Integration Key. Darmowy limit to 250 aktualizacji miesięcznie, a jeden przejazd zużywa zwykle jedną. Godziny pochodzą z rozkładu, bez opóźnień na żywo. Klucz zostaje na tym urządzeniu, w tej przeglądarce. Usunięcie klucza wyłącza funkcję.",
