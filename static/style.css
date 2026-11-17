@@ -2373,10 +2373,19 @@ body.dev-open .scheme-panel { right: 322px; }
     font: 600 13px system-ui, sans-serif; paint-order: stroke; stroke-linejoin: round;
     fill: #1c3550; stroke: #d6eaf8; stroke-width: 4px; }
 /* Plakietka z numerami jak grupka numerów na mapie (.line-cluster). */
-.scheme-badge { pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
-.scheme-badge rect { fill: #fff; stroke: rgba(0, 0, 0, 0.25); stroke-width: 1; }
-.scheme-num { text-anchor: middle; dominant-baseline: central; font: 700 11px system-ui, sans-serif; }
-.scheme-badge rect.scheme-num-hit { fill: transparent; stroke: none; pointer-events: all; cursor: pointer; }
+/* Plakietka to ta sama grupka numerów co na mapie (clusterHtml), wyśrodkowana
+   na kresce; ramka wokół niej nie łapie kursora, numery tak. */
+.scheme-badge, .scheme-hop-badge { pointer-events: none; overflow: visible; }
+.scheme-cluster-anchor { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.scheme-cluster-anchor .line-cluster { position: static; transform: none; }
+.scheme-hop-badge .line-cluster { pointer-events: none; }
+/* Kropka auta na krótkiej odnodze - odnoga jak dojście do auta na mapie. */
+.scheme-car-stub { fill: none; stroke: #455a64; stroke-width: 2.5; stroke-dasharray: 1 6; stroke-linecap: round; }
+.scheme-car-hit { fill: transparent; pointer-events: all; cursor: pointer; }
+/* Rower jak przejście pieszo, tylko z ikoną roweru; da się na niego najechać. */
+.scheme-walk.scheme-walk-bike { pointer-events: all; cursor: pointer; }
+.scheme-walk-brace path.scheme-hit { stroke: transparent; stroke-width: 14; stroke-dasharray: none; }
+#scheme-tip.leaflet-tooltip { position: fixed; z-index: 1100; pointer-events: none; }
 
 #scheme-canvas svg {
     display: block;

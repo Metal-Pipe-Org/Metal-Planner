@@ -704,7 +704,7 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup(flowBikeMarkers(
             lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
-        if (bikeRidesAlways()) showAllBikeRides(lastFlow.bike_places);
+        if (setting('bike-rides')) showAllBikeRides(lastFlow.bike_places);
         return;
     }
     loadCityBikes();
@@ -856,10 +856,28 @@ function hideCarZone() {
 function carMarker(car, tooltipHtml) {
     const dot = L.circleMarker([car.lat, car.lon], carStyle(car))
         .bindTooltip(tooltipHtml, {direction: 'top', offset: [0, -4], opacity: 1})
-        .on('mouseover', () => { showCarZone(car); showCarRide(car); })
-        .on('mouseout', () => { hideCarZone(); hideCarRide(); });
+        .on('mouseover', () => showCarOnMap(car, true))
+        .on('mouseout', () => showCarOnMap(car, false));
     dot.tapRank = TAP_RANK.shared;
+    dot.car = car;
     return dot;
+}
+
+/** Auto wskazane na mapie: jego strefa i jazda do niego. */
+function showCarOnMap(car, on) {
+    if (on) { showCarZone(car); showCarRide(car); }
+    else { hideCarZone(); hideCarRide(); }
+}
+
+/** To samo z zewnątrz mapy (kropka auta na schemacie): do tego dymek kropki
+    auta na mapie. */
+function pointCar(car, on) {
+    showCarOnMap(car, on);
+    if (!flowCarLayer) return;
+    flowCarLayer.eachLayer(dot => {
+        if (dot.car !== car) return;
+        if (on) dot.openTooltip(); else dot.closeTooltip();
+    });
 }
 
 /** Auto o krótką jazdę od startu (pole `ride`, patrz planner._short_hops):
@@ -2329,14 +2347,17 @@ function chipTimesAt(at, roster) {
     });
 }
 
-function clusterMarker(at, roster, weight, times) {
+/** Grupka numerów - TA SAMA na mapie i na plakietkach schematu: ten sam
+    wygląd i to samo wskazywanie linii najechaniem na numer. */
+function clusterHtml(roster, times) {
     let index = 0;
     const rows = clusterRows(roster).map(row =>
         '<span class="line-cluster-row">' + row.map(l => {
             const sec = times ? times[index] : null;
             // Slot jest celem myszy (patrz bindCluster) - dzięki temu wskazanie
             // linii działa tak samo, gdy kursor stoi na czasie pod numerem.
-            const html = `<span class="line-chip-slot" data-i="${index++}">`
+            const html = `<span class="line-chip-slot" data-i="${index++}" `
+                + `data-num="${escAttr(l.num)}" data-kind="${escAttr(l.kind)}">`
                 + `<span class="line-chip ${esc(l.kind)}">${esc(l.num)}</span>`
                 + (times
                     ? `<span class="chip-time">${sec === null ? '' : esc(fmtClock(sec))}</span>`
@@ -2345,10 +2366,14 @@ function clusterMarker(at, roster, weight, times) {
             return html;
         }).join('') + '</span>',
     ).join('');
+    return `<span class="line-cluster">${rows}</span>`;
+}
+
+function clusterMarker(at, roster, weight, times) {
     const marker = L.marker(at, {
         icon: L.divIcon({
             className: 'line-cluster-anchor',
-            html: `<span class="line-cluster">${rows}</span>`,
+            html: clusterHtml(roster, times),
             iconSize: null,
         }),
         keyboard: false,
@@ -2618,23 +2643,33 @@ function hideTimeDot() {
     nie tylko ten pod kursorem. Najpierw ciemna otoczka pod spodem, potem
     linia w pełnym kryciu - warstwa idzie na wierzch całej mapy, więc wskazana
     linia wychodzi przed wszystkie inne, także jaśniejsze od siebie. */
+/** Styl podświetlonej linii - jeden dla mapy i schematu: ciemna otoczka
+    pod spodem, a na niej linia w pełnym kryciu, obie grubsze od zwykłej. */
+function lineHighlightStyles(kind, weight) {
+    return [
+        {color: '#111', opacity: 0.85, weight: weight + HALO_EXTRA_PX,
+         lineCap: 'round', lineJoin: 'round', interactive: false},
+        {color: LINE_COLORS[kind] || LINE_COLORS.other, opacity: 1,
+         weight: weight + HIGHLIGHT_EXTRA_PX, lineCap: 'round', lineJoin: 'round',
+         interactive: false},
+    ];
+}
+
 function showLineHighlight(num, kind) {
     const key = kind + ' ' + num;
     if (flowHighlightKey === key) return;      // ta sama linia - nie przerysowujemy
     hideLineHighlight();
+    // Wskazana linia jest wskazana wszędzie naraz: na mapie, na schemacie
+    // i w każdej grupce numerów (wypełniony numer).
+    flowHighlightKey = key;
+    markPickedChips(num, kind);
+    schemeLineHighlight(num, kind);
     const parts = flowHits.filter(h => h.seg.num === num && h.seg.kind === kind);
     if (!parts.length) return;
     const color = LINE_COLORS[kind] || LINE_COLORS.other;
-    const halos = parts.map(h => L.polyline(h.latlngs, {
-        color: '#111', opacity: 0.85, weight: h.weight + HALO_EXTRA_PX,
-        lineCap: 'round', lineJoin: 'round', interactive: false,
-    }));
-    const cores = parts.map(h => L.polyline(h.latlngs, {
-        color, opacity: 1, weight: h.weight + HIGHLIGHT_EXTRA_PX,
-        lineCap: 'round', lineJoin: 'round', interactive: false,
-    }));
+    const halos = parts.map(h => L.polyline(h.latlngs, lineHighlightStyles(kind, h.weight)[0]));
+    const cores = parts.map(h => L.polyline(h.latlngs, lineHighlightStyles(kind, h.weight)[1]));
     flowHighlight = L.layerGroup([...halos, ...cores]).addTo(map);
-    flowHighlightKey = key;
     // Przystanki tej linii - tylko dopóki jest wskazana (zgłoszenie #252).
     // Na wierzchu podświetlenia, bo ono przykryłoby je tak samo jak linię.
     flowLineStopLayer = L.layerGroup(lineStopsOf(parts.map(h => h.seg))
@@ -2643,10 +2678,26 @@ function showLineHighlight(num, kind) {
 }
 
 function hideLineHighlight() {
+    if (flowHighlightKey) {
+        markPickedChips(null);
+        schemeLineHighlight(null);
+    }
     if (flowHighlight) { map.removeLayer(flowHighlight); flowHighlight = null; }
     if (flowLineStopLayer) { map.removeLayer(flowLineStopLayer); flowLineStopLayer = null; }
     hoveredLineStop = null;
     flowHighlightKey = null;
+}
+
+function markPickedChips(num, kind) {
+    for (const chip of document.querySelectorAll('.line-chip-slot .line-chip.picked')) {
+        chip.classList.remove('picked');
+    }
+    if (num === null) return;
+    for (const slot of document.querySelectorAll('.line-chip-slot')) {
+        if (slot.dataset.num === num && slot.dataset.kind === kind) {
+            slot.querySelector('.line-chip').classList.add('picked');
+        }
+    }
 }
 
 function renderFlowPick() {
@@ -3859,9 +3910,6 @@ const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
 // Kreska przejazdu kropkowana tak samo, jak etap rowerowy wybranej trasy.
 const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
                          dashArray: '1, 6', interactive: false};
-// Nowa mapa: przejazd rowerem to opcja jak linia, więc widać go tak jak linię.
-const BIKE_MOVE_STYLE = {color: '#ef6c00', weight: 4, opacity: 0.9, lineCap: 'round',
-                         dashArray: '2, 8', interactive: false};
 
 /** Kropki rowerów w zasięgu mapy (patrz bikes.map_places).
 
@@ -3881,17 +3929,11 @@ function flowBikeMarkers(places, live) {
         dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
-            if (!bikeRidesAlways()) clearBikeRides();
+            if (!setting('bike-rides')) clearBikeRides();
             else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
         });
         return dot;
     });
-}
-
-/** Nowa mapa rysuje przejazdy rowerem na stałe: to jej opcje, tak samo jak
-    linie (patrz planner._bike_moves). */
-function bikeRidesAlways() {
-    return setting('bike-rides') || !!(lastFlow && lastFlow.scheme);
 }
 
 function bikeStyle(place, live) {
@@ -3978,7 +4020,7 @@ function bikeRideLayers(place, labels) {
     const layers = [];
     for (const ride of place.rides) {
         layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
-                               lastFlow && lastFlow.scheme ? BIKE_MOVE_STYLE : BIKE_RIDE_STYLE));
+                               BIKE_RIDE_STYLE));
         if (!labels) continue;
         const target = L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
             .bindTooltip(bikeRideTooltipHtml(ride),
@@ -5766,21 +5808,15 @@ function schemeBadges(boxes, strands, branches) {
             || fractions.map(rectAt).find(free) || rectAt(0.5);
         placed.push(spot);
         s.badge = spot;
-        let x = spot.x + PAD;
-        const texts = s.lines.map((line, i) => {
-            // Każdy numer osobno pod kursorem: najechanie na niego pokazuje
-            // tylko tę linię (patrz bindSchemeLines).
-            const t = `<text class="scheme-num" fill="${LINE_COLORS[line.kind] || LINE_COLORS.other}" `
-                + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`
-                + `<rect class="scheme-num-hit" data-num="${escAttr(line.num)}" data-kind="${escAttr(line.kind)}" `
-                + `x="${(x - GAP / 2).toFixed(1)}" y="${spot.y.toFixed(1)}" width="${(widths[i] + GAP).toFixed(1)}" height="${H}"/>`;
-            x += widths[i] + GAP;
-            return t;
-        }).join('');
-        out += `<g class="scheme-badge" data-lines="${escAttr(s.label)}" data-from="${escAttr(s.from || '')}" `
-            + `data-to="${escAttr(s.to || '')}" data-cx="${spot.cx.toFixed(1)}" `
-            + `data-cy="${spot.cy.toFixed(1)}"><rect x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" `
-            + `width="${w.toFixed(1)}" height="${H}" rx="9"/>${texts}</g>`;
+        // Ta sama grupka numerów co na mapie (clusterHtml), wyśrodkowana na
+        // kresce - ten sam wygląd i to samo wskazywanie numerem.
+        const fw = w + 40, fh = H + 30;
+        out += `<foreignObject class="scheme-badge" data-lines="${escAttr(s.label)}" `
+            + `data-from="${escAttr(s.from || '')}" data-to="${escAttr(s.to || '')}" `
+            + `data-cx="${spot.cx.toFixed(1)}" data-cy="${spot.cy.toFixed(1)}" `
+            + `x="${(spot.cx - fw / 2).toFixed(1)}" y="${(spot.cy - fh / 2).toFixed(1)}" `
+            + `width="${fw.toFixed(1)}" height="${fh}"><div xmlns="http://www.w3.org/1999/xhtml" `
+            + `class="scheme-cluster-anchor">${clusterHtml(s.lines)}</div></foreignObject>`;
     }
     return out;
 }
@@ -5828,22 +5864,24 @@ function schemeWalkLayer(boxes, walks, routes = new Map()) {
         const points = [[a.x + a.w / 2, a.y + a.h], ...(routes.get(pair) || []), [b.x + b.w / 2, b.y]];
         const d = points.length > 2 ? curvePath(points) : `M${points[0][0]} ${points[0][1]}L${points[1][0]} ${points[1][1]}`;
         const [x1, y1] = points[0], [x2, y2] = points[points.length - 1];
-        const text = `${pair.min} min`;
+        const bike = pair.why === 'bike';
+        const text = bike ? `${BIKE_ICON} ${pair.min} min` : `${pair.min} min`;
         const w = text.length * 5.8 + 14;
         const [cx, cy] = pointAlong(strandSamples({curved: points.length > 2, points}), 0.6);
         out.minX = Math.min(out.minX, x1, x2, cx - w / 2); out.maxX = Math.max(out.maxX, x1, x2, cx + w / 2);
         out.minY = Math.min(out.minY, y1); out.maxY = Math.max(out.maxY, y2);
-        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}" `
-            + `data-walk="${escAttr(`${pair.from}>${pair.to}`)}">`
-            + `<title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
-            + `<path d="${d}"/><circle cx="${x1}" cy="${y1}" r="2.5"/><circle cx="${x2}" cy="${y2}" r="2.5"/>`
+        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}`
+            + `${bike ? ' scheme-walk-bike' : ''}" data-walk="${escAttr(`${pair.from}>${pair.to}`)}"`
+            + `${bike ? ` data-station="${escAttr(pair.station_id)}"` : ''}>`
+            + (bike ? '' : `<title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`)
+            + `<path d="${d}"/>${bike ? `<path class="scheme-hit" d="${d}"/>` : ""}<circle cx="${x1}" cy="${y1}" r="2.5"/><circle cx="${x2}" cy="${y2}" r="2.5"/>`
             + `<rect class="scheme-walk-pill" x="${cx - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
             + `<text class="scheme-walk-text" x="${cx}" y="${cy}">${text}</text></g>`;
     }
     return out;
 }
 
-function schemeSvg(boxes, strands, pairs, routes = new Map()) {
+function schemeSvg(boxes, strands, pairs, routes = new Map(), cars = []) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -5862,6 +5900,9 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
     const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs).filter(p => boxes.has(p.from) && boxes.has(p.to)), routes);
     minX = Math.min(minX, walkLayer.minX); maxX = Math.max(maxX, walkLayer.maxX);
     minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
+    const carLayer = schemeCarLayer(boxes, strands, cars);
+    minX = Math.min(minX, carLayer.minX); maxX = Math.max(maxX, carLayer.maxX);
+    minY = Math.min(minY, carLayer.minY); maxY = Math.max(maxY, carLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
     const colors = new Set();
     const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
@@ -5916,7 +5957,73 @@ function schemeSvg(boxes, strands, pairs, routes = new Map()) {
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
         + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
-        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${lines}${rects}${names}${labels}</svg>`;
+        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${lines}<g id="scheme-pick-layer"></g>${carLayer.svg}${rects}${names}`
+        + `${carLayer.labels}${labels}</svg>`;
+}
+
+const SCHEME_LINE_PX = 3;     // grubość kreski schematu (.scheme-line)
+
+/** Auta z mapy na schemacie: nie kreska do celu (ile potrwa jazda autem, nie
+    wiadomo), tylko kropka auta w jego stylu z mapy (carStyle) na krótkiej,
+    przerywanej odnodze od miejsca, w którym się wysiada - przy pudełku, przy
+    kresce w miejscu mijanego przystanku, albo na końcu krótkiej jazdy linią,
+    której schemat poza tym nie rysuje (planner._car_spots). Przystanku
+    wysiadania nie ma: mówi o nim dymek kropki. */
+function schemeCarLayer(boxes, strands, spots) {
+    const out = {svg: '', labels: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
+    const cars = new Map(((lastFlow && lastFlow.cars) || []).map(car => [car.plate, car]));
+    const groups = new Map();
+    for (const spot of spots) {
+        if (!cars.has(spot.plate)) continue;
+        const key = spot.hop ? `hop|${spot.node}|${spot.hop.kind}|${spot.hop.num}`
+            : spot.edge ? `edge|${spot.edge.join('>')}|${spot.at}` : `node|${spot.node}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(spot);
+    }
+    const grow = (x, y) => {
+        out.minX = Math.min(out.minX, x - 10); out.maxX = Math.max(out.maxX, x + 10);
+        out.minY = Math.min(out.minY, y - 10); out.maxY = Math.max(out.maxY, y + 10);
+    };
+    const dots = (x, y, group) => {
+        let svg = '';
+        group.forEach((spot, i) => {
+            const style = carStyle(cars.get(spot.plate));
+            const cx = x + 22 + i * 16;
+            svg += `<g class="scheme-car" data-plate="${escAttr(spot.plate)}">`
+                + `<circle cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="${style.radius + 1}" `
+                + `fill="${style.fillColor || style.color}" fill-opacity="${style.fillOpacity === undefined ? 1 : style.fillOpacity}" `
+                + `stroke="${style.color}" stroke-width="${style.weight}"/>`
+                + `<circle class="scheme-car-hit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="9"/></g>`;
+            grow(cx, y);
+        });
+        const end = x + 22 + (group.length - 1) * 16;
+        return `<path class="scheme-car-stub" d="M${x.toFixed(1)} ${y.toFixed(1)}L${end.toFixed(1)} ${y.toFixed(1)}"/>` + svg;
+    };
+    for (const [key, group] of groups) {
+        const first = group[0];
+        if (first.hop) {
+            const b = boxes.get(first.node);
+            if (!b) continue;
+            const sx = b.x + b.w - 14, sy = b.y + b.h, ex = sx + 22, ey = sy + 34;
+            out.svg += `<path class="scheme-line" stroke="${LINE_COLORS[first.hop.kind] || LINE_COLORS.other}" `
+                + `d="M${sx} ${sy}L${ex} ${ey}"/>` + dots(ex, ey, group);
+            out.labels += `<foreignObject class="scheme-hop-badge" x="${sx - 30}" y="${sy + 3}" width="60" height="30">`
+                + `<div xmlns="http://www.w3.org/1999/xhtml" class="scheme-cluster-anchor">`
+                + `${clusterHtml([first.hop])}</div></foreignObject>`;
+            grow(sx, sy); grow(ex, ey);
+        } else if (first.edge) {
+            const s = strands.find(st => st.from === first.edge[0] && st.to === first.edge[1]);
+            if (!s) continue;
+            const [x, y] = pointAlong(strandSamples(s), first.at);
+            out.svg += dots(x, y, group);
+            grow(x, y);
+        } else {
+            const b = boxes.get(first.node);
+            if (!b) continue;
+            out.svg += dots(b.x + b.w, b.y + b.h / 2, group);
+        }
+    }
+    return out;
 }
 
 /** Pod schematem nie ma już listy ruchów: godziny są w samym rysunku (patrz
@@ -5979,14 +6086,7 @@ function mapMoveTip(sel, when) {
 function schemeMoveTip(num, fromPlace, toPlace) {
     for (const move of schemeMoves) {
         for (const line of move.lines) {
-            if (line.num !== num) continue;
-            // Rower i auto nie mają przystanków: stoją między dwoma pudełkami.
-            if (!line.stops) {
-                if ((line.box || null) === (fromPlace || null) && (!toPlace || line.to_box === toPlace)) {
-                    return moveTipHtml(line, null, fromPlace, move);
-                }
-                continue;
-            }
+            if (line.num !== num || !line.stops) continue;
             const i = line.stops.findIndex(stop => stop[0] === fromPlace);
             if (i < 0 || i === line.stops.length - 1) continue;
             if (toPlace && toPlace !== 'end'
@@ -5999,74 +6099,102 @@ function schemeMoveTip(num, fromPlace, toPlace) {
 
 /** Najechanie na linię (dotknięcie na telefonie) pokazuje okienko ruchu. */
 function bindSchemeLines(canvas) {
-    const tip = $('scheme-tip');
+    const placeOf = id => {
+        const box = id && schemeLast && schemeLast.boxes.get(id);
+        return box ? (box.node.role === 'end' ? 'end' : box.node.place) : null;
+    };
+    // Wskazanie linii na schemacie to to samo wskazanie co na mapie
+    // (showLineHighlight) i ten sam dymek (moveTipHtml) w tym samym stylu.
+    const pick = (num, kind, from, to, e) => {
+        showLineHighlight(num, kind);
+        const html = schemeMoveTip(num, placeOf(from), placeOf(to));
+        if (html) showSchemeLineTip(html, e.clientX, e.clientY);
+        else hideSchemeTip();
+    };
+    const unpick = () => {
+        hideSchemeTip();
+        hideLineHighlight();
+    };
     for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
+        const strand = schemeLast.strands.find(s => `${s.from}>${s.to}` === element.dataset.edge);
         const nums = element.dataset.lines.split(' ');
-        const box = schemeLast && schemeLast.boxes.get(element.dataset.from);
-        const place = box && box.node.place;
-        const toBox = element.dataset.to && schemeLast && schemeLast.boxes.get(element.dataset.to);
-        const toPlace = toBox ? (toBox.node.role === 'end' ? 'end' : toBox.node.place) : null;
-        const show = e => {
-            const rows = nums.map(num => schemeMoveTip(num, place, toPlace)).filter(Boolean);
-            if (!rows.length) return;
-            schemeTipOwner = null;
-            tip.innerHTML = rows.join('');
-            tip.hidden = false;
-            const at = {getBoundingClientRect: () => ({left: e.clientX, top: e.clientY - 6,
-                                                      bottom: e.clientY + 6, width: 0, height: 12})};
-            placeSchemeTip(at);
-        };
+        const line = strand && strand.lines.find(l => nums.includes(l.num));
+        if (!line) continue;
+        const show = e => pick(line.num, line.kind, element.dataset.from, element.dataset.to, e);
         element.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
-        element.addEventListener('pointerleave', e => {
-            if (e.pointerType === 'mouse') hideSchemeTip();
-        });
+        element.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') unpick(); });
         element.addEventListener('click', show);
     }
-    // Numer na plakietce: tylko ta linia - cała jej droga na schemacie i na
-    // mapie, i okienko tylko z nią (tak jak najechanie na linię na mapie).
-    for (const hit of canvas.querySelectorAll('rect.scheme-num-hit')) {
-        const badge = hit.closest('g.scheme-badge');
-        const box = schemeLast && schemeLast.boxes.get(badge.dataset.from);
-        const place = box && box.node.place;
-        const toBox = badge.dataset.to && schemeLast && schemeLast.boxes.get(badge.dataset.to);
-        const toPlace = toBox ? (toBox.node.role === 'end' ? 'end' : toBox.node.place) : null;
-        const {num, kind} = hit.dataset;
+    for (const badge of canvas.querySelectorAll('foreignObject.scheme-badge')) {
+        const cluster = badge.querySelector('.line-cluster');
+        const slotPick = e => {
+            const slot = e.target.closest && e.target.closest('.line-chip-slot');
+            if (slot) pick(slot.dataset.num, slot.dataset.kind, badge.dataset.from, badge.dataset.to, e);
+        };
+        cluster.addEventListener('mouseover', slotPick);
+        cluster.addEventListener('click', slotPick);
+        cluster.addEventListener('mouseleave', unpick);
+    }
+    // Auto i rower: ten sam dymek co ich kropka na mapie, a na mapie samo
+    // auto (stacja roweru) wskazane tak, jak przy najechaniu na kropkę.
+    for (const dot of canvas.querySelectorAll('g.scheme-car')) {
+        const car = (lastFlow && lastFlow.cars || []).find(c => c.plate === dot.dataset.plate);
+        if (!car) continue;
         const show = e => {
-            highlightSchemeLine(num);
-            if (flowHits.some(h => h.seg.num === num && h.seg.kind === kind)) showLineHighlight(num, kind);
-            const row = schemeMoveTip(num, place, toPlace);
-            if (!row) { hideSchemeTip(); return; }
-            schemeTipOwner = null;
-            tip.innerHTML = row;
-            tip.hidden = false;
-            const at = {getBoundingClientRect: () => ({left: e.clientX, top: e.clientY - 6,
-                                                      bottom: e.clientY + 6, width: 0, height: 12})};
-            placeSchemeTip(at);
+            showSchemeLineTip(carTooltipHtml(car), e.clientX, e.clientY);
+            pointCar(car, true);
         };
-        const hide = () => {
+        dot.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
+        dot.addEventListener('pointerleave', () => { hideSchemeTip(); pointCar(car, false); });
+        dot.addEventListener('click', show);
+    }
+    for (const walk of canvas.querySelectorAll('g.scheme-walk-bike')) {
+        const place = (lastFlow && lastFlow.bike_places || []).find(p => p.id === walk.dataset.station);
+        if (!place) continue;
+        const show = e => {
+            showSchemeLineTip(bikeTooltipHtml(place, lastFlow.bike_places_live), e.clientX, e.clientY);
+            showBikeRides(place);
+        };
+        walk.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
+        walk.addEventListener('pointerleave', () => {
             hideSchemeTip();
-            clearSchemeHighlight();
-            hideLineHighlight();
-        };
-        hit.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
-        hit.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); });
-        hit.addEventListener('click', e => { e.stopPropagation(); show(e); });
+            if (setting('bike-rides')) showAllBikeRides(lastFlow.bike_places);
+            else clearBikeRides();
+        });
+        walk.addEventListener('click', show);
     }
 }
 
-/** Cała droga jednej linii na schemacie: każda kreska, która ją niesie,
-    także przejazd przez pudełko. */
-function highlightSchemeLine(num) {
+/** Podświetlenie linii na schemacie - ten sam styl co na mapie
+    (lineHighlightStyles), w osobnej warstwie nad kreskami. */
+function schemeLineHighlight(num, kind) {
     const canvas = $('scheme-canvas');
-    clearSchemeHighlight();
-    let any = false;
+    const layer = canvas && canvas.querySelector('#scheme-pick-layer');
+    if (!layer) return;
+    if (num === null) { layer.innerHTML = ''; return; }
+    let out = '';
     for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
-        if (element.dataset.lines.split(' ').includes(num)) {
-            element.classList.add('scheme-pick');
-            any = true;
+        if (!element.dataset.lines.split(' ').includes(num)) continue;
+        const d = element.querySelector('.scheme-hit').getAttribute('d');
+        for (const style of lineHighlightStyles(kind, SCHEME_LINE_PX)) {
+            out += `<path d="${d}" fill="none" stroke="${style.color}" stroke-opacity="${style.opacity}" `
+                + `stroke-width="${style.weight}" stroke-linecap="round" stroke-linejoin="round"/>`;
         }
     }
-    canvas.classList.toggle('has-pick', any);
+    layer.innerHTML = out;
+}
+
+/** Dymek linii, auta albo roweru na schemacie - ten sam wygląd co dymek na
+    mapie (klasy dymka Leafletu), nad kursorem. */
+function showSchemeLineTip(html, x, y) {
+    const tip = $('scheme-tip');
+    schemeTipOwner = null;
+    tip.className = 'scheme-tip scheme-map-tip leaflet-tooltip leaflet-tooltip-top';
+    tip.innerHTML = html;
+    tip.hidden = false;
+    const box = tip.getBoundingClientRect();
+    tip.style.left = `${Math.max(8, Math.min(innerWidth - box.width - 8, x - box.width / 2))}px`;
+    tip.style.top = `${Math.max(8, y - box.height - 12)}px`;
 }
 
 /** Najechanie na najszybszą trasę na pasku podświetla w schemacie CAŁĄ tę
@@ -6146,7 +6274,7 @@ function renderScheme(data) {
         schemeLast = {boxes, strands, scheme, routes};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, routes);
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, routes, scheme.cars || []);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
@@ -6540,6 +6668,7 @@ function hideSchemeTip() {
 
 function showSchemeTip(element, where, sec) {
     const tip = $('scheme-tip');
+    tip.className = 'timetable-tip scheme-tip';
     const owner = {
         // Udaje kropkę mapy na tyle, ile loadTimetable jej potrzebuje: dymek,
         // do którego wpisuje się tablica, gdy dojdzie z sieci.
