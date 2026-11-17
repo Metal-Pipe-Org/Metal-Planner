@@ -704,7 +704,7 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup(flowBikeMarkers(
             lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
-        if (setting('bike-rides')) showAllBikeRides(lastFlow.bike_places);
+        if (bikeRidesAlways()) showAllBikeRides(lastFlow.bike_places);
         return;
     }
     loadCityBikes();
@@ -3859,6 +3859,9 @@ const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
 // Kreska przejazdu kropkowana tak samo, jak etap rowerowy wybranej trasy.
 const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
                          dashArray: '1, 6', interactive: false};
+// Nowa mapa: przejazd rowerem to opcja jak linia, więc widać go tak jak linię.
+const BIKE_MOVE_STYLE = {color: '#ef6c00', weight: 4, opacity: 0.9, lineCap: 'round',
+                         dashArray: '2, 8', interactive: false};
 
 /** Kropki rowerów w zasięgu mapy (patrz bikes.map_places).
 
@@ -3878,11 +3881,17 @@ function flowBikeMarkers(places, live) {
         dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => showBikeRides(place));
         dot.on('mouseout', () => {
-            if (!setting('bike-rides')) clearBikeRides();
+            if (!bikeRidesAlways()) clearBikeRides();
             else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
         });
         return dot;
     });
+}
+
+/** Nowa mapa rysuje przejazdy rowerem na stałe: to jej opcje, tak samo jak
+    linie (patrz planner._bike_moves). */
+function bikeRidesAlways() {
+    return setting('bike-rides') || !!(lastFlow && lastFlow.scheme);
 }
 
 function bikeStyle(place, live) {
@@ -3969,7 +3978,7 @@ function bikeRideLayers(place, labels) {
     const layers = [];
     for (const ride of place.rides) {
         layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
-                               BIKE_RIDE_STYLE));
+                               lastFlow && lastFlow.scheme ? BIKE_MOVE_STYLE : BIKE_RIDE_STYLE));
         if (!labels) continue;
         const target = L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
             .bindTooltip(bikeRideTooltipHtml(ride),
@@ -4006,6 +4015,7 @@ function bikeRideTooltipHtml(ride) {
         : `Stąd ${fmtDist(ride.m)} w linii prostej`);
     rows.push(`${ride.bikes} ` + plural(ride.bikes, 'rower', 'rowery', 'rowerów') +
               ` na miejscu, ${ride.docks} wolnych stojaków`);
+    if (ride.arrival) rows.push(`${GOAL_ICON}<b>${esc(fmtClock(ride.arrival))}</b> u celu`);
     return rows.join('<br>');
 }
 
@@ -5758,12 +5768,17 @@ function schemeBadges(boxes, strands, branches) {
         s.badge = spot;
         let x = spot.x + PAD;
         const texts = s.lines.map((line, i) => {
+            // Każdy numer osobno pod kursorem: najechanie na niego pokazuje
+            // tylko tę linię (patrz bindSchemeLines).
             const t = `<text class="scheme-num" fill="${LINE_COLORS[line.kind] || LINE_COLORS.other}" `
-                + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`;
+                + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`
+                + `<rect class="scheme-num-hit" data-num="${escAttr(line.num)}" data-kind="${escAttr(line.kind)}" `
+                + `x="${(x - GAP / 2).toFixed(1)}" y="${spot.y.toFixed(1)}" width="${(widths[i] + GAP).toFixed(1)}" height="${H}"/>`;
             x += widths[i] + GAP;
             return t;
         }).join('');
-        out += `<g class="scheme-badge" data-lines="${escAttr(s.label)}" data-cx="${spot.cx.toFixed(1)}" `
+        out += `<g class="scheme-badge" data-lines="${escAttr(s.label)}" data-from="${escAttr(s.from || '')}" `
+            + `data-to="${escAttr(s.to || '')}" data-cx="${spot.cx.toFixed(1)}" `
             + `data-cy="${spot.cy.toFixed(1)}"><rect x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" `
             + `width="${w.toFixed(1)}" height="${H}" rx="9"/>${texts}</g>`;
     }
@@ -5915,7 +5930,7 @@ function renderSchemeMoves(moves) {
 }
 
 /** Okienko po najechaniu na linię - JEDNO dla mapy i schematu: (1) linia
-    i godzina odjazdu, (2) godzina u celu, (3) uwaga, np. „na styk". Obie
+    i godzina odjazdu, (2) godzina u celu. Obie
     strony różni tylko to, skąd bierze się odjazd (patrz mapMoveTip i
     schemeMoveTip). Dane to ruchy ze schematu (planner._scheme_moves). */
 const GOAL_ICON =
@@ -5924,21 +5939,16 @@ const GOAL_ICON =
     + ' stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function moveTipHtml(line, depSec, depName, move) {
-    const note = line.tight
-        ? (line.slack_min < 0 ? `na styk - wg szacunku brakuje ${-line.slack_min} min`
-                              : `na styk - zapas ${line.slack_min} min`)
-        : '';
     // Pierwszy wiersz to wiersz tablicy odjazdów (patrz timetableLinesHtml):
     // ta sama plakietka, kierunek i godzina.
     return '<div class="move-tip">'
         + '<ul class="tt-rows tt-lines"><li>'
         + `<span class="badge ${escClass(line.mode)}">${esc(line.num)}</span>`
         + `<span class="tip-dir">${esc(line.headsign || '')}</span>`
-        + `<span class="tt-times"><span>${esc(fmtClock(depSec))}</span>`
+        + `<span class="tt-times"><span>${esc(depSec === null ? line.dep : fmtClock(depSec))}</span>`
         + (line.last && depName === line.from ? `<span class="tip-last">ostatni ${esc(line.last)}</span>` : '')
         + '</span></li></ul>'
         + `<div class="move-tip-row move-tip-goal">${GOAL_ICON}<b>${esc(move.arrival)}</b> u celu</div>`
-        + (note ? `<div class="move-tip-row move-tip-note">${esc(note)}</div>` : '')
         + '</div>';
 }
 
@@ -5969,7 +5979,14 @@ function mapMoveTip(sel, when) {
 function schemeMoveTip(num, fromPlace, toPlace) {
     for (const move of schemeMoves) {
         for (const line of move.lines) {
-            if (line.num !== num || !line.stops) continue;
+            if (line.num !== num) continue;
+            // Rower i auto nie mają przystanków: stoją między dwoma pudełkami.
+            if (!line.stops) {
+                if ((line.box || null) === (fromPlace || null) && (!toPlace || line.to_box === toPlace)) {
+                    return moveTipHtml(line, null, fromPlace, move);
+                }
+                continue;
+            }
             const i = line.stops.findIndex(stop => stop[0] === fromPlace);
             if (i < 0 || i === line.stops.length - 1) continue;
             if (toPlace && toPlace !== 'end'
@@ -6005,6 +6022,51 @@ function bindSchemeLines(canvas) {
         });
         element.addEventListener('click', show);
     }
+    // Numer na plakietce: tylko ta linia - cała jej droga na schemacie i na
+    // mapie, i okienko tylko z nią (tak jak najechanie na linię na mapie).
+    for (const hit of canvas.querySelectorAll('rect.scheme-num-hit')) {
+        const badge = hit.closest('g.scheme-badge');
+        const box = schemeLast && schemeLast.boxes.get(badge.dataset.from);
+        const place = box && box.node.place;
+        const toBox = badge.dataset.to && schemeLast && schemeLast.boxes.get(badge.dataset.to);
+        const toPlace = toBox ? (toBox.node.role === 'end' ? 'end' : toBox.node.place) : null;
+        const {num, kind} = hit.dataset;
+        const show = e => {
+            highlightSchemeLine(num);
+            if (flowHits.some(h => h.seg.num === num && h.seg.kind === kind)) showLineHighlight(num, kind);
+            const row = schemeMoveTip(num, place, toPlace);
+            if (!row) { hideSchemeTip(); return; }
+            schemeTipOwner = null;
+            tip.innerHTML = row;
+            tip.hidden = false;
+            const at = {getBoundingClientRect: () => ({left: e.clientX, top: e.clientY - 6,
+                                                      bottom: e.clientY + 6, width: 0, height: 12})};
+            placeSchemeTip(at);
+        };
+        const hide = () => {
+            hideSchemeTip();
+            clearSchemeHighlight();
+            hideLineHighlight();
+        };
+        hit.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
+        hit.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); });
+        hit.addEventListener('click', e => { e.stopPropagation(); show(e); });
+    }
+}
+
+/** Cała droga jednej linii na schemacie: każda kreska, która ją niesie,
+    także przejazd przez pudełko. */
+function highlightSchemeLine(num) {
+    const canvas = $('scheme-canvas');
+    clearSchemeHighlight();
+    let any = false;
+    for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
+        if (element.dataset.lines.split(' ').includes(num)) {
+            element.classList.add('scheme-pick');
+            any = true;
+        }
+    }
+    canvas.classList.toggle('has-pick', any);
 }
 
 /** Najechanie na najszybszą trasę na pasku podświetla w schemacie CAŁĄ tę
@@ -6682,6 +6744,9 @@ function applyStage(run, data) {
         if (run.onMapped) run.onMapped();
     } else if (lastFlow === run.acc) {
         renderLive(run.acc);
+        // Auta z danych na żywo stoją też na schemacie - przychodzi z nimi
+        // jego nowa wersja.
+        if ('scheme' in delta) renderScheme(run.acc);
     }
     if (search && !search.found) {
         search.found = true;

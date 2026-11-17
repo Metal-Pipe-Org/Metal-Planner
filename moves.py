@@ -177,10 +177,12 @@ def step_same_vehicles(ctx, insts):
             continue
 
         def rank(i):
-            slack = slack_of(day, i)
+            # Z równych: bez marszu między słupkami, a potem przesiadka tam,
+            # gdzie drogi pojazdów się rozchodzą - po co wysiadać wcześniej
+            # i czekać, skoro pierwszy pojazd jedzie dalej tą samą drogą
+            # (113 do ROD Bajki, a 146 i tak jedzie przez Dworzec).
             return (not is_exact(ctx, i), i["arr"], -i["dep"],
-                    -(slack if slack is not None else 10 ** 6),
-                    walked_sec(day, i), sum(alight for _, alight in i["rides"]))
+                    walked_sec(day, i), -sum(alight for _, alight in i["rides"]))
         if rank(inst) < rank(old):
             best[key] = inst
     for key, inst in best.items():
@@ -406,7 +408,7 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
         for move in moves:
             move["far_walk"] = False
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
-    shown, hidden = readable(day, moves, anchor)
+    shown, hidden = readable(day, moves, anchor, by_sig_all)
     add_branches(ctx, shown, insts, by_sig_all, origin_sec or {}, anchor)
     return shown, hidden, any(m["safe_alt"] or is_safe(day, i)
                           for m in shown for i in [m["first"], *m["branches"]])
@@ -543,7 +545,9 @@ def add_branches(ctx, shown, insts, by_sig, origin_sec, anchor):
         # złapanie z najbliższego przystanku, a z równych - tańsze.
         seen = {trips_of(main)} | set(covered)
         feeders = {}
-        for inst in sorted(pool, key=lambda i: (lead_of(i), cost(i, gain), -i["dep"])):
+        for inst in sorted(pool, key=lambda i: (lead_of(i), cost(i, gain), -i["dep"],
+                                                walked_sec(day, i),
+                                                -sum(a for _, a in i["rides"]))):
             trips = trips_of(inst)
             # Dojazd jeszcze jednym pojazdem do czegoś, do czego z tego samego
             # miejsca wsiada się od razu, niczego nie zaczyna inaczej.
@@ -562,7 +566,11 @@ def add_branches(ctx, shown, insts, by_sig, origin_sec, anchor):
             # samego miejsca wsiada się od razu, i złapanie tego samego
             # ostatniego pojazdu wcześniej na jego trasie, gdy trzeba przez to
             # wyjść wcześniej.
+            # Ta sama linia z tego samego miejsca co sam ruch też nie: do kiedy
+            # nią zdążyć, mówi już godzina ostatniego złapania (`last`).
             if (inst["sig"][0] in starts
+                    or (line_of(inst) == line_of(main)
+                        and inst["sig"][0][0] == main["sig"][0][0])
                     or covered.get(trips_of(inst)[1:]) == inst["sig"][0][0]
                     or (inst["rides"][-1][0] < main["rides"][-1][0] and inst["dep"] < latest
                         and inst["n"] >= main["n"])):
@@ -686,7 +694,7 @@ def variants_of(day, inst):
     return out
 
 
-def readable(day, moves, anchor):
+def readable(day, moves, anchor, by_sig=None):
     """Pierwszy widok to najszybszy ruch i do READABLE_MOVES - 1 kolejnych,
     NAPRAWDĘ różnych: żaden pojazd nie mija miejsca przesiadki innego pokazanego
     ruchu i dwa ruchy nie przesiadają się w tym samym miejscu - inaczej linie
@@ -718,15 +726,37 @@ def readable(day, moves, anchor):
             move["first"].pop("walked", None)
         return clash, passes_and_transfers(day, move["first"]["rides"])
 
+    def late(move):
+        """Do kiedy można wyjść i dalej dojechać tak jak ten ruch."""
+        return max((i["dep"] for i in (by_sig or {}).get(move["sig"], move["shown"])
+                    if not i["just_left"] and i["arr"] <= move["first"]["arr"]),
+                   default=move["first"]["dep"])
+
     shown, infos = [anchor], [passes_and_transfers(day, anchor["first"]["rides"])]
     for move in moves:
-        if len(shown) >= READABLE_MOVES:
+        if len(shown) >= READABLE_MOVES - 1:
             break
         if move is anchor or move["far_walk"]:
             continue
         clash, info = settle(move, infos)
         if clash:
             continue
+        shown.append(move)
+        infos.append(info)
+    # Ostatnie miejsce: gdy któryś ruch pozwala wyjść wyraźnie później niż
+    # wszystkie pokazane, to on - „a jak się spóźnię” to pytanie, na które
+    # tańszy, ale równie wczesny ruch nie odpowiada.
+    rest = []
+    for move in moves:
+        if len(shown) >= READABLE_MOVES or move in shown or move["far_walk"]:
+            continue
+        clash, info = settle(move, infos)
+        if not clash:
+            rest.append((move, info))
+    if rest and len(shown) < READABLE_MOVES:
+        latest = max(late(m) for m in shown)
+        later = [item for item in rest if late(item[0]) >= latest + EPSILON_SEC]
+        move, info = max(later, key=lambda item: late(item[0])) if later else rest[0]
         shown.append(move)
         infos.append(info)
     shown.sort(key=lambda m: (m["far_walk"], m["cost"]))
