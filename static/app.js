@@ -526,12 +526,38 @@ function vehiclesFilter() {
     return lines;
 }
 
+/** Przystanki, które mapa rysuje każdej linii (klucz linii -> zbiór "lat,lon").
+    Linia bez przystanków w odpowiedzi nie trafia do mapy: nie ma jak sprawdzić
+    jej kierunku. W rozkładach nie ma podróży, więc nie ma i kierunku. */
+function vehicleDrawnStops() {
+    const drawn = new Map();
+    if (window.timetableMode && window.timetableMode.vehicleLines()) return drawn;
+    for (const hit of flowHits) {
+        if (!hit.seg.num || !hit.seg.stops_t) continue;
+        const key = vehicleKey(hit.seg.kind, hit.seg.num);
+        if (!drawn.has(key)) drawn.set(key, new Set());
+        for (const [lat, lon] of hit.seg.stops_t) drawn.get(key).add(lat + ',' + lon);
+    }
+    return drawn;
+}
+
+/** Jedzie w naszą stronę, gdy jego dalsza trasa (v.rest) mija przystanek
+    narysowany na mapie tej linii. Bez rozpoznanego kursu - nie wiemy, więc
+    zostaje. */
+function vehicleGoesOurWay(v, drawn) {
+    const stops = drawn.get(vehicleKey(v.kind, v.line));
+    if (!stops || !v.rest) return true;
+    return v.rest.some(([lat, lon]) => stops.has(lat + ',' + lon));
+}
+
 function renderVehicles() {
     vehiclesLayer.clearLayers();
     if (!vehiclesOn) return;
     const only = vehiclesFilter();
+    const drawn = vehicleDrawnStops();
     for (const v of lastVehicles) {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
+        if (!vehicleGoesOurWay(v, drawn)) continue;
         const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)}).addTo(vehiclesLayer);
         if (v.to) marker.bindTooltip(vehicleTooltipHtml(v));
         marker.tapRank = TAP_RANK.vehicle;

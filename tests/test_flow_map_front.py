@@ -538,6 +538,14 @@ def test_live_vehicles_are_narrowed_to_the_drawn_lines(front):
     _check(front, "pojazdy_zawezone_do_linii_z_mapy")
 
 
+def test_live_vehicles_keep_only_our_direction_and_the_uncertain(front):
+    """Przy narysowanej mapie zostają pojazdy linii, których dalsza trasa mija
+    przystanek narysowany na mapie (jadą w stronę podróży), oraz te bez
+    rozpoznanego kursu; pojazd jadący w przeciwną stronę znika."""
+    result = _check(front, "pojazdy_tylko_w_naszym_kierunku")
+    assert len(result["widoczne"]) == 2
+
+
 # ------------------------------------------------------------- Traficar ----
 
 def test_the_car_leg_is_drawn_as_an_estimate_not_as_a_ride(front):

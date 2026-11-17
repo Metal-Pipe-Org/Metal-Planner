@@ -82,6 +82,9 @@ def _parse(raw_results):
         line = _clean(item.get("name"))
         if not line:
             continue
+        # Kanał oddaje linie literowe małymi literami ("d", "k"), a rozkład
+        # ma je wielkimi - bez tego nie zgadzają się z kursem ani z mapą.
+        line = line.upper()
         # API zwraca lat jako "x", lon jako "y" (zmierzone na żywych danych -
         # potwierdza to też static/js/buspositions.js na mpk.wroc.pl, które
         # tak samo buduje z nich google.maps.LatLng(x, y)).
@@ -350,7 +353,9 @@ def _add_courses(vehicles):
             v = vehicles[i]
             where = _locate(trip, (v["lat"], v["lon"]), db)
             if claims[trip["id"]] == 1 and where is not None and where[0] <= ON_ROUTE_M:
-                v["course"] = (trip, _trip_stops(trip, db)[where[1]])
+                stops = _trip_stops(trip, db)
+                v["course"] = (trip, stops[where[1]])
+                v["rest"] = [[round(s[0], 5), round(s[1], 5)] for s in stops[where[1]:]]
         _add_routes(vehicles, trips, db)
     finally:
         db.close()
