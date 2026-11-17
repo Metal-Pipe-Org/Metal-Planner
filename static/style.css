@@ -2378,14 +2378,30 @@ body.dev-open .scheme-panel { right: 322px; }
 .scheme-badge, .scheme-hop-badge { pointer-events: none; overflow: visible; }
 .scheme-cluster-anchor { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .scheme-cluster-anchor .line-cluster { position: static; transform: none; }
-.scheme-hop-badge .line-cluster { pointer-events: none; }
 /* Kropka auta na krótkiej odnodze - odnoga jak dojście do auta na mapie. */
 .scheme-car-stub { fill: none; stroke: #455a64; stroke-width: 2.5; stroke-dasharray: 1 6; stroke-linecap: round; }
 .scheme-car-hit { fill: transparent; pointer-events: all; cursor: pointer; }
-/* Rower jak przejście pieszo, tylko z ikoną roweru; da się na niego najechać. */
+/* Kropka auta wskazana na mapie albo na schemacie. */
+.scheme-car.picked circle:first-child { stroke: #111; stroke-width: 3; }
+/* Rower jak przejście pieszo, ale w pomarańczu roweru z mapy - kropkowany,
+   żeby nie mylił się z kreskowanymi dodatkowymi przejściami; da się na niego
+   najechać. */
 .scheme-walk.scheme-walk-bike { pointer-events: all; cursor: pointer; }
+.scheme-walk.scheme-walk-bike path { stroke: #ef6c00; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
+.scheme-walk.scheme-walk-bike circle { fill: #ef6c00; }
+.scheme-walk-bike .scheme-walk-pill { fill: #fff3e0; stroke: #ef6c00; }
+.scheme-walk-bike .scheme-walk-text { fill: #bf360c; }
 .scheme-walk-brace path.scheme-hit { stroke: transparent; stroke-width: 14; stroke-dasharray: none; }
+.scheme-walk-bike.picked path:not(.scheme-hit) { stroke-width: 4.5; }
+.scheme-walk-bike.picked .scheme-walk-pill { stroke-width: 2.5; }
+/* Stacje roweru spod przystanku w rogu pudełka. */
+.scheme-bike-corner { cursor: pointer; }
+.scheme-bike-corner rect { fill: #fff3e0; stroke: #ef6c00; stroke-width: 1; }
+.scheme-bike-corner text { fill: #bf360c; font: 600 10px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.scheme-bike-corner.picked rect { stroke-width: 2.5; }
 #scheme-tip.leaflet-tooltip { position: fixed; z-index: 1100; pointer-events: none; }
+/* „Nic do wzięcia” w dymku auta - informacja, ale nie powód, żeby je brać. */
+.ogarniam-none { font-size: 0.85em; color: #888; }
 
 #scheme-canvas svg {
     display: block;

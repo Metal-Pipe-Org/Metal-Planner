@@ -863,10 +863,12 @@ function carMarker(car, tooltipHtml) {
     return dot;
 }
 
-/** Auto wskazane na mapie: jego strefa i jazda do niego. */
+/** Auto wskazane na mapie: jego strefa i jazda do niego - a na schemacie
+    jego kropka i ta sama jazda (markSchemeCar), skądkolwiek je wskazano. */
 function showCarOnMap(car, on) {
     if (on) { showCarZone(car); showCarRide(car); }
     else { hideCarZone(); hideCarRide(); }
+    markSchemeCar(car, on);
 }
 
 /** To samo z zewnątrz mapy (kropka auta na schemacie): do tego dymek kropki
@@ -3836,12 +3838,13 @@ function flowCarMarkers(cars) {
 function carTooltipHtml(car) {
     return [
         `<b>${carName(car)}</b>`,
-        ...(car.ride ? [
-            `Dojazd: <span class="badge ${escClass(car.ride.kind)}">${esc(car.ride.num)}</span> ` +
-            `z „${esc(car.ride.from)}” o ${fmtClock(car.ride.dep)}`,
-        ] : []),
-        `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
-        `pieszo z „${esc(car.from)}”`,
+        // Jazda do auta i godzina przy nim w jednym zdaniu - gdzie wysiąść,
+        // pokazuje mapa (showCarRide).
+        car.ride
+            ? `Dojazd: <span class="badge ${escClass(car.ride.kind)}">${esc(car.ride.num)}</span> ` +
+              `z „${esc(car.ride.from)}” o ${fmtClock(car.ride.dep)}, przy aucie ${fmtClock(car.at)}`
+            : `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
+              `pieszo z „${esc(car.from)}”`,
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
         // Auta i tak zostają na mapie - oddać je na granicy strefy bywa
         // sensowne, byle wiedzieć przed wyruszeniem (zgłoszenie #157).
@@ -3877,7 +3880,7 @@ function whyText(why) {
     wzięcia i za ile. Zdanie pada ZAWSZE, także gdy nie ma nic: brak wiersza
     znaczyłby naraz „nic tu nie ma" i „nie wiadomo", a to dwie różne rzeczy. */
 function ogarniamText(tasks) {
-    if (!tasks || !tasks.length) return 'Ogarniam: nic do wzięcia';
+    if (!tasks || !tasks.length) return '<span class="ogarniam-none">Ogarniam: nic do wzięcia</span>';
     return 'Ogarniam: ' + tasks
         .map(task => `${esc(task.co.toLowerCase())} ${task.ile} zł`)
         .join(' · ');
@@ -3927,8 +3930,9 @@ function flowBikeMarkers(places, live) {
             .bindTooltip(bikeTooltipHtml(place, live),
                          {direction: 'top', offset: [0, -4], opacity: 1});
         dot.tapRank = TAP_RANK.shared;
-        dot.on('mouseover', () => showBikeRides(place));
+        dot.on('mouseover', () => { showBikeRides(place); markSchemeBike(place.id, true); });
         dot.on('mouseout', () => {
+            markSchemeBike(place.id, false);
             if (!setting('bike-rides')) clearBikeRides();
             else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
         });
@@ -5865,7 +5869,10 @@ function schemeWalkLayer(boxes, walks, routes = new Map()) {
         const d = points.length > 2 ? curvePath(points) : `M${points[0][0]} ${points[0][1]}L${points[1][0]} ${points[1][1]}`;
         const [x1, y1] = points[0], [x2, y2] = points[points.length - 1];
         const bike = pair.why === 'bike';
-        const text = bike ? `${BIKE_ICON} ${pair.min} min` : `${pair.min} min`;
+        // Odległość, a czas tylko na życzenie (⚙): minuty marszu i jazdy
+        // rowerem to szacunek, odległość - nie.
+        const amount = setting('scheme-walk-time') ? `${pair.min} min` : fmtWalkDistance(pair.m);
+        const text = bike ? `${BIKE_ICON} ${amount}` : amount;
         const w = text.length * 5.8 + 14;
         const [cx, cy] = pointAlong(strandSamples({curved: points.length > 2, points}), 0.6);
         out.minX = Math.min(out.minX, x1, x2, cx - w / 2); out.maxX = Math.max(out.maxX, x1, x2, cx + w / 2);
@@ -5881,7 +5888,7 @@ function schemeWalkLayer(boxes, walks, routes = new Map()) {
     return out;
 }
 
-function schemeSvg(boxes, strands, pairs, routes = new Map(), cars = []) {
+function schemeSvg(boxes, strands, pairs, routes = new Map(), cars = [], bikePlaces = []) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -5900,7 +5907,7 @@ function schemeSvg(boxes, strands, pairs, routes = new Map(), cars = []) {
     const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs).filter(p => boxes.has(p.from) && boxes.has(p.to)), routes);
     minX = Math.min(minX, walkLayer.minX); maxX = Math.max(maxX, walkLayer.maxX);
     minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
-    const carLayer = schemeCarLayer(boxes, strands, cars);
+    const carLayer = schemeCarLayer(boxes, strands, branches, cars);
     minX = Math.min(minX, carLayer.minX); maxX = Math.max(maxX, carLayer.maxX);
     minY = Math.min(minY, carLayer.minY); maxY = Math.max(maxY, carLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
@@ -5912,6 +5919,18 @@ function schemeSvg(boxes, strands, pairs, routes = new Map(), cars = []) {
         rects += `<g class="node" data-node="${id}"><rect class="scheme-box" `
             + `x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12"/></g>`;
         names += `<text class="scheme-name" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+        // Stacje roweru spod tego przystanku (te same co kropki na mapie) - bez
+        // osobnych odnóg, w rogu pudełka; odnogą jest tylko konkretny
+        // przejazd, który zastępuje czekanie albo przesiadkę.
+        const stations = bikePlaces.filter(place => place.box === id);
+        if (stations.length) {
+            const text = `${BIKE_ICON} ${stations.length}`;
+            const w = text.length * 5.8 + 12, x = b.x + b.w - w + 6, y = b.y - 9;
+            names += `<g class="scheme-bike-corner" data-node="${id}" `
+                + `data-stations="${escAttr(stations.map(place => place.id).join(' '))}">`
+                + `<rect x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="16" rx="8"/>`
+                + `<text x="${(x + w / 2).toFixed(1)}" y="${y + 8}">${text}</text></g>`;
+        }
     }
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
@@ -5969,7 +5988,7 @@ const SCHEME_LINE_PX = 3;     // grubość kreski schematu (.scheme-line)
     kresce w miejscu mijanego przystanku, albo na końcu krótkiej jazdy linią,
     której schemat poza tym nie rysuje (planner._car_spots). Przystanku
     wysiadania nie ma: mówi o nim dymek kropki. */
-function schemeCarLayer(boxes, strands, spots) {
+function schemeCarLayer(boxes, strands, branches, spots) {
     const out = {svg: '', labels: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
     const cars = new Map(((lastFlow && lastFlow.cars) || []).map(car => [car.plate, car]));
     const groups = new Map();
@@ -5984,11 +6003,20 @@ function schemeCarLayer(boxes, strands, spots) {
         out.minX = Math.min(out.minX, x - 10); out.maxX = Math.max(out.maxX, x + 10);
         out.minY = Math.min(out.minY, y - 10); out.maxY = Math.max(out.maxY, y + 10);
     };
-    const dots = (x, y, group) => {
+    // Kropka nie może zasłaniać grupki numerów: plakietek kresek (s.badge,
+    // z zapasem na grupkę, która bywa szersza od wyliczonej) ani innych kropek.
+    const taken = [...strands, ...branches].map(s => s.badge).filter(Boolean)
+        .map(r => ({x: r.x - 8, y: r.y - 6, w: r.w + 16, h: r.h + 12}));
+    const reach = (n, side) => side * (22 + (n - 1) * 16);
+    const blocked = (x, y, n, side) => {
+        const x1 = Math.min(x, x + reach(n, side)) - 9, x2 = Math.max(x, x + reach(n, side)) + 9;
+        return taken.some(r => x1 < r.x + r.w && x2 > r.x && y - 9 < r.y + r.h && y + 9 > r.y);
+    };
+    const dots = (x, y, group, side = 1) => {
         let svg = '';
         group.forEach((spot, i) => {
             const style = carStyle(cars.get(spot.plate));
-            const cx = x + 22 + i * 16;
+            const cx = x + side * (22 + i * 16);
             svg += `<g class="scheme-car" data-plate="${escAttr(spot.plate)}">`
                 + `<circle cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="${style.radius + 1}" `
                 + `fill="${style.fillColor || style.color}" fill-opacity="${style.fillOpacity === undefined ? 1 : style.fillOpacity}" `
@@ -5996,26 +6024,39 @@ function schemeCarLayer(boxes, strands, spots) {
                 + `<circle class="scheme-car-hit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="9"/></g>`;
             grow(cx, y);
         });
-        const end = x + 22 + (group.length - 1) * 16;
+        const end = x + reach(group.length, side);
+        taken.push({x: Math.min(x, end) - 9, y: y - 9, w: Math.abs(end - x) + 18, h: 18});
         return `<path class="scheme-car-stub" d="M${x.toFixed(1)} ${y.toFixed(1)}L${end.toFixed(1)} ${y.toFixed(1)}"/>` + svg;
     };
-    for (const [key, group] of groups) {
+    for (const group of groups.values()) {
         const first = group[0];
         if (first.hop) {
             const b = boxes.get(first.node);
             if (!b) continue;
             const sx = b.x + b.w - 14, sy = b.y + b.h, ex = sx + 22, ey = sy + 34;
-            out.svg += `<path class="scheme-line" stroke="${LINE_COLORS[first.hop.kind] || LINE_COLORS.other}" `
+            const plates = escAttr(group.map(spot => spot.plate).join(' '));
+            out.svg += `<path class="scheme-line scheme-hop-line" data-plates="${plates}" `
+                + `stroke="${LINE_COLORS[first.hop.kind] || LINE_COLORS.other}" `
                 + `d="M${sx} ${sy}L${ex} ${ey}"/>` + dots(ex, ey, group);
-            out.labels += `<foreignObject class="scheme-hop-badge" x="${sx - 30}" y="${sy + 3}" width="60" height="30">`
+            out.labels += `<foreignObject class="scheme-hop-badge" data-plates="${plates}" `
+                + `x="${sx - 30}" y="${sy + 3}" width="60" height="30">`
                 + `<div xmlns="http://www.w3.org/1999/xhtml" class="scheme-cluster-anchor">`
                 + `${clusterHtml([first.hop])}</div></foreignObject>`;
+            taken.push({x: sx - 20, y: sy + 3, w: 40, h: 26});
             grow(sx, sy); grow(ex, ey);
         } else if (first.edge) {
             const s = strands.find(st => st.from === first.edge[0] && st.to === first.edge[1]);
             if (!s) continue;
-            const [x, y] = pointAlong(strandSamples(s), first.at);
-            out.svg += dots(x, y, group);
+            const samples = strandSamples(s);
+            // Najpierw miejsce mijanego przystanku, potem coraz dalej od niego,
+            // po obu stronach kreski.
+            const tries = [0, 0.06, -0.06, 0.12, -0.12, 0.18, -0.18]
+                .map(d => Math.min(0.95, Math.max(0.05, first.at + d)))
+                .flatMap(at => [[at, 1], [at, -1]]);
+            const [at, side] = tries.find(([at, side]) => !blocked(...pointAlong(samples, at), group.length, side))
+                || tries[0];
+            const [x, y] = pointAlong(samples, at);
+            out.svg += dots(x, y, group, side);
             grow(x, y);
         } else {
             const b = boxes.get(first.node);
@@ -6024,6 +6065,63 @@ function schemeCarLayer(boxes, strands, spots) {
         }
     }
     return out;
+}
+
+/** Auto wskazane (na mapie albo na schemacie): na schemacie jego kropka
+    i jazda do niego - odnoga z numerem albo narysowana linia, którą się do
+    niego dojeżdża (ten sam styl co wskazana linia). */
+function markSchemeCar(car, on) {
+    const canvas = $('scheme-canvas');
+    const layer = canvas && canvas.querySelector('#scheme-pick-layer');
+    if (!layer) return;
+    for (const dot of canvas.querySelectorAll('g.scheme-car')) {
+        dot.classList.toggle('picked', on && dot.dataset.plate === car.plate);
+    }
+    if (!on) {
+        layer.innerHTML = '';
+        markPickedChips(null);
+        return;
+    }
+    if (!car.ride) return;
+    const hop = [...canvas.querySelectorAll('path.scheme-hop-line')]
+        .find(path => path.dataset.plates.split(' ').includes(car.plate));
+    if (hop) {
+        layer.innerHTML = lineHighlightStyles(car.ride.kind, SCHEME_LINE_PX).map(style =>
+            `<path d="${hop.getAttribute('d')}" fill="none" stroke="${style.color}" `
+            + `stroke-opacity="${style.opacity}" stroke-width="${style.weight}" stroke-linecap="round"/>`).join('');
+    } else {
+        schemeLineHighlight(car.ride.num, car.ride.kind);
+    }
+    markPickedChips(car.ride.num, car.ride.kind);
+}
+
+/** Stacja roweru wskazana na mapie: na schemacie jej przejazd i róg
+    pudełka, w którym stoi. */
+function markSchemeBike(id, on) {
+    const canvas = $('scheme-canvas');
+    if (!canvas) return;
+    for (const element of canvas.querySelectorAll('g.scheme-walk-bike, g.scheme-bike-corner')) {
+        const ids = element.dataset.station ? [element.dataset.station] : element.dataset.stations.split(' ');
+        if (ids.includes(String(id))) element.classList.toggle('picked', on);
+    }
+}
+
+let schemeMarkLayer = null;
+
+/** Róg pudełka ze stacjami roweru wskazany na schemacie: na mapie ten
+    przystanek i te stacje. */
+function markBikeCorner(node, ids, on) {
+    if (schemeMarkLayer) { map.removeLayer(schemeMarkLayer); schemeMarkLayer = null; }
+    if (!on || !lastFlow) return;
+    const layers = (lastFlow.bike_places || []).filter(place => ids.includes(String(place.id)))
+        .map(place => L.circleMarker([place.lat, place.lon],
+                                     {radius: 11, color: '#e65100', weight: 3, fill: false, interactive: false}));
+    const mapNode = node && (lastFlow.nodes || []).find(n => (node.role === 'start' ? n.start : n.place === node.place));
+    if (mapNode) {
+        layers.push(L.circleMarker(nodePoint(mapNode),
+                                   {radius: 11, color: '#111', weight: 3, fill: false, interactive: false}));
+    }
+    schemeMarkLayer = L.layerGroup(layers).addTo(map);
 }
 
 /** Pod schematem nie ma już listy ruchów: godziny są w samym rysunku (patrz
@@ -6147,6 +6245,27 @@ function bindSchemeLines(canvas) {
         dot.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
         dot.addEventListener('pointerleave', () => { hideSchemeTip(); pointCar(car, false); });
         dot.addEventListener('click', show);
+    }
+    // Numer na odnodze auta: ta jazda - na mapie i na schemacie - i dymek
+    // auta, które się nią dojeżdża.
+    for (const badge of canvas.querySelectorAll('foreignObject.scheme-hop-badge')) {
+        const car = (lastFlow && lastFlow.cars || []).find(c => c.plate === badge.dataset.plates.split(' ')[0]);
+        if (!car) continue;
+        const show = e => {
+            showSchemeLineTip(carTooltipHtml(car), e.clientX, e.clientY);
+            showCarOnMap(car, true);
+        };
+        const cluster = badge.querySelector('.line-cluster');
+        cluster.addEventListener('mouseover', show);
+        cluster.addEventListener('click', show);
+        cluster.addEventListener('mouseleave', () => { hideSchemeTip(); showCarOnMap(car, false); });
+    }
+    for (const corner of canvas.querySelectorAll('g.scheme-bike-corner')) {
+        const box = schemeLast && schemeLast.boxes.get(corner.dataset.node);
+        const ids = corner.dataset.stations.split(' ');
+        corner.addEventListener('pointerenter', () => markBikeCorner(box && box.node, ids, true));
+        corner.addEventListener('pointerleave', () => markBikeCorner(null, ids, false));
+        corner.addEventListener('click', () => markBikeCorner(box && box.node, ids, true));
     }
     for (const walk of canvas.querySelectorAll('g.scheme-walk-bike')) {
         const place = (lastFlow && lastFlow.bike_places || []).find(p => p.id === walk.dataset.station);
@@ -6274,7 +6393,8 @@ function renderScheme(data) {
         schemeLast = {boxes, strands, scheme, routes};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, routes, scheme.cars || []);
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, routes, scheme.cars || [],
+                                     data.bike_places || []);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
@@ -7856,6 +7976,7 @@ function showSchemeRows() {
     const on = setting('new-map');
     $('scheme-layout-row').hidden = !on;
     $('scheme-walks-count-row').hidden = !on;
+    $('scheme-walk-time-row').hidden = !on;
 }
 
 // Zmiana rysuje stan (`paint`, też na starcie) i/albo coś robi po ruchu (`react`).
@@ -7895,6 +8016,7 @@ const SETTING_EFFECTS = {
     'headline-map-range': {react: () => renderTimeHeadline()},
     // Układ schematu (tymczasowy wybór do porównania): zmiana tylko przerysowuje to, co już przyszło.
     'scheme-layout': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
+    'scheme-walk-time': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
     // Przejścia pieszo na schemacie (demo): ile przejść ze środka najszybszych podróży dodać do tych z dojścia.
     'scheme-walks-count': {react: replanSoon(false)},
     'bikes-merged': {paint: () => paintBikeButtons()},
