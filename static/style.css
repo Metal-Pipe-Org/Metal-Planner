@@ -1564,13 +1564,13 @@ body.routes-off #results .notice.loading { display: none; }
     box-shadow: var(--shadow);
 }
 
-.layer-note.warn {
+.layer-note-warn {
     background: #f5c518;
     color: #3a2f00;
     font-weight: 600;
 }
 
-.layer-note.info {
+.layer-note-info {
     background: var(--surface-alt);
     color: var(--ink-soft);
 }

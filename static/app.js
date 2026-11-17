@@ -502,7 +502,7 @@ function setLayerNotes(source, notes) {
     const all = Object.values(layerNotes).flat();
     layerNotesEl.hidden = !all.length;
     layerNotesEl.innerHTML = all.map(note =>
-        `<div class="layer-note ${note.level}"` +
+        `<div class="layer-note layer-note-${note.level}"` +
         (note.setting ? ` data-setting="${note.setting}" role="button" tabindex="0"` : '') +
         `>${esc(note.text)}</div>`).join('');
 }
