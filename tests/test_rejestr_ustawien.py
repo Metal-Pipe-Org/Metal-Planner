@@ -195,12 +195,6 @@ def test_strona_dev_i_obsolete_niesie_oba_znaczniki(monkeypatch):
     assert re.search(r"if \(row\.classList\.contains\('dev-only'\)\) tags\.push\('DEV'\);\s*if \(row\.dataset\.obsolete !== undefined\) tags\.push\('obsolete'\);", kod)
 
 
-def test_obsolete_nie_trafia_do_grupy_inne_niz_domyslne():
-    kod = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
-    funkcja = re.search(r"function changedSettingRows\(shown\) \{\n(.*?)\n\}", kod, re.S).group(1)
-    assert "!isObsolete(row)" in funkcja
-
-
 def _id_z_kodu():
     """id ustawień, o które pyta kod: id -> skąd je wzięto."""
     znalezione = {}

@@ -8070,7 +8070,7 @@ new MutationObserver(renderSettingsList).observe(settingsList,
 const CHANGED_GROUP = 'Inne niż domyślne';
 
 function changedSettingRows(shown) {
-    return shown.filter(row => isCopyable(row) && !isObsolete(row) && differsFromDefault(SETTINGS.get(row.dataset.setting)));
+    return shown.filter(row => isCopyable(row) && differsFromDefault(SETTINGS.get(row.dataset.setting)));
 }
 
 function visibleSettingRows() {
