@@ -113,7 +113,7 @@ albo z `data/.env` (zmienne ze środowiska przebijają plik). Najważniejsze:
 | `GTFS_UPDATE_ON_START` | `on` | odświeżanie rozkładu przy starcie serwera |
 | `WRM_ENABLED` | `on` | rower miejski |
 | `TRAFICAR` | `1` | auta Traficara; `0` wyłącza |
-| `DEV_MODE` | wyłączony | `1` pokazuje sekcje DEV w ⚙ (w tym wgranie rozkładu Siechnic) i dokłada w „O aplikacji” linki zespołu; lokalnie i na serwerze testowym |
+| `DEV_MODE` | wyłączony | `1` pokazuje sekcje DEV w ⚙ (w tym wgranie rozkładu Siechnic) i dokłada w „O aplikacji” linki zespołu, a pod nazwą datę deployu (lokalnie: startu serwera); lokalnie i na serwerze testowym |
 
 Pozostałe (rozkład PKP, procesy i wątki serwera, strefa czasowa) opisują
 komentarze w `docker-compose.yml`.

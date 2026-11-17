@@ -69,7 +69,6 @@ permissions:
 
 env:
   LABEL_PROGRESS: "PR in progress"
-  LABEL_STALE: "stale"
   # Dawne etykiety, które znaczyły to samo co "PR in progress". Zgłoszenia
   # mogą je jeszcze nosić, więc traktujemy je jak jej aliasy: schodzą razem
   # z nią. Lista do skasowania, gdy żadne zgłoszenie już ich nie ma.
@@ -169,6 +168,8 @@ jobs:
           MENTION: ${{ steps.refs.outputs.mention }}
         run: |
           set -euo pipefail
+          # LABEL_STALE z config.sh.
+          source .discord/.github/scripts/config.sh
 
           # Pierwszy bieg w repo zakłada etykiety; przy kolejnych `gh` zgłasza
           # „already exists" i to jest w porządku.

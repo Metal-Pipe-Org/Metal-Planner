@@ -636,6 +636,34 @@ def active_service_ids(db, day):
     return active
 
 
+def active_service_ids_for_days(db, days):
+    """To samo co active_service_ids, ale dla wielu dni naraz: kalendarz
+    wczytany raz (dwa zapytania), reszta w pamięci. Wynik: {dzień: zbiór}."""
+    calendar = db.execute(
+        f"SELECT service_id, start_date, end_date, {', '.join(WEEKDAY_COLUMNS)} FROM calendar"
+    ).fetchall()
+    exceptions = {}
+    for service_id, date_str, exception_type in db.execute(
+        "SELECT service_id, date, exception_type FROM calendar_dates"
+    ):
+        exceptions.setdefault(date_str, []).append((service_id, exception_type))
+
+    result = {}
+    for day in days:
+        date_str = day.strftime("%Y%m%d")
+        active = {
+            row[0] for row in calendar
+            if row[3 + day.weekday()] == 1 and row[1] <= date_str <= row[2]
+        }
+        for service_id, exception_type in exceptions.get(date_str, ()):
+            if exception_type == 1:
+                active.add(service_id)
+            else:
+                active.discard(service_id)
+        result[day] = active
+    return result
+
+
 def last_service_date():
     """Ostatni dzień, na który paczka GTFS ma jakiekolwiek kursy, albo None
     bez bazy. Paczka sięga zwykle ok. dwóch tygodni naprzód - dalej pytanie

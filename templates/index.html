@@ -173,6 +173,14 @@
                         Metal Planner
                     </button>
                 </h1>
+                {# Tylko w DEV_MODE (#446): kiedy wstała ta wersja - w kontenerze czas
+                   budowy obrazu, lokalnie start serwera (patrz config.deployed_at). #}
+                {% if deployed %}
+                <time class="deployed-at" datetime="{{ deployed.isoformat(timespec='seconds') }}">
+                    {#- Dzień bez zera z .day, bo %-d nie działa na Windowsie. -#}
+                    {{- 'Deployed ' ~ deployed.day ~ deployed.strftime('.%m.%Y, %H:%M') -}}
+                </time>
+                {% endif %}
             </div>
             <button id="install" class="icon-button" title="Zainstaluj aplikację"
                     aria-label="Zainstaluj aplikację" hidden>⤓</button>
@@ -667,36 +675,61 @@
 
       Wszystkie ustawienia stoją w jednej liście z wyszukiwarką (settingsList w app.js).
       Nagłówki grup składa app.js z `data-labels` widocznych wierszy, więc nowe
-      ustawienie wymaga tylko etykiet, nie miejsca w jakiejś sekcji.
+      ustawienie wymaga tylko tagów, nie miejsca w jakiejś sekcji.
 
-      Ten wiersz jest CAŁYM opisem ustawienia: rodzaj wynika z kontrolki
+      Rejestr settings.json trzyma tylko to, co da się zmienić bez ruszania
+      kodu: nazwę, opis (ikonka „i"), tagi, `dev` („tylko DEV") i `obsolete`.
+      Czyta go settings_registry.py i przekazuje tu jako `settings`. Typ
+      kontrolki, wartość domyślna i zakres zostają TUTAJ, a nie w rejestrze,
+      bo kod aplikacji musi z nimi współgrać: zmiana któregoś z nich samym
+      wpisem w rejestrze rozjechałaby się z kodem i psuła aplikację.
+      Wiersz tylko stawia kontrolkę i wywołuje makra z rejestru:
+      dev(id) dokłada klasę `dev-only` (pole `dev`), attrs(id) daje
+      `data-setting` i `data-labels` (tagi), name(id) nazwę, info(id) ikonkę
+      z opisem. Ustawienie z polem `obsolete` dostaje tu samo tag „obsolete"
+      (pole `dev` zostaje: takie ustawienie widać nadal tylko w trybie
+      deweloperskim), klikalny znaczek „obsolete" z odnośnikiem do zgłoszenia
+      (`data-issue-url`, znaczek dokłada app.js), a po miesiącu od daty wiersz
+      zostaje w DOM, ale jest schowany (`data-expired`), a jego zapamiętana
+      wartość nie działa.
+
+      Grupa z nagłówkiem w ⚙ powstaje od 3 ustawień z tym samym tagiem;
+      rzadsze tagi działają tylko w wyszukiwarce.
+
+      Nowe ustawienie: wpis w settings.json (id, name, opcjonalnie description,
+      tags, dev) i wiersz tutaj. Wiersz jest opisem KONTROLKI: rodzaj wynika z niej
       (przełącznik, suwak albo lista wyboru), `value`/`checked`/`selected` to
       wartość DOMYŚLNA (z nią porównuje pasek „zmienione", do niej wraca
-      „Przywróć domyślne"), `dev-only` to „tylko DEV", `data-labels` to
-      nagłówki, a `data-setting` musi być równe id kontrolki. Zapamiętywanie,
-      kopie pod nagłówkami i statystyki dostaje każde takie ustawienie samo
-      (blok „USTAWIENIA" w app.js). Aplikacja czyta wartość przez setting(id);
-      jeśli zmiana ma coś zrobić od razu, wpis dopisuje się w SETTING_EFFECTS.
-      `data-tuning` oznacza strojenie, które chowa stała w app.js (LOOK_TUNING,
-      SOUND_TUNING).
+      „Przywróć domyślne"), a `data-setting` musi być równe id kontrolki
+      i id wpisu w rejestrze. Zapamiętywanie, kopie pod nagłówkami i statystyki
+      dostaje każde takie ustawienie samo (blok „USTAWIENIA" w app.js).
+      Aplikacja czyta wartość przez setting(id); jeśli zmiana ma coś zrobić od
+      razu, wpis dopisuje się w SETTING_EFFECTS. `data-tuning` oznacza
+      strojenie, które chowa stała w app.js (LOOK_TUNING, SOUND_TUNING).
     #}
     <input type="search" id="settings-search" class="settings-search"
            placeholder="Szukaj ustawienia" aria-label="Szukaj ustawienia" autocomplete="off">
 
+    {% macro dev(id) -%}{% if settings[id].dev %} dev-only{% endif %}{%- endmacro %}
+    {% macro attrs(id) -%}
+        data-setting="{{ id }}" data-labels="{{ settings[id].labels }}"
+        {%- if settings[id].obsolete %} data-obsolete="{{ settings[id].obsolete }}" data-issue-url="{{ settings[id].issue_url }}"{% endif %}
+        {%- if settings[id].expired %} data-expired hidden{% endif %}
+    {%- endmacro %}
+    {% macro name(id) -%}{{ settings[id].name }}{%- endmacro %}
+    {% macro info(id, glyph='i') -%}
+        {%- if settings[id].description %}<span class="info" tabindex="0" role="button" data-tip="{{ settings[id].description }}">{{ glyph }}</span>{% endif -%}
+    {%- endmacro %}
     <div id="settings-list">
 
-    <label class="dev-check set-row" data-setting="time-show-headline" data-labels="Mapa, Czas">
-            <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
+    <label class="dev-check{{ dev('time-show-headline') }} set-row" {{ attrs('time-show-headline') }}>
+            <input type="checkbox" id="time-show-headline" checked> {{ name('time-show-headline') }} {{ info('time-show-headline') }}
         </label>
-    <label class="dev-check set-row" data-setting="tt-past" data-labels="Rozkład, Czas">
-            <input type="checkbox" id="tt-past" checked> Szare godziny w tablicy
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Odjazdy, na które już nie zdążysz, zostają w tablicy na szaro. Wyłączone — tablica zaczyna się od chwili, w której według mapy tu jesteś.">i</span>
+    <label class="dev-check{{ dev('tt-past') }} set-row" {{ attrs('tt-past') }}>
+            <input type="checkbox" id="tt-past" checked> {{ name('tt-past') }} {{ info('tt-past') }}
         </label>
-    <label class="dev-check set-row" data-setting="car-vans" data-labels="Traficar, Mapa">
-            <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka, i stoją na mapie jako puste pierścienie.">i</span>
+    <label class="dev-check{{ dev('car-vans') }} set-row" {{ attrs('car-vans') }}>
+            <input type="checkbox" id="car-vans"> {{ name('car-vans') }} {{ info('car-vans') }}
         </label>
 
 {#
@@ -705,41 +738,33 @@
       (gtfs.with_pace), więc każde tempo to jedno przeliczenie, a nie jedno
       na każde zapytanie.
     #}
-    <div class="field set-row" data-setting="walk-pace" data-labels="Założenia czasowe, Chodzenie">
+    <div class="field{{ dev('walk-pace') }} set-row" {{ attrs('walk-pace') }}>
         <label for="walk-pace">
-            Tempo marszu <output id="walk-pace-value">zwykłe</output>
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Dotyczy wszystkich przejść. Zwykłe to ok. 42 m na minutę w linii prostej, wolne ok. 33, szybkie ok. 54; krótsze przejście i tak trwa co najmniej 3 minuty.">i</span>
+            {{ name('walk-pace') }} <output id="walk-pace-value">zwykłe</output> {{ info('walk-pace') }}
         </label>
         <input type="range" id="walk-pace" min="0" max="2" step="1" value="1">
     </div>
-    <div class="field set-row" data-setting="bike-kmh" data-labels="Założenia czasowe, Rower">
+    <div class="field{{ dev('bike-kmh') }} set-row" {{ attrs('bike-kmh') }}>
         <label for="bike-kmh">
-            Prędkość roweru <output id="bike-kmh-value">10</output> km/h
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Liczona w linii prostej między stacjami, więc objazdy ulicami już w niej siedzą — 10 km/h to ok. 14 km/h realnej jazdy.">i</span>
+            {{ name('bike-kmh') }} <output id="bike-kmh-value">10</output> km/h {{ info('bike-kmh') }}
         </label>
         <input type="range" id="bike-kmh" min="5" max="20" step="1" value="10">
     </div>
-    <div class="field set-row" data-setting="bike-overhead" data-labels="Założenia czasowe, Rower">
+    <div class="field{{ dev('bike-overhead') }} set-row" {{ attrs('bike-overhead') }}>
         <label for="bike-overhead">
-            Wypożyczenie i zwrot roweru <output id="bike-overhead-value">2</output> min
+            {{ name('bike-overhead') }} <output id="bike-overhead-value">2</output> min {{ info('bike-overhead') }}
         </label>
         <input type="range" id="bike-overhead" min="0" max="10" step="1" value="2">
     </div>
-    <div class="field set-row" data-setting="car-kmh" data-labels="Założenia czasowe, Traficar">
+    <div class="field{{ dev('car-kmh') }} set-row" {{ attrs('car-kmh') }}>
         <label for="car-kmh">
-            Prędkość Traficara <output id="car-kmh-value">22</output> km/h
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Liczona w linii prostej do celu, więc objazdy i światła już w niej siedzą — 22 km/h to ok. 29 km/h realnej jazdy.">i</span>
+            {{ name('car-kmh') }} <output id="car-kmh-value">22</output> km/h {{ info('car-kmh') }}
         </label>
         <input type="range" id="car-kmh" min="10" max="40" step="1" value="22">
     </div>
-    <div class="field set-row" data-setting="car-overhead" data-labels="Założenia czasowe, Traficar">
+    <div class="field{{ dev('car-overhead') }} set-row" {{ attrs('car-overhead') }}>
         <label for="car-overhead">
-            Ruszenie i parkowanie Traficara <output id="car-overhead-value">8</output> min
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Otwarcie i wyjazd z miejsca, a na końcu szukanie miejsca, zakończenie najmu i dojście pod cel.">i</span>
+            {{ name('car-overhead') }} <output id="car-overhead-value">8</output> min {{ info('car-overhead') }}
         </label>
         <input type="range" id="car-overhead" min="0" max="20" step="1" value="8">
     </div>
@@ -749,128 +774,110 @@
       schowania. Wyłączona lista propozycji nie tylko znika z ekranu - serwer
       w ogóle jej nie składa (zgłoszenie #171).
     #}
-    <label class="dev-check set-row" data-setting="bikes-merged" data-labels="Rower">
-            <input type="checkbox" id="bikes-merged"> Jeden przycisk rowerów
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe i elektryczne naraz.">i</span>
+    <label class="dev-check{{ dev('bikes-merged') }} set-row" {{ attrs('bikes-merged') }}>
+            <input type="checkbox" id="bikes-merged"> {{ name('bikes-merged') }} {{ info('bikes-merged') }}
         </label>
-    <label class="dev-check set-row" data-setting="no-pull-refresh" data-labels="Zachowanie strony">
-            <input type="checkbox" id="no-pull-refresh"> Wyłącz odświeżanie przeciągnięciem w dół
+    <label class="dev-check{{ dev('no-pull-refresh') }} set-row" {{ attrs('no-pull-refresh') }}>
+            <input type="checkbox" id="no-pull-refresh"> {{ name('no-pull-refresh') }} {{ info('no-pull-refresh') }}
         </label>
-    <label class="dev-check set-row" data-setting="start-mode-switch" data-labels="Funkcje">
-            <input type="checkbox" id="start-mode-switch" checked> Przełącznik „Stoję tutaj / Jestem w pojeździe"
+    <label class="dev-check{{ dev('start-mode-switch') }} set-row" {{ attrs('start-mode-switch') }}>
+            <input type="checkbox" id="start-mode-switch" checked> {{ name('start-mode-switch') }} {{ info('start-mode-switch') }}
         </label>
-    <label class="dev-check set-row" data-setting="routes-on" data-labels="Propozycje tras, Funkcje">
-            <input type="checkbox" id="routes-on" checked> Propozycje tras
+    <label class="dev-check{{ dev('routes-on') }} set-row" {{ attrs('routes-on') }}>
+            <input type="checkbox" id="routes-on" checked> {{ name('routes-on') }} {{ info('routes-on') }}
         </label>
-    <label class="dev-check set-row" data-setting="via-open" data-labels="Przystanki">
-            <input type="checkbox" id="via-open"> Zawsze pokazuj przystanki po drodze
+    <label class="dev-check{{ dev('via-open') }} set-row" {{ attrs('via-open') }}>
+            <input type="checkbox" id="via-open"> {{ name('via-open') }} {{ info('via-open') }}
         </label>
 
-    <div class="field dev-only set-row" data-setting="density" data-labels="Zagęszczenie, Mapa">
+    <div class="field{{ dev('density') }} set-row" {{ attrs('density') }}>
         <label for="density">
-            Gęstość mapy <output id="density-value">2</output>
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru. Godzina „mapa pokazuje do” jest tego skutkiem.">i</span>
+            {{ name('density') }} <output id="density-value">2</output> {{ info('density') }}
         </label>
         <input type="range" id="density" min="0.5" max="15" step="0.5" value="2">
     </div>
-    <div class="field dev-only set-row" data-setting="car-count" data-labels="Zagęszczenie, Traficar">
+    <div class="field{{ dev('car-count') }} set-row" {{ attrs('car-count') }}>
         <label for="car-count">
-            Ile aut Traficara <output id="car-count-value">3</output>
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”, są zawsze. Suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.">i</span>
+            {{ name('car-count') }} <output id="car-count-value">3</output> {{ info('car-count') }}
         </label>
         <input type="range" id="car-count" min="1" max="30" step="1" value="3">
     </div>
-    <div class="field dev-only set-row" data-setting="bike-count" data-labels="Zagęszczenie, Rower">
+    <div class="field{{ dev('bike-count') }} set-row" {{ attrs('bike-count') }}>
         <label for="bike-count">
-            Ile stacji z rowerem <output id="bike-count-value">3</output>
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Stacje, których żadna inna nie bije godziną przy rowerze, godziną w celu ani liczbą pojazdów, są zawsze. Suwak dokłada kolejne.">i</span>
+            {{ name('bike-count') }} <output id="bike-count-value">3</output> {{ info('bike-count') }}
         </label>
         <input type="range" id="bike-count" min="1" max="30" step="1" value="3">
     </div>
 
-    <label class="dev-check dev-only set-row" data-setting="time-hover" data-labels="Czas, Mapa">
-            <input type="checkbox" id="time-hover" checked> Godzina w punkcie pod kursorem
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu, jeśli jedzie się dalej stąd.">i</span>
+    <label class="dev-check{{ dev('time-hover') }} set-row" {{ attrs('time-hover') }}>
+            <input type="checkbox" id="time-hover" checked> {{ name('time-hover') }} {{ info('time-hover') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="time-ends" data-labels="Czas, Mapa">
-            <input type="checkbox" id="time-ends"> …z kropką dokładnie w tym punkcie
+    <label class="dev-check{{ dev('time-ends') }} set-row" {{ attrs('time-ends') }}>
+            <input type="checkbox" id="time-ends"> {{ name('time-ends') }} {{ info('time-ends') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="time-chips" data-labels="Czas, Mapa">
-            <input type="checkbox" id="time-chips"> Godzina pod numerkiem w grupce
+    <label class="dev-check{{ dev('time-chips') }} set-row" {{ attrs('time-chips') }}>
+            <input type="checkbox" id="time-chips"> {{ name('time-chips') }} {{ info('time-chips') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="time-ride" data-labels="Czas, Mapa">
-            <input type="checkbox" id="time-ride"> Sam czas jazdy w pasku nad mapą
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Czas jazdy liczy się od wejścia do pierwszego pojazdu, bez czekania na niego.">i</span>
+    <label class="dev-check{{ dev('time-ride') }} set-row" {{ attrs('time-ride') }}>
+            <input type="checkbox" id="time-ride"> {{ name('time-ride') }} {{ info('time-ride') }}
         </label>
 
 {#
       Przystanki i rozkład spod kropki - nic tu nie rusza serwera (wszystko
       jest już w odpowiedziach, przełącznik tylko przemalowuje).
     #}
-    <label class="dev-check dev-only set-row" data-setting="dot-center" data-labels="Przystanki, Rozkład, Mapa">
-            <input type="checkbox" id="dot-center" checked> Kropka w środku wszystkich słupków
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie, z którego wzięta jest godzina.">i</span>
+    <label class="dev-check{{ dev('dot-center') }} set-row" {{ attrs('dot-center') }}>
+            <input type="checkbox" id="dot-center" checked> {{ name('dot-center') }} {{ info('dot-center') }}
         </label>
-    <div class="field compact dev-only set-row" data-setting="dot-rows" data-labels="Przystanki, Rozkład">
+    <div class="field compact{{ dev('dot-rows') }} set-row" {{ attrs('dot-rows') }}>
             <label for="dot-rows">
-                Ile odjazdów w tablicy <output id="dot-rows-value">20</output>
-            </label>
+                {{ name('dot-rows') }} <output id="dot-rows-value">20</output> {{ info('dot-rows') }}
+        </label>
             <input type="range" id="dot-rows" min="1" max="20" step="1" value="20">
         </div>
-    <div class="field compact dev-only set-row" data-setting="names-zoom" data-labels="Przystanki, Mapa">
+    <div class="field compact{{ dev('names-zoom') }} set-row" {{ attrs('names-zoom') }}>
             <label for="names-zoom">
-                Nazwy przystanków od przybliżenia <output id="names-zoom-value">17</output>
-                <span class="info" tabindex="0" role="button"
-                      data-tip="Przy narysowanej trasie podpisuje tylko przystanki jej linii, bez trasy - wszystkie w kadrze. 19 to najbliżej, jak się da.">i</span>
+                {{ name('names-zoom') }} <output id="names-zoom-value">17</output> {{ info('names-zoom') }}
             </label>
             <input type="range" id="names-zoom" min="14" max="19" step="1" value="17">
         </div>
-    <label class="dev-check dev-only set-row" data-setting="tip-cursor" data-labels="Rozkład, Przystanki">
-            <input type="checkbox" id="tip-cursor" checked> Dymek przy kursorze
+    <label class="dev-check{{ dev('tip-cursor') }} set-row" {{ attrs('tip-cursor') }}>
+            <input type="checkbox" id="tip-cursor" checked> {{ name('tip-cursor') }} {{ info('tip-cursor') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="tip-panel" data-labels="Rozkład, Przystanki">
-            <input type="checkbox" id="tip-panel" checked> Okienko w rogu ekranu
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Okienko zostaje do zamknięcia. Można włączyć dymek, okienko, oba albo żadne.">i</span>
+    <label class="dev-check{{ dev('tip-panel') }} set-row" {{ attrs('tip-panel') }}>
+            <input type="checkbox" id="tip-panel" checked> {{ name('tip-panel') }} {{ info('tip-panel') }}
         </label>
 
-    <label class="dev-check dev-only set-row" data-setting="bike-times" data-labels="Rower, Czas">
-            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Obok drugiego końca przejazdu staje godzina policzona z odległości, a nie sama odległość.">i</span>
+    <label class="dev-check{{ dev('bike-times') }} set-row" {{ attrs('bike-times') }}>
+            <input type="checkbox" id="bike-times"> {{ name('bike-times') }} {{ info('bike-times') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="bike-rides" data-labels="Rower, Mapa">
-            <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
+    <label class="dev-check{{ dev('bike-rides') }} set-row" {{ attrs('bike-rides') }}>
+            <input type="checkbox" id="bike-rides"> {{ name('bike-rides') }} {{ info('bike-rides') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="car-times" data-labels="Traficar, Czas">
-            <input type="checkbox" id="car-times"> Godzina dojazdu autem
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Godzina szacowana z odległości w linii prostej i założeń czasowych. Auta wybierane są nią zawsze — przełącznik tylko ją pokazuje.">i</span>
+    <label class="dev-check{{ dev('car-times') }} set-row" {{ attrs('car-times') }}>
+            <input type="checkbox" id="car-times"> {{ name('car-times') }} {{ info('car-times') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="zone-button" data-labels="Traficar">
-            <input type="checkbox" id="zone-button"> Przycisk strefy oddawania Traficara
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez niego strefa pokazuje się po najechaniu na auto.">i</span>
+    <label class="dev-check{{ dev('zone-button') }} set-row" {{ attrs('zone-button') }}>
+            <input type="checkbox" id="zone-button"> {{ name('zone-button') }} {{ info('zone-button') }}
         </label>
 
 {#
       Podgląd do oceniania reguł wyboru - nic tu nie rusza serwera, dane
       przychodzą zawsze, przełącznik tylko je pokazuje.
     #}
-    <label class="dev-check dev-only set-row" data-setting="debug-why" data-labels="Debug, Mapa, Rower, Traficar">
-            <input type="checkbox" id="debug-why"> Dlaczego rower i auto są na mapie
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych je bije i które.">i</span>
+    <label class="dev-check{{ dev('debug-why') }} set-row" {{ attrs('debug-why') }}>
+            <input type="checkbox" id="debug-why"> {{ name('debug-why') }} {{ info('debug-why') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="debug-why-seg" data-labels="Debug, Mapa">
-            <input type="checkbox" id="debug-why-seg"> Dlaczego kawałek jest na mapie
+    <label class="dev-check{{ dev('debug-why-seg') }} set-row" {{ attrs('debug-why-seg') }}>
+            <input type="checkbox" id="debug-why-seg"> {{ name('debug-why-seg') }} {{ info('debug-why-seg') }}
+        </label>
+    <label class="dev-check dev-only set-row" data-setting="vehicles-direction" data-labels="Eksperyment, Mapa, Pojazdy">
+            <input type="checkbox" id="vehicles-direction"> Pojazdy tylko w naszą stronę (◉)
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Przy narysowanej mapie ◉ ukrywa pojazdy jadące w przeciwną stronę; zostają jadące w naszą i te bez rozpoznanego kursu.">i</span>
+        </label>
+    <label class="dev-check dev-only set-row" data-setting="vehicles-stats" data-labels="Debug, Mapa, Pojazdy">
+            <input type="checkbox" id="vehicles-stats"> Statystyki pojazdów na mapie (◉)
         </label>
 
 {#
@@ -881,46 +888,46 @@
       suwaków (to, co zostaje, gdy są schowane) to `value` poniżej.
       Nie rusza serwera — działa natychmiast, bez ponownego zapytania.
     #}
-    <div class="field compact dev-only set-row" data-setting="dot-size" data-labels="Wygląd mapy" data-tuning="look" hidden>
+    <div class="field compact{{ dev('dot-size') }} set-row" {{ attrs('dot-size') }} data-tuning="look" hidden>
             <label for="dot-size">
-                Wielkość kropek <output id="dot-size-value">8</output> px
-            </label>
+                {{ name('dot-size') }} <output id="dot-size-value">8</output> px {{ info('dot-size') }}
+        </label>
             <input type="range" id="dot-size" min="3" max="14" step="0.5" value="8">
         </div>
     {# Każda linia jest pełna, więc suwaków „najbledsza/najjaśniejsza
            linia" i otoczki od jasności tu nie ma - nic by nie zmieniały. #}
-    <div class="field compact dev-only set-row" data-setting="look-weight" data-labels="Wygląd mapy" data-tuning="look" hidden>
+    <div class="field compact{{ dev('look-weight') }} set-row" {{ attrs('look-weight') }} data-tuning="look" hidden>
             <label for="look-weight">
-                Grubość linii <output id="look-weight-value">3</output> px
-            </label>
+                {{ name('look-weight') }} <output id="look-weight-value">3</output> px {{ info('look-weight') }}
+        </label>
             <input type="range" id="look-weight" min="2" max="12" step="0.5" value="3">
         </div>
-    <div class="field compact dev-only set-row" data-setting="look-dim" data-labels="Wygląd mapy" data-tuning="look" hidden>
+    <div class="field compact{{ dev('look-dim') }} set-row" {{ attrs('look-dim') }} data-tuning="look" hidden>
             <label for="look-dim">
-                Przygaszenie przy wybranej trasie <output id="look-dim-value">0.22</output>
-            </label>
+                {{ name('look-dim') }} <output id="look-dim-value">0.22</output> {{ info('look-dim') }}
+        </label>
             <input type="range" id="look-dim" min="0.05" max="1" step="0.01" value="0.22">
         </div>
-    <div class="field compact dev-only set-row" data-setting="look-label-step" data-labels="Wygląd mapy" data-tuning="look" hidden>
+    <div class="field compact{{ dev('look-label-step') }} set-row" {{ attrs('look-label-step') }} data-tuning="look" hidden>
             <label for="look-label-step">
-                Odstęp grupek numerów <output id="look-label-step-value">200</output> px
-            </label>
+                {{ name('look-label-step') }} <output id="look-label-step-value">200</output> px {{ info('look-label-step') }}
+        </label>
             <input type="range" id="look-label-step" min="120" max="700" step="20" value="200">
         </div>
-    <div class="field compact dev-only set-row" data-setting="look-label-size" data-labels="Wygląd mapy" data-tuning="look" hidden>
+    <div class="field compact{{ dev('look-label-size') }} set-row" {{ attrs('look-label-size') }} data-tuning="look" hidden>
             <label for="look-label-size">
-                Wielkość numerów <output id="look-label-size-value">0.8</output>×
-            </label>
+                {{ name('look-label-size') }} <output id="look-label-size-value">0.8</output>× {{ info('look-label-size') }}
+        </label>
             <input type="range" id="look-label-size" min="0.7" max="1.6" step="0.05" value="0.8">
         </div>
-    <div class="field compact dev-only set-row" data-setting="look-label-op" data-labels="Wygląd mapy" data-tuning="look" hidden>
+    <div class="field compact{{ dev('look-label-op') }} set-row" {{ attrs('look-label-op') }} data-tuning="look" hidden>
             <label for="look-label-op">
-                Krycie numerów <output id="look-label-op-value">1</output>×
-            </label>
+                {{ name('look-label-op') }} <output id="look-label-op-value">1</output>× {{ info('look-label-op') }}
+        </label>
             <input type="range" id="look-label-op" min="0.3" max="1" step="0.05" value="1">
         </div>
-    <div class="field dev-only set-row" data-setting="look-dump" data-labels="Wygląd mapy" data-tuning="look" hidden>
-        <div class="set-title">Wartości do wpisania</div>
+    <div class="field{{ dev('look-dump') }} set-row" {{ attrs('look-dump') }} data-tuning="look" hidden>
+        <div class="set-title">{{ name('look-dump') }} {{ info('look-dump') }}</div>
         <p class="field-hint" id="look-dump">
             Ustaw jak chcesz i podaj mi te liczby — wpiszę je jako domyślne
             i skasuję te suwaki.
@@ -932,8 +939,8 @@
       prostu jest, bez ustawienia. Atrybut `hidden` wiersza to tylko stan
       startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
     #}
-    <label class="dev-check set-row" data-setting="sound-pipe" data-labels="Dźwięk" data-tuning="sound" hidden>
-            <input type="checkbox" id="sound-pipe" checked> Metalowa rura po znalezieniu trasy
+    <label class="dev-check{{ dev('sound-pipe') }} set-row" {{ attrs('sound-pipe') }} data-tuning="sound" hidden>
+            <input type="checkbox" id="sound-pipe" checked> {{ name('sound-pipe') }} {{ info('sound-pipe') }}
         </label>
 
 {#
@@ -941,9 +948,9 @@
       tygodnia wgrywa się stąd (patrz siechnice.validate_snapshot). Nie jest
       ustawieniem: nic tu nie trafia do pamięci przeglądarki.
     #}
-    <div class="field dev-only set-row set-action" data-setting="siechnice-file" data-labels="Rozkład, Aplikacja">
+    <div class="field{{ dev('siechnice-file') }} set-row set-action" {{ attrs('siechnice-file') }}>
         <div class="sw-row" id="siechnice-upload">
-            <label class="button" for="siechnice-file" data-protected>Wgraj rozkład Siechnic</label>
+            <label class="button" for="siechnice-file" data-protected>{{ name('siechnice-file') }}</label>{{ info('siechnice-file') }}
             <input type="file" id="siechnice-file" accept=".json,application/json" hidden>
         </div>
         <p class="field-hint" id="siechnice-status" role="status"></p>
@@ -954,8 +961,8 @@
       zamknięcia karty. Chroniona kontrolka dostaje atrybut data-protected -
       przy braku odblokowania ma kłódkę i skacze tutaj.
     #}
-    <div class="field dev-only set-row set-action" data-setting="dev-access" data-labels="Deweloperskie, Dostęp">
-        <div class="set-title">Dostęp chroniony (kod z Discorda)</div>
+    <div class="field{{ dev('dev-access') }} set-row set-action" {{ attrs('dev-access') }}>
+        <div class="set-title">{{ name('dev-access') }} {{ info('dev-access') }}</div>
         <div id="access-lock">
             <div class="sw-row">
                 <select id="siechnice-person" aria-label="Kto dostanie kod"></select>
@@ -971,8 +978,23 @@
         <p class="field-hint" id="access-status" role="status"></p>
     </div>
 
-    <div class="field dev-only set-row" data-setting="sw-check" data-labels="Aplikacja" id="sw-field">
-        <div class="set-title">Wersja aplikacji</div>
+{#
+      Eksperyment (#453): odliczenie do odjazdu w Dynamic Island przez PushWard.
+      Klucz zapisuje app.js w localStorage - to nie ustawienie, więc set-action.
+    #}
+    <div class="field{{ dev('pushward') }} set-row set-action" {{ attrs('pushward') }}>
+        <div class="set-title">{{ name('pushward') }} {{ info('pushward', '?') }}
+        </div>
+        <div class="sw-row">
+            <input type="password" id="pushward-key" autocomplete="off" placeholder="Klucz integracji (hlk_…)" aria-label="Klucz integracji PushWard">
+            <button type="button" id="pushward-save" class="button">Zapisz</button>
+            <button type="button" id="pushward-clear" class="button">Usuń</button>
+        </div>
+        <p class="field-hint" id="pushward-status" role="status"></p>
+    </div>
+
+    <div class="field{{ dev('sw-check') }} set-row" {{ attrs('sw-check') }} id="sw-field">
+        <div class="set-title">{{ name('sw-check') }} {{ info('sw-check') }}</div>
         <div class="sw-row">
             <code id="sw-version">—</code>
             <button id="sw-check" class="button" title="Wymuś sprawdzenie aktualizacji">
@@ -982,66 +1004,63 @@
         <p class="field-hint" id="sw-status" role="status"></p>
     </div>
 
-    <div class="field dev-only set-row" data-setting="transfer-gain" data-labels="Propozycje tras, Czas">
+    <div class="field{{ dev('transfer-gain') }} set-row" {{ attrs('transfer-gain') }}>
         <label for="transfer-gain">
-            Ile musi oszczędzić przesiadka <output id="transfer-gain-value">10</output> min
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Lista proponuje przesiadkę jako pierwszą dopiero, gdy oszczędza co najmniej tyle minut względem jazdy tym samym pojazdem.">i</span>
+            {{ name('transfer-gain') }} <output id="transfer-gain-value">10</output> min {{ info('transfer-gain') }}
         </label>
         <input type="range" id="transfer-gain" min="0" max="30" step="1" value="10">
     </div>
 
 {# Tryb względny przy starcie z pokładu (#231, patrz onboard.find_ride). #}
-    <div class="field dev-only set-row" data-setting="onboard-slack" data-labels="Jestem w pojeździe, Czas">
+    <div class="field{{ dev('onboard-slack') }} set-row" {{ attrs('onboard-slack') }}>
         <label for="onboard-slack">
-            Tryb względny od <output id="onboard-slack-value">3</output> min
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Gdy kurs jest według rozkładu przy wybranym przystanku o więcej minut wcześniej albo później niż teraz, pojazd jedzie na mapie od teraz, a reszta zostaje przy rozkładzie. Do tylu minut liczymy wprost z rozkładu.">i</span>
+            {{ name('onboard-slack') }} <output id="onboard-slack-value">3</output> min {{ info('onboard-slack') }}
         </label>
         <input type="range" id="onboard-slack" min="0" max="15" step="1" value="3">
     </div>
 
     {# Nowa mapa rośnie za tym przełącznikiem, stara zostaje domyślna (docs/FLOW_MAP_CONTRACT_V2.md). #}
-    <label class="dev-check dev-only set-row" data-setting="new-map" data-labels="Eksperymenty, Mapa, Funkcje">
-        <input type="checkbox" id="new-map"> Nowa mapa (eksperyment)
-    </label>
+    <label class="dev-check{{ dev('new-map') }} set-row" {{ attrs('new-map') }}>
+        <input type="checkbox" id="new-map"> {{ name('new-map') }} {{ info('new-map') }}
+        </label>
 
-    <label class="dev-check dev-only set-row" data-setting="walking" data-labels="Eksperymenty, Mapa, Chodzenie">
-        <input type="checkbox" id="walking" checked> Chodzenie pieszo
-    </label>
+    <label class="dev-check{{ dev('walking') }} set-row" {{ attrs('walking') }}>
+        <input type="checkbox" id="walking" checked> {{ name('walking') }} {{ info('walking') }}
+        </label>
 
-    <label class="dev-check dev-only set-row" data-setting="headline-map-range" data-labels="Eksperymenty, Mapa, Pasek">
-        <input type="checkbox" id="headline-map-range"> Pokaż zakres mapy na pasku
-    </label>
+    <label class="dev-check{{ dev('headline-map-range') }} set-row" {{ attrs('headline-map-range') }}>
+        <input type="checkbox" id="headline-map-range"> {{ name('headline-map-range') }} {{ info('headline-map-range') }}
+        </label>
 
     {# Tymczasowo, do porównania układów schematu (#367). #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-layout" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-layout-row" hidden>
-        Układ schematu
+    <label class="dev-check{{ dev('scheme-layout') }} set-row" {{ attrs('scheme-layout') }} id="scheme-layout-row" hidden>
+        {{ name('scheme-layout') }}
         <select id="scheme-layout">
             <option value="dagre">dagre (krzywe)</option>
             <option value="elk">ELK (kąty proste)</option>
-        </select>
-    </label>
+        </select> {{ info('scheme-layout') }}
+        </label>
 
     {# Demo (#367): ile najszybszych podróży z przejściem pieszo w środku dorzucić do schematu. #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa, Schemat, Chodzenie" id="scheme-walks-count-row" hidden>
-        Ile dodatkowych najszybszych przejść: <output id="scheme-walks-count-value">2</output>
-        <input type="range" id="scheme-walks-count" min="0" max="20" step="1" value="2">
-    </label>
+    <label class="dev-check{{ dev('scheme-walks-count') }} set-row" {{ attrs('scheme-walks-count') }} id="scheme-walks-count-row" hidden>
+        {{ name('scheme-walks-count') }} <output id="scheme-walks-count-value">2</output>
+        <input type="range" id="scheme-walks-count" min="0" max="20" step="1" value="2"> {{ info('scheme-walks-count') }}
+        </label>
 
     {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
-    <label class="dev-check dev-only set-row" data-setting="location-refresh" data-labels="Eksperymenty, Lokalizacja, Funkcje">
-            <input type="checkbox" id="location-refresh"> Odświeżanie lokalizacji co 30 s
+    <label class="dev-check{{ dev('location-refresh') }} set-row" {{ attrs('location-refresh') }}>
+            <input type="checkbox" id="location-refresh"> {{ name('location-refresh') }} {{ info('location-refresh') }}
         </label>
 
     {# Zliczenia leżą w localStorage tej przeglądarki (#404), więc tabela jest na osobnej stronie. #}
-    <div class="field dev-only set-row" data-setting="stats" data-labels="Statystyki, Aplikacja">
-        <a class="set-title" href="/statystyki">Statystyki ustawień</a>
+    <div class="field{{ dev('stats') }} set-row" {{ attrs('stats') }}>
+        <a class="set-title" href="/statystyki">{{ name('stats') }}</a>{{ info('stats') }}
     </div>
 
     {# Jak często wolno przestawić kolejność listy (patrz snapshotSettingsLog w app.js). #}
-    <div class="field dev-only set-row" data-setting="order-limit" data-labels="Aplikacja, Statystyki">
-        <label for="order-limit">Przeliczanie kolejności ustawień najczęściej co</label>
+    <div class="field{{ dev('order-limit') }} set-row" {{ attrs('order-limit') }}>
+        <label for="order-limit">{{ name('order-limit') }} {{ info('order-limit') }}
+        </label>
         <select id="order-limit">
             <option value="off" selected>wyłączony</option>
             <option value="1h">1 godz.</option>

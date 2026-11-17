@@ -23,16 +23,18 @@
 # Zapisujemy tylko to, co się zmieniło: GitHub trzyma najwyżej tysiąc
 # statusów jednej nazwy na commicie, a przeliczeń jest dużo.
 
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+
 REVIEWERS_DOC="https://github.com/${REPO:-Metal-Pipe-Org/Metal-Planner}/blob/main/CONTRIBUTING.md#review-i-mergowanie"
 
 # Etykiety stanu PR-a (#353): dokładnie jedna na otwartym PR-ze, żadna na
 # zamkniętym. Nazwy po angielsku, jak reszta etykiet w repo. Etykiety
 # zgłoszeń (`PR in progress`, `merged - is it ok?`) to osobny zestaw
-# z issue-labels.yml — tych tu nie ruszamy.
-LABEL_AUTHOR="waiting for author"
-LABEL_CLAUDE="waiting for claude review"
-LABEL_HUMAN="waiting for human review"
-LABEL_OTHER="waiting for other PR"
+# z issue-labels.yml — tych tu nie ruszamy. Nazwy są w config.sh.
+LABEL_AUTHOR=$LABEL_PR_AUTHOR
+LABEL_CLAUDE=$LABEL_PR_CLAUDE
+LABEL_HUMAN=$LABEL_PR_HUMAN
+LABEL_OTHER=$LABEL_PR_OTHER
 LABEL_COLOR_AUTHOR="d93f0b"
 LABEL_COLOR_CLAUDE="d4c5f9"
 LABEL_COLOR_HUMAN="fbca04"
@@ -213,7 +215,11 @@ base_seeds() {
 #      status z „@claude” w opisie (porażka, PR albo jego baza zmienia
 #      workflow oceny), inna porażka albo brak statusu, gdy ocena nie rusza
 #      → autor (`@claude`),
-#   3. czekające „Request changes” → autor,
+#   3. czekające „Request changes”: czeka prośba o recenzję (kogokolwiek,
+#      także ponowna do tego, kto prosił o zmiany) → człowiek, nie czeka
+#      żadna → autor. „Request changes” zostaje, aż ta osoba zrobi nową
+#      recenzję, więc bez tego PR po poprawkach i ponownej prośbie dalej
+#      wisiałby na autorze,
 #   4. brak pełnego zatwierdzenia (co najmniej jedno stojące zatwierdzenie
 #      człowieka i zielony „Recenzenci konieczni”): czeka prośba o recenzję
 #      (osoba albo zespół) → człowiek, nie czeka żadna → autor. Po ocenie
@@ -241,7 +247,9 @@ labels_plan() {
         elif $claude and ((.review.description // "") | test("@claude")) then {s: "author", why: "ocena Claude'\''a czeka na @claude"}
         elif $claude and .review.state == "pending" then {s: "claude", why: "Claude ocenia"}
         elif $claude and .review.state != "success" then {s: "author", why: "ocena Claude'\''a się nie udała"}
-        elif (.changes_requested | length) > 0 then {s: "author", why: ("prośba o zmiany od " + (.changes_requested | join(", ")))}
+        elif (.changes_requested | length) > 0 then
+          (if .requested > 0 then {s: "human", why: ("prośba o zmiany od " + (.changes_requested | join(", ")) + ", ale czeka prośba o recenzję")}
+           else {s: "author", why: ("prośba o zmiany od " + (.changes_requested | join(", ")))} end)
         elif .approvals == 0 or (.reviewers_ok | not) then
           (if .requested > 0 then {s: "human", why: "czeka na recenzję człowieka"}
            else {s: "author", why: "brak pełnego zatwierdzenia i żadnej prośby o recenzję"} end)

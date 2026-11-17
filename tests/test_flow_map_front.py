@@ -41,12 +41,64 @@ sieci):
 import json
 import shutil
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
+from flask import Flask, render_template
+
+import settings_registry
 
 ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = ROOT / "tests" / "js"
+
+
+class _SettingRows(HTMLParser):
+    """Wiersze `.set-row` z index.html z ich kontrolkami i wartościami domyślnymi:
+    app.js buduje z nich całą mapę ustawień, a emulator nie czyta szablonu."""
+
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+        self._row = None
+        self._select = None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "option" and self._select is not None:
+            self._select["options"].append(a.get("value"))
+            if "selected" in a:
+                self._select["selected"] = a.get("value")
+            return
+        classes = (a.get("class") or "").split()
+        if "set-row" in classes:
+            self._select = None
+            self._row = {"classes": classes, "control": None,
+                         "data": {k[5:]: v for k, v in a.items() if k.startswith("data-")}}
+            self.rows.append(self._row)
+        if self._row is None or self._row["control"] is not None:
+            return
+        if tag == "input" and a.get("type") != "file":
+            self._row["control"] = {
+                "tag": "INPUT", "type": a.get("type", "text"), "id": a.get("id"),
+                "checked": "checked" in a, "value": a.get("value", ""),
+                "min": a.get("min"), "max": a.get("max")}
+        elif tag == "select":
+            self._row["control"] = self._select = {
+                "tag": "SELECT", "type": "select-one", "id": a.get("id"),
+                "options": [], "selected": None}
+
+
+def _setting_rows():
+    parser = _SettingRows()
+    # Nazwy, tagi i DEV wstawia do szablonu rejestr ustawień, więc czytamy stronę wyrenderowaną.
+    app = Flask(__name__, template_folder=str(ROOT / "templates"),
+                static_folder=str(ROOT / "static"))
+    with app.test_request_context("/"):
+        parser.feed(render_template("index.html", stops=[], abbreviations={}, lines=[],
+                                    data_error=None, form_time="12:00", form_date="2026-10-01",
+                                    settings=settings_registry.view(), dev_mode=True))
+    return parser.rows
 
 
 def _bundle_source():
@@ -56,6 +108,7 @@ def _bundle_source():
     return "\n".join([
         "const APP_SOURCE = " + json.dumps(app_js) + ";",
         "const FLOW_FIXTURE = " + fixture + ";",
+        "const SETTING_ROWS = " + json.dumps(_setting_rows()) + ";",
         (JS_DIR / "harness.js").read_text(encoding="utf-8"),
         (JS_DIR / "checks.js").read_text(encoding="utf-8"),
     ])

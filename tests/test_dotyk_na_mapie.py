@@ -210,7 +210,37 @@ def test_stukniecie_obok_linii_wskazuje_ja(telefon):
 def test_stukniecie_w_numer_wskazuje_te_linie(telefon):
     """Stuknięcie w numer w grupce wskazuje DOKŁADNIE tę linię - jak najechanie
     na numer kursorem."""
-    numer = telefon.locator(".line-cluster .line-chip-slot").first
+    # Przystanek pod numerem wygrywa ze stuknięciem (TAP_RANK), więc bierzemy
+    # numer, w którego środku palec nie sięga żadnej kropki ani znacznika.
+    wolny = telefon.evaluate("""() => {
+        const map = window.plannerBridge.map;
+        const origin = map.getContainer().getBoundingClientRect();
+        const REACH = 22;
+        const targets = [];
+        map.eachLayer(layer => {
+            if (layer.roster || layer.options.interactive === false) return;
+            if (layer instanceof L.CircleMarker) {
+                const p = map.latLngToContainerPoint(layer.getLatLng());
+                // Słupki miasta w tle (bez obrysu) nie dostają powiększonego celu.
+                const tlo = layer.cityStop !== undefined && layer.options.weight === 0;
+                targets.push({x: p.x, y: p.y,
+                              reach: tlo ? layer.getRadius() : Math.max(layer.getRadius(), REACH)});
+            } else if (layer instanceof L.Marker && layer.getElement()) {
+                const b = layer.getElement().getBoundingClientRect();
+                targets.push({x: (b.left + b.right) / 2 - origin.left,
+                              y: (b.top + b.bottom) / 2 - origin.top,
+                              reach: Math.max(b.width, b.height) / 2 + REACH});
+            }
+        });
+        return [...document.querySelectorAll('.line-cluster .line-chip-slot')].findIndex(slot => {
+            const b = slot.getBoundingClientRect();
+            const x = (b.left + b.right) / 2 - origin.left;
+            const y = (b.top + b.bottom) / 2 - origin.top;
+            return targets.every(t => Math.hypot(t.x - x, t.y - y) > t.reach);
+        });
+    }""")
+    assert wolny >= 0, "na mapie nie ma numeru, który nie leży przy żadnym przystanku"
+    numer = telefon.locator(".line-cluster .line-chip-slot").nth(wolny)
     tekst = numer.locator(".line-chip").inner_text()
     cel = telefon.input_value("#end")
 
