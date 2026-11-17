@@ -28,7 +28,6 @@ from collections import deque
 from datetime import date, datetime, timedelta
 
 import config
-import tls
 import pkp
 
 BASE_URL = "https://pdp-api.plk-sa.pl/api/v1/operations/train"
@@ -76,7 +75,7 @@ def _fetch(schedule_id, order_id, when):
         "User-Agent": USER_AGENT,
         "Accept": "application/json",
     })
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SEC, context=tls.SSL_CONTEXT) as response:
+    with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as response:
         data = json.load(response)
     return {
         station["stationId"]: (_parse(station.get("actualArrival")),

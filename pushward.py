@@ -19,8 +19,6 @@ from datetime import date, datetime, time as clock
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-import tls
-
 API = "https://api.pushward.app"
 SLUG = "metal-planner-odjazd"
 CARD_NAME = "Odjazd"
@@ -83,7 +81,7 @@ def _request(method, path, key, body):
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC, context=tls.SSL_CONTEXT) as response:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC) as response:
             raw = response.read()
     except urllib.error.HTTPError as e:
         raw = e.read()

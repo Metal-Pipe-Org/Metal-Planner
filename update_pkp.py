@@ -75,7 +75,6 @@ from pyproj import Transformer
 # serwera - musi wczytać data/.env na własną rękę.
 import config  # noqa: F401
 import pkp
-import tls
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DB_PATH = DATA_DIR / "pkp.sqlite"
@@ -158,7 +157,7 @@ def _fetch_schedule(date_from, date_to):
         "User-Agent": USER_AGENT,
         "Accept": "application/json",
     })
-    with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SEC, context=tls.SSL_CONTEXT) as response:
+    with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SEC) as response:
         return json.load(response)
 
 
@@ -307,7 +306,7 @@ def _fetch_plk_points():
         })
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
-            with urllib.request.urlopen(request, timeout=PLK_TIMEOUT_SEC, context=tls.SSL_CONTEXT) as response:
+            with urllib.request.urlopen(request, timeout=PLK_TIMEOUT_SEC) as response:
                 data = json.load(response)
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
                 OSError, ValueError):
@@ -579,7 +578,7 @@ def _fetch_osm_nodes(query, timeout_sec):
     url = OVERPASS_URL + "?" + urllib.parse.urlencode({"data": query})
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=timeout_sec, context=tls.SSL_CONTEXT) as response:
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             data = json.load(response)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
             OSError, ValueError):
@@ -656,7 +655,7 @@ def _fetch_portalpasazera_point(name):
     url = PORTAL_PASAZERA_URL + "?" + urllib.parse.urlencode({"stacja": name})
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=PLK_TIMEOUT_SEC, context=tls.SSL_CONTEXT) as response:
+        with urllib.request.urlopen(request, timeout=PLK_TIMEOUT_SEC) as response:
             html = response.read().decode("utf-8", errors="replace")
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
         return None

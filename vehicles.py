@@ -29,7 +29,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import gtfs
-import tls
 
 VEHICLES_URL = "https://mpk.wroc.pl/bus_position"
 
@@ -63,7 +62,7 @@ def _fetch_raw():
     request = urllib.request.Request(
         VEHICLES_URL, data=body, headers={"User-Agent": "Metal-Planner/0.1"}
     )
-    with urllib.request.urlopen(request, timeout=15, context=tls.SSL_CONTEXT) as response:
+    with urllib.request.urlopen(request, timeout=15) as response:
         return json.load(response)
 
 
