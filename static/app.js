@@ -495,17 +495,18 @@ let vehiclesTimer = null;
 const VEHICLES_REFRESH_MS = 15000;
 
 function vehicleIcon(v) {
+    const arrow = v.heading == null ? '' :
+        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
-        className: `vehicle-marker ${esc(v.kind)}`,
-        html: esc(v.line),
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
+        className: 'vehicle-box',
+        html: `<div class="vehicle-marker ${escAttr(v.kind)}">${esc(v.line)}</div>${arrow}`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
     });
 }
 
 function vehicleTooltipHtml(v) {
-    const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
-    return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
+    return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
 }
 
 const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();
@@ -525,17 +526,74 @@ function vehiclesFilter() {
     return lines;
 }
 
+/** Przystanki, które mapa rysuje każdej linii (klucz linii -> zbiór "lat,lon").
+    Linia bez przystanków w odpowiedzi nie trafia do mapy: nie ma jak sprawdzić
+    jej kierunku. W rozkładach nie ma podróży, więc nie ma i kierunku. */
+function vehicleDrawnStops() {
+    const drawn = new Map();
+    if (window.timetableMode && window.timetableMode.vehicleLines()) return drawn;
+    for (const hit of flowHits) {
+        if (!hit.seg.num || !hit.seg.stops_t) continue;
+        const key = vehicleKey(hit.seg.kind, hit.seg.num);
+        if (!drawn.has(key)) drawn.set(key, new Set());
+        for (const [lat, lon] of hit.seg.stops_t) drawn.get(key).add(lat + ',' + lon);
+    }
+    return drawn;
+}
+
+/** Jedzie w naszą stronę, gdy jego dalsza trasa (v.rest) mija przystanek
+    narysowany na mapie tej linii. Bez rozpoznanego kursu - nie wiemy, więc
+    zostaje. */
+function vehicleGoesOurWay(v, drawn) {
+    const stops = drawn.get(vehicleKey(v.kind, v.line));
+    if (!stops || !v.rest) return true;
+    return v.rest.some(([lat, lon]) => stops.has(lat + ',' + lon));
+}
+
+let vehicleStatsBox = null;
+
+/** Statystyki warstwy pojazdów (ustawienie developerskie "vehicles-stats"):
+    tylko to, co front już wie z odpowiedzi serwera. */
+function showVehicleStats(shown, hiddenByDirection) {
+    if (!vehiclesOn || !setting('vehicles-stats')) {
+        if (vehicleStatsBox) vehicleStatsBox.hidden = true;
+        return;
+    }
+    if (!vehicleStatsBox) {
+        vehicleStatsBox = document.createElement('div');
+        vehicleStatsBox.className = 'vehicle-stats';
+        map.getContainer().appendChild(vehicleStatsBox);
+    }
+    const count = pick => lastVehicles.filter(pick).length;
+    const withArrow = count(v => v.heading != null);
+    const lines = [
+        `Z kanału: ${lastVehicles.length}`,
+        `ze strzałką: ${withArrow} (z kursu ${count(v => v.source === 'trip')}, z ruchu ${count(v => v.source === 'route')})`,
+        `bez kierunku: ${lastVehicles.length - withArrow}`,
+        `Pokazane: ${shown.length}, w tym ze strzałką ${shown.filter(v => v.heading != null).length}`,
+    ];
+    if (setting('vehicles-direction')) lines.push(`ukryte filtrem kierunku: ${hiddenByDirection}`);
+    vehicleStatsBox.innerHTML = lines.map(esc).join('<br>');
+    vehicleStatsBox.hidden = false;
+}
+
 function renderVehicles() {
     vehiclesLayer.clearLayers();
-    if (!vehiclesOn) return;
+    if (!vehiclesOn) { showVehicleStats([], 0); return; }
     const only = vehiclesFilter();
+    const byDirection = setting('vehicles-direction');
+    const drawn = byDirection ? vehicleDrawnStops() : new Map();
+    const shown = [];
+    let hiddenByDirection = 0;
     for (const v of lastVehicles) {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
-        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
-            .bindTooltip(vehicleTooltipHtml(v))
-            .addTo(vehiclesLayer);
+        if (!vehicleGoesOurWay(v, drawn)) { hiddenByDirection++; continue; }
+        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)}).addTo(vehiclesLayer);
+        if (v.to) marker.bindTooltip(vehicleTooltipHtml(v));
         marker.tapRank = TAP_RANK.vehicle;
+        shown.push(v);
     }
+    showVehicleStats(shown, hiddenByDirection);
 }
 
 function loadVehicles() {
@@ -1346,7 +1404,8 @@ function endpointPoints() {
 // Ustawienie to wiersz `.set-row` w index.html i NIC więcej nie trzeba opisywać:
 // rodzaj wynika z kontrolki (przełącznik, suwak, lista wyboru), wartość
 // domyślna z jej `checked`/`value`/`selected` w HTML-u, etykiety z `data-labels`,
-// "tylko DEV" z klasy `dev-only`. Zapamiętywanie, przywracanie, pasek
+// "tylko DEV" z klasy `dev-only` (nazwy, opisy, etykiety i DEV pochodzą z
+// settings.json, serwer wstawia je do wiersza). Zapamiętywanie, przywracanie, pasek
 // "zmienione", kopie pod nagłówkami i statystyki działają na tym opisie
 // jednakowo dla każdego rodzaju. Aplikacja czyta wartość przez setting(id) w
 // chwili użycia; skutek zmiany (jeśli jest) wpisuje się w SETTING_EFFECTS.
@@ -1387,6 +1446,7 @@ for (const row of settingsRows) {
         kind: control.tagName === 'SELECT' ? 'select' : control.type,
         dflt: readControl(control),
         devOnly: row.classList.contains('dev-only'),
+        expired: row.dataset.expired !== undefined,
     };
     SETTINGS.set(info.id, info);
     SETTING_BY_CONTROL.set(control, info);
@@ -1467,12 +1527,14 @@ function storeSetting(key, value) {
 // schowane, więc z pamięci bierze się tylko to, co użytkownik w panelu widzi -
 // schowanej opcji nie miałby czym cofnąć (zgłoszenie #175). Schowana wartość
 // jest tylko pomijana, nie kasowana: po ponownym włączeniu DEV_MODE wraca.
-// To samo dotyczy strojeń wyłączonych stałymi (TUNING).
+// To samo dotyczy strojeń wyłączonych stałymi (TUNING). Ustawienie obsolete,
+// które zniknęło z menu (miesiąc po dacie z settings.json), wraca do domyślnego:
+// zapamiętana wartość jest pomijana, nie kasowana.
 function restoreSettings() {
     const stored = storedSettings();
     for (const info of SETTINGS.values()) {
         const row = info.row;
-        if (stored[info.id] === undefined || (info.devOnly && !devMode)
+        if (stored[info.id] === undefined || (info.devOnly && !devMode) || info.expired
             || (row.dataset.tuning && !TUNING[row.dataset.tuning])) continue;
         writeControl(info.control, stored[info.id]);
     }
@@ -7459,6 +7521,7 @@ function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
     $('transfer-gain').closest('.set-row').hidden = !on;
+    $('via-open').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
@@ -7562,6 +7625,9 @@ const SETTING_EFFECTS = {
 // Przełączniki, które tylko przemalowują z lastFlow, bez zapytania do serwera.
 for (const id of ['time-hover', 'time-ends', 'time-chips', 'time-show-headline', 'time-ride']) {
     SETTING_EFFECTS[id] = {react: () => applyTimeOpts()};
+}
+for (const id of ['vehicles-direction', 'vehicles-stats']) {
+    SETTING_EFFECTS[id] = {react: () => renderVehicles()};
 }
 for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-rides',
                   'car-times', 'debug-why', 'debug-why-seg']) {
@@ -7822,10 +7888,19 @@ function applyDotOpts() {
 const settingsSearch = $('settings-search');
 
 for (const row of settingsRows) {
-    if (row.classList.contains('dev-only')) {
-        const badge = document.createElement('span');
-        badge.className = 'dev-badge';
-        badge.textContent = 'DEV';
+    const tags = [];
+    if (row.classList.contains('dev-only')) tags.push('DEV');
+    if (row.dataset.obsolete !== undefined) tags.push('obsolete');
+    for (const tag of tags) {
+        const badge = document.createElement(tag === 'DEV' ? 'span' : 'a');
+        badge.className = tag === 'DEV' ? 'dev-badge' : 'dev-badge obsolete-badge';
+        badge.textContent = tag;
+        if (tag === 'obsolete') {
+            badge.href = row.dataset.issueUrl;
+            badge.target = '_blank';
+            badge.rel = 'noopener';
+            badge.dataset.tip = 'Korzystasz z tego? Kliknij, żeby dać znać, że jest ważne (otworzy się zgłoszenie na GitHubie)';
+        }
         (row.querySelector('label:not(.button), .set-title') || row).append(badge);
     }
 }
@@ -7889,6 +7964,7 @@ function snapshotSettingsLog() {
     }
 }
 
+const isObsolete = row => row.dataset.obsolete !== undefined;
 const rowScore = row => settingsLog.counts.get(row.dataset.setting) || 0;
 const rowIndex = new Map(settingsRows.map((row, i) => [row, i]));
 // Ustawienie dodane po ostatnim przeliczeniu staje na końcu wśród równych.
@@ -7948,7 +8024,7 @@ for (const type of ['input', 'change']) {
 
 function settingGroups(visible) {
     const byLabel = new Map();
-    for (const row of visible) {
+    for (const row of visible.filter(row => !isObsolete(row))) {
         for (const label of settingsInfo.get(row).labels) {
             if (!byLabel.has(label)) byLabel.set(label, []);
             byLabel.get(label).push(row);
@@ -7965,7 +8041,7 @@ function settingGroups(visible) {
 }
 
 function suggestedSettings(visible) {
-    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row));
+    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row) && !isObsolete(row));
     const recent = settingsLog.recent.filter(usable).slice(0, SETTINGS_SUGGEST_RECENT);
     const frequent = [...settingsLog.counts.keys()]
         .filter(id => usable(id) && !recent.includes(id))
@@ -7997,8 +8073,9 @@ function renderSettingsList() {
     const placed = new Set();
     if (needle) {
         // Wyniki jako płaska lista, każde ustawienie raz.
-        nodes.push(...matching);
-        for (const row of matching) placed.add(row);
+        const flat = [...matching.filter(row => !isObsolete(row)), ...matching.filter(isObsolete)];
+        nodes.push(...flat);
+        for (const row of flat) placed.add(row);
     } else {
         const suggested = suggestedSettings(shown);
         if (suggested.length) {
@@ -8016,9 +8093,13 @@ function renderSettingsList() {
             }
             addGroup(nodes, group.label, rows, false);
         }
-        const rest = shown.filter(row => !placed.has(row));
+        const rest = shown.filter(row => !placed.has(row) && !isObsolete(row));
         if (rest.length) addGroup(nodes, 'Inne', rest, false);
         for (const row of rest) placed.add(row);
+        // Przestarzałe na samym dole, zawsze razem, bez względu na swoje tagi.
+        const obsolete = shown.filter(isObsolete);
+        if (obsolete.length) addGroup(nodes, 'Obsolete', obsolete, false);
+        for (const row of obsolete) placed.add(row);
     }
     // Wiersze schowane z innych powodów (albo bez trafienia) zostają w DOM, na końcu.
     nodes.push(...settingsRows.filter(row => !placed.has(row)));
@@ -8054,7 +8135,7 @@ function changedSettingRows(shown) {
 }
 
 function visibleSettingRows() {
-    return settingsRows.filter(row => !row.hidden && (devMode || !row.classList.contains('dev-only')));
+    return settingsRows.filter(row => !row.hidden && row.dataset.expired === undefined && (devMode || !row.classList.contains('dev-only')));
 }
 
 function buildChangedGroup(rows, prefs) {
@@ -8557,18 +8638,18 @@ function showInfoTip(icon) {
 }
 
 document.addEventListener('mouseover', event => {
-    const icon = event.target.closest('.info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('mouseout', event => {
-    if (event.target.closest('.info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('focusin', event => {
-    const icon = event.target.closest('.info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('focusout', event => {
-    if (event.target.closest('.info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('click', event => {
     const icon = event.target.closest('.info');

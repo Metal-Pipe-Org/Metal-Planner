@@ -1,15 +1,27 @@
-# Progi ciszy (DAYS_QUIET, DAYS_GRACE), etykieta LABEL_STALE i etykiety stanu
+# Progi ciszy (DAYS_QUIET, DAYS_GRACE, DAYS_REVIEW), etykieta LABEL_STALE i etykiety stanu
 # PR-a (LABEL_PR_AUTHOR, LABEL_PR_HUMAN) są w config.sh.
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 # Niewidoczny znacznik, po którym rozpoznajemy własne przypomnienie wśród
 # innych komentarzy bota.
 MARKER="<!-- stale-ping -->"
+# Znacznik komentarza o spóźnionej recenzji (stale-prs.yml). Osobny od MARKER
+# z rozmysłem: `stale_action` odlicza zamknięcie wyłącznie od MARKER, więc
+# komentarz do recenzentów nigdy nie uruchomi zamykania PR-a po stronie autora.
+MARKER_REVIEW="<!-- stale-review-ping -->"
 
-# Stan PR-a z etykiety stanu (pr-state.yml): stale z komentarzem, etykietą
+# Stan PR-a z etykiety stanu (pr-state.yml): stale z komentarzem do autora
 # i zamknięciem dotyczy tylko PR-ów, w których ruch ma autor. PR czekający na
-# recenzję człowieka dostaje same przypomnienia na Discordzie — to recenzent
-# zwleka, więc nie ma powodu straszyć autora zamknięciem. Uzasadnienie
-# w stale-prs.yml. Etykiety: LABEL_PR_AUTHOR i LABEL_PR_HUMAN z config.sh.
+# recenzję człowieka nie jest zamykany nigdy — to recenzent zwleka, więc nie ma
+# powodu straszyć autora zamknięciem. Dostaje za to "stale" już po DAYS_REVIEW
+# dniach ciszy i codzienne pingi recenzentów (uzasadnienie w stale-prs.yml).
+# Etykiety: LABEL_PR_AUTHOR i LABEL_PR_HUMAN z config.sh.
+#
+# Kamień milowy (sprint) w stanie open chroni zgłoszenie i PR przed ciszą tak
+# samo jak "external blocked": `.milestone.state == "open"` w odpowiedzi API.
+# Praca w sprincie jest zaplanowana, więc cisza jest tam spodziewana. Samo
+# przypięcie do sprintu nie jest aktywnością (zdarzenie `milestoned` nie
+# jest na liście niżej): po zamknięciu sprintu licznik liczy od ostatniej
+# prawdziwej aktywności, jak dotąd.
 
 # Ostatnia aktywność (sekundy od epoki) — wspólna definicja dla
 # `stale_action` i `quiet_days`. Aktywność to założenie, wpis człowieka, PR,
@@ -52,6 +64,11 @@ STALE_JQ='
 # ZGŁOSZENIE.json to odpowiedź API zgłoszeń albo PR-ów — potrzebne są tylko
 # `created_at` i `labels`, a oba API je mają. Oś czasu jest wspólna
 # (`issues/N/timeline`). Wypisuje jedno z: ping / close / unlabel / none.
+#
+# "unlabel" także wtedy, gdy etykietę nadał bot, a nie ma po niej przypomnienia
+# do autora (ZNACZNIK): to etykieta ze spóźnionej recenzji, a PR wrócił do
+# autora. Nie może zacząć odliczać zamknięcia, bo tego nie zrobił autor.
+# Etykieta nadana ręcznie przez człowieka zostaje jak dotąd.
 stale_action() {
   jq -nr \
     --slurpfile i "$1" --slurpfile t "$2" \
@@ -63,10 +80,12 @@ stale_action() {
           | select(.event == "commented" and .user.type == "Bot" and (.body | contains($marker)))
           | .created_at | ts] | max) as $ping
       | (any($issue.labels[]; .name == $label)) as $labeled
+      | (([$events[] | select(.event == "labeled" and .label.name == $label)]
+          | last | .actor.type // "") == "Bot") as $bot_labeled
       | if $ping != null and $ping > $active then
           (if now - $ping >= $grace * 86400 then "close" else "none" end)
         elif now - $active >= $quiet * 86400 then "ping"
-        elif $ping != null and $labeled then "unlabel"
+        elif $labeled and ($ping != null or $bot_labeled) then "unlabel"
         else "none" end'
 }
 

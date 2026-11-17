@@ -2,3 +2,5 @@
 /docs/FLOW_MAP_CONTRACT_V2.md @EgorexW
 /docs/PRINCIPLES.md @EgorexW
 /.github/CODEOWNERS @EgorexW
+/settings.json @EgorexW
+/settings.schema.json @EgorexW

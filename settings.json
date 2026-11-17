@@ -1,0 +1,354 @@
+{
+  "$schema": "settings.schema.json",
+  "settings": [
+    {
+      "id": "time-show-headline",
+      "name": "Pasek nad mapą z czasem podróży",
+      "tags": ["Mapa", "Czas"],
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "tt-past",
+      "name": "Szare godziny w tablicy",
+      "description": "Odjazdy, na które już nie zdążysz, zostają w tablicy na szaro. Wyłączone — tablica zaczyna się od chwili, w której według mapy tu jesteś.",
+      "tags": ["Przystanki", "Czas"]
+    },
+    {
+      "id": "car-vans",
+      "name": "Pokazuj też dostawczaki",
+      "description": "Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka, i stoją na mapie jako puste pierścienie.",
+      "tags": ["Traficar", "Mapa"]
+    },
+    {
+      "id": "walk-pace",
+      "name": "Tempo marszu",
+      "description": "Dotyczy wszystkich przejść. Zwykłe to ok. 42 m na minutę w linii prostej, wolne ok. 33, szybkie ok. 54; krótsze przejście i tak trwa co najmniej 3 minuty.",
+      "tags": ["Założenia czasowe", "Chodzenie"]
+    },
+    {
+      "id": "bike-kmh",
+      "name": "Prędkość roweru",
+      "description": "Liczona w linii prostej między stacjami, więc objazdy ulicami już w niej siedzą — 10 km/h to ok. 14 km/h realnej jazdy.",
+      "tags": ["Założenia czasowe", "Rower"]
+    },
+    {
+      "id": "bike-overhead",
+      "name": "Wypożyczenie i zwrot roweru",
+      "tags": ["Założenia czasowe", "Rower"]
+    },
+    {
+      "id": "car-kmh",
+      "name": "Prędkość Traficara",
+      "description": "Liczona w linii prostej do celu, więc objazdy i światła już w niej siedzą — 22 km/h to ok. 29 km/h realnej jazdy.",
+      "tags": ["Założenia czasowe", "Traficar"]
+    },
+    {
+      "id": "car-overhead",
+      "name": "Ruszenie i parkowanie Traficara",
+      "description": "Otwarcie i wyjazd z miejsca, a na końcu szukanie miejsca, zakończenie najmu i dojście pod cel.",
+      "tags": ["Założenia czasowe", "Traficar"]
+    },
+    {
+      "id": "bikes-merged",
+      "name": "Jeden przycisk rowerów",
+      "description": "Zamiast osobnych 🚲 i ⚡ jeden 🚲 włącza i gasi rowery zwykłe i elektryczne naraz.",
+      "tags": ["Rower"]
+    },
+    {
+      "id": "no-pull-refresh",
+      "name": "Wyłącz odświeżanie przeciągnięciem w dół",
+      "tags": []
+    },
+    {
+      "id": "start-mode-switch",
+      "name": "Tryb „Jestem w pojeździe”",
+      "tags": ["Funkcje"]
+    },
+    {
+      "id": "routes-on",
+      "name": "Propozycje tras",
+      "tags": ["Propozycje tras", "Funkcje"]
+    },
+    {
+      "id": "via-open",
+      "name": "Zawsze pokazuj przystanki po drodze",
+      "description": "Przystanki między wsiadaniem a wysiadaniem są w szczegółach trasy od razu rozwinięte, zamiast zwinięte za przyciskiem.",
+      "tags": ["Propozycje tras", "Przystanki"]
+    },
+    {
+      "id": "density",
+      "name": "Gęstość mapy",
+      "description": "Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru. Godzina „mapa pokazuje do” jest tego skutkiem.",
+      "tags": ["Mapa"],
+      "dev": true
+    },
+    {
+      "id": "car-count",
+      "name": "Ile aut Traficara",
+      "description": "Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”, są zawsze. Suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.",
+      "tags": ["Traficar"],
+      "dev": true
+    },
+    {
+      "id": "bike-count",
+      "name": "Ile stacji z rowerem",
+      "description": "Stacje, których żadna inna nie bije godziną przy rowerze, godziną w celu ani liczbą pojazdów, są zawsze. Suwak dokłada kolejne.",
+      "tags": ["Rower"],
+      "dev": true
+    },
+    {
+      "id": "time-hover",
+      "name": "Godzina w punkcie pod kursorem",
+      "description": "Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu, jeśli jedzie się dalej stąd.",
+      "tags": ["Czas", "Mapa"],
+      "dev": true
+    },
+    {
+      "id": "time-ends",
+      "name": "…z kropką dokładnie w tym punkcie",
+      "tags": ["Czas", "Mapa"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "time-chips",
+      "name": "Godzina pod numerkiem w grupce",
+      "tags": ["Czas", "Mapa"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "time-ride",
+      "name": "Sam czas jazdy w pasku nad mapą",
+      "description": "Czas jazdy liczy się od wejścia do pierwszego pojazdu, bez czekania na niego.",
+      "tags": ["Czas", "Mapa"],
+      "dev": true
+    },
+    {
+      "id": "dot-center",
+      "name": "Kropka w środku wszystkich słupków",
+      "description": "Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie, z którego wzięta jest godzina.",
+      "tags": ["Przystanki", "Mapa"],
+      "dev": true
+    },
+    {
+      "id": "dot-rows",
+      "name": "Ile odjazdów w tablicy",
+      "tags": ["Przystanki"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "names-zoom",
+      "name": "Nazwy przystanków od przybliżenia",
+      "description": "Przy narysowanej trasie podpisuje tylko przystanki jej linii, bez trasy - wszystkie w kadrze. 19 to najbliżej, jak się da.",
+      "tags": ["Przystanki", "Mapa"],
+      "dev": true
+    },
+    {
+      "id": "tip-cursor",
+      "name": "Dymek przy kursorze",
+      "tags": ["Przystanki"],
+      "dev": true
+    },
+    {
+      "id": "tip-panel",
+      "name": "Okienko w rogu ekranu",
+      "description": "Okienko zostaje do zamknięcia. Można włączyć dymek, okienko, oba albo żadne.",
+      "tags": ["Przystanki"],
+      "dev": true
+    },
+    {
+      "id": "bike-times",
+      "name": "Godziny przejazdu rowerem",
+      "description": "Obok drugiego końca przejazdu staje godzina policzona z odległości, a nie sama odległość.",
+      "tags": ["Rower", "Czas"],
+      "dev": true
+    },
+    {
+      "id": "bike-rides",
+      "name": "Przejazdy rowerem zawsze widoczne",
+      "tags": ["Rower", "Mapa"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "car-times",
+      "name": "Godzina dojazdu autem",
+      "description": "Godzina szacowana z odległości w linii prostej i założeń czasowych. Auta wybierane są nią zawsze — przełącznik tylko ją pokazuje.",
+      "tags": ["Traficar", "Czas"],
+      "dev": true
+    },
+    {
+      "id": "zone-button",
+      "name": "Przycisk strefy oddawania Traficara",
+      "description": "Dokłada do warstw 🅿, który trzyma strefę na mapie cały czas. Bez niego strefa pokazuje się po najechaniu na auto.",
+      "tags": ["Traficar"],
+      "dev": true
+    },
+    {
+      "id": "debug-why",
+      "name": "Dlaczego rower i auto są na mapie",
+      "description": "Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych je bije i które.",
+      "tags": ["Debug", "Mapa", "Rower", "Traficar"],
+      "dev": true
+    },
+    {
+      "id": "debug-why-seg",
+      "name": "Dlaczego kawałek jest na mapie",
+      "tags": ["Debug", "Mapa"],
+      "dev": true
+    },
+    {
+      "id": "dot-size",
+      "name": "Wielkość kropek",
+      "tags": ["Wygląd mapy"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "look-weight",
+      "name": "Grubość linii",
+      "tags": ["Wygląd mapy"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "look-dim",
+      "name": "Przygaszenie przy wybranej trasie",
+      "tags": ["Wygląd mapy"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "look-label-step",
+      "name": "Odstęp grupek numerów",
+      "tags": ["Wygląd mapy"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "look-label-size",
+      "name": "Wielkość numerów",
+      "tags": ["Wygląd mapy"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "look-label-op",
+      "name": "Krycie numerów",
+      "tags": ["Wygląd mapy"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "look-dump",
+      "name": "Wartości do wpisania",
+      "tags": ["Wygląd mapy"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "sound-pipe",
+      "name": "Metalowa rura po znalezieniu trasy",
+      "tags": ["Dźwięk"]
+    },
+    {
+      "id": "siechnice-file",
+      "name": "Wgraj rozkład Siechnic",
+      "tags": [],
+      "dev": true
+    },
+    {
+      "id": "dev-access",
+      "name": "Dostęp chroniony (kod z Discorda)",
+      "tags": [],
+      "dev": true
+    },
+    {
+      "id": "pushward",
+      "name": "Dynamic Island (PushWard)",
+      "description": "Klik w godzinę odjazdu na tablicy przystanku wysyła odliczenie do Dynamic Island i na ekran blokady iPhone'a. Wymaga darmowej aplikacji PushWard na iPhonie (App Store). Klucz: w PushWard wejdź w Ustawienia → Integration Key. Darmowy limit to 250 aktualizacji miesięcznie, a jeden przejazd zużywa dwie. Godziny pochodzą z rozkładu, bez opóźnień na żywo. Klucz zostaje na tym urządzeniu, w tej przeglądarce. Usunięcie klucza wyłącza funkcję.",
+      "tags": [],
+      "dev": true
+    },
+    {
+      "id": "pushward-link",
+      "name": "Klik w kartę otwiera przystanek w Kiedy przyjedzie / Czy na czas (zamiast Metal-Plannera)",
+      "description": "Wyłączone: klik w kartę Dynamic Island otwiera Metal-Planner z tą trasą. Włączone: otwiera tablicę tego przystanku w zewnętrznym rozkładzie. Kursy z Siechnic otwierają Kiedy przyjedzie, wszystkie pozostałe Czy na czas.",
+      "tags": [],
+      "dev": true
+    },
+    {
+      "id": "sw-check",
+      "name": "Wersja aplikacji",
+      "tags": [],
+      "dev": true
+    },
+    {
+      "id": "transfer-gain",
+      "name": "Ile musi oszczędzić przesiadka",
+      "description": "Lista proponuje przesiadkę jako pierwszą dopiero, gdy oszczędza co najmniej tyle minut względem jazdy tym samym pojazdem.",
+      "tags": ["Propozycje tras", "Czas"],
+      "dev": true
+    },
+    {
+      "id": "onboard-slack",
+      "name": "Tryb względny od",
+      "description": "Gdy kurs jest według rozkładu przy wybranym przystanku o więcej minut wcześniej albo później niż teraz, pojazd jedzie na mapie od teraz, a reszta zostaje przy rozkładzie. Do tylu minut liczymy wprost z rozkładu.",
+      "tags": ["Jestem w pojeździe", "Czas"],
+      "dev": true
+    },
+    {
+      "id": "new-map",
+      "name": "Nowa mapa (eksperyment)",
+      "tags": ["Mapa", "Funkcje"],
+      "dev": true
+    },
+    {
+      "id": "walking",
+      "name": "Chodzenie pieszo",
+      "tags": ["Mapa", "Chodzenie"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "headline-map-range",
+      "name": "Pokaż zakres mapy na pasku",
+      "tags": ["Mapa"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "scheme-layout",
+      "name": "Układ schematu",
+      "tags": ["Mapa", "Schemat"],
+      "dev": true
+    },
+    {
+      "id": "scheme-walks-count",
+      "name": "Ile dodatkowych najszybszych przejść:",
+      "tags": ["Mapa", "Schemat", "Chodzenie"],
+      "dev": true,
+      "obsolete": "2026-11-15"
+    },
+    {
+      "id": "location-refresh",
+      "name": "Tryb aktywnego odświeżania lokalizacji",
+      "tags": ["Funkcje"],
+      "dev": true
+    },
+    {
+      "id": "stats",
+      "name": "Statystyki ustawień",
+      "tags": [],
+      "dev": true
+    },
+    {
+      "id": "order-limit",
+      "name": "Przeliczanie kolejności ustawień najczęściej co",
+      "tags": [],
+      "dev": true
+    }
+  ]
+}
