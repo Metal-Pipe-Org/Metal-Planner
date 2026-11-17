@@ -1572,7 +1572,8 @@ body.routes-off #results .notice.loading { display: none; }
 
 .layer-note-info {
     background: var(--surface-alt);
-    color: var(--ink-soft);
+    color: #000;
+    font-weight: 700;
 }
 
 .layer-note[data-setting] { cursor: pointer; }
