@@ -7519,9 +7519,6 @@ function showStartMode(on) {
 // na listę), ale nie błędy w tym samym miejscu: te mówią o wyszukiwaniu. Na telefonie znika też zakładka „Trasy".
 function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
-    // Ustawienia samej listy bez listy nic nie zmieniają.
-    $('transfer-gain').closest('.set-row').hidden = !on;
-    $('via-open').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
@@ -7540,11 +7537,15 @@ function reloadTimetable() {
     }
 }
 
-// Układ schematu i liczba dodatkowych przejść mają sens tylko z nową mapą.
-function showSchemeRows() {
-    const on = setting('new-map');
-    $('scheme-layout-row').hidden = !on;
-    $('scheme-walks-count-row').hidden = !on;
+// Wiersz z `requires` w settings.json (`data-requires`) widać tylko, gdy wszystkie
+// wymienione ustawienia są prawdziwe; schowane zachowuje zapamiętaną wartość.
+function applyRequires() {
+    for (const row of settingsRows) {
+        if (!row.dataset.requires) continue;
+        const hidden = !row.dataset.requires.split(' ').every(id => setting(id));
+        // Przypisanie bez zmiany też liczy się obserwatorowi listy jako zmiana i przerysowuje ją.
+        if (row.hidden !== hidden) row.hidden = hidden;
+    }
 }
 
 // Zmiana rysuje stan (`paint`, też na starcie) i/albo coś robi po ruchu (`react`).
@@ -7567,9 +7568,7 @@ const SETTING_EFFECTS = {
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     }},
     // Nowa mapa zmienia odpowiedź serwera, więc jak dostawczaki: od razu nowe zapytanie.
-    // Wiersze ustawień schematu widać tylko z nową mapą.
-    'new-map': {paint: showSchemeRows, react: () => {
-        showSchemeRows();
+    'new-map': {react: () => {
         mapMore = 0;
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
@@ -7639,6 +7638,7 @@ for (const row of settingsRows) {
     if (row.dataset.tuning) row.hidden = !TUNING[row.dataset.tuning];
 }
 
+applyRequires();
 for (const info of SETTINGS.values()) {
     paintSettingOutput(info);
     const effect = SETTING_EFFECTS[info.id];
@@ -7652,6 +7652,7 @@ for (const type of ['input', 'change']) {
         const value = readControl(info.control);
         storeSetting(info.id, value);
         paintSettingOutput(info);
+        applyRequires();
         if (type !== (info.kind === 'range' ? 'input' : 'change')) return;
         const effect = SETTING_EFFECTS[info.id];
         if (effect && effect.react) effect.react(value);

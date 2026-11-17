@@ -73,7 +73,8 @@
       "id": "via-open",
       "name": "Zawsze pokazuj przystanki po drodze",
       "description": "Przystanki między wsiadaniem a wysiadaniem są w szczegółach trasy od razu rozwinięte, zamiast zwinięte za przyciskiem.",
-      "tags": ["Propozycje tras", "Przystanki"]
+      "tags": ["Propozycje tras", "Przystanki"],
+      "requires": ["routes-on"]
     },
     {
       "id": "density",
@@ -283,7 +284,8 @@
       "name": "Ile musi oszczędzić przesiadka",
       "description": "Lista proponuje przesiadkę jako pierwszą dopiero, gdy oszczędza co najmniej tyle minut względem jazdy tym samym pojazdem.",
       "tags": ["Propozycje tras", "Czas"],
-      "dev": true
+      "dev": true,
+      "requires": ["routes-on"]
     },
     {
       "id": "onboard-slack",
@@ -316,14 +318,16 @@
       "id": "scheme-layout",
       "name": "Układ schematu",
       "tags": ["Mapa", "Schemat"],
-      "dev": true
+      "dev": true,
+      "requires": ["new-map"]
     },
     {
       "id": "scheme-walks-count",
       "name": "Ile dodatkowych najszybszych przejść:",
       "tags": ["Mapa", "Schemat", "Chodzenie"],
       "dev": true,
-      "obsolete": "2026-11-15"
+      "obsolete": "2026-11-15",
+      "requires": ["new-map"]
     },
     {
       "id": "location-refresh",

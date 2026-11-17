@@ -79,6 +79,14 @@
             "type": "boolean",
             "description": "Ustawienie tylko dla dewelopera: widać je wyłącznie w trybie deweloperskim, ze znaczkiem DEV. Brak pola = ustawienie dla każdego. Nie wpisuj „false”."
           },
+          "requires": {
+            "type": "array",
+            "description": "Id innych ustawień, od których zależy to: wiersz widać w ⚙ tylko wtedy, gdy każde z nich ma wartość prawdziwą (włączony przełącznik, niezerowy suwak). Schowane ustawienie zachowuje swoją wartość. Brak pola = widać zawsze.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           "obsolete": {
             "type": "string",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",

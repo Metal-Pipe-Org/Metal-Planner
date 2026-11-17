@@ -68,7 +68,7 @@ def test_rejestr_jest_poprawnym_jsonem_zgodnym_ze_schema():
 def test_schema_opisuje_kazde_pole_po_polsku():
     schema = json.loads((ROOT / "settings.schema.json").read_text(encoding="utf-8"))
     wpis = schema["properties"]["settings"]["items"]["properties"]
-    assert set(wpis) == {"id", "name", "description", "tags", "dev", "obsolete"}
+    assert set(wpis) == {"id", "name", "description", "tags", "dev", "obsolete", "requires"}
     for nazwa, pole in wpis.items():
         assert pole["description"], nazwa
 
@@ -94,6 +94,14 @@ def test_kazdy_wiersz_ma_wpis_i_odwrotnie():
     ids = [w["id"] for w in settings_registry.load()]
     assert sorted(wiersze) == sorted(ids)
     assert wiersze == ids, "kolejność wpisów ma być kolejnością wierszy"
+
+
+def test_requires_wskazuje_ustawienia_z_rejestru():
+    wpisy = settings_registry.load()
+    ids = {w["id"] for w in wpisy}
+    for wpis in wpisy:
+        assert set(wpis.get("requires", [])) <= ids, wpis["id"]
+        assert wpis["id"] not in wpis.get("requires", [])
 
 
 def test_dev_jest_osobnym_polem_i_nie_ma_go_w_tagach():

@@ -2,7 +2,7 @@
 
 Nazwy, opisy i tagi ustawień żyją w jednym pliku, a szablon tylko ustawia
 kontrolki. Tu plik jest czytany i przerabiany na to, czego potrzebuje strona:
-tagi trafiają do `data-labels`, pole `dev` zamienia się w klasę `dev-only`,
+tagi trafiają do `data-labels`, `requires` do `data-requires`, pole `dev` zamienia się w klasę `dev-only`,
 a ustawienie `obsolete` traci zwykłe tagi (ale nie `dev`), dostaje odnośnik
 do zgłoszenia i znika z menu po miesiącu od wpisanej daty.
 """
@@ -47,6 +47,7 @@ def view(today=None):
             "name": entry["name"],
             "description": entry.get("description"),
             "labels": ", ".join(tags),
+            "requires": " ".join(entry.get("requires", [])),
             "dev": entry.get("dev", False),
             "obsolete": entry.get("obsolete"),
             "expired": expired,

@@ -685,7 +685,9 @@
       wpisem w rejestrze rozjechałaby się z kodem i psuła aplikację.
       Wiersz tylko stawia kontrolkę i wywołuje makra z rejestru:
       dev(id) dokłada klasę `dev-only` (pole `dev`), attrs(id) daje
-      `data-setting` i `data-labels` (tagi), name(id) nazwę, info(id) ikonkę
+      `data-setting`, `data-labels` (tagi) i `data-requires` (pole `requires`:
+      wiersz widać tylko, gdy wszystkie wymienione ustawienia mają wartość
+      prawdziwą), name(id) nazwę, info(id) ikonkę
       z opisem. Ustawienie z polem `obsolete` dostaje tu samo tag „obsolete"
       (pole `dev` zostaje: takie ustawienie widać nadal tylko w trybie
       deweloperskim), klikalny znaczek „obsolete" z odnośnikiem do zgłoszenia
@@ -713,6 +715,7 @@
     {% macro dev(id) -%}{% if settings[id].dev %} dev-only{% endif %}{%- endmacro %}
     {% macro attrs(id) -%}
         data-setting="{{ id }}" data-labels="{{ settings[id].labels }}"
+        {%- if settings[id].requires %} data-requires="{{ settings[id].requires }}"{% endif %}
         {%- if settings[id].obsolete %} data-obsolete="{{ settings[id].obsolete }}" data-issue-url="{{ settings[id].issue_url }}"{% endif %}
         {%- if settings[id].expired %} data-expired hidden{% endif %}
     {%- endmacro %}
@@ -1033,7 +1036,7 @@
         </label>
 
     {# Tymczasowo, do porównania układów schematu (#367). #}
-    <label class="dev-check{{ dev('scheme-layout') }} set-row" {{ attrs('scheme-layout') }} id="scheme-layout-row" hidden>
+    <label class="dev-check{{ dev('scheme-layout') }} set-row" {{ attrs('scheme-layout') }}>
         {{ name('scheme-layout') }}
         <select id="scheme-layout">
             <option value="dagre">dagre (krzywe)</option>
@@ -1042,7 +1045,7 @@
         </label>
 
     {# Demo (#367): ile najszybszych podróży z przejściem pieszo w środku dorzucić do schematu. #}
-    <label class="dev-check{{ dev('scheme-walks-count') }} set-row" {{ attrs('scheme-walks-count') }} id="scheme-walks-count-row" hidden>
+    <label class="dev-check{{ dev('scheme-walks-count') }} set-row" {{ attrs('scheme-walks-count') }}>
         {{ name('scheme-walks-count') }} <output id="scheme-walks-count-value">2</output>
         <input type="range" id="scheme-walks-count" min="0" max="20" step="1" value="2"> {{ info('scheme-walks-count') }}
         </label>

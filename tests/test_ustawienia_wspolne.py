@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+import settings_registry
+
 sync_api = pytest.importorskip("playwright.sync_api")
 
 from test_uklad_telefonu import (PUSTE_ZRODLA, _odpowiedz, adres,  # noqa: F401
@@ -174,6 +176,20 @@ def _statystyka(strona, id):
     return stats.get("changes", {}).get(id, {}).get("n", 0)
 
 
+def test_ustawienie_z_requires_widac_tylko_gdy_wymagane_sa_prawdziwe(adres, przegladarka):
+    context, page = _otworz(przegladarka, adres)
+    try:
+        schowany = "id => document.querySelector(`[data-setting=\"${id}\"]`).hidden"
+        assert page.evaluate(schowany, "scheme-layout")
+        page.evaluate(USTAW_JS, ["new-map", True])
+        assert not page.evaluate(schowany, "scheme-layout")
+        page.evaluate(USTAW_JS, ["new-map", False])
+        assert page.evaluate(schowany, "scheme-layout")
+        assert not page.bledy, page.bledy
+    finally:
+        context.close()
+
+
 @pytest.mark.parametrize("w", USTAWIENIA, ids=IDS)
 def test_opis_ustawienia(w):
     assert w["id"] == w["control"], "data-setting musi być równe id kontrolki"
@@ -229,8 +245,9 @@ def test_pasek_kopie_i_statystyki(w, strona):
     assert "changed" not in strona.get_attribute(wiersz, "class").split()
     assert not strona.query_selector(f'[data-kind=changed] .set-copy[data-copy-of="{w["id"]}"]')
     assert _statystyka(strona, w["id"]) == zmian + 2
-    # „Nowa mapa" chowa i pokazuje wiersze schematu, a to odświeża nagłówki jeszcze raz.
-    assert strona.evaluate("window.__odswiezenia") == (2 if w["id"] == "new-map" else 1)
+    # Ustawienie wymagane przez inne chowa i pokazuje ich wiersze, a to odświeża nagłówki jeszcze raz.
+    wymagane = {id_ for wpis in settings_registry.load() for id_ in wpis.get("requires", [])}
+    assert strona.evaluate("window.__odswiezenia") == (2 if w["id"] in wymagane else 1)
 
 
 def test_dawne_klucze_sa_przenoszone(adres, przegladarka):
