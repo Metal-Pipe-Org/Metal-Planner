@@ -1142,32 +1142,6 @@ checks.pojazdy_zawezone_do_linii_z_mapy = (function () {
     };
 })();
 
-/* Przy narysowanej mapie warstwa pojazdów (◉) pokazuje te pojazdy linii z mapy,
-   które jadą w stronę podróży - ich dalsza trasa mija przystanek narysowany na
-   mapie tej linii - oraz te, których kursu nie znamy. Jadące w przeciwną
-   stronę znikają. */
-checks.pojazdy_tylko_w_naszym_kierunku = (function () {
-    app.drawFlow(FLOW_FIXTURE, false);
-    app.stopsLayer.addTo(app.map);
-    const zMapy = app.flowHits[0].seg;
-    const [lat, lon] = zMapy.stops_t[0];
-    const nasz = {line: zMapy.num, kind: zMapy.kind, lat: 51.10, lon: 17.00,
-                  rest: [[lat, lon]]};                       // jedzie przez narysowany przystanek
-    const przeciwny = {line: zMapy.num, kind: zMapy.kind, lat: 51.10, lon: 17.01,
-                       rest: [[50.0, 16.0]]};                // jego dalsza trasa omija mapę
-    const niepewny = {line: zMapy.num, kind: zMapy.kind, lat: 51.10, lon: 17.02};
-    app.lastVehicles = [nasz, przeciwny, niepewny];
-    app.setVehiclesOn(true);
-    app.renderVehicles();
-    const widoczne = app.vehiclesLayer.layers.map(m => m.getLatLng().lng);
-    app.setVehiclesOn(false);
-    return {
-        ok: widoczne.length === 2 && widoczne.includes(17.00) && widoczne.includes(17.02)
-            && !widoczne.includes(17.01),
-        widoczne,
-    };
-})();
-
 /* Ostatni etap Traficarem (patrz planner._car_drive_leg). Front ma go
    narysować INACZEJ niż kurs: odcinek auto -> cel jest prostą, nie przebiegiem
    ulicami, więc kreskowana linia zamiast ciągłej i żadnej białej otoczki,

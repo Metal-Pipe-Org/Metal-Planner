@@ -3532,3 +3532,18 @@ ul.tt-legend {
 .leaflet-tooltip-right::before {
     margin-top: calc(-6px - var(--tip-shift, 0px));
 }
+
+.vehicle-stats {
+    position: absolute;
+    right: 56px;
+    bottom: 28px;
+    z-index: 800;
+    padding: 4px 7px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #333;
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 6px;
+    pointer-events: none;
+    white-space: nowrap;
+}
