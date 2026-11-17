@@ -69,9 +69,10 @@ NEAR_EQUAL_SEC = 180
 # mapie i w schemacie). Pozostałe nie są rysowane.
 READABLE_MOVES = 3
 
-# Aut i rowerów przy mapie w pierwszym widoku (rowery i Traficar biorą zasięg z
-# narysowanych ruchów, więc im mniej ruchów, tym mniej ich w ogóle).
-FIRST_VIEW_VEHICLES = 1
+# Auto o krótką jazdę od startu: dowolną linią, która odjeżdża z przystanku
+# przy starcie w ciągu tylu sekund od dojścia, najwyżej tyle sekund jazdy.
+HOP_WAIT_SEC = 10 * 60
+HOP_RIDE_SEC = 10 * 60
 
 # Marsz liczy się w minutach przyjazdu, ale dłuższe chodzenie męczy bardziej niż
 # siedzenie: tyle razy sekundy marszu doliczają się do kosztu ponad ich wpływ
@@ -86,6 +87,9 @@ BRANCH_MAX_SLACK_SEC = 20 * 60
 # Inna linia tego samego ruchu dopisuje się do kreski, gdy po niej nie czeka
 # się na dalszy pojazd dłużej niż tyle.
 LINE_MAX_SLACK_SEC = 15 * 60
+# Kursy podmiejskie (osobny bilet) mają taki początek identyfikatora - patrz
+# siechnice.ID_PREFIX.
+SEPARATE_TICKET_PREFIX = "SIE:"
 
 # Wariant „ten sam pojazd jedzie dalej" może dowozić później niż ruch na styk,
 # ale nie o więcej niż tyle.
@@ -403,12 +407,12 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
             move["far_walk"] = False
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
     shown, hidden = readable(day, moves, anchor)
-    add_branches(ctx, shown, insts, by_sig_all, origin_sec or {})
+    add_branches(ctx, shown, insts, by_sig_all, origin_sec or {}, anchor)
     return shown, hidden, any(m["safe_alt"] or is_safe(day, i)
                           for m in shown for i in [m["first"], *m["branches"]])
 
 
-def add_branches(ctx, shown, insts, by_sig, origin_sec):
+def add_branches(ctx, shown, insts, by_sig, origin_sec, anchor):
     """Co poza pierwszym egzemplarzem ruchu rysuje się jako część tej samej
     sieci (`branches`):
 
@@ -421,6 +425,8 @@ def add_branches(ctx, shown, insts, by_sig, origin_sec):
       samym ruchem. Ten sam kurs łapany z innego przystanku to nie inne
       dojście (rysuje się od najbliższego), a dojście z marszem między
       przystankami odpada, gdy do tego pojazdu da się dojechać bez marszu.
+      Najszybsza podróż dostaje wszystkie takie dojścia, pozostałe ruchy po
+      jednym.
 
     Przesiadka na styk jest gałęzią jak każda - tylko oznaczoną."""
     day, gain = ctx["day"], ctx["gain_sec"]
@@ -453,37 +459,73 @@ def add_branches(ctx, shown, insts, by_sig, origin_sec):
         rest = iter(long)
         return all(stop in rest for stop in short)
 
-    def other_lines(main, taken):
-        """Po jednym egzemplarzu na każdą inną linię pierwszej jazdy tego
-        samego ruchu, która jedzie tą samą drogą i dowozi na ten sam dalszy
-        pojazd."""
-        best = {}
+    def other_lines(main):
+        """Które inne linie tego samego ruchu (ta sama droga, ten sam dalszy
+        pojazd) kreska niesie obok linii `main`. Nie wszystkie: każda kolejna
+        kosztuje miejsce na rysunku i wiersz w okienku, a mówi coraz mniej.
+        Zostaje to, co odpowiada na pytania pasażera: co odjedzie pierwsze,
+        czym jeszcze zdążę najpóźniej (godzina ostatniego złapania jest też
+        przy samej linii, `last`), co wziąć, gdy pierwsze ucieknie, i linia na
+        inny bilet niż reszta."""
+        best, last = {}, {}
+        own = line_of(main)
         for inst in by_sig.get(main["sig"], ()):
             if (inst["just_left"] or inst["rides"][1:] != main["rides"][1:]
                     or inst["n"] != main["n"] or (main["n"] == 1 and inst["arr"] > main["arr"]
                                                   + EPSILON_SEC)):
                 continue
             line = line_of(inst)
-            if line in taken or (inst["n"] > 1
-                                 and _last_slack(day, inst) > LINE_MAX_SLACK_SEC):
+            if line != own and not same_way(main, inst):
                 continue
-            if (line not in best or inst["dep"] < best[line]["dep"]) and same_way(main, inst):
+            last[line] = max(last.get(line, 0), inst["first"])
+            if line == own or (inst["n"] > 1
+                               and _last_slack(day, inst) > LINE_MAX_SLACK_SEC):
+                continue
+            if line not in best or inst["dep"] < best[line]["dep"]:
                 best[line] = inst
-        taken.update(best)
-        return list(best.values())
+        covered.update((trips_of(inst), inst["sig"][0][0]) for inst in best.values())
+        for inst in [main, *best.values()]:
+            if last.get(line_of(inst), 0) > inst["first"]:
+                inst["last"] = last[line_of(inst)]
+
+        def ticket(inst):
+            return conns[inst["rides"][0][0]][4].startswith(SEPARATE_TICKET_PREFIX)
+
+        ordered = sorted(best.values(), key=lambda i: (i["dep"], line_of(i)))
+        kept = []
+        if ordered and ordered[0]["dep"] < main["dep"]:
+            kept.append(ordered[0])
+        latest = max(ordered, key=lambda i: last[line_of(i)], default=None)
+        if latest is not None and last[line_of(latest)] > last.get(own, main["first"]) \
+                and latest not in kept:
+            kept.append(latest)
+        if ordered and not kept:
+            kept.append(ordered[0])
+        kinds = {ticket(i) for i in [main, *kept]}
+        different = next((i for i in ordered if ticket(i) not in kinds), None)
+        if different is not None:
+            kept.append(different)
+        return kept
 
     by_last = {}
     for inst in insts:
         if inst["n"] >= 2 and not inst["just_left"]:
             by_last.setdefault(conns[inst["rides"][-1][0]][4], []).append(inst)
     starts = {move["first"]["sig"][0] for move in shown}
+    # Pojazdy linii, które jadą tą samą drogą co pokazane, ale nie zmieściły
+    # się na kresce: to nadal ten sam ruch, nie nowe dojście.
+    covered = {}
+    for move in shown:
+        covered[trips_of(move["first"])] = move["first"]["sig"][0][0]
+    for move in shown:
+        move["branches"] = other_lines(move["first"])
+        move["safe_alt"] = False
     for move in shown:
         main = move["first"]
-        move["branches"] = other_lines(main, {line_of(main)})
-        move["safe_alt"] = False
         if main["n"] < 2:
             continue
-        latest = max(i["dep"] for i in [main, *move["branches"]])
+        latest = max(i["dep"] + i.get("last", i["first"]) - i["first"]
+                     for i in [main, *move["branches"]])
         limit = move["cost"] + ctx["reasonable_sec"]
         pool = [i for i in by_last.get(conns[main["rides"][-1][0]][4], ())
                 if i["arr"] <= main["arr"] and cost(i, gain) <= limit
@@ -499,10 +541,12 @@ def add_branches(ctx, shown, insts, by_sig, origin_sec):
             pool = [i for i in pool if not place_walks(i)]
         # Te same pojazdy łapane gdzie indziej to to samo dojście: zostaje
         # złapanie z najbliższego przystanku, a z równych - tańsze.
-        seen = {trips_of(main)} | {trips_of(i) for i in move["branches"]}
+        seen = {trips_of(main)} | set(covered)
         feeders = {}
         for inst in sorted(pool, key=lambda i: (lead_of(i), cost(i, gain), -i["dep"])):
             trips = trips_of(inst)
+            # Dojazd jeszcze jednym pojazdem do czegoś, do czego z tego samego
+            # miejsca wsiada się od razu, niczego nie zaczyna inaczej.
             if trips in seen:
                 continue
             seen.add(trips)
@@ -514,11 +558,22 @@ def add_branches(ctx, shown, insts, by_sig, origin_sec):
         # pokazanego (to samo wsiadanie i wysiadanie), a różni się dopiero
         # dalej, nie zaczyna się inaczej - to nie nowe dojście.
         for inst in sorted(feeders.values(), key=lambda i: (cost(i, gain), -i["dep"])):
-            if inst["sig"][0] in starts:
+            # Tak samo dojazd jeszcze jednym pojazdem do czegoś, do czego z tego
+            # samego miejsca wsiada się od razu, i złapanie tego samego
+            # ostatniego pojazdu wcześniej na jego trasie, gdy trzeba przez to
+            # wyjść wcześniej.
+            if (inst["sig"][0] in starts
+                    or covered.get(trips_of(inst)[1:]) == inst["sig"][0][0]
+                    or (inst["rides"][-1][0] < main["rides"][-1][0] and inst["dep"] < latest
+                        and inst["n"] >= main["n"])):
                 continue
             starts.add(inst["sig"][0])
             move["branches"].append(inst)
-            move["branches"] += other_lines(inst, {line_of(inst)})
+            move["branches"] += other_lines(inst)
+            # Najszybsza podróż dostaje wszystkie swoje dojścia, pozostałe
+            # ruchy po jednym: im dalej od najlepszego, tym mniej miejsca.
+            if move is not anchor:
+                break
     for move in shown:
         move["branches"] += [other for inst in [move["first"], *move["branches"]]
                              for other in near_boardings(day, inst, origin_sec,
@@ -548,6 +603,7 @@ def near_boardings(day, inst, origin_sec, query_sec):
                      lead=lead, dep=conns[i][0] - lead)
         other.pop("slack", None)
         other.pop("walked", None)
+        other.pop("last", None)
         out.append(other)
     return out
 

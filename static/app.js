@@ -856,10 +856,35 @@ function hideCarZone() {
 function carMarker(car, tooltipHtml) {
     const dot = L.circleMarker([car.lat, car.lon], carStyle(car))
         .bindTooltip(tooltipHtml, {direction: 'top', offset: [0, -4], opacity: 1})
-        .on('mouseover', () => showCarZone(car))
-        .on('mouseout', hideCarZone);
+        .on('mouseover', () => { showCarZone(car); showCarRide(car); })
+        .on('mouseout', () => { hideCarZone(); hideCarRide(); });
     dot.tapRank = TAP_RANK.shared;
     return dot;
+}
+
+/** Auto o krótką jazdę od startu (pole `ride`, patrz planner._short_hops):
+    po najechaniu mapa rysuje tę jazdę, bo linii, która do niego wiezie, nie
+    ma wśród narysowanych - nie prowadzi do celu. */
+let carRideLayer = null;
+
+function showCarRide(car) {
+    hideCarRide();
+    if (!car.ride || !car.ride.path || car.ride.path.length < 2) return;
+    const latlngs = car.ride.path.map(p => L.latLng(p));
+    carRideLayer = L.layerGroup([
+        L.polyline(latlngs, {color: '#111', opacity: 0.85, weight: 9,
+                             lineCap: 'round', lineJoin: 'round', interactive: false}),
+        L.polyline(latlngs, {color: LINE_COLORS[car.ride.kind] || LINE_COLORS.other, opacity: 1,
+                             weight: 5, lineCap: 'round', lineJoin: 'round', interactive: false}),
+        L.polyline([latlngs[latlngs.length - 1], L.latLng(car.lat, car.lon)],
+                   {color: WALK_COLOR, weight: 4, opacity: 1, dashArray: '1,7',
+                    lineCap: 'round', interactive: false}),
+    ]).addTo(map);
+}
+
+function hideCarRide() {
+    if (carRideLayer) map.removeLayer(carRideLayer);
+    carRideLayer = null;
 }
 
 /** Jeden przycisk rowerów zamiast dwóch (opcja w „Wyglądzie aplikacji”): ⚡ znika, a 🚲
@@ -3760,6 +3785,10 @@ function flowCarMarkers(cars) {
 function carTooltipHtml(car) {
     return [
         `<b>${carName(car)}</b>`,
+        ...(car.ride ? [
+            `Dojazd: <span class="badge ${escClass(car.ride.kind)}">${esc(car.ride.num)}</span> ` +
+            `z „${esc(car.ride.from)}” o ${fmtClock(car.ride.dep)}`,
+        ] : []),
         `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
         `pieszo z „${esc(car.from)}”`,
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
@@ -5371,68 +5400,11 @@ const schemeKey = line => `${line.kind}|${line.num}|${line.run === undefined ? '
     węźle wysiadają, odchodzą od kreski krótką odnogą ze strzałką w pudełko
     (`alight`, patrz schemeBranches); strzałką kończy się cały odcinek tylko
     wtedy, gdy nic nie jedzie dalej. */
-/** Linie jadą jedną kreską tylko wtedy, gdy mają ten sam los przy następnym
-    pudełku (jadą dalej tą samą krawędzią albo wysiadają) i to samo
-    pochodzenie przy poprzednim - inaczej wysiadająca 18 i jadąca dalej 145
-    byłyby jedną kreską, która w pudełku się rozdwaja. */
-function schemeSplitEdges(scheme) {
-    const edges = scheme.edges;
-    // Rekord na każdą linię każdego odcinka: jej następnik i poprzednik, czyli
-    // ta sama linia (`chain` po obu stronach węzła) na odcinku za węzłem albo
-    // przed nim.
-    const records = edges.map((edge, e) => edge.lines.map(line => ({e, line, group: ''})));
-    const find = (edge, line, dir) => {
-        const f = edges.findIndex(o => (dir === 'dst' ? o.from === edge.to : o.to === edge.from)
-            && o.lines.some(m => m.chain && schemeKey(m) === schemeKey(line)));
-        return f < 0 ? null : records[f].find(r => schemeKey(r.line) === schemeKey(line));
-    };
-    for (const list of records) {
-        for (const r of list) {
-            r.next = r.line.chain ? find(edges[r.e], r.line, 'dst') : null;
-            r.prev = r.line.chain ? find(edges[r.e], r.line, 'src') : null;
-            r.group = `${r.next ? r.next.e : -1}|${r.prev ? r.prev.e : -1}`;
-        }
-    }
-    // Grupa, której linie jadą dalej w różne grupy (albo skądś zbiegają się
-    // z różnych grup), rozpada się na osobne kreski - inaczej w pudełku
-    // trzeba by ją łączyć bokiem. Wysiadanie i wsiadanie tu nie liczą się:
-    // dla nich jest odnoga. Do skutku, bo rozpad idzie wzdłuż całej jazdy.
-    for (let pass = 0; pass < 24; pass++) {
-        let changed = false;
-        for (const list of records) {
-            const groups = new Map();
-            for (const r of list) {
-                if (!groups.has(r.group)) groups.set(r.group, []);
-                groups.get(r.group).push(r);
-            }
-            for (const [group, members] of groups) {
-                const nexts = [...new Set(members.filter(r => r.next).map(r => `${r.next.e}:${r.next.group}`))];
-                const prevs = [...new Set(members.filter(r => r.prev).map(r => `${r.prev.e}:${r.prev.group}`))];
-                if (nexts.length < 2 && prevs.length < 2) continue;
-                for (const r of members) {
-                    const n = r.next ? `${r.next.e}:${r.next.group}` : nexts[0];
-                    const pv = r.prev ? `${r.prev.e}:${r.prev.group}` : prevs[0];
-                    r.group = `${group}#${nexts.length > 1 ? n : ''}#${prevs.length > 1 ? pv : ''}`;
-                }
-                changed = true;
-            }
-        }
-        if (!changed) break;
-    }
-    const out = [];
-    records.forEach((list, e) => {
-        const groups = new Map();
-        for (const r of list) {
-            if (!groups.has(r.group)) groups.set(r.group, []);
-            groups.get(r.group).push(r.line);
-        }
-        for (const lines of groups.values()) out.push({...edges[e], lines});
-    });
-    return out;
-}
-
 function schemeStrands(scheme) {
-    const strands = schemeSplitEdges(scheme).map(edge => ({
+    // Linie między tymi samymi dwoma pudełkami to jedna kreska, także gdy
+    // jedna z nich w pudełku wysiada, a druga jedzie dalej: pudełka leżą nad
+    // kreskami, więc jadąca dalej po prostu wychodzi z niego dołem.
+    const strands = scheme.edges.map(edge => ({
         from: edge.from, to: edge.to, lines: edge.lines, next: null, prev: null,
         label: edge.lines.map(line => line.num).join(' '),
     }));
@@ -5808,27 +5780,10 @@ function schemeBadgeWidth(text) {
     dalej: odchodzi od kreski kawałek nad pudełkiem w bok i kończy się strzałką
     w jego górną krawędź. Ma własną plakietkę z numerami wysiadających. */
 function schemeBranches(boxes, strands) {
-    const out = [];
-    for (const s of strands) {
-        if ((!s.next && !s.merges.length) || !s.alight.length) continue;
-        const box = boxes.get(s.to);
-        const [xt, top] = s.points[s.points.length - 1];
-        const half = (s.alight.reduce((sum, line) => sum + schemeBadgeWidth(line.num) + 4, 0) + 10) / 2;
-        const dx = half + 16;
-        const side = xt + dx <= box.x + box.w - 8 ? xt + dx : xt - dx;
-        const xe = Math.max(box.x + 8, Math.min(box.x + box.w - 8, side));
-        // Odnoga startuje z samej kreski (jej krzywa nie jest nad pudełkiem
-        // pionowa), nie z punktu nad pudełkiem.
-        const samples = strandSamples(s);
-        let start = samples[0];
-        const sign = s.up ? -1 : 1;
-        for (let i = samples.length - 1; i >= 0; i--) {
-            if (sign * samples[i][1] <= sign * top - 44) { start = samples[i]; break; }
-        }
-        out.push({lines: s.alight, label: s.alight.map(line => line.num).join(' '), curved: true,
-                  points: [start, [xe, top]], owner: s});
-    }
-    return out;
+    // Odnóg nie ma: linie między tymi samymi pudełkami są jedną kreską, która
+    // wchodzi w pudełko cała, a jadące dalej wychodzą z niego dołem. Osobna
+    // odnoga z drugą grupką numerków powtarzała to samo.
+    return [];
 }
 
 /** Które przejścia pieszo schemat rysuje: te, które wybrał serwer z powodu
@@ -5979,8 +5934,9 @@ function moveTipHtml(line, depSec, depName, move) {
         + '<ul class="tt-rows tt-lines"><li>'
         + `<span class="badge ${escClass(line.mode)}">${esc(line.num)}</span>`
         + `<span class="tip-dir">${esc(line.headsign || '')}</span>`
-        + `<span class="tt-times"><span>${esc(fmtClock(depSec))}</span></span>`
-        + '</li></ul>'
+        + `<span class="tt-times"><span>${esc(fmtClock(depSec))}</span>`
+        + (line.last && depName === line.from ? `<span class="tip-last">ostatni ${esc(line.last)}</span>` : '')
+        + '</span></li></ul>'
         + `<div class="move-tip-row move-tip-goal">${GOAL_ICON}<b>${esc(move.arrival)}</b> u celu</div>`
         + (note ? `<div class="move-tip-row move-tip-note">${esc(note)}</div>` : '')
         + '</div>';

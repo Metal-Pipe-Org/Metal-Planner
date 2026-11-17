@@ -48,14 +48,15 @@ def _trips(label, rows, prefix, via=None):
 
 def test_zbitka_linii_jednego_ruchu_to_jedna_nitka(install_day):
     """Trzy linie z S do E jadą tym samym ruchem i tą samą drogą - to jeden
-    ruch, a kreska niesie wszystkie trzy numery."""
+    ruch i jedna kreska. Niesie linię, która odjeżdża pierwsza, i tę, którą
+    zdąża się najpóźniej; środkowa niczego nie dopowiada."""
     install_day(make_day(
         _trips("Autobus 1", [(2, 20)], "a") + _trips("Autobus 2", [(3, 20)], "b")
         + _trips("Autobus 3", [(4, 20)], "c")))
 
     result = _flow("S", "E")
 
-    assert _nums(result) == ["1", "2", "3"]
+    assert _nums(result) == ["1", "3"]
     assert len(result["scheme"]["edges"]) == 1
 
 

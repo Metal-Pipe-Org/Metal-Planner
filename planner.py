@@ -2597,11 +2597,6 @@ def plan_flow_stages(start_query, end_query, when=None,
                      else int(max(MIN_MAP_CARS, min(MAX_MAP_CARS, car_count))))
         bike_count = (DEFAULT_MAP_BIKES if bike_count is None
                       else int(max(MIN_MAP_BIKES, min(MAX_MAP_BIKES, bike_count))))
-        if by_moves:
-            # Pierwszy widok nowej mapy jest skromny: po jednym aucie i jednym
-            # rowerze, resztę pokazują dopiero suwaki pod zębatką.
-            car_count = min(car_count, moves.FIRST_VIEW_VEHICLES)
-            bike_count = min(bike_count, moves.FIRST_VIEW_VEHICLES)
         # Mapa z wartości podróży (zgłoszenie #150, patrz _value_map). Liczy
         # się od godziny z pytania, bo późniejsze wyjście jest już jedną z jej
         # wartości - a z pokładu od odjazdu pojazdu (patrz _value_journeys).
@@ -2955,13 +2950,39 @@ def plan_flow_stages(start_query, end_query, when=None,
                     if at < reach.get(stop, INF):
                         reach[stop] = at
                 if day_offset == 0 and when.date() == date.today():
+                    # Nowa mapa zna też auta o krótką jazdę od startu linią,
+                    # której nie rysuje, bo nie wiezie do celu: auto dowiezie
+                    # stamtąd samo (patrz _short_hops).
+                    in_reach = traficar.map_cars(day, reach, end_point_ll, car_mps,
+                                                 car_overhead)
+                    hops = _short_hops(day, source_stops, report_dep_sec) if by_moves else {}
+                    if hops:
+                        # Jazda do auta liczy się dopiero, gdy stawia przy nim
+                        # wyraźnie wcześniej niż dojście z tego, co narysowane.
+                        direct = {car["plate"]: car for car in in_reach}
+                        for car in traficar.map_cars(
+                                day, {stop: hop[0] for stop, hop in hops.items()},
+                                end_point_ll, car_mps, car_overhead):
+                            old = direct.get(car["plate"])
+                            if old is None or car["at"] <= old["at"] - moves.EPSILON_SEC:
+                                car["ride"] = _hop_ride(day, hops[car["from_stop"]], geo_db)
+                                direct[car["plate"]] = car
+                        in_reach = sorted(direct.values(),
+                                          key=lambda car: (car["at"], car["to_dest_m"]))
                     # Ile z nich: suwak razy to samo "pokaż więcej", co przy
                     # liniach - a auta, których nic nie bije, zostają i tak.
-                    cars = traficar.map_choice(
-                        traficar.map_cars(day, reach, end_point_ll, car_mps,
-                                          car_overhead),
-                        car_count * (1 + more), car_vans,
-                        min_level=more)
+                    cars = traficar.map_choice(in_reach, car_count * (1 + more), car_vans,
+                                               min_level=more)
+                    # Auto, do którego idzie się prosto ze startu, jest wśród
+                    # pokazanych zawsze: to jedyne, które nie zależy od żadnego
+                    # odjazdu.
+                    on_foot = [car for car in in_reach if car["from_stop"] in source_stops
+                               and "ride" not in car and (car_vans or not car["van"])]
+                    if by_moves and on_foot and not any(car in cars for car in on_foot):
+                        cars = sorted(cars + on_foot[:1],
+                                      key=lambda car: (car["at"], car["to_dest_m"]))
+                    for car in in_reach:
+                        car.pop("from_stop")
                     # Czy przy celu da się auto zostawić (zgłoszenie #157).
                     # Auta zostają na mapie tak czy inaczej - to ostrzeżenie
                     # w dymku, nie odsiew: wziąć auto i oddać je na granicy
@@ -3412,6 +3433,51 @@ def _drawn_reach(kept, ranges):
             if when is not None and when < reach.get(stop, INF):
                 reach[stop] = when
     return reach
+
+
+def _short_hops(day, source_stops, dep_sec):
+    """{słupek: (przyjazd, kurs, odjazd, słupek wsiadania, sekundy dojścia)}
+    - dokąd da się dojechać JEDNĄ krótką jazdą z przystanku przy starcie,
+    dowolną linią, która odjeżdża niedługo po dojściu na przystanek."""
+    boards = dict.fromkeys(source_stops, 0)
+    boards.update({stop: sec for stop, (_, sec) in _origin_walk(day, source_stops).items()})
+    index = gtfs.deps_by_stop(day)
+    # Sam punkt startu nie jest przystankiem: „najbliżej" liczy się wśród
+    # słupków, z których coś odjeżdża.
+    nearest = min((lead for stop, lead in boards.items() if stop in index), default=0)
+    out = {}
+    for board, lead in boards.items():
+        if lead > nearest + moves.NEAR_EQUAL_SEC:
+            continue
+        ready = dep_sec + lead
+        deps = index.get(board, ())
+        for dep, trip in deps[bisect_left(deps, (ready,)):]:
+            if dep > ready + moves.HOP_WAIT_SEC:
+                break
+            riding = False
+            for i in gtfs.trip_conns(day, trip):
+                conn_dep, conn_arr, from_stop, to_stop, _ = day.conns[i]
+                if from_stop == board and conn_dep == dep:
+                    riding = True
+                if not riding:
+                    continue
+                if conn_arr - dep > moves.HOP_RIDE_SEC:
+                    break
+                if conn_arr < out.get(to_stop, (INF,))[0]:
+                    out[to_stop] = (conn_arr, trip, dep, board, lead)
+    return out
+
+
+def _hop_ride(day, hop, geo_db):
+    """Jazda do auta z _short_hops w postaci dla frontu: linia, skąd, o której
+    i którędy - dymek auta ją opisuje, a po najechaniu mapa ją rysuje."""
+    arr, trip, dep, board, lead = hop
+    stop = next(day.conns[i][3] for i in gtfs.trip_conns(day, trip)
+                if day.conns[i][1] == arr and day.conns[i][0] >= dep)
+    leg = _ride_leg(day, trip, board, dep, stop, arr, geo_db)
+    return {"num": leg["num"], "kind": leg["mode"], "headsign": leg["headsign"],
+            "from": leg["from"], "dep": dep, "to": leg["to"], "arr": arr,
+            "walk_sec": lead, "path": leg["path"]}
 
 
 def _drawn_runs(day, kept, ranges):
@@ -4680,14 +4746,17 @@ def _scheme_moves(day, journeys, insts):
     godzina u celu i dla każdej jazdy jej przystanki z godzinami (stąd okienko
     bierze odjazd z właściwego przystanku), a przy jeździe po przesiadce
     zapas w minutach (ujemny, gdy wg szacunku brakuje, a mieści się w marginesie
-    błędu marszu, moves.WALK_MARGIN_SEC) i znacznik `tight` (na styk)."""
+    błędu marszu, moves.WALK_MARGIN_SEC) i znacznik `tight` (na styk); przy
+    pierwszej jeździe `last` - ostatni odjazd tej linii, którym jeszcze się
+    zdąży na to samo."""
     slacks = [None if inst["n"] < 2 else dict(
         (k, sec) for sec, k in moves.transfer_slacks(day, inst)) for inst in insts]
     slacks += [None] * (len(journeys) - len(insts))
+    lasts = [inst.get("last") for inst in insts] + [None] * (len(journeys) - len(insts))
     labels = {"ride": lambda leg: leg["num"], "bike": lambda leg: "rower",
               "drive": lambda leg: "Traficar"}
     out = []
-    for journey, slack in zip(journeys, slacks):
+    for journey, slack, last in zip(journeys, slacks, lasts):
         lines, ride_k = [], 0
         for leg in journey["legs"]:
             if leg["kind"] not in labels:
@@ -4708,6 +4777,10 @@ def _scheme_moves(day, journeys, insts):
                     stops.append([stop["name"], t])
                 stops.append([leg["to"], leg["arr_sec"]])
                 entry["stops"] = stops
+                # Ostatni odjazd tej linii stąd, którym jeszcze łapie się ten
+                # sam dalszy pojazd: ile można zwlekać.
+                if ride_k == 0 and last:
+                    entry["last"] = _fmt_time(last)
                 if slack and ride_k in slack:
                     entry["slack_min"] = floor(slack[ride_k] / 60)
                     entry["tight"] = slack[ride_k] <= moves.TIGHT_SEC
