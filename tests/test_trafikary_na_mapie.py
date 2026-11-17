@@ -453,15 +453,18 @@ def test_zasieg_aut_z_ustawienia_przesuwa_granice(install_day, monkeypatch):
     assert doba["cars_ahead_sec"] > 3600
 
 
-def test_dzien_ktory_minal_nie_ma_aut_ani_notki(install_day, monkeypatch):
+def test_zasieg_aut_dziala_tak_samo_wstecz(install_day, monkeypatch):
     install_day(_day())
     _cars(monkeypatch, [CAR])
+    wczoraj = datetime.combine(date.today() - timedelta(days=1), time())
 
-    result = planner.plan_flow("Start", "Cel", datetime(2026, 1, 5, 0, 0, 0),
-                               car_horizon_h=None)
+    domyslnie = planner.plan_flow("Start", "Cel", wczoraj)
+    bez_limitu = planner.plan_flow("Start", "Cel", wczoraj, car_horizon_h=None)
 
-    assert result["cars"] == []
-    assert result["cars_beyond"] is False
+    assert domyslnie["cars"] == []
+    assert domyslnie["cars_beyond"] is True
+    assert _tablice(bez_limitu["cars"]) == ["WE1AA11"]
+    assert bez_limitu["cars_beyond"] is False
 
 
 def test_wylacznik_gasi_auta_na_mapie(install_day, monkeypatch):

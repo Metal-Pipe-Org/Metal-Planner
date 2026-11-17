@@ -2619,11 +2619,11 @@ def plan_flow_stages(start_query, end_query, when=None,
                 searched_at = (datetime.combine(when.date(), datetime.min.time())
                                + timedelta(days=day_offset, seconds=report_dep_sec))
                 cars_ahead_sec = int((searched_at - datetime.now()).total_seconds())
+                # Pozycje aut są z teraz, więc tak samo mało mówią o dniu
+                # sprzed doby, jak o dniu za dobę.
                 cars_beyond = (car_horizon_h is not None
-                               and cars_ahead_sec > car_horizon_h * 3600)
-                # Dzień, który już minął, nie ma aut wcale i nie ma też o czym
-                # pisać - to nie jest pytanie o przyszłość.
-                if not cars_beyond and searched_at.date() >= date.today():
+                               and abs(cars_ahead_sec) > car_horizon_h * 3600)
+                if not cars_beyond:
                     # Ile z nich: suwak razy to samo "pokaż więcej", co przy
                     # liniach - a auta, których nic nie bije, zostają i tak.
                     cars = traficar.map_choice(

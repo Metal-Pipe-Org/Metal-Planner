@@ -1545,23 +1545,40 @@ body.routes-off #results .notice.loading { display: none; }
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
    linii, nie pigułka jak .line-badge: użytkownik prosił wprost o kropki. */
-/* Pasek w układzie panelu (nie nakładka): stoi pod nagłówkiem tylko wtedy,
-   gdy pozycje z MPK są nieaktualne; ◉ robi się wtedy żółty. */
-.vehicles-note {
+/* Pasek w układzie panelu (nie nakładka): komunikaty o warstwach mapy, każdy
+   w osobnej linii. Ostrzeżenie (żółte) mówi, że włączona warstwa nic teraz nie
+   daje, i zapala żółty przycisk tej warstwy; info (szare) - że działa z zastrzeżeniem. */
+.layer-notes {
     flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.layer-notes[hidden] { display: none; }
+
+.layer-note {
     padding: 8px 14px;
     border-radius: var(--radius);
-    background: #f5c518;
-    color: #3a2f00;
     font-size: 0.9rem;
-    font-weight: 600;
     box-shadow: var(--shadow);
 }
 
-.vehicles-note[hidden] { display: none; }
+.layer-note.warn {
+    background: #f5c518;
+    color: #3a2f00;
+    font-weight: 600;
+}
 
-#vehicles-toggle.stale,
-#vehicles-toggle.stale.active {
+.layer-note.info {
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+}
+
+.layer-note[data-setting] { cursor: pointer; }
+
+.layer-button.warn,
+.layer-button.warn.active {
     background: #f5c518;
     border-color: #d9a900;
     color: #3a2f00;

@@ -486,7 +486,34 @@ function updatePointMarker(slot, value) {
 //         sec <= only.until && drawn.has(lat + ',' + lon));
 
 const vehiclesLayer = L.layerGroup();
+
+/** Pasek komunikatów o warstwach mapy. Każda warstwa (źródło) ma własną listę
+    komunikatów {level: 'warn' | 'info', text, setting?}; wszystkie idą pod sobą,
+    każdy w osobnej linii. `warn` zapala też żółty przycisk warstwy, `info` go
+    nie rusza. Klik w komunikat z `setting` otwiera ⚙ przy tym ustawieniu. */
+const layerNotesEl = $('layer-notes');
+const layerNotes = {};
+const layerNoteButtons = {};
+
+function setLayerNotes(source, notes) {
+    layerNotes[source] = notes;
+    const button = layerNoteButtons[source];
+    if (button) button.classList.toggle('warn', notes.some(note => note.level === 'warn'));
+    const all = Object.values(layerNotes).flat();
+    layerNotesEl.hidden = !all.length;
+    layerNotesEl.innerHTML = all.map(note =>
+        `<div class="layer-note ${note.level}"` +
+        (note.setting ? ` data-setting="${note.setting}" role="button" tabindex="0"` : '') +
+        `>${esc(note.text)}</div>`).join('');
+}
+
+layerNotesEl.addEventListener('click', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note) jumpToSetting(note.dataset.setting);
+});
+
 const vehiclesToggle = $('vehicles-toggle');
+layerNoteButtons.vehicles = vehiclesToggle;
 let vehiclesOn = !!uiState.vehiclesOn;
 let lastVehicles = [];
 let vehiclesTimer = null;
@@ -599,19 +626,16 @@ function renderVehicles() {
 // Po tylu sekundach bez ruchu w danych MPK uznajemy je za nieaktualne. Normalnie
 // pozycje zmieniają się co ~20 s; kanał potrafi zamilknąć na kilkanaście minut.
 const VEHICLES_STALE_SEC = 30;
-const vehiclesNote = $('vehicles-note');
 // Kiedy (czas przeglądarki) ostatnio przyszły dane, które wciąż się ruszały.
 let vehiclesFreshAt = null;
 
 function setVehiclesStale(ageSec) {
-    const stale = ageSec !== null;
-    if (vehiclesToggle) vehiclesToggle.classList.toggle('stale', stale);
-    if (!vehiclesNote) return;
-    vehiclesNote.hidden = !stale;
-    if (!stale) return;
-    vehiclesNote.textContent = ageSec === undefined
-        ? 'Brak danych o pojazdach'
-        : `Dane nieaktualne od ${ageSec < 60 ? ageSec + ' s' : Math.round(ageSec / 60) + ' min'}`;
+    setLayerNotes('vehicles', ageSec === null ? [] : [{
+        level: 'warn',
+        text: ageSec === undefined
+            ? 'Brak danych o pojazdach'
+            : `Dane nieaktualne od ${ageSec < 60 ? ageSec + ' s' : Math.round(ageSec / 60) + ' min'}`,
+    }]);
 }
 
 /** Wiek danych po nieudanym zapytaniu: liczony od ostatnich udanych. */
@@ -701,6 +725,7 @@ let cityBikeLayer = null;
 let carsTimer = null;
 let bikesTimer = null;
 const carsToggle = $('cars-toggle');
+layerNoteButtons.cars = carsToggle;
 const bikesToggle = $('bikes-toggle');
 const bikesElectricToggle = $('bikes-electric-toggle');
 
@@ -768,30 +793,22 @@ function loadCityBikes() {
     }).catch(() => {});
 }
 
-const carsNote = $('cars-note');
-
-/** Notka o autach Traficara przy wyniku (zgłoszenie #490) - ten sam pasek co
-    „Dane nieaktualne" przy pojazdach na żywo. Jest tylko przy mapie z wynikiem
-    i włączonych autach; mówi o tym, że aut nie ma albo że stoją według
-    obecnych pozycji, a o celu poza strefą - raz na całe wyszukiwanie. */
+/** Komunikaty o autach Traficara przy wyniku (zgłoszenie #490). Są tylko przy
+    mapie z wynikiem i włączonych autach: ostrzeżenie, gdy czas wyszukiwania jest
+    poza zasięgiem od teraz (w przód i wstecz) i aut nie ma, oraz info o celu poza
+    strefą - raz na całe wyszukiwanie. */
 function paintCarsNote() {
-    const lines = [];
+    const notes = [];
     if (carsOn && !plannerSuspended && flowOnScreen()) {
-        const horizon = setting('cars-horizon');
-        const ahead = lastFlow.cars_ahead_sec;
-        const hours = Math.round(ahead / 3600);
         if (lastFlow.cars_beyond) {
-            lines.push(`Nie pokazujemy aut Traficara: szukasz ${hours} h naprzód, a limit to ` +
-                       `${horizon} h. Zmienisz to w ustawieniach: „Pokazuj auta Traficara do”.`);
-        } else if (ahead > 3600 && lastFlow.cars.length) {
-            lines.push(`Auta według obecnych pozycji — za ${hours} h mogą stać gdzie indziej.`);
+            notes.push({level: 'warn', setting: 'cars-horizon',
+                        text: `Auta Traficara tylko do ${setting('cars-horizon')} h od teraz`});
         }
         if (lastFlow.cars_dest_in_zone === false) {
-            lines.push('Cel poza strefą Traficara — tam auta nie oddasz.');
+            notes.push({level: 'info', text: 'Cel poza strefą Traficara'});
         }
     }
-    carsNote.hidden = !lines.length;
-    carsNote.innerHTML = lines.map(esc).join('<br>');
+    setLayerNotes('cars', notes);
 }
 
 /** Postawienie warstwy aut od zera - po przełączniku, po nowej mapie i po jej
