@@ -1029,6 +1029,10 @@ MIN_FRAME_SIDE_KM = 1.0
 # Auta, których nic nie bije, są na mapie i ponad tę liczbę - a bywa ich
 # sporo: na dziesięciu relacjach (2026-09-13, 20:20) od 2 do 13, mediana 6-7.
 DEFAULT_MAP_CARS = 3
+# Do ilu godzin naprzód od teraz pokazujemy auta Traficara (ustawienie pod
+# zębatką, zgłoszenie #490); None = bez limitu. Dalej niż to ich pozycje to już
+# zgadywanie, więc zamiast aut jest wyjaśnienie, dlaczego ich nie ma.
+DEFAULT_CAR_HORIZON_H = 3
 MIN_MAP_CARS = 1
 MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
@@ -2030,6 +2034,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
                      with_journeys=True, use_cars=True,
+                     car_horizon_h=DEFAULT_CAR_HORIZON_H,
                      live_refreshed=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
@@ -2594,6 +2599,10 @@ def plan_flow_stages(start_query, end_query, when=None,
             # narysował, mówiłoby o mapie coś, czego na niej nie ma.
             cars, bike_places = [], []
             cars_dest_in_zone = None
+            # Za ile sekund od TERAZ pasażer będzie przy początku podróży -
+            # od tego zależy, czy dzisiejsze pozycje aut jeszcze coś mówią.
+            cars_ahead_sec = None
+            cars_beyond = False
             # Przy "dowolnej stacji w mieście" po którejkolwiek stronie aut
             # i rowerów nie ma wcale - decyzja użytkownika: to podróż koleją
             # między miastami, a auto czy rower przy którejś ze stacji nie jest
@@ -2607,7 +2616,14 @@ def plan_flow_stages(start_query, end_query, when=None,
                 for stop, at in _drawn_reach(kept, ranges).items():
                     if at < reach.get(stop, INF):
                         reach[stop] = at
-                if day_offset == 0 and when.date() == date.today():
+                searched_at = (datetime.combine(when.date(), datetime.min.time())
+                               + timedelta(days=day_offset, seconds=report_dep_sec))
+                cars_ahead_sec = int((searched_at - datetime.now()).total_seconds())
+                cars_beyond = (car_horizon_h is not None
+                               and cars_ahead_sec > car_horizon_h * 3600)
+                # Dzień, który już minął, nie ma aut wcale i nie ma też o czym
+                # pisać - to nie jest pytanie o przyszłość.
+                if not cars_beyond and searched_at.date() >= date.today():
                     # Ile z nich: suwak razy to samo "pokaż więcej", co przy
                     # liniach - a auta, których nic nie bije, zostają i tak.
                     cars = traficar.map_choice(
@@ -2658,6 +2674,11 @@ def plan_flow_stages(start_query, end_query, when=None,
                 # Czy cel leży w strefie oddawania aut; None, gdy aut nie ma
                 # albo strefy nie znamy (patrz traficar.can_end_at).
                 "cars_dest_in_zone": cars_dest_in_zone,
+                # Za ile sekund od teraz zaczyna się podróż i czy to dalej niż
+                # zasięg z ustawienia (wtedy aut nie ma wcale) - front pisze
+                # z tego notkę (zgłoszenie #490).
+                "cars_ahead_sec": cars_ahead_sec,
+                "cars_beyond": cars_beyond,
                 # Rowery miejskie w zasięgu tej mapy, każdy z listą przejazdów,
                 # które jeszcze mieszczą się w oknie (patrz bikes.map_places).
                 # Przejazdów mapa NIE rysuje - front pokazuje je po najechaniu.

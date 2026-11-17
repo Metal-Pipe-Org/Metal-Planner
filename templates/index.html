@@ -255,6 +255,7 @@
     </header>
 
     <div id="vehicles-note" class="vehicles-note" role="status" hidden></div>
+    <div id="cars-note" class="vehicles-note" role="status" hidden></div>
 
     {% if data_error %}
 
@@ -703,6 +704,18 @@
             <span class="info" tabindex="0" role="button"
                   data-tip="Odjazdy, na które już nie zdążysz, zostają w tablicy na szaro. Wyłączone — tablica zaczyna się od chwili, w której według mapy tu jesteś.">i</span>
         </label>
+    <div class="field set-row" data-setting="cars-horizon" data-labels="Traficar, Mapa, Czas">
+        <label for="cars-horizon">
+            Pokazuj auta Traficara do
+            <span class="info" tabindex="0" role="button"
+                  data-tip="Liczone od teraz do czasu wyszukiwania. Auta stoją tam, gdzie są teraz, więc im dalej naprzód, tym mniej o nich wiadomo. Poza tym zasięgiem aut nie ma, a mapa mówi dlaczego.">i</span>
+        </label>
+        <select id="cars-horizon">
+            <option value="3" selected>3 h</option>
+            <option value="24">24 h</option>
+            <option value="none">bez limitu</option>
+        </select>
+    </div>
     <label class="dev-check set-row" data-setting="car-vans" data-labels="Traficar, Mapa">
             <input type="checkbox" id="car-vans"> Pokazuj też dostawczaki
             <span class="info" tabindex="0" role="button"

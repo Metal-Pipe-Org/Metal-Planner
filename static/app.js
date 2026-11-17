@@ -710,6 +710,32 @@ function loadCityBikes() {
     }).catch(() => {});
 }
 
+const carsNote = $('cars-note');
+
+/** Notka o autach Traficara przy wyniku (zgłoszenie #490) - ten sam pasek co
+    „Dane nieaktualne" przy pojazdach na żywo. Jest tylko przy mapie z wynikiem
+    i włączonych autach; mówi o tym, że aut nie ma albo że stoją według
+    obecnych pozycji, a o celu poza strefą - raz na całe wyszukiwanie. */
+function paintCarsNote() {
+    const lines = [];
+    if (carsOn && !plannerSuspended && flowOnScreen()) {
+        const horizon = setting('cars-horizon');
+        const ahead = lastFlow.cars_ahead_sec;
+        const hours = Math.round(ahead / 3600);
+        if (lastFlow.cars_beyond) {
+            lines.push(`Nie pokazujemy aut Traficara: szukasz ${hours} h naprzód, a limit to ` +
+                       `${horizon} h. Zmienisz to w ustawieniach: „Pokazuj auta Traficara do”.`);
+        } else if (ahead > 3600 && lastFlow.cars.length) {
+            lines.push(`Auta według obecnych pozycji — za ${hours} h mogą stać gdzie indziej.`);
+        }
+        if (lastFlow.cars_dest_in_zone === false) {
+            lines.push('Cel poza strefą Traficara — tam auta nie oddasz.');
+        }
+    }
+    carsNote.hidden = !lines.length;
+    carsNote.innerHTML = lines.map(esc).join('<br>');
+}
+
 /** Postawienie warstwy aut od zera - po przełączniku, po nowej mapie i po jej
     zdjęciu. Zawsze zdejmuje obie wersje i stawia najwyżej jedną, więc nie da
     się zostać z autami z wyniku pod autami z całego miasta. */
@@ -720,6 +746,7 @@ function refreshCarLayer() {
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     hideCarZone();
     refreshZoneLayer();
+    paintCarsNote();
     // W rozkładach mapa jest o linii albo o przystanku - auta i rowery nie
     // mają tam czego dokładać, choćby włącznik został zapalony.
     if (!carsOn || plannerSuspended) return;
@@ -5118,6 +5145,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
+        car_horizon_h: $('cars-horizon').value,
         newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
         scheme_extra: $('scheme-walks-count').value,
@@ -6440,8 +6468,8 @@ function renderHeadlineOnly(data) {
 }
 
 // Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
-const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, bike_places: [],
-                     bike_places_live: false};
+const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, cars_ahead_sec: null,
+                     cars_beyond: false, bike_places: [], bike_places_live: false};
 
 /** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
     zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
@@ -7534,6 +7562,11 @@ const SETTING_EFFECTS = {
     'car-overhead': {react: replanSoon(false)},
     'onboard-slack': {react: replanSoon(false)},
     // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
+    'cars-horizon': {react: () => {
+        mapMore = 0;
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
     'car-vans': {react: () => {
         mapMore = 0;
         if (!flowOnScreen()) refreshCarLayer();

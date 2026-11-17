@@ -11,7 +11,7 @@ Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
 import random
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 import gtfs
 import planner
@@ -425,16 +425,43 @@ def test_przelacznik_dostawczakow_dochodzi_do_mapy(install_day, monkeypatch):
 
 # ------------------------------------------------ kiedy aut nie ma w ogóle ----
 
-def test_pytanie_o_inny_dzien_nie_pokazuje_aut(install_day, monkeypatch):
-    """Auto stoi tam, gdzie stoi teraz - nie tam, gdzie będzie stało we
-    wtorek. Godzina "będziesz przy nim" byłaby wtedy zgadywaniem podanym
-    jako fakt (ta sama zasada, co przy stojakach rowerowych)."""
+def test_poza_zasiegiem_z_ustawienia_nie_ma_aut_i_jest_powod(install_day, monkeypatch):
+    """Auto stoi tam, gdzie stoi teraz - nie tam, gdzie będzie stało za dobę.
+    Zasięg (ustawienie pod zębatką, domyślnie 3 h) mówi, jak daleko naprzód
+    jeszcze to coś znaczy; poza nim aut nie ma, a odpowiedź mówi dlaczego."""
+    install_day(_day())
+    _cars(monkeypatch, [CAR])
+    jutro = datetime.combine(date.today() + timedelta(days=1), time())
+
+    result = planner.plan_flow("Start", "Cel", jutro)
+
+    assert result["cars"] == []
+    assert result["cars_beyond"] is True
+
+
+def test_zasieg_aut_z_ustawienia_przesuwa_granice(install_day, monkeypatch):
+    install_day(_day())
+    _cars(monkeypatch, [CAR])
+    jutro = datetime.combine(date.today() + timedelta(days=1), time())
+
+    doba = planner.plan_flow("Start", "Cel", jutro, car_horizon_h=48)
+    bez_limitu = planner.plan_flow("Start", "Cel", jutro, car_horizon_h=None)
+
+    assert _tablice(doba["cars"]) == ["WE1AA11"]
+    assert _tablice(bez_limitu["cars"]) == ["WE1AA11"]
+    assert doba["cars_beyond"] is False
+    assert doba["cars_ahead_sec"] > 3600
+
+
+def test_dzien_ktory_minal_nie_ma_aut_ani_notki(install_day, monkeypatch):
     install_day(_day())
     _cars(monkeypatch, [CAR])
 
-    result = planner.plan_flow("Start", "Cel", datetime(2026, 1, 5, 0, 0, 0))
+    result = planner.plan_flow("Start", "Cel", datetime(2026, 1, 5, 0, 0, 0),
+                               car_horizon_h=None)
 
     assert result["cars"] == []
+    assert result["cars_beyond"] is False
 
 
 def test_wylacznik_gasi_auta_na_mapie(install_day, monkeypatch):
