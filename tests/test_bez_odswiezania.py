@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import pytest
+import settings_registry
 from flask import Flask, render_template
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,7 +20,7 @@ def _index(dev_mode):
     with app.test_request_context("/"):
         return render_template("index.html", stops=[], abbreviations={},
                                lines=[], data_error=None, form_time="12:00",
-                               form_date="2026-10-01", dev_mode=dev_mode)
+                               form_date="2026-10-01", settings=settings_registry.view(), dev_mode=dev_mode)
 
 
 @pytest.mark.parametrize("dev_mode", [False, True])

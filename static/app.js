@@ -1404,7 +1404,8 @@ function endpointPoints() {
 // Ustawienie to wiersz `.set-row` w index.html i NIC więcej nie trzeba opisywać:
 // rodzaj wynika z kontrolki (przełącznik, suwak, lista wyboru), wartość
 // domyślna z jej `checked`/`value`/`selected` w HTML-u, etykiety z `data-labels`,
-// "tylko DEV" z klasy `dev-only`. Zapamiętywanie, przywracanie, pasek
+// "tylko DEV" z klasy `dev-only` (nazwy, opisy, etykiety i DEV pochodzą z
+// settings.json, serwer wstawia je do wiersza). Zapamiętywanie, przywracanie, pasek
 // "zmienione", kopie pod nagłówkami i statystyki działają na tym opisie
 // jednakowo dla każdego rodzaju. Aplikacja czyta wartość przez setting(id) w
 // chwili użycia; skutek zmiany (jeśli jest) wpisuje się w SETTING_EFFECTS.
@@ -1445,6 +1446,7 @@ for (const row of settingsRows) {
         kind: control.tagName === 'SELECT' ? 'select' : control.type,
         dflt: readControl(control),
         devOnly: row.classList.contains('dev-only'),
+        expired: row.dataset.expired !== undefined,
     };
     SETTINGS.set(info.id, info);
     SETTING_BY_CONTROL.set(control, info);
@@ -1525,12 +1527,14 @@ function storeSetting(key, value) {
 // schowane, więc z pamięci bierze się tylko to, co użytkownik w panelu widzi -
 // schowanej opcji nie miałby czym cofnąć (zgłoszenie #175). Schowana wartość
 // jest tylko pomijana, nie kasowana: po ponownym włączeniu DEV_MODE wraca.
-// To samo dotyczy strojeń wyłączonych stałymi (TUNING).
+// To samo dotyczy strojeń wyłączonych stałymi (TUNING). Ustawienie obsolete,
+// które zniknęło z menu (miesiąc po dacie z settings.json), wraca do domyślnego:
+// zapamiętana wartość jest pomijana, nie kasowana.
 function restoreSettings() {
     const stored = storedSettings();
     for (const info of SETTINGS.values()) {
         const row = info.row;
-        if (stored[info.id] === undefined || (info.devOnly && !devMode)
+        if (stored[info.id] === undefined || (info.devOnly && !devMode) || info.expired
             || (row.dataset.tuning && !TUNING[row.dataset.tuning])) continue;
         writeControl(info.control, stored[info.id]);
     }
@@ -7517,6 +7521,7 @@ function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
     $('transfer-gain').closest('.set-row').hidden = !on;
+    $('via-open').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
@@ -7883,10 +7888,19 @@ function applyDotOpts() {
 const settingsSearch = $('settings-search');
 
 for (const row of settingsRows) {
-    if (row.classList.contains('dev-only')) {
-        const badge = document.createElement('span');
-        badge.className = 'dev-badge';
-        badge.textContent = 'DEV';
+    const tags = [];
+    if (row.classList.contains('dev-only')) tags.push('DEV');
+    if (row.dataset.obsolete !== undefined) tags.push('obsolete');
+    for (const tag of tags) {
+        const badge = document.createElement(tag === 'DEV' ? 'span' : 'a');
+        badge.className = tag === 'DEV' ? 'dev-badge' : 'dev-badge obsolete-badge';
+        badge.textContent = tag;
+        if (tag === 'obsolete') {
+            badge.href = row.dataset.issueUrl;
+            badge.target = '_blank';
+            badge.rel = 'noopener';
+            badge.dataset.tip = 'Korzystasz z tego? Kliknij, żeby dać znać, że jest ważne (otworzy się zgłoszenie na GitHubie)';
+        }
         (row.querySelector('label:not(.button), .set-title') || row).append(badge);
     }
 }
@@ -7950,6 +7964,7 @@ function snapshotSettingsLog() {
     }
 }
 
+const isObsolete = row => row.dataset.obsolete !== undefined;
 const rowScore = row => settingsLog.counts.get(row.dataset.setting) || 0;
 const rowIndex = new Map(settingsRows.map((row, i) => [row, i]));
 // Ustawienie dodane po ostatnim przeliczeniu staje na końcu wśród równych.
@@ -8009,7 +8024,7 @@ for (const type of ['input', 'change']) {
 
 function settingGroups(visible) {
     const byLabel = new Map();
-    for (const row of visible) {
+    for (const row of visible.filter(row => !isObsolete(row))) {
         for (const label of settingsInfo.get(row).labels) {
             if (!byLabel.has(label)) byLabel.set(label, []);
             byLabel.get(label).push(row);
@@ -8026,7 +8041,7 @@ function settingGroups(visible) {
 }
 
 function suggestedSettings(visible) {
-    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row));
+    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row) && !isObsolete(row));
     const recent = settingsLog.recent.filter(usable).slice(0, SETTINGS_SUGGEST_RECENT);
     const frequent = [...settingsLog.counts.keys()]
         .filter(id => usable(id) && !recent.includes(id))
@@ -8058,8 +8073,9 @@ function renderSettingsList() {
     const placed = new Set();
     if (needle) {
         // Wyniki jako płaska lista, każde ustawienie raz.
-        nodes.push(...matching);
-        for (const row of matching) placed.add(row);
+        const flat = [...matching.filter(row => !isObsolete(row)), ...matching.filter(isObsolete)];
+        nodes.push(...flat);
+        for (const row of flat) placed.add(row);
     } else {
         const suggested = suggestedSettings(shown);
         if (suggested.length) {
@@ -8077,9 +8093,13 @@ function renderSettingsList() {
             }
             addGroup(nodes, group.label, rows, false);
         }
-        const rest = shown.filter(row => !placed.has(row));
+        const rest = shown.filter(row => !placed.has(row) && !isObsolete(row));
         if (rest.length) addGroup(nodes, 'Inne', rest, false);
         for (const row of rest) placed.add(row);
+        // Przestarzałe na samym dole, zawsze razem, bez względu na swoje tagi.
+        const obsolete = shown.filter(isObsolete);
+        if (obsolete.length) addGroup(nodes, 'Obsolete', obsolete, false);
+        for (const row of obsolete) placed.add(row);
     }
     // Wiersze schowane z innych powodów (albo bez trafienia) zostają w DOM, na końcu.
     nodes.push(...settingsRows.filter(row => !placed.has(row)));
@@ -8115,7 +8135,7 @@ function changedSettingRows(shown) {
 }
 
 function visibleSettingRows() {
-    return settingsRows.filter(row => !row.hidden && (devMode || !row.classList.contains('dev-only')));
+    return settingsRows.filter(row => !row.hidden && row.dataset.expired === undefined && (devMode || !row.classList.contains('dev-only')));
 }
 
 function buildChangedGroup(rows, prefs) {
@@ -8605,18 +8625,18 @@ function showInfoTip(icon) {
 }
 
 document.addEventListener('mouseover', event => {
-    const icon = event.target.closest('.info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('mouseout', event => {
-    if (event.target.closest('.info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('focusin', event => {
-    const icon = event.target.closest('.info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('focusout', event => {
-    if (event.target.closest('.info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('click', event => {
     const icon = event.target.closest('.info');

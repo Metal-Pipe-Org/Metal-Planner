@@ -2507,6 +2507,18 @@ body:not(.dev-mode) .dev-only { display: none; }
     letter-spacing: 0.06em;
 }
 
+/* Znaczek obsolete jest odnośnikiem do zgłoszenia: żółty z ciemnym tekstem,
+   czytelny na jasnym i na ciemnym tle panelu. */
+.obsolete-badge {
+    background: #ffd54f;
+    color: #3d2e00;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+.obsolete-badge:hover,
+.obsolete-badge:focus-visible { background: #ffca28; outline: 2px solid #3d2e00; outline-offset: 1px; }
+
 #dev-panel .dev-check {
     display: flex;
     align-items: center;
@@ -2565,6 +2577,7 @@ body:not(.dev-mode) .dev-only { display: none; }
 }
 .info:hover,
 .info:focus-visible { color: var(--ink); outline: none; }
+.set-row[data-expired] { display: none !important; }
 
 .info-tip {
     position: fixed;
