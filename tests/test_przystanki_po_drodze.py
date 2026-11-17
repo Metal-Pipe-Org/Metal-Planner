@@ -11,6 +11,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import settings_registry
 from flask import Flask, render_template
 
 import gtfs
@@ -81,6 +82,6 @@ def test_opcja_w_wygladzie_aplikacji_domyslnie_zgaszona():
     with app.test_request_context("/"):
         html = render_template("index.html", stops=[], abbreviations={},
                                lines=[], data_error=None, form_time="12:00",
-                               form_date="2026-10-01", dev_mode=False)
+                               form_date="2026-10-01", settings=settings_registry.view(), dev_mode=False)
     tag = re.search(r'<input[^>]*id="via-open"[^>]*>', html).group(0)
     assert "checked" not in tag
