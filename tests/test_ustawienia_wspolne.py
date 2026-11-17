@@ -178,7 +178,6 @@ def _statystyka(strona, id):
 def test_opis_ustawienia(w):
     assert w["id"] == w["control"], "data-setting musi być równe id kontrolki"
     assert w["kind"] in ("checkbox", "range", "select")
-    assert any(l.strip() for l in w["labels"].split(",")), "brak etykiet"
     assert _inna(w) != _domyslna(w)
     if w["kind"] == "range":
         assert float(w["min"]) <= _domyslna(w) <= float(w["max"])

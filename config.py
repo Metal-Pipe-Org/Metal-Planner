@@ -18,9 +18,12 @@ osobno przez docker/entrypoint.sh i z crona).
 
 import json
 import os
+import ssl
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+import certifi
 from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).resolve().parent / "data" / ".env"
@@ -33,6 +36,12 @@ _STARTED_AT = datetime.now(timezone.utc)
 # Brak pliku to nie błąd: na czystym klonie i w kontenerze bez sekretów
 # aplikacja ma wstać normalnie, po prostu bez klucza.
 load_dotenv(ENV_PATH, override=False)
+
+# Każde urllib.request.urlopen w aplikacji (MPK, rowery, Traficar, PKP, GTFS)
+# weryfikuje HTTPS po paczce certifi: magazyn systemowy Pythona z python.org na
+# macOS nie ma certyfikatów pośrednich i np. mpk.wroc.pl się nie weryfikował.
+urllib.request.install_opener(urllib.request.build_opener(
+    urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=certifi.where()))))
 
 
 def pkp_api_key():

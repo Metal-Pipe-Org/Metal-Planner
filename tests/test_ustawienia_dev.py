@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import pytest
+import settings_registry
 from flask import Flask, render_template
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,7 +21,8 @@ DEV_ROWS = {"density", "car-count", "bike-count", "time-hover", "time-ends",
             "look-label-op", "look-dump", "siechnice-file", "dev-access", "pushward", "sw-check",
             "transfer-gain", "onboard-slack", "location-refresh", "stats",
             "order-limit", "new-map", "walking",
-            "scheme-layout", "scheme-walks-count", "headline-map-range"}
+            "scheme-layout", "scheme-walks-count", "headline-map-range",
+            "vehicles-direction", "vehicles-stats", "server-logs"}
 USER_ROWS = {"time-show-headline", "tt-past", "car-vans", "walk-pace",
              "bike-kmh", "bike-overhead", "car-kmh", "car-overhead",
              "bikes-merged", "no-pull-refresh", "start-mode-switch",
@@ -33,7 +35,7 @@ def _index(dev_mode):
     with app.test_request_context("/"):
         return render_template("index.html", stops=[], abbreviations={},
                                lines=[], data_error=None, form_time="12:00",
-                               form_date="2026-10-01", dev_mode=dev_mode)
+                               form_date="2026-10-01", settings=settings_registry.view(), dev_mode=dev_mode)
 
 
 def _rows(html):
@@ -64,10 +66,11 @@ def test_ustawienie_eksperymentu_jest_na_liscie():
     assert 'id="location-refresh"' in _index(dev_mode=True)
 
 
-def test_kazdy_wiersz_ustawien_ma_etykiety():
-    """Nagłówki listy składają się z etykiet - wiersz bez nich nie trafiłby do żadnej grupy."""
+def test_kazdy_wiersz_ustawien_ma_atrybut_etykiet():
+    """Nagłówki listy składają się z etykiet; wiersz z pustą listą tagów jest dozwolony
+    (ląduje w „Inne”), ale atrybut `data-labels` musi być."""
     tags = re.findall(r'<(?:div|label)\s[^>]*\bset-row\b[^>]*>', _index(dev_mode=True))
     assert tags
     for tag in tags:
         labels = re.search(r'data-labels="([^"]*)"', tag)
-        assert labels and any(l.strip() for l in labels.group(1).split(",")), tag
+        assert labels, tag

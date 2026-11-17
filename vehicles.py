@@ -20,6 +20,7 @@ app.js) biłoby wprost w cudzy serwer.
 
 import json
 import math
+import re
 import socket
 import ssl
 import threading
@@ -27,6 +28,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import gtfs
 import serverlog
@@ -82,6 +85,9 @@ def _parse(raw_results):
         line = _clean(item.get("name"))
         if not line:
             continue
+        # Kanał oddaje linie literowe małymi literami ("d", "k"), a rozkład
+        # ma je wielkimi - bez tego nie zgadzają się z kursem ani z mapą.
+        line = line.upper()
         # API zwraca lat jako "x", lon jako "y" (zmierzone na żywych danych -
         # potwierdza to też static/js/buspositions.js na mpk.wroc.pl, które
         # tak samo buduje z nich google.maps.LatLng(x, y)).
@@ -90,7 +96,8 @@ def _parse(raw_results):
             continue
         if not (LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]):
             continue
-        parsed.append({"line": line, "kind": kind, "lat": lat, "lon": lon})
+        parsed.append({"line": line, "kind": kind, "lat": lat, "lon": lon,
+                       "key": item.get("k")})
     return parsed
 
 
@@ -136,6 +143,11 @@ def get_vehicles():
         if snapshot != _cache["snapshot"]:
             _cache["snapshot"] = snapshot
             _cache["same_since"] = time.time()
+        _track_motion(vehicles)
+        _add_courses(vehicles)
+        _add_headings(vehicles)
+        for v in vehicles:
+            del v["key"]
         _cache["vehicles"] = vehicles
         _cache["at"] = time.monotonic()
         return vehicles
@@ -145,6 +157,302 @@ def stale_sec():
     """Od ilu sekund pozycje z MPK się nie zmieniły (po ostatnim udanym
     get_vehicles)."""
     return int(time.time() - _cache["same_since"])
+
+
+# ------------------------------------------------- w którą stronę jedzie pojazd ---
+#
+# Szybki kanał nie mówi, dokąd jedzie pojazd. Kierunek składamy z dwóch
+# źródeł. (1) Kurs: ośmiocyfrowy klucz "k" przy pojeździe to numer kursu, a
+# numer kursu w rozkładzie GTFS (trip_id "3_17599100") różni się od niego o
+# stałą, wspólną dla grupy linii (zmierzone na żywych danych: wszystkie
+# tramwaje 11826866, linie 122-128 11866456 itd.; stałe zmieniają się z
+# kolejnymi wydaniami rozkładu). Stałe uczymy się w locie z pojazdów, których
+# kurs jest ponad wszelką wątpliwość (kropka stoi tam, gdzie kurs ma być wg
+# rozkładu, a żaden inny kurs tej linii nie jest blisko), a przyjmujemy dopiero
+# stałą potwierdzoną przez kilka różnych kursów. Potem pojazd wiążemy z kursem
+# po samym kluczu i pokazujemy cel tylko wtedy, gdy kurs istnieje, jest tej
+# samej linii, trwa teraz i kropka leży na jego trasie. Strzałka celuje w
+# następny przystanek kursu, także gdy pojazd stoi.
+# (2) Ruch: bez kursu strzałka pokazuje się tylko, gdy pojazd dwa razy z rzędu
+# przesunął się w tę samą stronę. Ruch jest też wetem dla kursu: jeśli
+# przesunięcie przeczy rozkładowi, wolimy nie pokazywać nic niż pokazać źle.
+
+LEARN_NEAR_M = 150            # kropka tak blisko pozycji rozkładowej kursu ...
+LEARN_RIVAL_M = 600           # ... a każdy inny kurs tej linii tak daleko: uczymy się stałej
+OFFSET_MIN_KEYS = 3           # tyle sąsiednich kursów musi potwierdzić stałą ...
+OFFSET_SHARE = 0.5            # ... i stanowić tyle wszystkich sąsiednich głosów
+KEY_WINDOW = 300              # sąsiad = klucz różniący się o nie więcej niż tyle
+OFFSET_TTL_SEC = 6 * 3600
+WINDOW_SEC = 5 * 60           # o tyle kurs może się spóźnić z końcem rozkładu
+ON_ROUTE_M = 200              # dalej od trasy kursu - nie ufamy takiemu wiązaniu
+STEP_M = 30                   # krótsze przesunięcie to szum GPS
+VETO_DEG = 90
+STRAIGHT_DEG = 30
+AT_STOP_M = 25
+ROUTE_NEAR_M = 100            # kropka tak blisko odcinka wariantu trasy ...
+ROUTE_DEG = 45                # ... a odcinek biegnie tak zgodnie z ruchem: pasuje
+TRACK_TTL_SEC = 300
+
+_TRIP_ID = re.compile(r"\d+_\d+")
+WARSAW = ZoneInfo("Europe/Warsaw")
+_ROUTE_TYPE = {"tram": 0, "bus": 3}
+
+_tracks = {}                  # klucz kursu z szybkiego kanału -> {"pts": [...], "seen": t}
+_anchors = {}                 # klucz kursu -> (stała, kiedy widziany)
+_anchors_db = [None]          # mtime bazy, z której pochodzą stałe
+_window_cache = {}            # (dzień, mtime bazy) -> kursy z oknem czasu
+_stops_cache = {}             # trip_id -> przystanki; czyszczony razem z oknami
+
+
+def _metres(a, b):
+    lat = math.radians((a[0] + b[0]) / 2)
+    return math.hypot((b[0] - a[0]) * 111320, (b[1] - a[1]) * 111320 * math.cos(lat))
+
+
+def _bearing(a, b):
+    dy = b[0] - a[0]
+    dx = (b[1] - a[1]) * math.cos(math.radians((a[0] + b[0]) / 2))
+    return math.degrees(math.atan2(dx, dy)) % 360
+
+
+def _angle_diff(a, b):
+    return abs((a - b + 180) % 360 - 180)
+
+
+def _track_motion(vehicles):
+    """Dopisuje przy pojeździe kierunki dwóch ostatnich przesunięć o co najmniej
+    STEP_M (najstarsze pierwsze): v["steps"]."""
+    now = time.monotonic()
+    for k in [k for k, t in _tracks.items() if now - t["seen"] > TRACK_TTL_SEC]:
+        del _tracks[k]
+    for v in vehicles:
+        point = (v["lat"], v["lon"])
+        track = _tracks.setdefault(v["key"], {"pts": [point], "seen": now})
+        track["seen"] = now
+        if _metres(track["pts"][-1], point) >= STEP_M:
+            track["pts"] = (track["pts"] + [point])[-3:]
+        pts = track["pts"]
+        v["steps"] = [_bearing(a, b) for a, b in zip(pts, pts[1:])]
+
+
+def _day_trips(day, db):
+    """Kursy dnia z oknem czasu: liczone raz na dzień."""
+    key = (day, gtfs.DB_PATH.stat().st_mtime)
+    cached = _window_cache.get(key)
+    if cached is not None:
+        return cached
+    services = gtfs.active_service_ids(db, day)
+    holes = ",".join("?" * len(services))
+    rows = db.execute(
+        f"""SELECT t.trip_id, TRIM(r.route_short_name), r.route_type,
+                   t.trip_headsign, MIN(st.departure_sec), MAX(st.arrival_sec)
+            FROM trips t
+            JOIN routes r ON r.route_id = t.route_id
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            WHERE t.service_id IN ({holes})
+            GROUP BY t.trip_id""",
+        tuple(services),
+    ).fetchall()
+    # Doklejone kursy z innych źródeł (np. "SIE:friday:35169589") nie mają
+    # numeru, który dałoby się porównać z kluczem - po kluczu ich nie wiążemy.
+    trips = [{"id": i, "num": int(i.split("_")[1]), "route": n, "type": ty,
+              "headsign": h, "first": f, "last": la}
+             for i, n, ty, h, f, la in rows if _TRIP_ID.fullmatch(i)]
+    for old in [k for k in _window_cache if k[1] != key[1] or abs((k[0] - day).days) > 1]:
+        del _window_cache[old]
+    if not _window_cache:
+        _stops_cache.clear()
+    _window_cache[key] = trips
+    return trips
+
+
+def _running_trips(now, db):
+    """Kursy trwające teraz - także sprzed północy, liczone w sekundach
+    rozkładu dnia poprzedniego (> 24:00)."""
+    out = []
+    for back in (0, 1):
+        day = (now - timedelta(days=back)).date()
+        sec = now.hour * 3600 + now.minute * 60 + now.second + back * 86400
+        for t in _day_trips(day, db):
+            if t["first"] - WINDOW_SEC <= sec <= t["last"] + WINDOW_SEC:
+                out.append({**t, "sec": sec})
+    return out
+
+
+def _trip_stops(trip, db):
+    stops = _stops_cache.get(trip["id"])
+    if stops is None:
+        stops = _stops_cache[trip["id"]] = db.execute(
+            """SELECT s.stop_lat, s.stop_lon, st.departure_sec, s.stop_name
+               FROM stop_times st JOIN stops s ON s.stop_id = st.stop_id
+               WHERE st.trip_id = ? ORDER BY st.stop_sequence""", (trip["id"],)
+        ).fetchall()
+    return stops
+
+
+def _seg_distance(p, a, b):
+    """Odległość punktu od odcinka a-b w metrach (płaskie przybliżenie)."""
+    k = math.cos(math.radians(p[0]))
+    ax, ay = (a[1] - p[1]) * 111320 * k, (a[0] - p[0]) * 111320
+    bx, by = (b[1] - p[1]) * 111320 * k, (b[0] - p[0]) * 111320
+    dx, dy = bx - ax, by - ay
+    span = dx * dx + dy * dy
+    t = 0 if span == 0 else max(0, min(1, -(ax * dx + ay * dy) / span))
+    return math.hypot(ax + t * dx, ay + t * dy)
+
+
+def _locate(trip, point, db):
+    """(odległość od trasy kursu, indeks następnego przystanku). Trasa to cały
+    kurs; przy kilku równie bliskich odcinkach (pętla, wspólny odcinek tam i z
+    powrotem) wygrywa ten bliższy temu, gdzie kurs ma być wg rozkładu."""
+    stops = _trip_stops(trip, db)
+    ahead = sum(1 for s in stops if s[2] <= trip["sec"])
+    near = [(_seg_distance(point, stops[j][:2], stops[j + 1][:2]), j + 1)
+            for j in range(len(stops) - 1)]
+    if not near:
+        return None
+    best = min(d for d, _ in near)
+    d, nxt = min(((d, j) for d, j in near if d <= best + 30), key=lambda c: abs(c[1] - ahead))
+    if nxt + 1 < len(stops) and _metres(point, stops[nxt][:2]) < AT_STOP_M:
+        nxt += 1
+    return best, nxt
+
+
+def _scheduled_position(trip, db):
+    """Gdzie kurs powinien być teraz wg rozkładu (prosta między przystankami)."""
+    stops = _trip_stops(trip, db)
+    sec = trip["sec"]
+    for before, after in zip(stops, stops[1:]):
+        if before[2] <= sec <= after[2]:
+            span = after[2] - before[2]
+            f = (sec - before[2]) / span if span else 0
+            return (before[0] + (after[0] - before[0]) * f,
+                    before[1] + (after[1] - before[1]) * f)
+    return None
+
+
+def _learn_offsets(vehicles, trips, db, now):
+    """Dopisuje do _anchors stałe pojazdów, których kurs jest oczywisty."""
+    stamp = gtfs.DB_PATH.stat().st_mtime
+    if _anchors_db[0] != stamp:
+        _anchors.clear()
+        _anchors_db[0] = stamp
+    spots = {}
+    by_line = {}
+    for t in trips:
+        spots[t["id"]] = _scheduled_position(t, db)
+        by_line.setdefault((t["route"], t["type"]), []).append(t)
+    for v in vehicles:
+        ranked = sorted(
+            (_metres((v["lat"], v["lon"]), spots[t["id"]]), t["num"])
+            for t in by_line.get((v["line"], _ROUTE_TYPE[v["kind"]]), []) if spots[t["id"]]
+        )
+        if ranked and ranked[0][0] < LEARN_NEAR_M and (len(ranked) == 1 or ranked[1][0] > LEARN_RIVAL_M):
+            _anchors[v["key"]] = (v["key"] - ranked[0][1], now)
+    for key in [k for k, (_, t) in _anchors.items() if now - t > OFFSET_TTL_SEC]:
+        del _anchors[key]
+
+
+def _offset_for(key):
+    """Stała dla tego klucza, jeśli sąsiednie klucze (±KEY_WINDOW) w zdecydowanej
+    większości zgadzają się co do niej - stała jest bowiem stała tylko w obrębie
+    bloku kursów, a gdzie indziej (zmierzone) rozjeżdża się o kilkadziesiąt
+    numerów. Własny głos klucza się nie liczy."""
+    votes = {}
+    for k, (offset, _) in _anchors.items():
+        if k != key and abs(k - key) <= KEY_WINDOW:
+            votes[offset] = votes.get(offset, 0) + 1
+    if not votes:
+        return None
+    offset, top = max(votes.items(), key=lambda kv: kv[1])
+    if top >= OFFSET_MIN_KEYS and top >= OFFSET_SHARE * sum(votes.values()):
+        return offset
+    return None
+
+
+def _add_courses(vehicles):
+    """Przy pojazdach z rozpoznanym kursem: v["course"] = (kurs, następny przystanek).
+
+    Pojazd wiąże się z kursem po kluczu (patrz komentarz nad sekcją). Gdy dwa
+    pojazdy dostają ten sam kurs, nie wiążemy żadnego."""
+    now = datetime.now(WARSAW)
+    db = gtfs.open_db()
+    try:
+        trips = _running_trips(now, db)
+        _learn_offsets(vehicles, trips, db, time.time())
+        by_num = {t["num"]: t for t in trips}
+        found = {}
+        for i, v in enumerate(vehicles):
+            offset = _offset_for(v["key"])
+            trip = by_num.get(v["key"] - offset) if offset is not None else None
+            if (trip and trip["route"] == v["line"] and trip["type"] == _ROUTE_TYPE[v["kind"]]
+                    and _scheduled_position(trip, db)):
+                found[i] = trip
+        claims = {}
+        for trip in found.values():
+            claims[trip["id"]] = claims.get(trip["id"], 0) + 1
+        for i, trip in found.items():
+            v = vehicles[i]
+            where = _locate(trip, (v["lat"], v["lon"]), db)
+            if claims[trip["id"]] == 1 and where is not None and where[0] <= ON_ROUTE_M:
+                stops = _trip_stops(trip, db)
+                v["course"] = (trip, stops[where[1]])
+                v["rest"] = [[round(s[0], 5), round(s[1], 5)] for s in stops[where[1]:]]
+        _add_routes(vehicles, trips, db)
+    finally:
+        db.close()
+
+
+def _add_routes(vehicles, trips, db):
+    """Pojazdom bez kursu, ale z wiarygodnym ruchem: v["route"] = (cel, następny
+    przystanek), gdy wszystkie warianty trasy tej linii, które mijają kropkę
+    (≤ ROUTE_NEAR_M) w kierunku zgodnym z ruchem (< ROUTE_DEG), mają ten sam cel
+    i ten sam następny przystanek. Pętla, rozjazd albo brak dopasowania - nic."""
+    variants = {}
+    for t in trips:
+        stops = _trip_stops(t, db)
+        key = (t["route"], t["type"], t["headsign"], len(stops), stops[0][:2], stops[-1][:2])
+        variants.setdefault(key, t)
+    by_line = {}
+    for (route, kind, *_), t in variants.items():
+        by_line.setdefault((route, kind), []).append(t)
+    for v in vehicles:
+        steps = v["steps"]
+        if "course" in v or len(steps) != 2 or _angle_diff(steps[0], steps[1]) >= STRAIGHT_DEG:
+            continue
+        point = (v["lat"], v["lon"])
+        found = set()
+        for t in by_line.get((v["line"], _ROUTE_TYPE[v["kind"]]), []):
+            stops = _trip_stops(t, db)
+            for j in range(len(stops) - 1):
+                if (_seg_distance(point, stops[j][:2], stops[j + 1][:2]) <= ROUTE_NEAR_M
+                        and _angle_diff(steps[1], _bearing(stops[j][:2], stops[j + 1][:2])) < ROUTE_DEG):
+                    nxt = j + 1
+                    if nxt + 1 < len(stops) and _metres(point, stops[nxt][:2]) < AT_STOP_M:
+                        nxt += 1
+                    found.add((t["headsign"], stops[nxt][3], stops[nxt][0], stops[nxt][1]))
+        if len({f[:2] for f in found}) == 1:
+            headsign, name, lat, lon = next(iter(found))
+            v["route"] = (headsign, (lat, lon, None, name))
+
+
+def _add_headings(vehicles):
+    """Składa z kursu (albo wariantu trasy) i ruchu to, co dostaje front: heading
+    (stopnie), source ("trip"/"route") oraz to (cel) i next (następny przystanek).
+    Strzałka jest tylko tam, gdzie znamy cel - bez celu pojazd ma samo kółko."""
+    for v in vehicles:
+        steps = v.pop("steps")
+        course = v.pop("course", None)
+        route = v.pop("route", None)
+        v["heading"] = v["source"] = None
+        if course or route:
+            headsign, stop = (course[0]["headsign"], course[1]) if course else route
+            bearing = _bearing((v["lat"], v["lon"]), stop[:2])
+            if steps and _angle_diff(steps[-1], bearing) > VETO_DEG:
+                v.pop("rest", None)
+                continue
+            v["heading"], v["source"] = round(bearing), "trip" if course else "route"
+            v["to"], v["next"] = headsign, stop[3]
 
 
 # ------------------------------------------- którym kursem to właściwie jedzie ---
