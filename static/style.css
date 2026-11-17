@@ -2378,8 +2378,13 @@ body.dev-open .scheme-panel { right: 322px; }
 .scheme-badge, .scheme-hop-badge { pointer-events: none; overflow: visible; }
 .scheme-cluster-anchor { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .scheme-cluster-anchor .line-cluster { position: static; transform: none; }
-/* Kropka auta na krótkiej odnodze - odnoga jak dojście do auta na mapie. */
-.scheme-car-stub { fill: none; stroke: #455a64; stroke-width: 2.5; stroke-dasharray: 1 6; stroke-linecap: round; }
+/* Kropka auta na krótkiej odnodze - kropkowanej jak dojście do auta na mapie,
+   w fiolecie auta. */
+.scheme-car-stub { fill: none; stroke: #6a1b9a; stroke-width: 2.5; stroke-dasharray: 1 6; stroke-linecap: round; }
+/* Podświetlenie leży nad kreskami, ale kursora nie łapie: inaczej zasłania
+   kreskę, nad którą stoi kursor, ta traci najechanie, podświetlenie znika
+   i wszystko zaczyna się od nowa - miganie. */
+#scheme-pick-layer { pointer-events: none; }
 .scheme-car-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 /* Kropka auta wskazana na mapie albo na schemacie. */
 .scheme-car.picked circle:first-child { stroke: #111; stroke-width: 3; }

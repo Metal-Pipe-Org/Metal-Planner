@@ -2317,11 +2317,15 @@ def _vehicle_ends(day, legs, k, start_place, end_place, start_name, end_name):
     return place_of(before), place_of(after)
 
 
-def _bike_boxes(day, places, source_stops, start_name, scheme):
-    """Przy którym pudełku schematu stoi każda stacja z mapy (`box`): przy tym,
-    spod którego się do niej idzie. Schemat pokazuje je w rogu pudełka, bez
-    osobnych odnóg - odnogą jest tylko konkretny przejazd z _bike_moves."""
+def _bike_boxes(day, places, spots, source_stops, start_name, target_set, scheme):
+    """Przy którym pudełku schematu stoi każda stacja z mapy (`box`). Stacja,
+    na którą się wsiada (`places`) - przy tym, spod którego się do niej idzie.
+    Stacja, na której przejazd się kończy (`spots`) - przy najbliższym
+    pudełku w zasięgu dojścia, także przy celu. Schemat liczy je razem w rogu
+    pudełka, bez osobnych odnóg - odnogą jest tylko konkretny przejazd
+    z _bike_moves."""
     start = next(n["id"] for n in scheme["nodes"] if n["role"] == "start")
+    end = next(n["id"] for n in scheme["nodes"] if n["role"] == "end")
     by_place = {n["place"]: n["id"] for n in scheme["nodes"]
                 if n["role"] == "stop" and "place" in n}
     for place in places:
@@ -2330,6 +2334,16 @@ def _bike_boxes(day, places, source_stops, start_name, scheme):
             place["box"] = start
         elif ids and gtfs.place_name(day, ids[0]) in by_place:
             place["box"] = by_place[gtfs.place_name(day, ids[0])]
+    if not spots:
+        return
+    near = [(stop, end) for stop in target_set]
+    near += [(stop, by_place[gtfs.place_name(day, stop)]) for stop in day.stop_coords
+             if gtfs.place_name(day, stop) in by_place]
+    for spot in spots:
+        best = min(((gtfs._haversine_m(spot["lat"], spot["lon"], *day.stop_coords[stop]), box)
+                    for stop, box in near), default=None)
+        if best is not None and best[0] <= gtfs.WALK_M:
+            spot["box"] = best[1]
 
 
 def _bike_leg(bike):
@@ -2346,6 +2360,9 @@ def _bike_places(bike_moves):
         leg = _bike_leg(bike)
         k = legs.index(leg)
         before = legs[k - 1] if k and legs[k - 1]["kind"] == "walk" else None
+        # Dojazd do roweru pokazaną podróżą - dymek roweru opisuje go tą samą
+        # linijką co dymek auta (app.js: reachLineHtml).
+        lead = next((x for x in reversed(legs[:k]) if x["kind"] == "ride"), None)
         (lat_a, lon_a), (lat_b, lon_b) = leg["path"][0], leg["path"][-1]
         station = by_id.get(leg["station_from_id"], {})
         place = places.setdefault(leg["station_from_id"], {
@@ -2353,20 +2370,24 @@ def _bike_places(bike_moves):
             "bikes": leg["bikes_available"], "electric": station.get("electric", 0),
             "docks": station.get("docks", 0), "loose": False, "at": leg["dep_sec"],
             "from": before["from"] if before else leg["from"],
-            "walk_sec": before["minutes"] * 60 if before else 0, "rides": [],
+            "walk_sec": before["minutes"] * 60 if before else 0,
+            "walk_m": round(gtfs._haversine_m(*before["path"][0], *before["path"][-1])) if before else 0,
+            "rides": [],
+            **({"ride": {"num": lead["num"], "kind": lead["mode"], "from": lead["from"],
+                         "dep": lead["dep_sec"]}} if lead else {}),
         })
         place["rides"].append({
             "id": leg["station_to_id"], "name": leg["to"], "lat": lat_b, "lon": lon_b,
             "bikes": by_id.get(leg["station_to_id"], {}).get("bikes", 0),
             "docks": leg["docks_available"], "m": leg["distance_m"],
-            "sec": leg["arr_sec"] - leg["dep_sec"], "at": leg["arr_sec"],
+            "sec": leg["arr_sec"] - leg["dep_sec"], "at": leg["arr_sec"], "move": True,
             "options": [{"bike_at": leg["dep_sec"], "arrival": bike["journey"]["arrival_sec"],
                          "vehicles": sum(1 for x in legs if x["kind"] == "ride")}],
         })
     return list(places.values())
 
 
-def _car_spots(day, cars, source_stops, scheme):
+def _car_spots(day, cars, source_stops, target_set, scheme):
     """Gdzie na schemacie stoją kropki aut z mapy (patrz traficar.map_cars):
     przy pudełku (`node`), przy kresce między pudełkami w miejscu mijanego
     przystanku (`edge` i `at` - ułamek drogi), a auto o krótką jazdę od startu
@@ -2382,12 +2403,19 @@ def _car_spots(day, cars, source_stops, scheme):
         stop = car["from_stop"]
         spot = {"plate": car["plate"], "stop": car["from"]}
         place = gtfs.place_name(day, stop)
-        edge = next((e for e in scheme["edges"] if place in e.get("via", ())), None)
         hop = car.get("ride")
+        # Kropka stoi przy tym, czym się do auta dojeżdża (linia z dymka):
+        # przy kresce, która ją niesie, a nie przy innej kresce mijającej ten
+        # sam przystanek.
+        edge = next((e for e in scheme["edges"] if place in e.get("via", ())
+                     and (not hop or any(line["num"] == hop["num"] for line in e["lines"]))),
+                    None)
         # Przystanek na tym, co schemat i tak rysuje, wygrywa z krótką jazdą
         # linią spoza schematu.
         if stop in source_stops:
             spot["node"] = start
+        elif stop in target_set:
+            spot["node"] = next(n["id"] for n in scheme["nodes"] if n["role"] == "end")
         elif place in by_place:
             spot["node"] = by_place[place]
         elif edge is not None:
@@ -2919,7 +2947,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                     out = _scheme_of_map(*scheme_args, from_journeys=True)
                     _scheme_times(out, scheme_journeys)
                     out["moves"] = _scheme_moves(day, scheme_journeys, drawn_insts)
-                    out["cars"] = _car_spots(day, cars, source_stops, out)
+                    out["cars"] = _car_spots(day, cars, source_stops, target_set, out)
                     return out
                 scheme = moves_scheme([])
             elif new_map:
@@ -3156,7 +3184,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # i akurat tam mapa nie jest wachlarzem, tylko jedną trasą (patrz
             # gałąź else wyżej). Auto przy przystanku, którego nikt nie
             # narysował, mówiłoby o mapie coś, czego na niej nie ma.
-            cars, bike_places = [], []
+            cars, bike_places, bike_spots = [], [], []
             cars_dest_in_zone = None
             live_scheme = None
             # Przy "dowolnej stacji w mieście" po którejkolwiek stronie aut
@@ -3213,14 +3241,16 @@ def plan_flow_stages(start_query, end_query, when=None,
                         cars = sorted(cars + on_foot[:1],
                                       key=lambda car: (car["at"], car["to_dest_m"]))
                     if moves_scheme is not None:
-                        live_scheme = moves_scheme(cars)
                         # Auto przy narysowanej linii: dojazd do niego to ta
                         # jazda - dymek ją opisuje, a najechanie ją wskazuje,
-                        # tak jak przy aucie o krótką jazdę od startu.
+                        # tak jak przy aucie o krótką jazdę od startu. Przed
+                        # schematem: kropka auta staje przy tej samej linii,
+                        # o której mówi dymek (_car_spots).
                         rides_to = _drawn_rides_to(day, chosen_map)
                         for car in cars:
                             if "ride" not in car and car["from_stop"] in rides_to:
                                 car["ride"] = _hop_ride(day, rides_to[car["from_stop"]], geo_db)
+                        live_scheme = moves_scheme(cars)
                     for car in in_reach:
                         car.pop("from_stop")
                         if "ride" in car:
@@ -3254,12 +3284,31 @@ def plan_flow_stages(start_query, end_query, when=None,
                     min_level=more, electric=bike_electric, regular=bike_regular,
                     ride_mps=bike_mps, overhead_sec=bike_overhead)
                 # Rower ze schematu ma swoją kropkę na mapie, także gdy mapa
-                # sama by jej nie wybrała.
-                bike_places += _bike_places([bike for bike in bike_moves
-                                             if not any(place.get("id") == _bike_leg(bike)["station_from_id"]
-                                                        for place in bike_places)])
-                if live_scheme is not None:
-                    _bike_boxes(day, bike_places, source_stops, start_name, live_scheme)
+                # sama by jej nie wybrała - i to jego przejazd (z kreską na
+                # mapie) zastępuje tę samą stację wybraną przez mapę.
+                shown = _bike_places(bike_moves)
+                shown_ids = {place["id"] for place in shown}
+                # Stacje, na których przejazdy się kończą: na mapie same
+                # kropki, bez kresek - kreskę ma tylko przejazd ze schematu.
+                ends = {}
+                for place in bike_places + shown:
+                    for end in place["rides"]:
+                        ends.setdefault(end["id"], {key: end[key] for key in
+                                                    ("id", "name", "lat", "lon", "bikes", "docks")})
+                bike_places = [place for place in bike_places if place["id"] not in shown_ids] + shown
+                bike_spots = [spot for spot in ends.values()
+                              if not any(place["id"] == spot["id"] for place in bike_places)]
+                box_scheme = (live_scheme if live_scheme is not None
+                              else scheme if moves_scheme is not None else None)
+                if box_scheme is not None:
+                    _bike_boxes(day, bike_places, bike_spots, source_stops, start_name,
+                                target_set, box_scheme)
+                # Z końców przejazdów tylko te przy pudełkach schematu (także
+                # przy celu) i koniec przejazdu ze schematu - reszta to stacje
+                # rozsiane po mieście, z których nic na tej drodze nie wynika.
+                move_ends = {end["id"] for place in shown for end in place["rides"]}
+                bike_spots = [spot for spot in bike_spots
+                              if "box" in spot or spot["id"] in move_ends]
 
             # Wysiadka dopisuje się na samym końcu, po rowerze i po
             # Traficarze: dotyczy KAŻDEJ propozycji, bez względu na to, który
@@ -3280,6 +3329,9 @@ def plan_flow_stages(start_query, end_query, when=None,
                 # które jeszcze mieszczą się w oknie (patrz bikes.map_places).
                 # Przejazdów mapa NIE rysuje - front pokazuje je po najechaniu.
                 "bike_places": bike_places,
+                # Stacje, na których kończą się przejazdy z `bike_places` -
+                # na mapie same kropki, w schemacie liczone w rogu pudełka.
+                "bike_spots": bike_spots,
                 # Czy liczby rowerów pochodzą z tej chwili. Przy pytaniu o inny
                 # dzień kropki stacji zostają, ale stan stojaka jest nieznany -
                 # front ma to napisać, a nie pokazać wczorajszą liczbę jako

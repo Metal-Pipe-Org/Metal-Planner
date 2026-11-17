@@ -841,11 +841,6 @@
                   data-tip="Okienko zostaje do zamknięcia. Można włączyć dymek, okienko, oba albo żadne.">i</span>
         </label>
 
-    <label class="dev-check dev-only set-row" data-setting="bike-times" data-labels="Rower, Czas">
-            <input type="checkbox" id="bike-times"> Godziny przejazdu rowerem
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Obok drugiego końca przejazdu staje godzina policzona z odległości, a nie sama odległość.">i</span>
-        </label>
     <label class="dev-check dev-only set-row" data-setting="bike-rides" data-labels="Rower, Mapa">
             <input type="checkbox" id="bike-rides"> Przejazdy rowerem zawsze widoczne
         </label>
@@ -1014,9 +1009,11 @@
         <input type="checkbox" id="headline-map-range"> Pokaż zakres mapy na pasku
     </label>
 
-    {# Przy przejściach i rowerze schemat pisze odległość; czas tylko na życzenie. #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-walk-time" data-labels="Mapa, Schemat, Chodzenie, Rower" id="scheme-walk-time-row" hidden>
-        <input type="checkbox" id="scheme-walk-time"> Czas zamiast odległości na schemacie
+    {# Przy przejściach i rowerze cała aplikacja pisze odległość; czas tylko na życzenie. #}
+    <label class="dev-check dev-only set-row" data-setting="walk-time" data-labels="Mapa, Schemat, Chodzenie, Rower, Czas">
+        <input type="checkbox" id="walk-time"> Czas zamiast odległości
+        <span class="info" tabindex="0" role="button"
+              data-tip="Przy przejściach pieszo i przejazdach rowerem: na schemacie, na mapie i w dymkach. Czas jest policzony z odległości.">i</span>
     </label>
 
     {# Tymczasowo, do porównania układów schematu (#367). #}

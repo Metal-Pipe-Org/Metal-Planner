@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 DEV_ROWS = {"density", "car-count", "bike-count", "time-hover", "time-ends",
             "time-chips", "time-ride", "dot-center", "dot-rows", "names-zoom",
-            "tip-cursor", "tip-panel", "bike-times", "bike-rides", "car-times",
+            "tip-cursor", "tip-panel", "walk-time", "bike-rides", "car-times",
             "zone-button", "debug-why", "debug-why-seg", "dot-size",
             "look-weight", "look-dim", "look-label-step", "look-label-size",
             "look-label-op", "look-dump", "siechnice-file", "dev-access", "sw-check",
