@@ -105,3 +105,15 @@ def test_a_vehicle_with_an_unknown_course_carries_no_rest(feed):
     obcy = {"line": "D", "kind": "bus", "lat": 51.5, "lon": 17.5, "key": 999999, "steps": []}
     vehicles._add_courses(pojazdy + [obcy])
     assert "rest" not in obcy and "course" not in obcy
+
+
+def test_a_vetoed_course_leaves_nothing_behind(feed):
+    """Ruch przeczący kursowi (strzałka by kłamała) kasuje całe dopasowanie,
+    także dalszą trasę - po niej front odsiewa pojazdy."""
+    pojazdy = [_vehicle(feed, n) for n in range(1, 6)]
+    pojazdy[0]["steps"] = [180]
+    vehicles._add_courses(pojazdy)
+    assert "rest" in pojazdy[0]
+    vehicles._add_headings(pojazdy)
+    assert pojazdy[0]["heading"] is None and pojazdy[0]["source"] is None
+    assert "rest" not in pojazdy[0] and "to" not in pojazdy[0]

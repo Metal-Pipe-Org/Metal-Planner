@@ -113,8 +113,9 @@ Od zgłoszenia #364 Polinka nie jest kursem: w wyszukiwaniu jej nie ma, więc ni
   Opis niżej.
 - **`vehicles.py`** — pozycje autobusów i tramwajów na żywo z kanału MPK
   (`mpk.wroc.pl`), pod warstwę ◉. Tak jak rowery: tylko w pamięci, z krótkim
-  cache. Rozpoznawanie, którym kursem rozkładu jedzie dany pojazd, czeka
-  w pliku zakomentowane.
+  cache. Pojazd dostaje kierunek z kursu rozkładu dopasowanego po
+  kluczu z kanału albo z własnego ruchu, a z nim cel, następny przystanek
+  i dalszą trasę; gdy ruch przeczy rozkładowi, z dopasowania nic nie zostaje.
 - **`routes.py`** — endpointy: `/` (strona), `/sw.js`, `/healthz`,
   `/api/stops`, `/api/plan`, `/api/flow`, `/api/timetable`, `/api/line`,
   `/api/onboard`, `/api/stop_board`, `/api/trip`, `/api/vehicles`,

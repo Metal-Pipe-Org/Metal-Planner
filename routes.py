@@ -307,9 +307,11 @@ def init_routes(app):
         """Żywe pozycje autobusów/tramwajów (mpk.wroc.pl/bus_position, patrz
         vehicles.py) - warstwa włączana przyciskiem ◉ w pasku warstw.
 
-        Odpowiedź niesie same pozycje: front zawęża je do linii narysowanych na
-        mapie i na tym koniec. Odstawione dopisywanie rozkładu kursu, którym
-        dany pojazd jedzie, czeka zakomentowane w vehicles.py.
+        Odpowiedź niesie pozycje, a przy pojeździe o rozpoznanym kierunku też
+        strzałkę (heading), cel (to), następny przystanek (next) i dalszą trasę
+        kursu (rest). Kierunek bierze się z kursu dopasowanego po kluczu albo
+        z ruchu pojazdu; ruch przeczący rozkładowi kasuje całe dopasowanie.
+        Front zawęża pojazdy do linii narysowanych na mapie.
         """
         try:
             return jsonify({"vehicles": vehicles.get_vehicles()})

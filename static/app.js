@@ -496,10 +496,10 @@ const VEHICLES_REFRESH_MS = 15000;
 
 function vehicleIcon(v) {
     const arrow = v.heading == null ? '' :
-        `<div class="vehicle-arrow ${esc(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
+        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
         className: 'vehicle-box',
-        html: `<div class="vehicle-marker ${esc(v.kind)}">${esc(v.line)}</div>${arrow}`,
+        html: `<div class="vehicle-marker ${escAttr(v.kind)}">${esc(v.line)}</div>${arrow}`,
         iconSize: [36, 36],
         iconAnchor: [18, 18],
     });

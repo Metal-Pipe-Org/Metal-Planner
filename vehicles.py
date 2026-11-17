@@ -406,6 +406,7 @@ def _add_headings(vehicles):
             headsign, stop = (course[0]["headsign"], course[1]) if course else route
             bearing = _bearing((v["lat"], v["lon"]), stop[:2])
             if steps and _angle_diff(steps[-1], bearing) > VETO_DEG:
+                v.pop("rest", None)
                 continue
             v["heading"], v["source"] = round(bearing), "trip" if course else "route"
             v["to"], v["next"] = headsign, stop[3]
