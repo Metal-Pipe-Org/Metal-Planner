@@ -993,6 +993,10 @@
         <p class="field-hint" id="pushward-status" role="status"></p>
     </div>
 
+    <label class="dev-check{{ dev('pushward-link') }} set-row" {{ attrs('pushward-link') }}>
+        <input type="checkbox" id="pushward-link"> {{ name('pushward-link') }} {{ info('pushward-link', '?') }}
+    </label>
+
     <div class="field{{ dev('sw-check') }} set-row" {{ attrs('sw-check') }} id="sw-field">
         <div class="set-title">{{ name('sw-check') }} {{ info('sw-check') }}</div>
         <div class="sw-row">
