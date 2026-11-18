@@ -2712,6 +2712,21 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
     text-align: center;
 }
 
+/* Żółty licznik przestarzałych stoi przed niebieskim; margines „auto" przejmuje
+   on, żeby oba trzymały się prawej krawędzi. */
+.set-group > summary[data-changed] > .obsolete-count {
+    margin-left: auto;
+    min-width: 18px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: #ffd54f;
+    color: #3d2e00;
+    font-size: 10px;
+    letter-spacing: 0;
+    text-align: center;
+}
+.set-group > summary[data-changed]:has(> .obsolete-count)::after { margin-left: 4px; }
+
 /* Strona /statystyki - bez mapy i panelu, zwykła przewijana strona. */
 .stats-page { background: var(--surface); min-height: 100vh; }
 .stats-main { max-width: 640px; margin: 0 auto; padding: 16px; }

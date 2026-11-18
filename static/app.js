@@ -8147,6 +8147,12 @@ function buildChangedGroup(rows, prefs) {
     group.open = saved === undefined ? false : !!saved;
     const summary = Object.assign(document.createElement('summary'), {textContent: CHANGED_GROUP});
     summary.dataset.changed = rows.length;
+    const obsolete = rows.filter(isObsolete).length;
+    if (obsolete) {
+        const count = Object.assign(document.createElement('span'), {className: 'obsolete-count', textContent: obsolete});
+        count.title = `${obsolete} ` + plural(obsolete, 'ustawienie przestarzałe', 'ustawienia przestarzałe', 'ustawień przestarzałych');
+        summary.append(count);
+    }
     group.append(summary, ...rows.map(makeSettingCopy));
     group.addEventListener('toggle', () => storeSetting('fold:' + CHANGED_GROUP, group.open));
     return group;
