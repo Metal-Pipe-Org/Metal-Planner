@@ -596,13 +596,48 @@ function renderVehicles() {
     showVehicleStats(shown, hiddenByDirection);
 }
 
+// Po tylu sekundach bez ruchu w danych MPK uznajemy je za nieaktualne. Normalnie
+// pozycje zmieniają się co ~20 s; kanał potrafi zamilknąć na kilkanaście minut.
+const VEHICLES_STALE_SEC = 30;
+const vehiclesNote = $('vehicles-note');
+// Kiedy (czas przeglądarki) ostatnio przyszły dane, które wciąż się ruszały.
+let vehiclesFreshAt = null;
+
+function setVehiclesStale(ageSec) {
+    const stale = ageSec !== null;
+    if (vehiclesToggle) vehiclesToggle.classList.toggle('stale', stale);
+    if (!vehiclesNote) return;
+    vehiclesNote.hidden = !stale;
+    if (!stale) return;
+    vehiclesNote.textContent = ageSec === undefined
+        ? 'Brak danych o pojazdach'
+        : `Dane nieaktualne od ${ageSec < 60 ? ageSec + ' s' : Math.round(ageSec / 60) + ' min'}`;
+}
+
+/** Wiek danych po nieudanym zapytaniu: liczony od ostatnich udanych. */
+function vehiclesFailed() {
+    setVehiclesStale(vehiclesFreshAt === null
+        ? undefined : Math.round((Date.now() - vehiclesFreshAt) / 1000));
+}
+
 function loadVehicles() {
     fetch('/api/vehicles').then(r => r.json()).then(data => {
-        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
+        if (!vehiclesOn) return;
+        if (data.error) return vehiclesFailed();   // zostają ostatnie znane pozycje
         lastVehicles = data.vehicles;
         renderVehicles();
-    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+        const staleSec = data.stale_sec ?? 0;   // brak pola = dane uznajemy za świeże
+        vehiclesFreshAt = Date.now() - staleSec * 1000;
+        setVehiclesStale(staleSec > VEHICLES_STALE_SEC ? staleSec : null);
+    }).catch(() => {
+        if (vehiclesOn) vehiclesFailed();
+    });   // kolejna próba za VEHICLES_REFRESH_MS
 }
+
+// Karta w tle ma przycinane timery - po powrocie nie czekamy na następny tik.
+document.addEventListener('visibilitychange', () => {
+    if (vehiclesOn && !document.hidden) loadVehicles();
+});
 
 function setVehiclesOn(on) {
     vehiclesOn = on;
@@ -613,6 +648,8 @@ function setVehiclesOn(on) {
     }
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
+    vehiclesFreshAt = null;
+    setVehiclesStale(null);
     if (on) {
         vehiclesLayer.addTo(map);
         loadVehicles();

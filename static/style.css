@@ -1545,6 +1545,28 @@ body.routes-off #results .notice.loading { display: none; }
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
    linii, nie pigułka jak .line-badge: użytkownik prosił wprost o kropki. */
+/* Pasek w układzie panelu (nie nakładka): stoi pod nagłówkiem tylko wtedy,
+   gdy pozycje z MPK są nieaktualne; ◉ robi się wtedy żółty. */
+.vehicles-note {
+    flex: 0 0 auto;
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    background: #f5c518;
+    color: #3a2f00;
+    font-size: 0.9rem;
+    font-weight: 600;
+    box-shadow: var(--shadow);
+}
+
+.vehicles-note[hidden] { display: none; }
+
+#vehicles-toggle.stale,
+#vehicles-toggle.stale.active {
+    background: #f5c518;
+    border-color: #d9a900;
+    color: #3a2f00;
+}
+
 .vehicle-box {
     position: absolute;
 }

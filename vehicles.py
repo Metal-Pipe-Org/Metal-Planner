@@ -42,7 +42,7 @@ LAT_RANGE = (50.6, 51.6)
 LON_RANGE = (16.4, 17.8)
 
 _lock = threading.Lock()
-_cache = {"at": 0.0, "vehicles": None}
+_cache = {"at": 0.0, "vehicles": None, "same_since": None, "snapshot": None}
 
 
 def _query_fields():
@@ -106,6 +106,13 @@ def get_vehicles():
         if _cache["vehicles"] is not None and time.monotonic() - _cache["at"] < CACHE_SEC:
             return _cache["vehicles"]
         vehicles = _parse(_fetch_raw())
+        # MPK potrafi zamilknąć i oddawać w kółko te same pozycje - bez śladu
+        # po tym wyglądałoby to jak żywe dane, więc pamiętamy, od kiedy
+        # odpowiedź jest identyczna.
+        snapshot = frozenset((v["line"], v["lat"], v["lon"]) for v in vehicles)
+        if snapshot != _cache["snapshot"]:
+            _cache["snapshot"] = snapshot
+            _cache["same_since"] = time.time()
         _track_motion(vehicles)
         _add_courses(vehicles)
         _add_headings(vehicles)
@@ -114,6 +121,12 @@ def get_vehicles():
         _cache["vehicles"] = vehicles
         _cache["at"] = time.monotonic()
         return vehicles
+
+
+def stale_sec():
+    """Od ilu sekund pozycje z MPK się nie zmieniły (po ostatnim udanym
+    get_vehicles)."""
+    return int(time.time() - _cache["same_since"])
 
 
 # ------------------------------------------------- w którą stronę jedzie pojazd ---
