@@ -602,9 +602,12 @@ kolejne poziomy w całości (`traficar.map_skyband`). Dostawczaki to osobny
 wybór, domyślnie wyłączony. W dymku domyślnie stoi odległość do celu w linii
 prostej; szacowaną godzinę dopisuje przełącznik „Godzina dojazdu autem".
 
-Znaczniki pojawiają się wyłącznie przy pytaniu o dziś (auta stoją tam, gdzie
-stoją teraz — ta sama zasada, co przy stojakach rowerowych), a milczący feed
-albo `TRAFICAR=0` po prostu je zabiera.
+Znaczniki pojawiają się tylko wtedy, gdy wyszukiwana godzina leży nie dalej
+od teraz niż zasięg z ustawienia „Pokazuj auta Traficara do" (3 h / 24 h /
+bez limitu, domyślnie 3 h; liczone tak samo w przód i wstecz, zgłoszenie
+#490) — auta stoją tam, gdzie stoją teraz. Poza zasięgiem pasek komunikatów
+mapy mówi o tym wprost, a milczący feed albo `TRAFICAR=0` po prostu zabiera
+znaczniki.
 
 #### Rower jako miejsce na mapie (`bikes.map_places`, punkt 16 kontraktu)
 

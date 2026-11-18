@@ -254,7 +254,7 @@
         </div>
     </header>
 
-    <div id="vehicles-note" class="vehicles-note" role="status" hidden></div>
+    <div id="layer-notes" class="layer-notes" role="status" hidden></div>
 
     {% if data_error %}
 
@@ -730,6 +730,16 @@
     <label class="dev-check{{ dev('tt-past') }} set-row" {{ attrs('tt-past') }}>
             <input type="checkbox" id="tt-past" checked> {{ name('tt-past') }} {{ info('tt-past') }}
         </label>
+    <div class="field{{ dev('cars-horizon') }} set-row" {{ attrs('cars-horizon') }}>
+        <label for="cars-horizon">
+            {{ name('cars-horizon') }} {{ info('cars-horizon') }}
+        </label>
+        <select id="cars-horizon">
+            <option value="3" selected>3 h</option>
+            <option value="24">24 h</option>
+            <option value="none">bez limitu</option>
+        </select>
+    </div>
     <label class="dev-check{{ dev('car-vans') }} set-row" {{ attrs('car-vans') }}>
             <input type="checkbox" id="car-vans"> {{ name('car-vans') }} {{ info('car-vans') }}
         </label>

@@ -28,7 +28,7 @@ import traficar
 import update_gtfs
 import vehicles
 import warmup
-from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
+from planner import (DEFAULT_CAR_HORIZON_H, TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
                      plan_route, stop_timetable)
 
 # Ile najwyżej ostatni etap wyszukiwania czeka na świeże rowery i auta - wynik
@@ -119,6 +119,18 @@ def _float_arg(name):
         return _finite(request.args.get(name, ""))
     except ValueError:
         return None
+
+
+def _car_horizon_arg():
+    """Zasięg aut Traficara w godzinach: liczba, None dla "none" (bez limitu)
+    albo domyślny, gdy parametru nie ma lub jest zepsuty."""
+    raw = request.args.get("car_horizon_h", "")
+    if raw == "none":
+        return None
+    try:
+        return _finite(raw)
+    except ValueError:
+        return DEFAULT_CAR_HORIZON_H
 
 
 def _point_arg(prefix):
@@ -501,6 +513,9 @@ def init_routes(app):
             car_count=_float_arg("cars"),
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",
+            # Do ilu godzin naprzód od teraz pokazywać auta ("none" = bez
+            # limitu); bez parametru obowiązuje domyślny zasięg.
+            car_horizon_h=_car_horizon_arg(),
             # Nowa mapa rośnie za przełącznikiem pod zębatką (sekcja DEV
             # "Eksperymenty"); stara zostaje domyślna.
             new_map=request.args.get("newmap") == "1",
