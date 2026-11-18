@@ -7,7 +7,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from flask import Response, abort, jsonify, render_template, request
+from flask import Response, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
@@ -20,6 +20,7 @@ import pkp
 import pkp_live
 import polinka
 import pushward
+import serverlog
 import settings_registry
 import siechnice
 import timetables
@@ -623,6 +624,18 @@ def init_routes(app):
             "used": me.get("live_activity_updates_used"),
             "limit": me.get("live_activity_updates_limit"),
         })
+
+    @app.route("/api/dev/logi")
+    def api_dev_logi():
+        """Plik logu serwera (patrz serverlog.py) - za tym samym kodem z Discorda
+        co wgrywanie Siechnic."""
+        if not config.dev_mode():
+            abort(404)
+        if not devcode.valid_token(request.headers.get("X-Dev-Token", "")):
+            return jsonify({"error": "Logi są chronione - odblokuj je kodem z Discorda."}), 403
+        serverlog.get_logger()
+        return send_file(serverlog.LOG_PATH, mimetype="text/plain", as_attachment=True,
+                         download_name="metal-planner-server.log")
 
     @app.route("/api/dev/siechnice", methods=["GET", "POST"])
     def api_dev_siechnice():
