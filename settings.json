@@ -249,7 +249,7 @@
       "obsolete": "2026-11-15"
     },
     {
-      "id": "sound-pipe",
+      "id": "sound-level",
       "name": "Metalowa rura po znalezieniu trasy",
       "tags": ["Dźwięk"]
     },
