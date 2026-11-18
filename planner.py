@@ -2587,10 +2587,11 @@ def plan_flow_stages(start_query, end_query, when=None,
             # przejście (punkt 14), a nie łańcuch "dojdź na przystanek, potem
             # do auta".
             #
-            # Warunek na dobę ten sam, co przy rowerze: auta stoją tam, gdzie
-            # stoją TERAZ. Przy pytaniu o inny dzień (także ten, na który
-            # wyszukiwarka sama zeszła) nie pokazujemy ich wcale - pokazanie
-            # byłoby zgadywaniem podanym jako fakt.
+            # Auta stoją tam, gdzie stoją TERAZ, więc im dalej od teraz jest
+            # wyszukiwana godzina (w przód czy wstecz, także na inny dzień),
+            # tym bardziej ich pokazanie byłoby zgadywaniem podanym jako fakt.
+            # Granicę stawia pasażer ustawieniem „Pokazuj auta Traficara do”
+            # (zgłoszenie #490); poza nią aut nie ma, a front mówi dlaczego.
             #
             # W trybie awaryjnym (kept puste) aut nie ma wcale: godziny ze
             # skanu znają pół miasta, a tu ma być to, co widać na ekranie -

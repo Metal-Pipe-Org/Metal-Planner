@@ -512,6 +512,14 @@ layerNotesEl.addEventListener('click', event => {
     if (note) jumpToSetting(note.dataset.setting);
 });
 
+layerNotesEl.addEventListener('keydown', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        jumpToSetting(note.dataset.setting);
+    }
+});
+
 const vehiclesToggle = $('vehicles-toggle');
 layerNoteButtons.vehicles = vehiclesToggle;
 let vehiclesOn = !!uiState.vehiclesOn;
