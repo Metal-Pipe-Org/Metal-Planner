@@ -1029,7 +1029,12 @@ def stop_at(lat, lon, data, max_m=STOP_SNAP_M):
             best_dist, best_stop = dist, stop_id
     if best_stop is None:
         return None, None
-    return data.stop_names[best_stop], _expand_to_places(data, [best_stop])
+    # Nazwa MIEJSCA, nie słupka: kropka węzła stoi na jednym z peronów, ale
+    # tablica obejmuje wszystkie (patrz _expand_to_places), więc nagłówek
+    # "GALERIA DOMINIKAŃSKA 06" kłamałby, że to lista tego jednego peronu.
+    place_key = data.place_of.get(best_stop)
+    name = data.display_name.get(place_key, data.stop_names[best_stop])
+    return name, _expand_to_places(data, [best_stop])
 
 
 # Ta sama etykieta, co prettyStopName w static/app.js - front pokazuje ją

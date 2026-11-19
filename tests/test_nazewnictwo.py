@@ -332,3 +332,13 @@ def test_a_house_number_is_not_a_platform():
     })
     assert day.place_of["B65"] == "bierutowska 65"
     assert day.place_of["B1"] == "bierutowska"
+
+
+def test_a_dot_on_one_platform_is_named_after_the_whole_hub():
+    """Kropka węzła stoi na jednym peronie, ale jej tablica obejmuje cały
+    węzeł - nagłówek ma nosić nazwę węzła, nie przypadkowego peronu."""
+    day = _dzien_z_peronami(_WEZEL)
+    lat, lon = _WEZEL["1417"][1]
+    name, stops = gtfs.stop_at(lat, lon, day)
+    assert name == "GALERIA DOMINIKAŃSKA"
+    assert sorted(stops) == sorted(_WEZEL)
