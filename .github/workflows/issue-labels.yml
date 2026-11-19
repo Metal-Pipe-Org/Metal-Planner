@@ -7,7 +7,8 @@ name: "Zgłoszenia: etykiety z PR-ów i zamykanie po merge"
 #     albo opisie PR-a; tak samo liczy się nazwa gałęzi solvera
 #     (`claude/issue-78-20260903-2030`). Autor deklaruje: ten PR to załatwia.
 #       • PR otwarty (także jako wersja robocza) → zgłoszenie dostaje "PR in progress"
-#       • merge do `main` → etykieta znika, a zgłoszenie zostaje zamknięte
+#       • merge do `main` (także PR-a ze stosu, którego baza to gałąź
+#         dolnego PR-a) → etykieta znika, a zgłoszenie zostaje zamknięte
 #     Komentarza o zamknięciu nie dopisujemy: oś czasu zgłoszenia i kanał na
 #     Discordzie i tak pokazują, który PR je zamknął.
 #
@@ -314,9 +315,9 @@ jobs:
           steps.refs.outputs.keyword != ''
           && github.event.action == 'closed'
           && github.event.pull_request.merged == true
-          && github.event.pull_request.base.ref == 'main'
         env:
           KEYWORD: ${{ steps.refs.outputs.keyword }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           MERGER: ${{ github.event.pull_request.merged_by.login }}
@@ -325,6 +326,17 @@ jobs:
         run: |
           set -euo pipefail
           source .discord/.github/scripts/discord.sh
+
+          # Nie `base.ref == 'main'`: PR ze stosu ma w zdarzeniu bazą gałąź
+          # dolnego PR-a, choć jego merge wchodzi do `main` razem ze stosem
+          # (#496), a GitHub słów kluczowych wtedy nie obsługuje. Liczy się,
+          # czy commit scalenia leży w `main`; PR do `stable` i do gałęzi
+          # stosu, która nie weszła do `main`, nie zamyka niczego.
+          on_main=$(gh api "repos/$REPO/compare/main...$MERGE_SHA" --jq '.status')
+          if [ "$on_main" != behind ] && [ "$on_main" != identical ]; then
+            echo "PR #$PR nie wszedł do main (status względem main: $on_main) — nie zamykam."
+            exit 0
+          fi
 
           for n in $KEYWORD; do
             json=$(gh api "repos/$REPO/issues/$n")
