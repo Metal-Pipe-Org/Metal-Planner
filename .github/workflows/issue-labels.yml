@@ -332,7 +332,12 @@ jobs:
           # (#496), a GitHub słów kluczowych wtedy nie obsługuje. Liczy się,
           # czy commit scalenia leży w `main`; PR do `stable` i do gałęzi
           # stosu, która nie weszła do `main`, nie zamyka niczego.
-          on_main=$(gh api "repos/$REPO/compare/main...$MERGE_SHA" --jq '.status')
+          # Chwilowy błąd API (sieć, limit) nie powinien od razu wywalać kroku.
+          for attempt in 1 2 3; do
+            on_main=$(gh api "repos/$REPO/compare/main...$MERGE_SHA" --jq '.status') && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 10
+          done
           if [ "$on_main" != behind ] && [ "$on_main" != identical ]; then
             echo "PR #$PR nie wszedł do main (status względem main: $on_main) — nie zamykam."
             exit 0
