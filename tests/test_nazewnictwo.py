@@ -253,3 +253,82 @@ def test_rail_stations_go_through_the_same_indexes():
     day = _dzien_z_nazwami("Wrocław Główny")
     assert gtfs.match_stop("wroclaw glowny", day)[0] == "Wrocław Główny"
     assert day.stops_by_alias_key["wroclaw glowny"] == ["S0"]
+
+
+# ---- numerowane perony węzła (zgłoszenia #474, #486, #487) ----------------
+
+def _dzien_z_peronami(slupki):
+    """DayData z {stop_id: (nazwa, (lat, lon))}, z nazwami zarejestrowanymi
+    tak jak w gtfs.load_day - peron także pod nazwą bazową węzła."""
+    day = gtfs.DayData()
+    for stop_id, (nazwa, coords) in slupki.items():
+        day.stop_names[stop_id] = nazwa
+        day.stop_coords[stop_id] = coords
+    hubs = gtfs._numbered_hubs(day.stop_names.values())
+    for stop_id, nazwa in day.stop_names.items():
+        gtfs._register_stop_name(day, stop_id, nazwa)
+        base = gtfs._platform_base_name(nazwa, hubs)
+        if base is not None:
+            gtfs._register_stop_name(day, stop_id, base)
+    day.stops_by_place = gtfs._build_places(
+        day.stop_names, day.stop_coords, day.stops_by_key)
+    day.place_of = {
+        sid: key for key, ids in day.stops_by_place.items() for sid in ids
+    }
+    return day
+
+
+# Prawdziwe współrzędne: perony 01, 02, 03, 10 i słupek linii z Siechnic,
+# który nosi samą nazwę węzła.
+_WEZEL = {
+    "841": ("GALERIA DOMINIKAŃSKA 01", (51.10852894, 17.03870108)),
+    "1417": ("GALERIA DOMINIKAŃSKA 02", (51.10840403, 17.03857899)),
+    "1330": ("GALERIA DOMINIKAŃSKA 03", (51.10670852, 17.03827095)),
+    "5963": ("GALERIA DOMINIKAŃSKA 10", (51.10901058, 17.04170288)),
+    "SIE:1": ("Galeria Dominikańska", (51.107384, 17.040268)),
+}
+
+
+def test_numbered_platforms_are_one_place():
+    """Perony "... 01" - "... 11" to jeden węzeł, razem ze słupkiem, który
+    nosi samą nazwę węzła - inaczej start z węzła był jednym słupkiem
+    (#486, #487), a linia z Siechnic nie stawała w węźle, tylko obok."""
+    day = _dzien_z_peronami(_WEZEL)
+    assert set(day.stops_by_place) == {"galeria dominikańska"}
+    assert sorted(day.stops_by_place["galeria dominikańska"]) == sorted(_WEZEL)
+
+
+def test_a_hub_without_a_stop_of_its_own_name_still_forms_a_place():
+    """PL. JANA PAWŁA II ma same numerowane perony - miejsce zakłada peron."""
+    day = _dzien_z_peronami({
+        "1579": ("PL. JANA PAWŁA II 01", (51.11222444, 17.02253106)),
+        "242": ("PL. JANA PAWŁA II 07", (51.11215441, 17.02072472)),
+    })
+    assert day.stops_by_place == {"pl. jana pawła ii": ["1579", "242"]}
+    name, stops, suggestions = gtfs.match_stop("PL. JANA PAWŁA II", day)
+    assert suggestions is None
+    assert (name, sorted(stops)) == ("PL. JANA PAWŁA II", ["1579", "242"])
+
+
+@pytest.mark.parametrize("query", [
+    "GALERIA DOMINIKAŃSKA",
+    "Galeria Dominikańska",
+    "GALERIA DOMINIKAŃSKA 02",
+])
+def test_any_platform_name_finds_the_whole_hub(query):
+    day = _dzien_z_peronami(_WEZEL)
+    _, stops, suggestions = gtfs.match_stop(query, day)
+    assert suggestions is None
+    assert sorted(stops) == sorted(_WEZEL)
+
+
+def test_a_house_number_is_not_a_platform():
+    """"Bierutowska 65" stoi ~300 m od "Bierutowska" i jest innym
+    przystankiem - bez peronu "... 0N" w rodzinie dwie cyfry to numer domu."""
+    day = _dzien_z_peronami({
+        "B1": ("Bierutowska", (51.1519, 17.1273)),
+        "B65": ("Bierutowska 65", (51.15220524, 17.13170553)),
+        "B75": ("Bierutowska 75", (51.15575814, 17.13998408)),
+    })
+    assert day.place_of["B65"] == "bierutowska 65"
+    assert day.place_of["B1"] == "bierutowska"

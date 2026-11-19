@@ -49,6 +49,13 @@ SHIFT_PREFIX = "@"
 # wciąż jedno miejsce. _platform_base_name ucina taki sufiks, żeby dociągnąć
 # peron do miejsca o nazwie bazowej (patrz _build_places).
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
+# Nowszy zapis MPK numeruje perony ("GALERIA DOMINIKAŃSKA 01" ... "11", "PL.
+# JANA PAWŁA II 01" ... "09") i nie zostawia słupka o samej nazwie bazowej.
+# Dwie cyfry na końcu to jednak także numer domu ("Bierutowska 65" stoi
+# ~300 m od "Bierutowska" i jest INNYM przystankiem), więc numer peronu
+# rozpoznajemy po rodzinie: tylko tam, gdzie ta sama nazwa ma też peron
+# z zerem na początku ("... 01") - takiego numeru domu nikt nie pisze.
+_PLATFORM_NUMBER = re.compile(r"^(.*?)\s+(\d{2})$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
 
 # CHODZENIE. JEDNA zasada na cały system: pieszo przechodzi się między
@@ -184,11 +191,30 @@ def _register_stop_name(data, stop_id, name):
 _day_cache = {}
 
 
-def _platform_base_name(stop_name):
-    """Nazwa bazowa węzła, jeśli `stop_name` wygląda na kierunkowy peron
-    (np. 'PL. GRUNWALDZKI W/t' -> 'PL. GRUNWALDZKI'), inaczej None."""
+def _numbered_hubs(names):
+    """Nazwy bazowe (casefold) węzłów z numerowanymi peronami - patrz
+    _PLATFORM_NUMBER. Liczone z całej listy nazw, bo o tym, czy "X 10" to
+    peron, rozstrzyga istnienie "X 01", a nie sama nazwa."""
+    hubs = set()
+    for name in names:
+        m = _PLATFORM_NUMBER.match(name)
+        if m and m.group(2).startswith("0"):
+            hubs.add(m.group(1).casefold())
+    return hubs
+
+
+def _platform_base_name(stop_name, numbered_hubs=frozenset()):
+    """Nazwa bazowa węzła, jeśli `stop_name` wygląda na peron węzła
+    (np. 'PL. GRUNWALDZKI W/t' -> 'PL. GRUNWALDZKI', a przy węźle z
+    `numbered_hubs` 'GALERIA DOMINIKAŃSKA 02' -> 'GALERIA DOMINIKAŃSKA'),
+    inaczej None."""
     m = _PLATFORM_SUFFIX.match(stop_name.casefold())
-    return stop_name[:m.end(1)] if m else None
+    if m:
+        return stop_name[:m.end(1)]
+    m = _PLATFORM_NUMBER.match(stop_name)
+    if m and m.group(1).casefold() in numbered_hubs:
+        return m.group(1)
+    return None
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):
@@ -275,8 +301,8 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     systemu (dojechaliśmy? można się tu przesiąść?), zamiast surowej nazwy
     GTFS. Baza to dotychczasowe grupy "identyczna nazwa" (zaufane, bez
     sprawdzania odległości - tak działało to już wcześniej). Do nich
-    dolepiamy perony kierunkowe o nazwie bazowej pasującej do istniejącego
-    miejsca, o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
+    dolepiamy perony węzła do miejsca o ich nazwie bazowej (a gdy takiego
+    nie ma, perony same je tworzą), o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
     zabezpieczenie przed przypadkową kolizją nazw gdzie indziej w mieście.
     Na koniec scalamy pary nazw z ręcznej tabeli (patrz _merge_named_places)
     - tam, gdzie to samo miejsce nosi w obu sieciach inną nazwę.
@@ -286,18 +312,21 @@ def _build_places(stop_names, stop_coords, stops_by_key):
         kept = _one_spot(ids, stop_coords)
         if kept:
             places[key] = kept
+    hubs = _numbered_hubs(stop_names.values())
     for stop_id, name in stop_names.items():
-        base = _platform_base_name(name)
+        base = _platform_base_name(name, hubs)
         if base is None:
             continue
         base_key = base.casefold()
-        target = places.get(base_key)
-        if not target or stop_id in target:
-            continue
-        lat, lon = stop_coords[stop_id]
-        if not all(_haversine_m(lat, lon, *stop_coords[t]) <= PLACE_MAX_SPAN_M for t in target):
-            continue
-        places[base_key] = target + [stop_id]
+        # Węzeł z numerowanymi peronami nie ma słupka o samej nazwie bazowej
+        # - miejsce zakłada wtedy pierwszy z jego peronów.
+        target = places.get(base_key, [])
+        if stop_id not in target:
+            lat, lon = stop_coords[stop_id]
+            if not all(_haversine_m(lat, lon, *stop_coords[t]) <= PLACE_MAX_SPAN_M
+                       for t in target):
+                continue
+            places[base_key] = target + [stop_id]
         # Usuwamy własną grupę "dokładna nazwa" tego peronu - inaczej
         # zostaje osierocona w `places` obok scalonego miejsca, i który
         # klucz "wygra" dla tego słupka w `place_of` zależy od przypadkowej
@@ -332,9 +361,13 @@ def with_place_names(stops):
     stop_names = {i: s["name"] for i, s in enumerate(stops)}
     stop_coords = {i: (s["lat"], s["lon"]) for i, s in enumerate(stops)}
     stops_by_key, display = {}, {}
+    hubs = _numbered_hubs(stop_names.values())
     for i, name in stop_names.items():
         stops_by_key.setdefault(name.casefold(), []).append(i)
         display.setdefault(name.casefold(), name)
+        base = _platform_base_name(name, hubs)
+        if base is not None:
+            display.setdefault(base.casefold(), base)
     places = _build_places(stop_names, stop_coords, stops_by_key)
     place_of = {i: key for key, ids in places.items() for i in ids}
     return [
@@ -767,8 +800,16 @@ def load_day(day):
     # klucza po każdej stronie). Kolejność jest ta sama co wtedy: MPK
     # wchodzi do stop_names pierwsze, więc przy wspólnym kluczu to jego
     # pisownia zostaje wyświetlana (patrz _register_stop_name).
+    #
+    # Peron węzła wchodzi też pod nazwą bazową: węzeł z numerowanymi
+    # peronami nie ma słupka o samej nazwie, a pasażer szuka węzła, nie
+    # peronu - i to tę nazwę podpowiada formularz (all_stop_names).
+    hubs = _numbered_hubs(data.stop_names.values())
     for stop_id, stop_name in data.stop_names.items():
         _register_stop_name(data, stop_id, stop_name)
+        base = _platform_base_name(stop_name, hubs)
+        if base is not None:
+            _register_stop_name(data, stop_id, base)
 
     # Kanoniczne miejsce (patrz _build_places) i mosty piesze: między słupkami
     # jednego miejsca (_walking_bridges) oraz między słupkami po prostu
@@ -1196,7 +1237,8 @@ def all_stop_names():
     db = _connect()
     names = {row[0] for row in db.execute("SELECT DISTINCT stop_name FROM stops")}
     db.close()
-    display = {_platform_base_name(name) or name for name in names}
+    hubs = _numbered_hubs(names)
+    display = {_platform_base_name(name, hubs) or name for name in names}
     return sorted(display)
 
 
