@@ -1240,11 +1240,18 @@ def all_stop_names():
     całe miejsce niezależnie od tego, który wpisze (patrz _expand_to_places).
     """
     db = _connect()
-    names = {row[0] for row in db.execute("SELECT DISTINCT stop_name FROM stops")}
+    names = [row[0] for row in db.execute("SELECT stop_name FROM stops")]
     db.close()
     hubs = _numbered_hubs(names)
-    display = {_platform_base_name(name, hubs) or name for name in names}
-    return sorted(display)
+    # Jedna pozycja na klucz wyszukiwarki (casefold, patrz match_stop): ona
+    # i tak trafia we wszystkie słupki tej nazwy, więc "ZAKRZÓW" obok
+    # "Zakrzów" z innej sieci to dwa razy ten sam wybór. Pisownia - pierwsza
+    # w kolejności bazy, jak w load_day (MPK przed resztą).
+    display = {}
+    for name in names:
+        shown = _platform_base_name(name, hubs) or name
+        display.setdefault(shown.casefold(), shown)
+    return sorted(display.values())
 
 
 def all_stops_geo():

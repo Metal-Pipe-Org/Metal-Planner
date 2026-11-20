@@ -226,17 +226,16 @@ def init_routes(app):
         # static/app.js), ale do pola wyszukiwania i tak wstawia samą nazwę:
         # doklejenie "PKP" wprost do nazwy zepsułoby dopasowanie po stronie
         # wyszukiwarki, która zna stację tylko pod jej prawdziwą nazwą.
-        # Nazwa, która trafia do OBU list (MPK i PKP - w praktyce nie
-        # zdarza się w tych danych, ale nie ma gwarancji, że nigdy), zostaje
+        # Nazwa, która trafia do OBU list (MPK i PKP - np. Karłowice), zostaje
         # bez plakietki: to nie tylko stacja kolejowa, więc oznaczenie
         # "PKP" byłoby mylące.
-        gtfs_names = set(stops)
-        pkp_names = set(pkp.all_station_names())
-        train_only = pkp_names - gtfs_names
-        stops = [
-            {"name": name, "kind": "train" if name in train_only else "stop"}
-            for name in sorted(gtfs_names | pkp_names)
-        ]
+        # Porównujemy po casefold, jak wyszukiwarka (gtfs.match_stop): "KARŁOWICE"
+        # z MPK i "Karłowice" z PKP to jeden wybór, trafiający w oba słupki -
+        # zostaje pisownia MPK, jak w gtfs.load_day.
+        by_key = {name.casefold(): {"name": name, "kind": "stop"} for name in stops}
+        for name in pkp.all_station_names():
+            by_key.setdefault(name.casefold(), {"name": name, "kind": "train"})
+        stops = sorted(by_key.values(), key=lambda s: s["name"])
         # Stacje Polinki (zgłoszenie #165) - do podpowiedzi jak każdy słupek.
         stops += [{"name": s["name"], "kind": "cable"} for s in polinka.stations_geo()]
         stops.sort(key=lambda s: s["name"])
