@@ -523,7 +523,7 @@ def _wtorek():
     return (dzis + timedelta(days=(1 - dzis.weekday()) % 7 or 7)).isoformat()
 
 
-def _strona(przegladarka, adres, elk, uklad="elk"):
+def _strona(przegladarka, adres, elk):
     from tests.test_uklad_telefonu import PUSTE_ZRODLA, _odpowiedz
     context = przegladarka.new_context(viewport={"width": 1280, "height": 800},
                                        locale="pl-PL", service_workers="block")
@@ -541,18 +541,16 @@ def _strona(przegladarka, adres, elk, uklad="elk"):
                                 body=DAGRE_ATRAPA))
     page.goto(adres)
     page.wait_for_selector("#start")
-    page.evaluate("u => document.getElementById('scheme-layout').value = u", uklad)
     return context, page
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
 @pytest.mark.parametrize("flaga", [False, True])
-def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
+def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga):
     from tests.test_uklad_telefonu import _wybierz
     elk = []
-    context, page = _strona(przegladarka, adres, elk, uklad)
+    context, page = _strona(przegladarka, adres, elk)
     if flaga:
-        page.evaluate("document.getElementById('new-map').checked = true")
+        page.evaluate("document.getElementById('scheme-on').checked = true")
     page.fill("#time", "15:00")
     page.evaluate(f"document.getElementById('date').value = '{_wtorek()}'")
     _wybierz(page, "#start", "Katedra")
@@ -562,11 +560,8 @@ def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
     page.wait_for_selector("#time-headline .headline-map", state="attached", timeout=30000)
     if flaga:
         page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
-        # Układ warstwowy nie ciągnie nic z sieci; ELK ma przypiętą wersję, nie „latest”.
-        if uklad == "dagre":
-            assert elk == []
-        else:
-            assert len(elk) == 1 and "/npm/elkjs@0.9.3/" in elk[0]
+        # Układ warstwowy nie ciągnie nic z sieci.
+        assert elk == []
         pomiar = page.evaluate(POMIAR)
         _plakietki_na_kreskach(pomiar)
         napisy = page.evaluate("[...document.querySelectorAll('.scheme-name')].map(t => t.textContent)")
@@ -628,11 +623,10 @@ RECZNY = {
 }
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
+def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka):
     elk = []
-    context, page = _strona(przegladarka, adres, elk, uklad)
-    page.evaluate("document.getElementById('new-map').checked = true")
+    context, page = _strona(przegladarka, adres, elk)
+    page.evaluate("document.getElementById('scheme-on').checked = true")
     page.evaluate("data => renderScheme(data)",
                   {"scheme": RECZNY, "start": "S", "end": "E", "nodes": []})
     page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
@@ -775,50 +769,29 @@ PARY = [{"from": "n0", "to": "n1", "m": 740, "why": "access"},
         {"from": "n0", "to": "n5", "m": 2050, "why": "fastest"}]
 
 
-def _schemat_z_parami(przegladarka, adres, uklad, ile=3):
+def _schemat_z_parami(przegladarka, adres):
     elk = []
-    context, page = _strona(przegladarka, adres, elk, uklad)
-    page.evaluate("document.getElementById('new-map').checked = true")
-    page.evaluate("""c => { document.getElementById('scheme-walks-count').value = c; }""", ile)
+    context, page = _strona(przegladarka, adres, elk)
+    page.evaluate("document.getElementById('scheme-on').checked = true")
     page.evaluate("data => renderScheme(data)",
                   {"scheme": {**RECZNY, "pairs": PARY}, "start": "S", "end": "E", "nodes": []})
     page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
     return context, page
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_przejscia_pieszo_dojscia_zawsze_a_dodatkowe_wedlug_ustawienia(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, 3)
-    assert page.evaluate("document.querySelectorAll('g.scheme-walk-brace').length") == len(PARY)
-    assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") is None
-    # Dodatkowe klamry mają inny kolor niż szare: to ustawienie debugowe.
-    kolory = page.evaluate("""[...document.querySelectorAll('g.scheme-walk-brace')].map(g => [
-        g.classList.contains('scheme-walk-extra'),
-        getComputedStyle(g.querySelector('path')).stroke,
-        getComputedStyle(g.querySelector('.scheme-walk-text')).fill])""")
-    assert sorted(k[0] for k in kolory) == [False, False, True, True, True]
-    assert {(k[1], k[2]) for k in kolory if k[0]} == {("rgb(230, 81, 0)", "rgb(230, 81, 0)")}
-    assert not {(k[1], k[2]) for k in kolory if not k[0]} & {("rgb(230, 81, 0)", "rgb(230, 81, 0)")}
+def test_przejscia_pieszo_tylko_dojscia_i_najszybsza(adres, przegladarka):
+    """Schemat rysuje przejścia z dojścia i z najszybszej podróży; dodatkowych
+    (dawne ustawienie „Ile dodatkowych najszybszych przejść”) już nie ma."""
+    context, page = _schemat_z_parami(przegladarka, adres)
     assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
-                                  .map(t => t.textContent)""")) == sorted([
-        "pieszo, 740 m", "pieszo, 120 m", "pieszo, 1,2 km", "pieszo, 260 m", "pieszo, 2,1 km"])
-    assert page.errors == []
-    context.close()
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, 1)
-    assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
-                                  .map(t => t.textContent)""")) == [
-        "pieszo, 120 m", "pieszo, 2,1 km", "pieszo, 740 m"]
-    assert page.errors == []
-    context.close()
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, 0)
-    assert _przejscia(page) == 2
+                                  .map(t => t.textContent)""")) == ["2,1 km", "740 m"]
+    assert page.evaluate("document.querySelectorAll('g.scheme-walk-extra').length") == 0
     assert page.errors == []
     context.close()
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_klamry_leza_na_prawo_od_wszystkiego_i_nie_nakladaja_sie(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad)
+def test_klamry_leza_na_prawo_od_wszystkiego_i_nie_nakladaja_sie(adres, przegladarka):
+    context, page = _schemat_z_parami(przegladarka, adres)
     pomiar = page.evaluate("""(() => {
         const svg = document.querySelector('#scheme-canvas svg');
         const prawy = Math.max(...[...svg.querySelectorAll('rect.scheme-box, .scheme-line, .scheme-badge')]

@@ -12,7 +12,9 @@ import planner
 import traficar
 
 KATALOG = Path(__file__).parent / "probka_rower_traficar"
-DZIEN = datetime.date(2026, 11, 6)
+# Próbkę zebrano w piątek; „dzisiaj" testów to najbliższy piątek, bo paczka
+# rozkładów nie sięga wstecz (patrz test_mapa_ruchy._real).
+DZIEN = datetime.date.today() + datetime.timedelta(days=(4 - datetime.date.today().weekday()) % 7)
 
 
 def _plik(nazwa):

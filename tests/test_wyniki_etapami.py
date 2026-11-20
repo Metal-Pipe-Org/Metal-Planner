@@ -141,17 +141,17 @@ def test_endpoint_wysyla_etapy_linijkami(install_day, monkeypatch):
     merged = {}
     for line in lines:
         merged.update({k: v for k, v in line.items() if k != "stage"})
-    assert merged == json.loads(json.dumps(planner.plan_flow("S", "E", WHEN)))
+    assert merged == json.loads(json.dumps(planner.plan_flow("S", "E", WHEN, new_map=True)))
 
 
-def test_przelacznik_nowej_mapy_dochodzi_do_plannera(monkeypatch):
+def test_wyszukiwanie_zawsze_rysuje_nowa_mape(monkeypatch):
     uzyte = []
     monkeypatch.setattr(routes, "plan_flow_stages",
                         lambda *args, **kwargs: uzyte.append(kwargs["new_map"]) or [])
     klient = _klient(monkeypatch)
     for query in ("", "&newmap=0", "&newmap=1"):
         klient.get("/api/flow?start=S&end=E" + query).get_data()
-    assert uzyte == [False, False, True]
+    assert uzyte == [True, True, True]
 
 
 def test_blad_to_jedna_linijka(install_day, monkeypatch):

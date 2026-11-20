@@ -12,7 +12,7 @@ sprawdzają obecność i nieobecność, nie dokładne minuty. Część trzecia: 
 i Traficar na zapisanej próbce danych (tests/probka.py), bez sieci.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -129,6 +129,10 @@ PIATEK = date(2026, 11, 6)
 def _real(start, end, day, hhmm, new_map=True, **kwargs):
     if not gtfs.DB_PATH.exists():
         pytest.skip("brak data/gtfs.sqlite")
+    # Scenariusze opisują dzień tygodnia, a paczka rozkładów zaczyna się
+    # dzisiaj: ten sam dzień tygodnia w jej najbliższym tygodniu.
+    while day < date.today():
+        day += timedelta(days=7)
     last = gtfs.last_service_date()
     if last is None or day > last:
         pytest.skip("dnia nie ma w paczce GTFS")
@@ -152,7 +156,9 @@ def test_scenariusz_c_z_petli_jeden_ruch_to_jedna_nitka():
     assert _threads(stara) >= 5
 
 
-@pytest.mark.parametrize("hhmm", ["19:00", "15:00", "21:30"])
+# O 19:00 Siechnicki dowozi wyraźnie po kilku lepszych i nie jest pokazywany
+# (ustalenie 9a), więc tu tylko godziny, o których jest wśród najlepszych.
+@pytest.mark.parametrize("hhmm", ["15:00", "21:30"])
 def test_scenariusz_a_pierwszy_widok_jest_skromny_i_ma_siechnickiego(hhmm):
     result = _real(None, SOSNOWIECKA, PIATEK, hhmm)
 

@@ -688,6 +688,10 @@
     <label class="dev-check set-row" data-setting="time-show-headline" data-labels="Mapa, Czas">
             <input type="checkbox" id="time-show-headline" checked> Pasek nad mapą z czasem podróży
         </label>
+    {# Przycisk na mapie i wygląd na telefonie przyjdą osobno; na razie tylko tutaj. #}
+    <label class="dev-check set-row" data-setting="scheme-on" data-labels="Mapa, Schemat">
+            <input type="checkbox" id="scheme-on"> Schemat obok mapy
+        </label>
     <label class="dev-check set-row" data-setting="tt-past" data-labels="Rozkład, Czas">
             <input type="checkbox" id="tt-past" checked> Szare godziny w tablicy
             <span class="info" tabindex="0" role="button"
@@ -996,11 +1000,6 @@
         <input type="range" id="onboard-slack" min="0" max="15" step="1" value="3">
     </div>
 
-    {# Nowa mapa rośnie za tym przełącznikiem, stara zostaje domyślna (docs/FLOW_MAP_CONTRACT_V2.md). #}
-    <label class="dev-check dev-only set-row" data-setting="new-map" data-labels="Eksperymenty, Mapa, Funkcje">
-        <input type="checkbox" id="new-map"> Nowa mapa (eksperyment)
-    </label>
-
     <label class="dev-check dev-only set-row" data-setting="walking" data-labels="Eksperymenty, Mapa, Chodzenie">
         <input type="checkbox" id="walking" checked> Chodzenie pieszo
     </label>
@@ -1014,21 +1013,6 @@
         <input type="checkbox" id="walk-time"> Czas zamiast odległości
         <span class="info" tabindex="0" role="button"
               data-tip="Przy przejściach pieszo i przejazdach rowerem: na schemacie, na mapie i w dymkach. Czas jest policzony z odległości.">i</span>
-    </label>
-
-    {# Tymczasowo, do porównania układów schematu (#367). #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-layout" data-labels="Eksperymenty, Mapa, Schemat" id="scheme-layout-row" hidden>
-        Układ schematu
-        <select id="scheme-layout">
-            <option value="dagre">dagre (krzywe)</option>
-            <option value="elk">ELK (kąty proste)</option>
-        </select>
-    </label>
-
-    {# Demo (#367): ile najszybszych podróży z przejściem pieszo w środku dorzucić do schematu. #}
-    <label class="dev-check dev-only set-row" data-setting="scheme-walks-count" data-labels="Eksperymenty, Mapa, Schemat, Chodzenie" id="scheme-walks-count-row" hidden>
-        Ile dodatkowych najszybszych przejść: <output id="scheme-walks-count-value">2</output>
-        <input type="range" id="scheme-walks-count" min="0" max="20" step="1" value="2">
     </label>
 
     {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}

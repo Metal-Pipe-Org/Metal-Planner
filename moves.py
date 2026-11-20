@@ -745,10 +745,15 @@ def readable(day, moves, anchor, by_sig=None):
         infos.append(info)
     # Ostatnie miejsce: gdy któryś ruch pozwala wyjść wyraźnie później niż
     # wszystkie pokazane, to on - „a jak się spóźnię” to pytanie, na które
-    # tańszy, ale równie wczesny ruch nie odpowiada.
+    # tańszy, ale równie wczesny ruch nie odpowiada. Przy kilku pokazanych
+    # nie ten, który dowozi wyraźnie po nich wszystkich (810 na Sosnowiecką
+    # w 20 minut po 143 i 151) - obok lepszych tylko zaśmieca.
+    after = max(m["first"]["arr"] for m in shown) + EPSILON_SEC if len(shown) > 1 else None
     rest = []
     for move in moves:
         if len(shown) >= READABLE_MOVES or move in shown or move["far_walk"]:
+            continue
+        if after is not None and move["first"]["arr"] > after:
             continue
         clash, info = settle(move, infos)
         if not clash:

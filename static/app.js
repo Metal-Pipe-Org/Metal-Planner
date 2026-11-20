@@ -704,7 +704,7 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup([
             ...flowBikeMarkers(lastFlow.bike_places, lastFlow.bike_places_live),
-            ...(setting('new-map') ? flowBikeSpotMarkers(lastFlow.bike_spots, lastFlow.bike_places) : []),
+            ...flowBikeSpotMarkers(lastFlow.bike_spots, lastFlow.bike_places),
         ]).addTo(map);
         restBikeRides();
         return;
@@ -1345,7 +1345,7 @@ function fitTo(points) {
         options.paddingBottomRight = [gutter, inset.bottom];
     } else {
         options.paddingTopLeft = [panelVisible ? sidebar.offsetWidth + gutter : gutter, gutter];
-        // Schemat (eksperyment „nowa mapa”) stoi po prawej - trasa ma się
+        // Schemat (gdy włączony) stoi po prawej - trasa ma się
         // zmieścić obok niego, nie pod nim.
         options.paddingBottomRight = [gutter + schemeInset(), gutter];
     }
@@ -1956,13 +1956,9 @@ function renderTimeHeadline() {
     // i przycisku jeszcze nie ma.
     const mapped = typeof flow.limit_sec === 'number';
     const showMapRange = $('headline-map-range').checked;
-    // Nowa mapa (eksperyment) nie ma „Pokaż więcej": pokazuje kilka ruchów,
-    // resztę da się wyklikać przystankiem.
-    const more = mapped && flow.more < MAX_MAP_MORE && !$('new-map').checked
-        ? '<button type="button" class="headline-more" data-tip="'
-          + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
-          + '"><span class="spinner" aria-hidden="true"></span>Pokaż więcej</button>'
-        : '';
+    // Mapa nie ma „Pokaż więcej": pokazuje kilka ruchów, resztę da się
+    // wyklikać przystankiem.
+    const more = '';
     // Sama jazda to osobna liczba na życzenie.
     const ride = setting('time-ride') && typeof flow.ride_sec === 'number'
         ? item('', `Sama jazda: ${fmtMins(flow.ride_sec)}, od odjazdu pierwszego pojazdu`
@@ -3928,9 +3924,6 @@ function flowBikeMarkers(places, live) {
                          {direction: 'top', offset: [0, -4], opacity: 1});
         dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => {
-            // Nowa mapa: same kropki stacji, kreskę ma tylko przejazd, który
-            // schemat pokazuje osobno (restBikeRides) - także pod kursorem.
-            if (!setting('new-map')) showBikeRides(place);
             markSchemeBike(place.id, true);
         });
         dot.on('mouseout', () => {
@@ -3960,19 +3953,17 @@ function flowBikeSpotMarkers(spots, places) {
 function bikeSpotTooltipHtml(spot) {
     return [`<b>${esc(spot.name)}</b>`,
             `${spot.bikes} ` + plural(spot.bikes, 'rower', 'rowery', 'rowerów') +
-            ` na miejscu, ${spot.docks} wolnych stojaków`].join('<br>');
+            ` na miejscu`].join('<br>');
 }
 
-/** Przejazdy rowerem, gdy nic nie jest wskazane: na nowej mapie stale te,
-    które schemat pokazuje osobno (z kreską i drugim końcem), na starej -
-    wszystkie albo żaden, jak każe przełącznik pod zębatką. */
+/** Przejazdy rowerem, gdy nic nie jest wskazane: stale te, które schemat
+    pokazuje osobno (z kreską i drugim końcem). */
 function restBikeRides() {
     if (!lastFlow) clearBikeRides();
-    else if (setting('new-map')) {
+    else {
         showAllBikeRides((lastFlow.bike_places || [])
             .map(place => ({...place, rides: place.rides.filter(ride => ride.move)})));
-    } else if (setting('bike-rides')) showAllBikeRides(lastFlow.bike_places);
-    else clearBikeRides();
+    }
 }
 
 function bikeStyle(place, live) {
@@ -4101,7 +4092,7 @@ function bikeRideTooltipHtml(ride) {
         ? `Stąd ${fmtMins(ride.sec)} z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
         : `Stąd ${fmtDist(ride.m)} w linii prostej`);
     rows.push(`${ride.bikes} ` + plural(ride.bikes, 'rower', 'rowery', 'rowerów') +
-              ` na miejscu, ${ride.docks} wolnych stojaków`);
+              ` na miejscu`);
     if (ride.arrival) rows.push(`${GOAL_ICON}<b>${esc(fmtClock(ride.arrival))}</b> u celu`);
     return rows.join('<br>');
 }
@@ -5211,9 +5202,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
-        newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
-        scheme_extra: $('scheme-walks-count').value,
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
@@ -5439,20 +5428,14 @@ function renderPlan(data, refit) {
 
 // ------------------------------------------- schemat obok mapy (#367) --
 //
-// Eksperyment „nowa mapa”: ta sama mapa zdjęta z geografii - te same kropki
-// przesiadek, start na górze, cel na dole, jedna linia to jedna jazda od
-// wsiadania do wysiadania. Graf składa serwer (pole `scheme`, patrz
+// Ta sama mapa zdjęta z geografii (za ustawieniem „Schemat obok mapy”) - te
+// same kropki przesiadek, start na górze, cel na dole, jedna linia to jedna
+// jazda od wsiadania do wysiadania. Graf składa serwer (pole `scheme`, patrz
 // planner._scheme), bo tylko on wie, gdzie podróże z mapy wysiadają i dokąd
-// dochodzą pieszo. Biblioteka ELK liczy tylko położenie pudełek, a kreski
-// i napisy rysujemy sami: linia, która przez węzeł tylko przejeżdża, ma
-// iść przez jego pudełko jedną ciągłą kreską, a to nie jest coś, co układacz
-// strzałek umie narysować. ELK przychodzi z sieci dopiero przy pierwszym
-// schemacie - bez przełącznika strona go w ogóle nie pobiera.
-const ELK_URL = 'https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js';
-let elkReady = null;
+// dochodzą pieszo. Układ i kreski liczymy sami (layoutLayers): linia, która
+// przez węzeł tylko przejeżdża, ma iść przez jego pudełko jedną ciągłą kreską.
 let lastSchemeData = null;
 let schemeLast = null;
-let schemeToken = 0;
 let schemeCollapsed = !!uiState.schemeCollapsed;
 // Przybliżenie i przesunięcie rysunku w panelu: rysunek po „Pokaż więcej”
 // bywa kilka razy szerszy niż panel, więc trzeba go dać obejrzeć z bliska.
@@ -5466,19 +5449,6 @@ const SCHEME_TRIALS = 24;     // ile układów sprawdzamy (patrz layoutLayers)
 const SCHEME_BOX_H = 38;
 const SCHEME_LANE = 30;       // odstęp między sąsiednimi liniami przy pudełku
 const SCHEME_MARGIN = 28;
-
-function loadElk() {
-    if (!elkReady) {
-        elkReady = new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = ELK_URL;
-            script.onload = () => resolve(new ELK());
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
-    }
-    return elkReady;
-}
 
 let schemeMeasure = null;
 function schemeTextWidth(text) {
@@ -5883,11 +5853,9 @@ function schemeBranches(boxes, strands) {
 }
 
 /** Które przejścia pieszo schemat rysuje: te, które wybrał serwer z powodu
-    najszybszej podróży i dojścia (patrz planner._scheme_pairs), i przejścia
-    z `count` kolejnych podróży, które mają przejście w środku. */
+    najszybszej podróży i dojścia (patrz planner._scheme_pairs). */
 function schemeWalksOf(pairs) {
-    const count = Number($('scheme-walks-count').value);
-    return pairs.filter(p => p.why !== 'extra' || p.rank <= count);
+    return pairs.filter(p => p.why !== 'extra');
 }
 
 /** Odległość do napisu: do 10 m poniżej kilometra, do 0,1 km powyżej. */
@@ -6490,9 +6458,8 @@ function clearSchemeHighlight() {
 function renderScheme(data) {
     lastSchemeData = data;
     const panel = $('scheme-panel');
-    const mine = ++schemeToken;
     hideSchemeTip();
-    if (!data || !data.scheme || !$('new-map').checked) {
+    if (!data || !data.scheme || !setting('scheme-on')) {
         panel.hidden = true;
         $('scheme-canvas').innerHTML = '';
         $('scheme-moves').innerHTML = '';
@@ -6502,24 +6469,6 @@ function renderScheme(data) {
     renderSchemeMoves(scheme.moves || []);
     const strands = schemeStrands(scheme);
     const boxes = schemeBoxes(scheme, strands, data);
-    // Węzły bez strzałki jazdy między sobą (przejścia piesze i gałęzie bez nich) układają się w tej
-    // kolejności dzięki dodatkowym, niewidocznym krawędziom.
-    const hidden = (scheme.order || []).map(([from, to]) => ({from, to}));
-    const graph = {
-        id: 'root',
-        layoutOptions: {
-            'elk.algorithm': 'layered',
-            'elk.direction': 'DOWN',
-            'elk.edgeRouting': 'POLYLINE',
-            'elk.spacing.nodeNode': '56',
-            'elk.layered.spacing.nodeNodeBetweenLayers': '110',
-            'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-        },
-        children: [...boxes].map(([id, b]) => ({id, width: b.w, height: b.h})),
-        edges: [...scheme.edges, ...hidden].map((e, i) => ({
-            id: `e${i}`, sources: [e.from], targets: [e.to],
-        })),
-    };
     const finish = (boxes, strands, routes = new Map()) => {
         schemeLast = {boxes, strands, scheme, routes};
         window.schemeLast = schemeLast;
@@ -6532,40 +6481,17 @@ function renderScheme(data) {
         bindSchemeLines(canvas);
         fitScheme();
     };
-    if ($('scheme-layout').value === 'dagre') {
-        const walkPairs = schemeWalksOf(scheme.pairs).filter(p => boxes.has(p.from) && boxes.has(p.to));
-        let best = null;
-        for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
-            const trialStrands = schemeStrands(scheme);
-            const trialBoxes = schemeBoxes(scheme, trialStrands, data);
-            const routes = layoutLayers(scheme, trialBoxes, trialStrands, walkPairs, seed);
-            const cost = schemeCost(trialBoxes, trialStrands).total;
-            if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost, routes};
-            if (!cost) break;
-        }
-        finish(best.boxes, best.strands, best.routes);
-        return;
+    const walkPairs = schemeWalksOf(scheme.pairs).filter(p => boxes.has(p.from) && boxes.has(p.to));
+    let best = null;
+    for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
+        const trialStrands = schemeStrands(scheme);
+        const trialBoxes = schemeBoxes(scheme, trialStrands, data);
+        const routes = layoutLayers(scheme, trialBoxes, trialStrands, walkPairs, seed);
+        const cost = schemeCost(trialBoxes, trialStrands).total;
+        if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost, routes};
+        if (!cost) break;
     }
-    loadElk()
-        .then(elk => elk.layout(graph))
-        .then(laid => {
-            if (mine !== schemeToken) return;
-            for (const child of laid.children) {
-                // Całkowite współrzędne pudełek: kreski kończą się dokładnie na ich krawędziach.
-                Object.assign(boxes.get(child.id), {x: Math.round(child.x), y: Math.round(child.y)});
-            }
-            // Zakręty, którymi ELK obszedł pudełka długiej krawędzi, to
-            // gotowe korytarze wolne od pudełek.
-            const hintX = new Map();
-            for (const s of strands) {
-                const routed = (laid.edges || []).find(e => e.sources[0] === s.from && e.targets[0] === s.to);
-                const bends = routed && routed.sections && routed.sections[0].bendPoints;
-                if (bends) hintX.set(s, bends.map(p => p.x));
-            }
-            assignPorts(boxes, strands);
-            schemeRoutes(boxes, strands, hintX);
-            finish(boxes, strands);
-        });
+    finish(best.boxes, best.strands, best.routes);
 }
 
 /** Kreski tych samych dwóch węzłów, które nie mają nic do powiedzenia po
@@ -6804,7 +6730,7 @@ setSchemeCollapsed(schemeCollapsed);
     brzegu. Liczona z reguły, a nie z panelu, bo przy pierwszym wyszukaniu
     mapa kadruje się, zanim schemat zdąży się pokazać. */
 function schemeInset() {
-    if (!$('new-map').checked || $('scheme-panel').classList.contains('collapsed')) return 0;
+    if (!setting('scheme-on') || $('scheme-panel').classList.contains('collapsed')) return 0;
     return Math.min(560, innerWidth * 0.45) + 16;
 }
 
@@ -8102,13 +8028,6 @@ function reloadTimetable() {
     }
 }
 
-// Układ schematu i liczba dodatkowych przejść mają sens tylko z nową mapą.
-function showSchemeRows() {
-    const on = setting('new-map');
-    $('scheme-layout-row').hidden = !on;
-    $('scheme-walks-count-row').hidden = !on;
-}
-
 // Zmiana rysuje stan (`paint`, też na starcie) i/albo coś robi po ruchu (`react`).
 const SETTING_EFFECTS = {
     'density': {react: replanSoon(true)},
@@ -8128,14 +8047,9 @@ const SETTING_EFFECTS = {
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     }},
-    // Nowa mapa zmienia odpowiedź serwera, więc jak dostawczaki: od razu nowe zapytanie.
-    // Wiersze ustawień schematu widać tylko z nową mapą.
-    'new-map': {paint: showSchemeRows, react: () => {
-        showSchemeRows();
-        mapMore = 0;
-        if (!startInput.value || !endInput.value) return;
-        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
-    }},
+    // Schemat przychodzi zawsze z mapą, więc włączenie tylko go rysuje (i mapa
+    // kadruje się obok niego przy następnym wyszukaniu).
+    'scheme-on': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
     // Chodzenie pieszo zmienia odpowiedź serwera, jak dostawczaki.
     'walking': {react: () => {
         mapMore = 0;
@@ -8144,13 +8058,9 @@ const SETTING_EFFECTS = {
     }},
     // Zakres mapy na pasku to tylko podgląd: zmiana przerysowuje pasek, bez nowego zapytania.
     'headline-map-range': {react: () => renderTimeHeadline()},
-    // Układ schematu (tymczasowy wybór do porównania): zmiana tylko przerysowuje to, co już przyszło.
-    'scheme-layout': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
     // Odległość albo czas przy przejściach i rowerze - wszędzie naraz: dymki
     // i kropki na mapie oraz schemat.
     'walk-time': {react: () => { applyDotOpts(); if (lastSchemeData) renderScheme(lastSchemeData); }},
-    // Przejścia pieszo na schemacie (demo): ile przejść ze środka najszybszych podróży dodać do tych z dojścia.
-    'scheme-walks-count': {react: replanSoon(false)},
     'bikes-merged': {paint: () => paintBikeButtons()},
     'start-mode-switch': {paint: showStartMode},
     'routes-on': {paint: showRoutes, react: on => {

@@ -2187,6 +2187,12 @@ def _bike_accept(day, chosen_map, near_start, foot):
     odrzucone nie zajmowały miejsca tym, które coś dają."""
     shown_lines = {day.trip_info[day.conns[board][4]][0]
                    for inst in _drawn(chosen_map["moves"]) for board, _ in inst["rides"]}
+    # Kim i od kiedy jedzie pokazana podróż: {kurs: [(wsiadanie, ile pojazdów
+    # przed nim, wyjście ze startu)]}.
+    aboard = {}
+    for inst in _drawn(chosen_map["moves"]):
+        for count, (board, _alight) in enumerate(inst["rides"]):
+            aboard.setdefault(day.conns[board][4], []).append((board, count, inst["dep"]))
 
     def accept(journey):
         pairs = _transit_pairs(day, journey)
@@ -2208,13 +2214,26 @@ def _bike_accept(day, chosen_map, near_start, foot):
         # albo zamiast czekania na nie).
         if any(leg["line"] not in shown_lines for leg in after):
             return False
+        # Rower, po którym siedzi się w kursie, w którym pokazana podróż i tak
+        # już jest, zanim z niego wysiądziemy - a wyszła nie wcześniej i nie
+        # większą liczbą pojazdów - niczego nie zastępuje: kawałek dalej obie
+        # są w tym samym pojeździe. Tak powstawały 3,7 km rowerem na
+        # Pl. Legionów po czwórkę na Kościuszki, kiedy czwórka i szesnastka
+        # wiozą tam spod samego startu na tego samego 810.
+        before = sum(1 for leg in journey["legs"][:k] if leg["kind"] == "ride")
+        for pos, (board, alight) in enumerate(pairs[before:], before):
+            for shown_board, count, shown_dep in aboard.get(day.conns[board][4], ()):
+                if (shown_board <= alight and count <= pos + 1
+                        and shown_dep + moves.EPSILON_SEC > journey["departure_sec"]):
+                    return False
         # Rower, po którym wsiada się w pojazd, który i tak mija miejsce,
         # gdzie przed rowerem już się jest (przystanek przy starcie, pojazd,
         # którym się tam jedzie) - na Tramwajową po kurs, który staje pod
         # startem - tylko zastępuje kawałek jazdy nim: nie oszczędza ani
-        # czekania, ani przesiadki.
+        # czekania, ani przesiadki. Także gdy mija je dopiero po wsiadaniu
+        # (2,1 km na Wyszyńskiego po szesnastkę, która potem staje na
+        # Pl. Grunwaldzkim pod startem).
         if after:
-            before = sum(1 for leg in journey["legs"][:k] if leg["kind"] == "ride")
             here = dict(foot)
             for b, a in pairs[:before]:
                 here[day.conns[b][2]] = min(here.get(day.conns[b][2], INF), day.conns[b][0])
@@ -2226,9 +2245,9 @@ def _bike_accept(day, chosen_map, near_start, foot):
                 for sibling in day.siblings.get(stop, ()):
                     walked = at + gtfs.walk_seconds(day, stop, sibling)
                     here[sibling] = min(here.get(sibling, INF), walked)
-            board = pairs[before][0]
+            board, alight = pairs[before]
             for i in gtfs.trip_conns(day, day.conns[board][4]):
-                if i == board:
+                if i > alight:
                     break
                 if here.get(day.conns[i][2], INF) <= day.conns[i][0]:
                     return False
@@ -2320,30 +2339,49 @@ def _vehicle_ends(day, legs, k, start_place, end_place, start_name, end_name):
 def _bike_boxes(day, places, spots, source_stops, start_name, target_set, scheme):
     """Przy którym pudełku schematu stoi każda stacja z mapy (`box`). Stacja,
     na którą się wsiada (`places`) - przy tym, spod którego się do niej idzie.
-    Stacja, na której przejazd się kończy (`spots`) - przy najbliższym
-    pudełku w zasięgu dojścia, także przy celu. Schemat liczy je razem w rogu
+    Stacja, na której przejazd się kończy (`spots`) - przy celu w zasięgu
+    dojścia, a poza tym przy pudełku, przy którego przystanku naprawdę stoi
+    (patrz at_box). Schemat liczy je razem w rogu
     pudełka, bez osobnych odnóg - odnogą jest tylko konkretny przejazd
     z _bike_moves."""
     start = next(n["id"] for n in scheme["nodes"] if n["role"] == "start")
     end = next(n["id"] for n in scheme["nodes"] if n["role"] == "end")
     by_place = {n["place"]: n["id"] for n in scheme["nodes"]
                 if n["role"] == "stop" and "place" in n}
+    grid = _stop_grid(day)
+    stops_of = {}
+    for stop in day.stop_coords:
+        if gtfs.place_name(day, stop) in by_place:
+            stops_of.setdefault(by_place[gtfs.place_name(day, stop)], []).append(stop)
+    # Stacja należy do pudełka, gdy od jego przystanku idzie się do niej
+    # niewiele dalej niż od słupka, przy którym naprawdę stoi. Stacja spod
+    # Dworca Głównego nie liczy się do Kościuszki, choć da się do niej dojść.
+    slack_m = moves.NEAR_EQUAL_SEC * gtfs.WALK_SPEED_MPS
+
+    def at_box(station, box):
+        nearest = _near_stops(day, grid, station["lat"], station["lon"], limit=1)
+        own = min((gtfs._haversine_m(station["lat"], station["lon"], *day.stop_coords[stop])
+                   for stop in stops_of.get(box, ())), default=INF)
+        return bool(nearest) and own <= min(gtfs.WALK_M, nearest[0][0] + slack_m)
+
     for place in places:
         ids = day.stops_by_key.get((place.get("from") or "").casefold(), ())
         if place.get("from") == start_name or any(stop in source_stops for stop in ids):
             place["box"] = start
-        elif ids and gtfs.place_name(day, ids[0]) in by_place:
+        elif ids and gtfs.place_name(day, ids[0]) in by_place \
+                and at_box(place, by_place[gtfs.place_name(day, ids[0])]):
             place["box"] = by_place[gtfs.place_name(day, ids[0])]
-    if not spots:
-        return
-    near = [(stop, end) for stop in target_set]
-    near += [(stop, by_place[gtfs.place_name(day, stop)]) for stop in day.stop_coords
-             if gtfs.place_name(day, stop) in by_place]
     for spot in spots:
-        best = min(((gtfs._haversine_m(spot["lat"], spot["lon"], *day.stop_coords[stop]), box)
-                    for stop, box in near), default=None)
-        if best is not None and best[0] <= gtfs.WALK_M:
-            spot["box"] = best[1]
+        at_end = min((gtfs._haversine_m(spot["lat"], spot["lon"], *day.stop_coords[stop])
+                      for stop in target_set), default=INF)
+        if at_end <= gtfs.WALK_M:
+            spot["box"] = end
+            continue
+        boxes = [box for box in stops_of if at_box(spot, box)]
+        if boxes:
+            spot["box"] = min(boxes, key=lambda box: min(
+                gtfs._haversine_m(spot["lat"], spot["lon"], *day.stop_coords[stop])
+                for stop in stops_of[box]))
 
 
 def _bike_leg(bike):
