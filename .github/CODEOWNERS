@@ -1,6 +1,19 @@
 /docs/FLOW_MAP_CONTRACT.md @EgorexW
 /docs/FLOW_MAP_CONTRACT_V2.md @EgorexW
 /docs/PRINCIPLES.md @EgorexW
-/.github/CODEOWNERS @EgorexW
 /settings.json @EgorexW
 /settings.schema.json @EgorexW
+
+# Pliki, które nie przechodzą przez „merge na kredyt” (#506): workflow, wdrożenie,
+# zależności i instrukcje Claude'a. Ostatni pasujący wpis wygrywa, więc
+# `/.github/` obejmuje też `.github/CODEOWNERS`; dawny osobny wpis dla
+# @EgorexW zniknął, bo wpis `/.github/` niżej i tak by go przykrył. Gdy autor jest code ownerem
+# ścieżki, GitHub przepuszcza go sam — dlatego przy tych ścieżkach stoi
+# wyłącznie SzymonEls.
+/.github/ @SzymonEls
+/docker/ @SzymonEls
+/Dockerfile* @SzymonEls
+/docker-compose*.yml @SzymonEls
+/requirements*.txt @SzymonEls
+/.claude/ @SzymonEls
+/CLAUDE.md @SzymonEls

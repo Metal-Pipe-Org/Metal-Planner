@@ -1,6 +1,6 @@
-# Stan PR-a liczony od zera z API, za każdym razem w całości: wymagany
-# status „Recenzenci konieczni” (#352) i etykieta mówiąca, na czyj ruch PR
-# czeka (#353). Wołający robi `source` (razem ze statuses.sh i approvals.sh)
+# Stan PR-a liczony od zera z API, za każdym razem w całości: wymagane
+# statusy „Recenzenci konieczni” (#352) i „Recenzja albo kredyt” (#506,
+# credit.sh) oraz etykieta mówiąca, na czyj ruch PR czeka (#353). Wołający robi `source` (razem ze statuses.sh i approvals.sh)
 # i woła `pr_state`; resztę bierze z env:
 #
 #   GH_TOKEN  token ze `statuses: write`, zapisem etykiet i odczytem PR-ów
@@ -24,6 +24,7 @@
 # statusów jednej nazwy na commicie, a przeliczeń jest dużo.
 
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/credit.sh"
 
 REVIEWERS_DOC="https://github.com/${REPO:-Metal-Pipe-Org/Metal-Planner}/blob/main/CONTRIBUTING.md#review-i-mergowanie"
 
@@ -131,8 +132,10 @@ put_status() {
 }
 
 # pr_facts PR REQUIRED — dla jednego otwartego PR-a (obiekt z listy PR-ów
-# z API) stawia status „Recenzenci konieczni” i wypisuje jedną linijkę JSON
-# ze wszystkim, czego potrzebuje `labels_plan`. Trzy wywołania API na PR.
+# z API) stawia statusy „Recenzenci konieczni” i „Recenzja albo kredyt”
+# (kolejkę kredytu bierze z CREDIT_QUEUE, policzonej raz na bieg w `pr_state`)
+# i wypisuje jedną linijkę JSON ze wszystkim, czego potrzebuje `labels_plan`.
+# Trzy wywołania API na PR.
 #
 # `mergeable_state` jest tylko w pojedynczym PR-ze, lista PR-ów go nie ma —
 # stąd osobne pytanie. Konflikt powinien i tak cofnąć PR do wersji roboczej
@@ -141,7 +144,7 @@ put_status() {
 # GitHub stanu nie policzył (`null`, `unknown`), traktujemy PR jak bez
 # konfliktu — następne przeliczenie go poprawi.
 pr_facts() {
-  local pr=$1 req=$2 n sha author reviews statuses reviewers mergeable
+  local pr=$1 req=$2 n sha author reviews statuses reviewers mergeable summary credit
 
   n=$(jq -r .number <<<"$pr")
   sha=$(jq -r .head.sha <<<"$pr")
@@ -154,8 +157,13 @@ pr_facts() {
   echo "#$n (${sha:0:7}): $REVIEWERS_CONTEXT → $(jq -r '"\(.state): \(.description)"' <<<"$reviewers")" >&2
   put_status "$sha" "$REVIEWERS_CONTEXT" "$reviewers" "$statuses" >&2
 
+  summary=$(review_summary <<<"$reviews")
+  credit=$(credit_status "$summary" "$statuses" "$CREDIT_QUEUE")
+  echo "#$n (${sha:0:7}): $CREDIT_CONTEXT → $(jq -r '"\(.state): \(.description)"' <<<"$credit")" >&2
+  put_status "$sha" "$CREDIT_CONTEXT" "$credit" "$statuses" >&2
+
   jq -nc --argjson pr "$pr" --argjson st "$statuses" --argjson rv "$reviewers" \
-    --argjson sum "$(review_summary <<<"$reviews")" --arg ctx "$REVIEW_CONTEXT" --arg repo "$REPO" \
+    --argjson sum "$summary" --arg ctx "$REVIEW_CONTEXT" --arg repo "$REPO" \
     --arg mergeable "$mergeable" '
     $pr | {number, draft, base: .base.ref, head: .head.ref,
            same_repo: ((.head.repo.full_name // "") == $repo),
@@ -365,6 +373,10 @@ pr_state() {
 
   req=$(required_reviewers)
   echo "Recenzenci konieczni (REQUIRED_REVIEWERS na main): $(jq -r 'if length == 0 then "nikt" else join(", ") end' <<<"$req")"
+  # Kolejkę kredytu liczymy raz na bieg; błąd API wywraca bieg, zamiast
+  # puścić PR-y na kredyt z pustej kolejki.
+  CREDIT_QUEUE=$(credit_count)
+  echo "Kolejka kredytu: $CREDIT_QUEUE/$CREDIT_LIMIT"
   prs=$(open_prs)
 
   if [ $# -eq 0 ] || [ "$1" = all ]; then

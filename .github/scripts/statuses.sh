@@ -20,6 +20,9 @@
 REVIEW_CONTEXT="Ocena Claude'a"
 # Zatwierdzenie od każdego recenzenta koniecznego (#352) — stawia pr-state.sh.
 REVIEWERS_CONTEXT="Recenzenci konieczni"
+# Zatwierdzenie człowieka albo kredyt (#506) — stawia pr-state.sh; zastępuje
+# wbudowany wymóg „1 zatwierdzenie” w regułach `main`.
+CREDIT_CONTEXT="Recenzja albo kredyt"
 
 # set_status SHA NAZWA STAN OPIS [LINK] — stawia status NAZWA na commicie.
 # STAN: pending / success / failure / error. GitHub odrzuca opis dłuższy niż
