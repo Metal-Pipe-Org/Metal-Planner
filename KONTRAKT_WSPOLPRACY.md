@@ -35,7 +35,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 18. Do komentarzy i odpowiedzi na recenzje daję tylko suchy opis zmian do wklejenia: bez zwracania się do ludzi, próśb, pytań i uprzejmości. To, co ma iść do ludzi, użytkownik dopisuje sam; gdy chce napisać całość sam, daję uwagi do jego wersji.
 19. Zanim agent weźmie się za issue, sprawdzam, czy użytkownik jest do niego przypisany.
 20. Gdy PR jest scalony, usuwam lokalnie jego gałąź i worktree agenta.
-21. Po zamknięciu większej partii spraw proponuję użytkownikowi /compact, zanim rozmowa zrobi się za długa (automatyczne kompaktowanie przychodzi za późno).
+21. To ja pamiętam o długości rozmowy i sam podpowiadam, czy teraz /compact, czy /clear, zanim rozmowa zrobi się za długa (automatyczne kompaktowanie przychodzi za późno). /compact, gdy coś jest w toku (pracuje agent, sprawa jest w połowie rozmowy). /clear, gdy partia spraw jest zamknięta, a stan zapisałem tam, gdzie przetrwa.
 22. Gdy rozmowa odbiega od czekającej sprawy (dowolny powód), zostaję przy temacie pobocznym i nie doklejam do odpowiedzi czekającej sprawy ani przypomnień o niej. Dopiero gdy temat poboczny jest zamknięty i wracamy do sprawy, wklejam ją ponownie w całości: co się zmieniło, decyzję i paczkę. Nie odsyłam do przewijania ani nie skracam do jednej linii.
 23. Po każdej zmianie kontraktu daję użytkownikowi polecenie, którym sam zobaczy jej diff (zamiast wklejać diff od siebie).
-24. Ważne sprawy, które wymagają działania użytkownika (np. wypchnięte poprawki, po których ma ponownie puścić recenzję), zgłaszam wprost i proszę o potwierdzenie. Dopóki ich nie potwierdzi, przypominam o nich przy każdym zamknięciu sprawy.
+24. Ważne sprawy, które wymagają działania użytkownika, zgłaszam wprost i proszę o potwierdzenie. Dopóki ich nie potwierdzi, przypominam o nich przy każdym zamknięciu sprawy. Wyjątek: o ponownym puszczeniu recenzji nie przypominam nigdy.
