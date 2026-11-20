@@ -265,11 +265,17 @@ def _dzien_z_peronami(slupki):
         day.stop_names[stop_id] = nazwa
         day.stop_coords[stop_id] = coords
     hubs = gtfs._numbered_hubs(day.stop_names.values())
-    for stop_id, nazwa in day.stop_names.items():
-        gtfs._register_stop_name(day, stop_id, nazwa)
-        base = gtfs._platform_base_name(nazwa, hubs)
-        if base is not None:
-            gtfs._register_stop_name(day, stop_id, base)
+    far = gtfs.far_namesakes([
+        (nazwa, *day.stop_coords[stop_id], gtfs._network_of(stop_id, ()))
+        for stop_id, nazwa in day.stop_names.items()
+    ])
+    for i, (stop_id, nazwa) in enumerate(day.stop_names.items()):
+        for name in (nazwa, gtfs._platform_base_name(nazwa, hubs)):
+            if name is None:
+                continue
+            if i in far:
+                name = gtfs.qualified_name(name, far[i])
+            gtfs._register_stop_name(day, stop_id, name)
     day.stops_by_place = gtfs._build_places(
         day.stop_names, day.stop_coords, day.stops_by_key)
     day.place_of = {
@@ -342,3 +348,44 @@ def test_a_dot_on_one_platform_is_named_after_the_whole_hub():
     name, stops = gtfs.stop_at(lat, lon, day)
     assert name == "GALERIA DOMINIKAŃSKA"
     assert sorted(stops) == sorted(_WEZEL)
+
+
+# Prawdziwe współrzędne: trzy słupki ZAKRZÓW MPK i słupek "Zakrzów" z rozkładu
+# Siechnic - wieś pod Siechnicami, 20 km dalej.
+_ZAKRZOWY = {
+    "727": ("ZAKRZÓW", (51.1618697, 17.12441774)),
+    "55": ("ZAKRZÓW", (51.16227118, 17.1251501)),
+    "728": ("ZAKRZÓW", (51.16201253, 17.12469012)),
+    "SIE:1": ("Zakrzów", (51.002042, 17.255056)),
+}
+
+
+def test_a_far_namesake_is_a_separate_place():
+    """Ta sama nazwa bez względu na wielkość liter to jedno miejsce tylko
+    blisko - daleki imiennik z innej sieci jest osobnym wyborem z dopiskiem
+    sieci, a nazwa bez dopisku zostaje przy przystanku MPK."""
+    day = _dzien_z_peronami(_ZAKRZOWY)
+    _, stops, _ = gtfs.match_stop("Zakrzów", day)
+    assert sorted(stops) == ["55", "727", "728"]
+    name, stops, _ = gtfs.match_stop("Zakrzów (Siechnice)", day)
+    assert (name, stops) == ("Zakrzów (Siechnice)", ["SIE:1"])
+    assert gtfs.place_name(day, "SIE:1") == "Zakrzów (Siechnice)"
+
+
+def test_a_near_namesake_stays_one_place():
+    """Słupek Siechnic "Galeria Dominikańska" stoi przy węźle MPK - zostaje
+    w nim, bez dopisku."""
+    day = _dzien_z_peronami(_WEZEL)
+    assert not any("(" in key for key in day.stops_by_key)
+
+
+def test_map_names_a_far_namesake_with_its_network():
+    """Klik w słupek na mapie wpisuje do pola jego nazwę - dalekiemu
+    imiennikowi tę z dopiskiem, pod którą zna go wyszukiwarka."""
+    slupki = gtfs.with_place_names([
+        {"name": nazwa, "lat": lat, "lon": lon,
+         "network": gtfs._network_of(stop_id, ())}
+        for stop_id, (nazwa, (lat, lon)) in _ZAKRZOWY.items()
+    ])
+    assert [s["name"] for s in slupki] == ["ZAKRZÓW"] * 3 + ["Zakrzów (Siechnice)"]
+    assert slupki[-1]["place"] == "Zakrzów (Siechnice)"
