@@ -240,7 +240,11 @@ jobs:
                 # kredyt” (#506) — dopisek mówi, ile miejsc w kolejce zajęto.
                 # Dopisek to dodatek: awaria API nie może zgubić wiadomości
                 # o merge'u.
-                note=$(credit_merge_note "$PR_N") || note=""
+                # Tylko PR scalony do `main` — tak jak etykieta w pr-credit.yml.
+                note=""
+                if [ "$PR_BASE" = main ]; then
+                  note=$(credit_merge_note "$PR_N") || note=""
+                fi
                 discord_send merged "$SENDER" "🔀 PR zmergowany: #$PR_N $PR_TITLE" "$PR_URL" \
                   "$note" "" "$ping"
               else

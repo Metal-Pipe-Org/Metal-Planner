@@ -29,11 +29,12 @@ name: "PR-y: kredyt"
 # `pull_request_target` bierze workflow z `main`; kodu z PR-a nie pobieramy
 # wcale — wszystko idzie z API (zasada 9 w WORKFLOWS.md). Problemy znalezione
 # w recenzji po fakcie zespół zgłasza ręcznie, nic się tu nie dzieje samo.
-# PR do `stable` (wydanie `main` -> `stable`) kredytu nie zajmuje.
+# Kredyt zajmują tylko PR-y scalone do `main`: piętra stosu scalane do gałęzi
+# pośrednich i wydanie `main` -> `stable` go nie zajmują (filtr `branches`).
 on:
   pull_request_target:
     types: [closed, unlabeled]
-    branches-ignore: [stable]
+    branches: [main]
   workflow_run:
     workflows:
       - "PR-y: recenzja (przekaźnik)"
