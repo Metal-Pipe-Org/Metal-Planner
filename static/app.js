@@ -8748,3 +8748,25 @@ window.plannerBridge = {
 };
 
 }
+
+// X w polach tekstowych (#508): czyści pole jak ręczne skasowanie (zdarzenie input) i zostawia w nim kursor.
+// Widoczność robi CSS przez :placeholder-shown, więc działa też przy wartościach ustawionych z kodu.
+document.addEventListener('DOMContentLoaded', () => {
+    for (const id of ['start', 'end', 'place-where', 'ob-line']) {
+        const input = document.getElementById(id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'field-clear';
+        button.title = 'Wyczyść';
+        button.setAttribute('aria-label', 'Wyczyść pole');
+        button.innerHTML = '&#10005;';
+        if (input.classList.contains('with-action')) button.classList.add('beside-action');
+        button.addEventListener('mousedown', e => e.preventDefault());
+        button.addEventListener('click', () => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        });
+        input.after(button);
+    }
+});
