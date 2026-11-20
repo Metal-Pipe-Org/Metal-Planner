@@ -47,7 +47,7 @@ permissions:
   contents: read
   # Recenzje (czy PR miał zatwierdzenie) i etykiety kredytu. Etykiety PR-a idą
   # przez API zgłoszeń, więc jak w pr-state.yml dajemy oba zapisy.
-  pull-requests: write
+  pull-requests: read
   issues: write
 
 jobs:
