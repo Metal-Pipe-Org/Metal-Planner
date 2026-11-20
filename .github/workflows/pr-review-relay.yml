@@ -1,8 +1,9 @@
 name: "PR-y: recenzja (przekaźnik)"
 
 # Sam przekaźnik: po recenzji PR-a (wystawionej albo cofniętej przez
-# człowieka) kończy bieg, a jego zakończenie budzi pr-state.yml przez
-# `workflow_run`. Nie liczy niczego sam, bo `pull_request_review` bierze
+# człowieka) kończy bieg, a jego zakończenie budzi pr-state.yml i pr-credit.yml
+# przez `workflow_run`; ten drugi dzięki temu widzi też zatwierdzenia scalonych
+# PR-ów, które zdejmują z nich etykietę kredytu (#506). Nie liczy niczego sam, bo `pull_request_review` bierze
 # workflow z commitu scalenia PR-a — PR mógłby go podmienić — a przy PR-ach
 # z forków daje token tylko do odczytu. `workflow_run` biegnie zawsze
 # z `main` i z naszym tokenem, a pr-state.yml nie bierze stąd żadnych danych:

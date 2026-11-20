@@ -47,6 +47,14 @@ def test_sito_etykiety_stale_zgodne_z_configiem():
     assert set(stale_like) == {label}
 
 
+def test_sito_etykiety_kredytu_zgodne_z_configiem():
+    label = _config()["LABEL_CREDIT"]
+    literals = re.findall(r"label\.name == '([^']*)'",
+                          (WORKFLOWS / "pr-credit.yml").read_text())
+    assert literals, "pr-credit.yml: nie znaleziono sita z etykietą kredytu w if:"
+    assert set(literals) == {label}
+
+
 @pytest.mark.parametrize("path", sorted(
     [p for p in SCRIPTS.glob("*.sh") if p != CONFIG] + list(WORKFLOWS.glob("*.yml")),
     key=str), ids=lambda p: p.name)

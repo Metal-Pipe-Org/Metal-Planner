@@ -19,7 +19,8 @@ name: Discord - powiadomienia
 #
 #  PR-y
 #   • otwarcie (z fragmentem opisu), wyjście z wersji roboczej, ponowne
-#     otwarcie, merge albo zamknięcie bez merge'a,
+#     otwarcie, merge albo zamknięcie bez merge'a; merge bez żadnego
+#     zatwierdzenia człowieka dostaje dopisek „kredyt 7/15” (#506),
 #   • prośba o recenzję z panelu bocznego — ping recenzenta. Kiedy o nią
 #     prosić, to umowa w zespole, nie automat: dopiero gdy autor przeczytał
 #     ocenę Claude'a i uznał PR za gotowy,
@@ -118,6 +119,8 @@ jobs:
         run: |
           set -euo pipefail
           source .discord/.github/scripts/discord.sh
+          source .discord/.github/scripts/approvals.sh
+          source .discord/.github/scripts/credit.sh
 
           case "$EVENT/$ACTION" in
             issues/opened)
@@ -233,8 +236,13 @@ jobs:
                 if [ "$PR_AUTHOR" != "$SENDER" ]; then
                   ping=$PR_AUTHOR
                 fi
+                # PR scalony bez żadnego zatwierdzenia człowieka wszedł „na
+                # kredyt” (#506) — dopisek mówi, ile miejsc w kolejce zajęto.
+                # Dopisek to dodatek: awaria API nie może zgubić wiadomości
+                # o merge'u.
+                note=$(credit_merge_note "$PR_N") || note=""
                 discord_send merged "$SENDER" "🔀 PR zmergowany: #$PR_N $PR_TITLE" "$PR_URL" \
-                  "" "" "$ping"
+                  "$note" "" "$ping"
               else
                 discord_send closed "$SENDER" "🚫 PR zamknięty bez merge'a: #$PR_N $PR_TITLE" "$PR_URL"
               fi

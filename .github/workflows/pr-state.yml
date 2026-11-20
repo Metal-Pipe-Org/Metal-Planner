@@ -1,18 +1,35 @@
 name: "PR-y: stan"
 
-# Wymagany status „Recenzenci konieczni” na czubku każdego otwartego PR-a
-# (#352). Recenzent konieczny to ktoś, kto dopisał się PR-em do
-# `.github/REQUIRED_REVIEWERS`: każdy PR musi dostać jego zatwierdzenie, a on sam
+# Wymagane statusy „Recenzenci konieczni” i „Recenzja albo kredyt” na czubku
+# każdego otwartego PR-a. Najpierw pierwszy (#352). Recenzent konieczny to
+# ktoś, kto dopisał się PR-em do `.github/REQUIRED_REVIEWERS`: każdy PR musi
+# dostać jego zatwierdzenie, a on sam
 # zobowiązuje się zrobić review każdego PR-a w ciągu 24 h. To deklaracja, nie
 # hierarchia — dopisać się może każdy. Status jest zielony, gdy każdy z nich
 # (poza autorem PR-a) ma stojące zatwierdzenie; inaczej czeka i w opisie
 # mówi, na kogo.
 #
-# Czemu nie wbudowane „Require review from Code Owners”: przy kilku ownerach
-# jednej ścieżki GitHub zadowala się zatwierdzeniem jednego z nich, a my
-# potrzebujemy każdego. To ustawienie jest więc w regułach `main` wyłączone,
-# a ten status — wymagany; „co najmniej jedno zatwierdzenie” zostaje
-# w regułach jak było.
+# Czemu nie wbudowane „Require review from Code Owners” zamiast tej listy: przy
+# kilku ownerach jednej ścieżki GitHub zadowala się zatwierdzeniem jednego
+# z nich, a my potrzebujemy każdego. Od #506 jest ono jednak włączone — ale do
+# pilnowania plików, które ma wyłącznie SzymonEls (jeden owner, więc ta wada
+# go nie dotyczy); „Recenzenci konieczni” zostaje wymagany obok niego.
+# Wbudowany wymóg „co najmniej jedno zatwierdzenie”
+# zastępuje od #506 drugi status, niżej; liczba wymaganych zatwierdzeń
+# w regułach `main` jest wtedy zerowa.
+#
+# „Recenzja albo kredyt” (#506, logika w `.github/scripts/credit.sh`) jest
+# zielony, gdy PR ma stojące zatwierdzenie człowieka (i nikt nie czeka na
+# zmiany), albo gdy ostatnia ocena Claude'a na czubku PR-a ma werdykt 🟢,
+# a w kolejce PR-ów scalonych bez recenzji jest mniej niż CREDIT_LIMIT
+# (config.sh) — to „kredyt”. Opis mówi, ile miejsc zajęto („kredyt: 7/15
+# w kolejce”) albo że kolejka jest pełna. Kolejkę tworzą scalone PR-y
+# z etykietą kredytu, którą po merge'u daje pr-credit.yml; jego zakończenie
+# budzi ten workflow, bo etykieta nałożona naszym tokenem nie tworzy zdarzeń,
+# a zmiana kolejki przestawia status wszystkich otwartych PR-ów. Ręczne
+# zdjęcie albo nałożenie etykiety kredytu przelicza je wszystkie od razu.
+# Chronionych plików ten status nie sprawdza — pilnują ich code ownerzy
+# z `.github/CODEOWNERS` (wbudowane „Require review from Code Owners”).
 #
 # Ten sam bieg daje każdemu otwartemu PR-owi dokładnie jedną z czterech
 # etykiet (#353), żeby z listy PR-ów było widać, czyj jest następny ruch:
@@ -76,10 +93,11 @@ on:
       - "PR-y: nowy konflikt z bazą — ping i wersja robocza"
       - "PR-y: składnia"
       - "PR-y: recenzja (przekaźnik)"
+      - "PR-y: kredyt"
     types: [completed]
 
 permissions:
-  # Status „Recenzenci konieczni”.
+  # Statusy „Recenzenci konieczni” i „Recenzja albo kredyt”.
   statuses: write
   # Skrypty z `main` i REQUIRED_REVIEWERS z `main`.
   contents: read
@@ -136,6 +154,9 @@ jobs:
           # ze swojego stosu i też trzeba go przeliczyć (base_seeds
           # w pr-state.sh). Nazwa gałęzi to tekst od ludzi — tylko przez env.
           OLD_BASE: ${{ github.event.changes.base.ref.from }}
+          # Etykieta, której zmiana mogła przestawić kolejkę kredytu (#506);
+          # nazwa etykiety to tekst od ludzi — tylko przez env.
+          LABEL_EVENT: ${{ github.event.label.name }}
         run: |
           set -euo pipefail
           source .discord/.github/scripts/statuses.sh
@@ -143,5 +164,10 @@ jobs:
           source .discord/.github/scripts/pr-state.sh
 
           # `pull_request_target` dotyczy jednego PR-a, `workflow_run` —
-          # wszystkich otwartych (patrz nagłówek).
-          pr_state "${N:-all}"
+          # wszystkich otwartych (patrz nagłówek). Zmiana etykiety kredytu
+          # zmienia kolejkę, więc dotyczy wszystkich.
+          if [ "${LABEL_EVENT:-}" = "$LABEL_CREDIT" ]; then
+            pr_state all
+          else
+            pr_state "${N:-all}"
+          fi
