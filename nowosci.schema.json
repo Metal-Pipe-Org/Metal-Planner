@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Rejestr okienek nowości Metal-Planner",
+  "description": "Plik nowosci.json: jednorazowe okienka o nowych funkcjach. Wpisów się nie usuwa - wygasłe po prostu przestają się pokazywać. Data wdrożenia nie jest polem rejestru: serwer zapamiętuje, kiedy pierwszy raz zobaczył wpis, i od tej chwili liczy wygasanie.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "popups"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Ścieżka do pliku schemy; edytor podpowiada na jej podstawie, serwer to pole ignoruje."
+    },
+    "popups": {
+      "type": "array",
+      "description": "Okienka nowości.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "description",
+          "place"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stały identyfikator wpisu, unikalny w rejestrze; pod nim zapamiętuje się potwierdzenie okienka. Nie zmieniaj go dla istniejącego wpisu."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Tytuł okienka."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Treść okienka. Gdy funkcja pojawia się dopiero po jakimś działaniu, opis mówi, co zrobić."
+          },
+          "place": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Selektor miejsca, na które wskazuje strzałka (przy funkcji „po działaniu” - tam, gdzie to działanie się zaczyna). „Pokaż” samo znajduje panel, w którym to miejsce siedzi. Element musi istnieć w templates/index.html."
+          },
+          "expiry": {
+            "description": "Po ilu dniach od pierwszego zobaczenia wpisu przez serwer okienko wygasa: liczba całkowita, najmniej 14, albo \"never\". Brak pola = 30 dni.",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 14
+              },
+              {
+                "const": "never"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
