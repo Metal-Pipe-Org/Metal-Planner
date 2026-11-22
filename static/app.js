@@ -353,25 +353,43 @@ function escClass(value) {
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 // `cable` to Polinka (zgłoszenie #165) - granat Politechniki, która ją prowadzi.
-const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
+// Autobusy (też siechnickie) mają zieleń pociągów - tak chce prototyp A
+// ustawienia „Kolory linii”.
+const LINE_COLORS = {tram: '#c62828', bus: '#2e7d32', train: '#2e7d32',
                      cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 
-// Prototyp B ustawienia „Kolory linii”: każda linia ma swój losowy kolor,
-// liczony z numeru stałym ziarnem - ta sama linia wygląda tak samo wszędzie
-// i po odświeżeniu. Rower, Traficar i przejście pieszo zostają przy swoich.
-// Jasność jest ograniczona tylko po to, żeby biały numer na plakietce był
-// czytelny. Kolor wychodzi jako #rrggbb, bo schemat robi z niego id grotu.
+// Prototyp B ustawienia „Kolory linii”: tramwaj i autobus mają swój losowy
+// kolor, liczony z numeru stałym ziarnem - ta sama linia wygląda tak samo
+// wszędzie i po odświeżeniu. Reszta zostaje przy kolorach z A, więc odcienie
+// zbliżone do nich (zieleń pociągu, granat Polinki, pomarańcz roweru, fiolet
+// Traficara) są wycięte z koła barw, a nasycenie od 55% w górę nie daje
+// szarości przejścia pieszo. Kolor ma co najmniej 3:1 kontrastu z bielą -
+// widać go na mapie i da się nim pisać na białym; numer na kolorowej
+// plakietce jest białym albo ciemnym, czym da większy kontrast.
+// Kolor wychodzi jako #rrggbb, bo schemat robi z niego id grotu.
 const LINE_COLOR_SEED = 0x811c9dc5;
-const OWN_COLOR_KINDS = new Set(['bike', 'car', 'walk']);
+const RANDOM_COLOR_KINDS = new Set(['tram', 'bus']);
+const RESERVED_HUES = [[12, 42], [103, 143], [197, 227], [248, 292]];   // stopnie, rosnąco
+const DARK_INK = '#16202b';                                             // --ink w style.css
 const byLineColors = () => setting('line-colors') === 'line';
+const randomColor = kind => byLineColors() && RANDOM_COLOR_KINDS.has(kind);
 
-function lineColor(kind, num) {
-    if (!byLineColors() || OWN_COLOR_KINDS.has(kind)) return LINE_COLORS[kind] || LINE_COLORS.other;
-    let h = LINE_COLOR_SEED;
-    for (const ch of String(num)) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
-    const hue = h % 360, sat = (50 + (h >>> 9) % 40) / 100, light = (30 + (h >>> 17) % 20) / 100;
+function luminance(hex) {
+    const [r, g, b] = [1, 3, 5].map(i => {
+        const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+const contrast = (a, b) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+};
+
+function hslHex(hue, sat, light) {
     const a = sat * Math.min(light, 1 - light);
     const channel = n => {
         const k = (n + hue / 30) % 12;
@@ -381,10 +399,43 @@ function lineColor(kind, num) {
     return '#' + channel(0) + channel(8) + channel(4);
 }
 
+const lineColorCache = new Map();
+
+/** {color, ink} losowego koloru linii o tym numerze. */
+function randomLineColor(num) {
+    const key = String(num);
+    if (lineColorCache.has(key)) return lineColorCache.get(key);
+    let h = LINE_COLOR_SEED;
+    for (const ch of key) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+    // Wolne odcinki koła zsunięte w jeden, więc każdy wolny odcień jest równie
+    // prawdopodobny, a zarezerwowanego nie da się wylosować.
+    const free = 360 - RESERVED_HUES.reduce((sum, [from, to]) => sum + to - from, 0);
+    let hue = h % free;
+    for (const [from, to] of RESERVED_HUES) if (hue >= from) hue += to - from;
+    const sat = (55 + (h >>> 9) % 46) / 100;
+    let light = (28 + (h >>> 17) % 35) / 100;
+    let color = hslHex(hue, sat, light);
+    while (contrast(color, '#ffffff') < 3) {
+        light -= 0.02;
+        color = hslHex(hue, sat, light);
+    }
+    const ink = contrast(color, '#ffffff') >= contrast(color, DARK_INK) ? '#fff' : DARK_INK;
+    const result = {color, ink};
+    lineColorCache.set(key, result);
+    return result;
+}
+
+function lineColor(kind, num) {
+    return randomColor(kind) ? randomLineColor(num).color : LINE_COLORS[kind] || LINE_COLORS.other;
+}
+
 /** Dla elementu z klasą rodzaju linii: arkusz bierze z `--lc` kolor linii
-    przed kolorem rodzaju, więc przy podziale na rodzaje nic tu nie ma. */
+    przed kolorem rodzaju, a z `--lc-ink` kolor numeru na nim, więc przy
+    podziale na rodzaje nic tu nie ma. */
 function lineVar(kind, num) {
-    return byLineColors() && !OWN_COLOR_KINDS.has(kind) ? `--lc: ${lineColor(kind, num)}; ` : '';
+    if (!randomColor(kind)) return '';
+    const {color, ink} = randomLineColor(num);
+    return `--lc: ${color}; --lc-ink: ${ink}; `;
 }
 
 function lineStyle(kind, num) {
@@ -4148,7 +4199,10 @@ function legLayers(legs, {preview}) {
             });
             // divIcon nie przyjmuje stylu - kolor linii dostaje dopiero postawiony element.
             if (lineVar(leg.mode, leg.num)) {
-                mark.on('add', () => mark.getElement().style.setProperty('--lc', color));
+                mark.on('add', () => {
+                    mark.getElement().style.setProperty('--lc', color);
+                    mark.getElement().style.setProperty('--lc-ink', randomLineColor(leg.num).ink);
+                });
             }
             marks.push(mark);
         }

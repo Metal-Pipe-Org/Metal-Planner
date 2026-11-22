@@ -202,7 +202,7 @@
     {
       "id": "line-colors",
       "name": "Kolory linii",
-      "description": "A: tramwaje, autobusy i pociągi mają kolor swojego rodzaju. B: każda linia ma swój losowy kolor, ten sam wszędzie i po odświeżeniu. Rower, Traficar i przejście pieszo zostają przy swoich kolorach.",
+      "description": "A: tramwaje czerwone, autobusy (też siechnickie) i pociągi zielone, Traficar fioletowy, rower pomarańczowy, przejście pieszo szare. B: każdy tramwaj i autobus ma swój losowy kolor, ten sam wszędzie i po odświeżeniu; pociągi, Polinka, rower, Traficar i przejście pieszo jak w A.",
       "tags": ["Wygląd mapy", "Mapa"],
       "dev": true
     },

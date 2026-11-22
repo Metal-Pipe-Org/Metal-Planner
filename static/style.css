@@ -5,14 +5,14 @@
 
 :root {
     --tram: #c62828;
-    --bus: #1565c0;
+    --bus: #2e7d33;                  /* jak pociąg - prototyp A „Kolorów linii” */
     --train: #2e7d33;
     --cable: #002147;                /* Polinka - granat Politechniki (#165) */
     --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
     /* Elementy linii biorą kolor rodzaju przez var(--lc, ...): `--lc` to kolor
-       jednej linii, wpisywany na elemencie przy ustawieniu „Kolory linii” na B
-       (patrz lineStyle w app.js). */
+       jednej linii, a `--lc-ink` numeru na nim, wpisywane na elemencie przy
+       ustawieniu „Kolory linii” na B (patrz lineVar w app.js). */
     --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
     --walk: #455a64;   /* przejście pieszo - ten sam kolor, co kreskowana
                           linia dojścia na mapie (patrz legLayers) */
@@ -1186,7 +1186,7 @@ body.routes-off #results .notice.loading { display: none; }
     padding: 0 7px;
     border-radius: 6px;
     background: var(--lc, var(--other));
-    color: #fff;
+    color: var(--lc-ink, #fff);
     font-size: 13px;
     font-weight: 700;
     line-height: 1;
@@ -1529,7 +1529,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-badge.bike { color: var(--bike); border-color: var(--bike); }
 
 .line-badge.solid {
-    color: #fff;
+    color: var(--lc-ink, #fff);
     font-size: 11px;
     line-height: 16px;
     padding: 0 6px;
@@ -1589,7 +1589,7 @@ body.routes-off #results .notice.loading { display: none; }
     border-radius: 50%;
     border: 2px solid #fff;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-    color: #fff;
+    color: var(--lc-ink, #fff);
     font-size: 9px;
     font-weight: bold;
     letter-spacing: -0.3px;
@@ -1703,7 +1703,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-chip.bike { color: var(--bike); }
 
 .line-chip.picked,
-.line-cluster .line-chip:hover { color: #fff; }
+.line-cluster .line-chip:hover { color: var(--lc-ink, #fff); }
 .line-chip.picked.tram,
 .line-cluster .line-chip.tram:hover { background: var(--lc, var(--tram)); }
 .line-chip.picked.bus,
@@ -1861,7 +1861,7 @@ body.routes-off #results .notice.loading { display: none; }
     font-variant-numeric: tabular-nums;
 }
 
-.line-cluster .line-chip-slot:hover .line-chip { color: #fff; }
+.line-cluster .line-chip-slot:hover .line-chip { color: var(--lc-ink, #fff); }
 .line-cluster .line-chip-slot:hover .line-chip.tram { background: var(--lc, var(--tram)); }
 .line-cluster .line-chip-slot:hover .line-chip.bus { background: var(--lc, var(--bus)); }
 .line-cluster .line-chip-slot:hover .line-chip.train { background: var(--lc, var(--train)); }
@@ -2953,7 +2953,7 @@ body.mode-timetable .time-headline { display: none; }
     height: 10px;
     flex: 0 0 auto;
     margin: 0 9px;
-    border: 2px solid var(--bus);
+    border: 2px solid #1565c0;       /* BASE_STYLE w app.js */
     border-radius: 50%;
     background: var(--surface);
 }
