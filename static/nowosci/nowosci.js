@@ -2,26 +2,16 @@
    strzałką do miejsca, w którym ona jest.
 
    Dokładka z boku: reszta aplikacji o niej nie wie i od niej nie zależy.
-   Wszystko siedzi w tym folderze (skrypt, wygląd, rejestr nowosci.json),
-   a w szablonie są tylko dwa znaczniki, które go dołączają (po stronie
+   Wszystko siedzi w tym folderze (skrypt, wygląd), rejestr leży obok rejestru
+   ustawień, a w szablonie są tylko dwa znaczniki, które go dołączają (po stronie
    serwera jest jeszcze nowosci.py) - usunięcie ich wyłącza okienka bez śladu.
    Okienko samo korzysta z aplikacji: czyta jej elementy przez selektory,
    klika przyciski paneli przy „Pokaż” i patrzy na wyniki wyszukiwania, ale
    niczego w niej nie woła. Wiedza o panelach aplikacji (PANELS niżej) siedzi
    tu, nie w rejestrze.
 
-   Wpis rejestru (wpisów się nie usuwa, wygasłe po prostu się nie pokazują):
-   - id          - stałe, pod nim zapamiętuje się potwierdzenie;
-   - title, description - treść okienka; gdy funkcja pojawia się dopiero po
-                   jakimś działaniu, opis mówi, co zrobić;
-   - place       - selektor miejsca, na które wskazuje strzałka (przy funkcji
-                   „po działaniu” - tam, gdzie to działanie się zaczyna);
-                   „Pokaż” samo znajduje panel, w którym to miejsce siedzi;
-   - expiry      - po ilu dniach wygasa: domyślnie 30, najmniej 14, albo
-                   "never".
-   Data wdrożenia nie jest polem rejestru: serwer zapamiętuje, kiedy pierwszy
-   raz zobaczył wpis, i podaje ją razem z rejestrem (/api/nowosci). Od niej
-   liczy się wygasanie. */
+   Rejestr (nowosci.json w katalogu głównym, opis pól w nowosci.schema.json)
+   przeglądarka dostaje z /api/nowosci razem z datą wdrożenia. */
 
 (function () {
 'use strict';

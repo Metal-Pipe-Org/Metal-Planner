@@ -1,4 +1,5 @@
 {
+  "$schema": "nowosci.schema.json",
   "popups": [
     {
       "id": "kolory-linii",

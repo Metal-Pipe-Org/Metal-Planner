@@ -1,9 +1,10 @@
 """Okienka nowości (static/nowosci/): serwerowa połowa.
 
 Dokładka z boku: aplikacja o niej nie wie. Usunięcie okienek to skasowanie
-tego pliku, folderu static/nowosci/ i jednej linii w app.py.
+tego pliku, folderu static/nowosci/, rejestru nowosci.json ze schematem
+i jednej linii w app.py.
 
-Rejestr (static/nowosci/nowosci.json) nie ma daty wdrożenia - zapisałby ją
+Rejestr (nowosci.json obok settings.json, opis pól w nowosci.schema.json) nie ma daty wdrożenia - zapisałby ją
 człowiek, a człowiek zapomina. Każdy serwer sam zapamiętuje, kiedy pierwszy raz
 zobaczył dany wpis, i od tej chwili liczy się wygasanie. Zapis leży w folderze
 danych, bo ten przeżywa wdrożenia (w kontenerze to podmontowany ./data).
@@ -18,8 +19,13 @@ from flask import jsonify
 
 import config
 
-REGISTRY_PATH = Path(__file__).resolve().parent / "static" / "nowosci" / "nowosci.json"
+REGISTRY_PATH = Path(__file__).resolve().parent / "nowosci.json"
 SEEN_PATH = config.ENV_PATH.parent / "nowosci-widziane.json"
+
+
+def load():
+    """Wpisy rejestru (pole `$schema` służy tylko edytorowi)."""
+    return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))["popups"]
 
 
 def first_seen(ids):
@@ -51,8 +57,8 @@ def init_nowosci(app):
 
     @app.route("/api/nowosci")
     def nowosci():
-        registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-        seen = first_seen([entry["id"] for entry in registry["popups"]])
+        popups = load()
+        seen = first_seen([entry["id"] for entry in popups])
         return jsonify({"popups": [
-            {**entry, "deployed": seen[entry["id"]]} for entry in registry["popups"]
+            {**entry, "deployed": seen[entry["id"]]} for entry in popups
         ]})
