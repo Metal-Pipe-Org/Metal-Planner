@@ -2562,7 +2562,7 @@ function clusterMarker(at, roster, weight, times) {
             // Slot jest celem myszy (patrz bindCluster) - dzięki temu wskazanie
             // linii działa tak samo, gdy kursor stoi na czasie pod numerem.
             const html = `<span class="line-chip-slot" data-i="${index++}">`
-                + `<span class="line-chip ${esc(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
+                + `<span class="line-chip ${escClass(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
                 + (times
                     ? `<span class="chip-time">${sec === null ? '' : esc(fmtClock(sec))}</span>`
                     : '')
@@ -2724,11 +2724,11 @@ function flowPickHtml(when) {
     const sel = options[flowPick.index];
     if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
-    let html = `<span class="flow-tip-line ${esc(sel.kind)}"${lineStyle(sel.kind, sel.num)}>${esc(mode)} ${esc(sel.num)}</span>`;
+    let html = `<span class="flow-tip-line ${escClass(sel.kind)}"${lineStyle(sel.kind, sel.num)}>${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
     if (options.length > 1) {
         html += '<span class="flow-tip-row">' + options.map((o, i) =>
-            `<span class="line-chip ${esc(o.kind)}${i === flowPick.index ? ' picked' : ''}"${lineStyle(o.kind, o.num)}>`
+            `<span class="line-chip ${escClass(o.kind)}${i === flowPick.index ? ' picked' : ''}"${lineStyle(o.kind, o.num)}>`
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
@@ -4742,7 +4742,7 @@ function detailHtml(journey) {
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
                           leg.from_platform, depLate));
         rows.push(
-            `<li class="tl-ride ${esc(leg.mode)}"${lineStyle(leg.mode, leg.num)}><span class="tl-time"></span>` +
+            `<li class="tl-ride ${escClass(leg.mode)}"${lineStyle(leg.mode, leg.num)}><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
             // Przycisk PRZED liczbą przystanków, choć czyta się go po niej:
             // .tl-info zajmuje całą szerokość (flex-basis: 100%), więc wszystko
@@ -4765,7 +4765,7 @@ function detailHtml(journey) {
         // które przewijałoby ją do początku karty.
         for (const stop of via) {
             rows.push(
-                `<li class="tl-via ${esc(leg.mode)}"${lineStyle(leg.mode, leg.num)} data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
+                `<li class="tl-via ${escClass(leg.mode)}"${lineStyle(leg.mode, leg.num)} data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
                 `<span class="tl-time">${esc(stop.t)}</span><span class="tl-dot"></span>` +
                 `<span class="tl-name">${esc(stop.name)}</span></li>`,
             );
@@ -4830,7 +4830,7 @@ function onboardNoteHtml() {
     const kurs = lastFlow && lastFlow.onboard;
     if (!kurs) return '';
     return `<p class="onboard-head">`
-        + `<span class="badge ${esc(kurs.mode)}"${lineStyle(kurs.mode, kurs.num)}>${esc(kurs.num)}</span>`
+        + `<span class="badge ${escClass(kurs.mode)}"${lineStyle(kurs.mode, kurs.num)}>${esc(kurs.num)}</span>`
         + `<span>w stronę <b>${esc(kurs.headsign)}</b> — najbliższy przystanek `
         + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
 }
@@ -5101,7 +5101,7 @@ function syncOnboardView() {
     const przystanek = prettyStopName(
         obStopSelect.options[obStopSelect.selectedIndex].text);
     obSummary.innerHTML =
-        `<span class="badge ${esc(kurs.mode || 'other')}"${lineStyle(kurs.mode || 'other', kurs.num)}>${esc(kurs.num)}</span>`
+        `<span class="badge ${escClass(kurs.mode || 'other')}"${lineStyle(kurs.mode || 'other', kurs.num)}>${esc(kurs.num)}</span>`
         // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
         // linijki ucina się koniec, a stracić wolno kierunek (kontekst),
         // nie przystanek, przy którym pojazd zaraz stanie. Znaczek słupka
