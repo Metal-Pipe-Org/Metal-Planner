@@ -1,0 +1,82 @@
+/* Okienko nowości (nowosci.js). Nad panelem ⚙, bo bywa, że wskazuje coś
+   w nim, a pod paskiem komunikatów PWA (.toast), który dotyczy całej
+   aplikacji. */
+.news-popup {
+    position: fixed;
+    z-index: 1200;
+    width: min(300px, calc(100vw - 32px));
+    padding: 12px 14px 14px;
+    --news-arrow: 50%;
+}
+
+.news-popup[hidden] { display: none; }
+
+.news-popup p { margin: 0; }
+
+.news-label {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.news-popup .news-title {
+    margin: 2px 36px 4px 0;
+    font-weight: 700;
+}
+
+.news-text {
+    color: var(--ink-soft);
+    font-size: 14px;
+}
+
+.news-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+}
+
+.news-show {
+    margin-top: 12px;
+    width: 100%;
+}
+
+/* Strzałka to obrócony kwadrat w kolorze karty, wystający z boku
+   zwróconego do miejsca; --news-arrow ustawia skrypt. */
+.news-popup::before {
+    content: "";
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: var(--surface);
+    transform: rotate(45deg);
+}
+
+.news-popup[data-side="none"]::before { display: none; }
+
+.news-popup[data-side="below"]::before {
+    top: -6px;
+    left: calc(var(--news-arrow) - 6px);
+    box-shadow: -1px -1px 2px rgba(16, 32, 48, 0.08);
+}
+
+.news-popup[data-side="above"]::before {
+    bottom: -6px;
+    left: calc(var(--news-arrow) - 6px);
+    box-shadow: 1px 1px 2px rgba(16, 32, 48, 0.08);
+}
+
+.news-popup[data-side="right"]::before {
+    left: -6px;
+    top: calc(var(--news-arrow) - 6px);
+    box-shadow: -1px 1px 2px rgba(16, 32, 48, 0.08);
+}
+
+.news-popup[data-side="left"]::before {
+    right: -6px;
+    top: calc(var(--news-arrow) - 6px);
+    box-shadow: 1px -1px 2px rgba(16, 32, 48, 0.08);
+}
