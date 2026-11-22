@@ -486,7 +486,42 @@ function updatePointMarker(slot, value) {
 //         sec <= only.until && drawn.has(lat + ',' + lon));
 
 const vehiclesLayer = L.layerGroup();
+
+/** Pasek komunikatów o warstwach mapy. Każda warstwa (źródło) ma własną listę
+    komunikatów {level: 'warn' | 'info', text, setting?}; wszystkie idą pod sobą,
+    każdy w osobnej linii. `warn` zapala też żółty przycisk warstwy, `info` go
+    nie rusza. Klik w komunikat z `setting` otwiera ⚙ przy tym ustawieniu. */
+const layerNotesEl = $('layer-notes');
+const layerNotes = {};
+const layerNoteButtons = {};
+
+function setLayerNotes(source, notes) {
+    layerNotes[source] = notes;
+    const button = layerNoteButtons[source];
+    if (button) button.classList.toggle('warn', notes.some(note => note.level === 'warn'));
+    const all = Object.values(layerNotes).flat();
+    layerNotesEl.hidden = !all.length;
+    layerNotesEl.innerHTML = all.map(note =>
+        `<div class="layer-note layer-note-${note.level}"` +
+        (note.setting ? ` data-setting="${note.setting}" role="button" tabindex="0"` : '') +
+        `>${esc(note.text)}</div>`).join('');
+}
+
+layerNotesEl.addEventListener('click', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note) jumpToSetting(note.dataset.setting);
+});
+
+layerNotesEl.addEventListener('keydown', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        jumpToSetting(note.dataset.setting);
+    }
+});
+
 const vehiclesToggle = $('vehicles-toggle');
+layerNoteButtons.vehicles = vehiclesToggle;
 let vehiclesOn = !!uiState.vehiclesOn;
 let lastVehicles = [];
 let vehiclesTimer = null;
@@ -596,13 +631,45 @@ function renderVehicles() {
     showVehicleStats(shown, hiddenByDirection);
 }
 
+// Po tylu sekundach bez ruchu w danych MPK uznajemy je za nieaktualne. Normalnie
+// pozycje zmieniają się co ~20 s; kanał potrafi zamilknąć na kilkanaście minut.
+const VEHICLES_STALE_SEC = 30;
+// Kiedy (czas przeglądarki) ostatnio przyszły dane, które wciąż się ruszały.
+let vehiclesFreshAt = null;
+
+function setVehiclesStale(ageSec) {
+    setLayerNotes('vehicles', ageSec === null ? [] : [{
+        level: 'warn',
+        text: ageSec === undefined
+            ? 'Brak danych o pojazdach'
+            : `Dane nieaktualne od ${ageSec < 60 ? ageSec + ' s' : Math.round(ageSec / 60) + ' min'}`,
+    }]);
+}
+
+/** Wiek danych po nieudanym zapytaniu: liczony od ostatnich udanych. */
+function vehiclesFailed() {
+    setVehiclesStale(vehiclesFreshAt === null
+        ? undefined : Math.round((Date.now() - vehiclesFreshAt) / 1000));
+}
+
 function loadVehicles() {
     fetch('/api/vehicles').then(r => r.json()).then(data => {
-        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
+        if (!vehiclesOn) return;
+        if (data.error) return vehiclesFailed();   // zostają ostatnie znane pozycje
         lastVehicles = data.vehicles;
         renderVehicles();
-    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+        const staleSec = data.stale_sec ?? 0;   // brak pola = dane uznajemy za świeże
+        vehiclesFreshAt = Date.now() - staleSec * 1000;
+        setVehiclesStale(staleSec > VEHICLES_STALE_SEC ? staleSec : null);
+    }).catch(() => {
+        if (vehiclesOn) vehiclesFailed();
+    });   // kolejna próba za VEHICLES_REFRESH_MS
 }
+
+// Karta w tle ma przycinane timery - po powrocie nie czekamy na następny tik.
+document.addEventListener('visibilitychange', () => {
+    if (vehiclesOn && !document.hidden) loadVehicles();
+});
 
 function setVehiclesOn(on) {
     vehiclesOn = on;
@@ -613,6 +680,8 @@ function setVehiclesOn(on) {
     }
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
+    vehiclesFreshAt = null;
+    setVehiclesStale(null);
     if (on) {
         vehiclesLayer.addTo(map);
         loadVehicles();
@@ -667,6 +736,7 @@ let carsTimer = null;
 let bikesTimer = null;
 const carsToggle = $('cars-toggle');
 const trainsToggle = $('trains-toggle');
+layerNoteButtons.cars = carsToggle;
 const bikesToggle = $('bikes-toggle');
 const bikesElectricToggle = $('bikes-electric-toggle');
 
@@ -734,6 +804,24 @@ function loadCityBikes() {
     }).catch(() => {});
 }
 
+/** Komunikaty o autach Traficara przy wyniku (zgłoszenie #490). Są tylko przy
+    mapie z wynikiem i włączonych autach: ostrzeżenie, gdy czas wyszukiwania jest
+    poza zasięgiem od teraz (w przód i wstecz) i aut nie ma, oraz info o celu poza
+    strefą - raz na całe wyszukiwanie. */
+function paintCarsNote() {
+    const notes = [];
+    if (carsOn && !plannerSuspended && flowOnScreen()) {
+        if (lastFlow.cars_beyond) {
+            notes.push({level: 'warn', setting: 'cars-horizon',
+                        text: `Auta Traficara tylko do ${setting('cars-horizon')} h od teraz`});
+        }
+        if (lastFlow.cars_dest_in_zone === false) {
+            notes.push({level: 'info', text: 'Cel poza strefą Traficara'});
+        }
+    }
+    setLayerNotes('cars', notes);
+}
+
 /** Postawienie warstwy aut od zera - po przełączniku, po nowej mapie i po jej
     zdjęciu. Zawsze zdejmuje obie wersje i stawia najwyżej jedną, więc nie da
     się zostać z autami z wyniku pod autami z całego miasta. */
@@ -744,6 +832,7 @@ function refreshCarLayer() {
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     hideCarZone();
     refreshZoneLayer();
+    paintCarsNote();
     // W rozkładach mapa jest o linii albo o przystanku - auta i rowery nie
     // mają tam czego dokładać, choćby włącznik został zapalony.
     if (!carsOn || plannerSuspended) return;
@@ -1445,10 +1534,9 @@ const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 // w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków),
 // `false` chowa ją w całości i zostawia domyślne. Kod suwaków zostaje w repo
 // celowo - patrz znaczniki TYMCZASOWE w index.html i style.css. Dźwięk działa
-// tak samo (SOUND_TUNING, wiersze z `data-tuning`).
+// tak samo (wiersze z `data-tuning`).
 const LOOK_TUNING = true;
-const SOUND_TUNING = false;
-const TUNING = {look: LOOK_TUNING, sound: SOUND_TUNING};
+const TUNING = {look: LOOK_TUNING};
 
 const SETTINGS_KEY = 'metal-planner:settings';
 
@@ -1517,7 +1605,6 @@ const LEGACY_SETTINGS_KEYS = {
         maxWeight: 'look-weight', dimFactor: 'look-dim', labelStep: 'look-label-step',
         labelScale: 'look-label-size', labelOpacity: 'look-label-op',
     },
-    'metal-planner:sound-prefs': {pipe: 'sound-pipe'},
 };
 
 // Jednorazowo: kto miał ustawienia pod dawnymi kluczami, nie traci ich.
@@ -5174,6 +5261,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
+        car_horizon_h: $('cars-horizon').value,
         newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
         scheme_extra: $('scheme-walks-count').value,
@@ -6498,8 +6586,8 @@ function renderHeadlineOnly(data) {
 }
 
 // Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
-const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, bike_places: [],
-                     bike_places_live: false};
+const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, cars_ahead_sec: null,
+                     cars_beyond: false, bike_places: [], bike_places_live: false};
 
 /** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
     zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
@@ -7596,6 +7684,11 @@ const SETTING_EFFECTS = {
     'car-overhead': {react: replanSoon(false)},
     'onboard-slack': {react: replanSoon(false)},
     // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
+    'cars-horizon': {react: () => {
+        mapMore = 0;
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
     'car-vans': {react: () => {
         mapMore = 0;
         if (!flowOnScreen()) refreshCarLayer();
@@ -7641,10 +7734,10 @@ const SETTING_EFFECTS = {
     }},
     // Bez przycisku strefa pokazuje się tylko pod kursorem (patrz refreshZoneLayer).
     'zone-button': {react: () => refreshZoneLayer()},
-    'sound-pipe': {react: on => {
-        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
-        // co się właśnie włączyło.
-        if (on) playPipeDrop();
+    'sound-level': {react: level => {
+        // Zmiana od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
+        // jak brzmi wybrana głośność.
+        if (level !== 'off') playPipeDrop();
     }},
     'dot-size': {react: debounced(() => applyDotOpts(), 60)},   // przeciąganie suwaka: jedno przemalowanie na klatkę
     'dot-rows': {react: reloadTimetable},
@@ -7670,7 +7763,7 @@ for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-r
     SETTING_EFFECTS[id] = {react: () => applyDotOpts()};
 }
 
-// Strojenia schowane stałymi (LOOK_TUNING, SOUND_TUNING) nie mają wiersza w panelu.
+// Strojenia schowane stałą (LOOK_TUNING) nie mają wiersza w panelu.
 for (const row of settingsRows) {
     if (row.dataset.tuning) row.hidden = !TUNING[row.dataset.tuning];
 }
@@ -7681,11 +7774,79 @@ for (const info of SETTINGS.values()) {
     if (effect && effect.paint) effect.paint(setting(info.id));
 }
 
+// Poprzedni wybór, do którego wraca lista po anulowaniu któregoś z okien.
+let soundLevelBefore = setting('sound-level');
+// Natywna lista ma już wartość „Wyłączony”, zanim padnie pierwsze pytanie, więc
+// do czasu odpowiedzi wiersz nie może zmienić grupy.
+let soundLevelConfirming = false;
+
+function acceptSoundLevel(info, value) {
+    soundLevelBefore = value;
+    storeSetting(info.id, value);
+    // Zliczamy tu, nie na zdarzeniu `change`: anulowane wyłączenie nie jest zmianą.
+    recordSettingChange(info.id);
+    syncSettingsSnapshot();
+    SETTING_EFFECTS[info.id].react(value);
+}
+
+const PIPE_OFF_STEPS = [
+    {text: 'Czy jesteś w pełni przekonany, że chcesz wyłączyć ten przepiękny element aplikacji?', ok: 'Tak'},
+    {text: 'Czy wiesz, że to Ci zepsuje experience aplikacji?', ok: 'Tak'},
+    {text: 'Czy wiesz, że badania amerykańskich naukowców stwierdziły, że słuchanie Metal Pipe\'a pozwala zachować dobry słuch nawet w wieku 100 lat?',
+     ok: 'Wyłącz mimo to', joke: true},
+];
+
+/** Trzy okna z rzędu; true tylko, gdy użytkownik przeszedł wszystkie. */
+async function confirmPipeOff() {
+    const dialog = $('pipe-off-dialog');
+    let confirmed = true;
+    // To samo okno stoi otwarte przez wszystkie kroki i zamykamy je raz, na
+    // końcu: `close` odpala się asynchronicznie, więc zamknięcie między krokami
+    // uruchomiłoby obsługę następnego kroku jako anulowanie.
+    dialog.showModal();
+    for (const step of PIPE_OFF_STEPS) {
+        $('pipe-off-text').textContent = step.text;
+        $('pipe-off-ok').textContent = step.ok;
+        $('pipe-off-joke').hidden = !step.joke;
+        confirmed = await new Promise(resolve => {
+            $('pipe-off-ok').onclick = () => resolve(true);
+            $('pipe-off-cancel').onclick = () => resolve(false);
+            // Esc zamyka okno samo, klik w tło zamykamy tu - oba to anulowanie.
+            dialog.onclose = () => resolve(false);
+            dialog.onclick = e => { if (e.target === dialog) resolve(false); };
+        });
+        if (!confirmed) break;
+    }
+    $('pipe-off-ok').onclick = $('pipe-off-cancel').onclick = null;
+    dialog.onclose = dialog.onclick = null;
+    if (dialog.open) dialog.close();
+    return confirmed;
+}
+
 for (const type of ['input', 'change']) {
     devPanel.addEventListener(type, event => {
         const info = SETTING_BY_CONTROL.get(event.target);
         if (!info) return;
         const value = readControl(info.control);
+        if (info.id === 'sound-level') {
+            // `input` leci też przy przewijaniu listy klawiaturą, a okna
+            // potwierdzeń nie mają się mnożyć.
+            if (type === 'input') return;
+            if (value !== 'off') {
+                acceptSoundLevel(info, value);
+                return;
+            }
+            const previous = soundLevelBefore;
+            soundLevelConfirming = true;
+            confirmPipeOff().then(confirmed => {
+                soundLevelConfirming = false;
+                if (confirmed) acceptSoundLevel(info, value);
+                else info.control.value = previous;
+                syncSettingCopies();
+                markChangedSettings();
+            });
+            return;
+        }
         storeSetting(info.id, value);
         paintSettingOutput(info);
         if (type !== (info.kind === 'range' ? 'input' : 'change')) return;
@@ -7731,10 +7892,6 @@ document.documentElement.style.setProperty('--chip-scale', setting('look-label-s
 // przeglądarki - ta kłamie, a canPlayType odpowiada za konkretny dekoder.
 // Oba pliki ważą po ~38 kB, więc wpadają do cache'u service workera razem
 // z resztą statyki i działają offline.
-//
-// Ustawienie jest SCHOWANE (SOUND_TUNING = false) - dźwięk po prostu jest.
-// Przełącznik zostaje w kodzie i w panelu, więc pokazanie go to zmiana
-// jednej stałej (ten sam układ, co przy LOOK_TUNING).
 
 const PIPE_SOURCES = [
     ['audio/ogg; codecs=opus', '/static/sounds/metal-pipe.ogg'],
@@ -7742,14 +7899,17 @@ const PIPE_SOURCES = [
 ];
 
 // Nagranie jest głośne (szczyt ponad 0 dBFS), a to ma być żart w tle,
-// nie alarm. 0.35 wciąż było za głośno - połowa tego.
+// nie alarm. 0.175 ("normalnie") to głośność, którą użytkownik już uznał za
+// górną granicę. "Po cichutku" (domyślne, #447) to ok. 29% tego: wyraźnie
+// ciszej, ale wciąż słychać.
 //
 // Głośność idzie przez mikser przeglądarki (Web Audio), nie przez
 // `volume` elementu audio: iOS tego pola nie słucha i gra zawsze głośnością
 // systemu. Wzmocnienie miksera słucha wszędzie, więc każdy efekt może mieć
 // swoją głośność. Cena na iPhonie: dźwięk z miksera milknie przy włączonym
 // wyciszeniu telefonu - dla żartu w tle to raczej zaleta.
-const PIPE_VOLUME = 0.175;
+const PIPE_VOLUMES = {normal: 0.175, quiet: 0.05};
+const pipeVolume = () => PIPE_VOLUMES[setting('sound-level')];
 
 let pipeAudio = null;
 let soundMixer = null;
@@ -7818,7 +7978,7 @@ function playPipeBuffer() {
     // a nie nałożyć się na poprzednie.
     if (pipeVoice) pipeVoice.stop();
     const gain = ctx.createGain();
-    gain.gain.value = PIPE_VOLUME;
+    gain.gain.value = pipeVolume();
     gain.connect(ctx.destination);
     const voice = ctx.createBufferSource();
     voice.buffer = pipeBuffer;
@@ -7833,7 +7993,7 @@ function playPipeBuffer() {
 // go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
 // z powrotem, gdy strona zejdzie w tło.
 function wakeMixer() {
-    if (!setting('sound-pipe')) return;
+    if (setting('sound-level') === 'off') return;
     const ctx = mixer();
     if (!ctx) return;
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
@@ -7853,7 +8013,6 @@ function pipeElement() {
     const element = document.createElement('audio');
     element.src = url;
     element.preload = 'auto';
-    element.volume = PIPE_VOLUME;
     pipeAudio = element;
     return pipeAudio;
 }
@@ -7863,10 +8022,10 @@ function prefersLessMotion() {
               && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
-/** Cicho, gdy przełącznik wyłączony, gdy system prosi o ograniczenie
+/** Cicho, gdy dźwięk wyłączony, gdy system prosi o ograniczenie
     animacji albo gdy przeglądarka nie umie żadnego z formatów. */
 function playPipeDrop() {
-    if (!setting('sound-pipe') || prefersLessMotion()) return;
+    if (setting('sound-level') === 'off' || prefersLessMotion()) return;
     if (mixer()) {
         if (pipeBuffer) playPipeBuffer();
         else { pipePending = true; loadPipe(); }
@@ -7876,6 +8035,7 @@ function playPipeDrop() {
     if (!audio) return;
     // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,
     // a nie zostać po cichu pominięte.
+    audio.volume = pipeVolume();
     audio.currentTime = 0;
     const started = audio.play();
     // Przeglądarka odmawia, dopóki strona nie dostała gestu. Tu zawsze
@@ -8053,6 +8213,7 @@ for (const type of ['input', 'change']) {
             source.dispatchEvent(new Event(type, {bubbles: true}));
             return;
         }
+        if (soundLevelConfirming) return;
         syncSettingCopies();
         markChangedSettings();
     });
@@ -8273,7 +8434,7 @@ function recordSettingsReset() {
 function settingControls() {
     // Kopie (`.set-copy`) tylko przekazują zmianę oryginałowi.
     // Tylko kontrolki wierszy listy: pole wyszukiwania i przyciski akcji nie są
-    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
+    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze nic nie zmienią, więc ich nie ma.
     return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy, .set-action) :is(input, select)');
 }
 
@@ -8294,6 +8455,7 @@ function settingValue(control) {
 
 devPanel.addEventListener('change', event => {
     if (![...settingControls()].includes(event.target) || !event.target.id) return;
+    if (event.target.id === 'sound-level') return;
     recordSettingChange(event.target.id);
     syncSettingsSnapshot();
 });
@@ -8398,6 +8560,26 @@ document.addEventListener('click', event => {
     if (!locked) return;
     event.preventDefault();
     jumpToSetting('dev-access');
+});
+
+$('server-logs-download').addEventListener('click', async event => {
+    if (event.currentTarget.classList.contains('locked')) return;
+    const status = $('server-logs-status');
+    status.textContent = '';
+    try {
+        const response = await fetch('/api/dev/logi', {headers: {'X-Dev-Token': siechniceToken()}});
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+        }
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(await response.blob());
+        link.download = 'metal-planner-server.log';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    } catch (e) {
+        status.textContent = `Nie udało się pobrać logów: ${e.message}`;
+    }
 });
 
 async function fetchSiechniceStatus(init = {}) {
@@ -8798,3 +8980,25 @@ window.plannerBridge = {
 };
 
 }
+
+// X w polach tekstowych (#508): czyści pole jak ręczne skasowanie (zdarzenie input) i zostawia w nim kursor.
+// Widoczność robi CSS przez :placeholder-shown, więc działa też przy wartościach ustawionych z kodu.
+document.addEventListener('DOMContentLoaded', () => {
+    for (const id of ['start', 'end', 'place-where', 'ob-line']) {
+        const input = document.getElementById(id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'field-clear';
+        button.title = 'Wyczyść';
+        button.setAttribute('aria-label', 'Wyczyść pole');
+        button.innerHTML = '&#10005;';
+        if (input.classList.contains('with-action')) button.classList.add('beside-action');
+        button.addEventListener('mousedown', e => e.preventDefault());
+        button.addEventListener('click', () => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        });
+        input.after(button);
+    }
+});
