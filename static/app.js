@@ -353,25 +353,32 @@ function escClass(value) {
 // `car` to ostatni etap propozycji z Traficarem (patrz planner._car_drive_leg) -
 // fiolet, bo tym kolorem jeżdżą te auta i po nim się je poznaje na ulicy.
 // `cable` to Polinka (zgłoszenie #165) - granat Politechniki, która ją prowadzi.
-// Autobusy (też siechnickie) mają zieleń pociągów - tak chce prototyp A
-// ustawienia „Kolory linii”.
-const LINE_COLORS = {tram: '#c62828', bus: '#2e7d32', train: '#2e7d32',
+const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
                      cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 
+// Autobusy spoza MPK (na razie siechnickie) mają w prototypie A ustawienia
+// „Kolory linii” zieleń pociągów. Rodzaj mają ten sam, co MPK, więc poznaje
+// się je po numerze z listy linii (patrz timetables.all_lines). Bez bazy
+// rozkładów listy nie ma na stronie.
+const lineNamesJson = document.getElementById('line-names');
+const SIECHNICE_LINES = new Set((lineNamesJson ? JSON.parse(lineNamesJson.textContent) : [])
+    .filter(line => line.siechnice).map(line => line.num));
+const isSiechniceBus = (kind, num) => kind === 'bus' && SIECHNICE_LINES.has(String(num));
+
 // Prototyp B ustawienia „Kolory linii”: tramwaj i autobus mają swój losowy
 // kolor, liczony z numeru stałym ziarnem - ta sama linia wygląda tak samo
 // wszędzie i po odświeżeniu. Reszta zostaje przy kolorach z A, więc odcienie
-// zbliżone do nich (zieleń pociągu, granat Polinki, pomarańcz roweru, fiolet
-// Traficara) są wycięte z koła barw, a nasycenie od 55% w górę nie daje
+// zbliżone do nich (zieleń pociągu, pomarańcz roweru, fiolet Traficara) są
+// wycięte z koła barw, a nasycenie od 55% w górę nie daje
 // szarości przejścia pieszo. Kolor ma co najmniej 3:1 kontrastu z bielą -
 // widać go na mapie i da się nim pisać na białym; numer na kolorowej
 // plakietce jest białym albo ciemnym, czym da większy kontrast.
 // Kolor wychodzi jako #rrggbb, bo schemat robi z niego id grotu.
 const LINE_COLOR_SEED = 0x811c9dc5;
 const RANDOM_COLOR_KINDS = new Set(['tram', 'bus']);
-const RESERVED_HUES = [[12, 42], [103, 143], [197, 227], [248, 292]];   // stopnie, rosnąco
+const RESERVED_HUES = [[12, 42], [103, 143], [248, 292]];   // stopnie, rosnąco
 const DARK_INK = '#16202b';                                             // --ink w style.css
 const byLineColors = () => setting('line-colors') === 'line';
 const randomColor = kind => byLineColors() && RANDOM_COLOR_KINDS.has(kind);
@@ -426,16 +433,20 @@ function randomLineColor(num) {
 }
 
 function lineColor(kind, num) {
-    return randomColor(kind) ? randomLineColor(num).color : LINE_COLORS[kind] || LINE_COLORS.other;
+    if (randomColor(kind)) return randomLineColor(num).color;
+    if (isSiechniceBus(kind, num)) return LINE_COLORS.train;
+    return LINE_COLORS[kind] || LINE_COLORS.other;
 }
 
 /** Dla elementu z klasą rodzaju linii: arkusz bierze z `--lc` kolor linii
-    przed kolorem rodzaju, a z `--lc-ink` kolor numeru na nim, więc przy
-    podziale na rodzaje nic tu nie ma. */
+    przed kolorem rodzaju, a z `--lc-ink` kolor numeru na nim, więc linia
+    w kolorze swojego rodzaju nic tu nie dostaje. */
 function lineVar(kind, num) {
-    if (!randomColor(kind)) return '';
-    const {color, ink} = randomLineColor(num);
-    return `--lc: ${color}; --lc-ink: ${ink}; `;
+    if (randomColor(kind)) {
+        const {color, ink} = randomLineColor(num);
+        return `--lc: ${color}; --lc-ink: ${ink}; `;
+    }
+    return isSiechniceBus(kind, num) ? `--lc: ${LINE_COLORS.train}; ` : '';
 }
 
 function lineStyle(kind, num) {
@@ -4198,12 +4209,8 @@ function legLayers(legs, {preview}) {
                 interactive: false,
             });
             // divIcon nie przyjmuje stylu - kolor linii dostaje dopiero postawiony element.
-            if (lineVar(leg.mode, leg.num)) {
-                mark.on('add', () => {
-                    mark.getElement().style.setProperty('--lc', color);
-                    mark.getElement().style.setProperty('--lc-ink', randomLineColor(leg.num).ink);
-                });
-            }
+            const declared = lineVar(leg.mode, leg.num);
+            if (declared) mark.on('add', () => { mark.getElement().style.cssText += declared; });
             marks.push(mark);
         }
     }

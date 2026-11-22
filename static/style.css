@@ -5,7 +5,7 @@
 
 :root {
     --tram: #c62828;
-    --bus: #2e7d33;                  /* jak pociąg - prototyp A „Kolorów linii” */
+    --bus: #1565c0;
     --train: #2e7d33;
     --cable: #002147;                /* Polinka - granat Politechniki (#165) */
     --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
@@ -2953,7 +2953,7 @@ body.mode-timetable .time-headline { display: none; }
     height: 10px;
     flex: 0 0 auto;
     margin: 0 9px;
-    border: 2px solid #1565c0;       /* BASE_STYLE w app.js */
+    border: 2px solid var(--bus);
     border-radius: 50%;
     background: var(--surface);
 }

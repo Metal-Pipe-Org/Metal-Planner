@@ -632,8 +632,8 @@ def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
                          ("149", "end"), ("7 9", "end")]:
         assert koniec(lines, gdzie)[0]["marker"]
     # Grupa z tramwaju i autobusu ma oba kolory, czysta - jeden.
-    assert sorted(koniec("7 9", "end")[0]["colors"]) == sorted(["#c62828", "#2e7d32"])
-    assert koniec("145 146", "C")[0]["colors"] == ["#2e7d32"]
+    assert sorted(koniec("7 9", "end")[0]["colors"]) == sorted(["#c62828", "#1565c0"])
+    assert koniec("145 146", "C")[0]["colors"] == ["#1565c0"]
     # Jeden napis na grupę, ze wszystkimi numerami.
     numery = [b["lines"] for b in pomiar["badges"]]
     assert {"5", "6", "145 146", "149", "7 9"} <= set(numery)
