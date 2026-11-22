@@ -2,11 +2,12 @@
 
 Bez sieci i bez prawdziwego klucza: wywołania HTTP (`pushward._request`) są
 podmienione na zapis tego, co poszłoby do API. Pilnujemy trzech rzeczy:
-karta powstaje tylko wtedy, gdy jej nie ma; każdy przejazd to jeden PATCH;
-a `end_date` to dokładnie ta chwila, w którą odjeżdża pojazd - także po
+każdy przejazd zakłada nową kartę z własnym slugiem i tytułem tego odjazdu
+(POST, PATCH), bez kasowania poprzedniej; a `end_date` to dokładnie ta chwila, w którą odjeżdża pojazd - także po
 północy i dla godzin rozkładu powyżej 24:00.
 """
 
+import re
 from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -72,27 +73,36 @@ def test_end_date_w_dobie_zmiany_czasu_liczy_prawdziwe_sekundy():
     assert pushward.end_date("2026-03-29", 8 * 3600) == _czas(2026, 3, 29, 8, 0)
 
 
-def test_pierwszy_przejazd_tworzy_karte_i_aktualizuje_ja(api):
-    api.odpowiedzi.extend([pushward.PushWardError(404, "activity.not_found"), {}, {}])
+def test_przejazd_zaklada_nowa_karte_i_wypelnia_ja_bez_kasowania(api):
     pushward.send_departure(KLUCZ, ODJAZD)
-    metody = [(m, p) for m, p, _, _ in api.wywolania]
-    assert metody == [("PATCH", "/activities/metal-planner-odjazd"),
-                      ("POST", "/activities"),
-                      ("PATCH", "/activities/metal-planner-odjazd")]
-    tworzenie = api.wywolania[1][3]
-    assert tworzenie["slug"] == "metal-planner-odjazd"
-    assert tworzenie["ended_ttl"] == 30 * 24 * 3600
-    assert api.wywolania[0][3] == api.wywolania[2][3]
+    tworzenie = api.wywolania[0][3]
+    slug = tworzenie["slug"]
+    assert re.fullmatch(rf"metal-planner-{(KONIEC - 3600) * 1000}-[0-9a-f]{{6}}", slug)
+    assert [(m, p) for m, p, _, _ in api.wywolania] == [
+        ("POST", "/activities"),
+        ("PATCH", f"/activities/{slug}")]
+    assert tworzenie["name"] == "5 → Księże Małe"
+    assert tworzenie["ended_ttl"] == 600
+    assert tworzenie["dismissal_ttl"] == 300
 
 
-def test_kolejny_przejazd_to_jeden_patch(api):
+@pytest.mark.parametrize("num,oczekiwany", [("A", "A"), ("149", "149"), ("810+81", "810+")])
+def test_numer_linii_w_wyspie_ma_najwyzej_cztery_znaki(api, num, oczekiwany):
+    pushward.send_departure(KLUCZ, {**ODJAZD, "num": num})
+    assert api.wywolania[-1][3]["content"]["compact_label"] == oczekiwany
+
+
+def test_kolejne_przejazdy_dostaja_rozne_karty(api, monkeypatch):
     pushward.send_departure(KLUCZ, ODJAZD)
-    assert [(m, p) for m, p, _, _ in api.wywolania] == [("PATCH", "/activities/metal-planner-odjazd")]
+    _zamroz_czas(monkeypatch, KONIEC - 3000)
+    pushward.send_departure(KLUCZ, ODJAZD)
+    assert api.wywolania[0][3]["slug"] != api.wywolania[2][3]["slug"]
+    assert "DELETE" not in [m for m, _, _, _ in api.wywolania]
 
 
 def test_tresc_karty(api):
     pushward.send_departure(KLUCZ, ODJAZD)
-    _, _, klucz, body = api.wywolania[0]
+    _, _, klucz, body = api.wywolania[-1]
     tresc = body["content"]
     assert klucz == KLUCZ
     assert body["state"] == "ONGOING"
@@ -103,22 +113,24 @@ def test_tresc_karty(api):
     assert tresc["warning_threshold"] == 120
     assert tresc["completion_message"] == "Odjeżdża"
     assert tresc["icon"] == "tram.fill"
-    assert tresc["state"] == "5 → Księże Małe"
-    assert tresc["subtitle"] == "Pl. Grunwaldzki · 22:57"
+    assert tresc["compact_label"] == "5"
+    assert tresc["state"] == "Pl. Grunwaldzki"
+    assert "subtitle" not in tresc
+    assert "accent_color" not in tresc
 
 
 def test_link_trafia_do_karty_jako_tap_action(api):
     link = "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce&time=22:00"
     pushward.send_departure(KLUCZ, {**ODJAZD, "link": link})
-    assert api.wywolania[0][3]["content"]["tap_action"] == {"url": link, "foreground": True}
+    assert api.wywolania[-1][3]["content"]["tap_action"] == {"url": link, "foreground": True}
 
 
 @pytest.mark.parametrize("zly", [None, "", "javascript:alert(1)", "ftp://host/", "https://",
                                  "/?from=A", "metal.sze.one", 5])
 def test_zly_link_pomija_tap_action_ale_wysyla(api, zly):
     pushward.send_departure(KLUCZ, {**ODJAZD, "link": zly})
-    assert len(api.wywolania) == 1
-    assert "tap_action" not in api.wywolania[0][3]["content"]
+    assert len(api.wywolania) == 2
+    assert "tap_action" not in api.wywolania[-1][3]["content"]
 
 
 def test_trasa_przekazuje_link(klient, api):
@@ -126,20 +138,24 @@ def test_trasa_przekazuje_link(klient, api):
     odpowiedz = klient.post("/api/dev/pushward", json={**ODJAZD, "link": link},
                             headers={"X-PushWard-Key": KLUCZ})
     assert odpowiedz.status_code == 200
-    assert api.wywolania[0][3]["content"]["tap_action"]["url"] == link
+    assert api.wywolania[-1][3]["content"]["tap_action"]["url"] == link
+
+
+@pytest.mark.parametrize("link", [
+    "https://siechnice.kiedyprzyjedzie.pl/#/stops/30329:54854/departures",
+    "https://czynaczas.pl/wroclaw?przystanek=1605",
+])
+def test_link_do_zewnetrznego_rozkladu_przechodzi_z_fragmentem(api, link):
+    pushward.send_departure(KLUCZ, {**ODJAZD, "link": link})
+    assert api.wywolania[-1][3]["content"]["tap_action"]["url"] == link
 
 
 def test_autobus_dostaje_ikone_autobusu(api):
     pushward.send_departure(KLUCZ, {**ODJAZD, "mode": "bus"})
-    assert api.wywolania[0][3]["content"]["icon"] == "bus.fill"
+    assert api.wywolania[-1][3]["content"]["icon"] == "bus.fill"
 
 
-def test_godzina_po_dobie_w_podtytule_jest_zegarowa(api):
-    pushward.send_departure(KLUCZ, {**ODJAZD, "sec": 25 * 3600 + 10 * 60})
-    assert api.wywolania[0][3]["content"]["subtitle"] == "Pl. Grunwaldzki · 01:10"
-
-
-def test_inny_blad_niz_brak_karty_nie_tworzy_jej(api):
+def test_blad_api_przerywa_przejazd(api):
     api.odpowiedzi.append(pushward.PushWardError(429, "rate_limited"))
     with pytest.raises(pushward.PushWardError) as blad:
         pushward.send_departure(KLUCZ, ODJAZD)
@@ -206,9 +222,9 @@ def test_zapytania_ida_z_wlasnym_user_agentem(monkeypatch):
     monkeypatch.setattr(pushward.urllib.request, "urlopen", udawane)
     pushward.send_departure(KLUCZ, ODJAZD)
     pushward.account(KLUCZ)
-    assert len(wyslane) == 2
+    assert len(wyslane) == 3
     assert all(r.get_header("User-agent") == "Metal-Planner/1.0" for r in wyslane)
-    assert wyslane[1].get_method() == "GET" and wyslane[1].full_url.endswith("/auth/me")
+    assert wyslane[2].get_method() == "GET" and wyslane[2].full_url.endswith("/auth/me")
 
 
 def test_blokada_cloudflare_to_blad_polaczenia_nie_brak_uprawnien(monkeypatch):
@@ -269,7 +285,7 @@ def test_okno_osmiu_godzin(klient, api, monkeypatch, przed_odjazdem, wysylane):
     odpowiedz = klient.post("/api/dev/pushward", json=ODJAZD, headers={"X-PushWard-Key": KLUCZ})
     if wysylane:
         assert odpowiedz.status_code == 200
-        assert len(api.wywolania) == 1
+        assert len(api.wywolania) == 2
     else:
         assert odpowiedz.status_code == 400
         assert "8 godzin" in odpowiedz.get_json()["error"]
@@ -282,3 +298,9 @@ def test_jutrzejszy_odjazd_w_oknie_dziala(klient, api, monkeypatch):
     odjazd = {**ODJAZD, "sec": 30 * 3600}
     assert klient.post("/api/dev/pushward", json=odjazd,
                        headers={"X-PushWard-Key": KLUCZ}).status_code == 200
+
+
+def test_dwa_przejazdy_w_tej_samej_sekundzie_dostaja_rozne_karty(api):
+    pushward.send_departure(KLUCZ, ODJAZD)
+    pushward.send_departure(KLUCZ, ODJAZD)
+    assert api.wywolania[0][3]["slug"] != api.wywolania[2][3]["slug"]

@@ -486,7 +486,42 @@ function updatePointMarker(slot, value) {
 //         sec <= only.until && drawn.has(lat + ',' + lon));
 
 const vehiclesLayer = L.layerGroup();
+
+/** Pasek komunikatów o warstwach mapy. Każda warstwa (źródło) ma własną listę
+    komunikatów {level: 'warn' | 'info', text, setting?}; wszystkie idą pod sobą,
+    każdy w osobnej linii. `warn` zapala też żółty przycisk warstwy, `info` go
+    nie rusza. Klik w komunikat z `setting` otwiera ⚙ przy tym ustawieniu. */
+const layerNotesEl = $('layer-notes');
+const layerNotes = {};
+const layerNoteButtons = {};
+
+function setLayerNotes(source, notes) {
+    layerNotes[source] = notes;
+    const button = layerNoteButtons[source];
+    if (button) button.classList.toggle('warn', notes.some(note => note.level === 'warn'));
+    const all = Object.values(layerNotes).flat();
+    layerNotesEl.hidden = !all.length;
+    layerNotesEl.innerHTML = all.map(note =>
+        `<div class="layer-note layer-note-${note.level}"` +
+        (note.setting ? ` data-setting="${note.setting}" role="button" tabindex="0"` : '') +
+        `>${esc(note.text)}</div>`).join('');
+}
+
+layerNotesEl.addEventListener('click', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note) jumpToSetting(note.dataset.setting);
+});
+
+layerNotesEl.addEventListener('keydown', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        jumpToSetting(note.dataset.setting);
+    }
+});
+
 const vehiclesToggle = $('vehicles-toggle');
+layerNoteButtons.vehicles = vehiclesToggle;
 let vehiclesOn = !!uiState.vehiclesOn;
 let lastVehicles = [];
 let vehiclesTimer = null;
@@ -714,15 +749,49 @@ function trainTooltipHtml(train) {
         + `<br>Szacowane położenie: ${esc(late)}`;
 }
 
+// Po tylu sekundach bez ruchu w danych MPK uznajemy je za nieaktualne. Normalnie
+// pozycje zmieniają się co ~20 s; kanał potrafi zamilknąć na kilkanaście minut.
+const VEHICLES_STALE_SEC = 30;
+// Kiedy (czas przeglądarki) ostatnio przyszły dane, które wciąż się ruszały.
+let vehiclesFreshAt = null;
+
+function setVehiclesStale(ageSec) {
+    setLayerNotes('vehicles', ageSec === null ? [] : [{
+        level: 'warn',
+        text: ageSec === undefined
+            ? 'Brak danych o pojazdach'
+            : `Dane nieaktualne od ${ageSec < 60 ? ageSec + ' s' : Math.round(ageSec / 60) + ' min'}`,
+    }]);
+}
+
+/** Wiek danych po nieudanym zapytaniu: liczony od ostatnich udanych. */
+function vehiclesFailed() {
+    setVehiclesStale(vehiclesFreshAt === null
+        ? undefined : Math.round((Date.now() - vehiclesFreshAt) / 1000));
+}
+
 function loadVehicles() {
     fetch('/api/vehicles').then(r => r.json()).then(data => {
         if (!vehiclesOn) return;
-        // Błąd - zostają ostatnie znane pozycje, ale pociągi (liczone u nas)
-        // i tak mają się przesunąć.
-        if (!data.error) lastVehicles = data.vehicles;
+        if (data.error) {
+            vehiclesFailed();      // zostają ostatnie znane pozycje...
+            renderVehicles();      // ...ale pociągi (liczone u nas) i tak się przesuwają
+            return;
+        }
+        lastVehicles = data.vehicles;
         renderVehicles();
-    }).catch(() => { if (vehiclesOn) renderVehicles(); });   // kolejna próba za VEHICLES_REFRESH_MS
+        const staleSec = data.stale_sec ?? 0;   // brak pola = dane uznajemy za świeże
+        vehiclesFreshAt = Date.now() - staleSec * 1000;
+        setVehiclesStale(staleSec > VEHICLES_STALE_SEC ? staleSec : null);
+    }).catch(() => {
+        if (vehiclesOn) { vehiclesFailed(); renderVehicles(); }
+    });   // kolejna próba za VEHICLES_REFRESH_MS
 }
+
+// Karta w tle ma przycinane timery - po powrocie nie czekamy na następny tik.
+document.addEventListener('visibilitychange', () => {
+    if (vehiclesOn && !document.hidden) loadVehicles();
+});
 
 function setVehiclesOn(on) {
     vehiclesOn = on;
@@ -733,6 +802,8 @@ function setVehiclesOn(on) {
     }
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
+    vehiclesFreshAt = null;
+    setVehiclesStale(null);
     if (on) {
         vehiclesLayer.addTo(map);
         loadVehicles();
@@ -784,6 +855,7 @@ let cityBikeLayer = null;
 let carsTimer = null;
 let bikesTimer = null;
 const carsToggle = $('cars-toggle');
+layerNoteButtons.cars = carsToggle;
 const bikesToggle = $('bikes-toggle');
 const bikesElectricToggle = $('bikes-electric-toggle');
 
@@ -851,6 +923,24 @@ function loadCityBikes() {
     }).catch(() => {});
 }
 
+/** Komunikaty o autach Traficara przy wyniku (zgłoszenie #490). Są tylko przy
+    mapie z wynikiem i włączonych autach: ostrzeżenie, gdy czas wyszukiwania jest
+    poza zasięgiem od teraz (w przód i wstecz) i aut nie ma, oraz info o celu poza
+    strefą - raz na całe wyszukiwanie. */
+function paintCarsNote() {
+    const notes = [];
+    if (carsOn && !plannerSuspended && flowOnScreen()) {
+        if (lastFlow.cars_beyond) {
+            notes.push({level: 'warn', setting: 'cars-horizon',
+                        text: `Auta Traficara tylko do ${setting('cars-horizon')} h od teraz`});
+        }
+        if (lastFlow.cars_dest_in_zone === false) {
+            notes.push({level: 'info', text: 'Cel poza strefą Traficara'});
+        }
+    }
+    setLayerNotes('cars', notes);
+}
+
 /** Postawienie warstwy aut od zera - po przełączniku, po nowej mapie i po jej
     zdjęciu. Zawsze zdejmuje obie wersje i stawia najwyżej jedną, więc nie da
     się zostać z autami z wyniku pod autami z całego miasta. */
@@ -861,6 +951,7 @@ function refreshCarLayer() {
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     hideCarZone();
     refreshZoneLayer();
+    paintCarsNote();
     // W rozkładach mapa jest o linii albo o przystanku - auta i rowery nie
     // mają tam czego dokładać, choćby włącznik został zapalony.
     if (!carsOn || plannerSuspended) return;
@@ -5263,6 +5354,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
+        car_horizon_h: $('cars-horizon').value,
         newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
         scheme_extra: $('scheme-walks-count').value,
@@ -6585,8 +6677,8 @@ function renderHeadlineOnly(data) {
 }
 
 // Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
-const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, bike_places: [],
-                     bike_places_live: false};
+const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, cars_ahead_sec: null,
+                     cars_beyond: false, bike_places: [], bike_places_live: false};
 
 /** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
     zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
@@ -7680,6 +7772,11 @@ const SETTING_EFFECTS = {
     'car-overhead': {react: replanSoon(false)},
     'onboard-slack': {react: replanSoon(false)},
     // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
+    'cars-horizon': {react: () => {
+        mapMore = 0;
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
     'car-vans': {react: () => {
         mapMore = 0;
         if (!flowOnScreen()) refreshCarLayer();
@@ -8267,6 +8364,12 @@ function buildChangedGroup(rows, prefs) {
     group.open = saved === undefined ? false : !!saved;
     const summary = Object.assign(document.createElement('summary'), {textContent: CHANGED_GROUP});
     summary.dataset.changed = rows.length;
+    const obsolete = rows.filter(isObsolete).length;
+    if (obsolete) {
+        const count = Object.assign(document.createElement('span'), {className: 'obsolete-count', textContent: obsolete});
+        count.title = `${obsolete} ` + plural(obsolete, 'ustawienie przestarzałe', 'ustawienia przestarzałe', 'ustawień przestarzałych');
+        summary.append(count);
+    }
     group.append(summary, ...rows.map(makeSettingCopy));
     group.addEventListener('toggle', () => storeSetting('fold:' + CHANGED_GROUP, group.open));
     return group;
@@ -8478,6 +8581,26 @@ document.addEventListener('click', event => {
     jumpToSetting('dev-access');
 });
 
+$('server-logs-download').addEventListener('click', async event => {
+    if (event.currentTarget.classList.contains('locked')) return;
+    const status = $('server-logs-status');
+    status.textContent = '';
+    try {
+        const response = await fetch('/api/dev/logi', {headers: {'X-Dev-Token': siechniceToken()}});
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+        }
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(await response.blob());
+        link.download = 'metal-planner-server.log';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    } catch (e) {
+        status.textContent = `Nie udało się pobrać logów: ${e.message}`;
+    }
+});
+
 async function fetchSiechniceStatus(init = {}) {
     const response = await fetch('/api/dev/siechnice',
         {...init, headers: {'X-Dev-Token': siechniceToken()}});
@@ -8618,7 +8741,9 @@ function departureAttrs(d, stop, sec) {
     if (wait <= 0 || wait > PUSHWARD_WINDOW_SEC) return '';
     return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
            ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
-           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"`;
+           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"` +
+           ` data-dep-stop-id="${escAttr(d.stop_id)}"` +
+           ('siechnice_stop' in d ? ` data-dep-siechnice-stop="${escAttr(d.siechnice_stop || '')}"` : '');
 }
 
 const PUSHWARD_ERRORS = {
@@ -8645,6 +8770,18 @@ function pushwardLink() {
     return origin + location.pathname + (query ? '?' + query : '');
 }
 
+// Opcjonalnie klik w kartę otwiera przystanek (ten słupek) w zewnętrznym
+// rozkładzie. Wybiera kurs, nie przystanek: kurs Siechnic ma własny serwis
+// także na słupku wspólnym z MPK we Wrocławiu, reszta jest w Czy na czas.
+// Kursu gminnego bez ustalonego słupka nie wysyłamy do Czy na czas, bo tam go nie ma.
+function pushwardStopLink(dep) {
+    if (dep.depSiechniceStop !== undefined)
+        return dep.depSiechniceStop
+            ? `https://siechnice.kiedyprzyjedzie.pl/#/stops/${dep.depSiechniceStop}/departures`
+            : pushwardLink();
+    return `https://czynaczas.pl/wroclaw?przystanek=${encodeURIComponent(dep.depStopId)}`;
+}
+
 async function pushwardClick(event) {
     const hour = event.target.closest('[data-dep-sec]');
     const key = pushwardKey();
@@ -8658,12 +8795,11 @@ async function pushwardClick(event) {
             body: JSON.stringify({
                 num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
                 stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
-                link: pushwardLink(),
+                link: setting('pushward-link') ? pushwardStopLink(dep) : pushwardLink(),
             }),
         });
         const body = await response.json().catch(() => ({}));
-        alert(response.ok ? 'Wysłano odliczenie do Dynamic Island.'
-                          : `Nie wysłano: ${describePushwardError(body)}`);
+        if (!response.ok) alert(`Nie wysłano: ${describePushwardError(body)}`);
     } catch {
         alert('Nie wysłano: brak połączenia z serwerem.');
     }
@@ -8862,3 +8998,25 @@ window.plannerBridge = {
 };
 
 }
+
+// X w polach tekstowych (#508): czyści pole jak ręczne skasowanie (zdarzenie input) i zostawia w nim kursor.
+// Widoczność robi CSS przez :placeholder-shown, więc działa też przy wartościach ustawionych z kodu.
+document.addEventListener('DOMContentLoaded', () => {
+    for (const id of ['start', 'end', 'place-where', 'ob-line']) {
+        const input = document.getElementById(id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'field-clear';
+        button.title = 'Wyczyść';
+        button.setAttribute('aria-label', 'Wyczyść pole');
+        button.innerHTML = '&#10005;';
+        if (input.classList.contains('with-action')) button.classList.add('beside-action');
+        button.addEventListener('mousedown', e => e.preventDefault());
+        button.addEventListener('click', () => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        });
+        input.after(button);
+    }
+});

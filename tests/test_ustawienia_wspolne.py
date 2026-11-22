@@ -286,3 +286,28 @@ def test_kazdy_skutek_dotyczy_istniejacego_ustawienia():
 def test_nazwy_data_setting_sa_unikalne():
     powtorzone = [n for n, ile in Counter(w["id"] for w in _wszystkie_wiersze()).items() if ile > 1]
     assert not powtorzone, f"te same data-setting w kilku wierszach: {powtorzone}"
+
+
+def test_licznik_przestarzalych_w_innych_niz_domyslne(adres, przegladarka):
+    context, page = _otworz(przegladarka, adres)
+    try:
+        ids = page.evaluate("""() => [...document.querySelectorAll('#settings-list .set-row[data-obsolete]')]
+            .filter(row => !row.hidden && row.dataset.expired === undefined).map(row => row.dataset.setting)""")
+        przestarzale = [w for w in USTAWIENIA if w["id"] in ids]
+        assert len(przestarzale) >= 2
+        licznik = "[data-kind=changed] > summary > .obsolete-count"
+        # Zmienione, ale nieprzestarzałe ustawienie: niebieski licznik jest, żółtego nie ma.
+        zwykle = page.evaluate("""() => [...document.querySelectorAll('#settings-list .set-row[data-setting]:not([data-obsolete])')]
+            .filter(row => !row.hidden).map(row => row.dataset.setting)""")
+        zwykle = next(w for w in USTAWIENIA if w["id"] in zwykle)
+        page.evaluate(USTAW_JS, [zwykle["id"], _inna(zwykle)])
+        assert not page.query_selector(licznik)
+        page.evaluate(USTAW_JS, [przestarzale[0]["id"], _inna(przestarzale[0])])
+        assert page.text_content(licznik) == "1"
+        assert page.get_attribute(licznik, "title") == "1 ustawienie przestarzałe"
+        page.evaluate(USTAW_JS, [przestarzale[1]["id"], _inna(przestarzale[1])])
+        assert page.text_content(licznik) == "2"
+        assert page.get_attribute(licznik, "title") == "2 ustawienia przestarzałe"
+        assert not page.bledy, page.bledy
+    finally:
+        context.close()

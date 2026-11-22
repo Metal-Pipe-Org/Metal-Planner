@@ -48,8 +48,8 @@
     <meta name="description" content="Planowanie podróży komunikacją miejską we Wrocławiu.">
 
     <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
-    <meta name="theme-color" content="#2563eb">
-    <link rel="icon" href="{{ url_for('static', filename='icons/icon.svg') }}" type="image/svg+xml">
+    <meta name="theme-color" content="#362768">
+    <link rel="icon" href="{{ url_for('static', filename='icons/favicon.ico') }}" sizes="any">
     <link rel="icon" href="{{ url_for('static', filename='icons/favicon-32.png') }}" sizes="32x32">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -168,7 +168,7 @@
                 <h1>
                     <button id="about-toggle" class="brand-button" type="button"
                             title="O aplikacji" aria-haspopup="dialog">
-                        <img class="brand-icon" src="{{ url_for('static', filename='icons/icon.svg') }}"
+                        <img class="brand-icon" src="{{ url_for('static', filename='icons/logo-64.png') }}"
                              alt="" width="22" height="22">
                         Metal Planner
                     </button>
@@ -253,6 +253,8 @@
         {% endif %}
         </div>
     </header>
+
+    <div id="layer-notes" class="layer-notes" role="status" hidden></div>
 
     {% if data_error %}
 
@@ -728,6 +730,16 @@
     <label class="dev-check{{ dev('tt-past') }} set-row" {{ attrs('tt-past') }}>
             <input type="checkbox" id="tt-past" checked> {{ name('tt-past') }} {{ info('tt-past') }}
         </label>
+    <div class="field{{ dev('cars-horizon') }} set-row" {{ attrs('cars-horizon') }}>
+        <label for="cars-horizon">
+            {{ name('cars-horizon') }} {{ info('cars-horizon') }}
+        </label>
+        <select id="cars-horizon">
+            <option value="3" selected>3 h</option>
+            <option value="24">24 h</option>
+            <option value="none">bez limitu</option>
+        </select>
+    </div>
     <label class="dev-check{{ dev('car-vans') }} set-row" {{ attrs('car-vans') }}>
             <input type="checkbox" id="car-vans"> {{ name('car-vans') }} {{ info('car-vans') }}
         </label>
@@ -979,6 +991,17 @@
     </div>
 
 {#
+      Log serwera (zgłoszenie #285): plik z zapisem zdarzeń po stronie serwera,
+      za tym samym odblokowaniem co Siechnice (data-protected).
+    #}
+    <div class="field{{ dev('server-logs') }} set-row set-action" {{ attrs('server-logs') }}>
+        <div class="sw-row">
+            <button type="button" id="server-logs-download" class="button" data-protected>{{ name('server-logs') }}</button>{{ info('server-logs') }}
+        </div>
+        <p class="field-hint" id="server-logs-status" role="status"></p>
+    </div>
+
+{#
       Eksperyment (#453): odliczenie do odjazdu w Dynamic Island przez PushWard.
       Klucz zapisuje app.js w localStorage - to nie ustawienie, więc set-action.
     #}
@@ -992,6 +1015,10 @@
         </div>
         <p class="field-hint" id="pushward-status" role="status"></p>
     </div>
+
+    <label class="dev-check{{ dev('pushward-link') }} set-row" {{ attrs('pushward-link') }}>
+        <input type="checkbox" id="pushward-link"> {{ name('pushward-link') }} {{ info('pushward-link', '?') }}
+    </label>
 
     <div class="field{{ dev('sw-check') }} set-row" {{ attrs('sw-check') }} id="sw-field">
         <div class="set-title">{{ name('sw-check') }} {{ info('sw-check') }}</div>
