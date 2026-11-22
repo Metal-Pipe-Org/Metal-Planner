@@ -8970,7 +8970,7 @@ window.plannerBridge = {
     // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
     // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
     // tablice w jednym API to zaproszenie do sięgnięcia po złą.
-    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON, lineColor, lineStyle,
+    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON, lineColor, lineStyle, escClass,
     prettyStopName, rawStopName,
     suspendPlanner, resumePlanner, setTimeNow,
 };

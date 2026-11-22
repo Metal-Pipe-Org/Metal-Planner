@@ -25,7 +25,7 @@
 const B = window.plannerBridge;
 if (!B) return;         // brak bazy rozkładów - panel pokazuje sam komunikat
 
-const {map, esc, fitTo, MODE_LABEL, ROUTE_ICON, lineColor, lineStyle} = B;
+const {map, esc, escClass, fitTo, MODE_LABEL, ROUTE_ICON, lineColor, lineStyle} = B;
 const $ = id => document.getElementById(id);
 
 const queryInput = $('tt-query');
@@ -368,7 +368,7 @@ function suggestionRow(item) {
     // więc pasuje cała, a kolorowy fragment w kolorowym prostokącie tylko
     // zabiera kontrast.
     if (item.kind === 'line') {
-        return `<span class="badge ${esc(item.mode)}"${lineStyle(item.mode, item.name)}>${esc(item.name)}</span>`
+        return `<span class="badge ${escClass(item.mode)}"${lineStyle(item.mode, item.name)}>${esc(item.name)}</span>`
              + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`;
     }
     return `<span class="ac-pin" aria-hidden="true"></span>`
@@ -693,7 +693,7 @@ function renderLine() {
 
     resultsBox.innerHTML = `
         <div class="tt-title">
-            <span class="badge ${esc(data.mode)}"${lineStyle(data.mode, data.num)}>${esc(data.num)}</span>
+            <span class="badge ${escClass(data.mode)}"${lineStyle(data.mode, data.num)}>${esc(data.num)}</span>
             <span class="tt-title-main">${esc(MODE_LABEL[data.mode] || 'Linia')}
                 ${esc(data.num)}</span>
             <span class="tt-title-sub">${esc(dayLabel())}</span>
@@ -715,7 +715,7 @@ function renderLine() {
                 <h3 class="tt-h3">Przystanki</h3>
                 <span class="tt-count">${variant.stops.length}</span>
             </div>
-            <ol class="tt-stops ${esc(data.mode)}"${lineStyle(data.mode, data.num)}>${stops}</ol>
+            <ol class="tt-stops ${escClass(data.mode)}"${lineStyle(data.mode, data.num)}>${stops}</ol>
         </div>`;
 }
 
@@ -1110,7 +1110,7 @@ function renderBoard() {
     const all = pickedLines === groups.length;
 
     const chips = groups.map(group => `
-        <button type="button" class="tt-line badge ${esc(group.mode)}${picked.has(group.key) ? '' : ' off'}"${lineStyle(group.mode, group.num)}
+        <button type="button" class="tt-line badge ${escClass(group.mode)}${picked.has(group.key) ? '' : ' off'}"${lineStyle(group.mode, group.num)}
                 data-line="${esc(group.key)}" aria-pressed="${picked.has(group.key)}"
                 title="${esc(MODE_LABEL[group.mode] || 'Linia')} ${esc(group.num)} · ${group.count} ${plural(group.count, 'kurs', 'kursy', 'kursów')}"
                 >${esc(group.num)}</button>`
@@ -1124,7 +1124,7 @@ function renderBoard() {
         <li class="tt-dep${open ? ' open' : ''}" data-dep="${index}" tabindex="0"
             role="button" aria-expanded="${open}">
             <span class="tt-t">${esc(dep.t)}</span>
-            <span class="badge ${esc(line.mode)}"${lineStyle(line.mode, line.num)}>${esc(line.num)}</span>
+            <span class="badge ${escClass(line.mode)}"${lineStyle(line.mode, line.num)}>${esc(line.num)}</span>
             <span class="tt-head">${esc(line.headsign)}</span>
             ${dep.platform ? `<span class="tt-platform">${esc(dep.platform)}</span>` : ''}
         </li>${open ? tripHtml(dep) : ''}`;
@@ -1194,7 +1194,7 @@ function tripStopsHtml(dep) {
     // Kurs pokazuje drogę OD TEGO SŁUPKA dalej - a "którędy ta linia jedzie
     // w ogóle" to pytanie, które pada właśnie tutaj, bo widać połowę odpowiedzi.
     return `
-        <ol class="tt-stops ${esc(trip.mode)}"${lineStyle(trip.mode, trip.num)}>${stops}</ol>
+        <ol class="tt-stops ${escClass(trip.mode)}"${lineStyle(trip.mode, trip.num)}>${stops}</ol>
         <p class="field-hint tt-trip-foot">
             ${routeButton(data.lines[dep.line], 'cała trasa', dep.trip)}
         </p>`;
