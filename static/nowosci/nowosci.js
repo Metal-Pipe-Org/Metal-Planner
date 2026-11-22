@@ -155,11 +155,18 @@ function show(entry) {
 
     showButton.addEventListener('click', () => {
         acknowledge();
+        // Ustawienia siedzą w zwijanych grupach, a panel pamięta ich stan, więc
+        // grupa miejsca może być zwinięta nawet przy otwartym panelu.
+        const unfold = node => {
+            for (let group = node?.closest('details:not([open])'); group; group = node.closest('details:not([open])')) group.open = true;
+        };
         const el = target();
+        unfold(el);
         if (!visible(el)) {
             const panel = PANELS.find(candidate => el?.closest(candidate.inside));
             if (panel) document.querySelector(panel.opener)?.click();
         }
+        unfold(target());
         target()?.scrollIntoView({block: 'nearest'});
         pointing = true;
         showButton.remove();
