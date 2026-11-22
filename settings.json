@@ -203,8 +203,7 @@
       "id": "line-colors",
       "name": "Kolory linii",
       "description": "A: tramwaje czerwone, autobusy MPK niebieskie, autobusy siechnickie i pociągi zielone, Traficar fioletowy, rower pomarańczowy, przejście pieszo szare. B: każdy tramwaj i autobus ma swój kolor, ten sam wszędzie i po odświeżeniu, rozłożony tak, żeby żadne dwie linie nie wyglądały tak samo; pociągi, rower, Traficar i przejście pieszo jak w A.",
-      "tags": ["Wygląd mapy", "Mapa"],
-      "dev": true
+      "tags": ["Wygląd mapy", "Mapa"]
     },
     {
       "id": "dot-size",

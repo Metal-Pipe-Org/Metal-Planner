@@ -1,3 +1,10 @@
 {
-  "popups": []
+  "popups": [
+    {
+      "id": "kolory-linii",
+      "title": "Kolory linii",
+      "description": "Możesz wybrać kolorowanie każdej linii osobnym kolorem, przetestuj i napisz co sądzisz o tej funkcji",
+      "place": "#line-colors"
+    }
+  ]
 }
