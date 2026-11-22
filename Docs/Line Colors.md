@@ -6,7 +6,7 @@ For now both prototypes as a setting switch
 ## A
 Division by type:
 Trams: Red
-Busses: Green
+Busses: Blue
 Busses not MPK (siechnickie for now): Green
 Trains: Green
 Traficar: Purple
@@ -17,4 +17,4 @@ Each lane has a random color, it should be calculated from the line number, usin
 - Use as wide color range as possible
 - Make sure each color is visible and everything is still readable
 - Colors used below should be excluded
-Bikes, Traficars, walking, trains and Polinka as A
+Bikes, Traficars, walking, trains as A
