@@ -14,6 +14,7 @@ Bike: Orange
 Walking: Gray
 ## B
 Each lane has a random color, it should be calculated from the line number, using a constant seed, so it is consistent
+- The colors can occasionally change when the data set changes
 - Use as wide color range as possible
 - Evenly spread all the lines on the available color spectrum
 - Make sure each color is visible and everything is still readable
