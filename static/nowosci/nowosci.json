@@ -4,16 +4,13 @@
       "id": "kierunek-pojazdow",
       "title": "Kierunek jazdy pojazdów",
       "description": "Włącz ◉ — strzałka przy autobusie i tramwaju pokazuje, w którą stronę jedzie.",
-      "place": "#vehicles-toggle",
-      "deployed": "2026-11-17"
+      "place": "#vehicles-toggle"
     },
     {
       "id": "szukanie-ustawien",
       "title": "Szukanie w ustawieniach",
       "description": "Wpisz kawałek nazwy, a lista ustawień zawęzi się do pasujących.",
       "place": "#settings-search",
-      "open": ["#dev-toggle"],
-      "deployed": "2026-10-23",
       "expiry": "never"
     }
   ]

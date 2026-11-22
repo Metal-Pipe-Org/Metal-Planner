@@ -3,10 +3,12 @@
 
    Dokładka z boku: reszta aplikacji o niej nie wie i od niej nie zależy.
    Wszystko siedzi w tym folderze (skrypt, wygląd, rejestr nowosci.json),
-   a w szablonie są tylko dwa znaczniki, które go dołączają - usunięcie ich
-   wyłącza okienka bez śladu. Okienko samo korzysta z aplikacji: czyta jej
-   elementy przez selektory z rejestru, klika je przy „Pokaż” i patrzy na
-   wyniki wyszukiwania, ale niczego w niej nie woła.
+   a w szablonie są tylko dwa znaczniki, które go dołączają (po stronie
+   serwera jest jeszcze nowosci.py) - usunięcie ich wyłącza okienka bez śladu.
+   Okienko samo korzysta z aplikacji: czyta jej elementy przez selektory,
+   klika przyciski paneli przy „Pokaż” i patrzy na wyniki wyszukiwania, ale
+   niczego w niej nie woła. Wiedza o panelach aplikacji (PANELS niżej) siedzi
+   tu, nie w rejestrze.
 
    Wpis rejestru (wpisów się nie usuwa, wygasłe po prostu się nie pokazują):
    - id          - stałe, pod nim zapamiętuje się potwierdzenie;
@@ -14,12 +16,12 @@
                    jakimś działaniu, opis mówi, co zrobić;
    - place       - selektor miejsca, na które wskazuje strzałka (przy funkcji
                    „po działaniu” - tam, gdzie to działanie się zaczyna);
-   - open        - selektory klikane po kolei przez „Pokaż”, gdy miejsca nie
-                   widać na ekranie startowym;
-   - deployed    - dzień wejścia funkcji na main (RRRR-MM-DD), od niego liczy
-                   się wygasanie;
+                   „Pokaż” samo znajduje panel, w którym to miejsce siedzi;
    - expiry      - po ilu dniach wygasa: domyślnie 30, najmniej 14, albo
-                   "never". */
+                   "never".
+   Data wdrożenia nie jest polem rejestru: serwer zapamiętuje, kiedy pierwszy
+   raz zobaczył wpis, i podaje ją razem z rejestrem (/api/nowosci). Od niej
+   liczy się wygasanie. */
 
 (function () {
 'use strict';
@@ -37,7 +39,12 @@ const GAP = 12;
 const MARGIN = 8;
 const ARROW_INSET = 18;
 
-const registryUrl = new URL('nowosci.json', document.currentScript.src);
+// Panele aplikacji, w których miejsce może siedzieć schowane: `inside` to
+// panel, `opener` - przycisk, którym otwiera go użytkownik.
+const PANELS = [
+    {inside: '#dev-panel', opener: '#dev-toggle'},
+    {inside: '#timetable-card', opener: '#view-tabs [data-view="timetable"]'},
+];
 
 let seen, last, firstVisit;
 try {
@@ -59,20 +66,16 @@ function save(key, value) {
     }
 }
 
-function deployedAt(entry) {
-    return new Date(entry.deployed + 'T00:00').getTime();
-}
-
 function expired(entry, now) {
     const days = entry.expiry ?? DEFAULT_EXPIRY_DAYS;
-    return days !== 'never' && now >= deployedAt(entry) + days * DAY_MS;
+    return days !== 'never' && now >= entry.deployed + days * DAY_MS;
 }
 
 /** Najnowsze najpierw; przy tej samej dacie wygrywa wpis niżej w rejestrze,
     czyli dopisany później. */
 function newestFirst(entries) {
     return entries.map((entry, index) => ({entry, index}))
-        .sort((a, b) => deployedAt(b.entry) - deployedAt(a.entry) || b.index - a.index)
+        .sort((a, b) => b.entry.deployed - a.entry.deployed || b.index - a.index)
         .map(item => item.entry);
 }
 
@@ -152,9 +155,10 @@ function show(entry) {
 
     showButton.addEventListener('click', () => {
         acknowledge();
-        for (const selector of entry.open || []) {
-            if (visible(target())) break;
-            document.querySelector(selector)?.click();
+        const el = target();
+        if (!visible(el)) {
+            const panel = PANELS.find(candidate => el?.closest(candidate.inside));
+            if (panel) document.querySelector(panel.opener)?.click();
         }
         target()?.scrollIntoView({block: 'nearest'});
         pointing = true;
@@ -251,7 +255,7 @@ function place(el, r) {
 }
 
 window.addEventListener('load', () => {
-    fetch(registryUrl)
+    fetch('/api/nowosci')
         .then(response => response.json())
         .then(registry => {
             const entry = pick(registry.popups);
