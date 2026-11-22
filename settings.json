@@ -200,6 +200,13 @@
       "dev": true
     },
     {
+      "id": "line-colors",
+      "name": "Kolory linii",
+      "description": "A: tramwaje, autobusy i pociągi mają kolor swojego rodzaju. B: każda linia ma swój losowy kolor, ten sam wszędzie i po odświeżeniu. Rower, Traficar i przejście pieszo zostają przy swoich kolorach.",
+      "tags": ["Wygląd mapy", "Mapa"],
+      "dev": true
+    },
+    {
       "id": "dot-size",
       "name": "Wielkość kropek",
       "tags": ["Wygląd mapy"],

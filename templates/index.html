@@ -880,6 +880,14 @@
             <input type="checkbox" id="vehicles-stats"> Statystyki pojazdów na mapie (◉)
         </label>
 
+    <label class="dev-check{{ dev('line-colors') }} set-row" {{ attrs('line-colors') }}>
+        {{ name('line-colors') }}
+        <select id="line-colors">
+            <option value="type">A: według rodzaju</option>
+            <option value="line">B: każda linia osobno</option>
+        </select> {{ info('line-colors') }}
+        </label>
+
 {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
       Suwaki są WIDOCZNE (LOOK_TUNING = true w app.js) — strojenie trwa.
