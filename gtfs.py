@@ -824,7 +824,10 @@ def load_day(day, trains=True):
     data.dep_times = [c[0] for c in conns]
 
     _day_cache[key] = data
-    if len(_day_cache) > 2:                      # trzymamy najwyżej 2 dni w RAM
+    # Najwyżej 4 wpisy: dwa dni, każdy w wariancie z koleją i bez niej (filtr
+    # „Pociągi"), żeby użytkownicy z różnym ustawieniem nie wypychali sobie
+    # nawzajem dnia z cache.
+    if len(_day_cache) > 4:
         _day_cache.pop(next(iter(_day_cache)))
     return data
 

@@ -790,6 +790,7 @@ function setTrainsOn(on) {
     saveUiState({trainsOn: on});
     paintLayerButton(trainsToggle, on);
     paintTrainStops();
+    placeStopNames();
     replanInPlace();
 }
 
@@ -982,7 +983,7 @@ const stopsReady = fetch('/api/stops')
         if (stops.error) { showError(stops.error); return; }
         for (const s of stops) {
             stopKind.set(s.name, s.kind);
-            cityStops.push({name: s.place || s.name, lat: s.lat, lon: s.lon});
+            cityStops.push({name: s.place || s.name, lat: s.lat, lon: s.lon, kind: s.kind});
             const m = L.circleMarker([s.lat, s.lon], styleFor(s.name));
             m.cityStop = s.name;   // ranga stuknięcia zależy od stylu (patrz tapRank)
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
@@ -2974,7 +2975,8 @@ function placeStopNames() {
             .map(st => lineStopDot(st, LINE_STOP_GREY))).addTo(map);
         named = stops;
     } else {
-        named = cityStops.filter(s => view.contains([s.lat, s.lon]));
+        named = cityStops.filter(s => view.contains([s.lat, s.lon])
+            && (trainsOn || s.kind !== 'train'));
     }
     const dotBox = at => [at.x - NAME_DOT_PX, at.y - NAME_DOT_PX,
                           at.x + NAME_DOT_PX, at.y + NAME_DOT_PX];
