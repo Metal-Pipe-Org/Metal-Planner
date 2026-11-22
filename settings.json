@@ -107,7 +107,8 @@
       "name": "Godzina w punkcie pod kursorem",
       "description": "Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu, jeśli jedzie się dalej stąd.",
       "tags": ["Czas", "Mapa"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-17"
     },
     {
       "id": "time-ends",
