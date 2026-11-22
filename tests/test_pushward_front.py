@@ -15,7 +15,7 @@ from tests.test_uklad_telefonu import PUSTE_ZRODLA, _chromium, _odpowiedz
 KLUCZ = "hlk_testowy"
 TABLICA = {"stop": "Pl. Grunwaldzki", "from_time": "22:00", "departures": [
     {"time": "22:57", "sec": 82620, "num": "5", "mode": "tram",
-     "headsign": "Księże Małe", "trip": None},
+     "headsign": "Księże Małe", "trip": None, "stop_id": "1605"},
 ]}
 
 TABLICA_JS = """(data) => {
@@ -115,6 +115,7 @@ def test_z_kluczem_klik_pyta_i_wysyla(przegladarka, adres):
     assert "5 → Księże Małe, 22:57" in pytania[0]
     assert wyslane[0][0] == KLUCZ
     assert wyslane[0][1]["sec"] == 82620
+    assert len(pytania) == 1
 
 
 def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(przegladarka, adres):
@@ -129,6 +130,41 @@ def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(pr
     }""")
     _kliknij_godzine(page, potwierdzaj=True)
     assert wyslane[0][1]["link"] == "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce"
+
+
+def _link_z_klikniecia(przegladarka, url, kurs, zewnetrzny):
+    tablica = {**TABLICA, "departures": [{**TABLICA["departures"][0], **kurs}]}
+    page, wyslane = _strona(przegladarka, url, klucz=True, tablica=tablica)
+    if zewnetrzny:
+        page.evaluate("document.getElementById('pushward-link').checked = true")
+    _kliknij_godzine(page, potwierdzaj=True)
+    return wyslane[0][1]["link"]
+
+
+@pytest.mark.parametrize("kurs, link", [
+    ({"stop_id": "1605"}, "https://czynaczas.pl/wroclaw?przystanek=1605"),
+    # Kurs gminy na słupku wspólnym z MPK (810 na Kościuszki): liczy kurs, nie słupek.
+    ({"stop_id": "886", "siechnice_stop": "30307:54819"},
+     "https://siechnice.kiedyprzyjedzie.pl/#/stops/30307:54819/departures"),
+    ({"stop_id": "SIE:30329:54854", "siechnice_stop": "30329:54854"},
+     "https://siechnice.kiedyprzyjedzie.pl/#/stops/30329:54854/departures"),
+    # Słupka gminnego kursu nie ustalono: Czy na czas go nie zna, więc link do Metal-Plannera.
+    ({"stop_id": "886", "siechnice_stop": None}, "https://metal-testing.sze.one/"),
+])
+def test_wlaczone_ustawienie_wysyla_link_do_przystanku(przegladarka, adres, kurs, link):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    wyslany = _link_z_klikniecia(przegladarka, url, kurs, zewnetrzny=True)
+    assert wyslany.startswith(link)
+
+
+def test_wylaczone_ustawienie_zostawia_link_do_metal_plannera(przegladarka, adres):
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    link = _link_z_klikniecia(przegladarka, url, {"stop_id": "1605"}, zewnetrzny=False)
+    assert link.startswith("https://metal-testing.sze.one/")
 
 
 def test_odmowa_w_potwierdzeniu_nic_nie_wysyla(przegladarka, adres):
