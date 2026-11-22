@@ -116,7 +116,6 @@ function show(entry) {
     box.setAttribute('aria-label', 'Nowość: ' + entry.title);
     box.innerHTML = `
         <button type="button" class="icon-button news-close" title="Zamknij" aria-label="Zamknij">✕</button>
-        <p class="news-label">Nowość</p>
         <p class="news-title"></p>
         <p class="news-text"></p>`;
     box.querySelector('.news-title').textContent = entry.title;
