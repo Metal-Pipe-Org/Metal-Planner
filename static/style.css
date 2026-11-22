@@ -419,6 +419,42 @@ body.mode-timetable .tools-sep { display: none; }
     color: var(--ink-faint);
 }
 
+/* ------------------------------------------------- wyłączenie dźwięku --- */
+
+#pipe-off-dialog {
+    position: fixed;
+    width: min(380px, calc(100vw - 32px));
+    border: none;
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+#pipe-off-dialog::backdrop { background: rgba(16, 32, 48, 0.35); }
+#pipe-off-dialog p { margin: 0 0 16px; }
+
+/* Plakietka, nie przycisk: nic nie robi, tylko mówi, że to żart. */
+.joke-badge {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    padding: 1px 6px;
+    border: 1px solid var(--ink-faint);
+    border-radius: 8px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    pointer-events: none;
+}
+
+.joke-badge[hidden] { display: none; }
+
+.pipe-off-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 /* -------------------------------------------------------- moje miejsce --- */
 
 /* Bez przewijania w sobie (inaczej niż #about): lista podpowiedzi wychodzi
