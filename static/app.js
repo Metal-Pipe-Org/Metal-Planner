@@ -547,7 +547,7 @@ function lineVar(kind, num) {
 
 function lineStyle(kind, num) {
     const declared = lineVar(kind, num);
-    return declared ? ` style="${declared}"` : '';
+    return declared ? ` style="${escAttr(declared)}"` : '';
 }
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
                     cable: 'Kolej linowa',
