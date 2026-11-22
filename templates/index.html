@@ -254,6 +254,8 @@
         </div>
     </header>
 
+    <div id="layer-notes" class="layer-notes" role="status" hidden></div>
+
     {% if data_error %}
 
     <div class="card"><div class="notice error">{{ data_error }}</div></div>
@@ -728,6 +730,16 @@
     <label class="dev-check{{ dev('tt-past') }} set-row" {{ attrs('tt-past') }}>
             <input type="checkbox" id="tt-past" checked> {{ name('tt-past') }} {{ info('tt-past') }}
         </label>
+    <div class="field{{ dev('cars-horizon') }} set-row" {{ attrs('cars-horizon') }}>
+        <label for="cars-horizon">
+            {{ name('cars-horizon') }} {{ info('cars-horizon') }}
+        </label>
+        <select id="cars-horizon">
+            <option value="3" selected>3 h</option>
+            <option value="24">24 h</option>
+            <option value="none">bez limitu</option>
+        </select>
+    </div>
     <label class="dev-check{{ dev('car-vans') }} set-row" {{ attrs('car-vans') }}>
             <input type="checkbox" id="car-vans"> {{ name('car-vans') }} {{ info('car-vans') }}
         </label>
@@ -976,6 +988,17 @@
         </div>
         <p class="field-hint ok" id="access-unlocked" hidden>Odblokowane do zamknięcia karty.</p>
         <p class="field-hint" id="access-status" role="status"></p>
+    </div>
+
+{#
+      Log serwera (zgłoszenie #285): plik z zapisem zdarzeń po stronie serwera,
+      za tym samym odblokowaniem co Siechnice (data-protected).
+    #}
+    <div class="field{{ dev('server-logs') }} set-row set-action" {{ attrs('server-logs') }}>
+        <div class="sw-row">
+            <button type="button" id="server-logs-download" class="button" data-protected>{{ name('server-logs') }}</button>{{ info('server-logs') }}
+        </div>
+        <p class="field-hint" id="server-logs-status" role="status"></p>
     </div>
 
 {#

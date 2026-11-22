@@ -14,6 +14,12 @@
       "tags": ["Przystanki", "Czas"]
     },
     {
+      "id": "cars-horizon",
+      "name": "Pokazuj auta Traficara do",
+      "description": "Liczone od teraz do czasu wyszukiwania. Auta stoją tam, gdzie są teraz, więc im dalej naprzód, tym mniej o nich wiadomo. Poza tym zasięgiem aut nie ma, a mapa mówi dlaczego.",
+      "tags": ["Traficar", "Mapa", "Czas"]
+    },
+    {
       "id": "car-vans",
       "name": "Pokazuj też dostawczaki",
       "description": "Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka, i stoją na mapie jako puste pierścienie.",
@@ -263,6 +269,12 @@
       "id": "dev-access",
       "name": "Dostęp chroniony (kod z Discorda)",
       "tags": [],
+      "dev": true
+    },
+    {
+      "id": "server-logs",
+      "name": "Pobierz logi",
+      "tags": ["Logi"],
       "dev": true
     },
     {
