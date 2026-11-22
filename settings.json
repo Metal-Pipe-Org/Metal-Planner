@@ -206,6 +206,19 @@
       "dev": true
     },
     {
+      "id": "vehicles-direction",
+      "name": "Pojazdy tylko w naszą stronę (◉)",
+      "description": "Przy narysowanej mapie ◉ ukrywa pojazdy jadące w przeciwną stronę; zostają jadące w naszą i te bez rozpoznanego kursu.",
+      "tags": ["Mapa"],
+      "dev": true
+    },
+    {
+      "id": "vehicles-stats",
+      "name": "Statystyki pojazdów na mapie (◉)",
+      "tags": ["Debug", "Mapa"],
+      "dev": true
+    },
+    {
       "id": "dot-size",
       "name": "Wielkość kropek",
       "tags": ["Wygląd mapy"],
