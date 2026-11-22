@@ -2190,6 +2190,8 @@ def plan_flow_stages(start_query, end_query, when=None,
     ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point,
                               ride)
     if "error" in ends:
+        if not trains:
+            ends = _train_station_error(day, when, start_query, end_query, ends)
         yield "error", ends
         return
     day = ends["day"]          # z punktem z mapy dołożonym jako słupek
@@ -4922,6 +4924,19 @@ def _backward(day, target_set, dep_sec, deadline):
                     if walk_dep > latest.get(sibling, -1):
                         latest[sibling] = walk_dep
     return latest
+
+
+def _train_station_error(day, when, start_query, end_query, error):
+    """Przy wyłączonych pociągach stacja kolejowa jest dla wyszukiwarki
+    nieznana - zamiast "nie znam przystanku" mówimy, dlaczego."""
+    full = gtfs.load_day(when.date())
+    for query in (start_query, end_query):
+        if gtfs.match_stop(query, day)[0] is not None:
+            continue
+        name, stops, _ = gtfs.match_stop(query, full)
+        if name is not None and gtfs.is_rail(full, stops):
+            return {"error": "Masz wyłączone pociągi — to stacja kolejowa."}
+    return error
 
 
 def _unknown_stop(query, hints):

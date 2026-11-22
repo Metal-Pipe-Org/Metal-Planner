@@ -7071,7 +7071,8 @@ function recentFirst(items, recent) {
 // Ostatnie miejsca szukane osobno w ich krótkiej liście, żeby przy jednej
 // literze nie sortować tysięcy trafień ze wszystkich przystanków.
 const suggestRecentFirst = side => query => {
-    const recent = (loadRecentPlaces()[side] || []).filter(name => STOP_KIND.has(name));
+    const recent = (loadRecentPlaces()[side] || []).filter(
+        name => STOP_KIND.has(name) && (trainsOn || STOP_KIND.get(name) !== 'train'));
     const hits = recentFirst(suggestionsFor(query, recent, undefined, Infinity), recent);
     const rest = suggestionsFor(query, STOP_LABELS, undefined, MAX_SUGGESTIONS + hits.length)
         .filter(item => !recent.includes(item.name));
