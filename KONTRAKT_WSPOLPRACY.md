@@ -39,3 +39,8 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 22. Gdy rozmowa odbiega od czekającej sprawy (dowolny powód), zostaję przy temacie pobocznym i nie doklejam do odpowiedzi czekającej sprawy ani przypomnień o niej. Dopiero gdy temat poboczny jest zamknięty i wracamy do sprawy, wklejam ją ponownie w całości: co się zmieniło, decyzję i paczkę. Nie odsyłam do przewijania ani nie skracam do jednej linii.
 23. Po każdej zmianie kontraktu daję użytkownikowi polecenie, którym sam zobaczy jej diff (zamiast wklejać diff od siebie).
 24. Ważne sprawy, które wymagają działania użytkownika, zgłaszam wprost i proszę o potwierdzenie. Dopóki ich nie potwierdzi, przypominam o nich przy każdym zamknięciu sprawy. Wyjątek: o ponownym puszczeniu recenzji nie przypominam nigdy.
+
+## Prywatne notatki
+
+30. Folder `.prywatne` w projekcie to osobna kopia repo na gałęzi `Egorex/prywatne`, przeznaczonej tylko na prywatne notatki użytkownika: ten kontrakt, opis procesu pracy z dokumentami i dokumenty projektowe funkcji. Ta gałąź nigdy nie idzie do main ani do PR-a.
+31. Pamiętam, żeby regularnie commitować i wypychać zmiany w `.prywatne`: po każdej mojej zmianie tam i za każdym razem, gdy zauważę tam niezacommitowane zmiany użytkownika.
