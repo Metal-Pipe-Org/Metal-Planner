@@ -101,7 +101,7 @@ TIMETABLE_MAX = 60
 
 
 def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
-                   point=None, until_sec=None):
+                   point=None, until_sec=None, trains=True):
     """Tablica odjazdów jednego przystanku - to, co widać po najechaniu na
     kropkę przesiadki na mapie.
 
@@ -126,7 +126,7 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
     when = when or datetime.now()
 
     try:
-        day = gtfs.load_day(when.date())
+        day = gtfs.load_day(when.date(), trains)
     except FileNotFoundError as e:
         return {"error": str(e)}
 
@@ -2037,7 +2037,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                      bike_electric=True, bike_regular=True,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
-                     with_journeys=True, use_cars=True,
+                     with_journeys=True, use_cars=True, trains=True,
                      live_refreshed=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
@@ -2108,6 +2108,9 @@ def plan_flow_stages(start_query, end_query, when=None,
     rzeczy w reszcie odpowiedzi - rower niczego tu nie przestawia, tylko
     dopisuje.
 
+    trains False - rozkład dnia bez kolei (patrz gtfs.load_day): ani trasy,
+    ani mapa nie używają pociągów.
+
     use_cars False - na liście nie ma propozycji kończących się Traficarem
     (zgaszony przycisk 🚗 w pasku warstw, zgłoszenie #163). Auta przy mapie
     (`cars`) zostają w odpowiedzi - pokazuje je albo chowa sam front - a reszta
@@ -2154,7 +2157,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                     else int(max(0, min(MAX_CAR_OVERHEAD_SEC, car_overhead_sec))))
 
     try:
-        day = gtfs.with_pace(gtfs.load_day(when.date()), walk_pace)
+        day = gtfs.with_pace(gtfs.load_day(when.date(), trains), walk_pace)
         if not walking:
             day = gtfs.without_walking(day)
     except FileNotFoundError as e:
@@ -2224,7 +2227,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         day_offset += 1
         try:
             later = gtfs.with_pace(
-                gtfs.load_day(when.date() + timedelta(days=day_offset)), walk_pace)
+                gtfs.load_day(when.date() + timedelta(days=day_offset), trains), walk_pace)
             if not walking:
                 later = gtfs.without_walking(later)
         except FileNotFoundError:

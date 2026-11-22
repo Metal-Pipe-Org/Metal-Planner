@@ -680,8 +680,12 @@ def last_service_date():
     return datetime.strptime(last, "%Y%m%d").date() if last else None
 
 
-def load_day(day):
+def load_day(day, trains=True):
     """Zwraca DayData dla podanej daty (datetime.date), z cache.
+
+    `trains` False - dzień bez kolei: stacje i kursy PKP nie są doklejane
+    wcale (filtr „Pociągi" w pasku warstw), więc nie ma ich ani w trasach,
+    ani w tablicach odjazdów. Osobny wpis w cache, bo inny dzień.
 
     Oś czasu jest liczona od północy `day`: kursy tej doby zachowują swoje
     sekundy (także te ponad 24 h), a ogon doby poprzedniej wchodzi przesunięty
@@ -701,7 +705,7 @@ def load_day(day):
     pkp_coords_mtime = pkp.COORDS_PATH.stat().st_mtime if pkp.COORDS_PATH.exists() else 0
     key = (
         day.isoformat(), DB_PATH.stat().st_mtime if DB_PATH.exists() else 0,
-        pkp_mtime, pkp_coords_mtime,
+        pkp_mtime, pkp_coords_mtime, trains,
     )
     if key in _day_cache:
         return _day_cache[key]
@@ -756,7 +760,8 @@ def load_day(day):
     # przejście pieszo między słupkami). Doklejona po miejscach - tak było
     # do 2026-08-31 - nie należała do żadnego miejsca i musiała mieć własny,
     # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
-    pkp.augment_day(data, day)
+    if trains:
+        pkp.augment_day(data, day)
     # Polinka (zgłoszenie #165) z tego samego powodu w tym samym miejscu:
     # jej stacje mają dostać przejścia piesze jak każdy słupek.
     polinka.augment_day(data, day)

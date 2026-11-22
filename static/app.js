@@ -648,6 +648,8 @@ const BIKES_REFRESH_MS = 60000;   // tyle deklaruje kanał WRM (`ttl`)
 // „mam konto w WRM": domyślnie nie, a kto go odhaczył wcześniej, ten ma go
 // dalej (stara pamięć `bikes`). Pojazdy na żywo zostają zgaszone jak dotąd.
 let carsOn = uiState.carsOn !== false;
+// Pociągi jak auta: domyślnie są, a zgaszone znikają i z trasy, i z mapy.
+let trainsOn = uiState.trainsOn !== false;
 // Rodzaj roweru ma własny przycisk w pasku (zgłoszenie #147). Warstwa świeci,
 // gdy świeci choć jeden z nich - dwa zgaszone znaczą dokładnie to, co dawniej
 // zgaszone „Rowery". Kto miał zapamiętany stary włącznik, dostaje oba w jego
@@ -664,6 +666,7 @@ let cityBikeLayer = null;
 let carsTimer = null;
 let bikesTimer = null;
 const carsToggle = $('cars-toggle');
+const trainsToggle = $('trains-toggle');
 const bikesToggle = $('bikes-toggle');
 const bikesElectricToggle = $('bikes-electric-toggle');
 
@@ -782,6 +785,25 @@ function setCarsOn(on) {
     replanInPlace();
 }
 
+function setTrainsOn(on) {
+    trainsOn = on;
+    saveUiState({trainsOn: on});
+    paintLayerButton(trainsToggle, on);
+    paintTrainStops();
+    replanInPlace();
+}
+
+/** Stacje PKP siedzą w tej samej warstwie co słupki - zgaszony filtr zdejmuje
+    z niej tylko je. */
+function paintTrainStops() {
+    for (const [name, markers] of markersByName) {
+        if (stopKind.get(name) !== 'train') continue;
+        for (const m of markers) {
+            if (trainsOn) m.addTo(stopsLayer); else stopsLayer.removeLayer(m);
+        }
+    }
+}
+
 /** Jeden rodzaj roweru. Warstwa świeci, gdy świeci choć jeden - więc
     zgaszenie ostatniego gasi rower w całości, tak jak dawniej jeden włącznik.
 
@@ -812,6 +834,11 @@ function setBikesOn(on) {
     paintBikeButtons();
     refreshBikeLayer();
     replanInPlace();
+}
+
+if (trainsToggle) {
+    trainsToggle.addEventListener('click', () => setTrainsOn(!trainsOn));
+    paintLayerButton(trainsToggle, trainsOn);
 }
 
 if (carsToggle) {
@@ -975,6 +1002,7 @@ const stopsReady = fetch('/api/stops')
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
         }
+        paintTrainStops();
         stopsLayer.addTo(map);
         // Stan włącznika ◉ wraca z localStorage (patrz saveUiState).
         setVehiclesOn(vehiclesOn);
@@ -3574,7 +3602,7 @@ function loadTimetable(dot, where, sec) {
         ? where.lines.map(l => `${lineKey(l)}/${l.flow || ''}/${l.arrive || ''}`).join('|')
         : '';
     const key = `${where.name || where.lat + ',' + where.lon}`
-        + `@${date}@${from}@${sec}@${filtr}@${where.deadline || ''}`;
+        + `@${date}@${from}@${sec}@${filtr}@${where.deadline || ''}@${trainsOn}`;
     const cached = timetableCache.get(key);
     if (cached !== undefined) { emitTimetable(dot, cached); return; }
 
@@ -3589,6 +3617,7 @@ function loadTimetable(dot, where, sec) {
     // czterdzieści odjazdów wszystkich linii kończyło się przed godziną,
     // o której pasażer tu staje, i kursy z mapy wypadały przed odsiewem
     // (Śliczna: 113 o 15:59 i 16:14 znikały za 15:55).
+    if (!trainsOn) query.trains = '0';
     if (where.deadline) query.until_sec = where.deadline;
     else query.limit = TIMETABLE_FETCH;
     emitTimetable(dot, TIP_LOADING);
@@ -4851,7 +4880,7 @@ const obTrainKey = query => `${$('date').value}|${query.replace(/\D/g, '')}`;
     kiedy przyjdą. */
 function obTrainSuggestions(query) {
     const train = TRAIN_NUMBER.exec(query.trim());
-    if (!train || train[2].length < 2) return [];
+    if (!trainsOn || !train || train[2].length < 2) return [];
     const [, carrier, digits] = train;
     // Wpisany przewoźnik zawęża listę: „KD 602" bez pociągów PR 602…
     const pick = list => list.filter(
@@ -5168,6 +5197,8 @@ function queryParams() {
     // zdejmuje je z listy (zgłoszenie #163) - jak przy `routes`, prosi się
     // tylko o ich brak.
     if (!carsOn) params.set('traficar', '0');
+    // Pociągi tak samo jak auta: prosi się tylko o ich brak.
+    if (!trainsOn) params.set('trains', '0');
     const poklad = onboardOn ? onboardPick() : null;
     if (poklad) {
         // Start z pokładu pojazdu (patrz onboard.py): zamiast miejsca jedzie
@@ -6979,7 +7010,9 @@ function suggestionsFor(query, names = STOP_LABELS, folded, limit = MAX_SUGGESTI
         // at/len na zero = nic nie podświetlamy (patrz wyżej, dlaczego).
         else if (alias && aliases[i].includes(alias)) aliased.push({name, at: 0, len: 0});
     });
-    return [...prefix, ...inside, ...aliased].slice(0, limit);
+    return [...prefix, ...inside, ...aliased]
+        .filter(item => trainsOn || !own || STOP_KIND.get(item.name) !== 'train')
+        .slice(0, limit);
 }
 
 /** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów
@@ -8758,6 +8791,7 @@ window.plannerBridge = {
     LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
     prettyStopName, rawStopName,
     suspendPlanner, resumePlanner, setTimeNow,
+    trainsOn: () => trainsOn,
 };
 
 }
