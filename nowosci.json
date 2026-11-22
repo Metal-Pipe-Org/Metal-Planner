@@ -4,7 +4,7 @@
     {
       "id": "kolory-linii",
       "title": "Kolory linii",
-      "description": "Możesz wybrać kolorowanie każdej linii osobnym kolorem, przetestuj i napisz co sądzisz o tej funkcji",
+      "description": "Możesz wybrać kolorowanie każdej linii osobnym kolorem. Przetestuj i napisz co sądzisz o tej funkcji!",
       "place": "#line-colors"
     }
   ]
