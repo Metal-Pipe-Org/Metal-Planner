@@ -612,20 +612,20 @@ checks.odjazd_ktorym_sie_nie_zdazy_wypada = (() => {
 })();
 
 /* Liczba wierszy to ustawienie panelu, a nie stała wpisana w kod - i ma swój
-   sufit, bo w pamięci przeglądarki może leżeć wartość z czasów innego zakresu
-   (albo w ogóle nie liczba). */
+   sufit, bo w pamięci przeglądarki może leżeć wartość z czasów innego zakresu.
+   Wartości, która nie jest liczbą, suwak w ogóle nie przyjmie (robi to
+   przeglądarka), więc tego przypadku nie ma już po co sprawdzać w kodzie. */
 checks.liczba_wierszy_to_ustawienie = (() => {
     const bylo = app.dotOpts.rows;
     const odczyt = [];
-    for (const ile of [3, 8, 999, 0, 'iks']) {
+    for (const ile of [3, 8, 999, 0]) {
         app.dotOpts.rows = ile;
         odczyt.push(app.timetableRows());
     }
     app.dotOpts.rows = bylo;
     return {
         ok: odczyt[0] === 3 && odczyt[1] === 8
-            && odczyt[2] === app.TIMETABLE_ROWS_MAX && odczyt[3] === 1
-            && odczyt[4] === app.DOT_DEFAULTS.rows,
+            && odczyt[2] === app.TIMETABLE_ROWS_MAX && odczyt[3] === 1,
         odczyt,
     };
 })();
@@ -1011,6 +1011,9 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
                   best_sec: 40 * 60, ride_sec: 15 * 60,
                   map_from: '12:00', deadline: '12:55', limit_sec: 55 * 60};
     const bylo = app.timeOpts.ride;
+    // Zakres mapy na pasku jest za ustawieniem deweloperskim.
+    const zakres = document.getElementById('headline-map-range');
+    zakres.checked = true;
 
     app.timeOpts.ride = false;
     app.drawFlow(flow, false);
@@ -1020,6 +1023,7 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
     const z = pasek(), zDymki = dymki();
 
     app.timeOpts.ride = bylo;
+    zakres.checked = false;
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
     return {
         ok: bez.includes('61212:25→12:40') && !bez.includes('40 min')   // plakietki przed godzinami

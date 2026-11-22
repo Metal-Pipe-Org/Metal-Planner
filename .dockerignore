@@ -20,3 +20,6 @@ siechnice/
 logs/
 *.log
 *.sqlite
+
+# Czas budowy zapisuje Dockerfile - lokalna kopia nie może go podmienić.
+DEPLOYED_AT

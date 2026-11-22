@@ -7,6 +7,8 @@
 # Wołający pobiera ten plik z `main`, nigdy z drzewa PR-a ani pracy Claude'a:
 # decyduje on, kto może odpalić runnera z sekretami.
 
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+
 # caller_permission LOGIN — wypisuje uprawnienie osoby w repo (admin /
 # maintain / write / triage / read / none). Nie używamy `author_association`:
 # przy prywatnym członkostwie w organizacji GitHub zwraca tam CONTRIBUTOR albo
@@ -34,9 +36,9 @@ is_team_permission() {
 gate_claude_call() {
   local body=$1 who=$2 perm
 
-  if ! printf '%s\n' "$body" | grep -v '^[[:space:]]*>' | grep -q '@claude'; then
+  if ! printf '%s\n' "$body" | grep -v '^[[:space:]]*>' | grep -qF -- "$CLAUDE_MENTION"; then
     echo "go=false" >> "$GITHUB_OUTPUT"
-    echo "Wszystkie @claude w tym wpisie są w cytacie — pomijam." \
+    echo "Wszystkie $CLAUDE_MENTION w tym wpisie są w cytacie — pomijam." \
       | tee -a "$GITHUB_STEP_SUMMARY"
     return 0
   fi

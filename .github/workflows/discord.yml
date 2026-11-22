@@ -32,7 +32,7 @@ name: Discord - powiadomienia
 # Komentarzy botów nie przekazujemy. To, co naprawdę ważne z naszych
 # automatów, wysyłają one same, z pingiem właściwej osoby: gotowa ocena
 # Claude'a (claude-review-pr.yml), koniec pracy solvera (claude-issue.yml),
-# przypomnienie i zamknięcie po ciszy (stale-issues.yml), zamknięcie przez
+# przypomnienie i zamknięcie po ciszy (stale-issues.yml, stale-prs.yml), zamknięcie przez
 # zapasowy krok (issue-labels.yml). Zresztą wszystkiego, co robią naszym
 # tokenem, GitHub tutaj nie przekaże.
 #

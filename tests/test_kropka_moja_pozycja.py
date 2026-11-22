@@ -46,7 +46,8 @@ def test_kropka_pokazuje_sie_i_przesuwa_przy_zmianie_pozycji(przegladarka, adres
         przegladarka, adres, permissions=["geolocation"],
         geolocation={"latitude": slupek["lat"], "longitude": slupek["lon"]})
     page.wait_for_selector(KROPKA)
-    page.evaluate("map.setView([%s, %s], 15, {animate: false})" % (slupek["lat"], slupek["lon"]))
+    page.evaluate("() => { map.setView([%s, %s], 15, {animate: false}); }"
+                  % (slupek["lat"], slupek["lon"]))
     przed = page.evaluate(SRODEK_JS)
     context.set_geolocation({"latitude": slupek["lat"] + 0.002, "longitude": slupek["lon"]})
     page.wait_for_function(

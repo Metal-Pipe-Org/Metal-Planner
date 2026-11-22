@@ -338,8 +338,18 @@ body.mode-timetable .tools-sep { display: none; }
 /* Przed nazwą ikona aplikacji, ta sama co na ekranie telefonu. */
 .brand {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+/* Pod nazwą, tylko w DEV_MODE (#446): kiedy wstała ta wersja. Wcięte o ikonę
+   z odstępem (22 + 8 px), żeby stało pod napisem, a nie pod ikoną. */
+.deployed-at {
+    padding-left: 30px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--ink-soft);
+    white-space: nowrap;
 }
 
 .brand-icon {
@@ -1535,6 +1545,80 @@ body.routes-off #results .notice.loading { display: none; }
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
    linii, nie pigułka jak .line-badge: użytkownik prosił wprost o kropki. */
+/* Pasek w układzie panelu (nie nakładka): komunikaty o warstwach mapy, każdy
+   w osobnej linii. Ostrzeżenie (żółte) mówi, że włączona warstwa nic teraz nie
+   daje, i zapala żółty przycisk tej warstwy; info (szare) - że działa z zastrzeżeniem. */
+.layer-notes {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.layer-notes[hidden] { display: none; }
+
+.layer-note {
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    box-shadow: var(--shadow);
+}
+
+.layer-note-warn {
+    background: #f5c518;
+    color: #3a2f00;
+    font-weight: 600;
+}
+
+.layer-note-info {
+    background: var(--surface-alt);
+    color: #000;
+    font-weight: 700;
+}
+
+.layer-note[data-setting] { cursor: pointer; }
+
+.layer-button.warn,
+.layer-button.warn.active {
+    background: #f5c518;
+    border-color: #d9a900;
+    color: #3a2f00;
+}
+
+.vehicle-box {
+    position: absolute;
+}
+
+.vehicle-box .vehicle-marker {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    width: 26px;
+    height: 26px;
+    box-sizing: border-box;
+}
+
+/* Klin na obwodzie kółka, w kolorze kółka; biała poświata czyni go czytelnym
+   na jasnej i ciemnej mapie. */
+.vehicle-arrow {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    margin: -4.5px 0 0 -5px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 9px solid;
+    filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+}
+
+.vehicle-arrow.tram { color: var(--tram); }
+.vehicle-arrow.bus { color: var(--bus); }
+.vehicle-arrow.train { color: var(--train); }
+.vehicle-arrow.cable { color: var(--cable); }
+.vehicle-arrow.other { color: var(--other); }
+
 .vehicle-marker {
     display: flex;
     align-items: center;
@@ -2222,6 +2306,8 @@ body.more-busy .headline-more { cursor: progress; }
     color: var(--ink-faint);
     font-weight: 600;
 }
+/* Z kluczem PushWard (#453) godzina jest przyciskiem odliczenia. */
+body.pushward-on .tt-times [data-dep-sec] { cursor: pointer; text-decoration: underline dotted; }
 
 /* ------------------------------------------------ Ustawienia Developerskie --- */
 
@@ -2230,7 +2316,9 @@ body.more-busy .headline-more { cursor: progress; }
     top: 16px;
     right: 16px;
     z-index: 1000;
-    width: 290px;
+    /* Było 290px - wiersze z polem i przyciskami się ściskały. Poszerzone w
+       lewo (prawa krawędź stoi), na telefonie phone.css i tak robi width: auto. */
+    width: 380px;
     /* Suwaków jest już tyle, że nie mieszczą się na niższym ekranie - panel
        przewija się w sobie zamiast wychodzić poza okno. */
     max-height: calc(100vh - 32px);
@@ -2459,6 +2547,18 @@ body:not(.dev-mode) .dev-only { display: none; }
     letter-spacing: 0.06em;
 }
 
+/* Znaczek obsolete jest odnośnikiem do zgłoszenia: żółty z ciemnym tekstem,
+   czytelny na jasnym i na ciemnym tle panelu. */
+.obsolete-badge {
+    background: #ffd54f;
+    color: #3d2e00;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+.obsolete-badge:hover,
+.obsolete-badge:focus-visible { background: #ffca28; outline: 2px solid #3d2e00; outline-offset: 1px; }
+
 #dev-panel .dev-check {
     display: flex;
     align-items: center;
@@ -2517,6 +2617,7 @@ body:not(.dev-mode) .dev-only { display: none; }
 }
 .info:hover,
 .info:focus-visible { color: var(--ink); outline: none; }
+.set-row[data-expired] { display: none !important; }
 
 .info-tip {
     position: fixed;
@@ -2651,6 +2752,21 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
     text-align: center;
 }
 
+/* Żółty licznik przestarzałych stoi przed niebieskim; margines „auto" przejmuje
+   on, żeby oba trzymały się prawej krawędzi. */
+.set-group > summary[data-changed] > .obsolete-count {
+    margin-left: auto;
+    min-width: 18px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: #ffd54f;
+    color: #3d2e00;
+    font-size: 10px;
+    letter-spacing: 0;
+    text-align: center;
+}
+.set-group > summary[data-changed]:has(> .obsolete-count)::after { margin-left: 4px; }
+
 /* Strona /statystyki - bez mapy i panelu, zwykła przewijana strona. */
 .stats-page { background: var(--surface); min-height: 100vh; }
 .stats-main { max-width: 640px; margin: 0 auto; padding: 16px; }
@@ -2751,7 +2867,7 @@ body:not(.dev-mode) #dev-panel .dev-only { display: none; }
 }
 
 .sw-row[hidden] { display: none; }
-.sw-row select, .sw-row input[type="text"] { flex: 1; min-width: 0; }
+.sw-row select, .sw-row input[type="text"], .sw-row input[type="password"] { flex: 1; min-width: 0; }
 .sw-row .button { flex: 0 0 auto; background: var(--surface-alt); }
 .sw-row .button:hover { background: #e8edf3; }
 @keyframes jump-flash { from { background: #fff3b0; } to { background: transparent; } }
@@ -3484,3 +3600,43 @@ ul.tt-legend {
 .leaflet-tooltip-right::before {
     margin-top: calc(-6px - var(--tip-shift, 0px));
 }
+
+.vehicle-stats {
+    position: absolute;
+    right: 56px;
+    bottom: 28px;
+    z-index: 800;
+    padding: 4px 7px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #333;
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 6px;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* X czyszczący pole tekstowe (#508); widoczny tylko, gdy pole nie jest puste. */
+.field-clear {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.field-clear:hover { background: #e8edf3; }
+.field-clear.beside-action { right: 40px; }
+input:placeholder-shown + .field-clear { display: none; }
+.endpoint-fields input.with-action,
+.place-field input.with-action { padding-right: 74px; }
+.ac-field input:not(.with-action):not(:placeholder-shown) { padding-right: 38px; }

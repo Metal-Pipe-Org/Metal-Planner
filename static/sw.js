@@ -48,6 +48,8 @@ const SHELL_URLS = [
     '/static/manifest.webmanifest',
     '/static/icons/icon-192.png',
     '/static/icons/icon-512.png',
+    '/static/icons/logo-64.png',
+    '/static/icons/favicon.ico',
     // Oba formaty do powłoki, nie ten "właściwy": który zagra, rozstrzyga
     // przeglądarka (patrz PIPE_SOURCES w app.js), a offline nie ma już jak
     // dobrać brakującego.

@@ -94,7 +94,7 @@ def test_wiersz_odjazdu(install_day):
 
     assert wynik["departures"][0] == {
         "time": "00:16", "sec": 1000, "line": "Autobus 100",
-        "num": "100", "mode": "bus", "headsign": "PÓŁNOC",
+        "num": "100", "mode": "bus", "headsign": "PÓŁNOC", "stop_id": "W1",
     }
     # `sec` jest po to, żeby dało się porównać odjazd z horyzontem mapy -
     # "00:16" po północy zawija się i do porównań się nie nadaje.
@@ -277,3 +277,52 @@ def test_start_z_punktu_ma_tablice_startu_u_przystanku_do_ktorego_sie_idzie(
     wezel = [n for n in wynik["nodes"] if n["name"] == "GRUNWALDZKI"][0]
     assert wezel["late"] == [{"num": "146", "kind": "bus", "headsign": "GAJ pętla",
                               "sec": 64260}]
+
+
+def _siechnice_na_wspolnym_slupku(install_day, monkeypatch, tmp_path):
+    """Słupek 886 to wrocławski MPK, a gmina ma ten sam słupek pod swoim
+    identyfikatorem (jak linia 810 na Kościuszki). Współrzędne pierwszego
+    słupka make_day to (BASE_LAT, BASE_LON)."""
+    import json
+    import siechnice
+    from tests.gtfs_builder import BASE_LAT, BASE_LON
+
+    kopia = tmp_path / "rozklad.json"
+    kopia.write_text(json.dumps({
+        "stops": [["30307:54819", 20317, "Kościuszki",
+                   round(BASE_LON * 1e6), round(BASE_LAT * 1e6)]],
+        "lines_by_stop": {"30307:54819": ["810+81"]},
+        "days": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr(siechnice, "SNAPSHOT_PATH", kopia)
+    install_day(make_day(
+        [
+            {"trip_id": "SIE:monday:7", "label": "Autobus 810+81", "headsign": "Siechnice",
+             "stops": [("886", 1000, 1000), ("KONIEC", 1600, 1600)]},
+            {"trip_id": "SIE:monday:8", "label": "Autobus 800+80", "headsign": "Siechnice",
+             "stops": [("886", 1100, 1100), ("KONIEC", 1700, 1700)]},
+            {"trip_id": "m1", "label": "Autobus 145", "headsign": "GAJ",
+             "stops": [("886", 1200, 1200), ("KONIEC", 1800, 1800)]},
+        ],
+        names={"886": "Kościuszki", "KONIEC": "KONIEC"},
+    ))
+
+
+def test_kurs_siechnic_na_wspolnym_slupku_niesie_slupek_z_ich_serwisu(
+        install_day, monkeypatch, tmp_path):
+    """Link do zewnętrznego rozkładu wybiera kurs, nie przystanek: 810 na
+    wrocławskim słupku 886 ma iść do Kiedy przyjedzie, a MPK 145 - do Czy na czas."""
+    _siechnice_na_wspolnym_slupku(install_day, monkeypatch, tmp_path)
+    wynik = planner.stop_timetable("Kościuszki", WHEN, from_sec=0)
+
+    sie, nieznany, mpk = wynik["departures"]
+    assert sie["stop_id"] == "886" and sie["siechnice_stop"] == "30307:54819"
+    # Gminny kurs, którego linia nie staje na tym słupku w ich serwisie: pole
+    # jest (front nie ma wysyłać go do Czy na czas), ale pusto.
+    assert nieznany["siechnice_stop"] is None
+    assert mpk["stop_id"] == "886" and "siechnice_stop" not in mpk
+
+
+def test_slupek_gminny_to_jego_identyfikator_bez_prefiksu():
+    import siechnice
+    assert siechnice.post_of("SIE:30329:54854", "x", 0, 0, "86+860") == "30329:54854"

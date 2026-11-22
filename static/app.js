@@ -486,7 +486,42 @@ function updatePointMarker(slot, value) {
 //         sec <= only.until && drawn.has(lat + ',' + lon));
 
 const vehiclesLayer = L.layerGroup();
+
+/** Pasek komunikatów o warstwach mapy. Każda warstwa (źródło) ma własną listę
+    komunikatów {level: 'warn' | 'info', text, setting?}; wszystkie idą pod sobą,
+    każdy w osobnej linii. `warn` zapala też żółty przycisk warstwy, `info` go
+    nie rusza. Klik w komunikat z `setting` otwiera ⚙ przy tym ustawieniu. */
+const layerNotesEl = $('layer-notes');
+const layerNotes = {};
+const layerNoteButtons = {};
+
+function setLayerNotes(source, notes) {
+    layerNotes[source] = notes;
+    const button = layerNoteButtons[source];
+    if (button) button.classList.toggle('warn', notes.some(note => note.level === 'warn'));
+    const all = Object.values(layerNotes).flat();
+    layerNotesEl.hidden = !all.length;
+    layerNotesEl.innerHTML = all.map(note =>
+        `<div class="layer-note layer-note-${note.level}"` +
+        (note.setting ? ` data-setting="${note.setting}" role="button" tabindex="0"` : '') +
+        `>${esc(note.text)}</div>`).join('');
+}
+
+layerNotesEl.addEventListener('click', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note) jumpToSetting(note.dataset.setting);
+});
+
+layerNotesEl.addEventListener('keydown', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        jumpToSetting(note.dataset.setting);
+    }
+});
+
 const vehiclesToggle = $('vehicles-toggle');
+layerNoteButtons.vehicles = vehiclesToggle;
 let vehiclesOn = !!uiState.vehiclesOn;
 let lastVehicles = [];
 let vehiclesTimer = null;
@@ -495,17 +530,18 @@ let vehiclesTimer = null;
 const VEHICLES_REFRESH_MS = 15000;
 
 function vehicleIcon(v) {
+    const arrow = v.heading == null ? '' :
+        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
-        className: `vehicle-marker ${esc(v.kind)}`,
-        html: esc(v.line),
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
+        className: 'vehicle-box',
+        html: `<div class="vehicle-marker ${escAttr(v.kind)}">${esc(v.line)}</div>${arrow}`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
     });
 }
 
 function vehicleTooltipHtml(v) {
-    const mode = MODE_LABEL[v.kind] || MODE_LABEL.other;
-    return `<b>${esc(mode)} ${esc(v.line)}</b><br>Rodzaj: ${esc(mode)}`;
+    return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
 }
 
 const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();
@@ -525,26 +561,115 @@ function vehiclesFilter() {
     return lines;
 }
 
+/** Przystanki, które mapa rysuje każdej linii (klucz linii -> zbiór "lat,lon").
+    Linia bez przystanków w odpowiedzi nie trafia do mapy: nie ma jak sprawdzić
+    jej kierunku. W rozkładach nie ma podróży, więc nie ma i kierunku. */
+function vehicleDrawnStops() {
+    const drawn = new Map();
+    if (window.timetableMode && window.timetableMode.vehicleLines()) return drawn;
+    for (const hit of flowHits) {
+        if (!hit.seg.num || !hit.seg.stops_t) continue;
+        const key = vehicleKey(hit.seg.kind, hit.seg.num);
+        if (!drawn.has(key)) drawn.set(key, new Set());
+        for (const [lat, lon] of hit.seg.stops_t) drawn.get(key).add(lat + ',' + lon);
+    }
+    return drawn;
+}
+
+/** Jedzie w naszą stronę, gdy jego dalsza trasa (v.rest) mija przystanek
+    narysowany na mapie tej linii. Bez rozpoznanego kursu - nie wiemy, więc
+    zostaje. */
+function vehicleGoesOurWay(v, drawn) {
+    const stops = drawn.get(vehicleKey(v.kind, v.line));
+    if (!stops || !v.rest) return true;
+    return v.rest.some(([lat, lon]) => stops.has(lat + ',' + lon));
+}
+
+let vehicleStatsBox = null;
+
+/** Statystyki warstwy pojazdów (ustawienie developerskie "vehicles-stats"):
+    tylko to, co front już wie z odpowiedzi serwera. */
+function showVehicleStats(shown, hiddenByDirection) {
+    if (!vehiclesOn || !setting('vehicles-stats')) {
+        if (vehicleStatsBox) vehicleStatsBox.hidden = true;
+        return;
+    }
+    if (!vehicleStatsBox) {
+        vehicleStatsBox = document.createElement('div');
+        vehicleStatsBox.className = 'vehicle-stats';
+        map.getContainer().appendChild(vehicleStatsBox);
+    }
+    const count = pick => lastVehicles.filter(pick).length;
+    const withArrow = count(v => v.heading != null);
+    const lines = [
+        `Z kanału: ${lastVehicles.length}`,
+        `ze strzałką: ${withArrow} (z kursu ${count(v => v.source === 'trip')}, z ruchu ${count(v => v.source === 'route')})`,
+        `bez kierunku: ${lastVehicles.length - withArrow}`,
+        `Pokazane: ${shown.length}, w tym ze strzałką ${shown.filter(v => v.heading != null).length}`,
+    ];
+    if (setting('vehicles-direction')) lines.push(`ukryte filtrem kierunku: ${hiddenByDirection}`);
+    vehicleStatsBox.innerHTML = lines.map(esc).join('<br>');
+    vehicleStatsBox.hidden = false;
+}
+
 function renderVehicles() {
     vehiclesLayer.clearLayers();
-    if (!vehiclesOn) return;
+    if (!vehiclesOn) { showVehicleStats([], 0); return; }
     const only = vehiclesFilter();
+    const byDirection = setting('vehicles-direction');
+    const drawn = byDirection ? vehicleDrawnStops() : new Map();
+    const shown = [];
+    let hiddenByDirection = 0;
     for (const v of lastVehicles) {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
-        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)})
-            .bindTooltip(vehicleTooltipHtml(v))
-            .addTo(vehiclesLayer);
+        if (!vehicleGoesOurWay(v, drawn)) { hiddenByDirection++; continue; }
+        const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)}).addTo(vehiclesLayer);
+        if (v.to) marker.bindTooltip(vehicleTooltipHtml(v));
         marker.tapRank = TAP_RANK.vehicle;
+        shown.push(v);
     }
+    showVehicleStats(shown, hiddenByDirection);
+}
+
+// Po tylu sekundach bez ruchu w danych MPK uznajemy je za nieaktualne. Normalnie
+// pozycje zmieniają się co ~20 s; kanał potrafi zamilknąć na kilkanaście minut.
+const VEHICLES_STALE_SEC = 30;
+// Kiedy (czas przeglądarki) ostatnio przyszły dane, które wciąż się ruszały.
+let vehiclesFreshAt = null;
+
+function setVehiclesStale(ageSec) {
+    setLayerNotes('vehicles', ageSec === null ? [] : [{
+        level: 'warn',
+        text: ageSec === undefined
+            ? 'Brak danych o pojazdach'
+            : `Dane nieaktualne od ${ageSec < 60 ? ageSec + ' s' : Math.round(ageSec / 60) + ' min'}`,
+    }]);
+}
+
+/** Wiek danych po nieudanym zapytaniu: liczony od ostatnich udanych. */
+function vehiclesFailed() {
+    setVehiclesStale(vehiclesFreshAt === null
+        ? undefined : Math.round((Date.now() - vehiclesFreshAt) / 1000));
 }
 
 function loadVehicles() {
     fetch('/api/vehicles').then(r => r.json()).then(data => {
-        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
+        if (!vehiclesOn) return;
+        if (data.error) return vehiclesFailed();   // zostają ostatnie znane pozycje
         lastVehicles = data.vehicles;
         renderVehicles();
-    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+        const staleSec = data.stale_sec ?? 0;   // brak pola = dane uznajemy za świeże
+        vehiclesFreshAt = Date.now() - staleSec * 1000;
+        setVehiclesStale(staleSec > VEHICLES_STALE_SEC ? staleSec : null);
+    }).catch(() => {
+        if (vehiclesOn) vehiclesFailed();
+    });   // kolejna próba za VEHICLES_REFRESH_MS
 }
+
+// Karta w tle ma przycinane timery - po powrocie nie czekamy na następny tik.
+document.addEventListener('visibilitychange', () => {
+    if (vehiclesOn && !document.hidden) loadVehicles();
+});
 
 function setVehiclesOn(on) {
     vehiclesOn = on;
@@ -555,6 +680,8 @@ function setVehiclesOn(on) {
     }
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
+    vehiclesFreshAt = null;
+    setVehiclesStale(null);
     if (on) {
         vehiclesLayer.addTo(map);
         loadVehicles();
@@ -606,6 +733,7 @@ let cityBikeLayer = null;
 let carsTimer = null;
 let bikesTimer = null;
 const carsToggle = $('cars-toggle');
+layerNoteButtons.cars = carsToggle;
 const bikesToggle = $('bikes-toggle');
 const bikesElectricToggle = $('bikes-electric-toggle');
 
@@ -673,6 +801,24 @@ function loadCityBikes() {
     }).catch(() => {});
 }
 
+/** Komunikaty o autach Traficara przy wyniku (zgłoszenie #490). Są tylko przy
+    mapie z wynikiem i włączonych autach: ostrzeżenie, gdy czas wyszukiwania jest
+    poza zasięgiem od teraz (w przód i wstecz) i aut nie ma, oraz info o celu poza
+    strefą - raz na całe wyszukiwanie. */
+function paintCarsNote() {
+    const notes = [];
+    if (carsOn && !plannerSuspended && flowOnScreen()) {
+        if (lastFlow.cars_beyond) {
+            notes.push({level: 'warn', setting: 'cars-horizon',
+                        text: `Auta Traficara tylko do ${setting('cars-horizon')} h od teraz`});
+        }
+        if (lastFlow.cars_dest_in_zone === false) {
+            notes.push({level: 'info', text: 'Cel poza strefą Traficara'});
+        }
+    }
+    setLayerNotes('cars', notes);
+}
+
 /** Postawienie warstwy aut od zera - po przełączniku, po nowej mapie i po jej
     zdjęciu. Zawsze zdejmuje obie wersje i stawia najwyżej jedną, więc nie da
     się zostać z autami z wyniku pod autami z całego miasta. */
@@ -683,6 +829,7 @@ function refreshCarLayer() {
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     hideCarZone();
     refreshZoneLayer();
+    paintCarsNote();
     // W rozkładach mapa jest o linii albo o przystanku - auta i rowery nie
     // mają tam czego dokładać, choćby włącznik został zapalony.
     if (!carsOn || plannerSuspended) return;
@@ -1346,7 +1493,8 @@ function endpointPoints() {
 // Ustawienie to wiersz `.set-row` w index.html i NIC więcej nie trzeba opisywać:
 // rodzaj wynika z kontrolki (przełącznik, suwak, lista wyboru), wartość
 // domyślna z jej `checked`/`value`/`selected` w HTML-u, etykiety z `data-labels`,
-// "tylko DEV" z klasy `dev-only`. Zapamiętywanie, przywracanie, pasek
+// "tylko DEV" z klasy `dev-only` (nazwy, opisy, etykiety i DEV pochodzą z
+// settings.json, serwer wstawia je do wiersza). Zapamiętywanie, przywracanie, pasek
 // "zmienione", kopie pod nagłówkami i statystyki działają na tym opisie
 // jednakowo dla każdego rodzaju. Aplikacja czyta wartość przez setting(id) w
 // chwili użycia; skutek zmiany (jeśli jest) wpisuje się w SETTING_EFFECTS.
@@ -1387,6 +1535,7 @@ for (const row of settingsRows) {
         kind: control.tagName === 'SELECT' ? 'select' : control.type,
         dflt: readControl(control),
         devOnly: row.classList.contains('dev-only'),
+        expired: row.dataset.expired !== undefined,
     };
     SETTINGS.set(info.id, info);
     SETTING_BY_CONTROL.set(control, info);
@@ -1467,12 +1616,14 @@ function storeSetting(key, value) {
 // schowane, więc z pamięci bierze się tylko to, co użytkownik w panelu widzi -
 // schowanej opcji nie miałby czym cofnąć (zgłoszenie #175). Schowana wartość
 // jest tylko pomijana, nie kasowana: po ponownym włączeniu DEV_MODE wraca.
-// To samo dotyczy strojeń wyłączonych stałymi (TUNING).
+// To samo dotyczy strojeń wyłączonych stałymi (TUNING). Ustawienie obsolete,
+// które zniknęło z menu (miesiąc po dacie z settings.json), wraca do domyślnego:
+// zapamiętana wartość jest pomijana, nie kasowana.
 function restoreSettings() {
     const stored = storedSettings();
     for (const info of SETTINGS.values()) {
         const row = info.row;
-        if (stored[info.id] === undefined || (info.devOnly && !devMode)
+        if (stored[info.id] === undefined || (info.devOnly && !devMode) || info.expired
             || (row.dataset.tuning && !TUNING[row.dataset.tuning])) continue;
         writeControl(info.control, stored[info.id]);
     }
@@ -3136,6 +3287,7 @@ if (flowPanel) $('flow-panel-close').addEventListener('click', hideSidePanel);
 // dymek przy kursorze Leaflet trzyma poza zdarzeniami myszy (pointer-events),
 // więc przycisk "trasa" jest tam schowany stylem (patrz style.css).
 if (flowPanelBody) flowPanelBody.addEventListener('click', routeClick);
+if (flowPanelBody) flowPanelBody.addEventListener('click', pushwardClick);
 
 // Odpowiedzi /api/timetable trzymamy pod (przystanek, doba, godzina) - ta
 // sama kropka pytana drugi raz (powrót kursorem, przerysowanie trasy po
@@ -3256,7 +3408,8 @@ function timetableLinesHtml(data, mapSec) {
         `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
-            `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}>` +
+            `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}` +
+            (d.flow === 'end' ? '' : departureAttrs(d, data.stop, s)) + '>' +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
             // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
             (d.trip ? `<span class="tt-live" data-trip="${escAttr(d.trip)}"`
@@ -5079,6 +5232,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
+        car_horizon_h: $('cars-horizon').value,
         newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
         scheme_extra: $('scheme-walks-count').value,
@@ -6401,8 +6555,8 @@ function renderHeadlineOnly(data) {
 }
 
 // Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
-const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, bike_places: [],
-                     bike_places_live: false};
+const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, cars_ahead_sec: null,
+                     cars_beyond: false, bike_places: [], bike_places_live: false};
 
 /** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
     zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
@@ -7457,6 +7611,7 @@ function showRoutes(on) {
     document.body.classList.toggle('routes-off', !on);
     // Ustawienia samej listy bez listy nic nie zmieniają.
     $('transfer-gain').closest('.set-row').hidden = !on;
+    $('via-open').closest('.set-row').hidden = !on;
     const onRoutes = document.body.classList.contains('view-list')
         && !document.body.classList.contains('mode-timetable');
     if (!on && onRoutes) document.querySelector('#view-tabs [data-view="map"]').click();
@@ -7495,6 +7650,11 @@ const SETTING_EFFECTS = {
     'car-overhead': {react: replanSoon(false)},
     'onboard-slack': {react: replanSoon(false)},
     // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
+    'cars-horizon': {react: () => {
+        mapMore = 0;
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
     'car-vans': {react: () => {
         mapMore = 0;
         if (!flowOnScreen()) refreshCarLayer();
@@ -7560,6 +7720,9 @@ const SETTING_EFFECTS = {
 // Przełączniki, które tylko przemalowują z lastFlow, bez zapytania do serwera.
 for (const id of ['time-hover', 'time-ends', 'time-chips', 'time-show-headline', 'time-ride']) {
     SETTING_EFFECTS[id] = {react: () => applyTimeOpts()};
+}
+for (const id of ['vehicles-direction', 'vehicles-stats']) {
+    SETTING_EFFECTS[id] = {react: () => renderVehicles()};
 }
 for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-rides',
                   'car-times', 'debug-why', 'debug-why-seg']) {
@@ -7820,10 +7983,19 @@ function applyDotOpts() {
 const settingsSearch = $('settings-search');
 
 for (const row of settingsRows) {
-    if (row.classList.contains('dev-only')) {
-        const badge = document.createElement('span');
-        badge.className = 'dev-badge';
-        badge.textContent = 'DEV';
+    const tags = [];
+    if (row.classList.contains('dev-only')) tags.push('DEV');
+    if (row.dataset.obsolete !== undefined) tags.push('obsolete');
+    for (const tag of tags) {
+        const badge = document.createElement(tag === 'DEV' ? 'span' : 'a');
+        badge.className = tag === 'DEV' ? 'dev-badge' : 'dev-badge obsolete-badge';
+        badge.textContent = tag;
+        if (tag === 'obsolete') {
+            badge.href = row.dataset.issueUrl;
+            badge.target = '_blank';
+            badge.rel = 'noopener';
+            badge.dataset.tip = 'Korzystasz z tego? Kliknij, żeby dać znać, że jest ważne (otworzy się zgłoszenie na GitHubie)';
+        }
         (row.querySelector('label:not(.button), .set-title') || row).append(badge);
     }
 }
@@ -7887,6 +8059,7 @@ function snapshotSettingsLog() {
     }
 }
 
+const isObsolete = row => row.dataset.obsolete !== undefined;
 const rowScore = row => settingsLog.counts.get(row.dataset.setting) || 0;
 const rowIndex = new Map(settingsRows.map((row, i) => [row, i]));
 // Ustawienie dodane po ostatnim przeliczeniu staje na końcu wśród równych.
@@ -7946,7 +8119,7 @@ for (const type of ['input', 'change']) {
 
 function settingGroups(visible) {
     const byLabel = new Map();
-    for (const row of visible) {
+    for (const row of visible.filter(row => !isObsolete(row))) {
         for (const label of settingsInfo.get(row).labels) {
             if (!byLabel.has(label)) byLabel.set(label, []);
             byLabel.get(label).push(row);
@@ -7963,7 +8136,7 @@ function settingGroups(visible) {
 }
 
 function suggestedSettings(visible) {
-    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row));
+    const usable = id => visible.find(row => row.dataset.setting === id && isCopyable(row) && !isObsolete(row));
     const recent = settingsLog.recent.filter(usable).slice(0, SETTINGS_SUGGEST_RECENT);
     const frequent = [...settingsLog.counts.keys()]
         .filter(id => usable(id) && !recent.includes(id))
@@ -7995,8 +8168,9 @@ function renderSettingsList() {
     const placed = new Set();
     if (needle) {
         // Wyniki jako płaska lista, każde ustawienie raz.
-        nodes.push(...matching);
-        for (const row of matching) placed.add(row);
+        const flat = [...matching.filter(row => !isObsolete(row)), ...matching.filter(isObsolete)];
+        nodes.push(...flat);
+        for (const row of flat) placed.add(row);
     } else {
         const suggested = suggestedSettings(shown);
         if (suggested.length) {
@@ -8014,9 +8188,13 @@ function renderSettingsList() {
             }
             addGroup(nodes, group.label, rows, false);
         }
-        const rest = shown.filter(row => !placed.has(row));
+        const rest = shown.filter(row => !placed.has(row) && !isObsolete(row));
         if (rest.length) addGroup(nodes, 'Inne', rest, false);
         for (const row of rest) placed.add(row);
+        // Przestarzałe na samym dole, zawsze razem, bez względu na swoje tagi.
+        const obsolete = shown.filter(isObsolete);
+        if (obsolete.length) addGroup(nodes, 'Obsolete', obsolete, false);
+        for (const row of obsolete) placed.add(row);
     }
     // Wiersze schowane z innych powodów (albo bez trafienia) zostają w DOM, na końcu.
     nodes.push(...settingsRows.filter(row => !placed.has(row)));
@@ -8052,7 +8230,7 @@ function changedSettingRows(shown) {
 }
 
 function visibleSettingRows() {
-    return settingsRows.filter(row => !row.hidden && (devMode || !row.classList.contains('dev-only')));
+    return settingsRows.filter(row => !row.hidden && row.dataset.expired === undefined && (devMode || !row.classList.contains('dev-only')));
 }
 
 function buildChangedGroup(rows, prefs) {
@@ -8064,6 +8242,12 @@ function buildChangedGroup(rows, prefs) {
     group.open = saved === undefined ? false : !!saved;
     const summary = Object.assign(document.createElement('summary'), {textContent: CHANGED_GROUP});
     summary.dataset.changed = rows.length;
+    const obsolete = rows.filter(isObsolete).length;
+    if (obsolete) {
+        const count = Object.assign(document.createElement('span'), {className: 'obsolete-count', textContent: obsolete});
+        count.title = `${obsolete} ` + plural(obsolete, 'ustawienie przestarzałe', 'ustawienia przestarzałe', 'ustawień przestarzałych');
+        summary.append(count);
+    }
     group.append(summary, ...rows.map(makeSettingCopy));
     group.addEventListener('toggle', () => storeSetting('fold:' + CHANGED_GROUP, group.open));
     return group;
@@ -8275,6 +8459,26 @@ document.addEventListener('click', event => {
     jumpToSetting('dev-access');
 });
 
+$('server-logs-download').addEventListener('click', async event => {
+    if (event.currentTarget.classList.contains('locked')) return;
+    const status = $('server-logs-status');
+    status.textContent = '';
+    try {
+        const response = await fetch('/api/dev/logi', {headers: {'X-Dev-Token': siechniceToken()}});
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+        }
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(await response.blob());
+        link.download = 'metal-planner-server.log';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    } catch (e) {
+        status.textContent = `Nie udało się pobrać logów: ${e.message}`;
+    }
+});
+
 async function fetchSiechniceStatus(init = {}) {
     const response = await fetch('/api/dev/siechnice',
         {...init, headers: {'X-Dev-Token': siechniceToken()}});
@@ -8373,6 +8577,168 @@ if (devMode) {
     fetchSiechniceStatus().then(describeSiechnice).catch(() => {}).then(setupSiechniceLock);
 }
 
+// ------------------------------------- odliczenie w Dynamic Island (#453) --
+//
+// Eksperyment tylko dla dewelopera: klik w godzinę odjazdu na tablicy w rogu
+// wysyła odliczenie do aplikacji PushWard na iPhonie. Klucz integracji leży
+// wyłącznie w localStorage tej przeglądarki; bez niego nic się nie zmienia.
+// Wysyła serwer (/api/dev/pushward), nie przeglądarka - patrz pushward.py.
+const PUSHWARD_KEY = 'pushward-key';
+
+function pushwardKey() {
+    if (!devMode) return '';
+    try { return localStorage.getItem(PUSHWARD_KEY) || ''; } catch { return ''; }
+}
+
+// Unix-owa chwila odjazdu - to samo liczenie co pushward.end_date: doba
+// rozkładu startuje 12 h przed południem czasu warszawskiego, a godziny
+// powyżej 24:00 wypadają po północy. W południe nie ma zmiany czasu, więc
+// przesunięcie z tej chwili jest pewne.
+function warsawOffsetMs(utcMs) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Warsaw', hourCycle: 'h23', year: 'numeric', month: '2-digit',
+        day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(utcMs)).map(p => [p.type, p.value]));
+    return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - utcMs;
+}
+
+function departureEpochSec(day, sec) {
+    const [y, m, d] = day.split('-').map(Number);
+    const noonUtc = Date.UTC(y, m - 1, d, 12);
+    const noonWarsaw = noonUtc - warsawOffsetMs(noonUtc);
+    return noonWarsaw / 1000 - 12 * 3600 + sec;
+}
+
+// iOS kończy Live Activity po 8 h, więc dalszy odjazd nie doczekałby końca
+// odliczenia. Odjazd poza oknem (teraz, teraz + 8 h] nie dostaje atrybutów,
+// więc nie jest ani podkreślony, ani klikalny. Okno sprawdza też serwer.
+const PUSHWARD_WINDOW_SEC = 8 * 3600;
+
+function departureAttrs(d, stop, sec) {
+    const wait = departureEpochSec(mapDate(), sec) - Date.now() / 1000;
+    if (wait <= 0 || wait > PUSHWARD_WINDOW_SEC) return '';
+    return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
+           ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
+           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"` +
+           ` data-dep-stop-id="${escAttr(d.stop_id)}"` +
+           ('siechnice_stop' in d ? ` data-dep-siechnice-stop="${escAttr(d.siechnice_stop || '')}"` : '');
+}
+
+const PUSHWARD_ERRORS = {
+    401: 'zły albo wygasły klucz integracji',
+    403: 'klucz nie ma uprawnień do tworzenia i zmiany aktywności',
+    429: 'limit aktualizacji wyczerpany',
+    0: 'brak połączenia z PushWard',
+};
+
+function describePushwardError(body) {
+    const reason = PUSHWARD_ERRORS[body.status] || body.detail || body.error
+        || `PushWard odpowiedział ${body.status}`;
+    return `${reason}${body.code ? ` (${body.code})` : ''}`;
+}
+
+// Karta ma otwierać aplikację na telefonie, a tam localhost i adresy sieci
+// domowej nie działają, więc z nich link idzie na wdrożoną kopię (main, README).
+const PUBLIC_ORIGIN = 'https://metal-testing.sze.one';
+const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|.+\.local)$/i;
+
+function pushwardLink() {
+    const origin = LOCAL_HOST.test(location.hostname) ? PUBLIC_ORIGIN : location.origin;
+    const query = readableQuery(linkParams());
+    return origin + location.pathname + (query ? '?' + query : '');
+}
+
+// Opcjonalnie klik w kartę otwiera przystanek (ten słupek) w zewnętrznym
+// rozkładzie. Wybiera kurs, nie przystanek: kurs Siechnic ma własny serwis
+// także na słupku wspólnym z MPK we Wrocławiu, reszta jest w Czy na czas.
+// Kursu gminnego bez ustalonego słupka nie wysyłamy do Czy na czas, bo tam go nie ma.
+function pushwardStopLink(dep) {
+    if (dep.depSiechniceStop !== undefined)
+        return dep.depSiechniceStop
+            ? `https://siechnice.kiedyprzyjedzie.pl/#/stops/${dep.depSiechniceStop}/departures`
+            : pushwardLink();
+    return `https://czynaczas.pl/wroclaw?przystanek=${encodeURIComponent(dep.depStopId)}`;
+}
+
+async function pushwardClick(event) {
+    const hour = event.target.closest('[data-dep-sec]');
+    const key = pushwardKey();
+    if (!hour || !key) return;
+    const dep = hour.dataset;
+    if (!confirm(`Wysłać odliczenie do Dynamic Island?\n${dep.depNum} → ${dep.depHeadsign}, ${hour.textContent}`)) return;
+    try {
+        const response = await fetch('/api/dev/pushward', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-PushWard-Key': key},
+            body: JSON.stringify({
+                num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
+                stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
+                link: setting('pushward-link') ? pushwardStopLink(dep) : pushwardLink(),
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) alert(`Nie wysłano: ${describePushwardError(body)}`);
+    } catch {
+        alert('Nie wysłano: brak połączenia z serwerem.');
+    }
+}
+
+if (devMode) {
+    const input = $('pushward-key');
+    const status = $('pushward-status');
+    const show = (text, kind) => {
+        status.textContent = text;
+        status.className = kind ? `field-hint ${kind}` : 'field-hint';
+    };
+    const usage = me => me.used === null || me.limit === null ? ''
+        : ` — wykorzystano ${me.used} z ${me.limit} aktualizacji w tym miesiącu`;
+    // Serwer woła /auth/me; 401/403 to zły klucz, wszystko inne (też blokada
+    // po drodze) znaczy tylko, że nie dało się sprawdzić.
+    const check = async key => {
+        let response;
+        try {
+            response = await fetch('/api/dev/pushward/check', {headers: {'X-PushWard-Key': key}});
+        } catch {
+            return {unreachable: true};
+        }
+        const body = await response.json().catch(() => ({}));
+        if (response.ok) return {me: body};
+        return body.status === 401 || body.status === 403 ? {invalid: true} : {unreachable: true};
+    };
+    const describe = async () => {
+        const key = pushwardKey();
+        document.body.classList.toggle('pushward-on', !!key);
+        if (!key) return show('Wyłączone — bez klucza nic się nie zmienia.');
+        show('Włączone — klucz zapisany na tym urządzeniu.', 'ok');
+        const result = await check(key);
+        if (result.me && pushwardKey() === key) show(`Włączone${usage(result.me)}.`, 'ok');
+    };
+    $('pushward-save').addEventListener('click', async () => {
+        const key = input.value.trim();
+        if (!key) return;
+        show('Sprawdzanie klucza…');
+        const result = await check(key);
+        if (result.invalid) return show('Nieprawidłowy klucz.', 'bad');
+        if (result.unreachable) return show('Nie dało się sprawdzić klucza — klucz nie został zapisany.', 'bad');
+        try {
+            localStorage.setItem(PUSHWARD_KEY, key);
+        } catch {
+            return show('Przeglądarka nie pozwala zapisać klucza.', 'bad');
+        }
+        input.value = '';
+        document.body.classList.add('pushward-on');
+        show(`Włączone${usage(result.me)}.`, 'ok');
+    });
+    $('pushward-clear').addEventListener('click', () => {
+        try { localStorage.removeItem(PUSHWARD_KEY); } catch { /* i tak nie ma czego usuwać */ }
+        input.value = '';
+        describe();
+    });
+    // Licznik odświeżamy przy wejściu na stronę, nie przy otwarciu panelu:
+    // ustawienia nie mają zdarzenia otwarcia, więc to najprostsze miejsce.
+    describe();
+}
+
 // Opis w ⓘ zamiast akapitu (#225) - w Ustawieniach i w rozkładach. Dymek wisi
 // na <body>: panele przewijają się w sobie i przycięłyby go na krawędzi. Klik
 // też go pokazuje - na telefonie nie ma najechania - i nie przełącza opcji,
@@ -8393,18 +8759,18 @@ function showInfoTip(icon) {
 }
 
 document.addEventListener('mouseover', event => {
-    const icon = event.target.closest('.info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('mouseout', event => {
-    if (event.target.closest('.info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('focusin', event => {
-    const icon = event.target.closest('.info');
+    const icon = event.target.closest('.info, .obsolete-badge');
     if (icon) showInfoTip(icon);
 });
 document.addEventListener('focusout', event => {
-    if (event.target.closest('.info')) infoTip.hidden = true;
+    if (event.target.closest('.info, .obsolete-badge')) infoTip.hidden = true;
 });
 document.addEventListener('click', event => {
     const icon = event.target.closest('.info');
@@ -8510,3 +8876,25 @@ window.plannerBridge = {
 };
 
 }
+
+// X w polach tekstowych (#508): czyści pole jak ręczne skasowanie (zdarzenie input) i zostawia w nim kursor.
+// Widoczność robi CSS przez :placeholder-shown, więc działa też przy wartościach ustawionych z kodu.
+document.addEventListener('DOMContentLoaded', () => {
+    for (const id of ['start', 'end', 'place-where', 'ob-line']) {
+        const input = document.getElementById(id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'field-clear';
+        button.title = 'Wyczyść';
+        button.setAttribute('aria-label', 'Wyczyść pole');
+        button.innerHTML = '&#10005;';
+        if (input.classList.contains('with-action')) button.classList.add('beside-action');
+        button.addEventListener('mousedown', e => e.preventDefault());
+        button.addEventListener('click', () => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        });
+        input.after(button);
+    }
+});
