@@ -11,8 +11,9 @@
     --car: #7b2ff2;                  /* Traficar - ten sam fiolet, co na aucie */
     --other: #6a1b9a;
     /* Elementy linii biorą kolor rodzaju przez var(--lc, ...): `--lc` to kolor
-       jednej linii, a `--lc-ink` numeru na nim, wpisywane na elemencie przy
-       ustawieniu „Kolory linii” na B (patrz lineVar w app.js). */
+       jednej linii, `--lc-ink` numeru na nim, a `--lc-text` numeru pisanego
+       nim na białym - wpisywane na elemencie przez ustawienie „Kolory linii”
+       (patrz lineVar w app.js). */
     --bike: #ef6c00;                 /* rower miejski (WRM) - patrz bikes.py */
     --walk: #455a64;   /* przejście pieszo - ten sam kolor, co kreskowana
                           linia dojścia na mapie (patrz legLayers) */
@@ -1195,7 +1196,7 @@ body.routes-off #results .notice.loading { display: none; }
 .badge.tram { background: var(--lc, var(--tram)); }
 .badge.bus { background: var(--lc, var(--bus)); }
 .badge.train { background: var(--lc, var(--train)); }
-.badge.cable { background: var(--lc, var(--cable)); }
+.badge.cable { background: var(--cable); }
 .badge.bike { background: var(--bike); }
 .badge.car { background: var(--car); }
 
@@ -1365,7 +1366,7 @@ body.routes-off #results .notice.loading { display: none; }
 .tl-ride.tram .tl-dot { background: var(--lc, var(--tram)); }
 .tl-ride.bus .tl-dot { background: var(--lc, var(--bus)); }
 .tl-ride.train .tl-dot { background: var(--lc, var(--train)); }
-.tl-ride.cable .tl-dot { background: var(--lc, var(--cable)); }
+.tl-ride.cable .tl-dot { background: var(--cable); }
 .tl-ride.bike .tl-dot { background: var(--bike); }
 .tl-ride.car .tl-dot { background: var(--car); }
 
@@ -1465,7 +1466,7 @@ body.routes-off #results .notice.loading { display: none; }
 .tl-via.tram .tl-dot { background: var(--lc, var(--tram)); color: var(--lc, var(--tram)); }
 .tl-via.bus .tl-dot { background: var(--lc, var(--bus)); color: var(--lc, var(--bus)); }
 .tl-via.train .tl-dot { background: var(--lc, var(--train)); color: var(--lc, var(--train)); }
-.tl-via.cable .tl-dot { background: var(--lc, var(--cable)); color: var(--lc, var(--cable)); }
+.tl-via.cable .tl-dot { background: var(--cable); color: var(--cable); }
 
 .tl-via .tl-dot::before {
     content: "";
@@ -1521,11 +1522,11 @@ body.routes-off #results .notice.loading { display: none; }
 }
 
 .line-badge.car { color: var(--car); border-color: var(--car); }
-.line-badge.tram { color: var(--lc, var(--tram)); border-color: var(--lc, var(--tram)); }
-.line-badge.bus { color: var(--lc, var(--bus)); border-color: var(--lc, var(--bus)); }
-.line-badge.train { color: var(--lc, var(--train)); border-color: var(--lc, var(--train)); }
-.line-badge.cable { color: var(--lc, var(--cable)); border-color: var(--lc, var(--cable)); }
-.line-badge.other { color: var(--lc, var(--other)); border-color: var(--lc, var(--other)); }
+.line-badge.tram { color: var(--lc-text, var(--lc, var(--tram))); border-color: var(--lc, var(--tram)); }
+.line-badge.bus { color: var(--lc-text, var(--lc, var(--bus))); border-color: var(--lc, var(--bus)); }
+.line-badge.train { color: var(--lc-text, var(--lc, var(--train))); border-color: var(--lc, var(--train)); }
+.line-badge.cable { color: var(--cable); border-color: var(--cable); }
+.line-badge.other { color: var(--lc-text, var(--lc, var(--other))); border-color: var(--lc, var(--other)); }
 .line-badge.bike { color: var(--bike); border-color: var(--bike); }
 
 .line-badge.solid {
@@ -1540,7 +1541,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-badge.solid.tram { background: var(--lc, var(--tram)); }
 .line-badge.solid.bus { background: var(--lc, var(--bus)); }
 .line-badge.solid.train { background: var(--lc, var(--train)); }
-.line-badge.solid.cable { background: var(--lc, var(--cable)); }
+.line-badge.solid.cable { background: var(--cable); }
 .line-badge.solid.car { background: var(--car); }
 .line-badge.solid.other { background: var(--lc, var(--other)); }
 .line-badge.solid.bike { background: var(--bike); }
@@ -1579,7 +1580,7 @@ body.routes-off #results .notice.loading { display: none; }
 .vehicle-arrow.tram { color: var(--lc, var(--tram)); }
 .vehicle-arrow.bus { color: var(--lc, var(--bus)); }
 .vehicle-arrow.train { color: var(--lc, var(--train)); }
-.vehicle-arrow.cable { color: var(--lc, var(--cable)); }
+.vehicle-arrow.cable { color: var(--cable); }
 .vehicle-arrow.other { color: var(--lc, var(--other)); }
 
 .vehicle-marker {
@@ -1600,7 +1601,7 @@ body.routes-off #results .notice.loading { display: none; }
 .vehicle-marker.tram { background: var(--lc, var(--tram)); }
 .vehicle-marker.bus { background: var(--lc, var(--bus)); }
 .vehicle-marker.train { background: var(--lc, var(--train)); }
-.vehicle-marker.cable { background: var(--lc, var(--cable)); }
+.vehicle-marker.cable { background: var(--cable); }
 .vehicle-marker.other { background: var(--lc, var(--other)); }
 
 /* Kropka „tu jesteś" (#410): niebieska z białą obwódką jak w aplikacjach map. */
@@ -1695,11 +1696,11 @@ body.routes-off #results .notice.loading { display: none; }
         to right, #c5cfda 0 3px, transparent 3px 6px) content-box;
 }
 
-.line-chip.tram { color: var(--lc, var(--tram)); }
-.line-chip.bus { color: var(--lc, var(--bus)); }
-.line-chip.train { color: var(--lc, var(--train)); }
-.line-chip.cable { color: var(--lc, var(--cable)); }
-.line-chip.other { color: var(--lc, var(--other)); }
+.line-chip.tram { color: var(--lc-text, var(--lc, var(--tram))); }
+.line-chip.bus { color: var(--lc-text, var(--lc, var(--bus))); }
+.line-chip.train { color: var(--lc-text, var(--lc, var(--train))); }
+.line-chip.cable { color: var(--cable); }
+.line-chip.other { color: var(--lc-text, var(--lc, var(--other))); }
 .line-chip.bike { color: var(--bike); }
 
 .line-chip.picked,
@@ -1711,7 +1712,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-chip.picked.train,
 .line-cluster .line-chip.train:hover { background: var(--lc, var(--train)); }
 .line-chip.picked.cable,
-.line-cluster .line-chip.cable:hover { background: var(--lc, var(--cable)); }
+.line-cluster .line-chip.cable:hover { background: var(--cable); }
 .line-chip.picked.other,
 .line-cluster .line-chip.other:hover { background: var(--lc, var(--other)); }
 
@@ -1725,11 +1726,11 @@ body.routes-off #results .notice.loading { display: none; }
     font-weight: bold;
 }
 
-.flow-tip-line.tram { color: var(--lc, var(--tram)); }
-.flow-tip-line.bus { color: var(--lc, var(--bus)); }
-.flow-tip-line.train { color: var(--lc, var(--train)); }
-.flow-tip-line.cable { color: var(--lc, var(--cable)); }
-.flow-tip-line.other { color: var(--lc, var(--other)); }
+.flow-tip-line.tram { color: var(--lc-text, var(--lc, var(--tram))); }
+.flow-tip-line.bus { color: var(--lc-text, var(--lc, var(--bus))); }
+.flow-tip-line.train { color: var(--lc-text, var(--lc, var(--train))); }
+.flow-tip-line.cable { color: var(--cable); }
+.flow-tip-line.other { color: var(--lc-text, var(--lc, var(--other))); }
 
 .flow-tip-row {
     display: flex;
@@ -1865,7 +1866,7 @@ body.routes-off #results .notice.loading { display: none; }
 .line-cluster .line-chip-slot:hover .line-chip.tram { background: var(--lc, var(--tram)); }
 .line-cluster .line-chip-slot:hover .line-chip.bus { background: var(--lc, var(--bus)); }
 .line-cluster .line-chip-slot:hover .line-chip.train { background: var(--lc, var(--train)); }
-.line-cluster .line-chip-slot:hover .line-chip.cable { background: var(--lc, var(--cable)); }
+.line-cluster .line-chip-slot:hover .line-chip.cable { background: var(--cable); }
 .line-cluster .line-chip-slot:hover .line-chip.other { background: var(--lc, var(--other)); }
 .line-cluster .line-chip-slot:hover .chip-time { color: var(--ink); }
 

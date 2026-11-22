@@ -359,35 +359,48 @@ const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
 
 // Autobusy spoza MPK (na razie siechnickie) mają w prototypie A ustawienia
-// „Kolory linii” zieleń pociągów. Rodzaj mają ten sam, co MPK, więc poznaje
-// się je po numerze z listy linii (patrz timetables.all_lines). Bez bazy
-// rozkładów listy nie ma na stronie.
+// „Kolory linii” zieleń pociągów. Rodzaj mają ten sam, co MPK, a przewoźnika
+// zna tylko lista linii (patrz timetables.all_lines). Bez bazy rozkładów
+// listy nie ma na stronie.
 const lineNamesJson = document.getElementById('line-names');
-const SIECHNICE_LINES = new Set((lineNamesJson ? JSON.parse(lineNamesJson.textContent) : [])
-    .filter(line => line.siechnice).map(line => line.num));
+const LINE_LIST = lineNamesJson ? JSON.parse(lineNamesJson.textContent) : [];
+const SIECHNICE_LINES = new Set(LINE_LIST.filter(line => line.operator === 'siechnice')
+    .map(line => line.num));
 const isSiechniceBus = (kind, num) => kind === 'bus' && SIECHNICE_LINES.has(String(num));
 
-// Prototyp B ustawienia „Kolory linii”: tramwaj i autobus mają swój losowy
-// kolor, liczony z numeru stałym ziarnem - ta sama linia wygląda tak samo
-// wszędzie i po odświeżeniu. Reszta zostaje przy kolorach z A, więc odcienie
-// zbliżone do nich (zieleń pociągu, pomarańcz roweru, fiolet Traficara) są
-// wycięte z koła barw, a nasycenie od 55% w górę nie daje
-// szarości przejścia pieszo. Kolor ma co najmniej 3:1 kontrastu z bielą -
-// widać go na mapie i da się nim pisać na białym; numer na kolorowej
-// plakietce jest białym albo ciemnym, czym da większy kontrast.
+// Prototyp B ustawienia „Kolory linii”: każdy tramwaj i autobus ma swój kolor.
+// Kolory nie są losowane każdy osobno, bo przy ~150 liniach wiele wypadało
+// prawie takich samych: paleta ma tyle kolorów, ile linii na liście, każdy
+// kolejny najdalszy (w OKLab, czyli tak, jak oko widzi różnicę) od już
+// wybranych, a linie biorą je po kolei w porządku skrótu numeru ze stałym
+// ziarnem - ta sama lista daje te same kolory wszędzie i po odświeżeniu.
+// Z palety wypada to, co wygląda jak kolor roweru (pomarańcz), Traficara
+// (fiolet aż po purpurę) i przejścia pieszo (szarość), oraz kolory za jasne,
+// żeby linię było widać na mapie. Numer na kolorowej plakietce jest biały albo
+// czarny - ten, który daje co najmniej 4,5:1; numer pisany kolorem linii na
+// białym bierze, gdy trzeba, ciemniejszy wariant tego samego odcienia.
 // Kolor wychodzi jako #rrggbb, bo schemat robi z niego id grotu.
 const LINE_COLOR_SEED = 0x811c9dc5;
-const RANDOM_COLOR_KINDS = new Set(['tram', 'bus']);
-const RESERVED_HUES = [[12, 42], [103, 143], [248, 292]];   // stopnie, rosnąco
-const DARK_INK = '#16202b';                                             // --ink w style.css
+const OWN_PALETTE_KINDS = new Set(['tram', 'bus']);
+const EXCLUDED_HUES = [[12, 42], [245, 315]];        // odcień HSL: pomarańcz, fiolet i purpura
+const MIN_CHROMA = 0.09;                             // OKLCH; niżej to już szarość
+// Kolory, do których linia nie może się zbliżyć nawet poza tymi odcieniami.
+const RESERVED_COLORS = [LINE_COLORS.bike, LINE_COLORS.car, LINE_COLORS.other, WALK_COLOR];
+const MIN_RESERVED_DISTANCE = 0.1;                   // w OKLab
+const MAX_LUMINANCE = 0.45;                          // jaśniejszy ginie na mapie
+const MIN_TEXT_CONTRAST = 4.5;
 const byLineColors = () => setting('line-colors') === 'line';
-const randomColor = kind => byLineColors() && RANDOM_COLOR_KINDS.has(kind);
+const paletteColor = kind => byLineColors() && OWN_PALETTE_KINDS.has(kind);
+
+const toLinear = c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+const fromLinear = c => c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+
+function hexRgb(hex) {
+    return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+}
 
 function luminance(hex) {
-    const [r, g, b] = [1, 3, 5].map(i => {
-        const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
+    const [r, g, b] = hexRgb(hex).map(toLinear);
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
@@ -396,55 +409,138 @@ const contrast = (a, b) => {
     return (hi + 0.05) / (lo + 0.05);
 };
 
-function hslHex(hue, sat, light) {
-    const a = sat * Math.min(light, 1 - light);
-    const channel = n => {
-        const k = (n + hue / 30) % 12;
-        const c = light - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-        return Math.round(255 * c).toString(16).padStart(2, '0');
-    };
-    return '#' + channel(0) + channel(8) + channel(4);
+/** OKLCH -> #rrggbb albo null, gdy kolor nie mieści się w sRGB. */
+function oklchHex(l, c, h) {
+    const a = c * Math.cos(h * Math.PI / 180), b = c * Math.sin(h * Math.PI / 180);
+    const l_ = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+    const m_ = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+    const s_ = (l - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+    const rgb = [
+        4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+        -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+        -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_,
+    ];
+    if (rgb.some(v => v < -1e-4 || v > 1 + 1e-4)) return null;
+    return '#' + rgb.map(v => Math.round(255 * fromLinear(Math.min(1, Math.max(0, v))))
+        .toString(16).padStart(2, '0')).join('');
 }
 
-const lineColorCache = new Map();
+function hexOklab(hex) {
+    const [r, g, b] = hexRgb(hex).map(toLinear);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363288953 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
 
-/** {color, ink} losowego koloru linii o tym numerze. */
-function randomLineColor(num) {
-    const key = String(num);
-    if (lineColorCache.has(key)) return lineColorCache.get(key);
+function hslHue(hex) {
+    const [r, g, b] = hexRgb(hex);
+    const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+    if (d === 0) return 0;
+    const h = max === r ? (g - b) / d : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+}
+
+const lineSeedHash = num => {
     let h = LINE_COLOR_SEED;
-    for (const ch of key) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
-    // Wolne odcinki koła zsunięte w jeden, więc każdy wolny odcień jest równie
-    // prawdopodobny, a zarezerwowanego nie da się wylosować.
-    const free = 360 - RESERVED_HUES.reduce((sum, [from, to]) => sum + to - from, 0);
-    let hue = h % free;
-    for (const [from, to] of RESERVED_HUES) if (hue >= from) hue += to - from;
-    const sat = (55 + (h >>> 9) % 46) / 100;
-    let light = (28 + (h >>> 17) % 35) / 100;
-    let color = hslHex(hue, sat, light);
-    while (contrast(color, '#ffffff') < 3) {
-        light -= 0.02;
-        color = hslHex(hue, sat, light);
+    for (const ch of String(num)) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+    return h;
+};
+
+/** Kandydaci z siatki OKLCH, którzy przechodzą wszystkie wykluczenia. */
+function paletteCandidates() {
+    const reserved = RESERVED_COLORS.map(hexOklab);
+    const found = [];
+    for (let l = 0.30; l <= 0.86; l += 0.02) {
+        for (let c = MIN_CHROMA; c <= 0.32; c += 0.02) {
+            for (let h = 0; h < 360; h += 3) {
+                const hex = oklchHex(l, c, h);
+                if (!hex || luminance(hex) > MAX_LUMINANCE) continue;
+                const hue = hslHue(hex);
+                if (EXCLUDED_HUES.some(([from, to]) => hue >= from && hue <= to)) continue;
+                const lab = hexOklab(hex);
+                if (reserved.some(r => Math.hypot(r[0] - lab[0], r[1] - lab[1], r[2] - lab[2]) < MIN_RESERVED_DISTANCE)) continue;
+                found.push({hex, lab});
+            }
+        }
     }
-    const ink = contrast(color, '#ffffff') >= contrast(color, DARK_INK) ? '#fff' : DARK_INK;
-    const result = {color, ink};
-    lineColorCache.set(key, result);
-    return result;
+    return found;
+}
+
+/** `count` kolorów, każdy następny najdalszy od już wybranych. */
+function spreadPalette(count) {
+    const pool = paletteCandidates();
+    const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    const nearest = pool.map(() => Infinity);
+    const chosen = [];
+    let next = 0;
+    while (chosen.length < count) {
+        const pick = pool[next];
+        chosen.push(pick.hex);
+        next = 0;
+        for (let i = 0; i < pool.length; i++) {
+            nearest[i] = Math.min(nearest[i], dist(pool[i].lab, pick.lab));
+            if (nearest[i] > nearest[next]) next = i;
+        }
+    }
+    return {chosen, pool};
+}
+
+function textVariant(hex) {
+    const [l, a, b] = hexOklab(hex);
+    const c = Math.hypot(a, b), h = Math.atan2(b, a) * 180 / Math.PI;
+    for (let dark = l; dark > 0; dark -= 0.01) {
+        const candidate = oklchHex(dark, c, h) || oklchHex(dark, c * 0.8, h);
+        if (candidate && contrast(candidate, '#ffffff') >= MIN_TEXT_CONTRAST) return candidate;
+    }
+    return '#000000';
+}
+
+function paletteEntry(hex) {
+    return {
+        color: hex,
+        ink: contrast(hex, '#ffffff') >= MIN_TEXT_CONTRAST ? '#fff' : '#000',
+        text: contrast(hex, '#ffffff') >= MIN_TEXT_CONTRAST ? hex : textVariant(hex),
+    };
+}
+
+let linePalette = null;
+
+/** {color, ink, text} linii o tym numerze; paleta liczy się raz, przy pierwszym użyciu. */
+function paletteLineColor(num) {
+    if (!linePalette) {
+        const nums = [...new Set(LINE_LIST.filter(line => OWN_PALETTE_KINDS.has(line.mode))
+            .map(line => line.num))].sort((a, b) => lineSeedHash(a) - lineSeedHash(b) || (a < b ? -1 : 1));
+        const {chosen, pool} = spreadPalette(Math.max(nums.length, 1));
+        linePalette = {byNum: new Map(nums.map((n, i) => [n, paletteEntry(chosen[i])])), pool, extra: new Map()};
+    }
+    const key = String(num);
+    if (linePalette.byNum.has(key)) return linePalette.byNum.get(key);
+    // Linia spoza listy (np. pojazd na żywo z numerem, którego rozkład nie zna)
+    // bierze kolor z całej puli, tylko po skrócie numeru.
+    if (!linePalette.extra.has(key)) {
+        const {pool} = linePalette;
+        linePalette.extra.set(key, paletteEntry(pool[lineSeedHash(key) % pool.length].hex));
+    }
+    return linePalette.extra.get(key);
 }
 
 function lineColor(kind, num) {
-    if (randomColor(kind)) return randomLineColor(num).color;
+    if (paletteColor(kind)) return paletteLineColor(num).color;
     if (isSiechniceBus(kind, num)) return LINE_COLORS.train;
     return LINE_COLORS[kind] || LINE_COLORS.other;
 }
 
 /** Dla elementu z klasą rodzaju linii: arkusz bierze z `--lc` kolor linii
-    przed kolorem rodzaju, a z `--lc-ink` kolor numeru na nim, więc linia
-    w kolorze swojego rodzaju nic tu nie dostaje. */
+    przed kolorem rodzaju, z `--lc-ink` kolor numeru na nim, a z `--lc-text`
+    kolor numeru pisanego tym kolorem na białym - więc linia w kolorze swojego
+    rodzaju nic tu nie dostaje. */
 function lineVar(kind, num) {
-    if (randomColor(kind)) {
-        const {color, ink} = randomLineColor(num);
-        return `--lc: ${color}; --lc-ink: ${ink}; `;
+    if (paletteColor(kind)) {
+        const {color, ink, text} = paletteLineColor(num);
+        return `--lc: ${color}; --lc-ink: ${ink}; --lc-text: ${text}; `;
     }
     return isSiechniceBus(kind, num) ? `--lc: ${LINE_COLORS.train}; ` : '';
 }

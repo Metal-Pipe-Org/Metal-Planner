@@ -82,12 +82,13 @@ def all_lines():
             continue
         mode = _mode_of(route_type)
         # Front maluje autobusy spoza MPK inaczej (ustawienie „Kolory linii”),
-        # a rodzaj mają ten sam - po tym polu je rozpoznaje.
-        seen[(num, mode)] = route_id.startswith(siechnice.ID_PREFIX)
+        # a rodzaj mają ten sam. Baza nie trzyma przewoźnika, ale trasy
+        # siechnickiego przewoźnika mają własny prefiks (patrz siechnice.py).
+        seen[(num, mode)] = "siechnice" if route_id.startswith(siechnice.ID_PREFIX) else None
     return [
         {"num": num, "mode": mode, "label": f"{MODE_LABEL[mode]} {num}",
-         **({"siechnice": True} if outside else {})}
-        for (num, mode), outside in sorted(seen.items(), key=lambda k: _line_sort_key(*k[0]))
+         **({"operator": operator} if operator else {})}
+        for (num, mode), operator in sorted(seen.items(), key=lambda k: _line_sort_key(*k[0]))
     ]
 
 
