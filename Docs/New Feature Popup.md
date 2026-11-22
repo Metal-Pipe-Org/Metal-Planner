@@ -1,15 +1,15 @@
 # Scope
 One time pop-ups which show that a new feature has been added.
 # Design
-Should always sit on top of the app. Nothing in the app should know that it exists or care about it. It should be working as an extension.
+Always sit on top of the app. Nothing in the app knows that it exists or care about it. Imagine it working as an extension.
 
-These should have their own registry, where every one of those is described:
+These have their own registry, where every one of those is described:
 - Title
 - Description (show to the user)
 - Place
 - Expiry (default 1 month) (from 2 weeks to indefinitely)
 
-Visually they should be consistent with the app style. Show a title and a description, an X button(which dismisses them)
+Visually they are to be consistent with the app style. Show a title and a description, an X button(which dismisses them)
 If the target place is not visible on "home screen" a "show me" button appears which opens the place in the app.
 
 They show only once. If you dismiss it, ignore it or act, it should always count as it being acknowledged and no longer shown.
