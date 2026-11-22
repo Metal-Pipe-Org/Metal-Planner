@@ -1,17 +1,3 @@
 {
-  "popups": [
-    {
-      "id": "kierunek-pojazdow",
-      "title": "Kierunek jazdy pojazdów",
-      "description": "Włącz ◉ — strzałka przy autobusie i tramwaju pokazuje, w którą stronę jedzie.",
-      "place": "#vehicles-toggle"
-    },
-    {
-      "id": "szukanie-ustawien",
-      "title": "Szukanie w ustawieniach",
-      "description": "Wpisz kawałek nazwy, a lista ustawień zawęzi się do pasujących.",
-      "place": "#settings-search",
-      "expiry": "never"
-    }
-  ]
+  "popups": []
 }
