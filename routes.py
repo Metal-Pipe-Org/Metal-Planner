@@ -7,7 +7,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from flask import Response, abort, jsonify, render_template, request
+from flask import Response, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
@@ -20,6 +20,7 @@ import pkp
 import pkp_live
 import polinka
 import pushward
+import serverlog
 import settings_registry
 import siechnice
 import timetables
@@ -27,7 +28,7 @@ import traficar
 import update_gtfs
 import vehicles
 import warmup
-from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
+from planner import (DEFAULT_CAR_HORIZON_H, TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
                      plan_route, stop_timetable)
 
 # Ile najwyżej ostatni etap wyszukiwania czeka na świeże rowery i auta - wynik
@@ -118,6 +119,18 @@ def _float_arg(name):
         return _finite(request.args.get(name, ""))
     except ValueError:
         return None
+
+
+def _car_horizon_arg():
+    """Zasięg aut Traficara w godzinach: liczba, None dla "none" (bez limitu)
+    albo domyślny, gdy parametru nie ma lub jest zepsuty."""
+    raw = request.args.get("car_horizon_h", "")
+    if raw == "none":
+        return None
+    try:
+        return _finite(raw)
+    except ValueError:
+        return DEFAULT_CAR_HORIZON_H
 
 
 def _point_arg(prefix):
@@ -320,7 +333,8 @@ def init_routes(app):
         Front zawęża pojazdy do linii narysowanych na mapie.
         """
         try:
-            return jsonify({"vehicles": vehicles.get_vehicles()})
+            found = vehicles.get_vehicles()
+            return jsonify({"vehicles": found, "stale_sec": vehicles.stale_sec()})
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
         except (OSError, ValueError) as e:
@@ -502,6 +516,9 @@ def init_routes(app):
             car_count=_float_arg("cars"),
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",
+            # Do ilu godzin naprzód od teraz pokazywać auta ("none" = bez
+            # limitu); bez parametru obowiązuje domyślny zasięg.
+            car_horizon_h=_car_horizon_arg(),
             # Nowa mapa rośnie za przełącznikiem pod zębatką (sekcja DEV
             # "Eksperymenty"); stara zostaje domyślna.
             new_map=request.args.get("newmap") == "1",
@@ -625,6 +642,18 @@ def init_routes(app):
             "used": me.get("live_activity_updates_used"),
             "limit": me.get("live_activity_updates_limit"),
         })
+
+    @app.route("/api/dev/logi")
+    def api_dev_logi():
+        """Plik logu serwera (patrz serverlog.py) - za tym samym kodem z Discorda
+        co wgrywanie Siechnic."""
+        if not config.dev_mode():
+            abort(404)
+        if not devcode.valid_token(request.headers.get("X-Dev-Token", "")):
+            return jsonify({"error": "Logi są chronione - odblokuj je kodem z Discorda."}), 403
+        serverlog.get_logger()
+        return send_file(serverlog.LOG_PATH, mimetype="text/plain", as_attachment=True,
+                         download_name="metal-planner-server.log")
 
     @app.route("/api/dev/siechnice", methods=["GET", "POST"])
     def api_dev_siechnice():

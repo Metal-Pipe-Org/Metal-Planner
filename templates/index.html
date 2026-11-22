@@ -254,6 +254,8 @@
         </div>
     </header>
 
+    <div id="layer-notes" class="layer-notes" role="status" hidden></div>
+
     {% if data_error %}
 
     <div class="card"><div class="notice error">{{ data_error }}</div></div>
@@ -533,6 +535,19 @@
 </nav>
 
 {#
+  Wyłączenie dźwięku rury wymaga trzech potwierdzeń z rzędu (#447); jedno okno
+  służy za wszystkie trzy, treść i przyciski podmienia app.js.
+#}
+<dialog id="pipe-off-dialog" class="card" aria-labelledby="pipe-off-text">
+    <span id="pipe-off-joke" class="joke-badge" hidden>joke</span>
+    <p id="pipe-off-text"></p>
+    <div class="pipe-off-actions">
+        <button type="button" id="pipe-off-cancel" class="button">Anuluj</button>
+        <button type="button" id="pipe-off-ok" class="button primary"></button>
+    </div>
+</dialog>
+
+{#
   Pod ikoną, a nie na pasku: to rzeczy o samej aplikacji, do których zagląda
   się raz - kto szuka, ten znajdzie, a pasek zostaje dla mapy (zgłoszenie #173).
 #}
@@ -705,7 +720,7 @@
       dostaje każde takie ustawienie samo (blok „USTAWIENIA" w app.js).
       Aplikacja czyta wartość przez setting(id); jeśli zmiana ma coś zrobić od
       razu, wpis dopisuje się w SETTING_EFFECTS. `data-tuning` oznacza
-      strojenie, które chowa stała w app.js (LOOK_TUNING, SOUND_TUNING).
+      strojenie, które chowa stała w app.js (LOOK_TUNING).
     #}
     <input type="search" id="settings-search" class="settings-search"
            placeholder="Szukaj ustawienia" aria-label="Szukaj ustawienia" autocomplete="off">
@@ -728,6 +743,16 @@
     <label class="dev-check{{ dev('tt-past') }} set-row" {{ attrs('tt-past') }}>
             <input type="checkbox" id="tt-past" checked> {{ name('tt-past') }} {{ info('tt-past') }}
         </label>
+    <div class="field{{ dev('cars-horizon') }} set-row" {{ attrs('cars-horizon') }}>
+        <label for="cars-horizon">
+            {{ name('cars-horizon') }} {{ info('cars-horizon') }}
+        </label>
+        <select id="cars-horizon">
+            <option value="3" selected>3 h</option>
+            <option value="24">24 h</option>
+            <option value="none">bez limitu</option>
+        </select>
+    </div>
     <label class="dev-check{{ dev('car-vans') }} set-row" {{ attrs('car-vans') }}>
             <input type="checkbox" id="car-vans"> {{ name('car-vans') }} {{ info('car-vans') }}
         </label>
@@ -871,13 +896,11 @@
     <label class="dev-check{{ dev('debug-why-seg') }} set-row" {{ attrs('debug-why-seg') }}>
             <input type="checkbox" id="debug-why-seg"> {{ name('debug-why-seg') }} {{ info('debug-why-seg') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="vehicles-direction" data-labels="Eksperyment, Mapa, Pojazdy">
-            <input type="checkbox" id="vehicles-direction"> Pojazdy tylko w naszą stronę (◉)
-            <span class="info" tabindex="0" role="button"
-                  data-tip="Przy narysowanej mapie ◉ ukrywa pojazdy jadące w przeciwną stronę; zostają jadące w naszą i te bez rozpoznanego kursu.">i</span>
+    <label class="dev-check{{ dev('vehicles-direction') }} set-row" {{ attrs('vehicles-direction') }}>
+            <input type="checkbox" id="vehicles-direction"> {{ name('vehicles-direction') }} {{ info('vehicles-direction') }}
         </label>
-    <label class="dev-check dev-only set-row" data-setting="vehicles-stats" data-labels="Debug, Mapa, Pojazdy">
-            <input type="checkbox" id="vehicles-stats"> Statystyki pojazdów na mapie (◉)
+    <label class="dev-check{{ dev('vehicles-stats') }} set-row" {{ attrs('vehicles-stats') }}>
+            <input type="checkbox" id="vehicles-stats"> {{ name('vehicles-stats') }} {{ info('vehicles-stats') }}
         </label>
 
 {#
@@ -934,14 +957,14 @@
         </p>
     </div>
 
-{#
-      USTAWIENIE SCHOWANE (SOUND_TUNING = false w app.js) — na razie dźwięk po
-      prostu jest, bez ustawienia. Atrybut `hidden` wiersza to tylko stan
-      startowy: app.js zdejmuje go albo zostawia, zależnie od tej stałej.
-    #}
-    <label class="dev-check{{ dev('sound-pipe') }} set-row" {{ attrs('sound-pipe') }} data-tuning="sound" hidden>
-            <input type="checkbox" id="sound-pipe" checked> {{ name('sound-pipe') }} {{ info('sound-pipe') }}
-        </label>
+    <label class="dev-check{{ dev('sound-level') }} set-row" {{ attrs('sound-level') }}>
+        {{ name('sound-level') }}
+        <select id="sound-level">
+            <option value="normal">Normalnie</option>
+            <option value="quiet" selected>Po cichutku</option>
+            <option value="off">Wyłączony</option>
+        </select> {{ info('sound-level') }}
+    </label>
 
 {#
       Rozkładu Siechnic nie ma w repo ani serwer go nie pobiera - kopię
@@ -979,6 +1002,17 @@
     </div>
 
 {#
+      Log serwera (zgłoszenie #285): plik z zapisem zdarzeń po stronie serwera,
+      za tym samym odblokowaniem co Siechnice (data-protected).
+    #}
+    <div class="field{{ dev('server-logs') }} set-row set-action" {{ attrs('server-logs') }}>
+        <div class="sw-row">
+            <button type="button" id="server-logs-download" class="button" data-protected>{{ name('server-logs') }}</button>{{ info('server-logs') }}
+        </div>
+        <p class="field-hint" id="server-logs-status" role="status"></p>
+    </div>
+
+{#
       Eksperyment (#453): odliczenie do odjazdu w Dynamic Island przez PushWard.
       Klucz zapisuje app.js w localStorage - to nie ustawienie, więc set-action.
     #}
@@ -992,6 +1026,10 @@
         </div>
         <p class="field-hint" id="pushward-status" role="status"></p>
     </div>
+
+    <label class="dev-check{{ dev('pushward-link') }} set-row" {{ attrs('pushward-link') }}>
+        <input type="checkbox" id="pushward-link"> {{ name('pushward-link') }} {{ info('pushward-link', '?') }}
+    </label>
 
     <div class="field{{ dev('sw-check') }} set-row" {{ attrs('sw-check') }} id="sw-field">
         <div class="set-title">{{ name('sw-check') }} {{ info('sw-check') }}</div>
