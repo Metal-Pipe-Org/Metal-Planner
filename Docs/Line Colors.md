@@ -15,6 +15,7 @@ Walking: Gray
 ## B
 Each lane has a random color, it should be calculated from the line number, using a constant seed, so it is consistent
 - Use as wide color range as possible
+- Evenly spread all the lines on the available color spectrum
 - Make sure each color is visible and everything is still readable
-- Colors used below should be excluded
+- Colors used by bikes, Traficars, walking should be excluded
 Bikes, Traficars, walking, trains as A
