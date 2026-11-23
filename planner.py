@@ -3585,7 +3585,10 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         lat, lon = _round_path([day.stop_coords[node["stop"]]])[0]
         clat, clon = _place_center(day, key, node["stop"])
         entry = {
-            "name": day.stop_names[node["stop"]],
+            # Kropka stoi za całe miejsce, więc i tablicę pod nią front zamawia
+            # nazwą miejsca - nazwa jednego peronu dawała tablicy nagłówek
+            # "GALERIA DOMINIKAŃSKA 07" nad odjazdami ze wszystkich peronów.
+            "name": gtfs.place_name(day, node["stop"]),
             # Nazwa miejsca, ta sama co w stops_n kawałków - po niej mapa
             # nie stawia kropki przystanku linii tam, gdzie stoi już ta.
             "place": gtfs.place_name(day, node["stop"]),
