@@ -26,7 +26,8 @@ name: "Discord - podsumowanie dnia"
 #   • "merged - is it ok?" — ping autora zgłoszenia, bo to on potwierdza
 #     i zamyka (issue-labels.yml),
 #   • zgłoszenia z etykietą "stale" (stale-issues.yml) — ping przypisanych,
-#     a bez przypisania autora,
+#     a bez przypisania autora; PR-y z "stale" (stale-prs.yml, tylko te
+#     czekające na autora) — ping autora,
 #   • linki do trzech wspólnych widoków zgłoszeń: Todo, Open for taking
 #     i Open discussions,
 #   • na samym końcu liczby: wczoraj założone i zamknięte zgłoszenia oraz
@@ -128,8 +129,9 @@ jobs:
 
           # Do zrobienia — stan na teraz.
           prs=$(gh pr list --repo "$REPO" --state open --limit 100 \
-            --json number,title,url,author,isDraft,reviewRequests \
+            --json number,title,url,author,isDraft,reviewRequests,labels \
             --jq 'map({number, title, url, isDraft, author: .author.login,
+                       stale: any(.labels[]; .name == "stale"),
                        reviewers: [.reviewRequests[] | .login // .name | select(. != null)]})')
 
           check=$(gh issue list --repo "$REPO" --state open --limit 100 --label "merged - is it ok?" \
@@ -188,7 +190,9 @@ jobs:
                       + section("Do potwierdzenia";
                           [$check[] | link + " · " + (.author | ping) + ", sprawdź i zamknij"])
                       + section("Stale";
-                          [$stale[] | link + " · " + (.people | map(ping) | join(", "))])
+                          [($stale[]),
+                           ($prs[] | select(.stale) | .people = [.author])
+                           | link + " · " + (.people | map(ping) | join(", "))])
                       + [$views, $stats, $totals]
                       | join("\n"))}' > "$RUNNER_TEMP/cards.jsonl"
 

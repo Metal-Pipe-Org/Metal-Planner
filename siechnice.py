@@ -393,6 +393,54 @@ def merge_into(db_path, stops, days, log=print):
 
 
 # --------------------------------------------------------------------------
+# Słupek kursu w serwisie Kiedy przyjedzie
+# --------------------------------------------------------------------------
+
+_posts_cache = {}
+
+
+def _posts(path):
+    """(słupki, linie na słupkach) z kopii; None, gdy kopii nie ma. Wczytanie
+    pamiętamy do zmiany pliku, bo pytamy o każdy odjazd z tablicy."""
+    try:
+        mtime = path.stat().st_mtime_ns
+    except FileNotFoundError:
+        return None
+    cached = _posts_cache.get(path)
+    if cached is None or cached[0] != mtime:
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+        cached = (mtime, parse_stops(snapshot["stops"]),
+                  {k: set(v) for k, v in snapshot["lines_by_stop"].items()})
+        _posts_cache[path] = cached
+    return cached[1], cached[2]
+
+
+def post_of(stop_id, name, lat, lon, line, path=None):
+    """Identyfikator słupka w Kiedy przyjedzie dla kursu Siechnic w naszym
+    słupku `stop_id`; None, gdy się nie da ustalić.
+
+    Baza nie pamięta, który słupek gminy został sklejony z wrocławskim (patrz
+    merge_into: wspólny słupek dostaje wrocławski stop_id), więc ten sam
+    dopasowujemy jeszcze raz tą samą regułą, co przy sklejaniu. Z kilku
+    pasujących słupków bierzemy ten, na którym zatrzymuje się linia kursu.
+    """
+    if stop_id.startswith(ID_PREFIX):
+        return stop_id[len(ID_PREFIX):]
+    posts = _posts(path or SNAPSHOT_PATH)
+    if posts is None:
+        return None
+    stops, lines_by_stop = posts
+    existing = [(stop_id, name, lat, lon)]
+    candidates = [
+        (haversine_m(stop["lat"], stop["lon"], lat, lon), stop["designator"])
+        for stop in stops
+        if line in lines_by_stop.get(stop["designator"], ())
+        and match_existing_stops([stop], existing)
+    ]
+    return min(candidates)[1] if candidates else None
+
+
+# --------------------------------------------------------------------------
 # Wgranie kopii
 # --------------------------------------------------------------------------
 

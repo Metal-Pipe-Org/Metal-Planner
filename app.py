@@ -9,6 +9,7 @@ import config  # noqa: F401
 import update_gtfs
 import update_pkp
 import warmup
+from nowosci import init_nowosci
 from routes import init_routes
 
 # Python nie zna tego rozszerzenia, a manifest podany jako octet-stream bywa
@@ -23,6 +24,7 @@ mimetypes.add_type("audio/mp4", ".m4a")
 app = Flask(__name__)
 
 init_routes(app)
+init_nowosci(app)
 
 if __name__ == "__main__":
     # Odświeżenie rozkładu przy starcie - tylko dla uruchomienia lokalnego.

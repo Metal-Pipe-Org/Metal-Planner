@@ -612,20 +612,20 @@ checks.odjazd_ktorym_sie_nie_zdazy_wypada = (() => {
 })();
 
 /* Liczba wierszy to ustawienie panelu, a nie stała wpisana w kod - i ma swój
-   sufit, bo w pamięci przeglądarki może leżeć wartość z czasów innego zakresu
-   (albo w ogóle nie liczba). */
+   sufit, bo w pamięci przeglądarki może leżeć wartość z czasów innego zakresu.
+   Wartości, która nie jest liczbą, suwak w ogóle nie przyjmie (robi to
+   przeglądarka), więc tego przypadku nie ma już po co sprawdzać w kodzie. */
 checks.liczba_wierszy_to_ustawienie = (() => {
     const bylo = app.dotOpts.rows;
     const odczyt = [];
-    for (const ile of [3, 8, 999, 0, 'iks']) {
+    for (const ile of [3, 8, 999, 0]) {
         app.dotOpts.rows = ile;
         odczyt.push(app.timetableRows());
     }
     app.dotOpts.rows = bylo;
     return {
         ok: odczyt[0] === 3 && odczyt[1] === 8
-            && odczyt[2] === app.TIMETABLE_ROWS_MAX && odczyt[3] === 1
-            && odczyt[4] === app.DOT_DEFAULTS.rows,
+            && odczyt[2] === app.TIMETABLE_ROWS_MAX && odczyt[3] === 1,
         odczyt,
     };
 })();
@@ -678,7 +678,7 @@ function nagrajDzwiek(fn) {
 checks.dzwiek_wybiera_format_ktory_przegladarka_umie = (() => {
     // Emulator udaje przeglądarkę bez Ogg Opus, ale z AAC - czyli Safari.
     // Ma sięgnąć po drugi plik, a nie po pierwszy z listy.
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     const w = nagrajDzwiek(() => app.playPipeDrop());
     return {
         ok: w.zagrane === 1 && /metal-pipe\.m4a$/.test(w.zrodlo || ''),
@@ -690,13 +690,13 @@ checks.dzwiek_wybiera_format_ktory_przegladarka_umie = (() => {
 checks.dzwiek_gra_od_poczatku_przy_powtorzeniu = (() => {
     // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać od nowa,
     // a nie zostać po cichu pominięte.
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     const w = nagrajDzwiek(() => { app.playPipeDrop(); app.playPipeDrop(); });
     return {ok: w.zagrane === 2 && w.przewiniete === 2, ...w};
 })();
 
 checks.dzwiek_milczy_przy_ograniczonym_ruchu = (() => {
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     globalThis.__mniejRuchu = true;
     const w = nagrajDzwiek(() => app.playPipeDrop());
     globalThis.__mniejRuchu = false;
@@ -704,9 +704,9 @@ checks.dzwiek_milczy_przy_ograniczonym_ruchu = (() => {
 })();
 
 checks.dzwiek_milczy_gdy_wylaczony = (() => {
-    app.soundOpts.pipe = false;
+    app.soundOpts.level = 'off';
     const w = nagrajDzwiek(() => app.playPipeDrop());
-    app.soundOpts.pipe = true;
+    app.soundOpts.level = 'quiet';
     return {ok: w.zagrane === 0, ...w};
 })();
 
@@ -719,7 +719,9 @@ checks.dzwiek_nie_zatrzymuje_muzyki = (() => {
 
 checks.nagranie_nie_gra_na_pelnej_glosnosci = (() => {
     // Nagranie ma szczyt ponad 0 dBFS - w pełnej głośności to alarm, nie żart.
-    return {ok: app.PIPE_VOLUME > 0 && app.PIPE_VOLUME < 0.6, glosnosc: app.PIPE_VOLUME};
+    const {normal, quiet} = app.PIPE_VOLUMES;
+    return {ok: normal === 0.175 && quiet / normal >= 0.25 && quiet / normal <= 0.35,
+            glosnosc: app.PIPE_VOLUMES};
 })();
 
 /* --- kropki węzłów: gdzie stoją i która jest startowa ------------------- */
@@ -1011,6 +1013,9 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
                   best_sec: 40 * 60, ride_sec: 15 * 60,
                   map_from: '12:00', deadline: '12:55', limit_sec: 55 * 60};
     const bylo = app.timeOpts.ride;
+    // Zakres mapy na pasku jest za ustawieniem deweloperskim.
+    const zakres = document.getElementById('headline-map-range');
+    zakres.checked = true;
 
     app.timeOpts.ride = false;
     app.drawFlow(flow, false);
@@ -1020,6 +1025,7 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
     const z = pasek(), zDymki = dymki();
 
     app.timeOpts.ride = bylo;
+    zakres.checked = false;
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
     return {
         ok: bez.includes('61212:25→12:40') && !bez.includes('40 min')   // plakietki przed godzinami

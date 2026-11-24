@@ -16,6 +16,7 @@ from pathlib import Path
 
 import naming
 import polinka
+import siechnice
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "gtfs.sqlite"
 
@@ -49,6 +50,13 @@ SHIFT_PREFIX = "@"
 # wciąż jedno miejsce. _platform_base_name ucina taki sufiks, żeby dociągnąć
 # peron do miejsca o nazwie bazowej (patrz _build_places).
 _PLATFORM_SUFFIX = re.compile(r"^(.*?)\s+(?:z|w|pd|pn)/[a-ząćęłńóśźż]+$")
+# Nowszy zapis MPK numeruje perony ("GALERIA DOMINIKAŃSKA 01" ... "11", "PL.
+# JANA PAWŁA II 01" ... "09") i nie zostawia słupka o samej nazwie bazowej.
+# Dwie cyfry na końcu to jednak także numer domu ("Bierutowska 65" stoi
+# ~300 m od "Bierutowska" i jest INNYM przystankiem), więc numer peronu
+# rozpoznajemy po rodzinie: tylko tam, gdzie ta sama nazwa ma też peron
+# z zerem na początku ("... 01") - takiego numeru domu nikt nie pisze.
+_PLATFORM_NUMBER = re.compile(r"^(.*?)\s+(\d{2})$")
 PLACE_MAX_SPAN_M = 400  # zabezpieczenie: dolepiamy peron tylko gdy naprawdę blisko
 
 # CHODZENIE. JEDNA zasada na cały system: pieszo przechodzi się między
@@ -184,11 +192,30 @@ def _register_stop_name(data, stop_id, name):
 _day_cache = {}
 
 
-def _platform_base_name(stop_name):
-    """Nazwa bazowa węzła, jeśli `stop_name` wygląda na kierunkowy peron
-    (np. 'PL. GRUNWALDZKI W/t' -> 'PL. GRUNWALDZKI'), inaczej None."""
+def _numbered_hubs(names):
+    """Nazwy bazowe (casefold) węzłów z numerowanymi peronami - patrz
+    _PLATFORM_NUMBER. Liczone z całej listy nazw, bo o tym, czy "X 10" to
+    peron, rozstrzyga istnienie "X 01", a nie sama nazwa."""
+    hubs = set()
+    for name in names:
+        m = _PLATFORM_NUMBER.match(name)
+        if m and m.group(2).startswith("0"):
+            hubs.add(m.group(1).casefold())
+    return hubs
+
+
+def _platform_base_name(stop_name, numbered_hubs=frozenset()):
+    """Nazwa bazowa węzła, jeśli `stop_name` wygląda na peron węzła
+    (np. 'PL. GRUNWALDZKI W/t' -> 'PL. GRUNWALDZKI', a przy węźle z
+    `numbered_hubs` 'GALERIA DOMINIKAŃSKA 02' -> 'GALERIA DOMINIKAŃSKA'),
+    inaczej None."""
     m = _PLATFORM_SUFFIX.match(stop_name.casefold())
-    return stop_name[:m.end(1)] if m else None
+    if m:
+        return stop_name[:m.end(1)]
+    m = _PLATFORM_NUMBER.match(stop_name)
+    if m and m.group(1).casefold() in numbered_hubs:
+        return m.group(1)
+    return None
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):
@@ -234,6 +261,67 @@ def _one_spot(stop_ids, stop_coords):
     return kept
 
 
+# Ta sama nazwa dalej niż to od reszty słupków tej nazwy to inna miejscowość
+# (patrz far_namesakes). Z danych z 2026-11-20: najszerzej rozrzucony
+# przystanek o wspólnej nazwie (Ramiszów MPK i stacja PKP) ma 547 m między
+# skrajnymi słupkami, a najbliższy imiennik, który naprawdę jest gdzie
+# indziej (Zakrzów pod Siechnicami i ZAKRZÓW MPK), stoi 20 km dalej. Wynik
+# jest ten sam dla każdego progu od 600 m do 19 km; 3 km leży w tej dziurze
+# z zapasem w obie strony.
+NAMESAKE_MAX_GAP_M = 3000
+
+
+def _network_of(stop_id, rail_ids):
+    """Sieć słupka - dopisek, którym podpowiedź odróżnia go od dalekiego
+    imiennika (patrz far_namesakes)."""
+    if stop_id in rail_ids:
+        return "PKP"
+    if stop_id.startswith(siechnice.ID_PREFIX):
+        return "Siechnice"
+    return "MPK"
+
+
+def qualified_name(name, network):
+    """Nazwa dalekiego imiennika (patrz far_namesakes): 'Zakrzów (Siechnice)'.
+    Dopisek w nawiasie, jak w nazwach samego MPK ('Kiełczowska (Cmentarz)')
+    i Polinki - to zwykła nazwa, którą wyszukiwarka zna i którą da się
+    wpisać, a nie plakietka obok: plakietka nie jedzie do wyszukiwarki, więc
+    dwóch takich samych napisów z różnymi plakietkami nie dałoby się
+    rozróżnić przy szukaniu."""
+    return f"{name} ({network})"
+
+
+def far_namesakes(stops):
+    """{indeks: sieć} słupków, które noszą tę samą nazwę co inne (bez względu
+    na wielkość liter, peron węzła liczony nazwą węzła), ale stoją od nich
+    daleko - to inna miejscowość, nie ten sam przystanek z innej sieci.
+
+    `stops` to krotki (nazwa, lat, lon, sieć) w kolejności pierwszeństwa,
+    MPK przed resztą (jak w load_day): nazwę bez dopisku zachowuje grupa
+    pierwszego słupka, czyli wrocławski przystanek, a reszta dostaje dopisek
+    swojej sieci (qualified_name).
+
+    Grupa rośnie od pierwszego słupka po sąsiadach bliższych niż
+    NAMESAKE_MAX_GAP_M (patrz tam, skąd ten próg)."""
+    hubs = _numbered_hubs([s[0] for s in stops])
+    by_key = {}
+    for i, (name, *_rest) in enumerate(stops):
+        by_key.setdefault((_platform_base_name(name, hubs) or name).casefold(), []).append(i)
+    far = {}
+    for ids in by_key.values():
+        rest = set(ids[1:])
+        frontier = [ids[0]]
+        while frontier and rest:
+            _, lat, lon, _ = stops[frontier.pop()]
+            near = {i for i in rest
+                    if _haversine_m(lat, lon, stops[i][1], stops[i][2])
+                    <= NAMESAKE_MAX_GAP_M}
+            rest -= near
+            frontier.extend(near)
+        far.update({i: stops[i][3] for i in rest})
+    return far
+
+
 def _merge_named_places(places, stop_coords):
     """Skleja w jedno miejsce pary nazw wskazane ręcznie (patrz naming.py).
 
@@ -275,8 +363,8 @@ def _build_places(stop_names, stop_coords, stops_by_key):
     systemu (dojechaliśmy? można się tu przesiąść?), zamiast surowej nazwy
     GTFS. Baza to dotychczasowe grupy "identyczna nazwa" (zaufane, bez
     sprawdzania odległości - tak działało to już wcześniej). Do nich
-    dolepiamy perony kierunkowe o nazwie bazowej pasującej do istniejącego
-    miejsca, o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
+    dolepiamy perony węzła do miejsca o ich nazwie bazowej (a gdy takiego
+    nie ma, perony same je tworzą), o ile faktycznie leżą blisko (PLACE_MAX_SPAN_M) - to
     zabezpieczenie przed przypadkową kolizją nazw gdzie indziej w mieście.
     Na koniec scalamy pary nazw z ręcznej tabeli (patrz _merge_named_places)
     - tam, gdzie to samo miejsce nosi w obu sieciach inną nazwę.
@@ -286,18 +374,21 @@ def _build_places(stop_names, stop_coords, stops_by_key):
         kept = _one_spot(ids, stop_coords)
         if kept:
             places[key] = kept
+    hubs = _numbered_hubs(stop_names.values())
     for stop_id, name in stop_names.items():
-        base = _platform_base_name(name)
+        base = _platform_base_name(name, hubs)
         if base is None:
             continue
         base_key = base.casefold()
-        target = places.get(base_key)
-        if not target or stop_id in target:
-            continue
-        lat, lon = stop_coords[stop_id]
-        if not all(_haversine_m(lat, lon, *stop_coords[t]) <= PLACE_MAX_SPAN_M for t in target):
-            continue
-        places[base_key] = target + [stop_id]
+        # Węzeł z numerowanymi peronami nie ma słupka o samej nazwie bazowej
+        # - miejsce zakłada wtedy pierwszy z jego peronów.
+        target = places.get(base_key, [])
+        if stop_id not in target:
+            lat, lon = stop_coords[stop_id]
+            if not all(_haversine_m(lat, lon, *stop_coords[t]) <= PLACE_MAX_SPAN_M
+                       for t in target):
+                continue
+            places[base_key] = target + [stop_id]
         # Usuwamy własną grupę "dokładna nazwa" tego peronu - inaczej
         # zostaje osierocona w `places` obok scalonego miejsca, i który
         # klucz "wygra" dla tego słupka w `place_of` zależy od przypadkowej
@@ -328,13 +419,24 @@ def with_place_names(stops):
     podpisów na mapie bez narysowanej trasy. Grupuje je ten sam młynek co
     dzień (_build_places), więc miejsce ma tu tę samą nazwę co przy trasie.
     Lista ma być CAŁA naraz, MPK przed koleją: scalenie nazw łączy obie
-    sieci, a przy wspólnym kluczu wygrywa pisownia MPK, jak w load_day."""
+    sieci, a przy wspólnym kluczu wygrywa pisownia MPK, jak w load_day.
+    Daleki imiennik (patrz far_namesakes) wraca pod nazwą z dopiskiem -
+    tę samą, pod którą zna go wyszukiwarka, bo klik w słupek wpisuje ją
+    do pola."""
+    far = far_namesakes([(s["name"], s["lat"], s["lon"], s.get("network", "MPK"))
+                         for s in stops])
+    stops = [{**s, "name": qualified_name(s["name"], far[i])} if i in far else s
+             for i, s in enumerate(stops)]
     stop_names = {i: s["name"] for i, s in enumerate(stops)}
     stop_coords = {i: (s["lat"], s["lon"]) for i, s in enumerate(stops)}
     stops_by_key, display = {}, {}
+    hubs = _numbered_hubs(stop_names.values())
     for i, name in stop_names.items():
         stops_by_key.setdefault(name.casefold(), []).append(i)
         display.setdefault(name.casefold(), name)
+        base = _platform_base_name(name, hubs)
+        if base is not None:
+            display.setdefault(base.casefold(), base)
     places = _build_places(stop_names, stop_coords, stops_by_key)
     place_of = {i: key for key, ids in places.items() for i in ids}
     return [
@@ -641,6 +743,34 @@ def active_service_ids(db, day):
     return active
 
 
+def active_service_ids_for_days(db, days):
+    """To samo co active_service_ids, ale dla wielu dni naraz: kalendarz
+    wczytany raz (dwa zapytania), reszta w pamięci. Wynik: {dzień: zbiór}."""
+    calendar = db.execute(
+        f"SELECT service_id, start_date, end_date, {', '.join(WEEKDAY_COLUMNS)} FROM calendar"
+    ).fetchall()
+    exceptions = {}
+    for service_id, date_str, exception_type in db.execute(
+        "SELECT service_id, date, exception_type FROM calendar_dates"
+    ):
+        exceptions.setdefault(date_str, []).append((service_id, exception_type))
+
+    result = {}
+    for day in days:
+        date_str = day.strftime("%Y%m%d")
+        active = {
+            row[0] for row in calendar
+            if row[3 + day.weekday()] == 1 and row[1] <= date_str <= row[2]
+        }
+        for service_id, exception_type in exceptions.get(date_str, ()):
+            if exception_type == 1:
+                active.add(service_id)
+            else:
+                active.discard(service_id)
+        result[day] = active
+    return result
+
+
 def last_service_date():
     """Ostatni dzień, na który paczka GTFS ma jakiekolwiek kursy, albo None
     bez bazy. Paczka sięga zwykle ok. dwóch tygodni naprzód - dalej pytanie
@@ -657,8 +787,12 @@ def last_service_date():
     return datetime.strptime(last, "%Y%m%d").date() if last else None
 
 
-def load_day(day):
+def load_day(day, trains=True):
     """Zwraca DayData dla podanej daty (datetime.date), z cache.
+
+    `trains` False - dzień bez kolei: stacje i kursy PKP nie są doklejane
+    wcale (filtr „Pociągi" w pasku warstw), więc nie ma ich ani w trasach,
+    ani w tablicach odjazdów. Osobny wpis w cache, bo inny dzień.
 
     Oś czasu jest liczona od północy `day`: kursy tej doby zachowują swoje
     sekundy (także te ponad 24 h), a ogon doby poprzedniej wchodzi przesunięty
@@ -678,7 +812,7 @@ def load_day(day):
     pkp_coords_mtime = pkp.COORDS_PATH.stat().st_mtime if pkp.COORDS_PATH.exists() else 0
     key = (
         day.isoformat(), DB_PATH.stat().st_mtime if DB_PATH.exists() else 0,
-        pkp_mtime, pkp_coords_mtime,
+        pkp_mtime, pkp_coords_mtime, trains,
     )
     if key in _day_cache:
         return _day_cache[key]
@@ -733,7 +867,8 @@ def load_day(day):
     # przejście pieszo między słupkami). Doklejona po miejscach - tak było
     # do 2026-08-31 - nie należała do żadnego miejsca i musiała mieć własny,
     # drugi mechanizm przesiadki. Nie ma go już; patrz pkp.augment_day.
-    pkp.augment_day(data, day)
+    if trains:
+        pkp.augment_day(data, day)
     # Polinka (zgłoszenie #165) z tego samego powodu w tym samym miejscu:
     # jej stacje mają dostać przejścia piesze jak każdy słupek.
     polinka.augment_day(data, day)
@@ -744,8 +879,28 @@ def load_day(day):
     # klucza po każdej stronie). Kolejność jest ta sama co wtedy: MPK
     # wchodzi do stop_names pierwsze, więc przy wspólnym kluczu to jego
     # pisownia zostaje wyświetlana (patrz _register_stop_name).
-    for stop_id, stop_name in data.stop_names.items():
-        _register_stop_name(data, stop_id, stop_name)
+    #
+    # Peron węzła wchodzi też pod nazwą bazową: węzeł z numerowanymi
+    # peronami nie ma słupka o samej nazwie, a pasażer szuka węzła, nie
+    # peronu - i to tę nazwę podpowiada formularz (all_stop_names).
+    #
+    # Daleki imiennik (patrz far_namesakes) wchodzi WYŁĄCZNIE pod nazwą
+    # z dopiskiem sieci: "Zakrzów" spod Siechnic pod wspólnym kluczem
+    # "zakrzów" byłby jednym wyborem z ZAKRZÓW MPK, 20 km dalej.
+    hubs = _numbered_hubs(data.stop_names.values())
+    rail = {stop_id for _, stop_id in data.pkp_stations}
+    far = far_namesakes([
+        (name, *data.stop_coords[stop_id], _network_of(stop_id, rail))
+        for stop_id, name in data.stop_names.items()
+    ])
+    for i, (stop_id, stop_name) in enumerate(data.stop_names.items()):
+        base = _platform_base_name(stop_name, hubs)
+        for name in (stop_name, base):
+            if name is None:
+                continue
+            if i in far:
+                name = qualified_name(name, far[i])
+            _register_stop_name(data, stop_id, name)
 
     # Kanoniczne miejsce (patrz _build_places) i mosty piesze: między słupkami
     # jednego miejsca (_walking_bridges) oraz między słupkami po prostu
@@ -796,7 +951,10 @@ def load_day(day):
     data.dep_times = [c[0] for c in conns]
 
     _day_cache[key] = data
-    if len(_day_cache) > 2:                      # trzymamy najwyżej 2 dni w RAM
+    # Najwyżej 4 wpisy: dwa dni, każdy w wariancie z koleją i bez niej (filtr
+    # „Pociągi"), żeby użytkownicy z różnym ustawieniem nie wypychali sobie
+    # nawzajem dnia z cache.
+    if len(_day_cache) > 4:
         _day_cache.pop(next(iter(_day_cache)))
     return data
 
@@ -986,7 +1144,12 @@ def stop_at(lat, lon, data, max_m=STOP_SNAP_M):
             best_dist, best_stop = dist, stop_id
     if best_stop is None:
         return None, None
-    return data.stop_names[best_stop], _expand_to_places(data, [best_stop])
+    # Nazwa MIEJSCA, nie słupka: kropka węzła stoi na jednym z peronów, ale
+    # tablica obejmuje wszystkie (patrz _expand_to_places), więc nagłówek
+    # "GALERIA DOMINIKAŃSKA 06" kłamałby, że to lista tego jednego peronu.
+    place_key = data.place_of.get(best_stop)
+    name = data.display_name.get(place_key, data.stop_names[best_stop])
+    return name, _expand_to_places(data, [best_stop])
 
 
 # Ta sama etykieta, co prettyStopName w static/app.js - front pokazuje ją
@@ -1183,28 +1346,50 @@ def match_stop(query, data):
     return None, None, sorted({data.alias_display_name[k] for k in alias_candidates})[:8]
 
 
-def all_stop_names():
+def all_stop_names(rail=()):
     """Posortowane nazwy przystanków do podpowiadania w formularzu.
 
     Perony kierunkowe (patrz _platform_base_name) pokazujemy jako jedną
     nazwę bazową - użytkownik nie musi wybierać, który z 9 identycznych
     w praktyce wariantów miał na myśli, skoro match_stop i tak dociąga
     całe miejsce niezależnie od tego, który wpisze (patrz _expand_to_places).
+
+    `rail` to stacje kolejowe ({name, lat, lon}, pkp.all_stations_geo) -
+    tylko po to, żeby rozpoznać dalekich imienników (far_namesakes) także
+    między przystankiem a stacją. Z nich na listę wchodzą WYŁĄCZNIE te pod
+    nazwą z dopiskiem; resztę stacji podpowiada pkp.all_station_names.
     """
     db = _connect()
-    names = {row[0] for row in db.execute("SELECT DISTINCT stop_name FROM stops")}
+    rows = list(db.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops"))
     db.close()
-    display = {_platform_base_name(name) or name for name in names}
-    return sorted(display)
+    stops = [(name, lat, lon, _network_of(stop_id, ())) for stop_id, name, lat, lon in rows]
+    stops += [(s["name"], s["lat"], s["lon"], "PKP") for s in rail]
+    far = far_namesakes(stops)
+    hubs = _numbered_hubs([name for name, *_ in stops])
+    # Jedna pozycja na klucz wyszukiwarki (casefold, patrz match_stop): ona
+    # i tak trafia we wszystkie słupki tej nazwy, więc "GALERIA DOMINIKAŃSKA"
+    # obok "Galeria Dominikańska" z Siechnic to dwa razy ten sam wybór.
+    # Pisownia - pierwsza w kolejności bazy, jak w load_day (MPK przed
+    # resztą). Daleki imiennik ma własny klucz - nazwę z dopiskiem.
+    display = {}
+    for i, (name, *_rest) in enumerate(stops):
+        shown = _platform_base_name(name, hubs) or name
+        if i in far:
+            shown = qualified_name(shown, far[i])
+        elif i >= len(rows):
+            continue
+        display.setdefault(shown.casefold(), shown)
+    return sorted(display.values())
 
 
 def all_stops_geo():
     """Wszystkie słupki z współrzędnymi - do narysowania na mapie."""
     db = _connect()
     stops = [
-        {"name": name, "lat": lat, "lon": lon}
-        for name, lat, lon in db.execute(
-            "SELECT stop_name, stop_lat, stop_lon FROM stops"
+        # Sieć - do rozpoznania dalekich imienników (with_place_names).
+        {"name": name, "lat": lat, "lon": lon, "network": _network_of(stop_id, ())}
+        for stop_id, name, lat, lon in db.execute(
+            "SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops"
         )
     ]
     db.close()

@@ -516,3 +516,47 @@ def test_tablica_na_komputerze_tez_ma_kreski_miedzy_wierszami(adres, przegladark
     wiersze = page.evaluate(TABLICA_JS)
     context.close()
     assert wiersze[0]["kreska"] == "1px" and wiersze[-1]["kreska"] == "0px", wiersze
+
+
+# Panel ustawień miał 290 px i wiersze z polem i przyciskami się ściskały;
+# na szerokim ekranie jest szerszy (w lewo, prawa krawędź stoi), na telefonie
+# rozciąga się na ekran jak dotąd.
+STARA_SZEROKOSC_PANELU = 290
+
+
+def _panel_ustawien(przegladarka, adres, viewport, **opcje):
+    context = przegladarka.new_context(viewport=viewport, locale="pl-PL",
+                                       service_workers="block", **opcje)
+    page = context.new_page()
+    for wzor, odpowiedz in PUSTE_ZRODLA.items():
+        page.route(wzor, _odpowiedz(odpowiedz))
+    page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
+    page.goto(adres)
+    page.wait_for_selector("#start")
+    page.click("#dev-toggle")
+    # Panel się wysuwa (transform + opacity) - mierzy się dopiero po animacji.
+    page.wait_for_function("""() => {
+        const panel = document.getElementById('dev-panel');
+        const css = getComputedStyle(panel);
+        return !panel.classList.contains('hidden') && css.opacity === '1'
+            && (css.transform === 'none' || css.transform === 'matrix(1, 0, 0, 1, 0, 0)');
+    }""")
+    box = page.evaluate("""() => {
+        const b = document.getElementById('dev-panel').getBoundingClientRect();
+        return {left: b.left, right: b.right, width: b.width, W: innerWidth};
+    }""")
+    context.close()
+    return box
+
+
+def test_panel_ustawien_na_komputerze_jest_szerszy(adres, przegladarka):
+    box = _panel_ustawien(przegladarka, adres, {"width": 1280, "height": 800})
+    assert box["width"] >= STARA_SZEROKOSC_PANELU * 1.25, box
+    assert box["width"] <= box["W"] * 0.4, box
+    assert box["right"] == box["W"] - 16, box
+
+
+def test_panel_ustawien_na_telefonie_bez_zmian(adres, przegladarka):
+    box = _panel_ustawien(przegladarka, adres, {"width": 390, "height": 844},
+                          device_scale_factor=2, is_mobile=True, has_touch=True)
+    assert box["left"] == 8 and box["right"] == box["W"] - 8, box
