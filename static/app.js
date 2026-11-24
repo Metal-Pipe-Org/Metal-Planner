@@ -4259,6 +4259,18 @@ function fmtDist(metres) {
         : `${(metres / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
+// Stacja ma tylko dwie wielkości (decyzja użytkownika z 2026-11-24): duża
+// kropka tam, gdzie na rower da się liczyć - przez kwadrans nikt nie wybierze
+// wszystkich, a jeden zepsuty nie zostawi z niczym - i mniejsza, ale dalej
+// dobrze widoczna, przy rowerze luzem i stacji z ledwie kilkoma.
+const BIKE_SURE_COUNT = 4;
+const BIKE_BIG_RADIUS = 8;
+const BIKE_SMALL_RADIUS = 5.5;
+
+function bikeRadius(bikes) {
+    return bikes >= BIKE_SURE_COUNT ? BIKE_BIG_RADIUS : BIKE_SMALL_RADIUS;
+}
+
 // Rower miejski na mapie. Pomarańcz jest ten sam, co plakietka etapu
 // rowerowego na wybranej trasie - „to jest rower" ma znaczyć jedno, niezależnie
 // czy patrzy się na kropkę stacji, czy na kreskę przejazdu.
@@ -4266,11 +4278,11 @@ const BIKE_STYLE = {weight: 1, color: '#e65100', fillColor: '#ffb74d',
                     fillOpacity: 0.9};
 // Rower stojący luzem, poza stojakiem: ta sama rodzina koloru, ale pusty
 // środek - to jeden rower, a nie miejsce, w którym stoi ich kilka.
-const BIKE_LOOSE_STYLE = {radius: 4, weight: 2, color: '#e65100',
+const BIKE_LOOSE_STYLE = {radius: BIKE_SMALL_RADIUS, weight: 2, color: '#e65100',
                           fillColor: '#fff', fillOpacity: 1};
 // Pytanie o inny dzień: stacja stoi tam zawsze, ale ile w niej będzie
 // rowerów - nie wiadomo. Szarość mówi to, zanim się przeczyta dymek.
-const BIKE_UNKNOWN_STYLE = {radius: 4, weight: 1.5, color: '#9e9e9e',
+const BIKE_UNKNOWN_STYLE = {radius: BIKE_SMALL_RADIUS, weight: 1.5, color: '#9e9e9e',
                             fillColor: '#fff', fillOpacity: 0.35};
 // Drugi koniec przejazdu. Blada i bez własnego życia: pojawia się razem ze
 // strzałką, pod kursorem, bo opisuje przejazd, a nie miejsce, z którego coś
@@ -4315,7 +4327,8 @@ function flowBikeSpotMarkers(spots, places) {
     const drawn = new Set((places || []).flatMap(place => place.rides)
         .filter(ride => ride.move).map(ride => String(ride.id)));
     return (spots || []).filter(spot => !drawn.has(String(spot.id))).map(spot => {
-        const dot = L.circleMarker([spot.lat, spot.lon], BIKE_TARGET_STYLE)
+        const dot = L.circleMarker([spot.lat, spot.lon],
+                                   {...BIKE_TARGET_STYLE, radius: bikeRadius(spot.bikes)})
             .bindTooltip(bikeSpotTooltipHtml(spot), {direction: 'top', offset: [0, -4], opacity: 1});
         dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => markSchemeBike(spot.id, true));
@@ -4343,10 +4356,7 @@ function restBikeRides() {
 function bikeStyle(place, live) {
     if (!live) return BIKE_UNKNOWN_STYLE;
     if (place.loose) return BIKE_LOOSE_STYLE;
-    // Wielkość niesie liczbę rowerów, więc pełna i pusta stacja różnią się
-    // od siebie bez czytania. Sufit, bo powyżej kilkunastu "więcej" już nic
-    // nie zmienia w decyzji, a kropka zaczyna zasłaniać mapę.
-    return {...BIKE_STYLE, radius: 4 + Math.min(place.bikes, 16) * 0.4};
+    return {...BIKE_STYLE, radius: bikeRadius(place.bikes)};
 }
 
 /** Jak się dostać do auta albo roweru - jedna linijka, ta sama w dymku auta
@@ -4436,7 +4446,8 @@ function bikeRideLayers(place, labels) {
         layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
                                BIKE_RIDE_STYLE));
         if (!labels) continue;
-        const target = L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
+        const target = L.circleMarker([ride.lat, ride.lon],
+                                      {...BIKE_TARGET_STYLE, radius: bikeRadius(ride.bikes)})
             .bindTooltip(bikeRideTooltipHtml(ride),
                          {direction: 'top', offset: [0, -4], opacity: 1});
         target.tapRank = TAP_RANK.shared;
@@ -4445,7 +4456,7 @@ function bikeRideLayers(place, labels) {
         // dla kursora: leży dokładnie na kropce wyżej, a to ona ma łapać
         // najechanie.
         layers.push(L.circleMarker([ride.lat, ride.lon],
-                                   {...BIKE_TARGET_STYLE, opacity: 0,
+                                   {...BIKE_TARGET_STYLE, radius: bikeRadius(ride.bikes), opacity: 0,
                                     fillOpacity: 0, interactive: false})
             .bindTooltip(bikeRideLabel(ride),
                          {permanent: true, direction: 'right', offset: [6, 0],
