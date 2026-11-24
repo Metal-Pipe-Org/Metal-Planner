@@ -22,8 +22,7 @@ ma. Co z nimi zrobić, mówią podsekcje na końcu punktu 1.
   zacznij od `--name-only` i czytaj po pliku.
 - `gh pr view <PR_NUMBER> --repo <REPO> --comments` — dyskusja, o ile jakaś jest.
 - `README.md` i `docs/PROJECT.md`; przy zmianach w mapie przepływów albo
-  w wyszukiwaniu połączeń dołóż `docs/ROUTING_ALGORITHM.md`
-  i `docs/FLOW_MAP_CONTRACT.md`.
+  w wyszukiwaniu połączeń dołóż `docs/ROUTING_ALGORITHM.md`.
 - Repozytorium masz wypożyczone na commicie z czubka PR-a — czytaj **cały** plik
   wokół zmienionych linii, a nie sam diff. Połowa błędów siedzi w kodzie, którego
   w diffie nie widać, a który ta zmiana zaczyna wołać inaczej.

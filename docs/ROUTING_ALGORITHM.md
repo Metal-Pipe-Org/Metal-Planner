@@ -3,8 +3,7 @@
 This document covers exactly one thing: `plan_flow` in `planner.py`, the
 function behind the map you see in the UI (the "show every useful trip at
 once" view). Everything else — the data model, the single-route CSA scan,
-the frontend — is left out on purpose. *What* the map promises is in
-[FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md); this file is about *how*.
+the frontend — is left out on purpose. This file is about *how*.
 
 `plan_flow` decides what to draw with the value map (`_value_map`, issue
 #150) - since issue #187 the only map, also when the trip starts on board

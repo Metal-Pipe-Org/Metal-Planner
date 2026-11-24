@@ -2,8 +2,7 @@
 
 Mini-wiki: co to jest, jak jest zbudowane i jak działają algorytmy; historią
 zmian jest lista commitów. Instrukcja uruchomienia, konfiguracja i wdrożenie są w
-[README.md](../README.md); gwarancje zachowania mapy przepływów —
-w [FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md), a testy, które ich pilnują — w
+[README.md](../README.md); testy mapy przepływów — w
 [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md).
 
 ## O projekcie
@@ -872,7 +871,7 @@ przełącznik, nie wybór pojazdu).
 
 ### Mapa przepływów (`plan_flow`)
 
-Jak mapa wybiera, co narysować (wartości podróży, tolerancja, reguła numerów, próg z gęstości), opisuje krok po kroku [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md); co mapa obiecuje — [FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md).
+Jak mapa wybiera, co narysować (wartości podróży, tolerancja, reguła numerów, próg z gęstości), opisuje krok po kroku [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md).
 
 **Tablica przystanku docelowego** (zgłoszenie #266). Czerwona kropka celu jest zwykłą kropką przystanku mapy (`nodeDot` w app.js, węzeł z flagą `end` z `planner._transfer_nodes`): najechanie albo dotknięcie pokazuje tę samą tablicę co na każdej przesiadce — linie z mapy z ikonką „tu wysiadasz" i godziną przyjazdu, a obok to, co stąd dalej odjeżdża. Kropkę dostaje też każdy przystanek, na którym narysowana podróż kończy ostatni przejazd i dalej idzie pieszo do celu (`planner._last_alights`) — wcześniej miejsca, w których da się tylko wysiąść, kropek nie miały. Cel z punktu na mapie ma tylko swój znacznik, bez tablicy; kropki stoją na przystankach, z których się do niego dochodzi. Gdy żadna podróż nie dojeżdża do samego celu, węzła celu nie ma i czerwona kropka jest samym znacznikiem, bez tablicy — tak jak cel z punktu na mapie. Znana, przyjęta niedogodność: ikonka z lewej strony tablicy kropki (⇥ przyjazd, ↦ odjazd) stoi tylko przy liniach, którymi jedzie któraś podróż z bieżącej mapy; pozostałe linie przejeżdżające przez przystanek są na liście bez ikonki.
 

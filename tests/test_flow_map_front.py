@@ -1,6 +1,6 @@
 """Testy tej połowy kontraktu mapy, która mieszka WE FRONCIE.
 
-Kontrakt (docs/FLOW_MAP_CONTRACT.md) ma 10 punktów, a test_flow_map_contract.py
+Kontrakt ma 10 punktów, a test_flow_map_contract.py
 sięga wyłącznie planner.py. Trzy punkty żyją jednak w całości albo w połowie
 w static/app.js i do 2026-08-27 nie były sprawdzane niczym:
 

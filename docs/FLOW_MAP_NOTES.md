@@ -1,6 +1,6 @@
 # Notatki do kontraktu mapy przepływów
 
-Testy i otwarte pytania dla [FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md). Numeracja punktów odpowiada numeracji w kontrakcie. Historią zmian, pomiarów i decyzji jest lista commitów.
+Testy i otwarte pytania dla kontraktu starej mapy przepływów. Numeracja punktów odpowiada numeracji w kontrakcie. Historią zmian, pomiarów i decyzji jest lista commitów.
 
 Obecny stan: kontrakt i
 [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md).

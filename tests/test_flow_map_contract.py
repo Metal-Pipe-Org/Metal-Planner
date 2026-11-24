@@ -1,6 +1,6 @@
 """Testy "kontraktu mapy przepływów" - listy gwarancji zachowania mapy
-uzgodnionej z użytkownikiem 2026-08-11 (patrz docs/FLOW_MAP_CONTRACT.md dla
-pełnej listy punktów, docs/ROUTING_ALGORITHM.md dla opisu samego algorytmu).
+uzgodnionej z użytkownikiem 2026-08-11 (patrz docs/ROUTING_ALGORITHM.md dla
+opisu samego algorytmu).
 Dotyczy WYŁĄCZNIE rysowania mapy (plan_flow / segments) - lista propozycji
 tras (journeys) jest świadomie poza zakresem.
 

@@ -162,14 +162,12 @@ Cały sposób pracy opisuje [CONTRIBUTING.md](CONTRIBUTING.md).
 
 25. [docs/PROJECT.md](docs/PROJECT.md) — architektura, algorytmy,
     znane ograniczenia.
-26. [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md) — gwarancje
-    zachowania mapy przepływów; zmienia się wyłącznie na wyraźne polecenie.
-27. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad
-    pojedynczymi funkcjami; też tylko na wyraźne polecenie.
-28. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu
+26. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad
+    pojedynczymi funkcjami; zmienia się wyłącznie na wyraźne polecenie.
+27. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu
     i otwarte pytania.
-29. [docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md) — jak mapa jest
+28. [docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md) — jak mapa jest
     liczona, krok po kroku na przykładzie (po angielsku).
-30. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład
+29. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład
     gminy Siechnice.
-31. [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — automaty GitHuba i Discord.
+30. [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — automaty GitHuba i Discord.

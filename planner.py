@@ -5408,7 +5408,7 @@ def _scheme_of_legs(variants):
 #
 # Czego tu świadomie NIE ma: roweru na mapie przepływów. Jasność segmentu
 # znaczy tam „jak dobrym wyborem jest siedzieć TERAZ w TYM kursie" i liczy
-# się z rozkładu (patrz docs/FLOW_MAP_CONTRACT.md) - rower rozkładu nie ma,
+# się z rozkładu - rower rozkładu nie ma,
 # więc nie ma też czego porównywać. Trasa z rowerem rysuje się natomiast
 # w całości po wybraniu jej z listy propozycji, tak samo jak każda inna.
 

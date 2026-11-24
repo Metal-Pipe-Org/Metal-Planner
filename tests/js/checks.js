@@ -1,5 +1,5 @@
-/* Sprawdzenia kontraktu mapy, które mieszkają WE FRONCIE (docs/
-   FLOW_MAP_CONTRACT.md, punkty 7, 8 i 10). Uruchamiane na prawdziwym
+/* Sprawdzenia kontraktu mapy, które mieszkają WE FRONCIE (punkty 7, 8
+   i 10). Uruchamiane na prawdziwym
    static/app.js przez emulator z harness.js, na prawdziwej odpowiedzi
    /api/flow z flow_fixture.json.
 
