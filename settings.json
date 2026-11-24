@@ -91,7 +91,8 @@
       "name": "Gęstość mapy",
       "description": "Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru. Godzina „mapa pokazuje do” jest tego skutkiem.",
       "tags": ["Mapa"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-24"
     },
     {
       "id": "car-count",
@@ -202,7 +203,8 @@
       "id": "debug-why-seg",
       "name": "Dlaczego kawałek jest na mapie",
       "tags": ["Debug", "Mapa"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-24"
     },
     {
       "id": "vehicles-direction",

@@ -113,7 +113,7 @@ def test_teksty_na_stronie_pochodza_z_rejestru():
     html = _strona()
     assert "Szare godziny w tablicy" in html
     assert 'data-tip="Odjazdy, na które już nie zdążysz' in html
-    assert re.search(r'class="[^"]*dev-only[^"]*" data-setting="density" data-labels="Mapa"', html)
+    assert re.search(r'class="[^"]*dev-only[^"]*" data-setting="car-count" data-labels="Traficar"', html)
     assert 'data-setting="tt-past" data-labels="Przystanki, Czas"' in html
 
 
