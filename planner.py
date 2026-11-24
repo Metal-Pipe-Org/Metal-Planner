@@ -2069,15 +2069,18 @@ def _drawn(chosen):
 
 
 def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
-               prefer=None, wider=0, exact=None):
+               prefer=None, wider=0, exact=None, seated=None):
     """Ruchy do pokazania i mapa z nich narysowana - słownik jak z _value_map
     plus `moves`; None, gdy nic się nie znalazło (wtedy plan_flow wraca do
-    _value_map)."""
+    _value_map). `seated` - kurs, w którym pasażer już siedzi (start
+    z pokładu, patrz _value_journeys)."""
     allow = moves.reasonable_sec(best_arr, query_sec, wider)
-    start = max(0, query_sec - moves.JUST_LEFT_SEC)
+    # Z pokładu na przystanku jest się dopiero wtedy, gdy pojazd do niego
+    # dojedzie - odjazd sprzed tej chwili nie był do złapania.
+    start = query_sec if seated is not None else max(0, query_sec - moves.JUST_LEFT_SEC)
     forgive = int(min(MOVES_SEARCH_MAX_SEC, 2 * gain_sec + allow))
     classes = _value_journeys(day, source_stops, target_set, start, best_arr,
-                              forgive, rides_matter=True,
+                              forgive, seated=seated, rides_matter=True,
                               max_rides=moves.MAX_RIDES,
                               walk_margin_sec=moves.WALK_MARGIN_SEC)
     if not classes:
@@ -2105,7 +2108,7 @@ def _moves_map(day, source_stops, target_set, query_sec, best_arr, gain_sec,
     # dokąd wrócić, gdy uciekło (heurystyka 4), więc szukamy szerzej.
     if not wider and not has_safe:
         return _moves_map(day, source_stops, target_set, query_sec, best_arr,
-                          gain_sec, prefer, wider=2, exact=exact)
+                          gain_sec, prefer, wider=2, exact=exact, seated=seated)
     # Rysuje się jeden egzemplarz na ruch (pierwszy, na który zdążysz): zbitka
     # linii jednego ruchu to jeden ruch, a nie osobne nitki.
     picked = _drawn(chosen)
@@ -2690,9 +2693,10 @@ def plan_flow_stages(start_query, end_query, when=None,
     sekundy), za to odpowiedź jest o 40-50% mniejsza.
     """
     when = when or datetime.now()
-    # Wybór z ruchów (moves.py) żyje WYŁĄCZNIE pod „Nową mapą" (eksperyment);
-    # stara mapa jest dokładnie taka jak była. Nie dotyczy startu z pokładu.
-    by_moves = bool(new_map) and not in_vehicle
+    # Wybór z ruchów (moves.py) żyje WYŁĄCZNIE pod „Nową mapą"; stara mapa
+    # jest dokładnie taka jak była. Start z pokładu idzie tą samą drogą co
+    # zwykłe wyszukiwanie - różni się tylko kursem, w którym się siedzi.
+    by_moves = bool(new_map)
     journey_limit = (
         DEFAULT_JOURNEY_LIMIT if journey_limit is None
         else int(max(MIN_JOURNEY_LIMIT, min(MAX_JOURNEY_LIMIT, journey_limit)))
@@ -2849,7 +2853,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         # sięgania po listę propozycji (i bez drugiego szukania). Wyznacza też
         # kadr relacji, a z nim gęstość, do której dobiera się próg.
         best_legs = _reconstruct(day, best_journey, best_stop, geo_db)
-        if by_moves and ride is None:
+        if by_moves:
             # Przesiadka na pojazd, który dowozi tam, dokąd ten sam pierwszy
             # pojazd i tak dojeżdża nie później (113 do Działkowej, K na
             # Dworzec, choć 113 sama jedzie na Dworzec), nie jest ruchem.
@@ -2884,7 +2888,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         # wartości - a z pokładu od odjazdu pojazdu (patrz _value_journeys).
         dep_sec = report_dep_sec
         chosen_map = None
-        if (by_moves and ride is None
+        if (by_moves
                 and not (gtfs.is_city_group(day, source_stops)
                          or gtfs.is_city_group(day, target_set))):
             ride_legs = [leg for leg in best_legs if leg["kind"] == "ride"]
@@ -2892,7 +2896,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                 day, source_stops, target_set, dep_sec, best_arr, gain_sec,
                 tuple(leg["num"] for leg in ride_legs),
                 exact=tuple((leg["trip"], leg["dep_sec"], leg["arr_sec"])
-                            for leg in ride_legs))
+                            for leg in ride_legs), seated=seated)
         if chosen_map is None:
             chosen_map = _value_map(day, source_stops, target_set, dep_sec,
                                     best_arr, frame_km2, density, more, seated)
