@@ -1654,12 +1654,12 @@ if (navigator.geolocation && navigator.permissions) {
 
 // ---------------------------------------------------- kadrowanie widoku ----
 
-function fitTo(points) {
+function fitTo(points, maxZoom = 16) {
     if (!points.length) return;
     const panelVisible = !document.body.classList.contains('panel-hidden');
     const gutter = 40;
     // maxZoom: krótka trasa nie ma wjeżdżać w widok pojedynczej ulicy.
-    const options = {maxZoom: 16};
+    const options = {maxZoom};
     if (phoneLayout.active()) {
         const inset = phoneLayout.mapInsets();
         options.paddingTopLeft = [gutter, inset.top];
@@ -1673,19 +1673,16 @@ function fitTo(points) {
     map.fitBounds(L.latLngBounds(points), options);
 }
 
+function placePoints(endpoint) {
+    if (isPoint(endpoint)) return [[endpoint.lat, endpoint.lon]];
+    return (markersByName.get(endpoint) || []).map(m => {
+        const p = m.getLatLng();
+        return [p.lat, p.lng];
+    });
+}
+
 function endpointPoints() {
-    const points = [];
-    for (const endpoint of [sel.start, sel.end]) {
-        if (isPoint(endpoint)) {
-            points.push([endpoint.lat, endpoint.lon]);
-            continue;
-        }
-        for (const m of markersByName.get(endpoint) || []) {
-            const p = m.getLatLng();
-            points.push([p.lat, p.lng]);
-        }
-    }
-    return points;
+    return [sel.start, sel.end].flatMap(placePoints);
 }
 
 // ------------------------------------------------------ mapa przepływów ----
@@ -1741,6 +1738,10 @@ function writeControl(control, value) {
     // Zapamiętana opcja mogła zniknąć z listy.
     else if ([...control.options].some(option => option.value === value)) control.value = value;
 }
+
+// Domyślny kadr po wyszukiwaniu zależy od urządzenia (#321), a za domyślne
+// uchodzi to, co kontrolka ma przed odczytem niżej - stąd ustawienie tutaj.
+$('map-after-search').value = phoneLayout.active() ? 'start' : 'all';
 
 const SETTINGS = new Map();
 const SETTING_BY_CONTROL = new Map();
@@ -2137,6 +2138,13 @@ function drawFlow(flow, refit) {
     renderVehicles();
     if (!refit) return;
 
+    const framing = setting('map-after-search');
+    if (framing === 'none') return;
+    // Przybliżenie jak po wskazaniu startu ◎ (useMyLocation).
+    if (framing === 'start') {
+        fitTo(placePoints(sel.start), 15);
+        return;
+    }
     const points = flow.segments.flatMap(s => s.path);
     fitTo([...points, ...endpointPoints()]);   // start i cel zawsze w kadrze
 }
