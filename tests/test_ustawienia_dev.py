@@ -21,7 +21,7 @@ DEV_ROWS = {"car-count", "bike-count", "time-hover", "time-ends",
             "look-label-op", "look-dump", "siechnice-file", "dev-access", "pushward", "pushward-link", "sw-check",
             "transfer-gain", "onboard-slack", "location-refresh", "stats",
             "order-limit", "walking", "headline-map-range",
-            "vehicles-direction", "vehicles-stats", "server-logs"}
+            "vehicles-direction", "vehicles-stats", "server-logs", "when-picker"}
 USER_ROWS = {"time-show-headline", "tt-past", "car-vans", "cars-horizon", "walk-pace",
              "bike-kmh", "bike-overhead", "car-kmh", "car-overhead",
              "bikes-merged", "no-pull-refresh", "start-mode-switch",

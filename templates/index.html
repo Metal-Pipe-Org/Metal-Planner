@@ -435,7 +435,11 @@
         <script id="stop-abbrev" type="application/json">{{ abbreviations|tojson }}</script>
 
         <div class="search-row">
-            <div class="time-field">
+            {# Tymczasowo, do porównania wyboru godziny i daty (#501): warianty
+               rysuje app.js (patrz paintWhen), a pola #time i #date niżej
+               zostają jedynym miejscem, z którego czyta wyszukiwanie. #}
+            <div id="when-proto" class="when-proto" hidden></div>
+            <div class="time-field" id="when-classic">
                 <div class="time-row">
                     <span>Odjazd</span>
                     <input type="text" id="time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
@@ -915,6 +919,17 @@
         </label>
     <label class="dev-check{{ dev('vehicles-stats') }} set-row" {{ attrs('vehicles-stats') }}>
             <input type="checkbox" id="vehicles-stats"> {{ name('vehicles-stats') }} {{ info('vehicles-stats') }}
+        </label>
+
+    {# Tymczasowo, do porównania wyboru godziny i daty (#501). #}
+    <label class="dev-check{{ dev('when-picker') }} set-row" {{ attrs('when-picker') }}>
+        {{ name('when-picker') }}
+        <select id="when-picker">
+            <option value="current">Obecny</option>
+            <option value="chips">Skróty</option>
+            <option value="wheels">Kółka</option>
+            <option value="slider">Suwak</option>
+        </select> {{ info('when-picker') }}
         </label>
 
     <label class="dev-check{{ dev('line-colors') }} set-row" {{ attrs('line-colors') }}>

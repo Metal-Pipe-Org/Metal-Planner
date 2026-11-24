@@ -166,6 +166,28 @@ body.view-list .places-bar { display: none; }
 .time-row > span:first-child { display: none; }
 .search-row .button.primary { min-width: 0; padding: 0 12px; }
 
+/* TYMCZASOWO (#501): prototypy wyboru godziny i daty. Dni przewija się palcem
+   w jednym rzędzie, a kółka wysuwają się od dołu ekranu. */
+.when-days {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -2px;
+    padding: 0 2px 2px;
+}
+.when-days::-webkit-scrollbar { display: none; }
+.when-chip { padding: 7px 12px; }
+.when-pill .when-label { display: none; }
+.when-backdrop { background: rgba(16, 32, 48, 0.35); }
+.when-sheet {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
 /* Zwinięta: jedna linijka „skąd → dokąd  godzina" (tworzy ją phone.js).
    Stuknięcie rozwija formularz z powrotem. */
 body.search-collapsed .search-card { padding: 0; }

@@ -7448,6 +7448,7 @@ function applyLastSearch(saved) {
         timeInput.value = saved.time;
         $('date').value = saved.date;
         timeChosen = true;
+        paintWhen();
     }
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
@@ -7622,6 +7623,7 @@ function applyLink() {
         timeChosen = true;
         if (dayPanel.classList.contains('hidden')) dayToggle.click();
     }
+    paintWhen();
     const fill = (side, text) => {
         const place = placeFromParam(text);
         if (isPoint(place)) { sel[side] = place; updatePointMarker(side, place); }
@@ -7923,6 +7925,7 @@ function setTimeNow() {
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
+    paintWhen();
 }
 
 // Powrót do aplikacji z tła: pole ma pokazywać dzisiejszą chwilę, zanim
@@ -7935,6 +7938,352 @@ $('time-now').addEventListener('click', () => {
     setTimeNow();
     if (startInput.value && endInput.value) search();
 });
+
+// ------------------------------------- wybór godziny i daty (#501) ---
+// Tymczasowe prototypy do porównania, przełączane ustawieniem „when-picker".
+// Każdy wariant to tylko inna twarz pól #time i #date: wyszukiwanie, link
+// i zapamiętana trasa czytają je tak samo jak dotąd.
+const whenBox = $('when-proto');
+const whenClassic = $('when-classic');
+const WEEKDAYS = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
+const WHEN_CHIP_DAYS = 7;
+const WHEEL_DAYS = 14;
+const WHEEL_H = 40;
+let whenSearchTimer = null;
+let wheelsChanged = false;
+let wheelTimer = null;
+
+const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    + `-${String(d.getDate()).padStart(2, '0')}`;
+const clockOf = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:`
+    + String(minutes % 60).padStart(2, '0');
+const minutesOf = d => d.getHours() * 60 + d.getMinutes();
+
+// Nieustawiona ręcznie godzina to „teraz", a pola formularza odświeżają się
+// dopiero przy wyszukaniu albo powrocie z tła.
+function whenMoment() {
+    if (!timeChosen) return new Date();
+    const [y, m, d] = $('date').value.split('-').map(Number);
+    const [hh, mm] = (timeInput.value || '00:00').split(':').map(Number);
+    return new Date(y, m - 1, d, hh, mm);
+}
+
+function whenDayLabel(day, short) {
+    const diff = Math.round((midnight(day) - midnight(new Date())) / 86400000);
+    if (diff === 0) return 'Dziś';
+    if (diff === 1) return 'Jutro';
+    const name = `${WEEKDAYS[day.getDay()]} ${day.getDate()}`;
+    return short ? name : `${name}.${String(day.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function writeWhen(moment) {
+    timeInput.value = clockOf(minutesOf(moment));
+    $('date').value = isoDay(moment);
+    timeChosen = true;
+}
+
+// Kilka stuknięć pod rząd (+15, +15) to jedno wyszukiwanie.
+function searchWhenSoon() {
+    clearTimeout(whenSearchTimer);
+    whenSearchTimer = setTimeout(() => {
+        if (startInput.value && endInput.value) search();
+    }, 600);
+}
+
+function setWhen(moment) {
+    writeWhen(moment);
+    paintWhen();
+    searchWhenSoon();
+}
+
+function shiftWhen(minutes) {
+    const at = whenMoment();
+    at.setMinutes(at.getMinutes() + minutes);
+    setWhen(at);
+}
+
+function pickDay(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const at = whenMoment();
+    setWhen(new Date(y, m - 1, d, at.getHours(), at.getMinutes()));
+}
+
+function dayChipsHtml(at) {
+    const today = midnight(new Date());
+    const chosen = isoDay(at);
+    let html = '<div class="when-days" role="group" aria-label="Dzień">';
+    let listed = false;
+    for (let i = 0; i < WHEN_CHIP_DAYS; i++) {
+        const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+        const on = isoDay(day) === chosen;
+        listed = listed || on;
+        html += `<button type="button" class="when-chip${on ? ' on' : ''}" data-day="${isoDay(day)}">`
+            + `${whenDayLabel(day, true)}</button>`;
+    }
+    return html + `<span class="when-chip when-cal${listed ? '' : ' on'}" title="Inny dzień">`
+        + `📅${listed ? '' : ' ' + whenDayLabel(at, false)}`
+        + `<input type="date" class="when-cal-input" value="${chosen}" aria-label="Inny dzień"></span></div>`;
+}
+
+function nowChip() {
+    return `<button type="button" class="when-chip${timeChosen ? '' : ' on'}" data-now>Teraz</button>`;
+}
+
+function paintChips() {
+    const at = whenMoment();
+    whenBox.innerHTML = `<div class="when-line">
+            <span class="when-label">Odjazd</span>
+            <input type="text" class="when-clock" inputmode="numeric" maxlength="5"
+                   placeholder="GG:MM" autocomplete="off" aria-label="Godzina odjazdu"
+                   value="${clockOf(minutesOf(at))}">
+            ${nowChip()}
+            <button type="button" class="when-chip" data-shift="-15">−15</button>
+            <button type="button" class="when-chip" data-shift="15">+15</button>
+            <button type="button" class="when-chip" data-shift="60">+1 h</button>
+        </div>` + dayChipsHtml(at);
+}
+
+function paintSlider() {
+    const at = whenMoment();
+    const now = new Date();
+    const today = isoDay(now);
+    // Na dziś część osi przed „teraz" jest szara - tamte odjazdy już minęły.
+    const past = isoDay(at) === today ? minutesOf(now) / 1435 * 100 : isoDay(at) < today ? 100 : 0;
+    whenBox.innerHTML = dayChipsHtml(at) + `<div class="when-line">
+            <span class="when-label">Odjazd</span>
+            <b class="when-big">${clockOf(minutesOf(at))}</b>
+            <button type="button" class="when-chip" data-shift="-5">−5</button>
+            <button type="button" class="when-chip" data-shift="5">+5</button>
+            ${nowChip()}
+        </div>
+        <div class="when-track">
+            <input type="range" class="when-range" min="0" max="1435" step="5"
+                   value="${minutesOf(at)}" style="--past: ${past}%" aria-label="Godzina odjazdu">
+            <div class="when-ticks">${[0, 3, 6, 9, 12, 15, 18, 21, 24].map(h => `<span>${h}</span>`).join('')}</div>
+        </div>`;
+}
+
+function paintPill() {
+    const at = whenMoment();
+    whenBox.querySelector('.when-pill').innerHTML = '<span class="when-label">Odjazd</span> '
+        + (timeChosen ? `${whenDayLabel(at, false)} <b>${clockOf(minutesOf(at))}</b>`
+                      : `<b>Teraz</b> <small>${clockOf(minutesOf(at))}</small>`)
+        + ' <span class="when-caret">▾</span>';
+}
+
+function paintWhen() {
+    const variant = setting('when-picker');
+    whenClassic.classList.toggle('when-off', variant !== 'current');
+    whenBox.hidden = variant === 'current';
+    whenBox.classList.toggle('when-wide', variant === 'chips' || variant === 'slider');
+    if (variant !== 'wheels') closeWheels();
+    const days = whenBox.querySelector('.when-days');
+    const scrolled = days ? days.scrollLeft : 0;
+    if (variant === 'chips') paintChips();
+    else if (variant === 'slider') paintSlider();
+    else if (variant === 'wheels') {
+        if (whenBox.dataset.built !== 'wheels') {
+            whenBox.innerHTML = '<button type="button" class="when-pill" aria-haspopup="dialog"></button>';
+        }
+        paintPill();
+    }
+    whenBox.dataset.built = variant;
+    const after = whenBox.querySelector('.when-days');
+    if (after) after.scrollLeft = scrolled;
+}
+
+whenBox.addEventListener('click', event => {
+    const target = event.target.closest('button, .when-cal-input');
+    if (!target) return;
+    if (target.matches('.when-cal-input')) {
+        // Na komputerze klik w pole daty nie otwiera kalendarza sam.
+        try { target.showPicker(); } catch { /* starsza przeglądarka - zostaje pole */ }
+    } else if (target.hasAttribute('data-now')) {
+        setTimeNow();
+        searchWhenSoon();
+    } else if (target.dataset.shift) shiftWhen(Number(target.dataset.shift));
+    else if (target.dataset.day) pickDay(target.dataset.day);
+    else if (target.matches('.when-pill')) openWheels();
+});
+
+whenBox.addEventListener('input', event => {
+    if (event.target.matches('.when-range')) {
+        const at = whenMoment();
+        const minutes = Number(event.target.value);
+        writeWhen(new Date(at.getFullYear(), at.getMonth(), at.getDate(), Math.floor(minutes / 60), minutes % 60));
+        whenBox.querySelector('.when-big').textContent = clockOf(minutes);
+        whenBox.querySelector('[data-now]').classList.remove('on');
+    } else if (event.target.matches('.when-clock')) {
+        if (!timeChosen) $('date').value = isoDay(new Date());
+        timeInput.value = event.target.value;
+        timeInput.dispatchEvent(new Event('input'));
+        event.target.value = timeInput.value;
+    }
+});
+
+whenBox.addEventListener('change', event => {
+    if (event.target.matches('.when-range')) {
+        paintWhen();
+        searchWhenSoon();
+    } else if (event.target.matches('.when-cal-input') && event.target.value) pickDay(event.target.value);
+});
+
+whenBox.addEventListener('focusout', event => {
+    if (!event.target.matches('.when-clock')) return;
+    timeInput.dispatchEvent(new Event('blur'));
+    paintWhen();
+});
+
+whenBox.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || !event.target.matches('.when-clock')) return;
+    event.target.blur();
+    if (startInput.value && endInput.value) search();
+});
+
+// Kółka: arkusz leży w <body>, bo panel z kartą przycina to, co z niego wystaje.
+const whenBackdrop = document.createElement('div');
+whenBackdrop.className = 'when-backdrop';
+whenBackdrop.hidden = true;
+const whenSheet = document.createElement('div');
+whenSheet.className = 'when-sheet';
+whenSheet.hidden = true;
+whenSheet.setAttribute('role', 'dialog');
+whenSheet.setAttribute('aria-label', 'Godzina odjazdu');
+document.body.append(whenBackdrop, whenSheet);
+
+function wheelHtml(name, label, items) {
+    return `<div class="when-wheel" data-wheel="${name}" tabindex="0" aria-label="${label}">`
+        + items.map(([value, text]) => `<div class="when-item" data-v="${value}">${text}</div>`).join('')
+        + '</div>';
+}
+
+function openWheels() {
+    const today = midnight(new Date());
+    const days = [];
+    for (let i = 0; i < WHEEL_DAYS; i++) {
+        const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+        days.push([isoDay(day), whenDayLabel(day, false)]);
+    }
+    const hours = Array.from({length: 24}, (_, h) => [h, String(h).padStart(2, '0')]);
+    const minutes = Array.from({length: 12}, (_, i) => [i * 5, String(i * 5).padStart(2, '0')]);
+    whenSheet.innerHTML = `<div class="when-sheet-head">
+            ${nowChip()}
+            <span class="when-sheet-title">Odjazd</span>
+            <button type="button" class="button primary when-done" data-done>Gotowe</button>
+        </div>
+        <div class="when-wheels">
+            ${wheelHtml('day', 'Dzień', days)}${wheelHtml('hour', 'Godzina', hours)}${wheelHtml('min', 'Minuta', minutes)}
+            <div class="when-band"></div>
+        </div>`;
+    for (const wheel of whenSheet.querySelectorAll('.when-wheel')) {
+        wheel.addEventListener('wheel', event => {
+            event.preventDefault();
+            stepWheel(wheel, Math.sign(event.deltaY));
+        }, {passive: false});
+    }
+    whenBackdrop.hidden = false;
+    whenSheet.hidden = false;
+    if (phoneLayout.active()) {
+        whenSheet.style.top = whenSheet.style.left = '';
+    } else {
+        const rect = whenBox.querySelector('.when-pill').getBoundingClientRect();
+        whenSheet.style.top = `${rect.bottom + 6}px`;
+        whenSheet.style.left = `${rect.left}px`;
+    }
+    wheelsChanged = false;
+    scrollWheels('instant');
+}
+
+function closeWheels() {
+    if (whenSheet.hidden) return;
+    whenSheet.hidden = true;
+    whenBackdrop.hidden = true;
+    if (wheelsChanged) searchWhenSoon();
+}
+
+function wheelIndex(wheel) {
+    return Math.max(0, Math.min(wheel.children.length - 1, Math.round(wheel.scrollTop / WHEEL_H)));
+}
+
+// Jedno kliknięcie kółka myszy albo strzałka to jedna pozycja, a nie trzy.
+function stepWheel(wheel, step) {
+    if (!step) return;
+    wheel.scrollTo({top: (wheelIndex(wheel) + step) * WHEEL_H, behavior: 'instant'});
+}
+
+function scrollWheels(behavior) {
+    const at = whenMoment();
+    const indexOf = {
+        day: [...whenSheet.querySelectorAll('[data-wheel="day"] .when-item')]
+            .findIndex(item => item.dataset.v === isoDay(at)),
+        hour: at.getHours(),
+        min: Math.min(11, Math.round(at.getMinutes() / 5)),
+    };
+    for (const wheel of whenSheet.querySelectorAll('.when-wheel')) {
+        wheel.scrollTo({top: Math.max(0, indexOf[wheel.dataset.wheel]) * WHEEL_H, behavior});
+    }
+    markWheels();
+}
+
+function markWheels() {
+    for (const wheel of whenSheet.querySelectorAll('.when-wheel')) {
+        const index = wheelIndex(wheel);
+        [...wheel.children].forEach((item, i) => item.classList.toggle('on', i === index));
+    }
+}
+
+// Po zatrzymaniu kółek chwila z nich trafia do formularza. Ta sama chwila co
+// w formularzu (np. „teraz" zaokrąglone do 5 min) niczego nie zmienia.
+function settleWheels() {
+    markWheels();
+    const value = name => {
+        const wheel = whenSheet.querySelector(`[data-wheel="${name}"]`);
+        return wheel.children[wheelIndex(wheel)].dataset.v;
+    };
+    const [y, m, d] = value('day').split('-').map(Number);
+    const picked = new Date(y, m - 1, d, Number(value('hour')), Number(value('min')));
+    const at = whenMoment();
+    const shown = new Date(at.getFullYear(), at.getMonth(), at.getDate(), at.getHours(),
+                           Math.min(55, Math.round(at.getMinutes() / 5) * 5));
+    if (picked.getTime() === shown.getTime()) return;
+    writeWhen(picked);
+    paintPill();
+    whenSheet.querySelector('[data-now]').classList.remove('on');
+    wheelsChanged = true;
+}
+
+whenSheet.addEventListener('scroll', () => {
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(settleWheels, 120);
+}, true);
+
+whenSheet.addEventListener('click', event => {
+    const item = event.target.closest('.when-item');
+    const now = event.target.closest('[data-now]');
+    if (item) {
+        const wheel = item.parentElement;
+        wheel.scrollTo({top: [...wheel.children].indexOf(item) * WHEEL_H, behavior: 'smooth'});
+    } else if (now) {
+        setTimeNow();
+        wheelsChanged = true;
+        now.classList.add('on');
+        scrollWheels('smooth');
+    } else if (event.target.closest('[data-done]')) closeWheels();
+});
+
+whenSheet.addEventListener('keydown', event => {
+    const wheel = event.target.closest('.when-wheel');
+    if (event.key === 'Escape' || event.key === 'Enter') {
+        event.preventDefault();
+        closeWheels();
+    } else if (wheel && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        stepWheel(wheel, event.key === 'ArrowDown' ? 1 : -1);
+    }
+});
+
+whenBackdrop.addEventListener('click', () => closeWheels());
 
 $('clear').addEventListener('click', () => {
     const previous = [sel.start, sel.end];
@@ -8323,6 +8672,7 @@ const SETTING_EFFECTS = {
     // i kropki na mapie oraz schemat.
     'walk-time': {react: () => { applyDotOpts(); if (lastSchemeData) renderScheme(lastSchemeData); }},
     'line-colors': {react: repaintLineColors},
+    'when-picker': {paint: () => paintWhen(), react: () => paintWhen()},
     'bikes-merged': {paint: () => paintBikeButtons()},
     'start-mode-switch': {paint: showStartMode},
     'routes-on': {paint: showRoutes, react: on => {
