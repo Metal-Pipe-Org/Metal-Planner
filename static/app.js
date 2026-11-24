@@ -357,6 +357,198 @@ const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
                      cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
+
+// Autobusy spoza MPK (na razie siechnickie) mają w prototypie A ustawienia
+// „Kolory linii” zieleń pociągów. Rodzaj mają ten sam, co MPK, a przewoźnika
+// zna tylko lista linii (patrz timetables.all_lines). Bez bazy rozkładów
+// listy nie ma na stronie.
+const lineNamesJson = document.getElementById('line-names');
+const LINE_LIST = lineNamesJson ? JSON.parse(lineNamesJson.textContent) : [];
+const SIECHNICE_LINES = new Set(LINE_LIST.filter(line => line.operator === 'siechnice')
+    .map(line => line.num));
+const isSiechniceBus = (kind, num) => kind === 'bus' && SIECHNICE_LINES.has(String(num));
+
+// Prototyp B ustawienia „Kolory linii”: każdy tramwaj i autobus ma swój kolor.
+// Kolory nie są losowane każdy osobno, bo przy ~150 liniach wiele wypadało
+// prawie takich samych: paleta ma tyle kolorów, ile linii na liście, każdy
+// kolejny najdalszy (w OKLab, czyli tak, jak oko widzi różnicę) od już
+// wybranych, a linie biorą je po kolei w porządku skrótu numeru ze stałym
+// ziarnem - ta sama lista daje te same kolory wszędzie i po odświeżeniu.
+// Z palety wypada to, co wygląda jak kolor roweru (pomarańcz), Traficara
+// (fiolet aż po purpurę) i przejścia pieszo (szarość), oraz kolory za jasne,
+// żeby linię było widać na mapie. Numer na kolorowej plakietce jest biały albo
+// czarny - ten, który daje co najmniej 4,5:1; numer pisany kolorem linii na
+// białym bierze, gdy trzeba, ciemniejszy wariant tego samego odcienia.
+// Kolor wychodzi jako #rrggbb, bo schemat robi z niego id grotu.
+const LINE_COLOR_SEED = 0x811c9dc5;
+const OWN_PALETTE_KINDS = new Set(['tram', 'bus']);
+const EXCLUDED_HUES = [[12, 42], [245, 315]];        // odcień HSL: pomarańcz, fiolet i purpura
+const MIN_CHROMA = 0.09;                             // OKLCH; niżej to już szarość
+// Kolory, do których linia nie może się zbliżyć nawet poza tymi odcieniami.
+const RESERVED_COLORS = [LINE_COLORS.bike, LINE_COLORS.car, LINE_COLORS.other, WALK_COLOR];
+const MIN_RESERVED_DISTANCE = 0.1;                   // w OKLab
+const MAX_LUMINANCE = 0.45;                          // jaśniejszy ginie na mapie
+const MIN_TEXT_CONTRAST = 4.5;
+const byLineColors = () => setting('line-colors') === 'line';
+const paletteColor = kind => byLineColors() && OWN_PALETTE_KINDS.has(kind);
+
+const toLinear = c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+const fromLinear = c => c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+
+function hexRgb(hex) {
+    return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+}
+
+function luminance(hex) {
+    const [r, g, b] = hexRgb(hex).map(toLinear);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+const contrast = (a, b) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+};
+
+/** OKLCH -> #rrggbb albo null, gdy kolor nie mieści się w sRGB. */
+function oklchHex(l, c, h) {
+    const a = c * Math.cos(h * Math.PI / 180), b = c * Math.sin(h * Math.PI / 180);
+    const l_ = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+    const m_ = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+    const s_ = (l - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+    const rgb = [
+        4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+        -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+        -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_,
+    ];
+    if (rgb.some(v => v < -1e-4 || v > 1 + 1e-4)) return null;
+    return '#' + rgb.map(v => Math.round(255 * fromLinear(Math.min(1, Math.max(0, v))))
+        .toString(16).padStart(2, '0')).join('');
+}
+
+function hexOklab(hex) {
+    const [r, g, b] = hexRgb(hex).map(toLinear);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363288953 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
+
+function hslHue(hex) {
+    const [r, g, b] = hexRgb(hex);
+    const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+    if (d === 0) return 0;
+    const h = max === r ? (g - b) / d : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+}
+
+const lineSeedHash = num => {
+    let h = LINE_COLOR_SEED;
+    for (const ch of String(num)) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+    return h;
+};
+
+/** Kandydaci z siatki OKLCH, którzy przechodzą wszystkie wykluczenia. */
+function paletteCandidates() {
+    const reserved = RESERVED_COLORS.map(hexOklab);
+    const found = [];
+    for (let l = 0.30; l <= 0.86; l += 0.02) {
+        for (let c = MIN_CHROMA; c <= 0.32; c += 0.02) {
+            for (let h = 0; h < 360; h += 3) {
+                const hex = oklchHex(l, c, h);
+                if (!hex || luminance(hex) > MAX_LUMINANCE) continue;
+                const hue = hslHue(hex);
+                if (EXCLUDED_HUES.some(([from, to]) => hue >= from && hue <= to)) continue;
+                const lab = hexOklab(hex);
+                if (reserved.some(r => Math.hypot(r[0] - lab[0], r[1] - lab[1], r[2] - lab[2]) < MIN_RESERVED_DISTANCE)) continue;
+                found.push({hex, lab});
+            }
+        }
+    }
+    return found;
+}
+
+/** `count` kolorów, każdy następny najdalszy od już wybranych. */
+function spreadPalette(count) {
+    const pool = paletteCandidates();
+    const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    const nearest = pool.map(() => Infinity);
+    const chosen = [];
+    let next = 0;
+    while (chosen.length < count) {
+        const pick = pool[next];
+        chosen.push(pick.hex);
+        next = 0;
+        for (let i = 0; i < pool.length; i++) {
+            nearest[i] = Math.min(nearest[i], dist(pool[i].lab, pick.lab));
+            if (nearest[i] > nearest[next]) next = i;
+        }
+    }
+    return {chosen, pool};
+}
+
+function textVariant(hex) {
+    const [l, a, b] = hexOklab(hex);
+    const c = Math.hypot(a, b), h = Math.atan2(b, a) * 180 / Math.PI;
+    for (let dark = l; dark > 0; dark -= 0.01) {
+        const candidate = oklchHex(dark, c, h) || oklchHex(dark, c * 0.8, h);
+        if (candidate && contrast(candidate, '#ffffff') >= MIN_TEXT_CONTRAST) return candidate;
+    }
+    return '#000000';
+}
+
+function paletteEntry(hex) {
+    return {
+        color: hex,
+        ink: contrast(hex, '#ffffff') >= MIN_TEXT_CONTRAST ? '#fff' : '#000',
+        text: contrast(hex, '#ffffff') >= MIN_TEXT_CONTRAST ? hex : textVariant(hex),
+    };
+}
+
+let linePalette = null;
+
+/** {color, ink, text} linii o tym numerze; paleta liczy się raz, przy pierwszym użyciu. */
+function paletteLineColor(num) {
+    if (!linePalette) {
+        const nums = [...new Set(LINE_LIST.filter(line => OWN_PALETTE_KINDS.has(line.mode))
+            .map(line => line.num))].sort((a, b) => lineSeedHash(a) - lineSeedHash(b) || (a < b ? -1 : 1));
+        const {chosen, pool} = spreadPalette(Math.max(nums.length, 1));
+        linePalette = {byNum: new Map(nums.map((n, i) => [n, paletteEntry(chosen[i])])), pool, extra: new Map()};
+    }
+    const key = String(num);
+    if (linePalette.byNum.has(key)) return linePalette.byNum.get(key);
+    // Linia spoza listy (np. pojazd na żywo z numerem, którego rozkład nie zna)
+    // bierze kolor z całej puli, tylko po skrócie numeru.
+    if (!linePalette.extra.has(key)) {
+        const {pool} = linePalette;
+        linePalette.extra.set(key, paletteEntry(pool[lineSeedHash(key) % pool.length].hex));
+    }
+    return linePalette.extra.get(key);
+}
+
+function lineColor(kind, num) {
+    if (paletteColor(kind)) return paletteLineColor(num).color;
+    if (isSiechniceBus(kind, num)) return LINE_COLORS.train;
+    return LINE_COLORS[kind] || LINE_COLORS.other;
+}
+
+/** Dla elementu z klasą rodzaju linii: arkusz bierze z `--lc` kolor linii
+    przed kolorem rodzaju, z `--lc-ink` kolor numeru na nim, a z `--lc-text`
+    kolor numeru pisanego tym kolorem na białym - więc linia w kolorze swojego
+    rodzaju nic tu nie dostaje. */
+function lineVar(kind, num) {
+    if (paletteColor(kind)) {
+        const {color, ink, text} = paletteLineColor(num);
+        return `--lc: ${color}; --lc-ink: ${ink}; --lc-text: ${text}; `;
+    }
+    return isSiechniceBus(kind, num) ? `--lc: ${LINE_COLORS.train}; ` : '';
+}
+
+function lineStyle(kind, num) {
+    const declared = lineVar(kind, num);
+    return declared ? ` style="${escAttr(declared)}"` : '';
+}
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
                     cable: 'Kolej linowa',
                     bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
@@ -531,10 +723,10 @@ const VEHICLES_REFRESH_MS = 15000;
 
 function vehicleIcon(v) {
     const arrow = v.heading == null ? '' :
-        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
+        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="${lineVar(v.kind, v.line)}transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
         className: 'vehicle-box',
-        html: `<div class="vehicle-marker ${escAttr(v.kind)}">${esc(v.line)}</div>${arrow}`,
+        html: `<div class="vehicle-marker ${escAttr(v.kind)}"${lineStyle(v.kind, v.line)}>${esc(v.line)}</div>${arrow}`,
         iconSize: [36, 36],
         iconAnchor: [18, 18],
     });
@@ -1891,7 +2083,7 @@ function drawFlow(flow, refit) {
 
     for (const s of flow.segments) {        // posortowane po w rosnąco
         const rel = s.w;
-        const color = LINE_COLORS[s.kind] || LINE_COLORS.other;
+        const color = lineColor(s.kind, s.num);
         const weight = lookWeight(rel);
         const opacity = lookOpacity(rel);
         const latlngs = s.path.map(p => L.latLng(p));
@@ -1984,7 +2176,7 @@ function showFastest() {
             lineCap: 'round', lineJoin: 'round', interactive: false,
         }));
         cores.push(L.polyline(latlngs, {
-            color: LINE_COLORS[leg.kind] || LINE_COLORS.other, opacity: 1, weight: 5,
+            color: lineColor(leg.kind, leg.num), opacity: 1, weight: 5,
             lineCap: 'round', lineJoin: 'round', interactive: false,
         }));
     }
@@ -2022,8 +2214,8 @@ function showMore() {
     gdzie sie przesiada. */
 function headlineChips(legs) {
     const parts = [];
-    const piece = (cls, tip, html) =>
-        `<span class="${escClass(cls)}" data-tip="${escAttr(tip)}">${html}</span>`;
+    const piece = (cls, tip, html, style = '') =>
+        `<span class="${escClass(cls)}"${style} data-tip="${escAttr(tip)}">${html}</span>`;
     let pendingWalk = null;
     legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -2046,7 +2238,7 @@ function headlineChips(legs) {
         pendingWalk = null;
         parts.push(piece(`line-chip ${leg.kind}`,
                          `${MODE_LABEL[leg.kind] || MODE_LABEL.other} ${leg.num}, ok. `
-                         + `${fmtMins(leg.sec)} jazdy.`, esc(leg.num)));
+                         + `${fmtMins(leg.sec)} jazdy.`, esc(leg.num), lineStyle(leg.kind, leg.num)));
     });
     return parts.join('');
 }
@@ -2486,7 +2678,7 @@ function clusterMarker(at, roster, weight, times) {
             // Slot jest celem myszy (patrz bindCluster) - dzięki temu wskazanie
             // linii działa tak samo, gdy kursor stoi na czasie pod numerem.
             const html = `<span class="line-chip-slot" data-i="${index++}">`
-                + `<span class="line-chip ${esc(l.kind)}">${esc(l.num)}</span>`
+                + `<span class="line-chip ${escClass(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
                 + (times
                     ? `<span class="chip-time">${sec === null ? '' : esc(fmtClock(sec))}</span>`
                     : '')
@@ -2648,11 +2840,11 @@ function flowPickHtml(when) {
     const sel = options[flowPick.index];
     if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
-    let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
+    let html = `<span class="flow-tip-line ${escClass(sel.kind)}"${lineStyle(sel.kind, sel.num)}>${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
     if (options.length > 1) {
         html += '<span class="flow-tip-row">' + options.map((o, i) =>
-            `<span class="line-chip ${esc(o.kind)}${i === flowPick.index ? ' picked' : ''}">`
+            `<span class="line-chip ${escClass(o.kind)}${i === flowPick.index ? ' picked' : ''}"${lineStyle(o.kind, o.num)}>`
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
@@ -2771,7 +2963,7 @@ function showLineHighlight(num, kind) {
     hideLineHighlight();
     const parts = flowHits.filter(h => h.seg.num === num && h.seg.kind === kind);
     if (!parts.length) return;
-    const color = LINE_COLORS[kind] || LINE_COLORS.other;
+    const color = lineColor(kind, num);
     const halos = parts.map(h => L.polyline(h.latlngs, {
         color: '#111', opacity: 0.85, weight: h.weight + HALO_EXTRA_PX,
         lineCap: 'round', lineJoin: 'round', interactive: false,
@@ -2955,7 +3147,7 @@ function lineStopTipHtml(st) {
     if (st.pole) html += `<span class="tip-platform">${esc(prettyStopName(st.pole))}</span>`;
     if (lines.length > 1) {
         html += '<span class="tip-line-times">' + lines.map(l =>
-            `<span><span class="badge ${escAttr(l.kind)}">${esc(l.num)}</span>`
+            `<span><span class="badge ${escAttr(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
             + `${esc(fmtClock(l.sec))}</span>`).join('') + '</span>';
     }
     return html;
@@ -3433,7 +3625,7 @@ function timetableLinesHtml(data, mapSec) {
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
     const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
-        `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>` +
+        `<span class="badge ${escClass(d.mode)}"${lineStyle(d.mode, d.num)}>${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}` +
@@ -4213,7 +4405,7 @@ function legLayers(legs, {preview}) {
             }
             continue;
         }
-        const color = LINE_COLORS[leg.mode] || LINE_COLORS.other;
+        const color = lineColor(leg.mode, leg.num);
         casings.push(L.polyline(leg.path, {
             color: '#fff', weight: rideWeight + 5, opacity: preview ? 0.7 : 0.95,
             lineCap: 'round', lineJoin: 'round', interactive: false,
@@ -4223,13 +4415,17 @@ function legLayers(legs, {preview}) {
             lineCap: 'round', lineJoin: 'round', interactive: false,
         }));
         if (!preview) {
-            marks.push(L.marker(leg.path[Math.floor(leg.path.length / 2)], {
+            const mark = L.marker(leg.path[Math.floor(leg.path.length / 2)], {
                 icon: L.divIcon({
                     className: `line-badge solid ${leg.mode}`,
                     html: esc(leg.num), iconSize: null,
                 }),
                 interactive: false,
-            }));
+            });
+            // divIcon nie przyjmuje stylu - kolor linii dostaje dopiero postawiony element.
+            const declared = lineVar(leg.mode, leg.num);
+            if (declared) mark.on('add', () => { mark.getElement().style.cssText += declared; });
+            marks.push(mark);
         }
     }
 
@@ -4239,7 +4435,7 @@ function legLayers(legs, {preview}) {
         // Idą przed kropki wsiadania i wysiadania, czyli pod nie.
         for (const leg of legs) {
             if (leg.kind !== 'ride' || !leg.path || leg.path.length < 2) continue;
-            const color = LINE_COLORS[leg.mode] || LINE_COLORS.other;
+            const color = lineColor(leg.mode, leg.num);
             for (const stop of leg.via || []) {
                 if (stop.lat == null || stop.lon == null) continue;
                 marks.push(viaDot(stop, color));
@@ -4359,10 +4555,10 @@ function badgeHtml(leg) {
     // „4 › D" nie mówi inaczej, czy w 4 trzeba dopiero wsiąść, czy jedzie się
     // nią dalej (zgłoszenie #224).
     if (leg.onboard) {
-        return `<span class="badge ${leg.mode} current" title="${escAttr(leg.line)}`
+        return `<span class="badge ${leg.mode} current"${lineStyle(leg.mode, leg.num)} title="${escAttr(leg.line)}`
              + ` — jedziesz tym pojazdem">${esc(leg.num)}</span>`;
     }
-    return `<span class="badge ${leg.mode}" title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
+    return `<span class="badge ${leg.mode}"${lineStyle(leg.mode, leg.num)} title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
 }
 
 // Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
@@ -4664,7 +4860,7 @@ function detailHtml(journey) {
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
                           leg.from_platform, depLate));
         rows.push(
-            `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
+            `<li class="tl-ride ${escClass(leg.mode)}"${lineStyle(leg.mode, leg.num)}><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
             // Przycisk PRZED liczbą przystanków, choć czyta się go po niej:
             // .tl-info zajmuje całą szerokość (flex-basis: 100%), więc wszystko
@@ -4687,7 +4883,7 @@ function detailHtml(journey) {
         // które przewijałoby ją do początku karty.
         for (const stop of via) {
             rows.push(
-                `<li class="tl-via ${esc(leg.mode)}" data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
+                `<li class="tl-via ${escClass(leg.mode)}"${lineStyle(leg.mode, leg.num)} data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
                 `<span class="tl-time">${esc(stop.t)}</span><span class="tl-dot"></span>` +
                 `<span class="tl-name">${esc(stop.name)}</span></li>`,
             );
@@ -4752,7 +4948,7 @@ function onboardNoteHtml() {
     const kurs = lastFlow && lastFlow.onboard;
     if (!kurs) return '';
     return `<p class="onboard-head">`
-        + `<span class="badge ${esc(kurs.mode)}">${esc(kurs.num)}</span>`
+        + `<span class="badge ${escClass(kurs.mode)}"${lineStyle(kurs.mode, kurs.num)}>${esc(kurs.num)}</span>`
         + `<span>w stronę <b>${esc(kurs.headsign)}</b> — najbliższy przystanek `
         + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
 }
@@ -5023,7 +5219,7 @@ function syncOnboardView() {
     const przystanek = prettyStopName(
         obStopSelect.options[obStopSelect.selectedIndex].text);
     obSummary.innerHTML =
-        `<span class="badge ${esc(kurs.mode || 'other')}">${esc(kurs.num)}</span>`
+        `<span class="badge ${escClass(kurs.mode || 'other')}"${lineStyle(kurs.mode || 'other', kurs.num)}>${esc(kurs.num)}</span>`
         // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
         // linijki ucina się koniec, a stracić wolno kierunek (kontekst),
         // nie przystanek, przy którym pojazd zaraz stanie. Znaczek słupka
@@ -5178,7 +5374,7 @@ if (obLineInput) {
         render: item => item.label
             ? `<span class="badge train">${esc(item.label)}</span>`
               + `<span class="ac-kind">→ ${esc(item.headsign)}</span>`
-            : `<span class="badge ${escClass(item.mode)}">${esc(item.name)}</span>`
+            : `<span class="badge ${escClass(item.mode)}"${lineStyle(item.mode, item.name)}>${esc(item.name)}</span>`
               + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
         onEnter: () => loadDirections(),
     });
@@ -5978,7 +6174,7 @@ function schemeBadges(boxes, strands, branches) {
         s.badge = spot;
         let x = spot.x + PAD;
         const texts = s.lines.map((line, i) => {
-            const t = `<text class="scheme-num" fill="${LINE_COLORS[line.kind] || LINE_COLORS.other}" `
+            const t = `<text class="scheme-num" fill="${lineColor(line.kind, line.num)}" `
                 + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`;
             x += widths[i] + GAP;
             return t;
@@ -6133,7 +6329,6 @@ function schemeSvg(boxes, strands, pairs) {
     minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
     const colors = new Set();
-    const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
     const DASH = 9;
     let rects = '', lines = '', names = '';
     for (const [id, b] of boxes) {
@@ -6149,15 +6344,17 @@ function schemeSvg(boxes, strands, pairs) {
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
     const stroke = (group, label, d, arrow, extra = '') => {
-        const kinds = [...new Set(group.map(line => line.kind))].sort();
-        const tint = kinds.length === 1 ? colorOf(kinds[0]) : WALK_COLOR;
+        // Przy kolorze na linię pasek jest na linię, nie na rodzaj.
+        const tints = [...new Set([...group].sort((a, b) => a.kind.localeCompare(b.kind))
+            .map(line => lineColor(line.kind, line.num)))];
+        const tint = tints.length === 1 ? tints[0] : WALK_COLOR;
         const marker = arrow ? ` marker-end="url(#scheme-arrow-${tint.slice(1)})"` : '';
         if (arrow) colors.add(tint);
-        const strokes = kinds.map((kind, i) => kinds.length === 1
-            ? `<path class="scheme-line" stroke="${colorOf(kind)}"${marker} d="${d}"/>`
-            : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
-              + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
-              + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
+        const strokes = tints.map((color, i) => tints.length === 1
+            ? `<path class="scheme-line" stroke="${color}"${marker} d="${d}"/>`
+            : `<path class="scheme-line" stroke="${color}" stroke-linejoin="miter" `
+              + `stroke-dasharray="${DASH} ${DASH * (tints.length - 1)}" stroke-dashoffset="${-i * DASH}"`
+              + `${i === tints.length - 1 ? marker : ''} d="${d}"/>`).join('');
         return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}">${strokes}</g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
@@ -7664,6 +7861,23 @@ function reloadTimetable() {
     }
 }
 
+// Kolor linii siedzi w gotowym html i w warstwach mapy, więc zmiana kolorów
+// przerysowuje to, co już stoi, z tego, co już przyszło - bez zapytania.
+// Wachlarz w rozkładach jest zdjęty i wróci sam, już w nowych kolorach
+// (patrz resumePlanner).
+function repaintLineColors() {
+    reloadTimetable();
+    renderJourneys();
+    renderTimeHeadline();
+    renderVehicles();
+    syncOnboardView();
+    if (lastSchemeData) renderScheme(lastSchemeData);
+    if (window.timetableMode) window.timetableMode.repaint();
+    if (plannerSuspended) return;
+    if (lastFlow) drawFlow(lastFlow, false);
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+}
+
 // Układ schematu i liczba dodatkowych przejść mają sens tylko z nową mapą.
 function showSchemeRows() {
     const on = setting('new-map');
@@ -7715,6 +7929,7 @@ const SETTING_EFFECTS = {
     'scheme-layout': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
     // Przejścia pieszo na schemacie (demo): ile przejść ze środka najszybszych podróży dodać do tych z dojścia.
     'scheme-walks-count': {react: replanSoon(false)},
+    'line-colors': {react: repaintLineColors},
     'bikes-merged': {paint: () => paintBikeButtons()},
     'start-mode-switch': {paint: showStartMode},
     'routes-on': {paint: showRoutes, react: on => {
@@ -8973,7 +9188,7 @@ window.plannerBridge = {
     // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
     // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
     // tablice w jednym API to zaproszenie do sięgnięcia po złą.
-    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
+    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON, lineColor, lineStyle, escClass,
     prettyStopName, rawStopName,
     suspendPlanner, resumePlanner, setTimeNow,
     trainsOn: () => trainsOn,
