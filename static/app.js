@@ -1046,7 +1046,8 @@ function refreshBikeLayer() {
     if (flowOnScreen()) {
         flowBikeLayer = L.layerGroup([
             ...flowBikeMarkers(lastFlow.bike_places, lastFlow.bike_places_live),
-            ...flowBikeSpotMarkers(lastFlow.bike_spots, lastFlow.bike_places),
+            ...flowBikeSpotMarkers(lastFlow.bike_spots, lastFlow.bike_places,
+                                   lastFlow.bike_places_live),
         ]).addTo(map);
         restBikeRides();
         return;
@@ -4284,11 +4285,6 @@ const BIKE_LOOSE_STYLE = {radius: BIKE_SMALL_RADIUS, weight: 2, color: '#e65100'
 // rowerów - nie wiadomo. Szarość mówi to, zanim się przeczyta dymek.
 const BIKE_UNKNOWN_STYLE = {radius: BIKE_SMALL_RADIUS, weight: 1.5, color: '#9e9e9e',
                             fillColor: '#fff', fillOpacity: 0.35};
-// Drugi koniec przejazdu. Blada i bez własnego życia: pojawia się razem ze
-// strzałką, pod kursorem, bo opisuje przejazd, a nie miejsce, z którego coś
-// się bierze. Stacja, na której da się WSIĄŚĆ na rower, ma własną kropkę.
-const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
-                           fillColor: '#ffe0b2', fillOpacity: 0.85};
 // Kreska przejazdu kropkowana tak samo, jak etap rowerowy wybranej trasy.
 const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
                          dashArray: '1, 6', interactive: false};
@@ -4320,16 +4316,15 @@ function flowBikeMarkers(places, live) {
     });
 }
 
-/** Stacje, na których kończą się przejazdy (planner: bike_spots) - ciche
-    kropki w wyglądzie drugiego końca przejazdu, bez kresek. Koniec przejazdu
-    ze schematu ma już swoją kropkę przy kresce. */
-function flowBikeSpotMarkers(spots, places) {
+/** Stacje, na których kończą się przejazdy (planner: bike_spots) - kropki
+    jak każda inna stacja, bez kresek. Koniec przejazdu ze schematu ma już
+    swoją kropkę przy kresce. */
+function flowBikeSpotMarkers(spots, places, live) {
     const drawn = new Set((places || []).flatMap(place => place.rides)
         .filter(ride => ride.move).map(ride => String(ride.id)));
     return (spots || []).filter(spot => !drawn.has(String(spot.id))).map(spot => {
-        const dot = L.circleMarker([spot.lat, spot.lon],
-                                   {...BIKE_TARGET_STYLE, radius: bikeRadius(spot.bikes)})
-            .bindTooltip(bikeSpotTooltipHtml(spot), {direction: 'top', offset: [0, -4], opacity: 1});
+        const dot = L.circleMarker([spot.lat, spot.lon], bikeStyle(spot, live))
+            .bindTooltip(bikeSpotTooltipHtml(spot, live), {direction: 'top', offset: [0, -4], opacity: 1});
         dot.tapRank = TAP_RANK.shared;
         dot.on('mouseover', () => markSchemeBike(spot.id, true));
         dot.on('mouseout', () => markSchemeBike(spot.id, false));
@@ -4337,10 +4332,8 @@ function flowBikeSpotMarkers(spots, places) {
     });
 }
 
-function bikeSpotTooltipHtml(spot) {
-    return [`<b>${esc(spot.name)}</b>`,
-            `${spot.bikes} ` + plural(spot.bikes, 'rower', 'rowery', 'rowerów') +
-            ` na miejscu`].join('<br>');
+function bikeSpotTooltipHtml(spot, live) {
+    return [`<b>${esc(spot.name)}</b>`, bikeCountLine(spot, live)].join('<br>');
 }
 
 /** Przejazdy rowerem, gdy nic nie jest wskazane: stale te, które schemat
@@ -4373,9 +4366,7 @@ function reachLineHtml(item, near) {
 function bikeTooltipHtml(place, live) {
     const rows = [`<b>${esc(place.name || 'Rower luzem')}</b>`];
     rows.push(reachLineHtml(place, 'przy rowerze'));
-    rows.push(live ? bikeCountText(place)
-                   : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
-                     'jest z tej chwili, a pytasz o inny dzień');
+    rows.push(bikeCountLine(place, live));
     if (setting('debug-why') && place.why) {
         // Wybór przechodzi STACJA (punkt 16), więc powód stoi przy niej, a pod
         // nim podróże, które stacja pokazuje - każda ze swoimi trzema liczbami.
@@ -4389,6 +4380,12 @@ function bikeTooltipHtml(place, live) {
         }
     }
     return rows.join('<br>');
+}
+
+function bikeCountLine(place, live) {
+    return live ? bikeCountText(place)
+                : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
+                  'jest z tej chwili, a pytasz o inny dzień';
 }
 
 function bikeCountText(place) {
@@ -4442,12 +4439,12 @@ function clearBikeRides() {
 
 function bikeRideLayers(place, labels) {
     const layers = [];
+    const live = !lastFlow || lastFlow.bike_places_live;
     for (const ride of place.rides) {
         layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
                                BIKE_RIDE_STYLE));
         if (!labels) continue;
-        const target = L.circleMarker([ride.lat, ride.lon],
-                                      {...BIKE_TARGET_STYLE, radius: bikeRadius(ride.bikes)})
+        const target = L.circleMarker([ride.lat, ride.lon], bikeStyle(ride, live))
             .bindTooltip(bikeRideTooltipHtml(ride),
                          {direction: 'top', offset: [0, -4], opacity: 1});
         target.tapRank = TAP_RANK.shared;
@@ -4456,7 +4453,7 @@ function bikeRideLayers(place, labels) {
         // dla kursora: leży dokładnie na kropce wyżej, a to ona ma łapać
         // najechanie.
         layers.push(L.circleMarker([ride.lat, ride.lon],
-                                   {...BIKE_TARGET_STYLE, radius: bikeRadius(ride.bikes), opacity: 0,
+                                   {...bikeStyle(ride, live), opacity: 0,
                                     fillOpacity: 0, interactive: false})
             .bindTooltip(bikeRideLabel(ride),
                          {permanent: true, direction: 'right', offset: [6, 0],
@@ -4476,8 +4473,7 @@ function bikeRideTooltipHtml(ride) {
     rows.push(setting('walk-time')
         ? `Stąd ${fmtMins(ride.sec)} z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
         : `Stąd ${fmtDist(ride.m)} w linii prostej`);
-    rows.push(`${ride.bikes} ` + plural(ride.bikes, 'rower', 'rowery', 'rowerów') +
-              ` na miejscu`);
+    rows.push(bikeCountLine(ride, !lastFlow || lastFlow.bike_places_live));
     if (ride.arrival) rows.push(`${GOAL_ICON}<b>${esc(fmtClock(ride.arrival))}</b> u celu`);
     return rows.join('<br>');
 }

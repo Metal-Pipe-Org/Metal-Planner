@@ -2469,6 +2469,7 @@ def _bike_places(bike_moves):
         place["rides"].append({
             "id": leg["station_to_id"], "name": leg["to"], "lat": lat_b, "lon": lon_b,
             "bikes": by_id.get(leg["station_to_id"], {}).get("bikes", 0),
+            "electric": by_id.get(leg["station_to_id"], {}).get("electric", 0),
             "docks": leg["docks_available"], "m": leg["distance_m"],
             "sec": leg["arr_sec"] - leg["dep_sec"], "at": leg["arr_sec"], "move": True,
             "options": [{"bike_at": leg["dep_sec"], "arrival": bike["journey"]["arrival_sec"],
@@ -3404,15 +3405,23 @@ def plan_flow_stages(start_query, end_query, when=None,
                 for place in bike_places + shown:
                     for end in place["rides"]:
                         ends.setdefault(end["id"], {key: end[key] for key in
-                                                    ("id", "name", "lat", "lon", "bikes", "docks")})
+                                                    ("id", "name", "lat", "lon", "bikes",
+                                                     "electric", "docks")})
                 bike_places = [place for place in bike_places if place["id"] not in shown_ids] + shown
-                bike_spots = [spot for spot in ends.values()
-                              if not any(place["id"] == spot["id"] for place in bike_places)]
                 box_scheme = (live_scheme if live_scheme is not None
                               else scheme if moves_scheme is not None else None)
                 if box_scheme is not None:
-                    _bike_boxes(day, bike_places, bike_spots, source_stops, start_name,
+                    _bike_boxes(day, bike_places, list(ends.values()), source_stops, start_name,
                                 target_set, box_scheme)
+                    # Rower tylko tam, gdzie podróż i tak staje (pudełko
+                    # schematu), albo konkretny przejazd ze schematu. Stacja
+                    # przy przystanku, który pojazd tylko mija, każe wysiąść
+                    # w połowie jazdy, choć ten sam pojazd wiezie dalej
+                    # (Borowska przy 113 na Wojszyce → Katedra).
+                    bike_places = [place for place in bike_places
+                                   if "box" in place or place["id"] in shown_ids]
+                bike_spots = [spot for spot in ends.values()
+                              if not any(place["id"] == spot["id"] for place in bike_places)]
                 # Z końców przejazdów tylko te przy pudełkach schematu (także
                 # przy celu) i koniec przejazdu ze schematu - reszta to stacje
                 # rozsiane po mieście, z których nic na tej drodze nie wynika.
