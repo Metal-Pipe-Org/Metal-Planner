@@ -210,6 +210,12 @@
       "tags": ["Mapa"]
     },
     {
+      "id": "map-after-search",
+      "name": "Mapa po wyszukaniu",
+      "description": "Jak mapa ustawia się, gdy narysuje nowe wyszukiwanie. Domyślnie na telefonie pokazuje start, a na komputerze wszystko, co narysowała.",
+      "tags": ["Mapa"]
+    },
+    {
       "id": "dot-size",
       "name": "Wielkość kropek",
       "tags": ["Wygląd mapy"],
