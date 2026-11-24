@@ -820,7 +820,7 @@ def test_nothing_today_is_answered_with_tomorrow(monkeypatch):
     dzis = _dzien_z_jednym_kursem(8 * 3600, 8 * 3600 + 1800)     # było o 8:00
     jutro = _dzien_z_jednym_kursem(6 * 3600, 6 * 3600 + 1800)    # jest o 6:00
     dni = {datetime.date(2026, 8, 31): dzis, datetime.date(2026, 9, 1): jutro}
-    monkeypatch.setattr(gtfs, "load_day", lambda d: dni[d])
+    monkeypatch.setattr(gtfs, "load_day", lambda d, trains=True: dni[d])
 
     wynik = planner.plan_flow("START", "CEL",
                               datetime.datetime(2026, 8, 31, 22, 0))
@@ -837,7 +837,7 @@ def test_the_wait_does_not_move_the_map_threshold(monkeypatch):
     względem najszybszego PRZYJAZDU, więc pytanie o 10:00 i o 11:59 o ten sam
     autobus o 12:00 daje mapę do tej samej godziny."""
     day = _dzien_z_jednym_kursem(12 * 3600, 12 * 3600 + 1800)
-    monkeypatch.setattr(gtfs, "load_day", lambda d: day)
+    monkeypatch.setattr(gtfs, "load_day", lambda d, trains=True: day)
     wczesnie = planner.plan_flow("START", "CEL",
                                  datetime.datetime(2026, 8, 31, 10, 0))
     tuz_przed = planner.plan_flow("START", "CEL",
