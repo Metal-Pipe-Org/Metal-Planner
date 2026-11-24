@@ -4470,9 +4470,8 @@ function bikeRideLabel(ride) {
 
 function bikeRideTooltipHtml(ride) {
     const rows = [`<b>${esc(ride.name)}</b>`];
-    rows.push(setting('walk-time')
-        ? `Stąd ${fmtMins(ride.sec)} z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
-        : `Stąd ${fmtDist(ride.m)} w linii prostej`);
+    if (setting('walk-time'))
+        rows.push(`Stąd ${fmtMins(ride.sec)} z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`);
     rows.push(bikeCountLine(ride, !lastFlow || lastFlow.bike_places_live));
     if (ride.arrival) rows.push(`${GOAL_ICON}<b>${esc(fmtClock(ride.arrival))}</b> u celu`);
     return rows.join('<br>');
