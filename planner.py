@@ -1555,8 +1555,11 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
         walks = []
         for sibling, sec in day.siblings.get(arr_s, {}).items():
             when = arr_t + sec
+            # Margines po nazwie słupka, nie po miejscu: perony węzła
+            # (Galeria Dominikańska 01…11) są jednym miejscem, a przejście
+            # między nimi to dalej szacowany marsz.
             slack = (walk_margin_sec
-                     if day.place_of.get(sibling) != day.place_of.get(arr_s) else 0)
+                     if day.stop_names[sibling] != day.stop_names[arr_s] else 0)
             if when - slack <= latest.get(sibling, -1):
                 walks.append((sibling, when, sibling in target_set,
                               twins_at.setdefault(sibling, {})))
@@ -1580,7 +1583,7 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
                 if at_target or twin is None:
                     walked = _Label(when, when, here.dep, here.rides, 0,
                                     [(here, None)],
-                                    day.place_of.get(sibling) != day.place_of.get(arr_s))
+                                    day.stop_names[sibling] != day.stop_names[arr_s])
                 # Do celu idzie ta etykieta, nawet jeśli na przystanku okaże
                 # się bliźniakiem - z tą jedną drogą, nie z cudzymi.
                 if at_target:
@@ -5973,7 +5976,7 @@ def _backward(day, target_set, dep_sec, deadline, walk_margin_sec=0):
                 latest[dep_s] = dep_t
             for sibling in day.siblings.get(dep_s, ()):
                 walk_dep = dep_t - gtfs.walk_seconds(day, sibling, dep_s)
-                if day.place_of.get(sibling) != day.place_of.get(dep_s):
+                if day.stop_names[sibling] != day.stop_names[dep_s]:
                     walk_dep += walk_margin_sec
                 if walk_dep > on_foot.get(sibling, -1):
                     on_foot[sibling] = walk_dep
