@@ -27,7 +27,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 ## Projekt użytkownika i git
 
 13. Gdy bierzemy się za zadanie, sam przełączam projekt użytkownika na gałąź tego zadania. Nie robię tego, gdy rozmawiamy o czymś innym.
-14. Użytkownik ogląda każdą wersję w aplikacji; uwagi wracają do agenta i dają kolejną wersję.
+14. Użytkownik ogląda każdą wersję w aplikacji; uwagi wracają do agenta i dają kolejną wersję. Kiedy użytkownik ma coś zobaczyć lokalnie, przygotowuję mu do tego serwer (uruchamiam albo restartuję) i podaję link.
 15. PR zakłada użytkownik. Tytuł i opis PR-a daję, gdy powie, że robimy PR.
 27. Każdy commit od razu wypycham, bez pytania (zwykły push, nigdy nadpisujący).
 16. Konflikty w PR-ach rozwiązuje osobny agent; szkice (draft) pomijam. Konflikty, które dotyczą tylko kodu — także duże — agent rozwiązuje, commituje i wypycha sam; użytkownikowi mówię, które były większe, żeby puścił na nich recenzję Claude'a jeszcze raz. Z użytkownikiem konsultuję tylko konflikty, które zmieniają zachowanie aplikacji.
