@@ -1073,41 +1073,6 @@ checks.grupa_stacji_wraca_kanoniczna = (() => {
     };
 })();
 
-/* Przycisk "Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie dokłada
-   jedną wyjściową gęstość i leci do serwera jako `more` razem z gęstością
-   z suwaka. Po trzecim kliknięciu przycisku nie ma - to zwykły licznik, bez
-   pytania serwera, czy jest jeszcze co dołożyć. */
-checks.pokaz_wiecej_doklada_gestosc = (() => {
-    const pasek = () => document.getElementById('time-headline').innerHTML;
-
-    app.drawFlow({...FLOW_FIXTURE, more: 0, at_ceiling: false}, false);
-    const naStarcie = pasek();
-
-    app.showMore();
-    const zapytanie = app.queryParams().toString();
-
-    app.drawFlow({...FLOW_FIXTURE, more: app.MAX_MAP_MORE, at_ceiling: false}, false);
-    const poTrzecim = pasek();
-    app.drawFlow({...FLOW_FIXTURE, more: 1, at_ceiling: true}, false);
-    const przySuficie = pasek();
-    app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
-
-    return {
-        ok: naStarcie.includes('headline-more')
-            && app.mapMore === 1
-            && zapytanie.includes('more=1')              // i to leci do serwera
-            && zapytanie.includes('density=')            // razem z gęstością z suwaka
-            && zapytanie.includes('cars=')               // i liczbą aut, którą też mnoży
-            && !zapytanie.includes('horizon_sec')
-            && !poTrzecim.includes('headline-more')      // po trzecim nie ma przycisku
-            && przySuficie.includes('headline-more'),    // sufit serwera go nie chowa
-        more: app.mapMore,
-        zapytanie: zapytanie.slice(0, 200),
-        naStarcie: naStarcie.slice(-200),
-        poTrzecim: poTrzecim.slice(-200),
-    };
-})();
-
 /* Warstwa żywych pojazdów (przycisk ◉) przy narysowanej mapie przepływów:
    pokazuje TYLKO linie, które są na tej mapie. Pojazd linii, której mapa nie
    rysuje, odpowiada na inne pytanie i ma jej nie zasłaniać; bez mapy nie ma

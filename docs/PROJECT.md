@@ -505,7 +505,7 @@ lista to po prostu ścieżki przeczytane wprost z tego samego grafu segmentów,
 który mapa właśnie narysowała (`_extract_transfer_graph` +
 `_enumerate_journeys`, wołane na końcu `plan_flow`, po `_select_and_anchor`).
 Efekt: lista nigdy nie pokaże przesiadki, której nie ma na mapie, i reaguje
-na ten sam próg mapy (gęstość, „Pokaż więcej") — dawniej to nie było prawdą
+na to samo, co mapa rysuje — dawniej to nie było prawdą
 (lista miała własne, niezależne od mapy okno).
 
 1. **Graf przesiadek** (`_extract_transfer_graph`): węzły to już narysowane,

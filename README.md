@@ -49,8 +49,7 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
     samo wyszukiwanie wymaga sieci. Instalację przeglądarki proponują tylko
     po HTTPS albo na `localhost`.
 
-Ustawienia dla zespołu są pod zębatką ⚙: gęstość mapy i założenia czasowe
-(tempo marszu, prędkość roweru i auta).
+Ustawienia dla zespołu są pod zębatką ⚙, m.in. założenia czasowe (tempo marszu, prędkość roweru i auta).
 
 ## Uruchomienie lokalne
 

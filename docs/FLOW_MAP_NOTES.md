@@ -11,19 +11,19 @@ Uruchomienie i wymagania (część testów potrzebuje `data/gtfs.sqlite`, testy
 frontu — macOS): [README.md](../README.md#testy). Tu: który test pilnuje
 którego punktu kontraktu.
 
-Mapa jest jedna — z wartości podróży — i wszystkie testy sprawdzają ją.
+Testy z tej tabeli sprawdzają mapę z wartości podróży (dziś tylko zapas, patrz [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md)) i wspólną maszynerię mapy; wybór z ruchów sprawdza `tests/test_mapa_ruchy.py`.
 Testy frontu (emulator, `tests/test_flow_map_front.py` + `tests/js/`) jadą na
 zapisanej odpowiedzi `/api/flow` (`tests/js/flow_fixture.json`, Sosnowiecka →
 Wojszyce, wtorek 6.10, 15:37; przepis na odświeżenie w opisie
 `test_flow_map_front.py`). Scenariusze syntetyczne, w których mapa przy
 domyślnej gęstości nie sięgnęłaby tego, co test sprawdza, pytają o najwyższą
-gęstość z suwaka (`MAX_MAP_DENSITY`).
+gęstość (`MAX_MAP_DENSITY`).
 
 | Punkt | Backend | Front (emulator) |
 |---|---|---|
 | **1** | `test_mapa_z_wartosci.py`: `test_nie_ma_jasnosci`, `test_blizniaki_rysuja_sie_razem` | — |
 | **2** — tolerancja i numery | `test_mapa_z_wartosci.py`: `test_tolerancja_to_o_ile_dluzej_trwa_podroz`, `test_przesiadka_w_pojazd_ktory_i_tak_przyjedzie_nie_pojawia_sie_nigdy`, `test_rozne_trasy_o_tej_samej_minucie_zostaja_obie`, `test_z_tych_samych_numerow_rysuje_sie_tylko_najkrotszy_wariant`, `test_przegrana_z_tymi_samymi_numerami_znika_mimo_tolerancji`, `test_ten_sam_kurs_zamiast_marszu`, `test_ten_sam_kurs_nie_wpuszcza_objazdu`; podgląd Debug: `test_podglad_mowi_*` | — |
-| **2** — gęstość, „Pokaż więcej" | `test_lines_lying_on_each_other_count_once_towards_density`, `test_two_platforms_of_one_place_are_one_corridor`, `test_the_frame_is_never_narrower_than_a_kilometre`, `test_density_is_measured_per_side_of_the_frame_as_on_screen`, `test_the_density_slider_has_a_server_side_ceiling`; `test_mapa_z_wartosci.py`: `test_wiecej_zawsze_cos_doklada` | `test_show_more_adds_one_starting_density_per_click` |
+| **2** — gęstość (mapa z wartości) | `test_lines_lying_on_each_other_count_once_towards_density`, `test_two_platforms_of_one_place_are_one_corridor`, `test_the_frame_is_never_narrower_than_a_kilometre`, `test_density_is_measured_per_side_of_the_frame_as_on_screen`, `test_the_density_slider_has_a_server_side_ceiling`; `test_mapa_z_wartosci.py`: `test_wiecej_zawsze_cos_doklada` | — |
 | **4** | `test_dead_end_branch_never_appears`, `test_tail_onto_a_terminus_loop_is_not_anchored_by_the_way_back`, `test_tail_is_not_anchored_by_a_course_turning_back_further_up_the_line`, `test_two_tails_propping_each_other_up_are_both_cut_back`, `test_course_passing_the_origin_after_a_loop_is_anchored_at_the_origin`; tryb awaryjny: `test_a_normal_map_is_not_marked_as_a_fallback` | `test_fallback_mode_shows_a_notice_on_screen` |
 | **6** | `test_shape_slice_uses_real_street_geometry_when_available`, `test_shape_slice_falls_back_to_stop_polyline_without_a_shape` | — |
 | **7** | `test_lines_sharing_a_corridor_each_carry_the_whole_corridor`, `test_corridor_numbers_follow_one_global_order_everywhere`, `test_a_piece_never_claims_a_corridor_it_has_already_left`, `test_every_number_in_a_group_is_drawn_along_the_whole_piece`, `test_solo_line_never_gets_a_corridor_list` | `test_the_map_labels_its_corridors_at_all`, `test_number_groups_never_overlap`, `test_hovering_a_number_names_exactly_that_line`, `test_every_group_stands_on_a_drawn_corridor` |

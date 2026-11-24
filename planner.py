@@ -2660,13 +2660,15 @@ def plan_flow_stages(start_query, end_query, when=None,
     pokaże przesiadki, której nie ma na mapie, i przesuwa się razem z progiem
     mapy.
 
-    density to docelowa gęstość narysowanej sieci (suwak pod zębatką, patrz
-    DEFAULT_MAP_DENSITY), a more - ile razy kliknięto "pokaż więcej" (0-3).
-    Razem wyznaczają, o ile minut dłuższe podróże mapa jeszcze wybacza: tyle,
-    przy ilu sieć nie jest gęstsza niż density × (1 + more) (patrz _value_map).
+    density to docelowa gęstość narysowanej sieci (patrz DEFAULT_MAP_DENSITY),
+    a more - mnożnik tej gęstości (0-3). Razem wyznaczają, o ile minut dłuższe
+    podróże mapa z wartości jeszcze wybacza: tyle, przy ilu sieć nie jest
+    gęstsza niż density × (1 + more) (patrz _value_map). Działają tylko tam -
+    mapa z ruchów progu gęstości nie ma - a aplikacja ich nie wysyła (zawsze
+    domyślne); podają je testy mapy z wartości.
     car_count to ile aut car-sharingu pokazać przy mapie (suwak pod zębatką,
-    patrz DEFAULT_MAP_CARS i traficar.map_skyband); "pokaż więcej" mnoży ją
-    tak samo jak gęstość. bike_count - to samo dla przejazdów rowerem (osobny
+    patrz DEFAULT_MAP_CARS i traficar.map_skyband); more mnoży ją tak samo
+    jak gęstość. bike_count - to samo dla przejazdów rowerem (osobny
     suwak, patrz DEFAULT_MAP_BIKES i bikes.map_places). car_vans - czy
     pokazać też dostawczaki, wybierane osobno od osobówek.
     walking - False: bez chodzenia pieszo (patrz gtfs.without_walking), tylko
@@ -2674,9 +2676,10 @@ def plan_flow_stages(start_query, end_query, when=None,
     scheme_extra - ile dodatkowych najszybszych tras z przejściem pieszo
     w środku dorzucić do schematu (ustawienie deweloperskie, patrz
     _scheme_pairs).
-    new_map - przełącznik eksperymentu "nowa mapa" (⚙); na razie dokłada do
-    etapu "map" tylko `scheme` - schemat blokowy decyzji (patrz _scheme),
-    dalsze zmiany gałęzią się po nim.
+    new_map - mapa z ruchów (moves.py) i schemat (`scheme`, patrz _scheme).
+    Aplikacja woła zawsze z True; False (mapa z wartości jako zwykła mapa,
+    bez schematu) zostało tylko dla testów, które przez nią sprawdzają
+    wspólną maszynerię mapy.
     bike_electric/bike_regular - na jaki rodzaj roweru pasażer chce wsiąść
     (dwa przyciski w pasku warstw, patrz bikes.map_places). To odsiew MIEJSC, nie zmiana wyceny przejazdu: rower
     ma jedną prędkość niezależnie od rodzaju, więc odhaczenie jednego z nich
@@ -2728,9 +2731,9 @@ def plan_flow_stages(start_query, end_query, when=None,
     sekundy), za to odpowiedź jest o 40-50% mniejsza.
     """
     when = when or datetime.now()
-    # Wybór z ruchów (moves.py) żyje WYŁĄCZNIE pod „Nową mapą"; stara mapa
-    # jest dokładnie taka jak była. Start z pokładu idzie tą samą drogą co
-    # zwykłe wyszukiwanie - różni się tylko kursem, w którym się siedzi.
+    # Wybór z ruchów (moves.py) żyje WYŁĄCZNIE pod new_map; bez niego mapa
+    # z wartości jest dokładnie taka jak była. Start z pokładu idzie tą samą
+    # drogą co zwykłe wyszukiwanie - różni się tylko kursem, w którym się siedzi.
     by_moves = bool(new_map)
     journey_limit = (
         DEFAULT_JOURNEY_LIMIT if journey_limit is None
@@ -3209,8 +3212,8 @@ def plan_flow_stages(start_query, end_query, when=None,
             # wachlarzem opcji. Front ma po czym poznać, że pokazuje coś innego
             # niż zwykle - i nie brać rzadkiej mapy za "tędy nic nie jedzie".
             "degraded": degraded,
-            # Schemat blokowy obok mapy - tylko w eksperymencie „nowa mapa”;
-            # bez niego odpowiedź zostaje co do bajtu taka jak dotąd.
+            # Schemat blokowy obok mapy - tylko z new_map; bez niego odpowiedź
+            # zostaje co do bajtu taka jak w mapie z wartości.
             **({"scheme": scheme} if new_map else {}),
         }
 
@@ -4807,7 +4810,7 @@ def _enumerate_journeys(day, graph, dep_sec, geo_db, limit=DEFAULT_JOURNEY_LIMIT
     return journeys
 
 
-# Schemat blokowy mapy (eksperyment „nowa mapa”, zgłoszenie #367): ta sama
+# Schemat blokowy mapy (zgłoszenie #367): ta sama
 # mapa, tylko zdjęta z geografii. Węzły to te same kropki przesiadek co na
 # mapie (_transfer_nodes) plus start i cel; strzałka to jedna jazda - od
 # miejsca, w którym się wsiada, do miejsca, w którym mapa przestaje tę linię

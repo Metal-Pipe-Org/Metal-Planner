@@ -1839,7 +1839,7 @@ const LEGACY_SETTINGS_KEYS = {
         size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past', center: 'dot-center',
         tipCursor: 'tip-cursor', tipPanel: 'tip-panel', bikeTimes: 'walk-time',
         bikeRides: 'bike-rides', carTimes: 'car-times', why: 'debug-why',
-        whySeg: 'debug-why-seg', namesZoom: 'names-zoom',
+        namesZoom: 'names-zoom',
     },
     'metal-planner:look-prefs': {
         maxWeight: 'look-weight', dimFactor: 'look-dim', labelStep: 'look-label-step',
@@ -2194,7 +2194,7 @@ function drawFlow(flow, refit) {
 // Jedyna liczba na mapie, której nie trzeba szukać kursorem - i jedyna, która
 // odpowiada na pytanie zadawane najpierw: "ile to w ogóle zajmuje". Podaje
 // dwie granice całego wachlarza: najszybszy dojazd i najpóźniejszy, jaki mapa
-// jeszcze rysuje (czyli skutek progu mapy - patrz showMore).
+// jeszcze rysuje.
 // Najechanie na najszybszy czas pokazuje, KTÓRĄ trasą się go osiąga - obie
 // liczby przychodzą z serwera (best_sec/limit_sec/fastest), razem z gotową
 // geometrią tej trasy. Obie strony paska podają godzinę i czas jazdy w tej
@@ -2233,25 +2233,6 @@ function showFastest() {
 
 function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
-}
-
-// "Pokaż więcej" tuż za granicą mapy (punkt 2 kontraktu): każde kliknięcie
-// dokłada jedną WYJŚCIOWĄ gęstość - pierwsze do dwukrotności, drugie do
-// trzykrotności, trzecie do czterokrotności. Próg z tego dobiera serwer i to
-// on pilnuje sufitu (MAX_MAP_MORE w plannerze), tutaj liczba służy tylko
-// temu, żeby przycisk zniknął, gdy nie ma już czego dokładać. Dokładka żyje
-// do NASTĘPNEGO wyszukiwania - nowa relacja zaczyna od gęstości z suwaka.
-const MAX_MAP_MORE = 3;
-let mapMore = 0;                   // ile razy kliknięto "pokaż więcej"
-let moreBusy = false;              // klik w locie - drugi klik ma poczekać
-
-/** Gęstsza mapa dorysowuje się na tę, która już jest - bez kadrowania i bez
-    gubienia wybranej trasy (patrz renderPlan). Przycisk kręci się, aż
-    dojdą wszystkie etapy, a bez kółka klik wyglądał na zignorowany. */
-function showMore() {
-    if (moreBusy) return;
-    mapMore += 1;
-    loadPlan('more').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
@@ -2320,16 +2301,10 @@ function renderTimeHeadline() {
     // przez escAttr w jednym miejscu, a nie sklejany z esc() po kawałku.
     const item = (cls, tip, html) =>
         `<span class="headline-item${cls}" data-tip="${escAttr(tip)}">${html}</span>`;
-    // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
-    // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
-    // z wartości podróży wie to dopiero po szerszym szukaniu.
     // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - zakresu mapy
-    // i przycisku jeszcze nie ma.
+    // jeszcze nie ma.
     const mapped = typeof flow.limit_sec === 'number';
     const showMapRange = $('headline-map-range').checked;
-    // Mapa nie ma „Pokaż więcej": pokazuje kilka ruchów, resztę da się
-    // wyklikać przystankiem.
-    const more = '';
     // Sama jazda to osobna liczba na życzenie.
     const ride = setting('time-ride') && typeof flow.ride_sec === 'number'
         ? item('', `Sama jazda: ${fmtMins(flow.ride_sec)}, od odjazdu pierwszego pojazdu`
@@ -2373,7 +2348,6 @@ function renderTimeHeadline() {
                                               + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
                            `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
                   : '')
-              + more
               + '</span>'
             : '');
     el.hidden = false;
@@ -2384,8 +2358,6 @@ function renderTimeHeadline() {
     best.addEventListener('mouseleave', clearSchemeHighlight);
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
-    const moreBtn = el.querySelector('.headline-more');
-    if (moreBtn) moreBtn.addEventListener('click', showMore);
     // Na dotyku nie ma "mouseenter" - to jedyny sposób, żeby zobaczyć trasę
     // najszybszego dojazdu na telefonie. Toggle, nie show: drugie stuknięcie
     // (albo stuknięcie gdzie indziej, które i tak odpala renderTimeHeadline
@@ -2434,18 +2406,14 @@ function hideHeadlineTip() {
     bar.addEventListener('pointerout', event => {
         if (event.pointerType === 'mouse' && itemOf(event)) hideHeadlineTip();
     });
-    // "Pokaż więcej" to przycisk, a nie opis: klik i stuknięcie mają tylko
-    // zagęścić mapę. Kliknięty przycisk dostaje też fokus, więc fokus
-    // z myszy albo palca (bez :focus-visible) nie otwiera jego dymka.
-    const isMore = item => item.classList.contains('headline-more');
     bar.addEventListener('focusin', event => {
         const item = itemOf(event);
-        if (item && !(isMore(item) && !item.matches(':focus-visible'))) showHeadlineTip(item);
+        if (item) showHeadlineTip(item);
     });
     bar.addEventListener('focusout', hideHeadlineTip);
     bar.addEventListener('click', event => {
         const item = itemOf(event);
-        if (item && !isMore(item)) showHeadlineTip(item);
+        if (item) showHeadlineTip(item);
     }, true);
     document.addEventListener('click', event => {
         if (!bar.contains(event.target)) hideHeadlineTip();
@@ -2905,9 +2873,6 @@ function flowPickHtml(when) {
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
-    if (setting('debug-why-seg') && sel.hit && sel.hit.seg.why) {
-        html += segWhyHtml(sel.hit.seg.why);
-    }
     return html;
 }
 
@@ -2926,49 +2891,6 @@ function segTipHtml(tip) {
         ]),
         ...tip.lines.map(esc),
     ].join('<br>');
-}
-
-/** Debug: dlaczego kawałek jest na mapie z wartości podróży (pole `why`,
-    patrz planner._value_map). Każda podróż, która tędy jedzie, to jeden
-    wiersz: numerki, godziny i słowami, od jakiej tolerancji jest na mapie
-    i czemu tyle - tolerancja to suma dwóch strat w minutach. Pod spodem
-    warianty, które ukryły numerki, i przez co. */
-function segWhyHtml(why) {
-    const span = (from, to) => `${fmtClock(from)} → ${fmtClock(to)}`;
-    let html = '<span class="flow-tip-why">'
-        + `<span class="why-head">Dlaczego tu jest · tolerancja mapy ${why.tolerance} min`
-        + ` · najszybciej w celu ${fmtClock(why.fastest)}</span>`;
-    for (const j of why.journeys) {
-        const reasons = [];
-        if (j.late) reasons.push(`w celu ${j.late} min po najszybszej`);
-        if (j.early) {
-            reasons.push(`wychodzi ${j.early} min wcześniej niż ${esc(j.early_by.lines)} ` +
-                         `(${span(j.early_by.dep, j.early_by.arr)}), która w celu nie jest później`);
-        }
-        html += '<span class="why-journey">'
-            + `<b>${j.lines.map(esc).join(' lub ')}</b> ${span(j.dep, j.arr)}`
-            + ` · ${j.transfers} ` + plural(j.transfers, 'przesiadka', 'przesiadki', 'przesiadek')
-            + '<span class="why-reason">'
-            + (j.entry ? `od ${j.entry} min: ${reasons.join(' + ')}` : 'od razu — najwcześniej w celu')
-            + '</span></span>';
-    }
-    if (why.others) {
-        html += `<span class="why-more">i ${why.others} ` +
-                plural(why.others, 'inna podróż', 'inne podróże', 'innych podróży') +
-                ' tędy, później na mapie</span>';
-    }
-    if (why.hidden.length) {
-        html += '<span class="why-head">Ukryte przez numerki</span>';
-        for (const h of why.hidden) {
-            const same = h.added.length
-                ? `to ${esc(h.by.lines)} z dołożonym ${h.added.map(esc).join(', ')}`
-                : `te same numerki co ${esc(h.by.lines)}`;
-            html += `<span class="why-journey"><b>${esc(h.lines)}</b> ${span(h.dep, h.arr)}`
-                + `<span class="why-reason">${same} (${span(h.by.dep, h.by.arr)})` +
-                  ', a nie jest w niczym lepsza</span></span>';
-        }
-    }
-    return html + '</span>';
 }
 
 /** Godziny w dymku - odpowiedz na "o ktorej tu jestem i o ktorej bede u celu".
@@ -5582,7 +5504,6 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
-        density: $('density').value,
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
@@ -5599,9 +5520,6 @@ function queryParams() {
     });
     // Wyłączonych propozycji serwer nie składa wcale - patrz routes.api_flow.
     if (!$('routes-on').checked) params.set('routes', '0');
-    // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
-    // wynika z samej gęstości z suwaka.
-    if (mapMore) params.set('more', mapMore);
     // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
@@ -7380,8 +7298,8 @@ let planRun = null;
 
 /** Zapytanie o mapę, czytane etapami (patrz routes.api_flow): każdy etap
     rysuje się, gdy tylko przyjdzie. `kind` mówi, kto pyta: 'search' - nowe
-    wyszukiwanie (kadruje, gra rurę, zwija formularz na telefonie), 'more' -
-    „Pokaż więcej", 'quiet' - suwaki i przełączniki. Kończy się, gdy dojdzie
+    wyszukiwanie (kadruje, gra rurę, zwija formularz na telefonie), 'quiet' -
+    suwaki i przełączniki. Kończy się, gdy dojdzie
     ostatni etap albo gdy zastąpi je następne zapytanie. `onMapped` woła się
     po narysowaniu mapy z listą - tylko gdy to zapytanie wciąż jest aktualne. */
 function loadPlan(kind, onMapped) {
@@ -7469,12 +7387,10 @@ async function readLines(response, onLine) {
     if (buffer.trim()) onLine(JSON.parse(buffer));
 }
 
-/** Kółka w toku: „Szukaj" (i linijka zwiniętego formularza na telefonie)
-    przy wyszukiwaniu, „Pokaż więcej" przy dokładaniu mapy. */
+/** Kółko w toku: „Szukaj" (i linijka zwiniętego formularza na telefonie)
+    przy wyszukiwaniu. */
 function showBusy(busy) {
     setSearching(busy.has('search'));
-    moreBusy = busy.has('more');
-    document.body.classList.toggle('more-busy', moreBusy);
 }
 
 /** Rower i auto zmieniają ODPOWIEDŹ, nie tylko wygląd mapy: propozycje
@@ -7633,7 +7549,6 @@ function search({fromLink = false} = {}) {
     // zasłaniają wynik.
     if (onboardOn) { obCollapsed = true; syncOnboardView(); }
     hideRecallOffer();
-    mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     selectedJourney = null;
     clearJourney();
     clearPreview();
@@ -8375,15 +8290,8 @@ function replanQuietly() {
     loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
-// Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
-// z "pokaż więcej" liczyłaby się inaczej od starej i suwak
-// wyglądałby na zepsuty.
-function replanSoon(resetsMore) {
-    const later = debounced(replanQuietly, 200);
-    return () => {
-        if (resetsMore) mapMore = 0;
-        later();
-    };
+function replanSoon() {
+    return debounced(replanQuietly, 200);
 }
 
 // „Stoję tutaj / Jestem w pojeździe" da się schować - kto nie jeździ
@@ -8440,24 +8348,21 @@ function repaintLineColors() {
 
 // Zmiana rysuje stan (`paint`, też na starcie) i/albo coś robi po ruchu (`react`).
 const SETTING_EFFECTS = {
-    'density': {react: replanSoon(true)},
-    'car-count': {react: replanSoon(true)},
-    'bike-count': {react: replanSoon(true)},
-    'transfer-gain': {react: replanSoon(false)},
-    'walk-pace': {react: replanSoon(false)},
-    'bike-kmh': {react: replanSoon(false)},
-    'bike-overhead': {react: replanSoon(false)},
-    'car-kmh': {react: replanSoon(false)},
-    'car-overhead': {react: replanSoon(false)},
-    'onboard-slack': {react: replanSoon(false)},
+    'car-count': {react: replanSoon()},
+    'bike-count': {react: replanSoon()},
+    'transfer-gain': {react: replanSoon()},
+    'walk-pace': {react: replanSoon()},
+    'bike-kmh': {react: replanSoon()},
+    'bike-overhead': {react: replanSoon()},
+    'car-kmh': {react: replanSoon()},
+    'car-overhead': {react: replanSoon()},
+    'onboard-slack': {react: replanSoon()},
     // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
     'cars-horizon': {react: () => {
-        mapMore = 0;
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     }},
     'car-vans': {react: () => {
-        mapMore = 0;
         if (!flowOnScreen()) refreshCarLayer();
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
@@ -8467,7 +8372,6 @@ const SETTING_EFFECTS = {
     'scheme-on': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
     // Chodzenie pieszo zmienia odpowiedź serwera, jak dostawczaki.
     'walking': {react: () => {
-        mapMore = 0;
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     }},
@@ -8521,7 +8425,7 @@ for (const id of ['vehicles-direction', 'vehicles-stats']) {
     SETTING_EFFECTS[id] = {react: () => renderVehicles()};
 }
 for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-rides',
-                  'car-times', 'debug-why', 'debug-why-seg']) {
+                  'car-times', 'debug-why']) {
     SETTING_EFFECTS[id] = {react: () => applyDotOpts()};
 }
 

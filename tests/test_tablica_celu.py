@@ -259,9 +259,6 @@ def przebieg(request, adres, przegladarka):
     page.goto(adres)
     page.wait_for_selector("#start")
     page.fill("#time", "12:00")
-    # Przy domyślnej gęstości 2 ta trasa nie ma przystanku z samą wysiadką -
-    # przy 2,5 (dawnej domyślnej) ma go: Pl. Orląt Lwowskich.
-    page.evaluate("document.getElementById('density').value = '2.5'")
     _wybierz(page, "#start", TRASA[0])
     _wybierz(page, "#end", TRASA[1])
     if not page.evaluate("document.body.classList.contains('searching')") \

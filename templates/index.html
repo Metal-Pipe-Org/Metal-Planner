@@ -841,12 +841,6 @@
             <input type="checkbox" id="via-open"> {{ name('via-open') }} {{ info('via-open') }}
         </label>
 
-    <div class="field{{ dev('density') }} set-row" {{ attrs('density') }}>
-        <label for="density">
-            {{ name('density') }} <output id="density-value">2</output> {{ info('density') }}
-        </label>
-        <input type="range" id="density" min="0.5" max="15" step="0.5" value="2">
-    </div>
     <div class="field{{ dev('car-count') }} set-row" {{ attrs('car-count') }}>
         <label for="car-count">
             {{ name('car-count') }} <output id="car-count-value">3</output> {{ info('car-count') }}
@@ -915,9 +909,6 @@
     #}
     <label class="dev-check{{ dev('debug-why') }} set-row" {{ attrs('debug-why') }}>
             <input type="checkbox" id="debug-why"> {{ name('debug-why') }} {{ info('debug-why') }}
-        </label>
-    <label class="dev-check{{ dev('debug-why-seg') }} set-row" {{ attrs('debug-why-seg') }}>
-            <input type="checkbox" id="debug-why-seg"> {{ name('debug-why-seg') }} {{ info('debug-why-seg') }}
         </label>
     <label class="dev-check{{ dev('vehicles-direction') }} set-row" {{ attrs('vehicles-direction') }}>
             <input type="checkbox" id="vehicles-direction"> {{ name('vehicles-direction') }} {{ info('vehicles-direction') }}
@@ -1141,9 +1132,8 @@
 <div id="map-dock">
 
     {#
-      Schemat blokowy znalezionych tras obok mapy - eksperyment „nowa mapa”
-      (⚙ → Eksperymenty, patrz renderScheme w app.js). Bez przełącznika
-      zostaje schowany i pusty.
+      Schemat blokowy znalezionych tras obok mapy - ustawienie „Schemat obok
+      mapy” (patrz renderScheme w app.js). Bez niego zostaje schowany i pusty.
     #}
     <div id="scheme-panel" class="scheme-panel" hidden>
         <div class="scheme-head">

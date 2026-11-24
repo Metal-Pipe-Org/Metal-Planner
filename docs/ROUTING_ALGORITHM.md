@@ -45,10 +45,7 @@ What frames the value map:
    the drawn network has a target density: total length of *distinct*
    corridors divided by the side of the frame the relation is shown in
    (`_corridor_km`, `_map_density`). Lines lying on top of each other count
-   once, and the frame is never narrower than a kilometre. The target is a slider under ⚙ (default 2.5, range 0.5–15); "Pokaż więcej"
-   ("show more") multiplies it by 2, 3 and 4, and every click is guaranteed
-   to add something — if the new target changes nothing, the threshold keeps
-   moving to the first thing that is actually new. How late the map reaches is a result of the threshold, not a setting.
+   once, and the frame is never narrower than a kilometre. The target is `DEFAULT_MAP_DENSITY` (2): the app sends neither a density nor `more`, the multiplier that raises the target by 2, 3 and 4 with every step guaranteed to add something (if the new target changes nothing, the threshold keeps moving to the first thing that is actually new) — only the tests of the value map use them. How late the map reaches is a result of the threshold, not a setting.
 5. **Everything after the choice**: cutting into pieces, real street
    geometry, corridor number groups, transfer dots, cars and bikes
    (`_finalize_segments` onwards).
@@ -95,7 +92,7 @@ than the search window earlier than another label standing at the same
 place no later. The search window starts at 20 minutes past `best_arr` and
 grows in 5-minute steps up to 40 only when the map needs it — the cost
 grows steeply with the width, because nothing else cuts off "riding around
-while waiting". In practice: tenths of a second for an ordinary map, up to a few seconds after three "Pokaż więcej" clicks on dense relations.
+while waiting". In practice: tenths of a second for an ordinary map, up to a few seconds at the highest `more` on dense relations.
 
 Labels with the same minutes are **twins**: they travel on as one label and
 reach the map together. Two lines arriving at a transfer in the same minute
@@ -154,17 +151,14 @@ transfer and come back on the same run" is a tail, not a variant).
 
 The candidate thresholds are the distinct tolerances: 0, 8, 11, … The map
 takes the widest one whose drawn network is not denser than the target.
-Say the target allows 8: the map shows A and B. One "Pokaż więcej" raises
-the target and E (11) comes in. C and D never do.
+Say the target allows 8: the map shows A and B. One step of `more` raises the target and E (11) comes in. C and D never do.
 
 Drawing: the rides of the chosen trips are grouped by vehicle run; rides of
 the same run that touch or overlap become one piece, so a line never lies
 on top of itself. There is no brightness — every piece is drawn the same
 (`w` = 1). From here the shared machinery takes over (point 5 above).
 
-Each piece also carries `why` for the Debug preview: up to three trips
-through it, the tolerance at which each entered and why, and the variants
-hidden by the line-number rule.
+Each piece also carries `why`: up to three trips through it, the tolerance at which each entered and why, and the variants hidden by the line-number rule. Nothing in the app shows it any more; the value map's tests read it.
 
 ---
 
@@ -203,8 +197,7 @@ different corridor could have used.
 The payoff of doing it this way instead of running a separate search: a
 proposal can *never* name a transfer that isn't actually drawn on the map,
 because it's built from nothing but the map's own already-decided shape.
-Move the threshold (the density target, "Pokaż więcej") and the list
-shrinks or grows in lockstep with the map, automatically, for free.
+Whatever the map draws — the moves or, in the fallback, the value map at its threshold — the list shrinks or grows in lockstep with it, automatically, for free.
 
 If the map ever selects nothing despite a connection provably existing,
 the map and list both fall back to drawing that one proven-fastest route

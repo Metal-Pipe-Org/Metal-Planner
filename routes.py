@@ -508,13 +508,7 @@ def init_routes(app):
             _parse_when(request.args.get("time"),request.args.get("date")),
             _point_arg("start"),
             _point_arg("end"),
-            # Docelowa gęstość mapy (suwak pod zębatką) i ile razy kliknięto
-            # "pokaż więcej" - z nich planner dobiera próg. Sufity obu pilnuje
-            # planner, nie front.
-            density=_float_arg("density"),
-            more=_float_arg("more"),
-            # Ile aut Traficara przy mapie (suwak pod zębatką) - "pokaż
-            # więcej" mnoży ją w plannerze tak samo jak gęstość.
+            # Ile aut Traficara przy mapie (suwak pod zębatką).
             car_count=_float_arg("cars"),
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",

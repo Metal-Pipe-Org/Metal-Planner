@@ -87,14 +87,6 @@
       "tags": ["Propozycje tras", "Przystanki"]
     },
     {
-      "id": "density",
-      "name": "Gęstość mapy",
-      "description": "Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru. Godzina „mapa pokazuje do” jest tego skutkiem.",
-      "tags": ["Mapa"],
-      "dev": true,
-      "obsolete": "2026-11-24"
-    },
-    {
       "id": "car-count",
       "name": "Ile aut Traficara",
       "description": "Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”, są zawsze. Suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.",
@@ -198,13 +190,6 @@
       "description": "Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych je bije i które.",
       "tags": ["Debug", "Mapa", "Rower", "Traficar"],
       "dev": true
-    },
-    {
-      "id": "debug-why-seg",
-      "name": "Dlaczego kawałek jest na mapie",
-      "tags": ["Debug", "Mapa"],
-      "dev": true,
-      "obsolete": "2026-11-24"
     },
     {
       "id": "vehicles-direction",

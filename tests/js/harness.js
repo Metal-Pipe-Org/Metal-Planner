@@ -635,11 +635,9 @@ const INJECTION = `
     get flowBikeLayer() { return flowBikeLayer; },
     get flowBikeRideLayer() { return flowBikeRideLayer; },
     BIKE_STYLE, BIKE_UNKNOWN_STYLE,
-    showMore, MAX_MAP_MORE,
     // Etapy wyszukiwania podawane wprost, bez sieci (zgłoszenie #229).
     applyStage,
     get flowLayer() { return flowLayer; },
-    get mapMore() { return mapMore; },
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },
     // Przystanki narysowanych linii i nazwy przy przybliżeniu (#252, #253).
@@ -687,5 +685,5 @@ app.timeOpts = settingView({hover: 'time-hover', ends: 'time-ends', chips: 'time
 app.dotOpts = settingView({size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past',
     center: 'dot-center', tipCursor: 'tip-cursor', tipPanel: 'tip-panel',
     bikeTimes: 'bike-times', bikeRides: 'bike-rides', carTimes: 'car-times',
-    why: 'debug-why', whySeg: 'debug-why-seg', namesZoom: 'names-zoom'});
+    why: 'debug-why', namesZoom: 'names-zoom'});
 app.soundOpts = settingView({level: 'sound-level'});

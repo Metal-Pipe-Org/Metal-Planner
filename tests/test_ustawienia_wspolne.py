@@ -236,7 +236,7 @@ def test_dawne_klucze_sa_przenoszone(adres, przegladarka):
     init = """
         if (!localStorage.getItem('metal-planner:settings')) {
             localStorage.setItem('metal-planner:dev-prefs',
-                JSON.stringify({density: '5', 'car-vans': true, 'order-limit': '1d', 'fold:Rower': true}));
+                JSON.stringify({'car-count': '5', 'car-vans': true, 'order-limit': '1d', 'fold:Rower': true}));
             localStorage.setItem('metal-planner:time-prefs', JSON.stringify({ends: true}));
             localStorage.setItem('metal-planner:dot-prefs', JSON.stringify({size: 10, ttPast: false}));
             localStorage.setItem('metal-planner:look-prefs', JSON.stringify({maxWeight: 5, minOpacity: 0.5}));
@@ -244,7 +244,7 @@ def test_dawne_klucze_sa_przenoszone(adres, przegladarka):
     """
     context, page = _otworz(przegladarka, adres, init)
     try:
-        assert page.evaluate(ODCZYT_JS, "density") == 5
+        assert page.evaluate(ODCZYT_JS, "car-count") == 5
         assert page.evaluate(ODCZYT_JS, "car-vans") is True
         assert page.evaluate(ODCZYT_JS, "order-limit") == "1d"
         assert page.evaluate(ODCZYT_JS, "time-ends") is True

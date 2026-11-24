@@ -1817,35 +1817,6 @@ body.routes-off #results .notice.loading { display: none; }
 
 .flow-tip-row .line-chip { background: rgba(0, 0, 0, 0.07); }
 
-/* Debug "dlaczego tu jest": wiersz na podróż, powód pod nim mniejszym
-   drukiem - dymek ma się dać przeczytać, a nie rozszyfrować. */
-.flow-tip-why {
-    display: block;
-    max-width: 330px;
-    margin-top: 6px;
-    padding-top: 5px;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
-    font-size: 11.5px;
-    line-height: 1.35;
-    white-space: normal;
-}
-.flow-tip-why .why-head {
-    display: block;
-    margin: 4px 0 2px;
-    font-size: 10px;
-    color: var(--ink-soft);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-.flow-tip-why .why-journey { display: block; margin-top: 3px; }
-.flow-tip-why .why-reason,
-.flow-tip-why .why-more {
-    display: block;
-    padding-left: 10px;
-    font-size: 10.5px;
-    color: var(--ink-soft);
-}
-
 /* ------------------------------------------------- czas na mapie --- */
 
 /* Czas w dymku: liczba ma być pierwszą rzeczą, którą się tu czyta po numerze
@@ -2052,37 +2023,6 @@ body.routes-off #results .notice.loading { display: none; }
     padding: 0 3px;
     background: var(--line) content-box;
 }
-
-/* "Pokaż więcej" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie
-   jak przycisk formularza; co robi, mówi dymek. */
-.headline-more {
-    flex: none;
-    margin: -2px -6px -2px 0;
-    padding: 3px 9px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--surface-alt);
-    color: var(--ink);
-    font: inherit;
-    font-size: 12px;
-    white-space: nowrap;
-    cursor: pointer;
-}
-
-.headline-more:hover { background: var(--ink); color: #fff; }
-
-/* Kręci się, aż gęstsza mapa dojdzie w całości (patrz showMore). */
-.headline-more .spinner {
-    display: none;
-    width: 9px;
-    height: 9px;
-    margin-right: 5px;
-    border-width: 1.5px;
-    vertical-align: -1px;
-}
-body.more-busy .headline-more .spinner { display: inline-block; }
-body.more-busy .headline-more { cursor: progress; }
-.headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
 /* Dymek paska - ten sam wygląd, co dymek ⓘ w ustawieniach. Nad wszystkim,
    także nad dokiem telefonu, i przepuszcza kliknięcia do mapy pod sobą. */
@@ -2388,7 +2328,7 @@ body.pushward-on .tt-times [data-dep-sec] { cursor: pointer; text-decoration: un
 
 #flow-panel[hidden] { display: none; }
 
-/* Schemat obok mapy (eksperyment „nowa mapa”, #367) - prawa część ekranu,
+/* Schemat obok mapy (#367) - prawa część ekranu,
    pod okienkiem z rozkładem: mapa i schemat mają być widoczne naraz. Rysunek
    przybliża się i przesuwa w oknie panelu, a cały panel zwija się do
    nagłówka - tak jak lista propozycji. */

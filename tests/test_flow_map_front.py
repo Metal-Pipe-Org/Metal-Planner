@@ -507,13 +507,6 @@ def test_a_full_map_without_a_list_is_not_an_error(front):
     _check(front, "pelna_mapa_bez_listy_nie_jest_bledem")
 
 
-def test_show_more_adds_one_starting_density_per_click(front):
-    """„Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie wysyła do
-    serwera `more` razem z gęstością z suwaka, a po trzecim kliknięciu
-    przycisku nie ma - zwykły licznik, niezależny od serwera."""
-    _check(front, "pokaz_wiecej_doklada_gestosc")
-
-
 # ------------------------------------------------- pojazdy na żywo -
 
 def test_in_timetable_mode_the_screen_decides_which_vehicles_show(front):
