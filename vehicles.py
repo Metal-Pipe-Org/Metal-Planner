@@ -21,14 +21,18 @@ app.js) biłoby wprost w cudzy serwer.
 import json
 import math
 import re
+import socket
+import ssl
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import gtfs
+import serverlog
 
 VEHICLES_URL = "https://mpk.wroc.pl/bus_position"
 
@@ -42,7 +46,7 @@ LAT_RANGE = (50.6, 51.6)
 LON_RANGE = (16.4, 17.8)
 
 _lock = threading.Lock()
-_cache = {"at": 0.0, "vehicles": None}
+_cache = {"at": 0.0, "vehicles": None, "same_since": None, "snapshot": None}
 
 
 def _query_fields():
@@ -57,8 +61,8 @@ def _query_fields():
     return fields
 
 
-def _fetch_raw():
-    body = urllib.parse.urlencode(_query_fields()).encode()
+def _fetch_raw(fields):
+    body = urllib.parse.urlencode(fields).encode()
     request = urllib.request.Request(
         VEHICLES_URL, data=body, headers={"User-Agent": "Metal-Planner/0.1"}
     )
@@ -97,6 +101,20 @@ def _parse(raw_results):
     return parsed
 
 
+def _failure_reason(error):
+    """Krótka przyczyna do logu serwera - bez treści zapytania i odpowiedzi."""
+    cause = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(error, urllib.error.HTTPError):
+        return f"błąd HTTP {error.code}"
+    if isinstance(cause, ssl.SSLError):
+        return f"błąd certyfikatu/TLS ({type(cause).__name__})"
+    if isinstance(cause, (socket.timeout, TimeoutError)):
+        return "timeout"
+    if isinstance(error, ValueError):
+        return "odpowiedź nie jest poprawnym JSON-em"
+    return f"{type(cause).__name__}"
+
+
 def get_vehicles():
     """Aktualne pozycje pojazdów, z krótkim cache (CACHE_SEC) - patrz docstring
     modułu. Rzuca wyjątkiem sieciowym (OSError, w tym urllib.error.URLError
@@ -105,7 +123,26 @@ def get_vehicles():
     with _lock:
         if _cache["vehicles"] is not None and time.monotonic() - _cache["at"] < CACHE_SEC:
             return _cache["vehicles"]
-        vehicles = _parse(_fetch_raw())
+        # Poza try: brak bazy rozkładów to nie błąd MPK i ma polecieć z własnym komunikatem.
+        fields = _query_fields()
+        try:
+            raw = _fetch_raw(fields)
+        except (OSError, ValueError) as e:
+            reason = _failure_reason(e)
+            serverlog.log_repeating_error(reason, f"Pozycje pojazdów z MPK: pobranie nie powiodło się - {reason}")
+            raise
+        vehicles = _parse(raw)
+        if not vehicles:
+            serverlog.log_repeating_error("pusta odpowiedź", "Pozycje pojazdów z MPK: pobranie nie powiodło się - pusta odpowiedź")
+        else:
+            serverlog.close_error_streak()
+        # MPK potrafi zamilknąć i oddawać w kółko te same pozycje - bez śladu
+        # po tym wyglądałoby to jak żywe dane, więc pamiętamy, od kiedy
+        # odpowiedź jest identyczna.
+        snapshot = frozenset((v["line"], v["lat"], v["lon"]) for v in vehicles)
+        if snapshot != _cache["snapshot"]:
+            _cache["snapshot"] = snapshot
+            _cache["same_since"] = time.time()
         _track_motion(vehicles)
         _add_courses(vehicles)
         _add_headings(vehicles)
@@ -114,6 +151,12 @@ def get_vehicles():
         _cache["vehicles"] = vehicles
         _cache["at"] = time.monotonic()
         return vehicles
+
+
+def stale_sec():
+    """Od ilu sekund pozycje z MPK się nie zmieniły (po ostatnim udanym
+    get_vehicles)."""
+    return int(time.time() - _cache["same_since"])
 
 
 # ------------------------------------------------- w którą stronę jedzie pojazd ---

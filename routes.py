@@ -7,7 +7,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from flask import Response, abort, jsonify, render_template, request
+from flask import Response, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 
 import bikes
@@ -20,6 +20,7 @@ import pkp
 import pkp_live
 import polinka
 import pushward
+import serverlog
 import settings_registry
 import siechnice
 import timetables
@@ -27,7 +28,7 @@ import traficar
 import update_gtfs
 import vehicles
 import warmup
-from planner import (TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
+from planner import (DEFAULT_CAR_HORIZON_H, TIMETABLE_LIMIT, TIMETABLE_MAX, plan_flow_stages,
                      plan_route, stop_timetable)
 
 # Ile najwyżej ostatni etap wyszukiwania czeka na świeże rowery i auta - wynik
@@ -120,6 +121,18 @@ def _float_arg(name):
         return None
 
 
+def _car_horizon_arg():
+    """Zasięg aut Traficara w godzinach: liczba, None dla "none" (bez limitu)
+    albo domyślny, gdy parametru nie ma lub jest zepsuty."""
+    raw = request.args.get("car_horizon_h", "")
+    if raw == "none":
+        return None
+    try:
+        return _finite(raw)
+    except ValueError:
+        return DEFAULT_CAR_HORIZON_H
+
+
 def _point_arg(prefix):
     """Para (lat, lon) z `<prefix>_lat`/`<prefix>_lon` - klik w dowolny punkt mapy."""
     try:
@@ -205,7 +218,7 @@ def init_routes(app):
     @app.route("/")
     def index():
         try:
-            stops = gtfs.all_stop_names()
+            stops = gtfs.all_stop_names(pkp.all_stations_geo())
             lines = timetables.all_lines()
             data_error = None
         except FileNotFoundError as e:
@@ -226,17 +239,20 @@ def init_routes(app):
         # static/app.js), ale do pola wyszukiwania i tak wstawia samą nazwę:
         # doklejenie "PKP" wprost do nazwy zepsułoby dopasowanie po stronie
         # wyszukiwarki, która zna stację tylko pod jej prawdziwą nazwą.
-        # Nazwa, która trafia do OBU list (MPK i PKP - w praktyce nie
-        # zdarza się w tych danych, ale nie ma gwarancji, że nigdy), zostaje
+        # Nazwa, która trafia do OBU list (MPK i PKP - np. Ramiszów), zostaje
         # bez plakietki: to nie tylko stacja kolejowa, więc oznaczenie
         # "PKP" byłoby mylące.
-        gtfs_names = set(stops)
-        pkp_names = set(pkp.all_station_names())
-        train_only = pkp_names - gtfs_names
-        stops = [
-            {"name": name, "kind": "train" if name in train_only else "stop"}
-            for name in sorted(gtfs_names | pkp_names)
-        ]
+        # Porównujemy po casefold, jak wyszukiwarka (gtfs.match_stop): ta sama
+        # nazwa z MPK i z PKP to jeden wybór, trafiający w oba słupki -
+        # zostaje pisownia MPK, jak w gtfs.load_day. Stacja, która tylko nosi
+        # nazwę wrocławskiego przystanku, a stoi daleko (gtfs.far_namesakes -
+        # stacja "Karłowice" 54 km od KARŁOWICE MPK), przychodzi z
+        # all_stop_names jako osobny wybór "Karłowice (PKP)" - dopisek jest
+        # już w nazwie, więc plakietki nie dostaje.
+        by_key = {name.casefold(): {"name": name, "kind": "stop"} for name in stops}
+        for name in pkp.all_station_names():
+            by_key.setdefault(name.casefold(), {"name": name, "kind": "train"})
+        stops = sorted(by_key.values(), key=lambda s: s["name"])
         # Stacje Polinki (zgłoszenie #165) - do podpowiedzi jak każdy słupek.
         stops += [{"name": s["name"], "kind": "cable"} for s in polinka.stations_geo()]
         stops.sort(key=lambda s: s["name"])
@@ -298,7 +314,7 @@ def init_routes(app):
         # front mógł je odróżnić stylem (patrz static/app.js). To jedyne
         # miejsce, gdzie PKP i MPK są traktowane inaczej - bo tylko to
         # naprawdę je różni (markery), nie samo wyszukiwanie tras.
-        stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
+        stops += [{**s, "kind": "train", "network": "PKP"} for s in pkp.all_stations_geo()]
         # Stacje Polinki (zgłoszenie #165) - własny rodzaj, własny kolor.
         stops += [{**s, "kind": "cable"} for s in polinka.stations_geo()]
         # Nazwa miejsca dopiero na całej liście: DWORZEC GŁÓWNY i stacja
@@ -317,7 +333,8 @@ def init_routes(app):
         Front zawęża pojazdy do linii narysowanych na mapie.
         """
         try:
-            return jsonify({"vehicles": vehicles.get_vehicles()})
+            found = vehicles.get_vehicles()
+            return jsonify({"vehicles": found, "stale_sec": vehicles.stale_sec()})
         except FileNotFoundError as e:
             return jsonify({"error": str(e)}), 503
         except (OSError, ValueError) as e:
@@ -412,6 +429,7 @@ def init_routes(app):
         return jsonify(timetables.stop_board(
             request.args.get("stop", ""),
             _day_arg(),
+            trains=request.args.get("trains", "1") == "1",
         ))
 
     @app.route("/api/trip")
@@ -442,6 +460,7 @@ def init_routes(app):
             limit=min(int(limit), TIMETABLE_MAX) if limit else TIMETABLE_LIMIT,
             point=_latlon_arg(),
             until_sec=_float_arg("until_sec"),
+            trains=request.args.get("trains", "1") == "1",
         ))
 
     @app.route("/api/flow")
@@ -499,6 +518,9 @@ def init_routes(app):
             car_count=_float_arg("cars"),
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",
+            # Do ilu godzin naprzód od teraz pokazywać auta ("none" = bez
+            # limitu); bez parametru obowiązuje domyślny zasięg.
+            car_horizon_h=_car_horizon_arg(),
             # Nowa mapa rośnie za przełącznikiem pod zębatką (sekcja DEV
             # "Eksperymenty"); stara zostaje domyślna.
             new_map=request.args.get("newmap") == "1",
@@ -542,6 +564,9 @@ def init_routes(app):
             # Propozycje tras wyłączone pod zębatką - "0" i serwer ich nie
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",
+            # Filtr 🚆 w pasku warstw: zgaszony wysyła "0" i serwer liczy dzień
+            # bez kolei. Brak parametru znaczy, że pociągi są, jak dotąd.
+            trains=request.args.get("trains", "1") == "1",
         )
 
     @app.route("/api/dev/kod", methods=["GET", "POST"])
@@ -622,6 +647,18 @@ def init_routes(app):
             "used": me.get("live_activity_updates_used"),
             "limit": me.get("live_activity_updates_limit"),
         })
+
+    @app.route("/api/dev/logi")
+    def api_dev_logi():
+        """Plik logu serwera (patrz serverlog.py) - za tym samym kodem z Discorda
+        co wgrywanie Siechnic."""
+        if not config.dev_mode():
+            abort(404)
+        if not devcode.valid_token(request.headers.get("X-Dev-Token", "")):
+            return jsonify({"error": "Logi są chronione - odblokuj je kodem z Discorda."}), 403
+        serverlog.get_logger()
+        return send_file(serverlog.LOG_PATH, mimetype="text/plain", as_attachment=True,
+                         download_name="metal-planner-server.log")
 
     @app.route("/api/dev/siechnice", methods=["GET", "POST"])
     def api_dev_siechnice():

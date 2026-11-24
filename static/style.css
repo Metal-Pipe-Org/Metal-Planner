@@ -423,6 +423,42 @@ body.mode-timetable .tools-sep { display: none; }
     color: var(--ink-faint);
 }
 
+/* ------------------------------------------------- wyłączenie dźwięku --- */
+
+#pipe-off-dialog {
+    position: fixed;
+    width: min(380px, calc(100vw - 32px));
+    border: none;
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+#pipe-off-dialog::backdrop { background: rgba(16, 32, 48, 0.35); }
+#pipe-off-dialog p { margin: 0 0 16px; }
+
+/* Plakietka, nie przycisk: nic nie robi, tylko mówi, że to żart. */
+.joke-badge {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    padding: 1px 6px;
+    border: 1px solid var(--ink-faint);
+    border-radius: 8px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    pointer-events: none;
+}
+
+.joke-badge[hidden] { display: none; }
+
+.pipe-off-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 /* -------------------------------------------------------- moje miejsce --- */
 
 /* Bez przewijania w sobie (inaczej niż #about): lista podpowiedzi wychodzi
@@ -1549,6 +1585,46 @@ body.routes-off #results .notice.loading { display: none; }
 /* Kropka pojazdu w warstwie "autobusy i tramwaje" (przycisk ◉ w nagłówku,
    patrz vehicles-toggle w app.js) - okrąg o stałym rozmiarze z numerem
    linii, nie pigułka jak .line-badge: użytkownik prosił wprost o kropki. */
+/* Pasek w układzie panelu (nie nakładka): komunikaty o warstwach mapy, każdy
+   w osobnej linii. Ostrzeżenie (żółte) mówi, że włączona warstwa nic teraz nie
+   daje, i zapala żółty przycisk tej warstwy; info (szare) - że działa z zastrzeżeniem. */
+.layer-notes {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.layer-notes[hidden] { display: none; }
+
+.layer-note {
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    box-shadow: var(--shadow);
+}
+
+.layer-note-warn {
+    background: #f5c518;
+    color: #3a2f00;
+    font-weight: 600;
+}
+
+.layer-note-info {
+    background: var(--surface-alt);
+    color: #000;
+    font-weight: 700;
+}
+
+.layer-note[data-setting] { cursor: pointer; }
+
+.layer-button.warn,
+.layer-button.warn.active {
+    background: #f5c518;
+    border-color: #d9a900;
+    color: #3a2f00;
+}
+
 .vehicle-box {
     position: absolute;
 }
@@ -3579,3 +3655,28 @@ ul.tt-legend {
     pointer-events: none;
     white-space: nowrap;
 }
+
+/* X czyszczący pole tekstowe (#508); widoczny tylko, gdy pole nie jest puste. */
+.field-clear {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.field-clear:hover { background: #e8edf3; }
+.field-clear.beside-action { right: 40px; }
+input:placeholder-shown + .field-clear { display: none; }
+.endpoint-fields input.with-action,
+.place-field input.with-action { padding-right: 74px; }
+.ac-field input:not(.with-action):not(:placeholder-shown) { padding-right: 38px; }

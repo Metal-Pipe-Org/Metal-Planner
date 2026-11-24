@@ -412,7 +412,7 @@ def repeat_note(stop_ids, day):
     return phrase
 
 
-def stop_board(query, day):
+def stop_board(query, day, trains=True):
     """Tablica odjazdów z przystanku: wszystkie odjazdy doby, opisane linią
     (numer + kierunek), do której należą.
 
@@ -437,7 +437,7 @@ def stop_board(query, day):
     zostaje po stronie frontu, tak samo jak wybór linii.
     """
     try:
-        data = gtfs.load_day(day)
+        data = gtfs.load_day(day, trains)
     except FileNotFoundError as e:
         return {"error": str(e)}
 

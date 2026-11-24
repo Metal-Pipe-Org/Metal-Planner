@@ -14,6 +14,12 @@
       "tags": ["Przystanki", "Czas"]
     },
     {
+      "id": "cars-horizon",
+      "name": "Pokazuj auta Traficara do",
+      "description": "Liczone od teraz do czasu wyszukiwania. Auta stoją tam, gdzie są teraz, więc im dalej naprzód, tym mniej o nich wiadomo. Poza tym zasięgiem aut nie ma, a mapa mówi dlaczego.",
+      "tags": ["Traficar", "Mapa", "Czas"]
+    },
+    {
       "id": "car-vans",
       "name": "Pokazuj też dostawczaki",
       "description": "Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka, i stoją na mapie jako puste pierścienie.",
@@ -101,7 +107,8 @@
       "name": "Godzina w punkcie pod kursorem",
       "description": "Godzina, o której pojazd jest pod kursorem, a pod nią przyjazd do celu, jeśli jedzie się dalej stąd.",
       "tags": ["Czas", "Mapa"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-17"
     },
     {
       "id": "time-ends",
@@ -200,6 +207,19 @@
       "dev": true
     },
     {
+      "id": "vehicles-direction",
+      "name": "Pojazdy tylko w naszą stronę (◉)",
+      "description": "Przy narysowanej mapie ◉ ukrywa pojazdy jadące w przeciwną stronę; zostają jadące w naszą i te bez rozpoznanego kursu.",
+      "tags": ["Mapa"],
+      "dev": true
+    },
+    {
+      "id": "vehicles-stats",
+      "name": "Statystyki pojazdów na mapie (◉)",
+      "tags": ["Debug", "Mapa"],
+      "dev": true
+    },
+    {
       "id": "line-colors",
       "name": "Kolory linii",
       "tags": ["Mapa"]
@@ -254,7 +274,7 @@
       "obsolete": "2026-11-15"
     },
     {
-      "id": "sound-pipe",
+      "id": "sound-level",
       "name": "Metalowa rura po znalezieniu trasy",
       "tags": ["Dźwięk"]
     },
@@ -268,6 +288,12 @@
       "id": "dev-access",
       "name": "Dostęp chroniony (kod z Discorda)",
       "tags": [],
+      "dev": true
+    },
+    {
+      "id": "server-logs",
+      "name": "Pobierz logi",
+      "tags": ["Logi"],
       "dev": true
     },
     {
