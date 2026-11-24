@@ -279,6 +279,35 @@ def test_start_z_punktu_ma_tablice_startu_u_przystanku_do_ktorego_sie_idzie(
                               "sec": 64260}]
 
 
+def test_kropka_wezla_z_numerowanymi_peronami_zamawia_tablice_nazwa_wezla(install_day):
+    """Kropka stoi za całe miejsce, więc tablica pod nią nosi nazwę miejsca,
+    jak na każdym innym przystanku - nie peronu, z którego akurat rusza
+    narysowany kawałek ("GALERIA DOMINIKAŃSKA 07", #486)."""
+    day = make_day(
+        [
+            {"trip_id": "t1", "label": "Tramwaj 3", "headsign": "CEL",
+             "stops": [("P7", 1200, 1200), ("CEL", 1800, 1800)]},
+            {"trip_id": "t2", "label": "Tramwaj 5", "headsign": "CEL",
+             "stops": [("P1", 1300, 1300), ("CEL", 1900, 1900)]},
+        ],
+        names={"P1": "WEZEL 01", "P7": "WEZEL 07", "CEL": "CEL"},
+    )
+    # Miejsce węzła tak, jak składa je gtfs._build_places z numerowanych peronów.
+    for stop_id in ("P1", "P7"):
+        day.place_of[stop_id] = "wezel"
+    day.stops_by_place = {"wezel": ["P1", "P7"], "cel": ["CEL"]}
+    day.stops_by_key["wezel"] = ["P1", "P7"]
+    day.display_name["wezel"] = "WEZEL"
+    install_day(day)
+
+    wynik = planner.plan_flow("WEZEL", "CEL", WHEN + datetime.timedelta(seconds=1000))
+    start = [n for n in wynik["nodes"] if n.get("start")][0]
+    assert start["name"] == "WEZEL"
+    tablica = planner.stop_timetable(start["name"], WHEN, from_sec=1000)
+    assert tablica["stop"] == "WEZEL"
+    assert sorted(_numery(tablica)) == ["3", "5"]
+
+
 def _siechnice_na_wspolnym_slupku(install_day, monkeypatch, tmp_path):
     """Słupek 886 to wrocławski MPK, a gmina ma ten sam słupek pod swoim
     identyfikatorem (jak linia 810 na Kościuszki). Współrzędne pierwszego

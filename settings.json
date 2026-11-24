@@ -220,6 +220,11 @@
       "dev": true
     },
     {
+      "id": "line-colors",
+      "name": "Kolory linii",
+      "tags": ["Mapa"]
+    },
+    {
       "id": "dot-size",
       "name": "Wielkość kropek",
       "tags": ["Wygląd mapy"],

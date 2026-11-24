@@ -459,7 +459,7 @@ def test_brak_bazy_pociagow_nie_wypuszcza_tresci_wyjatku(monkeypatch):
     import gtfs
     from app import app
 
-    def bez_bazy(day):
+    def bez_bazy(day, trains=True):
         raise FileNotFoundError("/sekretna/sciezka/gtfs.sqlite")
 
     monkeypatch.setattr(gtfs, "load_day", bez_bazy)

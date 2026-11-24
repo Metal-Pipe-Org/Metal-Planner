@@ -11,6 +11,23 @@
     #}
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     {#
+      Nowy użytkownik to ktoś, kto zaczął korzystać z aplikacji mniej niż
+      tydzień temu - stąd chwila pierwszego wejścia tego urządzenia. Zapis
+      przed wszystkimi innymi skryptami, bo już pierwsze wejście zostawia
+      w localStorage ich dane, a urządzenie, które miało je, zanim pojawił się
+      ten zapis, używało aplikacji wcześniej: dostaje 0, czyli „dawno”.
+    #}
+    <script>
+        try {
+            if (localStorage.getItem('metal-planner:first-visit') === null) {
+                localStorage.setItem('metal-planner:first-visit',
+                    localStorage.length ? '0' : String(Date.now()));
+            }
+        } catch (error) {
+            // localStorage niedostępny - nie ma gdzie zapamiętać pierwszego wejścia
+        }
+    </script>
+    {#
       Odrzucenie zasłony „Obróć telefon" (phone.js) sprawdzamy przed pierwszym
       rysowaniem: gdyby robił to dopiero phone.js na końcu body, zasłona
       mignęłaby komuś, kto już ją odrzucił.
@@ -82,6 +99,7 @@
     <link rel="stylesheet" id="phone-css"
           media="(max-width: 760px), (pointer: coarse) and (max-height: 500px)"
           href="{{ url_for('static', filename='phone.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='nowosci/nowosci.css') }}">
 </head>
 <body{% if dev_mode %} class="dev-mode"{% endif %}>
 
@@ -216,6 +234,10 @@
                     title="Autobusy i tramwaje na żywo"
                     aria-label="Pokaż autobusy i tramwaje na żywo"
                     aria-pressed="false">◉</button>
+            <button id="trains-toggle" class="icon-button layer-button"
+                    title="Pociągi: stacje PKP i przejazdy koleją"
+                    aria-label="Uwzględniaj i pokazuj pociągi"
+                    aria-pressed="true">🚆</button>
             <button id="cars-toggle" class="icon-button layer-button"
                     title="Wolne auta Traficara"
                     aria-label="Pokaż wolne auta Traficara"
@@ -903,6 +925,14 @@
             <input type="checkbox" id="vehicles-stats"> {{ name('vehicles-stats') }} {{ info('vehicles-stats') }}
         </label>
 
+    <label class="dev-check{{ dev('line-colors') }} set-row" {{ attrs('line-colors') }}>
+        {{ name('line-colors') }}
+        <select id="line-colors">
+            <option value="type">Według rodzaju</option>
+            <option value="line">Każda linia osobno</option>
+        </select> {{ info('line-colors') }}
+        </label>
+
 {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.
       Suwaki są WIDOCZNE (LOOK_TUNING = true w app.js) — strojenie trwa.
@@ -1174,6 +1204,7 @@
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script src="{{ url_for('static', filename='timetable.js') }}"></script>
 <script src="{{ url_for('static', filename='pwa.js') }}"></script>
+<script src="{{ url_for('static', filename='nowosci/nowosci.js') }}"></script>
 
 </body>
 </html>

@@ -17,7 +17,7 @@ def install_day(monkeypatch):
     """install_day(day) podmienia gtfs.load_day tak, żeby plan_flow/plan_route
     dostawały syntetyczny DayData zamiast czytać SQLite."""
     def _install(day):
-        monkeypatch.setattr(gtfs, "load_day", lambda d: day)
+        monkeypatch.setattr(gtfs, "load_day", lambda d, trains=True: day)
     return _install
 
 
