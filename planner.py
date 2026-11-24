@@ -2199,10 +2199,26 @@ BIKE_MOVES_LIMIT = 12   # ile kandydatów z rowerem sprawdzić (każdy to osobne
 BIKE_SLACK_SEC = 10 * 60
 
 
-def _bike_accept(day, chosen_map, near_start, foot):
+def _bike_accept(day, chosen_map, near_start, foot, kinds=(True, True)):
     """Czy podróż z rowerem w ogóle jest pomysłem do pokazania - sprawdzane,
     zanim policzy się ją do limitu kandydatów (patrz _bike_journeys), żeby
-    odrzucone nie zajmowały miejsca tym, które coś dają."""
+    odrzucone nie zajmowały miejsca tym, które coś dają. `kinds` - na jaki
+    rodzaj roweru pasażer wsiada (patrz _bike_boardings)."""
+    renting = []
+    stations_at = {}
+
+    def stations_near(stop):
+        # Stacje dopiero przy pierwszym pytaniu: te same, z których
+        # _bike_journeys złożyło sprawdzaną podróż.
+        if not stations_at:
+            renting[:] = [station for station in bikes.stations_quiet()
+                          if station["renting"] and bikes.ma_rodzaj(station, *kinds)]
+        if stop not in stations_at:
+            lat, lon = day.stop_coords[stop]
+            stations_at[stop] = [(station["lat"], station["lon"]) for station in renting
+                                 if bikes.haversine_m(lat, lon, station["lat"], station["lon"])
+                                 <= gtfs.WALK_M]
+        return stations_at[stop]
     shown_lines = {day.trip_info[day.conns[board][4]][0]
                    for inst in _drawn(chosen_map["moves"]) for board, _ in inst["rides"]}
     # Kim i od kiedy jedzie pokazana podróż: {kurs: [(wsiadanie, ile pojazdów
@@ -2239,6 +2255,24 @@ def _bike_accept(day, chosen_map, near_start, foot):
         # Pl. Legionów po czwórkę na Kościuszki, kiedy czwórka i szesnastka
         # wiozą tam spod samego startu na tego samego 810.
         before = sum(1 for leg in journey["legs"][:k] if leg["kind"] == "ride")
+        # Rower po wysiadce z pojazdu, który jedzie dalej i jeszcze przed
+        # końcem jazdy rowerem staje przy stacji bliżej końca tej jazdy - po
+        # co wysiadać wcześniej: tym samym pojazdem dojeżdża się dalej i tam
+        # bierze rower (Dworzec Główny przy 113 jadącej na Galerię
+        # Dominikańską). Przesiadka w tym miejscu zostaje przesiadką.
+        if before:
+            bike = journey["legs"][k]
+            (lat_a, lon_a), (lat_b, lon_b) = bike["path"][0], bike["path"][-1]
+            far = bikes.haversine_m(lat_a, lon_a, lat_b, lon_b)
+            board, alight = pairs[before - 1]
+            for i in gtfs.trip_conns(day, day.conns[board][4]):
+                if i <= alight:
+                    continue
+                if day.conns[i][1] >= bike["arr_sec"]:
+                    break
+                if any(bikes.haversine_m(lat, lon, lat_b, lon_b) < far
+                       for lat, lon in stations_near(day.conns[i][3])):
+                    return False
         for pos, (board, alight) in enumerate(pairs[before:], before):
             for shown_board, count, shown_dep in aboard.get(day.conns[board][4], ()):
                 if (shown_board <= alight and count <= pos + 1
@@ -2938,7 +2972,8 @@ def plan_flow_stages(start_query, end_query, when=None,
                 bike_earliest, bike_profile, geo_db, start_point, end_point, start_name,
                 end_name, (bike_mps, bike_overhead), (bike_electric, bike_regular),
                 limit=BIKE_MOVES_LIMIT, by_place=True,
-                accept=_bike_accept(day, chosen_map, near_start, foot), lead=bike_lead)
+                accept=_bike_accept(day, chosen_map, near_start, foot,
+                                    (bike_electric, bike_regular)), lead=bike_lead)
             bike_moves = _bike_moves(day, chosen_map, found, gain_sec, bike_deadline)
             if chosen_map["deadline"] > deadline:
                 deadline, profile = chosen_map["deadline"], bike_profile
