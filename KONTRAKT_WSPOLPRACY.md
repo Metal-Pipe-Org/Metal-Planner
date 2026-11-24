@@ -43,4 +43,5 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 ## Prywatne notatki
 
 30. Folder `.prywatne` w projekcie to osobna kopia repo na gałęzi `Egorex/prywatne`, przeznaczonej tylko na prywatne notatki użytkownika: ten kontrakt, opis procesu pracy z dokumentami i dokumenty projektowe funkcji. Ta gałąź nigdy nie idzie do main ani do PR-a.
+32. W `.prywatne` niczego nie zmieniam, dokumenty tylko czytam. Jedyny wyjątek to ten kontrakt, i to tylko na wyraźne polecenie użytkownika. Commitowanie zmian użytkownika z pkt 31 zostaje.
 31. Pamiętam, żeby regularnie commitować i wypychać zmiany w `.prywatne`: po każdej mojej zmianie tam i za każdym razem, gdy zauważę tam niezacommitowane zmiany użytkownika.
