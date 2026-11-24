@@ -357,6 +357,198 @@ const LINE_COLORS = {tram: '#c62828', bus: '#1565c0', train: '#2e7d32',
                      cable: '#002147',
                      bike: '#ef6c00', car: '#7b2ff2', other: '#6a1b9a'};
 const WALK_COLOR = '#455a64';   // dojscie pieszo - patrz --walk w style.css
+
+// Autobusy spoza MPK (na razie siechnickie) mają w prototypie A ustawienia
+// „Kolory linii” zieleń pociągów. Rodzaj mają ten sam, co MPK, a przewoźnika
+// zna tylko lista linii (patrz timetables.all_lines). Bez bazy rozkładów
+// listy nie ma na stronie.
+const lineNamesJson = document.getElementById('line-names');
+const LINE_LIST = lineNamesJson ? JSON.parse(lineNamesJson.textContent) : [];
+const SIECHNICE_LINES = new Set(LINE_LIST.filter(line => line.operator === 'siechnice')
+    .map(line => line.num));
+const isSiechniceBus = (kind, num) => kind === 'bus' && SIECHNICE_LINES.has(String(num));
+
+// Prototyp B ustawienia „Kolory linii”: każdy tramwaj i autobus ma swój kolor.
+// Kolory nie są losowane każdy osobno, bo przy ~150 liniach wiele wypadało
+// prawie takich samych: paleta ma tyle kolorów, ile linii na liście, każdy
+// kolejny najdalszy (w OKLab, czyli tak, jak oko widzi różnicę) od już
+// wybranych, a linie biorą je po kolei w porządku skrótu numeru ze stałym
+// ziarnem - ta sama lista daje te same kolory wszędzie i po odświeżeniu.
+// Z palety wypada to, co wygląda jak kolor roweru (pomarańcz), Traficara
+// (fiolet aż po purpurę) i przejścia pieszo (szarość), oraz kolory za jasne,
+// żeby linię było widać na mapie. Numer na kolorowej plakietce jest biały albo
+// czarny - ten, który daje co najmniej 4,5:1; numer pisany kolorem linii na
+// białym bierze, gdy trzeba, ciemniejszy wariant tego samego odcienia.
+// Kolor wychodzi jako #rrggbb, bo schemat robi z niego id grotu.
+const LINE_COLOR_SEED = 0x811c9dc5;
+const OWN_PALETTE_KINDS = new Set(['tram', 'bus']);
+const EXCLUDED_HUES = [[12, 42], [245, 315]];        // odcień HSL: pomarańcz, fiolet i purpura
+const MIN_CHROMA = 0.09;                             // OKLCH; niżej to już szarość
+// Kolory, do których linia nie może się zbliżyć nawet poza tymi odcieniami.
+const RESERVED_COLORS = [LINE_COLORS.bike, LINE_COLORS.car, LINE_COLORS.other, WALK_COLOR];
+const MIN_RESERVED_DISTANCE = 0.1;                   // w OKLab
+const MAX_LUMINANCE = 0.45;                          // jaśniejszy ginie na mapie
+const MIN_TEXT_CONTRAST = 4.5;
+const byLineColors = () => setting('line-colors') === 'line';
+const paletteColor = kind => byLineColors() && OWN_PALETTE_KINDS.has(kind);
+
+const toLinear = c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+const fromLinear = c => c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+
+function hexRgb(hex) {
+    return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+}
+
+function luminance(hex) {
+    const [r, g, b] = hexRgb(hex).map(toLinear);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+const contrast = (a, b) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+};
+
+/** OKLCH -> #rrggbb albo null, gdy kolor nie mieści się w sRGB. */
+function oklchHex(l, c, h) {
+    const a = c * Math.cos(h * Math.PI / 180), b = c * Math.sin(h * Math.PI / 180);
+    const l_ = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+    const m_ = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+    const s_ = (l - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+    const rgb = [
+        4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+        -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+        -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_,
+    ];
+    if (rgb.some(v => v < -1e-4 || v > 1 + 1e-4)) return null;
+    return '#' + rgb.map(v => Math.round(255 * fromLinear(Math.min(1, Math.max(0, v))))
+        .toString(16).padStart(2, '0')).join('');
+}
+
+function hexOklab(hex) {
+    const [r, g, b] = hexRgb(hex).map(toLinear);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363288953 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
+
+function hslHue(hex) {
+    const [r, g, b] = hexRgb(hex);
+    const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+    if (d === 0) return 0;
+    const h = max === r ? (g - b) / d : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+}
+
+const lineSeedHash = num => {
+    let h = LINE_COLOR_SEED;
+    for (const ch of String(num)) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+    return h;
+};
+
+/** Kandydaci z siatki OKLCH, którzy przechodzą wszystkie wykluczenia. */
+function paletteCandidates() {
+    const reserved = RESERVED_COLORS.map(hexOklab);
+    const found = [];
+    for (let l = 0.30; l <= 0.86; l += 0.02) {
+        for (let c = MIN_CHROMA; c <= 0.32; c += 0.02) {
+            for (let h = 0; h < 360; h += 3) {
+                const hex = oklchHex(l, c, h);
+                if (!hex || luminance(hex) > MAX_LUMINANCE) continue;
+                const hue = hslHue(hex);
+                if (EXCLUDED_HUES.some(([from, to]) => hue >= from && hue <= to)) continue;
+                const lab = hexOklab(hex);
+                if (reserved.some(r => Math.hypot(r[0] - lab[0], r[1] - lab[1], r[2] - lab[2]) < MIN_RESERVED_DISTANCE)) continue;
+                found.push({hex, lab});
+            }
+        }
+    }
+    return found;
+}
+
+/** `count` kolorów, każdy następny najdalszy od już wybranych. */
+function spreadPalette(count) {
+    const pool = paletteCandidates();
+    const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    const nearest = pool.map(() => Infinity);
+    const chosen = [];
+    let next = 0;
+    while (chosen.length < count) {
+        const pick = pool[next];
+        chosen.push(pick.hex);
+        next = 0;
+        for (let i = 0; i < pool.length; i++) {
+            nearest[i] = Math.min(nearest[i], dist(pool[i].lab, pick.lab));
+            if (nearest[i] > nearest[next]) next = i;
+        }
+    }
+    return {chosen, pool};
+}
+
+function textVariant(hex) {
+    const [l, a, b] = hexOklab(hex);
+    const c = Math.hypot(a, b), h = Math.atan2(b, a) * 180 / Math.PI;
+    for (let dark = l; dark > 0; dark -= 0.01) {
+        const candidate = oklchHex(dark, c, h) || oklchHex(dark, c * 0.8, h);
+        if (candidate && contrast(candidate, '#ffffff') >= MIN_TEXT_CONTRAST) return candidate;
+    }
+    return '#000000';
+}
+
+function paletteEntry(hex) {
+    return {
+        color: hex,
+        ink: contrast(hex, '#ffffff') >= MIN_TEXT_CONTRAST ? '#fff' : '#000',
+        text: contrast(hex, '#ffffff') >= MIN_TEXT_CONTRAST ? hex : textVariant(hex),
+    };
+}
+
+let linePalette = null;
+
+/** {color, ink, text} linii o tym numerze; paleta liczy się raz, przy pierwszym użyciu. */
+function paletteLineColor(num) {
+    if (!linePalette) {
+        const nums = [...new Set(LINE_LIST.filter(line => OWN_PALETTE_KINDS.has(line.mode))
+            .map(line => line.num))].sort((a, b) => lineSeedHash(a) - lineSeedHash(b) || (a < b ? -1 : 1));
+        const {chosen, pool} = spreadPalette(Math.max(nums.length, 1));
+        linePalette = {byNum: new Map(nums.map((n, i) => [n, paletteEntry(chosen[i])])), pool, extra: new Map()};
+    }
+    const key = String(num);
+    if (linePalette.byNum.has(key)) return linePalette.byNum.get(key);
+    // Linia spoza listy (np. pojazd na żywo z numerem, którego rozkład nie zna)
+    // bierze kolor z całej puli, tylko po skrócie numeru.
+    if (!linePalette.extra.has(key)) {
+        const {pool} = linePalette;
+        linePalette.extra.set(key, paletteEntry(pool[lineSeedHash(key) % pool.length].hex));
+    }
+    return linePalette.extra.get(key);
+}
+
+function lineColor(kind, num) {
+    if (paletteColor(kind)) return paletteLineColor(num).color;
+    if (isSiechniceBus(kind, num)) return LINE_COLORS.train;
+    return LINE_COLORS[kind] || LINE_COLORS.other;
+}
+
+/** Dla elementu z klasą rodzaju linii: arkusz bierze z `--lc` kolor linii
+    przed kolorem rodzaju, z `--lc-ink` kolor numeru na nim, a z `--lc-text`
+    kolor numeru pisanego tym kolorem na białym - więc linia w kolorze swojego
+    rodzaju nic tu nie dostaje. */
+function lineVar(kind, num) {
+    if (paletteColor(kind)) {
+        const {color, ink, text} = paletteLineColor(num);
+        return `--lc: ${color}; --lc-ink: ${ink}; --lc-text: ${text}; `;
+    }
+    return isSiechniceBus(kind, num) ? `--lc: ${LINE_COLORS.train}; ` : '';
+}
+
+function lineStyle(kind, num) {
+    const declared = lineVar(kind, num);
+    return declared ? ` style="${escAttr(declared)}"` : '';
+}
 const MODE_LABEL = {tram: 'Tramwaj', bus: 'Autobus', train: 'Pociąg',
                     cable: 'Kolej linowa',
                     bike: 'Rower miejski', car: 'Traficar', other: 'Linia'};
@@ -486,7 +678,42 @@ function updatePointMarker(slot, value) {
 //         sec <= only.until && drawn.has(lat + ',' + lon));
 
 const vehiclesLayer = L.layerGroup();
+
+/** Pasek komunikatów o warstwach mapy. Każda warstwa (źródło) ma własną listę
+    komunikatów {level: 'warn' | 'info', text, setting?}; wszystkie idą pod sobą,
+    każdy w osobnej linii. `warn` zapala też żółty przycisk warstwy, `info` go
+    nie rusza. Klik w komunikat z `setting` otwiera ⚙ przy tym ustawieniu. */
+const layerNotesEl = $('layer-notes');
+const layerNotes = {};
+const layerNoteButtons = {};
+
+function setLayerNotes(source, notes) {
+    layerNotes[source] = notes;
+    const button = layerNoteButtons[source];
+    if (button) button.classList.toggle('warn', notes.some(note => note.level === 'warn'));
+    const all = Object.values(layerNotes).flat();
+    layerNotesEl.hidden = !all.length;
+    layerNotesEl.innerHTML = all.map(note =>
+        `<div class="layer-note layer-note-${note.level}"` +
+        (note.setting ? ` data-setting="${note.setting}" role="button" tabindex="0"` : '') +
+        `>${esc(note.text)}</div>`).join('');
+}
+
+layerNotesEl.addEventListener('click', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note) jumpToSetting(note.dataset.setting);
+});
+
+layerNotesEl.addEventListener('keydown', event => {
+    const note = event.target.closest('.layer-note[data-setting]');
+    if (note && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        jumpToSetting(note.dataset.setting);
+    }
+});
+
 const vehiclesToggle = $('vehicles-toggle');
+layerNoteButtons.vehicles = vehiclesToggle;
 let vehiclesOn = !!uiState.vehiclesOn;
 let lastVehicles = [];
 let vehiclesTimer = null;
@@ -496,10 +723,10 @@ const VEHICLES_REFRESH_MS = 15000;
 
 function vehicleIcon(v) {
     const arrow = v.heading == null ? '' :
-        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
+        `<div class="vehicle-arrow ${escAttr(v.kind)}" style="${lineVar(v.kind, v.line)}transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
         className: 'vehicle-box',
-        html: `<div class="vehicle-marker ${escAttr(v.kind)}">${esc(v.line)}</div>${arrow}`,
+        html: `<div class="vehicle-marker ${escAttr(v.kind)}"${lineStyle(v.kind, v.line)}>${esc(v.line)}</div>${arrow}`,
         iconSize: [36, 36],
         iconAnchor: [18, 18],
     });
@@ -596,13 +823,45 @@ function renderVehicles() {
     showVehicleStats(shown, hiddenByDirection);
 }
 
+// Po tylu sekundach bez ruchu w danych MPK uznajemy je za nieaktualne. Normalnie
+// pozycje zmieniają się co ~20 s; kanał potrafi zamilknąć na kilkanaście minut.
+const VEHICLES_STALE_SEC = 30;
+// Kiedy (czas przeglądarki) ostatnio przyszły dane, które wciąż się ruszały.
+let vehiclesFreshAt = null;
+
+function setVehiclesStale(ageSec) {
+    setLayerNotes('vehicles', ageSec === null ? [] : [{
+        level: 'warn',
+        text: ageSec === undefined
+            ? 'Brak danych o pojazdach'
+            : `Dane nieaktualne od ${ageSec < 60 ? ageSec + ' s' : Math.round(ageSec / 60) + ' min'}`,
+    }]);
+}
+
+/** Wiek danych po nieudanym zapytaniu: liczony od ostatnich udanych. */
+function vehiclesFailed() {
+    setVehiclesStale(vehiclesFreshAt === null
+        ? undefined : Math.round((Date.now() - vehiclesFreshAt) / 1000));
+}
+
 function loadVehicles() {
     fetch('/api/vehicles').then(r => r.json()).then(data => {
-        if (data.error || !vehiclesOn) return;   // błąd - zostają ostatnie znane pozycje
+        if (!vehiclesOn) return;
+        if (data.error) return vehiclesFailed();   // zostają ostatnie znane pozycje
         lastVehicles = data.vehicles;
         renderVehicles();
-    }).catch(() => {});   // sieć/timeout - kolejna próba za VEHICLES_REFRESH_MS
+        const staleSec = data.stale_sec ?? 0;   // brak pola = dane uznajemy za świeże
+        vehiclesFreshAt = Date.now() - staleSec * 1000;
+        setVehiclesStale(staleSec > VEHICLES_STALE_SEC ? staleSec : null);
+    }).catch(() => {
+        if (vehiclesOn) vehiclesFailed();
+    });   // kolejna próba za VEHICLES_REFRESH_MS
 }
+
+// Karta w tle ma przycinane timery - po powrocie nie czekamy na następny tik.
+document.addEventListener('visibilitychange', () => {
+    if (vehiclesOn && !document.hidden) loadVehicles();
+});
 
 function setVehiclesOn(on) {
     vehiclesOn = on;
@@ -613,6 +872,8 @@ function setVehiclesOn(on) {
     }
     clearInterval(vehiclesTimer);
     vehiclesTimer = null;
+    vehiclesFreshAt = null;
+    setVehiclesStale(null);
     if (on) {
         vehiclesLayer.addTo(map);
         loadVehicles();
@@ -648,6 +909,8 @@ const BIKES_REFRESH_MS = 60000;   // tyle deklaruje kanał WRM (`ttl`)
 // „mam konto w WRM": domyślnie nie, a kto go odhaczył wcześniej, ten ma go
 // dalej (stara pamięć `bikes`). Pojazdy na żywo zostają zgaszone jak dotąd.
 let carsOn = uiState.carsOn !== false;
+// Pociągi jak auta: domyślnie są, a zgaszone znikają i z trasy, i z mapy.
+let trainsOn = uiState.trainsOn !== false;
 // Rodzaj roweru ma własny przycisk w pasku (zgłoszenie #147). Warstwa świeci,
 // gdy świeci choć jeden z nich - dwa zgaszone znaczą dokładnie to, co dawniej
 // zgaszone „Rowery". Kto miał zapamiętany stary włącznik, dostaje oba w jego
@@ -664,6 +927,8 @@ let cityBikeLayer = null;
 let carsTimer = null;
 let bikesTimer = null;
 const carsToggle = $('cars-toggle');
+const trainsToggle = $('trains-toggle');
+layerNoteButtons.cars = carsToggle;
 const bikesToggle = $('bikes-toggle');
 const bikesElectricToggle = $('bikes-electric-toggle');
 
@@ -731,6 +996,24 @@ function loadCityBikes() {
     }).catch(() => {});
 }
 
+/** Komunikaty o autach Traficara przy wyniku (zgłoszenie #490). Są tylko przy
+    mapie z wynikiem i włączonych autach: ostrzeżenie, gdy czas wyszukiwania jest
+    poza zasięgiem od teraz (w przód i wstecz) i aut nie ma, oraz info o celu poza
+    strefą - raz na całe wyszukiwanie. */
+function paintCarsNote() {
+    const notes = [];
+    if (carsOn && !plannerSuspended && flowOnScreen()) {
+        if (lastFlow.cars_beyond) {
+            notes.push({level: 'warn', setting: 'cars-horizon',
+                        text: `Auta Traficara tylko do ${setting('cars-horizon')} h od teraz`});
+        }
+        if (lastFlow.cars_dest_in_zone === false) {
+            notes.push({level: 'info', text: 'Cel poza strefą Traficara'});
+        }
+    }
+    setLayerNotes('cars', notes);
+}
+
 /** Postawienie warstwy aut od zera - po przełączniku, po nowej mapie i po jej
     zdjęciu. Zawsze zdejmuje obie wersje i stawia najwyżej jedną, więc nie da
     się zostać z autami z wyniku pod autami z całego miasta. */
@@ -741,6 +1024,7 @@ function refreshCarLayer() {
     if (flowCarLayer) { map.removeLayer(flowCarLayer); flowCarLayer = null; }
     hideCarZone();
     refreshZoneLayer();
+    paintCarsNote();
     // W rozkładach mapa jest o linii albo o przystanku - auta i rowery nie
     // mają tam czego dokładać, choćby włącznik został zapalony.
     if (!carsOn || plannerSuspended) return;
@@ -782,6 +1066,26 @@ function setCarsOn(on) {
     replanInPlace();
 }
 
+function setTrainsOn(on) {
+    trainsOn = on;
+    saveUiState({trainsOn: on});
+    paintLayerButton(trainsToggle, on);
+    paintTrainStops();
+    placeStopNames();
+    replanInPlace();
+}
+
+/** Stacje PKP siedzą w tej samej warstwie co słupki - zgaszony filtr zdejmuje
+    z niej tylko je. */
+function paintTrainStops() {
+    for (const [name, markers] of markersByName) {
+        if (stopKind.get(name) !== 'train') continue;
+        for (const m of markers) {
+            if (trainsOn) m.addTo(stopsLayer); else stopsLayer.removeLayer(m);
+        }
+    }
+}
+
 /** Jeden rodzaj roweru. Warstwa świeci, gdy świeci choć jeden - więc
     zgaszenie ostatniego gasi rower w całości, tak jak dawniej jeden włącznik.
 
@@ -812,6 +1116,11 @@ function setBikesOn(on) {
     paintBikeButtons();
     refreshBikeLayer();
     replanInPlace();
+}
+
+if (trainsToggle) {
+    trainsToggle.addEventListener('click', () => setTrainsOn(!trainsOn));
+    paintLayerButton(trainsToggle, trainsOn);
 }
 
 if (carsToggle) {
@@ -955,7 +1264,7 @@ const stopsReady = fetch('/api/stops')
         if (stops.error) { showError(stops.error); return; }
         for (const s of stops) {
             stopKind.set(s.name, s.kind);
-            cityStops.push({name: s.place || s.name, lat: s.lat, lon: s.lon});
+            cityStops.push({name: s.place || s.name, lat: s.lat, lon: s.lon, kind: s.kind});
             const m = L.circleMarker([s.lat, s.lon], styleFor(s.name));
             m.cityStop = s.name;   // ranga stuknięcia zależy od stylu (patrz tapRank)
             // Sama etykieta dymka, w odróżnieniu od podpowiedzi w formularzu
@@ -975,6 +1284,7 @@ const stopsReady = fetch('/api/stops')
             if (!markersByName.has(s.name)) markersByName.set(s.name, []);
             markersByName.get(s.name).push(m);
         }
+        paintTrainStops();
         stopsLayer.addTo(map);
         // Stan włącznika ◉ wraca z localStorage (patrz saveUiState).
         setVehiclesOn(vehiclesOn);
@@ -1416,10 +1726,9 @@ const settingsRows = [...settingsList.querySelectorAll('.set-row')];
 // w Ustawieniach Developerskich (i zaczyna pamiętać ustawienia suwaków),
 // `false` chowa ją w całości i zostawia domyślne. Kod suwaków zostaje w repo
 // celowo - patrz znaczniki TYMCZASOWE w index.html i style.css. Dźwięk działa
-// tak samo (SOUND_TUNING, wiersze z `data-tuning`).
+// tak samo (wiersze z `data-tuning`).
 const LOOK_TUNING = true;
-const SOUND_TUNING = false;
-const TUNING = {look: LOOK_TUNING, sound: SOUND_TUNING};
+const TUNING = {look: LOOK_TUNING};
 
 const SETTINGS_KEY = 'metal-planner:settings';
 
@@ -1488,7 +1797,6 @@ const LEGACY_SETTINGS_KEYS = {
         maxWeight: 'look-weight', dimFactor: 'look-dim', labelStep: 'look-label-step',
         labelScale: 'look-label-size', labelOpacity: 'look-label-op',
     },
-    'metal-planner:sound-prefs': {pipe: 'sound-pipe'},
 };
 
 // Jednorazowo: kto miał ustawienia pod dawnymi kluczami, nie traci ich.
@@ -1775,7 +2083,7 @@ function drawFlow(flow, refit) {
 
     for (const s of flow.segments) {        // posortowane po w rosnąco
         const rel = s.w;
-        const color = LINE_COLORS[s.kind] || LINE_COLORS.other;
+        const color = lineColor(s.kind, s.num);
         const weight = lookWeight(rel);
         const opacity = lookOpacity(rel);
         const latlngs = s.path.map(p => L.latLng(p));
@@ -1868,7 +2176,7 @@ function showFastest() {
             lineCap: 'round', lineJoin: 'round', interactive: false,
         }));
         cores.push(L.polyline(latlngs, {
-            color: LINE_COLORS[leg.kind] || LINE_COLORS.other, opacity: 1, weight: 5,
+            color: lineColor(leg.kind, leg.num), opacity: 1, weight: 5,
             lineCap: 'round', lineJoin: 'round', interactive: false,
         }));
     }
@@ -1906,8 +2214,8 @@ function showMore() {
     gdzie sie przesiada. */
 function headlineChips(legs) {
     const parts = [];
-    const piece = (cls, tip, html) =>
-        `<span class="${escClass(cls)}" data-tip="${escAttr(tip)}">${html}</span>`;
+    const piece = (cls, tip, html, style = '') =>
+        `<span class="${escClass(cls)}"${style} data-tip="${escAttr(tip)}">${html}</span>`;
     let pendingWalk = null;
     legs.forEach((leg, i) => {
         if (leg.kind === 'walk') {
@@ -1930,7 +2238,7 @@ function headlineChips(legs) {
         pendingWalk = null;
         parts.push(piece(`line-chip ${leg.kind}`,
                          `${MODE_LABEL[leg.kind] || MODE_LABEL.other} ${leg.num}, ok. `
-                         + `${fmtMins(leg.sec)} jazdy.`, esc(leg.num)));
+                         + `${fmtMins(leg.sec)} jazdy.`, esc(leg.num), lineStyle(leg.kind, leg.num)));
     });
     return parts.join('');
 }
@@ -2370,7 +2678,7 @@ function clusterMarker(at, roster, weight, times) {
             // Slot jest celem myszy (patrz bindCluster) - dzięki temu wskazanie
             // linii działa tak samo, gdy kursor stoi na czasie pod numerem.
             const html = `<span class="line-chip-slot" data-i="${index++}">`
-                + `<span class="line-chip ${esc(l.kind)}">${esc(l.num)}</span>`
+                + `<span class="line-chip ${escClass(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
                 + (times
                     ? `<span class="chip-time">${sec === null ? '' : esc(fmtClock(sec))}</span>`
                     : '')
@@ -2532,11 +2840,11 @@ function flowPickHtml(when) {
     const sel = options[flowPick.index];
     if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
-    let html = `<span class="flow-tip-line ${esc(sel.kind)}">${esc(mode)} ${esc(sel.num)}</span>`;
+    let html = `<span class="flow-tip-line ${escClass(sel.kind)}"${lineStyle(sel.kind, sel.num)}>${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
     if (options.length > 1) {
         html += '<span class="flow-tip-row">' + options.map((o, i) =>
-            `<span class="line-chip ${esc(o.kind)}${i === flowPick.index ? ' picked' : ''}">`
+            `<span class="line-chip ${escClass(o.kind)}${i === flowPick.index ? ' picked' : ''}"${lineStyle(o.kind, o.num)}>`
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
     }
@@ -2655,7 +2963,7 @@ function showLineHighlight(num, kind) {
     hideLineHighlight();
     const parts = flowHits.filter(h => h.seg.num === num && h.seg.kind === kind);
     if (!parts.length) return;
-    const color = LINE_COLORS[kind] || LINE_COLORS.other;
+    const color = lineColor(kind, num);
     const halos = parts.map(h => L.polyline(h.latlngs, {
         color: '#111', opacity: 0.85, weight: h.weight + HALO_EXTRA_PX,
         lineCap: 'round', lineJoin: 'round', interactive: false,
@@ -2839,7 +3147,7 @@ function lineStopTipHtml(st) {
     if (st.pole) html += `<span class="tip-platform">${esc(prettyStopName(st.pole))}</span>`;
     if (lines.length > 1) {
         html += '<span class="tip-line-times">' + lines.map(l =>
-            `<span><span class="badge ${escAttr(l.kind)}">${esc(l.num)}</span>`
+            `<span><span class="badge ${escAttr(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
             + `${esc(fmtClock(l.sec))}</span>`).join('') + '</span>';
     }
     return html;
@@ -2946,7 +3254,8 @@ function placeStopNames() {
             .map(st => lineStopDot(st, LINE_STOP_GREY))).addTo(map);
         named = stops;
     } else {
-        named = cityStops.filter(s => view.contains([s.lat, s.lon]));
+        named = cityStops.filter(s => view.contains([s.lat, s.lon])
+            && (trainsOn || s.kind !== 'train'));
     }
     const dotBox = at => [at.x - NAME_DOT_PX, at.y - NAME_DOT_PX,
                           at.x + NAME_DOT_PX, at.y + NAME_DOT_PX];
@@ -3316,7 +3625,7 @@ function timetableLinesHtml(data, mapSec) {
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
     const html = list.map(({d, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
-        `<span class="badge ${escClass(d.mode)}">${esc(d.num)}</span>` +
+        `<span class="badge ${escClass(d.mode)}"${lineStyle(d.mode, d.num)}>${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}` +
@@ -3574,7 +3883,7 @@ function loadTimetable(dot, where, sec) {
         ? where.lines.map(l => `${lineKey(l)}/${l.flow || ''}/${l.arrive || ''}`).join('|')
         : '';
     const key = `${where.name || where.lat + ',' + where.lon}`
-        + `@${date}@${from}@${sec}@${filtr}@${where.deadline || ''}`;
+        + `@${date}@${from}@${sec}@${filtr}@${where.deadline || ''}@${trainsOn}`;
     const cached = timetableCache.get(key);
     if (cached !== undefined) { emitTimetable(dot, cached); return; }
 
@@ -3589,6 +3898,7 @@ function loadTimetable(dot, where, sec) {
     // czterdzieści odjazdów wszystkich linii kończyło się przed godziną,
     // o której pasażer tu staje, i kursy z mapy wypadały przed odsiewem
     // (Śliczna: 113 o 15:59 i 16:14 znikały za 15:55).
+    if (!trainsOn) query.trains = '0';
     if (where.deadline) query.until_sec = where.deadline;
     else query.limit = TIMETABLE_FETCH;
     emitTimetable(dot, TIP_LOADING);
@@ -4095,7 +4405,7 @@ function legLayers(legs, {preview}) {
             }
             continue;
         }
-        const color = LINE_COLORS[leg.mode] || LINE_COLORS.other;
+        const color = lineColor(leg.mode, leg.num);
         casings.push(L.polyline(leg.path, {
             color: '#fff', weight: rideWeight + 5, opacity: preview ? 0.7 : 0.95,
             lineCap: 'round', lineJoin: 'round', interactive: false,
@@ -4105,13 +4415,17 @@ function legLayers(legs, {preview}) {
             lineCap: 'round', lineJoin: 'round', interactive: false,
         }));
         if (!preview) {
-            marks.push(L.marker(leg.path[Math.floor(leg.path.length / 2)], {
+            const mark = L.marker(leg.path[Math.floor(leg.path.length / 2)], {
                 icon: L.divIcon({
                     className: `line-badge solid ${leg.mode}`,
                     html: esc(leg.num), iconSize: null,
                 }),
                 interactive: false,
-            }));
+            });
+            // divIcon nie przyjmuje stylu - kolor linii dostaje dopiero postawiony element.
+            const declared = lineVar(leg.mode, leg.num);
+            if (declared) mark.on('add', () => { mark.getElement().style.cssText += declared; });
+            marks.push(mark);
         }
     }
 
@@ -4121,7 +4435,7 @@ function legLayers(legs, {preview}) {
         // Idą przed kropki wsiadania i wysiadania, czyli pod nie.
         for (const leg of legs) {
             if (leg.kind !== 'ride' || !leg.path || leg.path.length < 2) continue;
-            const color = LINE_COLORS[leg.mode] || LINE_COLORS.other;
+            const color = lineColor(leg.mode, leg.num);
             for (const stop of leg.via || []) {
                 if (stop.lat == null || stop.lon == null) continue;
                 marks.push(viaDot(stop, color));
@@ -4241,10 +4555,10 @@ function badgeHtml(leg) {
     // „4 › D" nie mówi inaczej, czy w 4 trzeba dopiero wsiąść, czy jedzie się
     // nią dalej (zgłoszenie #224).
     if (leg.onboard) {
-        return `<span class="badge ${leg.mode} current" title="${escAttr(leg.line)}`
+        return `<span class="badge ${leg.mode} current"${lineStyle(leg.mode, leg.num)} title="${escAttr(leg.line)}`
              + ` — jedziesz tym pojazdem">${esc(leg.num)}</span>`;
     }
-    return `<span class="badge ${leg.mode}" title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
+    return `<span class="badge ${leg.mode}"${lineStyle(leg.mode, leg.num)} title="${escAttr(leg.line)}">${esc(leg.num)}</span>`;
 }
 
 // Plakietka etapu rowerowego na mapie. Sam znak 🚲 zamiast numeru linii,
@@ -4546,7 +4860,7 @@ function detailHtml(journey) {
         rows.push(stopRow(leg.from_time, leg.from, i === 0 ? 'first' : '',
                           leg.from_platform, depLate));
         rows.push(
-            `<li class="tl-ride ${esc(leg.mode)}"><span class="tl-time"></span>` +
+            `<li class="tl-ride ${escClass(leg.mode)}"${lineStyle(leg.mode, leg.num)}><span class="tl-time"></span>` +
             `<span class="tl-dot"></span><span class="tl-body">` +
             // Przycisk PRZED liczbą przystanków, choć czyta się go po niej:
             // .tl-info zajmuje całą szerokość (flex-basis: 100%), więc wszystko
@@ -4569,7 +4883,7 @@ function detailHtml(journey) {
         // które przewijałoby ją do początku karty.
         for (const stop of via) {
             rows.push(
-                `<li class="tl-via ${esc(leg.mode)}" data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
+                `<li class="tl-via ${escClass(leg.mode)}"${lineStyle(leg.mode, leg.num)} data-via-of="${i}"${viaOn ? '' : ' hidden'}>` +
                 `<span class="tl-time">${esc(stop.t)}</span><span class="tl-dot"></span>` +
                 `<span class="tl-name">${esc(stop.name)}</span></li>`,
             );
@@ -4634,7 +4948,7 @@ function onboardNoteHtml() {
     const kurs = lastFlow && lastFlow.onboard;
     if (!kurs) return '';
     return `<p class="onboard-head">`
-        + `<span class="badge ${esc(kurs.mode)}">${esc(kurs.num)}</span>`
+        + `<span class="badge ${escClass(kurs.mode)}"${lineStyle(kurs.mode, kurs.num)}>${esc(kurs.num)}</span>`
         + `<span>w stronę <b>${esc(kurs.headsign)}</b> — najbliższy przystanek `
         + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
 }
@@ -4851,7 +5165,7 @@ const obTrainKey = query => `${$('date').value}|${query.replace(/\D/g, '')}`;
     kiedy przyjdą. */
 function obTrainSuggestions(query) {
     const train = TRAIN_NUMBER.exec(query.trim());
-    if (!train || train[2].length < 2) return [];
+    if (!trainsOn || !train || train[2].length < 2) return [];
     const [, carrier, digits] = train;
     // Wpisany przewoźnik zawęża listę: „KD 602" bez pociągów PR 602…
     const pick = list => list.filter(
@@ -4905,7 +5219,7 @@ function syncOnboardView() {
     const przystanek = prettyStopName(
         obStopSelect.options[obStopSelect.selectedIndex].text);
     obSummary.innerHTML =
-        `<span class="badge ${esc(kurs.mode || 'other')}">${esc(kurs.num)}</span>`
+        `<span class="badge ${escClass(kurs.mode || 'other')}"${lineStyle(kurs.mode || 'other', kurs.num)}>${esc(kurs.num)}</span>`
         // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
         // linijki ucina się koniec, a stracić wolno kierunek (kontekst),
         // nie przystanek, przy którym pojazd zaraz stanie. Znaczek słupka
@@ -5060,7 +5374,7 @@ if (obLineInput) {
         render: item => item.label
             ? `<span class="badge train">${esc(item.label)}</span>`
               + `<span class="ac-kind">→ ${esc(item.headsign)}</span>`
-            : `<span class="badge ${escClass(item.mode)}">${esc(item.name)}</span>`
+            : `<span class="badge ${escClass(item.mode)}"${lineStyle(item.mode, item.name)}>${esc(item.name)}</span>`
               + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`,
         onEnter: () => loadDirections(),
     });
@@ -5143,6 +5457,7 @@ function queryParams() {
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
+        car_horizon_h: $('cars-horizon').value,
         newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
         scheme_extra: $('scheme-walks-count').value,
@@ -5168,6 +5483,8 @@ function queryParams() {
     // zdejmuje je z listy (zgłoszenie #163) - jak przy `routes`, prosi się
     // tylko o ich brak.
     if (!carsOn) params.set('traficar', '0');
+    // Pociągi tak samo jak auta: prosi się tylko o ich brak.
+    if (!trainsOn) params.set('trains', '0');
     const poklad = onboardOn ? onboardPick() : null;
     if (poklad) {
         // Start z pokładu pojazdu (patrz onboard.py): zamiast miejsca jedzie
@@ -5857,7 +6174,7 @@ function schemeBadges(boxes, strands, branches) {
         s.badge = spot;
         let x = spot.x + PAD;
         const texts = s.lines.map((line, i) => {
-            const t = `<text class="scheme-num" fill="${LINE_COLORS[line.kind] || LINE_COLORS.other}" `
+            const t = `<text class="scheme-num" fill="${lineColor(line.kind, line.num)}" `
                 + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`;
             x += widths[i] + GAP;
             return t;
@@ -6012,7 +6329,6 @@ function schemeSvg(boxes, strands, pairs) {
     minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
     const colors = new Set();
-    const colorOf = kind => LINE_COLORS[kind] || LINE_COLORS.other;
     const DASH = 9;
     let rects = '', lines = '', names = '';
     for (const [id, b] of boxes) {
@@ -6028,15 +6344,17 @@ function schemeSvg(boxes, strands, pairs) {
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
     const stroke = (group, label, d, arrow, extra = '') => {
-        const kinds = [...new Set(group.map(line => line.kind))].sort();
-        const tint = kinds.length === 1 ? colorOf(kinds[0]) : WALK_COLOR;
+        // Przy kolorze na linię pasek jest na linię, nie na rodzaj.
+        const tints = [...new Set([...group].sort((a, b) => a.kind.localeCompare(b.kind))
+            .map(line => lineColor(line.kind, line.num)))];
+        const tint = tints.length === 1 ? tints[0] : WALK_COLOR;
         const marker = arrow ? ` marker-end="url(#scheme-arrow-${tint.slice(1)})"` : '';
         if (arrow) colors.add(tint);
-        const strokes = kinds.map((kind, i) => kinds.length === 1
-            ? `<path class="scheme-line" stroke="${colorOf(kind)}"${marker} d="${d}"/>`
-            : `<path class="scheme-line" stroke="${colorOf(kind)}" stroke-linejoin="miter" `
-              + `stroke-dasharray="${DASH} ${DASH * (kinds.length - 1)}" stroke-dashoffset="${-i * DASH}"`
-              + `${i === kinds.length - 1 ? marker : ''} d="${d}"/>`).join('');
+        const strokes = tints.map((color, i) => tints.length === 1
+            ? `<path class="scheme-line" stroke="${color}"${marker} d="${d}"/>`
+            : `<path class="scheme-line" stroke="${color}" stroke-linejoin="miter" `
+              + `stroke-dasharray="${DASH} ${DASH * (tints.length - 1)}" stroke-dashoffset="${-i * DASH}"`
+              + `${i === tints.length - 1 ? marker : ''} d="${d}"/>`).join('');
         return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}">${strokes}</g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
@@ -6465,8 +6783,8 @@ function renderHeadlineOnly(data) {
 }
 
 // Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
-const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, bike_places: [],
-                     bike_places_live: false};
+const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, cars_ahead_sec: null,
+                     cars_beyond: false, bike_places: [], bike_places_live: false};
 
 /** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
     zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
@@ -6979,7 +7297,9 @@ function suggestionsFor(query, names = STOP_LABELS, folded, limit = MAX_SUGGESTI
         // at/len na zero = nic nie podświetlamy (patrz wyżej, dlaczego).
         else if (alias && aliases[i].includes(alias)) aliased.push({name, at: 0, len: 0});
     });
-    return [...prefix, ...inside, ...aliased].slice(0, limit);
+    return [...prefix, ...inside, ...aliased]
+        .filter(item => trainsOn || !own || STOP_KIND.get(item.name) !== 'train')
+        .slice(0, limit);
 }
 
 /** Wiersz podpowiedzi: nazwa z podświetlonym trafieniem. Tryb rozkładów
@@ -7038,7 +7358,8 @@ function recentFirst(items, recent) {
 // Ostatnie miejsca szukane osobno w ich krótkiej liście, żeby przy jednej
 // literze nie sortować tysięcy trafień ze wszystkich przystanków.
 const suggestRecentFirst = side => query => {
-    const recent = (loadRecentPlaces()[side] || []).filter(name => STOP_KIND.has(name));
+    const recent = (loadRecentPlaces()[side] || []).filter(
+        name => STOP_KIND.has(name) && (trainsOn || STOP_KIND.get(name) !== 'train'));
     const hits = recentFirst(suggestionsFor(query, recent, undefined, Infinity), recent);
     const rest = suggestionsFor(query, STOP_LABELS, undefined, MAX_SUGGESTIONS + hits.length)
         .filter(item => !recent.includes(item.name));
@@ -7540,6 +7861,23 @@ function reloadTimetable() {
     }
 }
 
+// Kolor linii siedzi w gotowym html i w warstwach mapy, więc zmiana kolorów
+// przerysowuje to, co już stoi, z tego, co już przyszło - bez zapytania.
+// Wachlarz w rozkładach jest zdjęty i wróci sam, już w nowych kolorach
+// (patrz resumePlanner).
+function repaintLineColors() {
+    reloadTimetable();
+    renderJourneys();
+    renderTimeHeadline();
+    renderVehicles();
+    syncOnboardView();
+    if (lastSchemeData) renderScheme(lastSchemeData);
+    if (window.timetableMode) window.timetableMode.repaint();
+    if (plannerSuspended) return;
+    if (lastFlow) drawFlow(lastFlow, false);
+    if (selectedJourney !== null) drawJourney(selectedJourney, true);
+}
+
 // Układ schematu i liczba dodatkowych przejść mają sens tylko z nową mapą.
 function showSchemeRows() {
     const on = setting('new-map');
@@ -7560,6 +7898,11 @@ const SETTING_EFFECTS = {
     'car-overhead': {react: replanSoon(false)},
     'onboard-slack': {react: replanSoon(false)},
     // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
+    'cars-horizon': {react: () => {
+        mapMore = 0;
+        if (!startInput.value || !endInput.value) return;
+        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
+    }},
     'car-vans': {react: () => {
         mapMore = 0;
         if (!flowOnScreen()) refreshCarLayer();
@@ -7586,6 +7929,7 @@ const SETTING_EFFECTS = {
     'scheme-layout': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
     // Przejścia pieszo na schemacie (demo): ile przejść ze środka najszybszych podróży dodać do tych z dojścia.
     'scheme-walks-count': {react: replanSoon(false)},
+    'line-colors': {react: repaintLineColors},
     'bikes-merged': {paint: () => paintBikeButtons()},
     'start-mode-switch': {paint: showStartMode},
     'routes-on': {paint: showRoutes, react: on => {
@@ -7605,10 +7949,10 @@ const SETTING_EFFECTS = {
     }},
     // Bez przycisku strefa pokazuje się tylko pod kursorem (patrz refreshZoneLayer).
     'zone-button': {react: () => refreshZoneLayer()},
-    'sound-pipe': {react: on => {
-        // Włączenie od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
-        // co się właśnie włączyło.
-        if (on) playPipeDrop();
+    'sound-level': {react: level => {
+        // Zmiana od razu gra: inaczej trzeba by szukać trasy, żeby usłyszeć,
+        // jak brzmi wybrana głośność.
+        if (level !== 'off') playPipeDrop();
     }},
     'dot-size': {react: debounced(() => applyDotOpts(), 60)},   // przeciąganie suwaka: jedno przemalowanie na klatkę
     'dot-rows': {react: reloadTimetable},
@@ -7634,7 +7978,7 @@ for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-r
     SETTING_EFFECTS[id] = {react: () => applyDotOpts()};
 }
 
-// Strojenia schowane stałymi (LOOK_TUNING, SOUND_TUNING) nie mają wiersza w panelu.
+// Strojenia schowane stałą (LOOK_TUNING) nie mają wiersza w panelu.
 for (const row of settingsRows) {
     if (row.dataset.tuning) row.hidden = !TUNING[row.dataset.tuning];
 }
@@ -7645,11 +7989,79 @@ for (const info of SETTINGS.values()) {
     if (effect && effect.paint) effect.paint(setting(info.id));
 }
 
+// Poprzedni wybór, do którego wraca lista po anulowaniu któregoś z okien.
+let soundLevelBefore = setting('sound-level');
+// Natywna lista ma już wartość „Wyłączony”, zanim padnie pierwsze pytanie, więc
+// do czasu odpowiedzi wiersz nie może zmienić grupy.
+let soundLevelConfirming = false;
+
+function acceptSoundLevel(info, value) {
+    soundLevelBefore = value;
+    storeSetting(info.id, value);
+    // Zliczamy tu, nie na zdarzeniu `change`: anulowane wyłączenie nie jest zmianą.
+    recordSettingChange(info.id);
+    syncSettingsSnapshot();
+    SETTING_EFFECTS[info.id].react(value);
+}
+
+const PIPE_OFF_STEPS = [
+    {text: 'Czy jesteś w pełni przekonany, że chcesz wyłączyć ten przepiękny element aplikacji?', ok: 'Tak'},
+    {text: 'Czy wiesz, że to Ci zepsuje experience aplikacji?', ok: 'Tak'},
+    {text: 'Czy wiesz, że badania amerykańskich naukowców stwierdziły, że słuchanie Metal Pipe\'a pozwala zachować dobry słuch nawet w wieku 100 lat?',
+     ok: 'Wyłącz mimo to', joke: true},
+];
+
+/** Trzy okna z rzędu; true tylko, gdy użytkownik przeszedł wszystkie. */
+async function confirmPipeOff() {
+    const dialog = $('pipe-off-dialog');
+    let confirmed = true;
+    // To samo okno stoi otwarte przez wszystkie kroki i zamykamy je raz, na
+    // końcu: `close` odpala się asynchronicznie, więc zamknięcie między krokami
+    // uruchomiłoby obsługę następnego kroku jako anulowanie.
+    dialog.showModal();
+    for (const step of PIPE_OFF_STEPS) {
+        $('pipe-off-text').textContent = step.text;
+        $('pipe-off-ok').textContent = step.ok;
+        $('pipe-off-joke').hidden = !step.joke;
+        confirmed = await new Promise(resolve => {
+            $('pipe-off-ok').onclick = () => resolve(true);
+            $('pipe-off-cancel').onclick = () => resolve(false);
+            // Esc zamyka okno samo, klik w tło zamykamy tu - oba to anulowanie.
+            dialog.onclose = () => resolve(false);
+            dialog.onclick = e => { if (e.target === dialog) resolve(false); };
+        });
+        if (!confirmed) break;
+    }
+    $('pipe-off-ok').onclick = $('pipe-off-cancel').onclick = null;
+    dialog.onclose = dialog.onclick = null;
+    if (dialog.open) dialog.close();
+    return confirmed;
+}
+
 for (const type of ['input', 'change']) {
     devPanel.addEventListener(type, event => {
         const info = SETTING_BY_CONTROL.get(event.target);
         if (!info) return;
         const value = readControl(info.control);
+        if (info.id === 'sound-level') {
+            // `input` leci też przy przewijaniu listy klawiaturą, a okna
+            // potwierdzeń nie mają się mnożyć.
+            if (type === 'input') return;
+            if (value !== 'off') {
+                acceptSoundLevel(info, value);
+                return;
+            }
+            const previous = soundLevelBefore;
+            soundLevelConfirming = true;
+            confirmPipeOff().then(confirmed => {
+                soundLevelConfirming = false;
+                if (confirmed) acceptSoundLevel(info, value);
+                else info.control.value = previous;
+                syncSettingCopies();
+                markChangedSettings();
+            });
+            return;
+        }
         storeSetting(info.id, value);
         paintSettingOutput(info);
         if (type !== (info.kind === 'range' ? 'input' : 'change')) return;
@@ -7695,10 +8107,6 @@ document.documentElement.style.setProperty('--chip-scale', setting('look-label-s
 // przeglądarki - ta kłamie, a canPlayType odpowiada za konkretny dekoder.
 // Oba pliki ważą po ~38 kB, więc wpadają do cache'u service workera razem
 // z resztą statyki i działają offline.
-//
-// Ustawienie jest SCHOWANE (SOUND_TUNING = false) - dźwięk po prostu jest.
-// Przełącznik zostaje w kodzie i w panelu, więc pokazanie go to zmiana
-// jednej stałej (ten sam układ, co przy LOOK_TUNING).
 
 const PIPE_SOURCES = [
     ['audio/ogg; codecs=opus', '/static/sounds/metal-pipe.ogg'],
@@ -7706,14 +8114,17 @@ const PIPE_SOURCES = [
 ];
 
 // Nagranie jest głośne (szczyt ponad 0 dBFS), a to ma być żart w tle,
-// nie alarm. 0.35 wciąż było za głośno - połowa tego.
+// nie alarm. 0.175 ("normalnie") to głośność, którą użytkownik już uznał za
+// górną granicę. "Po cichutku" (domyślne, #447) to ok. 29% tego: wyraźnie
+// ciszej, ale wciąż słychać.
 //
 // Głośność idzie przez mikser przeglądarki (Web Audio), nie przez
 // `volume` elementu audio: iOS tego pola nie słucha i gra zawsze głośnością
 // systemu. Wzmocnienie miksera słucha wszędzie, więc każdy efekt może mieć
 // swoją głośność. Cena na iPhonie: dźwięk z miksera milknie przy włączonym
 // wyciszeniu telefonu - dla żartu w tle to raczej zaleta.
-const PIPE_VOLUME = 0.175;
+const PIPE_VOLUMES = {normal: 0.175, quiet: 0.05};
+const pipeVolume = () => PIPE_VOLUMES[setting('sound-level')];
 
 let pipeAudio = null;
 let soundMixer = null;
@@ -7782,7 +8193,7 @@ function playPipeBuffer() {
     // a nie nałożyć się na poprzednie.
     if (pipeVoice) pipeVoice.stop();
     const gain = ctx.createGain();
-    gain.gain.value = PIPE_VOLUME;
+    gain.gain.value = pipeVolume();
     gain.connect(ctx.destination);
     const voice = ctx.createBufferSource();
     voice.buffer = pipeBuffer;
@@ -7797,7 +8208,7 @@ function playPipeBuffer() {
 // go więc przy każdym dotknięciu i klawiszu, nie raz: iOS usypia mikser
 // z powrotem, gdy strona zejdzie w tło.
 function wakeMixer() {
-    if (!setting('sound-pipe')) return;
+    if (setting('sound-level') === 'off') return;
     const ctx = mixer();
     if (!ctx) return;
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
@@ -7817,7 +8228,6 @@ function pipeElement() {
     const element = document.createElement('audio');
     element.src = url;
     element.preload = 'auto';
-    element.volume = PIPE_VOLUME;
     pipeAudio = element;
     return pipeAudio;
 }
@@ -7827,10 +8237,10 @@ function prefersLessMotion() {
               && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
-/** Cicho, gdy przełącznik wyłączony, gdy system prosi o ograniczenie
+/** Cicho, gdy dźwięk wyłączony, gdy system prosi o ograniczenie
     animacji albo gdy przeglądarka nie umie żadnego z formatów. */
 function playPipeDrop() {
-    if (!setting('sound-pipe') || prefersLessMotion()) return;
+    if (setting('sound-level') === 'off' || prefersLessMotion()) return;
     if (mixer()) {
         if (pipeBuffer) playPipeBuffer();
         else { pipePending = true; loadPipe(); }
@@ -7840,6 +8250,7 @@ function playPipeDrop() {
     if (!audio) return;
     // Drugie wyszukiwanie w trakcie pierwszego dźwięku ma zagrać OD NOWA,
     // a nie zostać po cichu pominięte.
+    audio.volume = pipeVolume();
     audio.currentTime = 0;
     const started = audio.play();
     // Przeglądarka odmawia, dopóki strona nie dostała gestu. Tu zawsze
@@ -8017,6 +8428,7 @@ for (const type of ['input', 'change']) {
             source.dispatchEvent(new Event(type, {bubbles: true}));
             return;
         }
+        if (soundLevelConfirming) return;
         syncSettingCopies();
         markChangedSettings();
     });
@@ -8237,7 +8649,7 @@ function recordSettingsReset() {
 function settingControls() {
     // Kopie (`.set-copy`) tylko przekazują zmianę oryginałowi.
     // Tylko kontrolki wierszy listy: pole wyszukiwania i przyciski akcji nie są
-    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze (np. dźwięk) nic nie zmienią, więc ich nie ma.
+    // ustawieniami (wiersze akcji, jak wybór osoby i kod z Discorda, też nie). Schowane wiersze nic nie zmienią, więc ich nie ma.
     return settingsList.querySelectorAll('.set-row:not([hidden], .set-copy, .set-action) :is(input, select)');
 }
 
@@ -8258,6 +8670,7 @@ function settingValue(control) {
 
 devPanel.addEventListener('change', event => {
     if (![...settingControls()].includes(event.target) || !event.target.id) return;
+    if (event.target.id === 'sound-level') return;
     recordSettingChange(event.target.id);
     syncSettingsSnapshot();
 });
@@ -8362,6 +8775,26 @@ document.addEventListener('click', event => {
     if (!locked) return;
     event.preventDefault();
     jumpToSetting('dev-access');
+});
+
+$('server-logs-download').addEventListener('click', async event => {
+    if (event.currentTarget.classList.contains('locked')) return;
+    const status = $('server-logs-status');
+    status.textContent = '';
+    try {
+        const response = await fetch('/api/dev/logi', {headers: {'X-Dev-Token': siechniceToken()}});
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `serwer odpowiedział ${response.status}`);
+        }
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(await response.blob());
+        link.download = 'metal-planner-server.log';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    } catch (e) {
+        status.textContent = `Nie udało się pobrać logów: ${e.message}`;
+    }
 });
 
 async function fetchSiechniceStatus(init = {}) {
@@ -8504,7 +8937,9 @@ function departureAttrs(d, stop, sec) {
     if (wait <= 0 || wait > PUSHWARD_WINDOW_SEC) return '';
     return ` data-dep-sec="${sec}" data-dep-date="${escAttr(mapDate())}"` +
            ` data-dep-num="${escAttr(d.num)}" data-dep-mode="${escAttr(d.mode)}"` +
-           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"`;
+           ` data-dep-headsign="${escAttr(d.headsign)}" data-dep-stop="${escAttr(stop)}"` +
+           ` data-dep-stop-id="${escAttr(d.stop_id)}"` +
+           ('siechnice_stop' in d ? ` data-dep-siechnice-stop="${escAttr(d.siechnice_stop || '')}"` : '');
 }
 
 const PUSHWARD_ERRORS = {
@@ -8531,6 +8966,18 @@ function pushwardLink() {
     return origin + location.pathname + (query ? '?' + query : '');
 }
 
+// Opcjonalnie klik w kartę otwiera przystanek (ten słupek) w zewnętrznym
+// rozkładzie. Wybiera kurs, nie przystanek: kurs Siechnic ma własny serwis
+// także na słupku wspólnym z MPK we Wrocławiu, reszta jest w Czy na czas.
+// Kursu gminnego bez ustalonego słupka nie wysyłamy do Czy na czas, bo tam go nie ma.
+function pushwardStopLink(dep) {
+    if (dep.depSiechniceStop !== undefined)
+        return dep.depSiechniceStop
+            ? `https://siechnice.kiedyprzyjedzie.pl/#/stops/${dep.depSiechniceStop}/departures`
+            : pushwardLink();
+    return `https://czynaczas.pl/wroclaw?przystanek=${encodeURIComponent(dep.depStopId)}`;
+}
+
 async function pushwardClick(event) {
     const hour = event.target.closest('[data-dep-sec]');
     const key = pushwardKey();
@@ -8544,12 +8991,11 @@ async function pushwardClick(event) {
             body: JSON.stringify({
                 num: dep.depNum, mode: dep.depMode, headsign: dep.depHeadsign,
                 stop: dep.depStop, date: dep.depDate, sec: Number(dep.depSec),
-                link: pushwardLink(),
+                link: setting('pushward-link') ? pushwardStopLink(dep) : pushwardLink(),
             }),
         });
         const body = await response.json().catch(() => ({}));
-        alert(response.ok ? 'Wysłano odliczenie do Dynamic Island.'
-                          : `Nie wysłano: ${describePushwardError(body)}`);
+        if (!response.ok) alert(`Nie wysłano: ${describePushwardError(body)}`);
     } catch {
         alert('Nie wysłano: brak połączenia z serwerem.');
     }
@@ -8742,9 +9188,32 @@ window.plannerBridge = {
     // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
     // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
     // tablice w jednym API to zaproszenie do sięgnięcia po złą.
-    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON,
+    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON, lineColor, lineStyle, escClass,
     prettyStopName, rawStopName,
     suspendPlanner, resumePlanner, setTimeNow,
+    trainsOn: () => trainsOn,
 };
 
 }
+
+// X w polach tekstowych (#508): czyści pole jak ręczne skasowanie (zdarzenie input) i zostawia w nim kursor.
+// Widoczność robi CSS przez :placeholder-shown, więc działa też przy wartościach ustawionych z kodu.
+document.addEventListener('DOMContentLoaded', () => {
+    for (const id of ['start', 'end', 'place-where', 'ob-line']) {
+        const input = document.getElementById(id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'field-clear';
+        button.title = 'Wyczyść';
+        button.setAttribute('aria-label', 'Wyczyść pole');
+        button.innerHTML = '&#10005;';
+        if (input.classList.contains('with-action')) button.classList.add('beside-action');
+        button.addEventListener('mousedown', e => e.preventDefault());
+        button.addEventListener('click', () => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        });
+        input.after(button);
+    }
+});

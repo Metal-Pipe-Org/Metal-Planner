@@ -25,7 +25,7 @@
 const B = window.plannerBridge;
 if (!B) return;         // brak bazy rozkładów - panel pokazuje sam komunikat
 
-const {map, esc, fitTo, LINE_COLORS, MODE_LABEL, ROUTE_ICON} = B;
+const {map, esc, escClass, fitTo, MODE_LABEL, ROUTE_ICON, lineColor, lineStyle} = B;
 const $ = id => document.getElementById(id);
 
 const queryInput = $('tt-query');
@@ -110,8 +110,6 @@ function clearMap() {
     focusLayer = dropLayer(focusLayer);
 }
 
-const colorOf = mode => LINE_COLORS[mode] || LINE_COLORS.other;
-
 /* Trzy siły rysowania trasy - kolorowa nitka w białej otoczce, tak samo jak
    wybrana trasa w wyszukiwarce, tylko w trzech natężeniach:
    - 'full'  - to, o co pytamy (przebieg linii, kurs od wsiadania dalej);
@@ -125,7 +123,7 @@ const ROUTE_LOOK = {
 
 /** `interactive` - trasa przyjmuje klik. Łapie go sama otoczka: jest szersza
     od kolorowej nitki, a nitka, nieinteraktywna, przepuszcza klik pod spód. */
-function routeLines(path, mode, level = 'full', interactive = false) {
+function routeLines(path, mode, num, level = 'full', interactive = false) {
     const look = ROUTE_LOOK[level];
     const latlngs = path.map(p => L.latLng(p));
     const stroke = (color, [weight, opacity], clickable) => L.polyline(latlngs, {
@@ -133,7 +131,7 @@ function routeLines(path, mode, level = 'full', interactive = false) {
         lineCap: 'round', lineJoin: 'round', interactive: clickable,
     });
     return [stroke('#fff', look.casing, interactive),
-            stroke(colorOf(mode), look.line, false)];
+            stroke(lineColor(mode, num), look.line, false)];
 }
 
 /** Klik w kropkę na mapie - przeskok do innego rozkładu (#155). Zdarzenie
@@ -144,10 +142,10 @@ const onPick = (layer, pick) => layer.on('click', event => {
 });
 
 /** `pick(stop, i)` - co robi klik w przystanek; bez niego kropka ma sam dymek. */
-function stopDots(stops, mode, times, pick) {
+function stopDots(stops, mode, num, times, pick) {
     return stops.map((stop, i) => {
         const marker = L.circleMarker([stop.lat, stop.lon], {
-            radius: 5, weight: 2, color: colorOf(mode),
+            radius: 5, weight: 2, color: lineColor(mode, num),
             fillColor: '#fff', fillOpacity: 1,
         });
         const time = times && times[i];
@@ -157,11 +155,11 @@ function stopDots(stops, mode, times, pick) {
     });
 }
 
-function terminusDots(stops, mode) {
+function terminusDots(stops, mode, num) {
     return [stops[0], stops[stops.length - 1]].filter(Boolean).map(stop =>
         L.circleMarker([stop.lat, stop.lon], {
             radius: 8, weight: 3, color: '#263238',
-            fillColor: colorOf(mode), fillOpacity: 1, interactive: false,
+            fillColor: lineColor(mode, num), fillOpacity: 1, interactive: false,
         }));
 }
 
@@ -188,7 +186,7 @@ const dimBase = dim => B.setBaseDim(dim);
 function addRoute(path, line) {
     if (!routeLayer) routeLayer = L.layerGroup().addTo(map);
     const opens = LINE_KEYS.has(lineKey(line));
-    const layers = routeLines(path, line.mode, 'soft', opens);
+    const layers = routeLines(path, line.mode, line.num, 'soft', opens);
     if (opens) {
         const [casing] = layers;
         casing.bindTooltip(`${MODE_LABEL[line.mode] || 'Linia'} ${line.num} → `
@@ -215,7 +213,7 @@ function addRouteStops(trip, line, seen, mainDots) {
         let entry = seen.get(stop.id);
         if (!entry) {
             const marker = L.circleMarker([stop.lat, stop.lon], {
-                radius: 5, weight: 2, color: colorOf(line.mode),
+                radius: 5, weight: 2, color: lineColor(line.mode, line.num),
                 fillColor: '#fff', fillOpacity: 1,
             });
             onPick(marker, () => window.timetableMode.pickStop(stop.name));
@@ -314,6 +312,12 @@ window.timetableMode = {
         return new Set([...picked].map(key => key.replace('|', ' ')));
     },
 
+    /** Przerysowanie po zmianie kolorów linii (patrz repaintLineColors w app.js). */
+    repaint() {
+        render();
+        draw(false);
+    },
+
     /** Czy tę linię da się w ogóle otworzyć. Wyszukiwarka pyta PRZED
         narysowaniem przycisku "trasa": przycisk, który prowadzi do "nie znam
         takiej linii", jest gorszy niż brak przycisku. */
@@ -364,7 +368,7 @@ function suggestionRow(item) {
     // więc pasuje cała, a kolorowy fragment w kolorowym prostokącie tylko
     // zabiera kontrast.
     if (item.kind === 'line') {
-        return `<span class="badge ${esc(item.mode)}">${esc(item.name)}</span>`
+        return `<span class="badge ${escClass(item.mode)}"${lineStyle(item.mode, item.name)}>${esc(item.name)}</span>`
              + `<span class="ac-kind">${esc(MODE_LABEL[item.mode] || 'Linia')}</span>`;
     }
     return `<span class="ac-pin" aria-hidden="true"></span>`
@@ -471,6 +475,7 @@ function load(forced) {
         // pyta tym samym match_stop, co planer - zna więc grupę stacji tylko
         // pod kanoniczną nazwą z myślnikiem.
         params.set('stop', B.rawStopName(query));
+        if (!B.trainsOn()) params.set('trains', '0');
         url = '/api/stop_board?' + params;
     }
 
@@ -646,11 +651,11 @@ function drawLine(refit) {
     if (!variant) { clearMap(); return; }
     dimBase(true);
     showRoutes(
-        routeLines(variant.path, data.mode),
+        routeLines(variant.path, data.mode, data.num),
         // Klik w przystanek linii na mapie = "odjazdy" z listy (#155) - a że
         // pętle końcowe nie przyjmują kliku, trafia w kropkę pod nimi.
-        [...stopDots(variant.stops, data.mode, null, (stop, i) => boardFor(i)),
-         ...terminusDots(variant.stops, data.mode)],
+        [...stopDots(variant.stops, data.mode, data.num, null, (stop, i) => boardFor(i)),
+         ...terminusDots(variant.stops, data.mode, data.num)],
         refit,
         variant.path,
     );
@@ -689,7 +694,7 @@ function renderLine() {
 
     resultsBox.innerHTML = `
         <div class="tt-title">
-            <span class="badge ${esc(data.mode)}">${esc(data.num)}</span>
+            <span class="badge ${escClass(data.mode)}"${lineStyle(data.mode, data.num)}>${esc(data.num)}</span>
             <span class="tt-title-main">${esc(MODE_LABEL[data.mode] || 'Linia')}
                 ${esc(data.num)}</span>
             <span class="tt-title-sub">${esc(dayLabel())}</span>
@@ -711,7 +716,7 @@ function renderLine() {
                 <h3 class="tt-h3">Przystanki</h3>
                 <span class="tt-count">${variant.stops.length}</span>
             </div>
-            <ol class="tt-stops ${esc(data.mode)}">${stops}</ol>
+            <ol class="tt-stops ${escClass(data.mode)}"${lineStyle(data.mode, data.num)}>${stops}</ol>
         </div>`;
 }
 
@@ -978,12 +983,12 @@ function drawOpenDeparture() {
         focusLayer = dropLayer(focusLayer);
         const onward = trip.stops.slice(trip.board_index);
         focusLayer = L.layerGroup([
-            ...routeLines(trip.path, trip.mode, 'ghost'),
-            ...routeLines(trip.tail, trip.mode, 'full'),
+            ...routeLines(trip.path, trip.mode, trip.num, 'ghost'),
+            ...routeLines(trip.tail, trip.mode, trip.num, 'full'),
             // Kolejne przystanki kursu przeskakują tak samo jak te na
             // trasach tablicy (addRouteStops). Pierwszy to ten, na którego
             // tablicy już jesteśmy - klik w niego nie ma dokąd prowadzić.
-            ...stopDots(onward, trip.mode, onward.map(s => s.t), (stop, i) => {
+            ...stopDots(onward, trip.mode, trip.num, onward.map(s => s.t), (stop, i) => {
                 if (i > 0) window.timetableMode.pickStop(stop.name);
             }),
         ]).addTo(map);
@@ -1106,7 +1111,7 @@ function renderBoard() {
     const all = pickedLines === groups.length;
 
     const chips = groups.map(group => `
-        <button type="button" class="tt-line badge ${esc(group.mode)}${picked.has(group.key) ? '' : ' off'}"
+        <button type="button" class="tt-line badge ${escClass(group.mode)}${picked.has(group.key) ? '' : ' off'}"${lineStyle(group.mode, group.num)}
                 data-line="${esc(group.key)}" aria-pressed="${picked.has(group.key)}"
                 title="${esc(MODE_LABEL[group.mode] || 'Linia')} ${esc(group.num)} · ${group.count} ${plural(group.count, 'kurs', 'kursy', 'kursów')}"
                 >${esc(group.num)}</button>`
@@ -1120,7 +1125,7 @@ function renderBoard() {
         <li class="tt-dep${open ? ' open' : ''}" data-dep="${index}" tabindex="0"
             role="button" aria-expanded="${open}">
             <span class="tt-t">${esc(dep.t)}</span>
-            <span class="badge ${esc(line.mode)}">${esc(line.num)}</span>
+            <span class="badge ${escClass(line.mode)}"${lineStyle(line.mode, line.num)}>${esc(line.num)}</span>
             <span class="tt-head">${esc(line.headsign)}</span>
             ${dep.platform ? `<span class="tt-platform">${esc(dep.platform)}</span>` : ''}
         </li>${open ? tripHtml(dep) : ''}`;
@@ -1190,7 +1195,7 @@ function tripStopsHtml(dep) {
     // Kurs pokazuje drogę OD TEGO SŁUPKA dalej - a "którędy ta linia jedzie
     // w ogóle" to pytanie, które pada właśnie tutaj, bo widać połowę odpowiedzi.
     return `
-        <ol class="tt-stops ${esc(trip.mode)}">${stops}</ol>
+        <ol class="tt-stops ${escClass(trip.mode)}"${lineStyle(trip.mode, trip.num)}>${stops}</ol>
         <p class="field-hint tt-trip-foot">
             ${routeButton(data.lines[dep.line], 'cała trasa', dep.trip)}
         </p>`;

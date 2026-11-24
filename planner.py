@@ -15,6 +15,7 @@ import bikes
 import gtfs
 import onboard
 import polinka
+import siechnice
 import traficar
 
 # Przesiadka na DOKŁADNIE tym samym słupku - bez marszu, więc nie wycenia się
@@ -100,7 +101,7 @@ TIMETABLE_MAX = 60
 
 
 def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
-                   point=None, until_sec=None):
+                   point=None, until_sec=None, trains=True):
     """Tablica odjazdów jednego przystanku - to, co widać po najechaniu na
     kropkę przesiadki na mapie.
 
@@ -125,7 +126,7 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
     when = when or datetime.now()
 
     try:
-        day = gtfs.load_day(when.date())
+        day = gtfs.load_day(when.date(), trains)
     except FileNotFoundError as e:
         return {"error": str(e)}
 
@@ -165,8 +166,15 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
             "num": num,
             "mode": mode,
             "headsign": headsign,
+            "stop_id": _stop_id,
             **({"platform": platform}
                if (platform := _platform(day, trip, _stop_id)) else {}),
+            # Kurs Siechnic ma własny serwis, a wspólny słupek we Wrocławiu
+            # nosi wrocławski stop_id - po nim nie widać, że kurs jest gminny.
+            # None = kurs gminny, ale słupka w ich serwisie nie ustalono.
+            **({"siechnice_stop": siechnice.post_of(
+                    _stop_id, day.stop_names[_stop_id], *day.stop_coords[_stop_id], num)}
+               if trip.startswith(siechnice.ID_PREFIX) else {}),
             # Kurs kolejowy niesie identyfikator - po nim front dopytuje
             # o opóźnienie na żywo (zgłoszenie #71, patrz pkp_live.py).
             # Razem z nazwą stacji, przy której stoi - tablica bywa MIEJSCEM
@@ -1029,6 +1037,10 @@ MIN_FRAME_SIDE_KM = 1.0
 # Auta, których nic nie bije, są na mapie i ponad tę liczbę - a bywa ich
 # sporo: na dziesięciu relacjach (2026-09-13, 20:20) od 2 do 13, mediana 6-7.
 DEFAULT_MAP_CARS = 3
+# Do ilu godzin naprzód od teraz pokazujemy auta Traficara (ustawienie pod
+# zębatką, zgłoszenie #490); None = bez limitu. Dalej niż to ich pozycje to już
+# zgadywanie, więc zamiast aut jest wyjaśnienie, dlaczego ich nie ma.
+DEFAULT_CAR_HORIZON_H = 3
 MIN_MAP_CARS = 1
 MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
@@ -2029,7 +2041,8 @@ def plan_flow_stages(start_query, end_query, when=None,
                      bike_electric=True, bike_regular=True,
                      in_vehicle=None, walk_pace=None, bike_kmh=None,
                      bike_overhead_sec=None, car_kmh=None, car_overhead_sec=None,
-                     with_journeys=True, use_cars=True,
+                     with_journeys=True, use_cars=True, trains=True,
+                     car_horizon_h=DEFAULT_CAR_HORIZON_H,
                      live_refreshed=None):
     """Mapa przepływów ("mrówki"): wszystkie użyteczne przejazdy start -> cel.
 
@@ -2100,6 +2113,9 @@ def plan_flow_stages(start_query, end_query, when=None,
     rzeczy w reszcie odpowiedzi - rower niczego tu nie przestawia, tylko
     dopisuje.
 
+    trains False - rozkład dnia bez kolei (patrz gtfs.load_day): ani trasy,
+    ani mapa nie używają pociągów.
+
     use_cars False - na liście nie ma propozycji kończących się Traficarem
     (zgaszony przycisk 🚗 w pasku warstw, zgłoszenie #163). Auta przy mapie
     (`cars`) zostają w odpowiedzi - pokazuje je albo chowa sam front - a reszta
@@ -2146,7 +2162,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                     else int(max(0, min(MAX_CAR_OVERHEAD_SEC, car_overhead_sec))))
 
     try:
-        day = gtfs.with_pace(gtfs.load_day(when.date()), walk_pace)
+        day = gtfs.with_pace(gtfs.load_day(when.date(), trains), walk_pace)
         if not walking:
             day = gtfs.without_walking(day)
     except FileNotFoundError as e:
@@ -2179,6 +2195,8 @@ def plan_flow_stages(start_query, end_query, when=None,
     ends = _resolve_endpoints(day, start_query, end_query, start_point, end_point,
                               ride)
     if "error" in ends:
+        if not trains:
+            ends = _train_station_error(day, when, start_query, end_query, ends)
         yield "error", ends
         return
     day = ends["day"]          # z punktem z mapy dołożonym jako słupek
@@ -2216,7 +2234,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         day_offset += 1
         try:
             later = gtfs.with_pace(
-                gtfs.load_day(when.date() + timedelta(days=day_offset)), walk_pace)
+                gtfs.load_day(when.date() + timedelta(days=day_offset), trains), walk_pace)
             if not walking:
                 later = gtfs.without_walking(later)
         except FileNotFoundError:
@@ -2582,10 +2600,11 @@ def plan_flow_stages(start_query, end_query, when=None,
             # przejście (punkt 14), a nie łańcuch "dojdź na przystanek, potem
             # do auta".
             #
-            # Warunek na dobę ten sam, co przy rowerze: auta stoją tam, gdzie
-            # stoją TERAZ. Przy pytaniu o inny dzień (także ten, na który
-            # wyszukiwarka sama zeszła) nie pokazujemy ich wcale - pokazanie
-            # byłoby zgadywaniem podanym jako fakt.
+            # Auta stoją tam, gdzie stoją TERAZ, więc im dalej od teraz jest
+            # wyszukiwana godzina (w przód czy wstecz, także na inny dzień),
+            # tym bardziej ich pokazanie byłoby zgadywaniem podanym jako fakt.
+            # Granicę stawia pasażer ustawieniem „Pokazuj auta Traficara do”
+            # (zgłoszenie #490); poza nią aut nie ma, a front mówi dlaczego.
             #
             # W trybie awaryjnym (kept puste) aut nie ma wcale: godziny ze
             # skanu znają pół miasta, a tu ma być to, co widać na ekranie -
@@ -2594,6 +2613,10 @@ def plan_flow_stages(start_query, end_query, when=None,
             # narysował, mówiłoby o mapie coś, czego na niej nie ma.
             cars, bike_places = [], []
             cars_dest_in_zone = None
+            # Za ile sekund od TERAZ pasażer będzie przy początku podróży -
+            # od tego zależy, czy dzisiejsze pozycje aut jeszcze coś mówią.
+            cars_ahead_sec = None
+            cars_beyond = False
             # Przy "dowolnej stacji w mieście" po którejkolwiek stronie aut
             # i rowerów nie ma wcale - decyzja użytkownika: to podróż koleją
             # między miastami, a auto czy rower przy którejś ze stacji nie jest
@@ -2607,7 +2630,14 @@ def plan_flow_stages(start_query, end_query, when=None,
                 for stop, at in _drawn_reach(kept, ranges).items():
                     if at < reach.get(stop, INF):
                         reach[stop] = at
-                if day_offset == 0 and when.date() == date.today():
+                searched_at = (datetime.combine(when.date(), datetime.min.time())
+                               + timedelta(days=day_offset, seconds=report_dep_sec))
+                cars_ahead_sec = int((searched_at - datetime.now()).total_seconds())
+                # Pozycje aut są z teraz, więc tak samo mało mówią o dniu
+                # sprzed doby, jak o dniu za dobę.
+                cars_beyond = (car_horizon_h is not None
+                               and abs(cars_ahead_sec) > car_horizon_h * 3600)
+                if not cars_beyond:
                     # Ile z nich: suwak razy to samo "pokaż więcej", co przy
                     # liniach - a auta, których nic nie bije, zostają i tak.
                     cars = traficar.map_choice(
@@ -2658,6 +2688,11 @@ def plan_flow_stages(start_query, end_query, when=None,
                 # Czy cel leży w strefie oddawania aut; None, gdy aut nie ma
                 # albo strefy nie znamy (patrz traficar.can_end_at).
                 "cars_dest_in_zone": cars_dest_in_zone,
+                # Za ile sekund od teraz zaczyna się podróż i czy to dalej niż
+                # zasięg z ustawienia (wtedy aut nie ma wcale) - front pisze
+                # z tego notkę (zgłoszenie #490).
+                "cars_ahead_sec": cars_ahead_sec,
+                "cars_beyond": cars_beyond,
                 # Rowery miejskie w zasięgu tej mapy, każdy z listą przejazdów,
                 # które jeszcze mieszczą się w oknie (patrz bikes.map_places).
                 # Przejazdów mapa NIE rysuje - front pokazuje je po najechaniu.
@@ -3555,7 +3590,10 @@ def _transfer_nodes(day, pieces, earliest=None, board_value=None, deadline=None,
         lat, lon = _round_path([day.stop_coords[node["stop"]]])[0]
         clat, clon = _place_center(day, key, node["stop"])
         entry = {
-            "name": day.stop_names[node["stop"]],
+            # Kropka stoi za całe miejsce, więc i tablicę pod nią front zamawia
+            # nazwą miejsca - nazwa jednego peronu dawała tablicy nagłówek
+            # "GALERIA DOMINIKAŃSKA 07" nad odjazdami ze wszystkich peronów.
+            "name": gtfs.place_name(day, node["stop"]),
             # Nazwa miejsca, ta sama co w stops_n kawałków - po niej mapa
             # nie stawia kropki przystanku linii tam, gdzie stoi już ta.
             "place": gtfs.place_name(day, node["stop"]),
@@ -4911,6 +4949,19 @@ def _backward(day, target_set, dep_sec, deadline):
                     if walk_dep > latest.get(sibling, -1):
                         latest[sibling] = walk_dep
     return latest
+
+
+def _train_station_error(day, when, start_query, end_query, error):
+    """Przy wyłączonych pociągach stacja kolejowa jest dla wyszukiwarki
+    nieznana - zamiast "nie znam przystanku" mówimy, dlaczego."""
+    full = gtfs.load_day(when.date())
+    for query in (start_query, end_query):
+        if gtfs.match_stop(query, day)[0] is not None:
+            continue
+        name, stops, _ = gtfs.match_stop(query, full)
+        if name is not None and gtfs.is_rail(full, stops):
+            return {"error": "Masz wyłączone pociągi — to stacja kolejowa."}
+    return error
 
 
 def _unknown_stop(query, hints):
