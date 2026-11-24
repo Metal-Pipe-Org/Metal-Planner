@@ -26,14 +26,15 @@ kiedyś doszło CI na Linuksie, trzeba będzie tu dołożyć drugi silnik.
 
 Odświeżenie fixture'a po zmianie w plannerze (data - dzień powszedni
 z bieżącego rozkładu; źródła na żywo wyłączone, żeby plik nie zależał od
-sieci):
+sieci; uruchamiać z korzenia repo, stąd `from tests import flow`):
 
     .venv/bin/python -c "
-    from datetime import datetime; import planner, json, pkp, traficar, bikes
+    from datetime import datetime; import json, pkp, traficar, bikes
+    from tests import flow
     pkp.enabled = traficar.enabled = lambda: False
     traficar.zone = lambda: None
     bikes._fetch = lambda url: (_ for _ in ()).throw(OSError(url))
-    r = flow.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 10, 6, 15, 37))
+    r = flow.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 11, 25, 15, 37))
     json.dump(r, open('tests/js/flow_fixture.json', 'w'),
               ensure_ascii=False, separators=(',', ':'))"
 """
