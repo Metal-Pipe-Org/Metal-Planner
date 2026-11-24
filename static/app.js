@@ -5377,7 +5377,7 @@ function fillStops() {
     const stops = kierunek ? kierunek.stops : [];
     obStopSelect.innerHTML = '<option value="">Przystanek</option>'
         + stops.map(stop =>
-            `<option value="${esc(stop.id)}">${esc(stop.name)}</option>`).join('');
+            `<option value="${escAttr(stop.id)}">${esc(stop.name)}</option>`).join('');
     obStopSelect.disabled = !stops.length;
     hideObWarn();
     syncOnboardView();
