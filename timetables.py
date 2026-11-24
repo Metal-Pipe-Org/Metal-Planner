@@ -22,6 +22,7 @@ północy (25:10 to kurs "dzisiejszy", tak samo jak w rozkładzie na słupku).
 import datetime
 
 import gtfs
+import siechnice
 
 # route_type z GTFS -> rodzaj używany przez front (kolor linii, etykieta).
 # Ten sam podział, co planner._line_parts, tylko liczony z typu trasy, a nie
@@ -69,21 +70,25 @@ def all_lines():
     db = gtfs.open_db()
     try:
         rows = db.execute(
-            "SELECT route_short_name, route_long_name, route_type FROM routes"
+            "SELECT route_id, route_short_name, route_long_name, route_type FROM routes"
         ).fetchall()
     finally:
         db.close()
 
     seen = {}
-    for short_name, long_name, route_type in rows:
+    for route_id, short_name, long_name, route_type in rows:
         num = _num_of(short_name, long_name)
         if not num:
             continue
         mode = _mode_of(route_type)
-        seen[(num, mode)] = None
+        # Front maluje autobusy spoza MPK inaczej (ustawienie „Kolory linii”),
+        # a rodzaj mają ten sam. Baza nie trzyma przewoźnika, ale trasy
+        # siechnickiego przewoźnika mają własny prefiks (patrz siechnice.py).
+        seen[(num, mode)] = "siechnice" if route_id.startswith(siechnice.ID_PREFIX) else None
     return [
-        {"num": num, "mode": mode, "label": f"{MODE_LABEL[mode]} {num}"}
-        for num, mode in sorted(seen, key=lambda k: _line_sort_key(*k))
+        {"num": num, "mode": mode, "label": f"{MODE_LABEL[mode]} {num}",
+         **({"operator": operator} if operator else {})}
+        for (num, mode), operator in sorted(seen.items(), key=lambda k: _line_sort_key(*k[0]))
     ]
 
 
