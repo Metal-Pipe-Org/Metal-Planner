@@ -471,6 +471,7 @@ function load(forced) {
         // pyta tym samym match_stop, co planer - zna więc grupę stacji tylko
         // pod kanoniczną nazwą z myślnikiem.
         params.set('stop', B.rawStopName(query));
+        if (!B.trainsOn()) params.set('trains', '0');
         url = '/api/stop_board?' + params;
     }
 

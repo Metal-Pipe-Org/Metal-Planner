@@ -226,7 +226,7 @@ def init_routes(app):
     @app.route("/")
     def index():
         try:
-            stops = gtfs.all_stop_names()
+            stops = gtfs.all_stop_names(pkp.all_stations_geo())
             lines = timetables.all_lines()
             data_error = None
         except FileNotFoundError:
@@ -247,17 +247,20 @@ def init_routes(app):
         # static/app.js), ale do pola wyszukiwania i tak wstawia samą nazwę:
         # doklejenie "PKP" wprost do nazwy zepsułoby dopasowanie po stronie
         # wyszukiwarki, która zna stację tylko pod jej prawdziwą nazwą.
-        # Nazwa, która trafia do OBU list (MPK i PKP - w praktyce nie
-        # zdarza się w tych danych, ale nie ma gwarancji, że nigdy), zostaje
+        # Nazwa, która trafia do OBU list (MPK i PKP - np. Ramiszów), zostaje
         # bez plakietki: to nie tylko stacja kolejowa, więc oznaczenie
         # "PKP" byłoby mylące.
-        gtfs_names = set(stops)
-        pkp_names = set(pkp.all_station_names())
-        train_only = pkp_names - gtfs_names
-        stops = [
-            {"name": name, "kind": "train" if name in train_only else "stop"}
-            for name in sorted(gtfs_names | pkp_names)
-        ]
+        # Porównujemy po casefold, jak wyszukiwarka (gtfs.match_stop): ta sama
+        # nazwa z MPK i z PKP to jeden wybór, trafiający w oba słupki -
+        # zostaje pisownia MPK, jak w gtfs.load_day. Stacja, która tylko nosi
+        # nazwę wrocławskiego przystanku, a stoi daleko (gtfs.far_namesakes -
+        # stacja "Karłowice" 54 km od KARŁOWICE MPK), przychodzi z
+        # all_stop_names jako osobny wybór "Karłowice (PKP)" - dopisek jest
+        # już w nazwie, więc plakietki nie dostaje.
+        by_key = {name.casefold(): {"name": name, "kind": "stop"} for name in stops}
+        for name in pkp.all_station_names():
+            by_key.setdefault(name.casefold(), {"name": name, "kind": "train"})
+        stops = sorted(by_key.values(), key=lambda s: s["name"])
         # Stacje Polinki (zgłoszenie #165) - do podpowiedzi jak każdy słupek.
         stops += [{"name": s["name"], "kind": "cable"} for s in polinka.stations_geo()]
         stops.sort(key=lambda s: s["name"])
@@ -319,7 +322,7 @@ def init_routes(app):
         # front mógł je odróżnić stylem (patrz static/app.js). To jedyne
         # miejsce, gdzie PKP i MPK są traktowane inaczej - bo tylko to
         # naprawdę je różni (markery), nie samo wyszukiwanie tras.
-        stops += [{**s, "kind": "train"} for s in pkp.all_stations_geo()]
+        stops += [{**s, "kind": "train", "network": "PKP"} for s in pkp.all_stations_geo()]
         # Stacje Polinki (zgłoszenie #165) - własny rodzaj, własny kolor.
         stops += [{**s, "kind": "cable"} for s in polinka.stations_geo()]
         # Nazwa miejsca dopiero na całej liście: DWORZEC GŁÓWNY i stacja
@@ -437,6 +440,7 @@ def init_routes(app):
         return jsonify(timetables.stop_board(
             request.args.get("stop", ""),
             _day_arg(),
+            trains=request.args.get("trains", "1") == "1",
         ))
 
     @app.route("/api/trip")
@@ -467,6 +471,7 @@ def init_routes(app):
             limit=min(int(limit), TIMETABLE_MAX) if limit else TIMETABLE_LIMIT,
             point=_latlon_arg(),
             until_sec=_float_arg("until_sec"),
+            trains=request.args.get("trains", "1") == "1",
         ))
 
     @app.route("/api/flow")
@@ -570,6 +575,9 @@ def init_routes(app):
             # Propozycje tras wyłączone pod zębatką - "0" i serwer ich nie
             # składa wcale. Brak parametru znaczy, że są.
             with_journeys=request.args.get("routes", "1") == "1",
+            # Filtr 🚆 w pasku warstw: zgaszony wysyła "0" i serwer liczy dzień
+            # bez kolei. Brak parametru znaczy, że pociągi są, jak dotąd.
+            trains=request.args.get("trains", "1") == "1",
         )
 
     @app.route("/api/dev/kod", methods=["GET", "POST"])
