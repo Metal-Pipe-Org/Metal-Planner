@@ -117,19 +117,10 @@ _LAT_DEG_M = 111_320   # metrów na stopień szerokości (siatka w _nearby_bridg
 # nie ma tego pytania w ogóle: żyje i umiera razem ze swoim rozkładem.
 _REACH_CACHE_MAX = 16
 
-# Pamięć podręczna wyszukiwań mapy z wartości (planner._value_map), z tego
-# samego powodu NA DNIU (DayData._searches). Jeden wpis to jedno okno jednej
-# relacji, a relacja ma ich najwyżej pięć - starcza na dwie, trzy relacje
-# naraz. Po co: „pokaż więcej", suwaki i przełączniki pytają o tę samą
-# relację jeszcze raz i liczyły wszystkie okna od zera (zgłoszenie #171).
-_SEARCHES_CACHE_MAX = 16
-
 # Kopie dnia z punktem z mapy (with_point), trzymane na dniu, z którego
-# powstały. Bez tego każde zapytanie o relację z punktu - „pokaż więcej",
-# suwak, przełącznik - dostawało świeżą kopię z pustą pamięcią wyszukiwań
-# i liczyło wszystkie okna od zera (zgłoszenie #229). Mało, bo każda kopia
-# niesie własną pamięć wyszukiwań: punkt startu i punkt celu to dwie kopie
-# jedna na drugiej.
+# powstały. Bez tego każde zapytanie o relację z punktu - suwak, przełącznik -
+# dostawało świeżą kopię z pustą pamięcią dojść (zgłoszenie #229). Mało, bo
+# punkt startu i punkt celu to dwie kopie jedna na drugiej.
 _POINTS_CACHE_MAX = 4
 
 # Wyszukiwanie ma ignorować polskie znaki diakrytyczne (użytkownik bez
@@ -646,7 +637,7 @@ class DayData:
         "siblings", "trip_info", "trip_shape",
         "stops_by_place", "place_of", "conns_by_trip", "pkp_trip_stops",
         "pkp_stations", "pkp_platforms", "deps_by_stop", "_reach", "walk_mps", "_paced",
-        "_searches", "_points", "walking", "walk_radius",
+        "_points", "walking", "walk_radius",
     )
 
     def __init__(self):
@@ -677,7 +668,6 @@ class DayData:
         self.conns_by_trip = None    # kurs -> indeksy w conns (leniwie, patrz trip_conns)
         self.deps_by_stop = None     # słupek -> odjazdy (leniwie, patrz stop_departures)
         self._reach = {}             # pamięć podręczna walk_reach (patrz wyżej)
-        self._searches = {}          # pamięć wyszukiwań mapy (patrz wyżej)
         self._points = {}            # kopie dnia z punktem z mapy (patrz wyżej)
         # Tempo marszu, którym policzono `siblings` - domyślne; inne tempa to
         # osobne kopie dnia (patrz with_pace), trzymane w `_paced`.
@@ -698,12 +688,8 @@ class DayData:
         # pkp.augment_day - to dokładnie te same station_id, co trafiają
         # do used_ids: mają choć jeden kurs w rozkładzie TEGO dnia i ustalone
         # współrzędne) - osobna, czysto kolejowa lista, NIE mieszana
-        # z przystankami MPK jak stops_by_key/stops_by_norm_key. Używana
-        # WYŁĄCZNIE przez match_stop do rozwijania zapytań w kształcie
-        # "Miasto -" (patrz _match_pkp_city_group) na wszystkie prawdziwe
-        # stacje PKP w tym mieście naraz - świadomie osobna struktura, żeby
-        # takie rozwinięcie nigdy przypadkiem nie złapało przystanku MPK
-        # o zbieżnym przedrostku nazwy.
+        # z przystankami MPK jak stops_by_key/stops_by_norm_key (patrz
+        # is_rail).
         self.pkp_stations = []
         # (trip_id "PKP:...", stop_id) -> (peron, tor) z rozkładu planowego
         # PLK (zgłoszenie #271, patrz pkp.augment_day). Tylko tam, gdzie
@@ -1005,7 +991,6 @@ def with_point(day, lat, lon, side):
     data.stop_names = dict(day.stop_names)
     data.siblings = dict(day.siblings)
     data._reach = {}          # inny zestaw słupków, więc cache dojść nie pasuje
-    data._searches = {}       # jw. - inne przejścia, inne wyszukiwania
     data._paced = {}          # jw. - tempa liczy się z dnia bazowego (patrz with_pace)
     data._points = {}
 
@@ -1055,7 +1040,6 @@ def with_pace(day, pace):
     paced = copy.copy(day)
     paced.walk_mps = mps
     paced._reach = {}
-    paced._searches = {}
     paced._paced = {}
     paced._points = {}
     paced.siblings = {
@@ -1084,7 +1068,6 @@ def with_walk_radius(day, radius_m):
     wider = copy.copy(day)
     wider.walk_radius = radius_m
     wider._reach = {}
-    wider._searches = {}
     wider._paced = {}
     wider._points = {}
     day._paced[("promien", radius_m)] = wider
@@ -1108,7 +1091,6 @@ def without_walking(day):
     free = copy.copy(day)
     free.walking = False
     free._reach = {}
-    free._searches = {}
     free._paced = {}
     free._points = {}
     free.siblings = {}
@@ -1152,115 +1134,12 @@ def stop_at(lat, lon, data, max_m=STOP_SNAP_M):
     return name, _expand_to_places(data, [best_stop])
 
 
-# Ta sama etykieta, co prettyStopName w static/app.js - front pokazuje ją
-# zamiast myślnika ze słownika PKP (patrz _match_city_group).
-CITY_GROUP_LABEL = "(dowolna stacja)"
-
-
-def _city_of_group_query(key):
-    """Nazwa miasta z zapytania o grupę stacji - "wrocław -" albo
-    "wrocław (dowolna stacja)" -> "wrocław". None, gdy to nie jest pytanie
-    o grupę. `key` jest już złożony przez casefold (patrz match_stop)."""
-    for suffix in ("-", CITY_GROUP_LABEL):
-        if key.endswith(suffix):
-            return key[: -len(suffix)].strip()
-    return None
-
-
-def _match_city_group(key, data):
-    """Dopasowuje "zbiorczą" stację PKP typu "Warszawa -" (patrz
-    update_pkp._is_city_wildcard) - PKP oznacza tak w słowniku stacji
-    "dowolną stację w tym mieście", zawsze bez żadnego WŁASNEGO kursu
-    (sprawdzone na żywo: 0 wpisów w stops dla każdej z nich) - żadne
-    z wcześniejszych dopasowań w match_stop nigdy jej więc nie złapie,
-    rozkład po prostu nie ma czego z nią połączyć.
-
-    Rozpoznanie PO WZORCU zapytania (kończy się myślnikiem albo etykietą
-    CITY_GROUP_LABEL - patrz _city_of_group_query), nie po sztywnej liście
-    nazw miast - i szukamy WSZYSTKICH prawdziwych, znanych stacji
-    zaczynających się od tej nazwy jako CAŁE SŁOWO (nie podciąg -
-    "Warszawa" nie ma złapać hipotetycznej "Warszawskiej"), łącząc ich
-    słupki w JEDNO zapytanie do CSA zamiast zwracać błąd "nie znaleziono" -
-    skan i tak sam wybierze najlepszą z nich (patrz _scan/plan_route:
-    przyjmuje ZBIÓR stacji startowych/końcowych z definicji, to nie nowy
-    mechanizm, tylko ten sam co przy zwykłym "miejscu" z wielu słupków).
-
-    PRZESZUKUJE WYŁĄCZNIE data.pkp_stations (patrz jej nagłówek w
-    DayData.__init__), NIE ogólne stops_by_key/stops_by_norm_key (tam MPK
-    i PKP są zmieszane) - "Wrocław -" ma trafić w prawdziwe stacje PKP
-    zaczynające się na "Wrocław", nie przypadkiem też w jakiś przystanek
-    MPK o zbieżnym przedrostku nazwy. data.pkp_stations to z definicji
-    tylko stacje z co najmniej jednym kursem TEGO dnia (patrz
-    pkp.augment_day, used_ids) - dokładnie to, co "przystanek" ma znaczyć.
-
-    Zwraca (nazwa_do_wyświetlenia, [stop_id, ...]) albo (None, None), gdy
-    nic nie pasuje - wołane jako OSTATNI fallback w match_stop.
-
-    Nazwa do wyświetlenia to "MIASTO -" (WIELKIMI LITERAMI + myślnik) - TA
-    SAMA postać, którą trzeba wpisać, żeby w ogóle trafić w tę gałąź (patrz
-    wyżej) i identyczna z etykietami podpowiedzi (pkp._city_group_labels).
-    To celowe, nie kosmetyka: zgłoszony przez użytkownika na żywo błąd -
-    front pokazuje/odsyła z powrotem nazwę zwróconą stąd (np. przy
-    ponownym wyszukaniu tej samej trasy), więc jeśli ta nazwa NIE pasuje
-    z powrotem do tego samego dopasowania (np. dawne "Wrocław (dowolna
-    stacja)" - bez myślnika na końcu, więc `key.endswith("-")` wyżej od
-    razu odrzuca), drugie wyszukanie kończy się fałszywym "nie znaleziono
-    przystanku", mimo że dane się nie zmieniły. Zwracana nazwa musi więc
-    być NIEZMIENNIKIEM tej funkcji (round-trip: wynik podany z powrotem na
-    wejściu daje ten sam wynik), nie tylko czytelną etykietą.
-
-    CZYTELNĄ etykietę robi z niej front (prettyStopName w static/app.js:
-    "WROCŁAW -" -> "Wrocław (dowolna stacja)") i on też zamienia ją z powrotem
-    przed wysłaniem zapytania. Przyjmowanie TU obu form jest tylko siatką pod
-    tamtym: gdyby któreś wywołanie na froncie przegapiło zamianę wstecz, ma
-    z tego wyjść brzydka nazwa w URL-u, a nie fałszywe "nie znaleziono
-    przystanku" (czyli dokładnie ten błąd, przez który etykieta wróciła kiedyś
-    do myślnika - patrz akapit wyżej). Zwracana nazwa zostaje przy myślniku:
-    to postać KANONICZNA, w niej front trzyma stan i zapisuje ostatnie
-    wyszukiwanie, więc jej zmiana unieważniłaby to, co ludzie mają już
-    zapisane w przeglądarce."""
-    city = _city_of_group_query(key)
-    if not city:
-        return None, None
-    norm_city = _strip_diacritics(city)
-
-    group = set()
-    for name, stop_id in data.pkp_stations:
-        name_cf = name.casefold()
-        if name_cf == city or name_cf.startswith(city + " "):
-            group.add(stop_id)
-            continue
-        norm_name = _strip_diacritics(name_cf)
-        if norm_name == norm_city or norm_name.startswith(norm_city + " "):
-            group.add(stop_id)
-    if not group:
-        return None, None
-    # Bez _expand_to_places, inaczej niż każde inne dopasowanie: miejsce stacji
-    # obejmuje przystanki MPK pod dworcem, a "dowolna stacja" to wybór samej
-    # stacji. Z tamtymi słupkami mapa "WROCŁAW -" -> "WARSZAWA -" rysowała
-    # tramwaje i autobusy spod sześciu dworców naraz - zgłoszone na żywo.
-    return f"{city.upper()} -", list(group)
-
-
 def is_rail(data, stops):
     """Czy wśród słupków jest choć jedna stacja kolejowa (patrz
     DayData.pkp_stations) - zwykła stacja jest MIEJSCEM razem z przystankami
     MPK pod nią, więc wystarczy jedna."""
     rail = {stop_id for _, stop_id in data.pkp_stations}
     return any(stop in rail for stop in stops)
-
-
-def is_city_group(data, stops):
-    """Czy słupki to "dowolna stacja w mieście" (patrz _match_city_group):
-    same stacje kolejowe w więcej niż jednym miejscu. Rozpoznane po słupkach,
-    nie po nazwie, bo pytają o to także miejsca, które nazwy nie znają (patrz
-    planner._origin_walk). Zwykła stacja to zawsze jedno miejsce - sprawdzone
-    2026-09-15: żadna z 3008 stacji nie dzieli nazwy z inną."""
-    if len(stops) < 2:
-        return False
-    rail = {stop_id for _, stop_id in data.pkp_stations}
-    return (all(stop in rail for stop in stops)
-            and len({data.place_of.get(stop, stop) for stop in stops}) > 1)
 
 
 def match_stop(query, data):
@@ -1282,10 +1161,9 @@ def match_stop(query, data):
     napisów, więc pytany wcześniej odbierałby trafienie czemuś, co pasuje
     dokładniej.
 
-    "Zbiorcza" stacja typu "Warszawa -" (patrz _match_city_group) trafia
-    we WSZYSTKIE prawdziwe stacje danego miasta na raz - dopiero gdy nic
-    innego wyżej nie pasuje, żeby nie odbierać pierwszeństwa zwykłemu,
-    dokładnemu dopasowaniu.
+    "Dowolna stacja w mieście" ("Warszawa -" ze słownika PKP) celowo nie
+    ma tu własnego dopasowania: to była odpowiedź starej mapy, a nowa mapa
+    jej nie obsługuje, więc taka nazwa kończy się jak każda nieznana.
     """
     key = " ".join(query.split()).casefold()
     if not key:
@@ -1308,10 +1186,6 @@ def match_stop(query, data):
             _expand_to_places(data, data.stops_by_alias_key[alias_key]),
             None,
         )
-
-    city_name, city_stops = _match_city_group(key, data)
-    if city_name is not None:
-        return city_name, city_stops, None
 
     candidates = [k for k in data.stops_by_key if key in k]
     if len(candidates) == 1:
@@ -1708,7 +1582,6 @@ def with_shifted_trip(day, trip_id, from_stop, late_sec):
     data.trip_info = {**day.trip_info, new_id: day.trip_info[trip_id]}
     if trip_id in day.trip_shape:
         data.trip_shape = {**day.trip_shape, new_id: day.trip_shape[trip_id]}
-    data._searches = {}       # inne połączenia, inne wyszukiwania
     data._paced = {}          # tempa liczy się z dnia bazowego (patrz with_pace)
     data._points = {}         # punkt z mapy na tym dniu nie może trafić do bazowego
     return data, new_id

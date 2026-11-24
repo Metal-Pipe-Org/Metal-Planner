@@ -249,32 +249,6 @@ checks.pelna_mapa_bez_listy_nie_jest_bledem = (() => {
     };
 })();
 
-// --- tryb awaryjny widoczny na ekranie ------------------------------------
-
-checks.tryb_awaryjny_mowi_o_sobie_na_ekranie = (() => {
-    // Zwykła odpowiedź: żadnego ostrzeżenia.
-    app.renderPlan({...FLOW_FIXTURE, degraded: false}, false);
-    const zwykla = app.resultsBox.innerHTML;
-
-    // Ta sama odpowiedź oznaczona jako awaryjna: ostrzeżenie NAD listą,
-    // w tym samym stylu co pozostałe komunikaty błędów, a lista zostaje.
-    app.renderPlan({...FLOW_FIXTURE, degraded: true}, false);
-    const awaryjna = app.resultsBox.innerHTML;
-
-    const ma = awaryjna.indexOf('notice error') >= 0
-        && awaryjna.toLowerCase().indexOf('awaryjny') >= 0;
-    const na_gorze = awaryjna.indexOf('notice error') === 0
-        || awaryjna.indexOf('notice error') < awaryjna.indexOf('journey');
-    return {
-        ok: ma && na_gorze
-            && zwykla.toLowerCase().indexOf('awaryjny') < 0
-            && awaryjna.length > 0,
-        zwykla_ma_ostrzezenie: zwykla.toLowerCase().indexOf('awaryjny') >= 0,
-        awaryjna_ma_ostrzezenie: ma,
-        ostrzezenie_nad_lista: na_gorze,
-    };
-})();
-
 // --- kropki przystanków na trasie i ich tablica odjazdów -------------------
 
 /* Legs zbudowane tu na miejscu, nie z fixture'a: kropka pyta o `arr_sec`,
@@ -1039,37 +1013,6 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
             && !bezDymki.includes('Sama jazda')
             && z.includes('12:4015 min') && zDymki.includes('Sama jazda: 15 min'),
         bez, z, bezDymki,
-    };
-})();
-
-/* Grupa stacji miasta: na ekranie czytelna etykieta, na serwer nazwa
-   kanoniczna. Para prettyStopName/rawStopName musi się znosić - inaczej
-   ładna nazwa poleci do /api/flow i wróci jako "nie znaleziono przystanku"
-   (błąd, przez który etykieta wróciła kiedyś do myślnika - patrz
-   gtfs._match_city_group). */
-checks.grupa_stacji_wraca_kanoniczna = (() => {
-    const etykieta = app.prettyStopName('WROCŁAW -');
-    const zwykly = app.prettyStopName('PL. GRUNWALDZKI');
-
-    // Najważniejsze: to, co widzi użytkownik w polu, wychodzi na serwer
-    // w postaci, którą rozumie wyszukiwarka.
-    app.startInput.value = etykieta;
-    app.endInput.value = 'Sosnowiecka';
-    const params = app.queryParams();
-
-    // Nazwa kanoniczna z odpowiedzi /api/flow wraca do pola jako etykieta.
-    app.adoptNames({start: 'WROCŁAW -', end: 'Sosnowiecka'});
-    const wPolu = app.startInput.value;
-
-    return {
-        ok: etykieta === 'WROCŁAW (dowolna stacja)'
-            && zwykly === 'PL. GRUNWALDZKI'
-            && app.rawStopName(etykieta) === 'WROCŁAW -'
-            && app.rawStopName(zwykly) === 'PL. GRUNWALDZKI'
-            && params.get('start') === 'WROCŁAW -'
-            && params.get('end') === 'Sosnowiecka'
-            && wPolu === 'WROCŁAW (dowolna stacja)',
-        etykieta, zwykly, start: params.get('start'), end: params.get('end'), wPolu,
     };
 })();
 

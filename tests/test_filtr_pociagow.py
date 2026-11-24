@@ -6,6 +6,7 @@ import datetime
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)
 
@@ -27,7 +28,7 @@ def _days(monkeypatch):
 def test_stacja_przy_wylaczonych_pociagach_dostaje_komunikat(monkeypatch):
     _days(monkeypatch)
 
-    result = planner.plan_flow("Przystanek A", "Beta Główna", WHEN, trains=False)
+    result = flow.plan_flow("Przystanek A", "Beta Główna", WHEN, trains=False)
 
     assert result["error"] == "Masz wyłączone pociągi — to stacja kolejowa."
 
@@ -36,6 +37,6 @@ def test_literowka_przy_wylaczonych_pociagach_dalej_jest_nieznanym_przystankiem(
         monkeypatch):
     _days(monkeypatch)
 
-    result = planner.plan_flow("Przystanek A", "Xyzzy", WHEN, trains=False)
+    result = flow.plan_flow("Przystanek A", "Xyzzy", WHEN, trains=False)
 
     assert result["error"].startswith("Nie znam przystanku")

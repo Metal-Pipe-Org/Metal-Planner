@@ -307,28 +307,8 @@ const samePlace = (a, b) => isPoint(a) || isPoint(b)
     ? isPoint(a) === isPoint(b) && a.lat === b.lat && a.lon === b.lon
     : a === b;
 
-// Grupa stacji jednego miasta (patrz gtfs._match_city_group) przyjeżdża
-// z serwera jako "WROCŁAW -". Myślnik to konwencja słownika PKP i ZARAZEM
-// kształt, po którym wyszukiwarka rozpoznaje takie zapytanie, więc nazwa nie
-// może zmienić postaci w drodze na serwer - zmieniamy tylko to, co widać:
-// prettyStopName na ekran, rawStopName z powrotem przed wysłaniem.
-//
-// Zawsze PARĄ, nigdy samo prettyStopName: samo ładne wyświetlanie oznacza, że
-// ładna nazwa siedzi w polu formularza, a stamtąd leci prosto do /api/flow -
-// i wraca jako "nie znaleziono przystanku" (błąd zgłoszony na żywo, przez
-// który etykieta wróciła kiedyś do myślnika - patrz docstring
-// gtfs._match_city_group). Stan (`sel`), klucze markerów i zapis ostatniego
-// wyszukiwania zostają przy postaci KANONICZNEJ, z myślnikiem.
-const CITY_GROUP_LABEL = '(dowolna stacja)';
-const prettyStopName = name => typeof name === 'string' && name.trimEnd().endsWith('-')
-    ? `${name.trimEnd().slice(0, -1).trimEnd()} ${CITY_GROUP_LABEL}`
-    : name;
-const rawStopName = name => typeof name === 'string' && name.trimEnd().endsWith(CITY_GROUP_LABEL)
-    ? `${name.trimEnd().slice(0, -CITY_GROUP_LABEL.length).trimEnd()} -`
-    : name;
-
 const displayValue = v => !v ? ''
-    : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : prettyStopName(v);
+    : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : v;
 
 function esc(text) {
     const div = document.createElement('div');
@@ -1433,7 +1413,7 @@ function offerNearestStop(point) {
     }
     if (!best) return;
     offeredStop = {name: best, point};
-    locateOfferName.textContent = prettyStopName(best);
+    locateOfferName.textContent = best;
     locateOffer.hidden = false;
 }
 
@@ -2177,7 +2157,7 @@ function drawFlow(flow, refit) {
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
     // Okienko w rogu otwiera się samo przy nowej relacji. Przy przerysowaniu
-    // tej samej (suwaki, „Pokaż więcej", kolejne etapy wyszukiwania) zostaje
+    // tej samej (suwaki, kolejne etapy wyszukiwania) zostaje
     // to, co user w nim zostawił - także zamknięte.
     if (refit || !timetableTarget) seedStartPanel();
     // Nowa mapa = inny zestaw linii, więc i inne pojazdy dotyczą tego, co
@@ -2903,7 +2883,7 @@ function flowTipTimeHtml(when) {
     let html = '<span class="flow-tip-time">'
         + `<b>${esc(fmtClock(when.now))}</b>`
         + '<span class="flow-tip-what">tu jesteś'
-        + (when.stop ? ` · najbliżej <b>${esc(prettyStopName(when.stop))}</b>` : '')
+        + (when.stop ? ` · najbliżej <b>${esc(when.stop)}</b>` : '')
         + '</span></span>';
     // Bez odczytanego przyjazdu do celu (kawalek bez widocznej kontynuacji)
     // nie pokazujemy NICZEGO o dalszej drodze - zgadnieta godzina lamalaby
@@ -3148,8 +3128,8 @@ function flowStopsOf(flow) {
 function lineStopTipHtml(st) {
     const lines = [...st.lines.values()].sort((a, b) => a.sec - b.sec);
     let html = lines.length === 1 ? `${esc(fmtClock(lines[0].sec))} · ` : '';
-    html += `<b>${esc(prettyStopName(st.name))}</b>`;
-    if (st.pole) html += `<span class="tip-platform">${esc(prettyStopName(st.pole))}</span>`;
+    html += `<b>${esc(st.name)}</b>`;
+    if (st.pole) html += `<span class="tip-platform">${esc(st.pole)}</span>`;
     if (lines.length > 1) {
         html += '<span class="tip-line-times">' + lines.map(l =>
             `<span><span class="badge ${escAttr(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
@@ -3273,7 +3253,7 @@ function placeStopNames() {
     const taken = [...clusterBoxes];
     const markers = [];
     for (const p of places) {
-        const text = prettyStopName(p.name);
+        const text = p.name;
         const width = nameWidthPx(text);
         const others = places.filter(o => o !== p).flatMap(o => o.dots);
         const box = nameBox(p.anchors, width, [...taken, ...others], p.dots);
@@ -4745,7 +4725,7 @@ function exitHtml(exit) {
     if (!exit) return '';
     const [co, gdzie] = exitText(exit);
     return `<div class="j-exit"><span class="j-exit-what">${esc(co)}</span>`
-         + `<span class="j-exit-stop">${esc(prettyStopName(gdzie))}</span>`
+         + `<span class="j-exit-stop">${esc(gdzie)}</span>`
          + `<span class="j-exit-time">${esc(exit.time)}</span></div>`;
 }
 
@@ -5001,7 +4981,7 @@ function onboardNoteHtml() {
     return `<p class="onboard-head">`
         + `<span class="badge ${escClass(kurs.mode)}"${lineStyle(kurs.mode, kurs.num)}>${esc(kurs.num)}</span>`
         + `<span>w stronę <b>${esc(kurs.headsign)}</b> — najbliższy przystanek `
-        + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
+        + `<b>${esc(kurs.stop_name)}</b> o ${esc(kurs.at)}</span></p>`;
 }
 
 function renderJourneys() {
@@ -5110,7 +5090,7 @@ resultsBox.addEventListener('click', event => {
     event.preventDefault();
     const known = new Set([...markersByName.keys()].map(n => n.toLowerCase()));
     if (!isPoint(sel.start)
-            && !known.has(rawStopName(startInput.value.trim()).toLowerCase())) {
+            && !known.has(startInput.value.trim().toLowerCase())) {
         startInput.value = name;
         sel.start = null;
         updatePointMarker('start', null);
@@ -5267,8 +5247,7 @@ function syncOnboardView() {
     if (zwiniete) { obLineInput.blur(); if (obLineAuto) obLineAuto.close(); }
     if (!kurs) return;
     const kierunek = obDirection();
-    const przystanek = prettyStopName(
-        obStopSelect.options[obStopSelect.selectedIndex].text);
+    const przystanek = obStopSelect.options[obStopSelect.selectedIndex].text;
     obSummary.innerHTML =
         `<span class="badge ${escClass(kurs.mode || 'other')}"${lineStyle(kurs.mode || 'other', kurs.num)}>${esc(kurs.num)}</span>`
         // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
@@ -5305,7 +5284,7 @@ function hideObWarn() {
 
 function warnOnboardRide(kurs) {
     if (!kurs || !kurs.late_sec) { hideObWarn(); return; }
-    const przystanek = esc(prettyStopName(kurs.stop_name));
+    const przystanek = esc(kurs.stop_name);
     const rozklad = `<b>${esc(kurs.at_sched)}</b>`;
     const ile = `${Math.round(Math.abs(kurs.late_sec) / 60)} min`;
     // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
@@ -5315,12 +5294,12 @@ function warnOnboardRide(kurs) {
         ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (rozkład ${rozklad})`,
            '⏩', 'Godziny pojazdu przesunięte',
            `${kurs.num} jedzie prawdopodobnie ok. ${ile} po rozkładzie — według rozkładu był `
-           + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `
+           + `na przystanku ${kurs.stop_name} o ${kurs.at_sched}. `
            + `Godziny tego pojazdu na mapie są przesunięte o ${ile}.`]
         : ['⚠️', `${esc(kurs.num)} na ${przystanek} dopiero o ${rozklad} (za ${ile})`,
            '🔎', 'Sprawdź linię i przystanek',
            `Najbliższy kurs ${kurs.num} jest według rozkładu na przystanku `
-           + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at_sched}, za `
+           + `${kurs.stop_name} dopiero o ${kurs.at_sched}, za `
            + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię i przystanek.`];
     $('ob-warn-text').innerHTML =
         `<span aria-hidden="true">${ikona}</span> ${fakt}`
@@ -5398,7 +5377,7 @@ function fillStops() {
     const stops = kierunek ? kierunek.stops : [];
     obStopSelect.innerHTML = '<option value="">Przystanek</option>'
         + stops.map(stop =>
-            `<option value="${esc(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
+            `<option value="${esc(stop.id)}">${esc(stop.name)}</option>`).join('');
     obStopSelect.disabled = !stops.length;
     hideObWarn();
     syncOnboardView();
@@ -5484,10 +5463,7 @@ function resetResults() {
 function showError(message, suggestions) {
     let html = `<div class="notice error"><p>${esc(message)}</p>`;
     if (suggestions && suggestions.length) {
-        // I napis, i data-name to ETYKIETA (patrz prettyStopName) - klik
-        // wstawia ją wprost do pola, a rawStopName w queryParams zamienia ją
-        // z powrotem przy wysyłaniu.
-        html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(prettyStopName).map(name =>
+        html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(name =>
             `<li><a href="#" data-name="${esc(name)}">${esc(name)}</a></li>`
         ).join('') + '</ul>';
     }
@@ -5547,16 +5523,13 @@ function queryParams() {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
     } else {
-        // rawStopName, nie surowa wartość pola: w polu stoi ETYKIETA
-        // (patrz prettyStopName), a wyszukiwarka zna grupę stacji tylko
-        // pod jej kanoniczną postacią z myślnikiem.
-        params.set('start', rawStopName(startInput.value));
+        params.set('start', startInput.value);
     }
     if (isPoint(sel.end)) {
         params.set('end_lat', sel.end.lat);
         params.set('end_lon', sel.end.lon);
     } else {
-        params.set('end', rawStopName(endInput.value));
+        params.set('end', endInput.value);
     }
     return params;
 }
@@ -5582,31 +5555,7 @@ function adoptNames(data) {
 
 /** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
     propozycji (journeys) - to ta sama, współdzielona odpowiedź, więc obie
-    nie mogą już się rozjechać (patrz planner.plan_flow). */
-/** Ostrzeżenie o TRYBIE AWARYJNYM mapy - ten sam wygląd, co pozostałe
-    komunikaty błędów, ale dopisywane NAD listą, nie zamiast niej: w tym
-    trybie jakaś trasa i tak jest pokazana i ma zostać widoczna.
-
-    Kiedy się pojawia: serwer nie zdołał złożyć wachlarza opcji i przysłał
-    samą najszybszą trasę (pole `degraded` w odpowiedzi /api/flow, patrz
-    plan_flow). Bez tego komunikatu rzadka mapa wygląda dokładnie tak samo
-    jak "tędy naprawdę nic nie jedzie" i nie da się tych dwóch rzeczy
-    odróżnić na ekranie.
-
-    Mówi też, CO z tym zrobić. Najczęstsza przyczyna to nie awaria, tylko za
-    wąskie okno na rzadkim kierunku: Bielany Wrocławskie - PKP -> Wojszyce
-    o 13:29 mieści w oknie z suwaków (12 min naddatku) dokładnie jeden kurs,
-    bo następny jedzie pół godziny później - wachlarz nie ma z czego powstać.
-    Poszerzenie zakresu jest wtedy jedynym wyjściem i to ono ma stać
-    w komunikacie, a nie sam fakt porażki. */
-function showDegradedNotice() {
-    resultsBox.insertAdjacentHTML('afterbegin',
-        '<div class="notice error degraded"><p>Tryb awaryjny: w tym oknie '
-        + 'czasowym nie ułożył się wachlarz połączeń — mapa pokazuje samą '
-        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „Pokaż więcej” nad mapą.'
-        + '</p></div>');
-}
-
+    nie mogą już się rozjechać (patrz planner.plan_flow_stages). */
 /** Mapa narysowana, lista obok pusta. To NIE jest błąd i nie ma go udawać:
     czerwona ramka nad kompletem połączeń mówiła "coś się zepsuło", a mapa
     pod nią była w porządku. Do 2026-09-04 kazała w dodatku zawęzić okno
@@ -5623,7 +5572,7 @@ function showWideWindowNotice() {
     w odpowiedzi /api/flow, patrz routes.py) - lista pokazuje same
     bezpośrednie połączenia kolejowe, bez mapy przepływów (nie ma jej z
     czego złożyć: MPK w ogóle nie zna jednego z dwóch miejsc). To nie błąd
-    (styl neutralny, nie czerwony jak showDegradedNotice), tylko wyjaśnienie,
+    (styl neutralny, nie czerwony jak błąd), tylko wyjaśnienie,
     czemu mapa jest pusta, mimo że lista poniżej ma wyniki. */
 function showRailOnlyNotice() {
     resultsBox.insertAdjacentHTML('afterbegin',
@@ -5719,7 +5668,7 @@ function missedTransfer(legs, i, late) {
     ją uruchomić bez sieci (patrz tests/js/harness.js).
 
     Wybrana trasa zostaje wybrana, jeśli nowa lista ją ma (ta sama trasa po
-    „Pokaż więcej", po suwaku) - inaczej przerysowanie zabierałoby ją spod
+    suwaku) - inaczej przerysowanie zabierałoby ją spod
     ręki. */
 function renderPlan(data, refit) {
     adoptNames(data);
@@ -5742,7 +5691,7 @@ function renderPlan(data, refit) {
 let lastSchemeData = null;
 let schemeLast = null;
 let schemeCollapsed = !!uiState.schemeCollapsed;
-// Przybliżenie i przesunięcie rysunku w panelu: rysunek po „Pokaż więcej”
+// Przybliżenie i przesunięcie rysunku w panelu: rysunek
 // bywa kilka razy szerszy niż panel, więc trzeba go dać obejrzeć z bliska.
 const schemeView = {scale: 1, x: 0, y: 0};
 const SCHEME_MIN_SCALE = 0.1;
@@ -5817,7 +5766,7 @@ function schemeBoxes(scheme, strands, data) {
     for (const node of scheme.nodes) {
         const label = node.role === 'start' ? 'Start: ' + displayValue(data.start)
             : node.role === 'end' ? 'Cel: ' + displayValue(data.end)
-            : prettyStopName(node.place);
+            : node.place;
         // Przejazd przez węzeł zajmuje jedno miejsce na górze i na dole naraz.
         const lanes = strands.filter(s => s.to === node.id && !s.next).length
             + strands.filter(s => s.from === node.id).length;
@@ -7241,7 +7190,6 @@ function renderList(data) {
     }
     loadTrainDelays();
     showWaitNotice(data);
-    if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
 
@@ -7727,14 +7675,8 @@ const MAX_SUGGESTIONS = 8;
 // fragment oryginalnej nazwy (do podświetlenia).
 const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                          .toLowerCase().replace(/ł/g, 'l');
-// Podpowiedzi żyją w ETYKIETACH (patrz prettyStopName), nie w nazwach
-// kanonicznych: to etykieta się pokazuje, to ją wybrany wiersz wpisuje do pola
-// i po niej szuka wpisany tekst - więc "dowolna" znajduje grupy stacji, choć
-// w kanonicznej nazwie tego słowa nie ma. Na kanoniczną wraca dopiero
-// rawStopName przy wysyłaniu (patrz queryParams).
-const STOP_LABELS = STOP_NAMES.map(prettyStopName);
-const STOP_KIND = new Map(STOP_ENTRIES.map(e => [prettyStopName(e.name), e.kind]));
-const FOLDED_LABELS = STOP_LABELS.map(fold);
+const STOP_KIND = new Map(STOP_ENTRIES.map(e => [e.name, e.kind]));
+const FOLDED_LABELS = STOP_NAMES.map(fold);
 
 // Drugie złożenie: bez kropek i z rozwiniętymi skrótami, żeby "Plac
 // Grunwaldzki" podpowiadało "PL. GRUNWALDZKI". Tabela przychodzi z serwera
@@ -7748,16 +7690,16 @@ const ABBREV = new Map(Object.entries(JSON.parse($('stop-abbrev').textContent)))
 const expand = folded => folded.replace(/\./g, ' ').split(/\s+/)
                                .filter(Boolean)
                                .map(word => ABBREV.get(word) || word).join(' ');
-const ALIAS_LABELS = STOP_LABELS.map(label => expand(fold(label)));
+const ALIAS_LABELS = STOP_NAMES.map(label => expand(fold(label)));
 
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
     chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie.
     Trafienia po rozwinięciu skrótu idą na koniec: są najluźniejsze, tak samo
     jak po stronie serwera (patrz gtfs.match_stop). */
-function suggestionsFor(query, names = STOP_LABELS, folded, limit = MAX_SUGGESTIONS) {
+function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIONS) {
     const needle = fold(query.trim());
     if (!needle) return [];
-    const own = names === STOP_LABELS;
+    const own = names === STOP_NAMES;
     folded = folded || (own ? FOLDED_LABELS : names.map(fold));
     // Złożenia aliasowe idą tą samą drogą co `folded`: gotowe dla domyślnej
     // listy przystanków, liczone w locie dla każdej innej (tryb rozkładów
@@ -7836,7 +7778,7 @@ const suggestRecentFirst = side => query => {
     const recent = (loadRecentPlaces()[side] || []).filter(
         name => STOP_KIND.has(name) && (trainsOn || STOP_KIND.get(name) !== 'train'));
     const hits = recentFirst(suggestionsFor(query, recent, undefined, Infinity), recent);
-    const rest = suggestionsFor(query, STOP_LABELS, undefined, MAX_SUGGESTIONS + hits.length)
+    const rest = suggestionsFor(query, STOP_NAMES, undefined, MAX_SUGGESTIONS + hits.length)
         .filter(item => !recent.includes(item.name));
     return [...hits, ...rest].slice(0, MAX_SUGGESTIONS);
 };
@@ -8112,7 +8054,7 @@ function parsePoint(text) {
 function placeFromField() {
     const text = placeWhere.value.trim();
     if (placeDraft && text === displayValue(placeDraft)) return placeDraft;
-    if (STOP_KIND.has(text)) return rawStopName(text);
+    if (STOP_KIND.has(text)) return text;
     return parsePoint(text);
 }
 
@@ -9636,11 +9578,7 @@ refreshBikeLayer();
 window.plannerBridge = {
     map, esc, fitTo, setView, syncTabs, setBaseDim, renderVehicles,
     attachAutocomplete, suggestionsFor, suggestionHtml,
-    // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
-    // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
-    // tablice w jednym API to zaproszenie do sięgnięcia po złą.
-    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON, lineColor, lineStyle, escClass,
-    prettyStopName, rawStopName,
+    LINE_COLORS, MODE_LABEL, STOP_NAMES, ROUTE_ICON, lineColor, lineStyle, escClass,
     suspendPlanner, resumePlanner, setTimeNow,
     trainsOn: () => trainsOn,
 };

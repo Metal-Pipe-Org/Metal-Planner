@@ -11,6 +11,7 @@ from datetime import datetime
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime(2026, 1, 5, 0, 0, 0)
 
@@ -24,7 +25,7 @@ Z_CENTRUM = {"trip_id": "Z_CENTRUM", "label": "Autobus 112", "headsign": "Zajezd
 def test_etap_niesie_kurs_ktorym_jedzie(install_day):
     install_day(make_day([Z_KRZYKOW, Z_CENTRUM]))
 
-    wynik = planner.plan_flow("S", "Z", WHEN.replace(minute=10))
+    wynik = flow.plan_flow("S", "Z", WHEN.replace(minute=10))
 
     [etap] = [leg for journey in wynik["journeys"] for leg in journey["legs"]
               if leg["kind"] == "ride"]

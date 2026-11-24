@@ -23,6 +23,7 @@ import pytest
 
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # doba, nie godzina - tę daje from_sec
 
@@ -196,7 +197,7 @@ def test_start_niesie_poprzednie_kursy_ktore_spoznione_by_dowiozly(install_day):
     od jego odjazdu, dowiózłby wcześniej niż najszybsza trasa. Mapy ani
     najszybszej trasy to nie rusza."""
     install_day(_start_ze_spoznionymi())
-    wynik = planner.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
+    wynik = flow.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
 
     start = [n for n in wynik["nodes"] if n.get("start")][0]
     assert start["late"] == [
@@ -236,7 +237,7 @@ def test_przesiadka_ma_te_sama_regule_co_start(install_day):
     (przyjazd), i musi dowieźć WCZEŚNIEJ niż najszybsza trasa - remis
     odpada."""
     install_day(_przesiadka_ze_spoznionymi())
-    wynik = planner.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
+    wynik = flow.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
 
     assert wynik["fastest"]["arrival"] == "00:31"
     wezly = {n["name"]: n for n in wynik["nodes"]}
@@ -270,7 +271,7 @@ def test_start_z_punktu_ma_tablice_startu_u_przystanku_do_ktorego_sie_idzie(
     day = _punkt_pod_grunwaldzkim()
     install_day(day)
     lat, lon = day.stop_coords["GRUNWALDZKI"]
-    wynik = planner.plan_flow("", "WOJSZYCE", WHEN.replace(hour=17, minute=minuta),
+    wynik = flow.plan_flow("", "WOJSZYCE", WHEN.replace(hour=17, minute=minuta),
                               start_point=(lat + 0.0004, lon))
 
     assert wynik["fastest"]["arrival"] == "18:43"
@@ -300,7 +301,7 @@ def test_kropka_wezla_z_numerowanymi_peronami_zamawia_tablice_nazwa_wezla(instal
     day.display_name["wezel"] = "WEZEL"
     install_day(day)
 
-    wynik = planner.plan_flow("WEZEL", "CEL", WHEN + datetime.timedelta(seconds=1000))
+    wynik = flow.plan_flow("WEZEL", "CEL", WHEN + datetime.timedelta(seconds=1000))
     start = [n for n in wynik["nodes"] if n.get("start")][0]
     assert start["name"] == "WEZEL"
     tablica = planner.stop_timetable(start["name"], WHEN, from_sec=1000)

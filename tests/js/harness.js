@@ -623,7 +623,7 @@ const INJECTION = `
     missedTransfer, boardLiveHtml, boardDelays,
     set trainDelays(v) { trainDelays = v; },
     nodePoint, seedStartPanel,
-    prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
+    queryParams, displayValue, adoptNames,
     pickEndpoint,
     get startInput() { return startInput; },
     get endInput() { return endInput; },

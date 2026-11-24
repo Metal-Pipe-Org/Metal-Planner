@@ -1,10 +1,9 @@
-"""Wybór z RUCHÓW (moves.py) - tylko pod „Nową mapą" (eksperyment, new_map).
+"""Wybór z RUCHÓW (moves.py) - jedyna mapa.
 
 Opcja to „stąd wsiadam i dojeżdżam tam", a nie linia ani odjazd: zbitka linii
 jednego ruchu to jedna nitka na mapie, a pierwszy widok to kilka różnych,
 czytelnych ruchów (moves.READABLE_MOVES). Co się nie mieści, nie jest rysowane
 - dostęp zostaje przez kliknięcie w przystanek (istniejąca tablica odjazdów).
-Stara mapa zostaje taka, jaka była.
 
 Część pierwsza: syntetyczny dzień, deterministyczne minuty. Część druga:
 prawdziwy rozkład (data/gtfs.sqlite) - scenariusze A/B/C z opisu użytkownika;
@@ -21,13 +20,14 @@ import moves
 import planner
 from tests import probka
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime(2026, 1, 5, 0, 10, 0)
 M = 60
 
 
 def _flow(start, end, when=WHEN, **kwargs):
-    return planner.plan_flow(start, end, when, new_map=True, **kwargs)
+    return flow.plan_flow(start, end, when, **kwargs)
 
 
 def _nums(result):
@@ -46,6 +46,18 @@ def _trips(label, rows, prefix, via=None):
     return out
 
 
+def test_bez_ruchow_jest_blad_braku_polaczenia(install_day, monkeypatch):
+    """Zapasowej mapy nie ma: gdy ruchy nie znajdą niczego, pasażer dostaje
+    zwykły komunikat o braku połączenia, a nie pustą mapę."""
+    install_day(make_day(_trips("Autobus 1", [(2, 20)], "a")))
+    monkeypatch.setattr(planner, "_moves_map", lambda *a, **k: None)
+
+    stages = list(planner.plan_flow_stages("S", "E", WHEN))
+
+    assert [name for name, _ in stages] == ["fastest", "error"]
+    assert stages[-1][1]["error"].startswith("Nie znaleziono połączenia S → E po 00:10")
+
+
 def test_zbitka_linii_jednego_ruchu_to_jedna_nitka(install_day):
     """Trzy linie z S do E jadą tym samym ruchem i tą samą drogą - to jeden
     ruch i jedna kreska. Niesie linię, która odjeżdża pierwsza, i tę, którą
@@ -58,15 +70,6 @@ def test_zbitka_linii_jednego_ruchu_to_jedna_nitka(install_day):
 
     assert _nums(result) == ["1", "3"]
     assert len(result["scheme"]["edges"]) == 1
-
-
-def test_stara_mapa_rysuje_wszystkie_bliznicze_linie(install_day):
-    install_day(make_day(
-        _trips("Autobus 1", [(2, 20)], "a") + _trips("Autobus 2", [(2, 20)], "b")))
-
-    result = planner.plan_flow("S", "E", WHEN)
-
-    assert _nums(result) == ["1", "2"]
 
 
 def test_bezposredni_i_z_przesiadka_sa_oba(install_day):
@@ -110,15 +113,6 @@ def test_te_same_pojazdy_z_innym_miejscem_przesiadki_to_jedna_podroz(install_day
     assert len([s for s in result["segments"] if s["num"] == "125"]) == 1
 
 
-def test_nowa_mapa_nie_zmienia_staremu_progowi(install_day):
-    """Wybór z ruchów żyje tylko pod new_map: bez niej wynik jest ten sam,
-    co przed wprowadzeniem ruchów."""
-    install_day(make_day(_trips("Autobus 1", [(2, 20)], "a")))
-
-    assert planner.plan_flow("S", "E", WHEN) == planner.plan_flow(
-        "S", "E", WHEN, new_map=False)
-
-
 # --- prawdziwy rozkład -------------------------------------------------------
 
 START = (51.1103533, 17.0586404)     # Plac Grunwaldzki 13
@@ -126,7 +120,7 @@ SOSNOWIECKA, SKRAJNA = "Sosnowiecka", "Radwanice - ul. Skrajna"
 PIATEK = date(2026, 11, 6)
 
 
-def _real(start, end, day, hhmm, new_map=True, **kwargs):
+def _real(start, end, day, hhmm, **kwargs):
     if not gtfs.DB_PATH.exists():
         pytest.skip("brak data/gtfs.sqlite")
     # Scenariusze opisują dzień tygodnia, a paczka rozkładów zaczyna się
@@ -139,7 +133,7 @@ def _real(start, end, day, hhmm, new_map=True, **kwargs):
     hour, minute = map(int, hhmm.split(":"))
     when = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute)
     point = {"start_point": START} if start is None else {}
-    return planner.plan_flow(start or "", end, when, new_map=new_map, **point, **kwargs)
+    return flow.plan_flow(start or "", end, when, **point, **kwargs)
 
 
 def _threads(result):
@@ -148,12 +142,10 @@ def _threads(result):
 
 def test_scenariusz_c_z_petli_jeden_ruch_to_jedna_nitka():
     """Z pętli KSIĘŻE MAŁE o 19:30 jedzie dziewięć linii tym samym ruchem:
-    stara mapa rysuje dziewięć nitek, nowa jedną."""
+    na mapie to jedna nitka."""
     nowa = _real("KSIĘŻE MAŁE", SOSNOWIECKA, PIATEK, "19:30")
-    stara = _real("KSIĘŻE MAŁE", SOSNOWIECKA, PIATEK, "19:30", new_map=False)
 
     assert _threads(nowa) == 1
-    assert _threads(stara) >= 5
 
 
 # O 19:00 Siechnicki dowozi wyraźnie po kilku lepszych i nie jest pokazywany
@@ -186,19 +178,17 @@ def test_scenariusz_b_przy_siechnickim_na_styk_mapa_pokazuje_tez_ruch_z_zapasem(
 # --- rowery i Traficar na zapisanej próbce -----------------------------------
 
 def test_rowery_i_traficar_z_probki_w_nowej_mapie_nie_przybywa(monkeypatch):
-    """Rowery i auta biorą zasięg z narysowanych ruchów: nowa mapa ma ich
-    pierwszy widok skromny (rowerów mniej niż stara, aut tyle, ile nic nie
-    bije), a sama próbka naprawdę je wnosi."""
+    """Rowery i auta biorą zasięg z narysowanych ruchów: pierwszy widok jest
+    skromny (aut tyle, ile nic nie bije), a sama próbka naprawdę je wnosi."""
     if not gtfs.DB_PATH.exists():
         pytest.skip("brak data/gtfs.sqlite")
     probka.podlacz(monkeypatch)
     nowa = _real(None, SOSNOWIECKA, PIATEK, "19:00", use_bikes=True)
-    stara = _real(None, SOSNOWIECKA, PIATEK, "19:00", new_map=False, use_bikes=True)
 
     assert nowa["bike_places_live"] is True
-    assert nowa["cars"] and stara["cars"]
+    assert nowa["cars"]
     assert len(nowa["cars"]) <= 3
-    assert 1 <= len(nowa["bike_places"]) < len(stara["bike_places"])
+    assert nowa["bike_places"]
 
 
 def test_ten_sam_ostatni_pojazd_to_jedna_podroz(install_day):

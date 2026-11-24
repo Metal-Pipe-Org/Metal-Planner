@@ -11,8 +11,6 @@ Sprawdzane jest to, co pasażer widzi:
     z mapą przepływów - a „Szukaj" kręci się do ostatniego etapu,
   - późniejsze etapy dokładają się do mapy - nie czyszczą jej, nie zabierają
     wybranej trasy ani okienka w rogu, a nowe propozycje idą na koniec listy,
-  - „Pokaż więcej" kręci się do końca i nie przestawia kadru, a auta nie
-    znikają razem ze starą mapą - zostają, aż przyjdą nowe,
   - na telefonie formularz zwija się przy pierwszym wyniku (a przy błędzie
     nie), a w zwiniętej linijce kręci się kółko, dopóki coś jeszcze dochodzi.
 """

@@ -521,10 +521,6 @@ na to samo, co mapa rysuje — dawniej to nie było prawdą
 3. Odpada powtórzony układ (te same linie wsiadane na tych samych
    przystankach); ranking po przyjeździe, potem liczbie przesiadek, potem
    czasie oczekiwania — tak jak dawniej.
-4. **Zabezpieczenie**: gdy mapa nie wybierze niczego, `plan_flow`
-   dorysowuje najszybszą trasę (już policzoną przez `_scan`) wprost - i do
-   mapy, i do listy, tym samym zrekonstruowanym przejazdem, więc obie
-   odpowiedzi nadal się zgadzają.
 
 Etapy dostają geometrię wprost z segmentu (ten sam `gtfs.shape_slice`, jedno
 połączenie do bazy na całe zapytanie - i mapę, i listę), więc wybrana
@@ -872,14 +868,14 @@ przełącznik, nie wybór pojazdu).
 
 Mapa rysuje kilka sensownych **ruchów** od startu do celu (`planner._moves_map`, sam wybór w `moves.py`), także przy starcie z pokładu pojazdu. Pasażer nie wybiera między liniami ani odjazdami, tylko między ruchami „stąd wsiadam i dojeżdżam tam”: pięć autobusów tą samą drogą to jeden ruch, a dwa przystanki obok siebie to dwa ruchy. Podróże przychodzą z wyszukiwania z wartości podróży (`_value_journeys` z wariantami numerów linii), od dwóch minut przed pytaną godziną (pojazd sprzed chwili mógł się spóźnić) i z dojściem ze startu i do celu do 1,5 km (`MOVES_WALK_M`), bo o tym, czy marsz się opłaca, rozstrzygają jego minuty w koszcie podróży. Ruch to wszystkie podróże o tym samym ciągu par (miejsce wsiadania, miejsce wysiadania). `moves.choose` przesiewa je kolejnymi krokami z listy `moves.STEPS` (jeden krok = jedna heurystyka użytkownika; koszt podróży = przyjazd plus `TRANSFER_GAIN_SEC` za każdą przesiadkę): tylko podróże najwyżej 20 minut droższe od najlepszej, na którą da się zdążyć; te same pojazdy z innym miejscem przesiadki to jedna podróż; jeden egzemplarz na odjazd pierwszego pojazdu; ruch zostaje, gdy żaden inny nie bije go wyraźnie (o 5 minut albo o przesiadkę), nie będąc gorszym w przyjeździe, wyjściu ani liczbie pojazdów; przesiadka na styk dostaje obok wariant z tym samym pojazdem jadącym dalej; a gdy wszystko jest na styk, dochodzi najlepszy ruch z zapasem. Gdy żaden pokazany ruch nie ma zapasu, wyszukiwanie idzie jeszcze raz w dwa razy szerszym oknie. Pierwszy widok (`moves.readable`) to najszybsza podróż z paska nad mapą i najwyżej dwa kolejne, naprawdę różne ruchy (`READABLE_MOVES` = 3): żaden pojazd nie mija miejsca przesiadki innego pokazanego ruchu i dwa ruchy nie przesiadają się w tym samym miejscu; ostatnie miejsce dostaje ruch, który pozwala wyjść wyraźnie później niż pozostałe, jeśli taki jest. Ruchy z dojściem 15 minut albo dłuższym na którymś końcu nie są rysowane (chyba że wszystkie je mają); reszta jest pod kliknięciem w przystanek (tablica odjazdów). Każdy ruch rysuje się jako pierwszy egzemplarz plus gałęzie, czyli inne dojścia do tego samego ostatniego pojazdu (`moves.add_branches`), a dalej idzie wspólna maszyneria: kawałki, prawdziwa geometria ulic, grupki numerów, kropki przesiadek (`_finalize_segments` i dalej). Mapa nie ma progu gęstości ani „Pokaż więcej”. Rower miejski i Traficar ocenia się na tych samych zasadach, jako osobne opcje obok komunikacji: rower tam, gdzie zastępuje czekanie albo przesiadkę (`_bike_moves`), auto tylko wtedy, gdy jest związane z pokazaną podróżą. Schemat obok mapy (ustawienie „Schemat obok mapy”) rysuje się z tych samych ruchów. Szczegóły: [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md).
 
-Mapa z wartości podróży (`_value_map`: tolerancja, reguła numerów, próg z gęstości) nie rysuje już zwykłego wyszukiwania. Rysuje tylko w dwóch przypadkach: gdy ruchy nie znajdą niczego i przy wyszukiwaniu „dowolnej stacji w mieście” (`gtfs.is_city_group`), które ruchy pomija. Tylko te dwa przypadki trzymają ją w kodzie.
+Gdy ruchy nie znajdą niczego, wyszukiwanie odpowiada zwykłym błędem „Nie znaleziono połączenia” — zapasowej mapy już nie ma (dawna mapa z wartości podróży, `_value_map`, została usunięta). „Dowolna stacja w mieście” (np. „WROCŁAW -” ze słownika PKP) celowo nie jest obsługiwana: podpowiedzi jej nie proponują, a wpisana jest nieznaną nazwą jak każda inna.
 
 **Tablica przystanku docelowego** (zgłoszenie #266). Czerwona kropka celu jest zwykłą kropką przystanku mapy (`nodeDot` w app.js, węzeł z flagą `end` z `planner._transfer_nodes`): najechanie albo dotknięcie pokazuje tę samą tablicę co na każdej przesiadce — linie z mapy z ikonką „tu wysiadasz" i godziną przyjazdu, a obok to, co stąd dalej odjeżdża. Kropkę dostaje też każdy przystanek, na którym narysowana podróż kończy ostatni przejazd i dalej idzie pieszo do celu (`planner._last_alights`) — wcześniej miejsca, w których da się tylko wysiąść, kropek nie miały. Cel z punktu na mapie ma tylko swój znacznik, bez tablicy; kropki stoją na przystankach, z których się do niego dochodzi. Gdy żadna podróż nie dojeżdża do samego celu, węzła celu nie ma i czerwona kropka jest samym znacznikiem, bez tablicy — tak jak cel z punktu na mapie. Znana, przyjęta niedogodność: ikonka z lewej strony tablicy kropki (⇥ przyjazd, ↦ odjazd) stoi tylko przy liniach, którymi jedzie któraś podróż z bieżącej mapy; pozostałe linie przejeżdżające przez przystanek są na liście bez ikonki.
 
 ## Znane ograniczenia
 
-- Auta i rowery na mapie biorą zasięg z tego, co mapa RYSUJE. Mapa z wartości
-  jest rzadsza, więc dojazd do auta „po drodze" (autobus o jeden przystanek do
+- Auta i rowery na mapie biorą zasięg z tego, co mapa RYSUJE. Mapa z ruchów
+  jest rzadka, więc dojazd do auta „po drodze" (autobus o jeden przystanek do
   Traficara) ma tu nie większe szanse niż wcześniej — do decyzji, czy dojazd
   do aut i rowerów ma iść po całej sieci (patrz [FLOW_MAP_NOTES.md](FLOW_MAP_NOTES.md#otwarte-pytania)).
 - Bufor przesiadki w skanie wstecz jest stosowany jednolicie (1 min),

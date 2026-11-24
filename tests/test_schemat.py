@@ -31,6 +31,7 @@ import pytest
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime(2026, 1, 5, 0, 0, 0)
 
@@ -72,21 +73,9 @@ def _wezel(place, *lines, start=False):
     return node
 
 
-def test_bez_flagi_odpowiedz_jest_taka_jak_dotad(install_day):
-    install_day(_dzien())
-    bez = planner.plan_flow("S", "E", WHEN, more=3)
-    z = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)
-    assert "scheme" not in bez
-    assert "scheme" in z
-    # Nowa mapa wybiera ruchy (moves.py), więc jej mapa nie jest już kopią starej;
-    # bez flagi odpowiedź nie zależy od niczego, co jest za flagą.
-    assert json.dumps(bez, sort_keys=True) == json.dumps(
-        planner.plan_flow("S", "E", WHEN, more=3, new_map=False), sort_keys=True)
-
-
 def test_start_na_gorze_cel_na_dole(install_day):
     install_day(_dzien())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     roles = [n["role"] for n in scheme["nodes"]]
     assert roles.count("start") == 1 and roles.count("end") == 1
     start = next(n["id"] for n in scheme["nodes"] if n["role"] == "start")
@@ -99,7 +88,7 @@ def test_start_na_gorze_cel_na_dole(install_day):
 
 def test_ten_sam_wybor_to_jedna_strzalka(install_day):
     install_day(_dzien())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     krawedzie = _po_nazwach(scheme)
     # Dwójka i czwórka jadą ze startu do celu tym samym ruchem: jedna strzałka
     # z oboma numerami (moves.py).
@@ -325,7 +314,7 @@ def _dzien_z_przesiadka_pieszo(*, bezposredni=False):
 
 def test_przejscie_pieszo_z_mapy_jest_na_schemacie(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     name = {n["id"]: n.get("place") or n["role"] for n in scheme["nodes"]}
     assert [(name[w["from"]], name[w["to"]]) for w in scheme["walks"]] == [("A", "B")]
     # To nie jest jazda: nie ma na nim linii i nie jest strzałką.
@@ -335,7 +324,7 @@ def test_przejscie_pieszo_z_mapy_jest_na_schemacie(install_day):
 
 def test_bez_chodzenia_schemat_nie_ma_przejsc_pieszych(install_day):
     install_day(_dzien_z_przesiadka_pieszo(bezposredni=True))
-    bez = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, walking=False)["scheme"]
+    bez = flow.plan_flow("S", "E", WHEN, walking=False)["scheme"]
     assert bez["walks"] == []
 
 
@@ -681,7 +670,7 @@ def _pary(scheme):
 
 def test_przejscie_ze_srodka_najszybszej_podrozy_jest_zawsze_z_odlegloscia_w_linii_prostej(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     pary = _pary(scheme)
     # Tylko to jedno: nie każda para pudełek, a odległość to linia prosta
     # między słupkami (a nie czas z krawędzi mostu, 120 s).
@@ -708,9 +697,9 @@ def _dzien_z_dwoma_przystankami_przy_punkcie(cel_blisko=False):
 def test_start_punkt_ma_dojscie_do_kazdego_przystanku_odjazdu(install_day):
     day, punkt = _dzien_z_dwoma_przystankami_przy_punkcie()
     install_day(day)
-    flow = planner.plan_flow("", "E", WHEN, start_point=punkt, more=3, new_map=True)
-    pary = _pary(flow["scheme"])
-    odjazdy = {leg["to"] for j in flow["journeys"] for leg in j["legs"][:1] if leg["kind"] == "walk"}
+    wynik = flow.plan_flow("", "E", WHEN, start_point=punkt)
+    pary = _pary(wynik["scheme"])
+    odjazdy = {leg["to"] for j in wynik["journeys"] for leg in j["legs"][:1] if leg["kind"] == "walk"}
     assert odjazdy == {"A", "B"}
     assert {tuple(sorted(k - {"start"})) for k, p in pary.items() if p["why"] == "access"} == {("A",), ("B",)}
 
@@ -719,16 +708,16 @@ def test_najszybsze_jest_dojscie_pieszo_start_cel(install_day):
     day, punkt = _dzien_z_dwoma_przystankami_przy_punkcie(cel_blisko=True)
     install_day(day)
     # Cel o 110 m od punktu: dwie minuty marszu wygrywają z każdym kursem.
-    flow = planner.plan_flow("", "E", WHEN, start_point=punkt, more=3, new_map=True)
-    assert frozenset(("start", "end")) in _pary(flow["scheme"])
-    assert _pary(flow["scheme"])[frozenset(("start", "end"))]["why"] == "fastest"
+    wynik = flow.plan_flow("", "E", WHEN, start_point=punkt)
+    assert frozenset(("start", "end")) in _pary(wynik["scheme"])
+    assert _pary(wynik["scheme"])[frozenset(("start", "end"))]["why"] == "fastest"
 
 
 def test_dojscie_pieszo_start_cel_znika_gdy_komunikacja_jest_szybsza(install_day):
     install_day(_dzien_z_przesiadka_pieszo(bezposredni=True))
     # E jest ~7 km od S, a autobus 3 jedzie 27 minut.
-    flow = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)
-    assert frozenset(("start", "end")) not in _pary(flow["scheme"])
+    wynik = flow.plan_flow("S", "E", WHEN)
+    assert frozenset(("start", "end")) not in _pary(wynik["scheme"])
 
 
 def _dzien_z_szybka_i_wolniejsza_z_przejsciem():
@@ -743,9 +732,9 @@ def _dzien_z_szybka_i_wolniejsza_z_przejsciem():
 
 def test_dodatkowe_przejscia_szuka_planner_poza_lista_wynikow(install_day):
     install_day(_dzien_z_szybka_i_wolniejsza_z_przejsciem())
-    bez = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    bez = flow.plan_flow("S", "E", WHEN)["scheme"]
     assert [p for p in bez["pairs"] if p["why"] == "extra"] == []
-    z = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, scheme_extra=4)["scheme"]
+    z = flow.plan_flow("S", "E", WHEN, scheme_extra=4)["scheme"]
     # Schemat nowej mapy powstaje z ruchów, które rysuje mapa: scheme_extra
     # niczego do niego nie dokłada (patrz planner._scheme_of_map).
     assert [p for p in z["pairs"] if p["why"] == "extra"] == []
@@ -754,7 +743,7 @@ def test_dodatkowe_przejscia_szuka_planner_poza_lista_wynikow(install_day):
 
 def test_najszybsza_podroz_z_przejsciem_nie_liczy_sie_do_dodatkowych(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, scheme_extra=4)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN, scheme_extra=4)["scheme"]
     assert [p["why"] for p in scheme["pairs"]] == ["fastest"]
 
 

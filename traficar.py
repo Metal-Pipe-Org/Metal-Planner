@@ -440,7 +440,7 @@ def _why(car, shown, pool):
     }
 
 
-def map_skyband(cars, limit, min_level=0):
+def map_skyband(cars, limit):
     """Które z aut w zasięgu mapy pokazać (punkt 15): k-skyband.
 
     Auto A bije auto B, gdy jest co najmniej tak dobre we wszystkich liczbach
@@ -454,35 +454,29 @@ def map_skyband(cars, limit, min_level=0):
 
     Auto z „Ogarniam" nie ma tu osobnej reguły: jego kwota jest drugą
     z tych liczb i tyle.
-
-    `min_level` to gwarancja dla "pokaż więcej" (zgłoszenie #141): każde
-    kliknięcie luzuje regułę o co najmniej jeden poziom, choćby sama liczba
-    z suwaka była już przekroczona. Inaczej przycisk bywa martwy - poziom,
-    którego nic nie bije, potrafi sam z siebie mieć więcej pozycji, niż
-    prosi suwak, i wtedy zwiększenie limitu nie zmienia nic.
     """
     shown = [_shown_as(car) for car in cars]
     beaten_by = [sum(_beats(other, mine) for other in shown) for mine in shown]
     if len(cars) <= limit:
         chosen = list(cars)
     else:
-        level = max(sorted(beaten_by)[limit - 1], min_level)
+        level = sorted(beaten_by)[limit - 1]
         chosen = [car for car, beaten in zip(cars, beaten_by) if beaten <= level]
     for car in chosen:
         car["why"] = _why(car, shown, cars)
     return chosen
 
 
-def map_choice(cars, limit, vans=False, min_level=0):
+def map_choice(cars, limit, vans=False):
     """Auta na mapę (punkt 15): osobówki zawsze, dostawczaki tylko na życzenie
     - i wtedy każdy rodzaj wybierany osobno (map_skyband), z tym samym `limit`.
 
     Dostawczak nie konkuruje z osobówką: kto wiezie szafę, nie weźmie Clio
     stojącego minutę bliżej, a kto jedzie sam, nie chce Mastera. Domyślnie
     dostawczaków nie ma wcale - zgłoszone przez użytkownika."""
-    chosen = map_skyband([car for car in cars if not car["van"]], limit, min_level)
+    chosen = map_skyband([car for car in cars if not car["van"]], limit)
     if vans:
-        chosen += map_skyband([car for car in cars if car["van"]], limit, min_level)
+        chosen += map_skyband([car for car in cars if car["van"]], limit)
     chosen_ids = {id(car) for car in chosen}
     return [car for car in cars if id(car) in chosen_ids]
 
