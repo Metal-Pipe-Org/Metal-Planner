@@ -1,13 +1,8 @@
 # The flow-map algorithm, explained with worked examples
 
-This document covers exactly one thing: `plan_flow` in `planner.py`, the
-function behind the map you see in the UI (the "show every useful trip at
-once" view). Everything else — the data model, the single-route CSA scan,
-the frontend — is left out on purpose. This file is about *how*.
+This document covers exactly one thing: how `plan_flow` in `planner.py` decides what the map you see in the UI draws. Everything else — the data model, the single-route CSA scan, the frontend — is left out on purpose. This file is about *how*.
 
-`plan_flow` decides what to draw with the value map (`_value_map`, issue
-#150) - since issue #187 the only map, also when the trip starts on board
-a vehicle. The old brightness map is gone.
+The map draws a few sensible **moves** from the start to the target (`_moves_map` in `planner.py`, the choice itself in `moves.py`), also when the trip starts on board a vehicle — see "The moves map" below. The value map further down (`_value_map`, issue #150) no longer decides what an ordinary search draws: its search is the input of the moves, and as a whole it is only a fallback (see "When the value map still draws"). The old brightness map is gone.
 
 Two terms you need before any of this makes sense:
 
@@ -19,7 +14,29 @@ Two terms you need before any of this makes sense:
    sweep that sorted list once, keeping track of the best arrival time found
    so far at every stop as you go.
 
-What frames the map:
+---
+
+# The moves map
+
+A passenger does not choose between lines or departures but between moves: "from here I get on and ride there". Five buses along the same road are one move; two stops next to each other are two moves.
+
+**Search.** The trips come from the value map's own multi-criteria scan (`_value_journeys`, Step 2 below), started two minutes before the asked time (a vehicle that has just left may be late), with walking from the start and to the target allowed up to 1.5 km (`MOVES_WALK_M`): whether a walk pays off is decided by its minutes in the trip's cost, not by a hard radius. Each trip is split into its line-number variants (Step 4), and each variant becomes an *instance*: one concrete trip with its rides, departure and arrival. A move is every instance with the same signature — the same sequence of (boarding place, alighting place) pairs.
+
+**Choice** (`moves.choose`, one user heuristic per step in `moves.STEPS`). The cost of a trip is its arrival plus `TRANSFER_GAIN_SEC` per transfer. In order: only trips at most 20 minutes costlier than the best catchable one; the same vehicles with a different transfer place are one trip; one instance per departure of the first vehicle; a move stays only when no other move beats it clearly (by 5 minutes or by a transfer) without being worse in arrival, departure or number of vehicles; a tight transfer gets the variant where the same vehicle rides on next to it; and when every move is tight, the best move with a margin is added. When none of the shown moves has a margin at all, the search runs again with a window twice as wide.
+
+**First view** (`moves.readable`). The fastest trip from the bar above the map is the spine; next to it at most two more moves (`READABLE_MOVES` = 3), and only really different ones: no vehicle passes another shown move's transfer place and no two moves change at the same place. The last slot goes, when there is one, to a move that lets you leave clearly later than all the others. Moves with a walk of 15 minutes or more at either end are not drawn (unless every move has one). Everything else stays one click away: the departure board of a stop.
+
+**Drawing.** Each shown move is drawn as its first instance plus its *branches* — other ways to reach the same last vehicle (`moves.add_branches`). The rides go through `_value_segments` (Step 5) and then the shared machinery: cutting into pieces, real street geometry, corridor number groups, transfer dots (`_finalize_segments` onwards). There is no density threshold and no "Pokaż więcej". City bikes and Traficar are judged the same way, as separate options next to public transport: a bike where it replaces waiting or a transfer (`_bike_moves`), a car only when it belongs to the drawn trip. The scheme next to the map ("Schemat obok mapy") is drawn from the same moves.
+
+**When the value map still draws.** Two cases: the moves find nothing (`_moves_map` returns `None`), and a search from or to "any station in the city" (`gtfs.is_city_group`), which skips the moves altogether. Then the map is the value map below, with its density threshold.
+
+---
+
+# The value map (fallback only)
+
+The value map no longer draws an ordinary search. Its search (Steps 1–2) and the line-number variants (Step 4) feed the moves map; its threshold (Steps 3 and 5, points 3–4 below) works only in the two fallback cases above, and those two cases are all that keeps it in the code.
+
+What frames the value map:
 
 3. **The fastest arrival** `best_arr`, from the ordinary single-route scan
    (`_scan`). Everything else is measured against it.
@@ -35,10 +52,6 @@ What frames the map:
 5. **Everything after the choice**: cutting into pieces, real street
    geometry, corridor number groups, transfer dots, cars and bikes
    (`_finalize_segments` onwards).
-
----
-
-# The value map
 
 The running example is the one that started it all (issue #150), with the
 times simplified: **Pl. Zgody → Klecina**, asked at **19:30**.

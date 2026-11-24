@@ -1,9 +1,6 @@
 # Metal-Planner
 
-Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej
-wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz**,
-a obok, w panelu, listę gotowych propozycji z godzinami, liniami
-i przesiadkami.
+Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej wyliczonej trasy pokazuje na mapie **kilka sensownych sposobów dojazdu naraz**, a obok, w panelu, listę gotowych propozycji z godzinami, liniami i przesiadkami.
 
 Jak pracujemy w zespole — gałęzie, pull requesty, ocena Claude'a, zgłoszenia
 i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -15,13 +12,7 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Co potrafi
 
-1. **Mapa przepływów.** Każdy dojazd to cała podróż od startu do celu,
-   opisana dwiema liczbami: o której jest się w celu i o której trzeba wyjść.
-   Na mapie jest to, co w którejś z nich jest najlepsze, plus podróże
-   najwyżej o kilka minut dłuższe. Ile tych minut, mapa dobiera sama tak,
-   żeby pozostała czytelna; przycisk **Pokaż więcej** (do trzech kliknięć)
-   zagęszcza ją, zawsze o coś nowego. Wszystkie narysowane linie wyglądają
-   tak samo — o tym, czy coś jest na mapie, rozstrzyga sam próg.
+1. **Mapa przepływów.** Mapa rysuje kilka sensownych ruchów od startu do celu, a nie wszystkie możliwe odcinki. Ruch to „stąd wsiadam i dojeżdżam tam”: pięć autobusów tą samą drogą to jeden ruch, a dwa przystanki obok siebie to dwa. Obok najszybszej podróży stają najwyżej dwa naprawdę różne ruchy, w granicach rozsądku (o ile później w celu i ile przesiadek), bez dalekich spacerów i bez linii przejeżdżających przez cudze przesiadki. Przesiadka na styk ma obok wyjście awaryjne: ten sam pojazd jedzie dalej albo ruch z zapasem. Kreska niesie kilka najlepszych linii; resztę odjazdów pokazuje kliknięcie w przystanek.
 2. **Zawsze wiadomo, co jedzie.** Linie jednego korytarza leżą na sobie,
    a numery stoją przy nich w zwartych grupkach. Najechanie kursorem
    podświetla jedną linię na całej długości i podaje godzinę w tym miejscu
