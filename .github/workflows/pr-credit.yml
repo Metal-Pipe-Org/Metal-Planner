@@ -3,13 +3,14 @@ name: "PR-y: kredyt"
 # Merge na kredyt (#506): PR z zielonym werdyktem oceny Claude'a może wejść do
 # `main` bez recenzji człowieka, dopóki w kolejce czeka mniej niż CREDIT_LIMIT
 # (config.sh) PR-ów scalonych bez recenzji. Przed merge'em decyduje o tym
-# wymagany status „Recenzja albo kredyt” (pr-state.yml); ten workflow prowadzi
-# kolejkę po merge'u. Kolejka to scalone PR-y z etykietą kredytu
-# (LABEL_CREDIT), więc każdy widzi ją na liście PR-ów; reguły w
-# `.github/scripts/credit.sh`.
+# wymagany status „Recenzja albo kredyt” (pr-state.yml); ten workflow
+# pilnuje etykiety po merge'u. Kolejka to fakty z API — PR-y scalone do `main`
+# od CREDIT_SINCE bez stojącego zatwierdzenia człowieka — a etykieta kredytu
+# (LABEL_CREDIT) tylko pokazuje ją na liście PR-ów; reguły w
+# `.github/scripts/credit.sh`. Każdy bieg zgrywa etykietę z faktami w obie
+# strony:
 #
-#  • merge — PR, który nie miał żadnego zatwierdzenia człowieka, dostaje
-#    etykietę kredytu i zajmuje miejsce w kolejce;
+#  • merge — PR, który nie ma zatwierdzenia człowieka, dostaje etykietę;
 #  • zatwierdzenie scalonego PR-a przez człowieka „spłaca” kredyt: etykieta
 #    schodzi, miejsce się zwalnia. GitHub pozwala zatwierdzać scalone PR-y;
 #    recenzji nie słuchamy tu wprost (`pull_request_review` nie ma wersji
@@ -17,10 +18,8 @@ name: "PR-y: kredyt"
 #    zakończenie budzi ten workflow przez `workflow_run`, a stan i tak
 #    ustalamy z API. Dla pewności, gdyby GitHub nie uruchamiał przekaźnika
 #    przy recenzjach scalonych PR-ów, całą kolejkę sprawdza też cykliczny bieg;
-#  • ręczne zdjęcie etykiety kredytu przez człowieka, gdy PR nie ma
-#    zatwierdzenia, to obejście kolejki — wiadomość z @everyone na Discordzie.
-#    Zdjęcie przez nasz workflow (po zatwierdzeniu) nie tworzy zdarzenia, więc
-#    nikogo nie woła.
+#  • ręczne zdjęcie (albo dołożenie) etykiety niczego nie zmienia: kolejka jej
+#    nie liczy, a najbliższy bieg przywraca etykietę zgodną z faktami.
 #
 # Po każdej zmianie kolejki pr-state.yml przelicza statusy wszystkich
 # otwartych PR-ów: słucha zakończenia tego workflow (`workflow_run`), bo
@@ -33,7 +32,7 @@ name: "PR-y: kredyt"
 # pośrednich i wydanie `main` -> `stable` go nie zajmują (filtr `branches`).
 on:
   pull_request_target:
-    types: [closed, unlabeled]
+    types: [closed]
     branches: [main]
   workflow_run:
     workflows:
@@ -45,23 +44,17 @@ on:
 permissions:
   # Odczyt skryptów z `main`.
   contents: read
-  # Recenzje (czy PR miał zatwierdzenie) i etykiety kredytu. Etykiety PR-a idą
+  # Recenzje (czy PR ma zatwierdzenie) i etykiety kredytu. Etykiety PR-a idą
   # przez API zgłoszeń, więc jak w pr-state.yml dajemy oba zapisy.
   pull-requests: read
   issues: write
 
 jobs:
   credit:
-    # Sito etykiety to kopia LABEL_CREDIT z config.sh (wyrażenie liczy się
-    # przed checkoutem); pilnuje jej tests/test_konfiguracja_automatow.py.
     if: >-
       github.repository == 'Metal-Pipe-Org/Metal-Planner'
       && (github.event_name != 'pull_request_target'
-          || (github.event.action == 'closed' && github.event.pull_request.merged)
-          || (github.event.action == 'unlabeled'
-              && github.event.label.name == 'merged on credit'
-              && github.event.pull_request.merged
-              && github.event.sender.type != 'Bot'))
+          || github.event.pull_request.merged)
       && (github.event_name != 'workflow_run'
           || github.event.workflow_run.conclusion == 'success')
     # Jeden bieg naraz na PR, po kolei; czekający bieg tego samego PR-a GitHub
@@ -82,35 +75,16 @@ jobs:
           sparse-checkout: .github/scripts
           persist-credentials: false
 
-      - name: Prowadź kolejkę kredytu
-        # Wszystko, co piszą ludzie (tytuł PR-a), wchodzi przez env, nigdy
-        # przez ${{ }} w środku basha.
+      - name: Zgraj etykietę kredytu z kolejką
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
-          EVENT: ${{ github.event_name }}
-          ACTION: ${{ github.event.action }}
-          SENDER: ${{ github.event.sender.login }}
-          PR_N: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-          source .discord/.github/scripts/discord.sh
           source .discord/.github/scripts/approvals.sh
           source .discord/.github/scripts/pr-state.sh
 
-          case "$EVENT/$ACTION" in
-            pull_request_target/closed)
-              credit_on_merge "$PR_N"
-              ;;
-            pull_request_target/unlabeled)
-              credit_unlabeled "$PR_N" "$SENDER" "$PR_TITLE" "$PR_URL"
-              ;;
-          esac
-
-          # Zatwierdzenie scalonego PR-a zwalnia miejsce — przy każdym biegu
-          # sprawdzamy całą kolejkę, nie tylko PR z tego zdarzenia.
+          # Przy każdym biegu sprawdzamy całą kolejkę, nie tylko PR z tego
+          # zdarzenia: merge, zatwierdzenie scalonego PR-a i ręczne ruszanie
+          # etykietą kończą się tym samym.
           credit_sweep

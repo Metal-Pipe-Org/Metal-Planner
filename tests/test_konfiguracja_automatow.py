@@ -6,6 +6,8 @@ pilnuje, żeby kopia nie rozjechała się z configiem. Pilnuje też, żeby żade
 workflow nie przypisywał tych zmiennych na nowo po swojemu.
 """
 
+import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -47,12 +49,78 @@ def test_sito_etykiety_stale_zgodne_z_configiem():
     assert set(stale_like) == {label}
 
 
-def test_sito_etykiety_kredytu_zgodne_z_configiem():
-    label = _config()["LABEL_CREDIT"]
-    literals = re.findall(r"label\.name == '([^']*)'",
-                          (WORKFLOWS / "pr-credit.yml").read_text())
-    assert literals, "pr-credit.yml: nie znaleziono sita z etykietą kredytu w if:"
-    assert set(literals) == {label}
+def _pr(number, merged, labeled=False, reviews=()):
+    return {"number": number, "mergedAt": merged, "updatedAt": merged,
+            "labels": {"nodes": [{"name": "merged on credit"}] if labeled else []},
+            "reviews": {"nodes": [{"databaseId": i, "state": state, "submittedAt": "2026-11-25T10:00:00Z",
+                                   "author": {"login": login, "__typename": kind}, "commit": {"oid": "abc"}}
+                                  for i, (login, kind, state) in enumerate(reviews, 1)]}}
+
+
+def _kredyt(tmp_path, nodes, has_next=False, script="credit_facts"):
+    """Odpala funkcję z credit.sh na podstawionym `gh`, który zwraca jedną stronę
+    GraphQL (a przy próbie pobrania drugiej wywraca bieg)."""
+    page = {"data": {"repository": {"pullRequests": {
+        "pageInfo": {"hasNextPage": has_next, "endCursor": "c"}, "nodes": nodes}}}}
+    (tmp_path / "page.json").write_text(json.dumps(page))
+    fake = tmp_path / "gh"
+    fake.write_text('#!/bin/bash\n'
+                    'if [ "$1 $2" = "api graphql" ]; then\n'
+                    f'  [ ! -e "{tmp_path}/called" ] || exit 99\n'
+                    f'  touch "{tmp_path}/called"; cat "{tmp_path}/page.json"\n'
+                    'else exit 0; fi\n')
+    fake.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "REPO": "o/r", "DRY_RUN": "1", "ENSURED": ""}
+    out = subprocess.run(["bash", "-c", f'set -euo pipefail; source "{SCRIPTS}/approvals.sh"; '
+                          f'source "{SCRIPTS}/pr-state.sh"; {script}'],
+                         check=True, capture_output=True, text=True, cwd=ROOT, env=env).stdout
+    return out
+
+
+def test_kolejka_kredytu_to_scalone_od_odciecia_bez_zatwierdzenia(tmp_path):
+    cutoff = _config()["CREDIT_SINCE"]
+    nodes = [
+        _pr(1, f"{cutoff}T12:00:00Z"),
+        _pr(2, f"{cutoff}T13:00:00Z", labeled=True, reviews=[("ala", "User", "APPROVED")]),
+        _pr(3, f"{cutoff}T14:00:00Z", reviews=[("dependabot[bot]", "Bot", "APPROVED")]),
+        _pr(4, f"{cutoff}T15:00:00Z", reviews=[("ola", "User", "APPROVED"), ("ola", "User", "DISMISSED")]),
+        _pr(5, "2000-01-01T00:00:00Z"),
+    ]
+    facts = json.loads(_kredyt(tmp_path, nodes))
+    assert facts == [
+        {"number": 1, "labeled": False, "approved": False},
+        {"number": 2, "labeled": True, "approved": True},
+        {"number": 3, "labeled": False, "approved": False},
+        {"number": 4, "labeled": False, "approved": False},
+    ]
+
+
+def test_kolejka_kredytu_nie_zalezy_od_etykiety(tmp_path):
+    cutoff = _config()["CREDIT_SINCE"]
+    nodes = [_pr(1, f"{cutoff}T12:00:00Z", labeled=True), _pr(2, f"{cutoff}T13:00:00Z")]
+    assert _kredyt(tmp_path, nodes, script="credit_count").strip() == "2"
+
+
+def test_lista_urywa_sie_na_dniu_odciecia(tmp_path):
+    # Strona jest cała starsza niż odcięcie, więc drugiej nie pobieramy
+    # (podstawiony `gh` wywraca bieg przy drugim zapytaniu).
+    nodes = [_pr(5, "2000-01-01T00:00:00Z")]
+    assert json.loads(_kredyt(tmp_path, nodes, has_next=True)) == []
+
+
+def test_sweep_zgrywa_etykiete_z_faktami_w_obie_strony(tmp_path):
+    cutoff = _config()["CREDIT_SINCE"]
+    nodes = [
+        _pr(1, f"{cutoff}T12:00:00Z"),
+        _pr(2, f"{cutoff}T13:00:00Z", labeled=True),
+        _pr(3, f"{cutoff}T14:00:00Z", labeled=True, reviews=[("ala", "User", "APPROVED")]),
+        _pr(4, f"{cutoff}T15:00:00Z", reviews=[("ala", "User", "APPROVED")]),
+    ]
+    out = _kredyt(tmp_path, nodes, script="credit_sweep")
+    assert "Kolejka kredytu: 2/" in out
+    assert "DRY_RUN: #1: dałbym" in out
+    assert "DRY_RUN: #3: zdjąłbym" in out
+    assert "#2:" not in out and "#4:" not in out
 
 
 @pytest.mark.parametrize("path", sorted(

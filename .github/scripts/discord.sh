@@ -17,7 +17,7 @@
 # Wołający zawsze pobiera ten plik z `main`, nigdy z drzewa PR-a ani pracy
 # Claude'a: skrypt dostaje w env sekret webhooka.
 
-# discord_send KOLOR AKTOR TYTUŁ LINK [OPIS] [FRAGMENT] [PINGI] [WSZYSCY]
+# discord_send KOLOR AKTOR TYTUŁ LINK [OPIS] [FRAGMENT] [PINGI]
 #   KOLOR     open / merged / closed / grey / info / comment / warn
 #   AKTOR     login GitHuba, który to zrobił — wiadomość idzie pod jego nazwą
 #             i awatarem; pusty, gdy zrobił to automat (wtedy nazwa webhooka)
@@ -50,9 +50,6 @@
 #             w treści — gdy z tytułu i tak wiadomo, czemu ktoś dostał ping.
 #             Login spoza mapy stoi tam pogrubiony, bez pingu: inaczej karta
 #             nie mówiłaby, kogo dotyczy
-#   WSZYSCY   niepuste (np. `everyone`) — nad kartą stoi @everyone i tylko
-#             wtedy Discord go zawoła; tekst od ludzi nigdy tego nie włączy.
-#             Rzadkie: dziś tylko ręczne zdjęcie etykiety kredytu (#506)
 discord_send() {
   if [ -z "${DISCORD_WEBHOOK:-}" ]; then
     echo "Brak sekretu DISCORD_WEBHOOK — pomijam Discorda."
@@ -82,8 +79,7 @@ discord_send() {
   #
   # `parse: []` wyłącza wszystkie wzmianki z treści, także @everyone i role
   # wpisane przez kogokolwiek w komentarzu; `users` wpuszcza z powrotem tylko
-  # osoby z mapy, które naprawdę padły w wiadomości. Jedyny wyjątek to
-  # @everyone, który wołający włącza sam ósmym argumentem.
+  # osoby z mapy, które naprawdę padły w wiadomości.
   #
   # Tytuł niesie tytuły od ludzi, a karta z tytułem ponad 256 znaków jest
   # przez Discorda odrzucana w całości — stąd przycięcie.
@@ -91,7 +87,7 @@ discord_send() {
   # Zepsuty JSON w DISCORD_IDS wywraca samo `jq`; pod `set -e` u wołającego
   # przerwałoby to cały krok, np. pętlę zamykającą zgłoszenia, stąd `if !`.
   if ! payload=$(jq -n --arg color "$1" --arg actor "$2" --arg title "$3" --arg url "$4" \
-      --arg text "${5:-}" --arg excerpt "${6:-}" --arg pings "${7:-}" --arg all "${8:-}" \
+      --arg text "${5:-}" --arg excerpt "${6:-}" --arg pings "${7:-}" \
       --argjson ids "${DISCORD_IDS:-"{}"}" --argjson max 500 '
     {open: 2991182, merged: 8540383, closed: 13574702, grey: 7239553,
      info: 616922, comment: 14774052, warn: 12551936} as $colors
@@ -119,12 +115,11 @@ discord_send() {
     | ($pings | split(" ") | map(select(. != ""))
       | reduce .[] as $l ([]; if any(.[]; ascii_downcase == ($l | ascii_downcase))
           then . else . + [$l] end)) as $named
-    | {content: ((if $all != "" then "@everyone " else "" end)
-        + ([$named[] | $lids[ascii_downcase] as $id
+    | {content: ([$named[] | $lids[ascii_downcase] as $id
           | if $id then "<@" + $id + ">" else "**" + . + "**" end]
         + (.users - [$named[] | $lids[ascii_downcase] // empty] | map("<@" + . + ">"))
-        | join(" "))),
-       allowed_mentions: {parse: (if $all != "" then ["everyone"] else [] end), users: .users},
+        | join(" ")),
+       allowed_mentions: {parse: [], users: .users},
        embeds: [{color: ($colors[$color] // $colors.grey), title: $title, url: $url}
          + (if .desc != "" then {description: .desc} else {} end)]}
     + (if $actor != "" then {username: $actor,

@@ -1,8 +1,12 @@
 # Merge na kredyt (#506): PR z zielonym werdyktem oceny Claude'a może wejść do
 # `main` bez recenzji człowieka, dopóki kolejka takich PR-ów jest krótsza niż
-# CREDIT_LIMIT. Kolejka to scalone PR-y z etykietą LABEL_CREDIT; etykietę daje
-# po merge'u pr-credit.yml, a zdejmuje ją zatwierdzenie człowieka (też po
-# merge'u). Wołający robi `source` (razem z approvals.sh i pr-state.sh —
+# CREDIT_LIMIT. Kolejka to fakty z API: PR-y scalone do `main` od dnia
+# CREDIT_SINCE (config.sh), które nie mają stojącego zatwierdzenia człowieka
+# (liczonego jak w approvals.sh). Etykieta LABEL_CREDIT jest tylko widokiem tych
+# faktów, żeby kolejkę widać było na liście PR-ów: credit_sweep dokłada ją na
+# scalony PR bez zatwierdzenia i zdejmuje z zatwierdzonego, więc ręczne zdjęcie
+# albo dołożenie etykiety niczego nie zmienia i przy następnym biegu wraca jak
+# było. Wołający robi `source` (razem z approvals.sh i pr-state.sh —
 # pr-state.sh sam wczytuje ten plik) i bierze z env:
 #
 #   GH_TOKEN  token z odczytem PR-ów i zgłoszeń (etykiety: zapis)
@@ -12,8 +16,8 @@
 # Wołający pobiera ten plik z `main`, tak jak skrypt Discorda: od statusu,
 # który stąd wynika, zależy, czy PR da się zmergować.
 #
-# Nic tu nie pamiętamy: kolejkę liczymy za każdym razem z etykiet w API, więc
-# nie ma znaczenia, które zdarzenie przepadło — następny bieg policzy dobrze.
+# Nic tu nie pamiętamy: kolejkę liczymy za każdym razem od zera, więc nie ma
+# znaczenia, które zdarzenie przepadło — następny bieg policzy dobrze.
 # Chronionych plików (workflow, Docker, `.claude/`) ten mechanizm nie pilnuje:
 # robią to code ownerzy z `.github/CODEOWNERS`.
 
@@ -21,15 +25,58 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
 LABEL_COLOR_CREDIT="fef2c0"
 
-# credit_numbers — numery scalonych PR-ów z etykietą kredytu, po jednym
-# w linijce. Lista zgłoszeń, nie wyszukiwarka: wyszukiwarka GitHuba spóźnia się
-# z indeksem, a po merge'u przeliczamy kolejkę od razu. Zgłoszenia mieszają
-# się z PR-ami, stąd `pull_request`; etykieta trafia tylko na scalone PR-y,
-# ale `merged_at` sprawdzamy na wszelki wypadek.
+# credit_facts — scalone do `main` PR-y od dnia CREDIT_SINCE jako tablica JSON
+# `{number, labeled, approved}`: czy PR ma etykietę kredytu i czy ma stojące
+# zatwierdzenie człowieka. Jedno zapytanie GraphQL na 50 PR-ów razem z ich
+# recenzjami i etykietami, a nie recenzje po jednym. Lista idzie od ostatnio
+# zmienionych i urywa się, gdy cała strona jest starsza niż CREDIT_SINCE: PR
+# scalony od tego dnia ma `updatedAt` nie wcześniejszy niż merge, więc dalej
+# nic już nie ma. Nie wyszukiwarka: ta spóźnia się z indeksem, a po merge'u
+# przeliczamy kolejkę od razu.
+credit_facts() {
+  local cursor="" page rows="" args pr
+  while :; do
+    args=(-f owner="${REPO%/*}" -f name="${REPO#*/}")
+    [ -z "$cursor" ] || args+=(-f after="$cursor")
+    page=$(gh api graphql "${args[@]}" -f query='
+      query($owner: String!, $name: String!, $after: String) {
+        repository(owner: $owner, name: $name) {
+          pullRequests(states: MERGED, baseRefName: "main", first: 50, after: $after,
+                       orderBy: {field: UPDATED_AT, direction: DESC}) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              number mergedAt updatedAt
+              labels(first: 30) { nodes { name } }
+              reviews(first: 100) {
+                nodes { databaseId state submittedAt author { login __typename } commit { oid } }
+              }
+            }
+          }
+        }
+      }')
+    # Recenzje w kształcie REST, żeby standing_approvals liczył je tak samo
+    # jak wszędzie (konto skasowane po fakcie to `user: null`).
+    rows+=$(jq -c --arg since "$CREDIT_SINCE" --arg label "$LABEL_CREDIT" '
+      .data.repository.pullRequests.nodes[]
+      | select(.mergedAt >= $since)
+      | {number, labeled: any(.labels.nodes[]; .name == $label),
+         reviews: [.reviews.nodes[] | {id: .databaseId, state, submitted_at: .submittedAt,
+           commit_id: .commit.oid,
+           user: (if .author == null then null else {login: .author.login, type: .author.__typename} end)}]}' <<<"$page")$'\n'
+    jq -e --arg since "$CREDIT_SINCE" '.data.repository.pullRequests
+        | .pageInfo.hasNextPage and ((.nodes | last.updatedAt) >= $since)' <<<"$page" > /dev/null || break
+    cursor=$(jq -r '.data.repository.pullRequests.pageInfo.endCursor' <<<"$page")
+  done
+  while IFS= read -r pr; do
+    [ -n "$pr" ] || continue
+    jq -c --argjson a "$(jq -c .reviews <<<"$pr" | standing_approvals | jq length)" \
+      '{number, labeled, approved: ($a > 0)}' <<<"$pr"
+  done <<<"$rows" | jq -s .
+}
+
+# credit_numbers — numery PR-ów w kolejce kredytu, po jednym w linijce.
 credit_numbers() {
-  gh api --paginate --slurp \
-    "repos/$REPO/issues?state=all&per_page=100&labels=$(jq -rn --arg s "$LABEL_CREDIT" '$s | @uri')" \
-    | jq -r 'add // [] | .[] | select(.pull_request != null and .pull_request.merged_at != null) | .number'
+  credit_facts | jq -r '.[] | select(.approved | not) | .number'
 }
 
 # credit_count [POMIŃ] — ile PR-ów stoi w kolejce, bez PR-a POMIŃ (numer).
@@ -78,61 +125,45 @@ credit_status() {
       end'
 }
 
-# credit_on_merge N — po merge'u: PR bez żadnego zatwierdzenia człowieka dostaje
-# etykietę kredytu. Zatwierdzenie, które stało w chwili merge'a, liczy się tak
-# jak przy statusie, więc PR, który przeszedł dzięki recenzji, kredytu nie zajmuje.
-credit_on_merge() {
-  local n=$1
-  if [ "$(human_approvals "$n")" -gt 0 ]; then
-    echo "#$n: scalony z recenzją człowieka — kredytu nie zajmuje."
-    return 0
-  fi
-  ensure_label "$LABEL_CREDIT" "$LABEL_COLOR_CREDIT" "PR scalony bez recenzji człowieka — zajmuje miejsce w kolejce, zwalnia je zatwierdzenie"
-  if [ "${DRY_RUN:-}" = 1 ]; then
-    echo "DRY_RUN: #$n: dałbym „$LABEL_CREDIT”"
-  else
-    jq -n --arg l "$LABEL_CREDIT" '{labels: [$l]}' | gh api -X POST "repos/$REPO/issues/$n/labels" --input - > /dev/null
-  fi
-  echo "#$n: scalony bez recenzji — kredyt $(credit_count)/$CREDIT_LIMIT." | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-}
-
-# credit_sweep — z każdego scalonego PR-a z etykietą kredytu, który ma już
-# stojące zatwierdzenie człowieka, zdejmuje etykietę. To nasza akcja, więc nie
-# woła nikogo na Discordzie (pr-credit.yml pinguje tylko ręczne zdjęcie).
+# credit_sweep — zgrywa etykietę kredytu z faktami (credit_facts): dokłada ją
+# na scalony PR bez zatwierdzenia, zdejmuje ze scalonego PR-a z zatwierdzeniem.
+# To nasza akcja, więc nikogo nie woła. Ręczne zdjęcie etykiety też nikogo nie
+# woła, bo nic nie zmienia: kolejka nie liczy etykiet, a ten bieg ją przywróci.
 # Rozstrzyga stan z API, a nie to, które zdarzenie nas obudziło — recenzja
 # scalonego PR-a mogła nie wywołać żadnego biegu.
 credit_sweep() {
-  local n
-  for n in $(credit_numbers); do
-    [ "$(human_approvals "$n")" -gt 0 ] || continue
-    if [ "${DRY_RUN:-}" = 1 ]; then
-      echo "DRY_RUN: #$n: zdjąłbym „$LABEL_CREDIT” — jest zatwierdzenie"
-    else
-      gh api -X DELETE "repos/$REPO/issues/$n/labels/$(jq -rn --arg s "$LABEL_CREDIT" '$s | @uri')" > /dev/null
+  local facts n labeled approved ensured=""
+  facts=$(credit_facts)
+  echo "Kolejka kredytu: $(jq '[.[] | select(.approved | not)] | length' <<<"$facts")/$CREDIT_LIMIT" \
+    | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  while IFS=$'\t' read -r n labeled approved; do
+    [ -n "$n" ] || continue
+    if [ "$approved" = false ] && [ "$labeled" = false ]; then
+      if [ -z "$ensured" ]; then
+        ensure_label "$LABEL_CREDIT" "$LABEL_COLOR_CREDIT" "PR scalony bez recenzji człowieka — zajmuje miejsce w kolejce, zwalnia je zatwierdzenie (etykieta tylko pokazuje kolejkę)"
+        ensured=1
+      fi
+      if [ "${DRY_RUN:-}" = 1 ]; then
+        echo "DRY_RUN: #$n: dałbym „${LABEL_CREDIT}” — scalony bez zatwierdzenia"
+      else
+        jq -n --arg l "$LABEL_CREDIT" '{labels: [$l]}' | gh api -X POST "repos/$REPO/issues/$n/labels" --input - > /dev/null
+      fi
+      echo "#$n: scalony bez recenzji — zajmuje miejsce w kolejce kredytu." | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+    elif [ "$approved" = true ] && [ "$labeled" = true ]; then
+      if [ "${DRY_RUN:-}" = 1 ]; then
+        echo "DRY_RUN: #$n: zdjąłbym „${LABEL_CREDIT}” — jest zatwierdzenie"
+      else
+        gh api -X DELETE "repos/$REPO/issues/$n/labels/$(jq -rn --arg s "$LABEL_CREDIT" '$s | @uri')" > /dev/null
+      fi
+      echo "#$n: zatwierdzony po merge'u — kredyt spłacony, miejsce w kolejce wolne." | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
     fi
-    echo "#$n: zatwierdzony po merge'u — kredyt spłacony, miejsce w kolejce wolne." | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-  done
-}
-
-# credit_unlabeled N SENDER TYTUŁ URL — ktoś zdjął etykietę kredytu ręcznie.
-# Gdy PR nie ma zatwierdzenia, to obejście kolejki: wiadomość z @everyone na
-# Discordzie (discord_send musi być wczytany). Z zatwierdzeniem zdjęcie jest
-# tym, co i tak zrobiłby sweep, więc milczymy. Nasze własne zdjęcia nie
-# docierają tu wcale: token workflow nie tworzy zdarzeń.
-credit_unlabeled() {
-  local n=$1 sender=$2 title=$3 url=$4
-  if [ "$(human_approvals "$n")" -gt 0 ]; then
-    echo "#$n: etykietę zdjął $sender, ale PR ma zatwierdzenie — bez pingu."
-    return 0
-  fi
-  discord_send warn "$sender" "⚠️ Zdjęta etykieta kredytu bez zatwierdzenia: #$n $title" "$url" \
-    "Kolejka kredytu po zdjęciu: $(credit_count)/$CREDIT_LIMIT. PR nie ma zatwierdzenia człowieka — ktoś musi go przejrzeć po fakcie." "" "" everyone
+  done < <(jq -r '.[] | [.number, .labeled, .approved] | @tsv' <<<"$facts")
 }
 
 # credit_merge_note N — dopisek do wiadomości o merge'u (discord.yml): puste,
 # gdy PR miał zatwierdzenie; inaczej „scalony bez recenzji — kredyt 7/15”.
-# Etykiety jeszcze może nie być (bieg pr-credit.yml idzie równolegle), więc
-# kolejkę liczymy bez tego PR-a i dodajemy jego miejsce.
+# Lista scalonych PR-ów mogła jeszcze nie dogonić merge'a, więc kolejkę liczymy
+# bez tego PR-a i dodajemy jego miejsce.
 credit_merge_note() {
   local n=$1 q
   [ "$(human_approvals "$n")" -eq 0 ] || return 0

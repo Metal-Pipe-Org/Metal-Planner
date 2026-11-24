@@ -373,7 +373,7 @@ pr_state() {
 
   req=$(required_reviewers)
   echo "Recenzenci konieczni (REQUIRED_REVIEWERS na main): $(jq -r 'if length == 0 then "nikt" else join(", ") end' <<<"$req")"
-  # Kolejkę kredytu liczymy raz na bieg; błąd API wywraca bieg, zamiast
+  # Kolejkę kredytu (fakty z API) liczymy raz na bieg; błąd API wywraca bieg, zamiast
   # puścić PR-y na kredyt z pustej kolejki.
   CREDIT_QUEUE=$(credit_count)
   echo "Kolejka kredytu: $CREDIT_QUEUE/$CREDIT_LIMIT"
