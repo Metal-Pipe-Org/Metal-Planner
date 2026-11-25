@@ -1272,17 +1272,14 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
     edges_of = {}    # kurs -> [najpóźniejsze, najwcześniejsze] wyjście w nim
     finals = {}      # key -> klasa podróży
     # Na przystanku, po pojeździe: (ready, arr, dep) -> etykieta, żeby
-    # bliźniaka znaleźć od razu, oraz [najpóźniejsze wyjście, najwcześniejsze
-    # wyjście] - granice, z których widać, że nikt tu nikogo nie odetnie,
-    # zanim przejdzie się po całym worku (to był koszt szukania: 190 mln
-    # porównań na Leśnicy). Zapas minuty na zaokrąglenia do pełnych minut.
+    # bliźniaka znaleźć od razu, oraz te same etykiety co w worku, tylko
+    # ułożone po wyjściu: odcina etykieta, która wyszła o więcej niż `limit`
+    # później albo wcześniej, więc wystarczy skraj, a nie cały worek
+    # (190 mln porównań na Leśnicy; wieczorem to tysiące etykiet na słupek,
+    # a skraj to kilka). Worek zostaje w swojej kolejności, bo od niej
+    # zależy, która z równych dróg wygra. Zapas minuty na zaokrąglenia do
+    # pełnych minut.
     twins_at = {}
-    spread_at = {}
-    # Te same etykiety po pojeździe co w worku, tylko ułożone po wyjściu:
-    # odcina etykieta, która wyszła o więcej niż `limit` później albo
-    # wcześniej, więc wystarczy skraj, a nie cały worek - wieczorem to
-    # tysiące etykiet na słupek, a skraj to kilka. Worek zostaje w swojej
-    # kolejności, bo od niej zależy, która z równych dróg wygra.
     by_dep_at = {}
     limit = forgive_sec + 60
 
@@ -1294,42 +1291,35 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
         zapisanej - bliźniaka sprawdza wołający, bo to najczęstszy przypadek,
         a wtedy etykieta nie musi nawet powstać. Do worka nie trafia
         etykieta, którą coś tu bije na zawsze."""
-        dep = label.dep
-        bag = at_stop.setdefault(stop, [])
+        dep, ready, arr, rides = label.dep, label.ready, label.arr, label.rides
         deps, ordered = by_dep_at.setdefault(stop, ([], []))
-        spread = spread_at.get(stop)
-        if spread is None:
-            spread_at[stop] = [dep, dep]
-        else:
-            # Te same warunki co `beats`, rozpisane w miejscu i od najtańszego:
-            # ta pętla to większość czasu wyszukiwania przy długim czekaniu.
-            ready, arr, rides = label.ready, label.arr, label.rides
-            if spread[0] - dep > limit:
-                for other in ordered[bisect_right(deps, dep + limit):]:
-                    if (other.ready <= ready and other.arr <= arr
-                            and not (rides_matter and other.rides > rides)):
-                        return
-            if dep - spread[1] > limit:
-                cut = bisect_left(deps, dep - limit)
-                beaten = [other for other in ordered[:cut]
-                          if ready <= other.ready and arr <= other.arr
-                          and not (rides_matter and rides > other.rides)]
-                if beaten:
-                    gone = set(map(id, beaten))
-                    bag[:] = [other for other in bag if id(other) not in gone]
-                    ordered[:cut] = [other for other in ordered[:cut] if id(other) not in gone]
-                    deps[:cut] = [other.dep for other in ordered[:cut - len(beaten)]]
-                    for other in beaten:
-                        del twins[twin_key(other.ready, other.arr, other.dep,
-                                           other.rides)]
-            spread[0] = max(spread[0], dep)
-            spread[1] = min(spread[1], dep)
-        twins[twin_key(label.ready, label.arr, dep, label.rides)] = label
+        # Te same warunki co `beats`, rozpisane w miejscu i od najtańszego:
+        # ta pętla to większość czasu wyszukiwania przy długim czekaniu.
+        if deps and deps[-1] - dep > limit:
+            for other in ordered[bisect_right(deps, dep + limit):]:
+                if (other.ready <= ready and other.arr <= arr
+                        and not (rides_matter and other.rides > rides)):
+                    return
+        if deps and dep - deps[0] > limit:
+            cut = bisect_left(deps, dep - limit)
+            beaten = [other for other in ordered[:cut]
+                      if ready <= other.ready and arr <= other.arr
+                      and not (rides_matter and rides > other.rides)]
+            if beaten:
+                gone = set(map(id, beaten))
+                bag = at_stop.setdefault(stop, [])
+                bag[:] = [other for other in bag if id(other) not in gone]
+                ordered[:cut] = [other for other in ordered[:cut] if id(other) not in gone]
+                deps[:cut] = [other.dep for other in ordered[:cut - len(beaten)]]
+                for other in beaten:
+                    del twins[twin_key(other.ready, other.arr, other.dep,
+                                       other.rides)]
+        twins[(ready, arr, dep, rides if rides_matter else 0)] = label
         # W worku tylko ci, którzy jeszcze w coś wsiądą: z kompletem pojazdów
         # odcinać i być odcinanym wolno (`ordered`), ale wsiadanie każdego
         # z nich w każdy odjazd stąd to była prawie połowa przebiegów.
-        if label.rides < max_rides:
-            bag.append(label)
+        if rides < max_rides:
+            at_stop.setdefault(stop, []).append(label)
         k = bisect_right(deps, dep)
         deps.insert(k, dep)
         ordered.insert(k, label)
@@ -1447,32 +1437,32 @@ def _value_journeys(day, source_stops, target_set, dep_sec, best_arr,
             # Margines po nazwie słupka, nie po miejscu: perony węzła
             # (Galeria Dominikańska 01…11) są jednym miejscem, a przejście
             # między nimi to dalej szacowany marsz.
-            slack = (walk_margin_sec
-                     if day.stop_names[sibling] != day.stop_names[arr_s] else 0)
+            moved = day.stop_names[sibling] != day.stop_names[arr_s]
+            slack = walk_margin_sec if moved else 0
             if when - slack <= latest.get(sibling, -1):
                 walks.append((sibling, when, sibling in target_set,
-                              twins_at.setdefault(sibling, {})))
+                              twins_at.setdefault(sibling, {}), moved))
         twins = twins_at.setdefault(arr_s, {})
         ready = arr_t + TRANSFER_SEC
         for label in [l for bag in riding.values() for l in bag.values()]:
-            twin = twins.get(twin_key(ready, arr_t, label.dep, label.rides))
+            dep, rides = label.dep, label.rides
+            slot = rides if rides_matter else 0
+            twin = twins.get((ready, arr_t, dep, slot))
             if twin is not None:
                 # Bliźniak dojdzie dalej razem z tamtą etykietą.
                 twin.parents.append((label, i))
                 continue
-            here = _Label(ready, arr_t, label.dep, label.rides, 0, [(label, i)])
+            here = _Label(ready, arr_t, dep, rides, 0, [(label, i)])
             settle(arr_s, twins, here)
             # Dalej pieszo - także z etykiety, która tu przegrała: przegrała
             # jako miejsce WSIADANIA (tamta zdąży na wszystko, na co ona), ale
             # jej własne dojście może dawać coś, czego tamtej brak.
             if reach is not None:
                 finish(arr_t + reach[0], here)
-            for sibling, when, at_target, there in walks:
-                twin = there.get(twin_key(when, when, here.dep, here.rides))
+            for sibling, when, at_target, there, moved in walks:
+                twin = there.get((when, when, dep, slot))
                 if at_target or twin is None:
-                    walked = _Label(when, when, here.dep, here.rides, 0,
-                                    [(here, None)],
-                                    day.stop_names[sibling] != day.stop_names[arr_s])
+                    walked = _Label(when, when, dep, rides, 0, [(here, None)], moved)
                 # Do celu idzie ta etykieta, nawet jeśli na przystanku okaże
                 # się bliźniakiem - z tą jedną drogą, nie z cudzymi.
                 if at_target:
