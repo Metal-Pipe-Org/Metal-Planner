@@ -8253,6 +8253,10 @@ let whenChangedAway = false;
 
 function closeWheels() {
     if (whenSheet.hidden) return;
+    if (wheelTimer) {
+        clearTimeout(wheelTimer);
+        settleWheels();
+    }
     whenSheet.hidden = true;
     whenBackdrop.hidden = true;
     if (!whenOnPhone) whenBox.querySelector('.when-pill').focus();
@@ -8278,8 +8282,17 @@ function finishWhen() {
     closeWheels();
 }
 
+// Kolumna przewijana przez aplikację (Teraz, stuknięta pozycja) pamięta, dokąd
+// jedzie: „Gotowe" w trakcie płynnego przewijania czytało pozycję z połowy
+// drogi, a po schowaniu arkusza nawet 00:00.
 function wheelIndex(wheel) {
+    if (wheel.dataset.target !== undefined) return Number(wheel.dataset.target);
     return Math.max(0, Math.min(wheel.children.length - 1, Math.round(wheel.scrollTop / WHEEL_H)));
+}
+
+function scrollWheelTo(wheel, index, behavior) {
+    wheel.dataset.target = index;
+    wheel.scrollTo({top: index * WHEEL_H, behavior});
 }
 
 function scrollWheels(behavior) {
@@ -8291,7 +8304,7 @@ function scrollWheels(behavior) {
         min: Math.min(11, Math.round(at.getMinutes() / 5)),
     };
     for (const wheel of whenSheet.querySelectorAll('.when-wheel')) {
-        wheel.scrollTo({top: Math.max(0, indexOf[wheel.dataset.wheel]) * WHEEL_H, behavior});
+        scrollWheelTo(wheel, Math.max(0, indexOf[wheel.dataset.wheel]), behavior);
     }
     markWheels();
 }
@@ -8306,6 +8319,7 @@ function markWheels() {
 // Po zatrzymaniu kółek chwila z nich trafia do formularza. Ta sama chwila co
 // w formularzu (np. „teraz" zaokrąglone do 5 min) niczego nie zmienia.
 function settleWheels() {
+    wheelTimer = null;
     markWheels();
     const value = name => {
         const wheel = whenSheet.querySelector(`[data-wheel="${name}"]`);
@@ -8325,9 +8339,18 @@ function settleWheels() {
 }
 
 whenSheet.addEventListener('scroll', () => {
+    if (whenSheet.hidden) return;
     clearTimeout(wheelTimer);
     wheelTimer = setTimeout(settleWheels, 120);
 }, true);
+
+// Palec na kolumnie: od teraz liczy się to, gdzie ją zostawi.
+for (const type of ['touchstart', 'pointerdown', 'wheel']) {
+    whenSheet.addEventListener(type, event => {
+        if (!event.target.closest('.when-wheels')) return;
+        for (const wheel of whenSheet.querySelectorAll('.when-wheel')) delete wheel.dataset.target;
+    }, {passive: true});
+}
 
 whenSheet.addEventListener('click', event => {
     const item = event.target.closest('.when-item');
@@ -8346,7 +8369,7 @@ whenSheet.addEventListener('click', event => {
         }
     } else if (item) {
         const wheel = item.parentElement;
-        wheel.scrollTo({top: [...wheel.children].indexOf(item) * WHEEL_H, behavior: 'smooth'});
+        scrollWheelTo(wheel, [...wheel.children].indexOf(item), 'smooth');
     } else if (day) {
         pickDay(day);
     } else if (now) {
@@ -8363,6 +8386,7 @@ whenSheet.addEventListener('click', event => {
 // Esc zamyka bez zmian: wraca to, co było przy otwarciu, łącznie z trybem.
 function cancelWheels() {
     clearTimeout(wheelTimer);
+    wheelTimer = null;
     setArriveBy(whenSnapshot.arrive);
     timeChosen = whenSnapshot.chosen;
     timeInput.value = whenSnapshot.time;
