@@ -19,7 +19,11 @@ wysłaniu wyniku czeka na koniec pobierania (wait_for_refreshes) i dosyła
 rowery i auta na świeżych danych ostatnim etapem odpowiedzi (patrz
 routes.api_flow i planner.plan_flow_stages).
 
-Wątek rozkładu startuje w procesie, który obsługuje zapytania: z
+Wyjątkiem są pozycje pojazdów MPK: te śledzi w tle vehicles.start_tracking,
+bo kierunek pojazdu składa się z kilku kolejnych odczytów (decyzja
+użytkownika z 2026-11-25, #380).
+
+Wątek rozkładu (i pojazdów) startuje w procesie, który obsługuje zapytania: z
 post_worker_init w gunicorn.conf.py (master tylko forkuje - wątek w nim nie
 przeszedłby do workerów) i z app.py przy uruchomieniu lokalnym.
 """
@@ -31,6 +35,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 import gtfs
+import vehicles
 
 DAYS_TICK_SEC = 60
 NEXT_DAY_FROM_HOUR = 23
@@ -122,7 +127,9 @@ def _loop():
 
 
 def start():
-    """Uruchamia wątek rozkładu. Raz na proces obsługujący zapytania."""
+    """Uruchamia wątek rozkładu i śledzenie pojazdów. Raz na proces
+    obsługujący zapytania."""
     thread = threading.Thread(target=_loop, name="warmup", daemon=True)
     thread.start()
+    vehicles.start_tracking()
     return thread

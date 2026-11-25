@@ -16,6 +16,14 @@ zmieniają się co kilkanaście sekund, więc trzyma się je wyłącznie w pami�
 procesu, z krótkim cache (CACHE_SEC) - inaczej każde odświeżenie warstwy w
 przeglądarce (front odpytuje się cyklicznie, patrz VEHICLES_REFRESH_MS w
 app.js) biłoby wprost w cudzy serwer.
+
+Pozycje odświeża też wątek w tle (start_tracking), także gdy nikt nie ogląda
+warstwy: kierunek z ruchu potrzebuje dwóch przesunięć, a kurs - kropki widzianej
+dwa razy, więc bez tego pierwsza osoba po przerwie przez minutę-dwie widziałaby
+same kółka. Gdy ktoś ogląda (żądanie w ostatnich WATCH_SEC), co CACHE_SEC;
+bez widzów co IDLE_SEC - tyle wystarcza, żeby ślady ruchu (TRACK_TTL_SEC,
+STEP_M) nie wygasały. Żądanie oddaje to, co jest w pamięci, i pyta MPK samo
+tylko wtedy, gdy dane są starsze niż CACHE_SEC.
 """
 
 import bisect
@@ -24,6 +32,7 @@ import math
 import re
 import socket
 import ssl
+import sys
 import threading
 import time
 import urllib.error
@@ -38,6 +47,9 @@ import serverlog
 VEHICLES_URL = "https://mpk.wroc.pl/bus_position"
 
 CACHE_SEC = 10
+WATCH_SEC = 60                # żądanie z ostatniej minuty: ktoś ogląda warstwę
+IDLE_SEC = 30                 # bez widzów odświeżamy tak rzadko
+FEED_OK_SEC = 5 * 60          # kanał działa tyle bez błędu: koniec awarii w logu
 
 # Wrocław i najbliższa aglomeracja, z zapasem - dalej MPK nie jeździ. Poza
 # tym zakresem w danych API trafiają się wyłącznie błędne/sentinelowe
@@ -47,7 +59,9 @@ LAT_RANGE = (50.6, 51.6)
 LON_RANGE = (16.4, 17.8)
 
 _lock = threading.Lock()
-_cache = {"at": 0.0, "vehicles": None, "same_since": None, "snapshot": None}
+_cache = {"at": 0.0, "tried": -math.inf, "vehicles": None, "same_since": None, "snapshot": None,
+          "watched": -math.inf, "failed": None}
+_tracker = [None]
 
 
 def _query_fields():
@@ -117,26 +131,45 @@ def _failure_reason(error):
 
 
 def get_vehicles():
-    """Aktualne pozycje pojazdów, z krótkim cache (CACHE_SEC) - patrz docstring
-    modułu. Rzuca wyjątkiem sieciowym (OSError, w tym urllib.error.URLError
-    i timeout) albo gtfs.FileNotFoundError (brak bazy rozkładów) - kto woła,
-    łapie i zamienia na odpowiedź błędu (patrz routes.api_vehicles)."""
+    """Aktualne pozycje pojazdów dla żądania (odnotowuje, że ktoś ogląda), z
+    krótkim cache (CACHE_SEC) - patrz docstring modułu. Rzuca wyjątkiem
+    sieciowym (OSError, w tym urllib.error.URLError i timeout) albo
+    gtfs.FileNotFoundError (brak bazy rozkładów) - kto woła, łapie i zamienia
+    na odpowiedź błędu (patrz routes.api_vehicles)."""
+    _cache["watched"] = time.monotonic()
+    return _refresh(CACHE_SEC)
+
+
+def _feed_failed(reason):
+    """Kanał, który co któreś pobranie zrywa połączenie, to jedna awaria, a nie
+    wpis co kilkanaście sekund przez całą noc: seria błędów trwa, dopóki kanał
+    nie przepracuje FEED_OK_SEC bez błędu (patrz serverlog.log_repeating_error)."""
+    _cache["failed"] = time.monotonic()
+    serverlog.log_repeating_error("pozycje pojazdów", f"Pozycje pojazdów z MPK: pobranie nie powiodło się - {reason}")
+
+
+def _refresh(max_age):
+    """Pozycje z pamięci, gdy są młodsze niż max_age, a inaczej świeżo z MPK.
+    Po nieudanej próbie następna najwcześniej po CACHE_SEC, bez względu na
+    to, kto pyta - stare pozycje zostają."""
     with _lock:
-        if _cache["vehicles"] is not None and time.monotonic() - _cache["at"] < CACHE_SEC:
+        now = time.monotonic()
+        if _cache["vehicles"] is not None and (now - _cache["at"] < max_age or now - _cache["tried"] < CACHE_SEC):
             return _cache["vehicles"]
+        _cache["tried"] = now
         # Poza try: brak bazy rozkładów to nie błąd MPK i ma polecieć z własnym komunikatem.
         fields = _query_fields()
         try:
             raw = _fetch_raw(fields)
         except (OSError, ValueError) as e:
-            reason = _failure_reason(e)
-            serverlog.log_repeating_error(reason, f"Pozycje pojazdów z MPK: pobranie nie powiodło się - {reason}")
+            _feed_failed(_failure_reason(e))
             raise
         vehicles = _parse(raw)
         if not vehicles:
-            serverlog.log_repeating_error("pusta odpowiedź", "Pozycje pojazdów z MPK: pobranie nie powiodło się - pusta odpowiedź")
-        else:
+            _feed_failed("pusta odpowiedź")
+        elif _cache["failed"] is not None and time.monotonic() - _cache["failed"] >= FEED_OK_SEC:
             serverlog.close_error_streak()
+            _cache["failed"] = None
         # MPK potrafi zamilknąć i oddawać w kółko te same pozycje - bez śladu
         # po tym wyglądałoby to jak żywe dane, więc pamiętamy, od kiedy
         # odpowiedź jest identyczna.
@@ -152,6 +185,40 @@ def get_vehicles():
         _cache["vehicles"] = vehicles
         _cache["at"] = time.monotonic()
         return vehicles
+
+
+def _track_once():
+    """Jedno odświeżenie z wątku w tle; zwraca, ile sekund spać do następnego."""
+    max_age = CACHE_SEC if time.monotonic() - _cache["watched"] < WATCH_SEC else IDLE_SEC
+    try:
+        _refresh(max_age)
+    except (OSError, ValueError):
+        pass        # zalogowane w _refresh; stare pozycje zostają do następnej próby
+    return max(1.0, max_age - (time.monotonic() - _cache["tried"]))
+
+
+def _track_forever():
+    last_error = None
+    while True:
+        try:
+            pause = _track_once()
+        except Exception as e:
+            # Wątek, który zdechnie na wyjątku, przestaje śledzić pojazdy do
+            # restartu - zgłaszamy (raz na rodzaj błędu) i próbujemy dalej.
+            if repr(e) != last_error:
+                print(f"Pojazdy w tle: {e!r}", file=sys.stderr, flush=True)
+            last_error, pause = repr(e), IDLE_SEC
+        time.sleep(pause)
+
+
+def start_tracking():
+    """Uruchamia wątek odświeżania w tle - raz na proces obsługujący zapytania
+    (patrz warmup.start)."""
+    with _lock:
+        if _tracker[0] is None:
+            _tracker[0] = threading.Thread(target=_track_forever, name="vehicles", daemon=True)
+            _tracker[0].start()
+    return _tracker[0]
 
 
 def stale_sec():
