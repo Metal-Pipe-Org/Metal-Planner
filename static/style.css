@@ -779,8 +779,7 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 }
 
 .endpoint-fields input:focus,
-.place-field input:focus,
-.time-field input:focus {
+.place-field input:focus {
     outline: none;
     border-color: var(--accent);
     background: var(--surface);
@@ -986,51 +985,6 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
     gap: 8px;
     margin-top: 12px;
 }
-
-.time-field {
-    flex: 0 0 auto;
-    flex-direction: column;
-    display: flex;
-    align-items: stretch;
-    gap: 8px;
-    height: auto;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--surface-alt);
-    color: var(--ink-faint);
-    font-size: 12.5px;
-}
-
-.time-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.time-field input {
-    border: none;
-    background: none;
-    font: inherit;
-    font-size: 14px;
-    color: var(--ink);
-    padding: 0;
-}
-
-.time-now-button {
-    flex: 0 0 auto;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--ink-soft);
-    font: inherit;
-    font-size: 11px;
-    padding: 3px 6px;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.time-now-button:hover { background: #e8edf3; color: var(--ink); }
 
 .search-row .button.primary { flex: 1; }
 
@@ -3242,8 +3196,8 @@ body.mode-timetable .time-headline { display: none; }
     border-color: #263238;
 }
 
-/* Pole szukania (z ✕ czyszczącym w środku), a pod nim czas -
-   ten sam .time-field, co w wyszukiwarce, na całą szerokość karty. Lista
+/* Pole szukania (z ✕ czyszczącym w środku), a pod nim pastylka godziny -
+   ta sama, co w wyszukiwarce. Lista
    podpowiedzi kotwiczy się do .tt-top, więc ma szerokość całego wiersza. */
 .tt-top {
     position: relative;
@@ -3266,26 +3220,15 @@ body.mode-timetable .time-headline { display: none; }
     gap: 8px;
 }
 
-.tt-time-row .time-field { flex: 1 1 0; min-width: 0; }
+.tt-time-row .tt-when { flex: 1 1 0; min-width: 0; }
 
 .tt-top .ac-list { top: 48px; }
 
-/* Wysokość pola szukania (44 px) - także w rozkładzie linii, gdzie w ramce
-   została sama data. Godzina i data stoją obok siebie w jednej ramce, bez
-   rozwijania; rozkład linii nie ma godziny, więc zostaje w nim sama data,
-   bez „teraz". */
-.tt-top .time-field {
+.tt-when {
     position: relative;
-    box-sizing: border-box;
-    min-height: 44px;
-    padding-top: 3px;
-    padding-bottom: 3px;
-    flex-direction: row;
+    display: flex;
     align-items: center;
-    gap: 14px;
 }
-
-.time-field.date-only .tt-hour-row { display: none; }
 
 /* "Zamknij rozkład" - patrz index.html: pokazuje się TYLKO w widoku mapy na
    telefonie, gdzie karta rozkładu jest jedyną rzeczą nad mapą. Mały niebieski

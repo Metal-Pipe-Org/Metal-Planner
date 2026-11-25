@@ -160,11 +160,8 @@ body.view-list .places-bar { display: none; }
 
 /* --------------------------------------------- karta wyszukiwania --- */
 
-/* Na wąskim ekranie „Odjazd" przepychał ✕ poza kartę, a kółko ładowania na
-   „Szukaj" robiło to samo na każdym telefonie. Pole godziny z „teraz" obok
-   mówi samo za siebie, a przycisk ma się kurczyć, a nie pchać sąsiadów. */
-.time-row > span:first-child { display: none; }
-.time-field .time-row { gap: 5px; }
+/* Kółko ładowania na „Szukaj" przepychało ✕ poza kartę na każdym telefonie:
+   przycisk ma się kurczyć, a nie pchać sąsiadów. */
 .search-row .button.primary { min-width: 0; padding: 0 12px; }
 
 /* Kółka wysuwają się od dołu ekranu. */

@@ -491,24 +491,15 @@
                 aria-label="Podpowiedzi linii i przystanków"></ul>
 
             {#
-              Dzień i godzina w TEJ SAMEJ ramce, co czas wyszukiwarki
-              (.time-field), w osobnym wierszu pod polem szukania. Data stoi
-              obok godziny, bez rozwijania - na całą szerokość karty jest na
-              nią miejsce. Godzina nie odpytuje serwera - odpowiedź niesie
-              całą dobę, więc jest punktem odniesienia tablicy przystanku: od
-              niej lecą odjazdy i na niej stoi kurs rysowany na mapie. Rozkład
-              linii godziny nie używa, więc zostaje w nim sam dzień (klasa
-              `date-only`, ustawia ją timetable.js).
+              Dzień i godzina to ta sama pastylka co w wyszukiwarce (#when):
+              na czas Rozkładów przechodzi tu (patrz timetable.js setMode), więc
+              godzina jest jedna dla obu widoków i wybiera się ją tak samo.
+              Godzina nie odpytuje serwera - odpowiedź niesie całą dobę, więc
+              jest punktem odniesienia tablicy przystanku: od niej lecą odjazdy
+              i na niej stoi kurs rysowany na mapie.
             #}
             <div class="tt-time-row">
-                <div class="time-field" id="tt-time-field">
-                    <div class="time-row tt-hour-row">
-                        <span>Odjazd</span>
-                        <button type="button" id="tt-now" class="time-now-button">teraz</button>
-                    </div>
-                    <div class="time-row tt-date-part">
-                        <span>Data</span>
-                    </div>
+                <div class="tt-when" id="tt-time-field">
                     <span class="spinner tt-spinner" aria-hidden="true"></span>
                 </div>
 

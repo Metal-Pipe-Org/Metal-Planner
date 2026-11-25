@@ -8010,8 +8010,12 @@ function searchWhenSoon() {
     }, 600);
 }
 
+// Rozkłady pokazują odjazdy, a z pokładu jedzie się teraz: tam przyjazdu nie ma.
+const inTimetable = () => document.body.classList.contains('mode-timetable');
+const whenArrive = () => arriveBy && !onboardOn && !inTimetable();
+
 function whenModeName() {
-    return arriveBy && !onboardOn ? 'Przyjazd' : 'Odjazd';
+    return whenArrive() ? 'Przyjazd' : 'Odjazd';
 }
 
 function setWhenMode(arrive) {
@@ -8062,12 +8066,13 @@ function wheelHtml(name, label, items) {
 function sheetTopHtml() {
     return `${modesHtml()}
         <div class="when-sheet-head">
-            ${arriveBy ? '' : nowChip()}
+            ${whenArrive() ? '' : nowChip()}
             <button type="button" class="button primary when-done" data-done>Gotowe</button>
         </div>`;
 }
 
 function modesHtml() {
+    if (inTimetable()) return '';
     return `<div class="when-modes" role="tablist">
             <button type="button" role="tab" class="when-mode${arriveBy ? '' : ' on'}" data-mode="depart"
                     aria-selected="${!arriveBy}">Odjazd</button>
@@ -8141,7 +8146,7 @@ function paintDesk() {
         tab.setAttribute('aria-selected', on);
     }
     const now = whenSheet.querySelector('[data-now]');
-    now.hidden = arriveBy;
+    now.hidden = whenArrive();
     now.classList.toggle('on', !timeChosen);
     paintDays();
 }
@@ -8242,12 +8247,25 @@ whenSheet.addEventListener('focusout', event => {
     }
 });
 
+// Zmiana w Rozkładach przelicza tablicę od razu, a trasę dopiero po powrocie
+// do wyszukiwarki (patrz resumePlanner) - schowanej nie ma po co liczyć.
+let whenChangedAway = false;
+
 function closeWheels() {
     if (whenSheet.hidden) return;
     whenSheet.hidden = true;
     whenBackdrop.hidden = true;
     if (!whenOnPhone) whenBox.querySelector('.when-pill').focus();
-    if (wheelsChanged) searchWhenSoon();
+    if (!wheelsChanged) return;
+    document.dispatchEvent(new Event('planner:when'));
+    if (inTimetable()) whenChangedAway = true;
+    else searchWhenSoon();
+}
+
+// Rozkłady liczą tablicę od godziny z pola, więc „teraz" musi być świeże.
+function whenEnterTimetable() {
+    if (!timeChosen) setTimeNow();
+    paintWhen();
 }
 
 // Na komputerze „Gotowe", Enter i klik obok przyjmują też godzinę dopiero
@@ -8332,6 +8350,8 @@ whenSheet.addEventListener('click', event => {
     } else if (day) {
         pickDay(day);
     } else if (now) {
+        // „Teraz" to odjazd: wybrane w Rozkładach nie zostawia trasie przyjazdu.
+        setArriveBy(false);
         setTimeNow();
         wheelsChanged = true;
         now.classList.add('on');
@@ -8369,13 +8389,14 @@ whenSheet.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
         event.preventDefault();
         cancelWheels();
-    } else if (event.key === 'Enter' && !event.target.closest('[data-mode], [data-now], .when-day')) {
+    } else if (event.key === 'Enter' && !event.target.closest('[data-mode], [data-now]')) {
         event.preventDefault();
         if (whenOnPhone) {
             clearTimeout(wheelTimer);
             settleWheels();
             wheelsChanged = true;
         }
+        if (day) pickDay(day);
         finishWhen();
     } else if (whenOnPhone) {
         // na telefonie klawiatury nie ma
@@ -10031,6 +10052,10 @@ function resumePlanner() {
     else { renderTimeHeadline(); renderVehicles();
            refreshCarLayer(); refreshBikeLayer(); }
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
+    if (whenChangedAway) {
+        whenChangedAway = false;
+        searchWhenSoon();
+    }
 }
 
 // Pierwsze postawienie warstw aut i rowerów: zanim padnie jakiekolwiek
@@ -10044,7 +10069,7 @@ window.plannerBridge = {
     map, esc, fitTo, setView, syncTabs, setBaseDim, renderVehicles,
     attachAutocomplete, suggestionsFor, suggestionHtml,
     LINE_COLORS, MODE_LABEL, STOP_NAMES, ROUTE_ICON, lineColor, lineStyle, escClass,
-    suspendPlanner, resumePlanner, setTimeNow,
+    suspendPlanner, resumePlanner, setTimeNow, paintWhen, whenEnterTimetable,
     trainsOn: () => trainsOn,
 };
 
