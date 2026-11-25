@@ -270,8 +270,7 @@ ROUTE_NEAR_M = 100            # kropka tak blisko przebiegu wariantu trasy ...
 ROUTE_DEG = 45                # ... a przebieg biegnie tam tak zgodnie z ruchem: pasuje
 PATH_FAR_M = 1000             # dalej od prostej między przystankami przebiegu nie liczymy
 TRACK_TTL_SEC = 300
-STALE_SEC = 90                # kanał tyle nie ruszył pojazdu poza pętlą: pozycja nieaktualna
-TERMINUS_M = 300              # tak blisko końca kursu swojej linii pojazd po prostu czeka
+STALE_SEC = 90                # kanał tyle nie ruszył pojazdu: pozycja nieaktualna
 
 _TRIP_ID = re.compile(r"\d+_\d+")
 WARSAW = ZoneInfo("Europe/Warsaw")
@@ -519,7 +518,7 @@ def _add_courses(vehicles):
                 v["course"] = (trip, stops[where[1]])
                 v["rest"] = [[round(s[0], 5), round(s[1], 5)] for s in stops[where[1]:]]
         _add_routes(vehicles, trips, db)
-        _mark_stale(vehicles, trips, db)
+        _mark_stale(vehicles)
     finally:
         db.close()
 
@@ -566,20 +565,14 @@ def _add_routes(vehicles, trips, db):
             v["route"] = (headsign, (lat, lon, None, name))
 
 
-def _mark_stale(vehicles, trips, db):
+def _mark_stale(vehicles):
     """v["stale"]: kanał MPK od ponad STALE_SEC podaje pojazd co do cyfry w tym
-    samym miejscu, a ten nie czeka na pętli swojej linii ani w zajezdni (linia
-    nie ma teraz żadnego kursu). Pojazd, który naprawdę stoi, ma drżące
-    współrzędne; takie zamrożenie w pomiarze 2026-11-25 zwykle kończyło się
-    skokiem o kilometr - pojazd jechał, a kanał go nie odświeżał."""
-    ends = {}
-    for t in trips:
-        stops = _trip_stops(t, db)
-        ends.setdefault((t["route"], t["type"]), set()).update((stops[0][:2], stops[-1][:2]))
+    samym miejscu. Bez wyjątków dla pętli i zajezdni: pasażer ma widzieć, że o
+    tym pojeździe nic świeżego nie wiemy, a nie zgadywać, czy stoi, czy kanał
+    go nie odświeża (pomiar 2026-11-25: takie zamrożenie zwykle kończyło się
+    skokiem o kilometr)."""
     for v in vehicles:
-        line_ends = ends.get((v["line"], _ROUTE_TYPE[v["kind"]]))
-        v["stale"] = bool(v["still_sec"] > STALE_SEC and line_ends
-                          and all(_metres((v["lat"], v["lon"]), e) > TERMINUS_M for e in line_ends))
+        v["stale"] = v["still_sec"] > STALE_SEC
 
 
 def _add_headings(vehicles):

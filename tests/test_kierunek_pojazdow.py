@@ -214,10 +214,10 @@ def test_a_vehicle_the_feed_froze_on_the_route_loses_its_arrow(feed):
     assert zamrozony["stale"] and zamrozony["heading"] is None and "rest" not in zamrozony
 
 
-def test_a_vehicle_waiting_at_its_terminus_is_not_stale(feed):
-    na_petli = {**_moving(LAT["S0"], 17.0), "still_sec": 600}
+def test_a_vehicle_standing_at_its_terminus_is_stale_too(feed):
+    na_petli = {**_moving(LAT["S0"], 17.0), "still_sec": vehicles.STALE_SEC + 1}
     vehicles._add_courses([na_petli])
-    assert na_petli["stale"] is False
+    assert na_petli["stale"] is True
 
 
 def test_the_feed_tells_how_long_ago_a_vehicle_last_moved(monkeypatch):
