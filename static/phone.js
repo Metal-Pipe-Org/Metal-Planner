@@ -135,7 +135,9 @@ const phoneLayout = (() => {
                 part('search-summary-from', from),
                 part('search-summary-arrow', '→'),
                 part('search-summary-to', document.getElementById('end').value),
-                part('search-summary-time', document.getElementById('time').value),
+                part('search-summary-time',
+                     (document.getElementById('time-mode').getAttribute('aria-pressed') === 'true'
+                         ? 'na ' : '') + document.getElementById('time').value),
                 // Kółko na końcu linijki, za godziną: kolejne etapy wyniku
                 // jeszcze się liczą (patrz setSearching w app.js).
                 busy,
