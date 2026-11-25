@@ -227,7 +227,7 @@
     {
       "id": "map-after-search",
       "name": "Mapa po wyszukaniu",
-      "description": "Jak mapa ustawia się, gdy narysuje nowe wyszukiwanie. Auto: na telefonie pokazuje start, a na komputerze wszystko, co narysowała.",
+      "description": "Jak mapa ustawia się, gdy narysuje nowe wyszukiwanie.",
       "tags": ["Mapa"]
     },
     {
