@@ -59,7 +59,7 @@ LAT_RANGE = (50.6, 51.6)
 LON_RANGE = (16.4, 17.8)
 
 _lock = threading.Lock()
-_cache = {"at": 0.0, "tried": -math.inf, "vehicles": None, "same_since": None, "snapshot": None,
+_cache = {"tried": -math.inf, "vehicles": None, "same_since": None, "snapshot": None,
           "watched": -math.inf, "failed": None}
 _tracker = [None]
 
@@ -150,12 +150,12 @@ def _feed_failed(reason):
 
 
 def _refresh(max_age):
-    """Pozycje z pamięci, gdy są młodsze niż max_age, a inaczej świeżo z MPK.
-    Po nieudanej próbie następna najwcześniej po CACHE_SEC, bez względu na
-    to, kto pyta - stare pozycje zostają."""
+    """Pozycje z pamięci, gdy ostatnie pobranie zaczęło się mniej niż max_age
+    temu, a inaczej świeżo z MPK. Po nieudanym pobraniu też się czeka - stare
+    pozycje zostają, a MPK nie dostaje pytań częściej niż zwykle."""
     with _lock:
         now = time.monotonic()
-        if _cache["vehicles"] is not None and (now - _cache["at"] < max_age or now - _cache["tried"] < CACHE_SEC):
+        if _cache["vehicles"] is not None and now - _cache["tried"] < max_age:
             return _cache["vehicles"]
         _cache["tried"] = now
         # Poza try: brak bazy rozkładów to nie błąd MPK i ma polecieć z własnym komunikatem.
@@ -184,7 +184,6 @@ def _refresh(max_age):
         for v in vehicles:
             del v["key"]
         _cache["vehicles"] = vehicles
-        _cache["at"] = time.monotonic()
         return vehicles
 
 

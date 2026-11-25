@@ -33,7 +33,7 @@ def mpk(monkeypatch):
     monkeypatch.setattr(vehicles, "_add_courses", lambda vs: None)
     fake_time = types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)
     monkeypatch.setattr(vehicles, "time", fake_time)
-    monkeypatch.setattr(vehicles, "_cache", {"at": 0.0, "tried": -math.inf, "vehicles": None, "same_since": None,
+    monkeypatch.setattr(vehicles, "_cache", {"tried": -math.inf, "vehicles": None, "same_since": None,
                                             "snapshot": None, "watched": -math.inf, "failed": None})
     monkeypatch.setattr(vehicles, "_tracks", {})
     logged = []
