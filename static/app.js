@@ -1739,10 +1739,6 @@ function writeControl(control, value) {
     else if ([...control.options].some(option => option.value === value)) control.value = value;
 }
 
-// Domyślny kadr po wyszukiwaniu zależy od urządzenia (#321), a za domyślne
-// uchodzi to, co kontrolka ma przed odczytem niżej - stąd ustawienie tutaj.
-$('map-after-search').value = phoneLayout.active() ? 'start' : 'all';
-
 const SETTINGS = new Map();
 const SETTING_BY_CONTROL = new Map();
 for (const row of settingsRows) {
@@ -2138,7 +2134,8 @@ function drawFlow(flow, refit) {
     renderVehicles();
     if (!refit) return;
 
-    const framing = setting('map-after-search');
+    let framing = setting('map-after-search');
+    if (framing === 'auto') framing = phoneLayout.active() ? 'start' : 'all';
     if (framing === 'none') return;
     // Przybliżenie jak po wskazaniu startu ◎ (useMyLocation).
     if (framing === 'start') {
