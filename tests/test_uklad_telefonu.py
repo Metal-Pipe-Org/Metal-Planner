@@ -83,9 +83,11 @@ UKLAD_JS = """async (mapView) => {
     }
 
     // Listy wyników i panel ⚙ przewijają się w sobie - to, co jest pod ich
-    // krawędzią, jest po prostu niżej na liście, a nie wystaje.
+    // krawędzią, jest po prostu niżej na liście, a nie wystaje. Pola godziny
+    // i daty w .when-fields są niewidoczne (pokazuje je pastylka).
     const controls = [...document.querySelectorAll('button, input, select, .tab')]
-        .filter(el => visible(el) && !el.closest('.results, #tt-results, #dev-panel, .leaflet-container'));
+        .filter(el => visible(el)
+                && !el.closest('.results, #tt-results, #dev-panel, .leaflet-container, .when-fields'));
     const screen = {left: 0, top: 0, right: W, bottom: H};
     for (const el of controls) {
         const box = el.getBoundingClientRect();

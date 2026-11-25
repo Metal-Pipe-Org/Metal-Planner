@@ -31,9 +31,14 @@ def test_powrot_z_tla_odswieza_godzine_nieustawiona_recznie(przegladarka, adres)
 def test_godzina_wpisana_recznie_przezywa_powrot_z_tla(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
-        page.click("#time", click_count=3)
-        page.keyboard.type("0930")
-        page.keyboard.press("Tab")
+        page.click(".when-pill")
+        page.evaluate("""() => {
+            const sheet = document.querySelector('.when-sheet');
+            sheet.querySelector('[data-wheel="hour"]').scrollTop = 9 * 40;
+            sheet.querySelector('[data-wheel="min"]').scrollTop = 6 * 40;
+        }""")
+        page.wait_for_function("document.getElementById('time').value === '09:30'")
+        page.click("[data-done]")
         _po_godzinie(page)
         assert page.input_value("#time") == "09:30"
     finally:

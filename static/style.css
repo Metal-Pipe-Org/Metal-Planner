@@ -1182,6 +1182,62 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
     pointer-events: none;
 }
 
+/* Na komputerze okienko bez kół: pole godziny do wpisania i dni do kliknięcia
+   (patrz openDesk). */
+.when-desk { width: 320px; }
+
+.when-desk-time {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.when-time {
+    width: 92px;
+    height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    color: var(--ink);
+    font: inherit;
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.when-time:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.when-time.bad { border-color: #dc2626; outline-color: #dc2626; }
+
+.when-days {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+.when-day {
+    height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.when-day:hover { background: #e8edf3; color: var(--ink); }
+.when-day.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.when-day:focus-visible,
+.when-mode:focus-visible,
+.when-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.when-desk-foot { display: flex; justify-content: flex-end; }
+
 /* ----------------------------------------------------- lista propozycji --- */
 
 .results {
