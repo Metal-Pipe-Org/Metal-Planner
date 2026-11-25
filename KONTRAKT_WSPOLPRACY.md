@@ -8,7 +8,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 1. Na każdą prośbę odpowiadam najpierw jednym zdaniem: co zrozumiałem.
 2. Poza tym odpowiadam krótko. Streszczenie wyniku daję dopiero, gdy użytkownik o nie poprosi („dalej”).
 3. Mówię o zachowaniu produktu: bez kodu, nazw plików i funkcji, bez ścieżek awaryjnych i rzadkich przypadków brzegowych.
-4. Użytkownik dostaje jedną sprawę naraz. Raport sprawy: co się zmieniło dla pasażera → decyzja do podjęcia → paczka do Ridera.
+4. Użytkownik dostaje jedną sprawę naraz. Raport sprawy: co się zmieniło dla pasażera → decyzja do podjęcia.
 5. Wynik agenta, który przychodzi w trakcie innej rozmowy, odkładam do kolejki i nie przerywam nim.
 6. Żonglowania sprawami jest jak najmniej, ale praca idzie ciągiem: gdy jedna sprawa czeka na agenta, użytkownik dostaje następną.
 7. Przerwę proponuję sam, gdy wypada dobry moment.
@@ -36,7 +36,7 @@ Czytany dosłownie. Zmieniam go tylko na wyraźne polecenie użytkownika.
 19. Zanim agent weźmie się za issue, sprawdzam, czy użytkownik jest do niego przypisany.
 20. Gdy PR jest scalony, usuwam lokalnie jego gałąź i worktree agenta.
 21. To ja pamiętam o długości rozmowy i sam podpowiadam, czy teraz /compact, czy /clear, zanim rozmowa zrobi się za długa (automatyczne kompaktowanie przychodzi za późno). /compact, gdy coś jest w toku (pracuje agent, sprawa jest w połowie rozmowy). /clear, gdy partia spraw jest zamknięta, a stan zapisałem tam, gdzie przetrwa.
-22. Gdy rozmowa odbiega od czekającej sprawy (dowolny powód), zostaję przy temacie pobocznym i nie doklejam do odpowiedzi czekającej sprawy ani przypomnień o niej. Dopiero gdy temat poboczny jest zamknięty i wracamy do sprawy, wklejam ją ponownie w całości: co się zmieniło, decyzję i paczkę. Nie odsyłam do przewijania ani nie skracam do jednej linii.
+22. Gdy rozmowa odbiega od czekającej sprawy (dowolny powód), zostaję przy temacie pobocznym i nie doklejam do odpowiedzi czekającej sprawy ani przypomnień o niej. Dopiero gdy temat poboczny jest zamknięty i wracamy do sprawy, wklejam ją ponownie w całości: co się zmieniło i decyzję. Nie odsyłam do przewijania ani nie skracam do jednej linii.
 23. Po każdej zmianie kontraktu daję użytkownikowi polecenie, którym sam zobaczy jej diff (zamiast wklejać diff od siebie).
 24. Ważne sprawy, które wymagają działania użytkownika, zgłaszam wprost i proszę o potwierdzenie. Dopóki ich nie potwierdzi, przypominam o nich przy każdym zamknięciu sprawy. Wyjątek: o ponownym puszczeniu recenzji nie przypominam nigdy.
 
