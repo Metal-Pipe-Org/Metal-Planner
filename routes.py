@@ -557,6 +557,9 @@ def init_routes(app):
             # Filtr 🚆 w pasku warstw: zgaszony wysyła "0" i serwer liczy dzień
             # bez kolei. Brak parametru znaczy, że pociągi są, jak dotąd.
             trains=request.args.get("trains", "1") == "1",
+            # Przełącznik przy godzinie: „1" to „być na" - godzina jest
+            # przyjazdem do celu (zgłoszenie #265). Brak to wyjście o godzinie.
+            arrive_by=request.args.get("arrive") == "1",
         )
 
     @app.route("/api/dev/kod", methods=["GET", "POST"])

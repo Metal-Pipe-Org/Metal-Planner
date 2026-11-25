@@ -13,6 +13,11 @@ Moduł nie zna plannera: dostaje dzień rozkładu i same podróże.
 Egzemplarz (instance) to jedna konkretna podróż: kolejne przejazdy (wsiadanie,
 wysiadanie), godzina wyjścia i przyjazd. Ruch to wszystkie egzemplarze o tej
 samej sygnaturze - ciągu par (miejsce wsiadania, miejsce wysiadania).
+
+Tryb „być na" (zgłoszenie #265, `back`) to lustro: pasażer podaje godzinę, na
+którą chce być w celu, a ruchy wybiera się po tym, jak PÓŹNO da się wyjść,
+a nie jak wcześnie się dojedzie. Kroki są te same - zmienia się tylko oś,
+po której jedna podróż jest lepsza od drugiej.
 """
 from bisect import bisect_left
 from statistics import median
@@ -100,7 +105,7 @@ def place(day, stop):
     return day.place_of.get(stop, stop)
 
 
-def instances_of(day, classes, query_sec):
+def instances_of(day, classes, query_sec, back=False):
     """Egzemplarze ze wszystkich klas podróży (po jednym na wariant numerów)."""
     conns = day.conns
     out = []
@@ -124,7 +129,8 @@ def instances_of(day, classes, query_sec):
                 "first": first,
                 "sig": tuple((place(day, conns[b][2]), place(day, conns[a][3]))
                              for b, a in ordered),
-                "just_left": cls["dep"] < query_sec,
+                "just_left": not back and cls["dep"] < query_sec,
+                "back": back,
             })
     return out
 
@@ -142,7 +148,18 @@ def is_exact(ctx, inst):
 
 
 def cost(inst, gain_sec):
-    return inst["arr"] + gain_sec * (inst["n"] - 1) + WALK_EXTRA * inst["walk"]
+    """W trybie „być na" liczy się, jak wcześnie trzeba wyjść: na godzinę
+    w celu i tak zdąży każda pokazana podróż."""
+    when = -inst["dep"] if inst.get("back") else inst["arr"]
+    return when + gain_sec * (inst["n"] - 1) + WALK_EXTRA * inst["walk"]
+
+
+def sooner(inst):
+    """Klucz „lepsza godzina": najpierw ta, o którą pyta tryb (przyjazd albo
+    wyjście), potem druga."""
+    if inst.get("back"):
+        return (-inst["dep"], inst["arr"])
+    return (inst["arr"], -inst["dep"])
 
 
 def reasonable_sec(best_arr, query_sec, wider=0):
@@ -181,7 +198,7 @@ def step_same_vehicles(ctx, insts):
             # gdzie drogi pojazdów się rozchodzą - po co wysiadać wcześniej
             # i czekać, skoro pierwszy pojazd jedzie dalej tą samą drogą
             # (113 do ROD Bajki, a 146 i tak jedzie przez Dworzec).
-            return (not is_exact(ctx, i), i["arr"], -i["dep"],
+            return (not is_exact(ctx, i), *sooner(i),
                     walked_sec(day, i), -sum(alight for _, alight in i["rides"]))
         if rank(inst) < rank(old):
             best[key] = inst
@@ -308,7 +325,8 @@ def step_same_vehicle_fallback(ctx, insts):
         fallbacks = [y for y in ctx["pool"]
                      if not y["just_left"]
                      and k < y["n"] <= inst["n"]
-                     and y["arr"] <= inst["arr"] + FALLBACK_LATER_SEC
+                     and (y["dep"] >= inst["dep"] - FALLBACK_LATER_SEC if ctx["back"]
+                          else y["arr"] <= inst["arr"] + FALLBACK_LATER_SEC)
                      and _trips(day, y, k) == prefix
                      and y["sig"][k - 1][1] != inst["sig"][k - 1][1]
                      and is_safe(day, y)]
@@ -325,9 +343,30 @@ def _trips(day, inst, count):
     return tuple(day.conns[board][4] for board, _ in inst["rides"][:count])
 
 
+def departures_back(own):
+    """Lustro heurystyki 2 dla trybu „być na": od najpóźniejszego wyjścia,
+    które jeszcze zdąża, wstecz przez zbitkę bliskich do pierwszej dużej
+    przerwy, plus pierwszy przed nią."""
+    own = sorted(own, key=lambda i: -i["dep"])
+    shown, gaps = [], []
+    for k, inst in enumerate(own):
+        shown.append(inst)
+        if len(shown) >= MAX_DEPARTURES or k + 1 == len(own):
+            break
+        gap = inst["dep"] - own[k + 1]["dep"]
+        threshold = max(GAP_MIN_SEC, GAP_FACTOR * median(gaps)) if gaps else GAP_MIN_SEC
+        if gap > threshold:
+            shown.append(own[k + 1])
+            break
+        gaps.append(gap)
+    return sorted(shown, key=lambda i: i["dep"])
+
+
 def departures_of_move(ctx, own, everything):
     """Heurystyka 2: odjazdy od tego sprzed chwili, przez całą zbitkę bliskich,
     do pierwszej dużej przerwy - z rozsądkiem - plus pierwszy po niej."""
+    if ctx["back"]:
+        return departures_back(own)
     own = sorted(own, key=lambda i: i["dep"])
     query = ctx["query_sec"]
     horizon = query + HORIZON_SEC
@@ -357,7 +396,7 @@ def departures_of_move(ctx, own, everything):
 
 
 def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
-           origin_sec=None, exact=None):
+           origin_sec=None, exact=None, back=False):
     """(ruchy do pokazania, ile ukryto): [{sig, shown: [egzemplarze], first,
     cost, far_walk, branches}] od najlepszego. `exact` to najszybsza podróż
     z paska (patrz rides_key): jest kręgosłupem - ruch z jej sygnaturą ma ją
@@ -366,7 +405,7 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
         return [], 0, True
     ctx = {"day": day, "query_sec": query_sec, "gain_sec": gain_sec,
            "reasonable_sec": reasonable_sec(best_arr, query_sec, wider),
-           "exact": tuple(exact) if exact else None}
+           "exact": tuple(exact) if exact else None, "back": back}
     ctx["pool"] = sorted(step_one_per_departure(ctx, step_same_vehicles(
         ctx, step_reasonable(ctx, insts))),
                          key=lambda i: cost(i, gain_sec))
@@ -393,7 +432,9 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
             shown = sorted(shown + [spine], key=lambda i: i["dep"])
         if not shown:
             continue
+        # W trybie „być na" rysuje się najpóźniejsze wyjście ruchu.
         first = spine if spine is not None and sig == spine["sig"] \
+            else min(shown, key=sooner) if back \
             else next(i for i in shown if not i["just_left"])
         moves.append({"sig": sig, "shown": shown, "first": first,
                       "cost": cost(first, gain_sec)})
@@ -408,7 +449,7 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
         for move in moves:
             move["far_walk"] = False
     moves.sort(key=lambda m: (m["far_walk"], m["cost"], -m["first"]["dep"]))
-    shown, hidden = readable(day, moves, anchor, by_sig_all)
+    shown, hidden = readable(day, moves, anchor, by_sig_all, back)
     add_branches(ctx, shown, insts, by_sig_all, origin_sec or {}, anchor)
     return shown, hidden, any(m["safe_alt"] or is_safe(day, i)
                           for m in shown for i in [m["first"], *m["branches"]])
@@ -647,7 +688,7 @@ def fastest(day, moves, prefer=None):
     def nums(move):
         return tuple(day.trip_info[day.conns[b][4]][0].rsplit(" ", 1)[-1]
                      for b, _ in move["first"]["rides"])
-    return min(moves, key=lambda m: (m["first"]["arr"], nums(m) != prefer, m["cost"]))
+    return min(moves, key=lambda m: (sooner(m["first"])[0], nums(m) != prefer, m["cost"]))
 
 
 def passes_and_transfers(day, rides):
@@ -694,7 +735,7 @@ def variants_of(day, inst):
     return out
 
 
-def readable(day, moves, anchor, by_sig=None):
+def readable(day, moves, anchor, by_sig=None, back=False):
     """Pierwszy widok to najszybszy ruch i do READABLE_MOVES - 1 kolejnych,
     NAPRAWDĘ różnych: żaden pojazd nie mija miejsca przesiadki innego pokazanego
     ruchu i dwa ruchy nie przesiadają się w tym samym miejscu - inaczej linie
@@ -727,7 +768,13 @@ def readable(day, moves, anchor, by_sig=None):
         return clash, passes_and_transfers(day, move["first"]["rides"])
 
     def late(move):
-        """Do kiedy można wyjść i dalej dojechać tak jak ten ruch."""
+        """Do kiedy można wyjść i dalej dojechać tak jak ten ruch. W trybie
+        „być na" lustro: jak wcześnie można być w celu, wychodząc nie
+        wcześniej niż ten ruch (ujemne, żeby „więcej" znaczyło „lepiej")."""
+        if back:
+            return -min((i["arr"] for i in (by_sig or {}).get(move["sig"], move["shown"])
+                         if i["dep"] >= move["first"]["dep"]),
+                        default=move["first"]["arr"])
         return max((i["dep"] for i in (by_sig or {}).get(move["sig"], move["shown"])
                     if not i["just_left"] and i["arr"] <= move["first"]["arr"]),
                    default=move["first"]["dep"])
@@ -748,12 +795,12 @@ def readable(day, moves, anchor, by_sig=None):
     # tańszy, ale równie wczesny ruch nie odpowiada. Przy kilku pokazanych
     # nie ten, który dowozi wyraźnie po nich wszystkich (810 na Sosnowiecką
     # w 20 minut po 143 i 151) - obok lepszych tylko zaśmieca.
-    after = max(m["first"]["arr"] for m in shown) + EPSILON_SEC if len(shown) > 1 else None
+    after = max(sooner(m["first"])[0] for m in shown) + EPSILON_SEC if len(shown) > 1 else None
     rest = []
     for move in moves:
         if len(shown) >= READABLE_MOVES or move in shown or move["far_walk"]:
             continue
-        if after is not None and move["first"]["arr"] > after:
+        if after is not None and sooner(move["first"])[0] > after:
             continue
         clash, info = settle(move, infos)
         if not clash:
