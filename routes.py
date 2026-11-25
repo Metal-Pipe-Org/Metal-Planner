@@ -268,6 +268,8 @@ def init_routes(app):
             # formacie dziennym pole zostawało puste i data nie docierała
             # do serwera wcale.
             form_date=datetime.now().strftime("%Y-%m-%d"),
+            # Ostatni dzień z rozkładem - dalej wybór daty nie ma sensu.
+            form_last_date=last.isoformat() if (last := gtfs.last_service_date()) else None,
             settings=settings_registry.view(),
             dev_mode=config.dev_mode(),
             deployed=config.deployed_at() if config.dev_mode() else None,

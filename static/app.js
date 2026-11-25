@@ -7446,7 +7446,7 @@ function applyLastSearch(saved) {
     // Wraca tylko godzina wpisana ręcznie; bez niej zostaje „teraz".
     if (saved.time) {
         timeInput.value = saved.time;
-        $('date').value = saved.date;
+        $('date').value = clampIso(saved.date);
         timeChosen = true;
         paintWhen();
     }
@@ -7619,7 +7619,7 @@ function applyLink() {
         timeChosen = true;
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(query.get('date'))) {
-        $('date').value = query.get('date');
+        $('date').value = clampIso(query.get('date'));
         timeChosen = true;
         if (dayPanel.classList.contains('hidden')) dayToggle.click();
     }
@@ -7960,6 +7960,28 @@ const clockOf = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}
     + String(minutes % 60).padStart(2, '0');
 const minutesOf = d => d.getHours() * 60 + d.getMinutes();
 
+// Ostatni dzień z rozkładem jedzie z serwera jako max pola daty; bez bazy go nie ma.
+const lastDayIso = () => $('date').max;
+function clampIso(iso) {
+    const last = lastDayIso();
+    if (iso < isoDay(new Date())) return isoDay(new Date());
+    return last && iso > last ? last : iso;
+}
+function clampMoment(moment) {
+    const iso = isoDay(moment);
+    const clamped = clampIso(iso);
+    if (clamped === iso) return moment;
+    const [y, m, d] = clamped.split('-').map(Number);
+    return clamped < iso ? new Date(y, m - 1, d, 23, 55) : new Date(y, m - 1, d, 0, 0);
+}
+function daysInRange(fallback) {
+    const last = lastDayIso();
+    if (!last) return fallback;
+    const [y, m, d] = last.split('-').map(Number);
+    const span = Math.round((new Date(y, m - 1, d) - midnight(new Date())) / 86400000) + 1;
+    return Math.max(1, span);
+}
+
 // Nieustawiona ręcznie godzina to „teraz", a pola formularza odświeżają się
 // dopiero przy wyszukaniu albo powrocie z tła.
 function whenMoment() {
@@ -7992,7 +8014,7 @@ function searchWhenSoon() {
 }
 
 function setWhen(moment) {
-    writeWhen(moment);
+    writeWhen(clampMoment(moment));
     paintWhen();
     searchWhenSoon();
 }
@@ -8014,7 +8036,7 @@ function dayChipsHtml(at) {
     const chosen = isoDay(at);
     let html = '<div class="when-days" role="group" aria-label="Dzień">';
     let listed = false;
-    for (let i = 0; i < WHEN_CHIP_DAYS; i++) {
+    for (let i = 0; i < Math.min(WHEN_CHIP_DAYS, daysInRange(WHEN_CHIP_DAYS)); i++) {
         const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
         const on = isoDay(day) === chosen;
         listed = listed || on;
@@ -8023,7 +8045,7 @@ function dayChipsHtml(at) {
     }
     return html + `<span class="when-chip when-cal${listed ? '' : ' on'}" title="Inny dzień">`
         + `📅${listed ? '' : ' ' + whenDayLabel(at, false)}`
-        + `<input type="date" class="when-cal-input" value="${chosen}" aria-label="Inny dzień"></span></div>`;
+        + `<input type="date" class="when-cal-input" value="${chosen}" min="${isoDay(today)}"${lastDayIso() ? ` max="${lastDayIso()}"` : ''} aria-label="Inny dzień"></span></div>`;
 }
 
 function nowChip() {
@@ -8161,7 +8183,7 @@ function wheelHtml(name, label, items) {
 function openWheels() {
     const today = midnight(new Date());
     const days = [];
-    for (let i = 0; i < WHEEL_DAYS; i++) {
+    for (let i = 0; i < daysInRange(WHEEL_DAYS); i++) {
         const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
         days.push([isoDay(day), whenDayLabel(day, false)]);
     }

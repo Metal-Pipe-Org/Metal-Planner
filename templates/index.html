@@ -450,7 +450,7 @@
                 </div>
                 <div id="day-panel" class="day-panel hidden time-row">
                     <span>Data</span>
-                    <input type="date" id="date" value="{{ form_date }}">
+                    <input type="date" id="date" value="{{ form_date }}" min="{{ form_date }}"{% if form_last_date %} max="{{ form_last_date }}"{% endif %}>
                 </div>
             </div>
             <button id="search" class="button primary">
