@@ -7970,9 +7970,15 @@ const WEEKDAYS = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
 const WHEN_CHIP_DAYS = 7;
 const WHEEL_DAYS = 14;
 const WHEEL_H = 40;
+// Przełączenie z „teraz" na „Przyjazd": od której chwili liczy się domyślną godzinę.
+const arriveFromNow = now => new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0);
 let whenSearchTimer = null;
 let wheelsChanged = false;
 let wheelTimer = null;
+let wheelsExact = false;
+let whenSnapshot = null;
+let typedDigits = '';
+let typedTimer = null;
 
 const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -8040,6 +8046,21 @@ function setWhen(moment) {
     searchWhenSoon();
 }
 
+function whenModeName() {
+    return arriveBy && !onboardOn ? 'Przyjazd' : 'Odjazd';
+}
+
+function setWhenMode(arrive) {
+    setArriveBy(arrive);
+    if (arrive && !timeChosen) writeWhen(clampMoment(arriveFromNow(new Date())));
+    paintWhen();
+}
+
+function modeButton() {
+    return `<button type="button" class="time-mode-button" data-mode-toggle aria-pressed="${arriveBy && !onboardOn}"`
+        + `${onboardOn ? ' disabled' : ''}>${whenModeName()}</button>`;
+}
+
 function shiftWhen(minutes) {
     const at = whenMoment();
     at.setMinutes(at.getMinutes() + minutes);
@@ -8076,7 +8097,7 @@ function nowChip() {
 function paintChips() {
     const at = whenMoment();
     whenBox.innerHTML = `<div class="when-line">
-            <span class="when-label">Odjazd</span>
+            ${modeButton()}
             <input type="text" class="when-clock" inputmode="numeric" maxlength="5"
                    placeholder="GG:MM" autocomplete="off" aria-label="Godzina odjazdu"
                    value="${clockOf(minutesOf(at))}">
@@ -8094,7 +8115,7 @@ function paintSlider() {
     // Na dziś część osi przed „teraz" jest szara - tamte odjazdy już minęły.
     const past = isoDay(at) === today ? minutesOf(now) / 1435 * 100 : isoDay(at) < today ? 100 : 0;
     whenBox.innerHTML = dayChipsHtml(at) + `<div class="when-line">
-            <span class="when-label">Odjazd</span>
+            ${modeButton()}
             <b class="when-big">${clockOf(minutesOf(at))}</b>
             <button type="button" class="when-chip" data-shift="-5">−5</button>
             <button type="button" class="when-chip" data-shift="5">+5</button>
@@ -8109,9 +8130,8 @@ function paintSlider() {
 
 function paintPill() {
     const at = whenMoment();
-    whenBox.querySelector('.when-pill').innerHTML = '<span class="when-label">Odjazd</span> '
-        + (timeChosen ? `${whenDayLabel(at, false)} <b>${clockOf(minutesOf(at))}</b>`
-                      : `<b>Teraz</b> <small>${clockOf(minutesOf(at))}</small>`)
+    whenBox.querySelector('.when-pill').innerHTML = `${whenModeName()} `
+        + (timeChosen ? `<b>${clockOf(minutesOf(at))}</b>, ${whenDayLabel(at, false).toLowerCase()}` : '<b>teraz</b>')
         + ' <span class="when-caret">▾</span>';
 }
 
@@ -8144,6 +8164,9 @@ whenBox.addEventListener('click', event => {
         try { target.showPicker(); } catch { /* starsza przeglądarka - zostaje pole */ }
     } else if (target.hasAttribute('data-now')) {
         setTimeNow();
+        searchWhenSoon();
+    } else if (target.hasAttribute('data-mode-toggle')) {
+        setWhenMode(!arriveBy);
         searchWhenSoon();
     } else if (target.dataset.shift) shiftWhen(Number(target.dataset.shift));
     else if (target.dataset.day) pickDay(target.dataset.day);
@@ -8201,7 +8224,23 @@ function wheelHtml(name, label, items) {
         + '</div>';
 }
 
+function sheetTopHtml() {
+    return `<div class="when-modes" role="tablist">
+            <button type="button" role="tab" class="when-mode${arriveBy ? '' : ' on'}" data-mode="depart"
+                    aria-selected="${!arriveBy}">Odjazd</button>
+            <button type="button" role="tab" class="when-mode${arriveBy ? ' on' : ''}" data-mode="arrive"
+                    aria-selected="${arriveBy}"${onboardOn ? ' disabled' : ''}>Przyjazd</button>
+        </div>
+        <div class="when-sheet-head">
+            ${arriveBy ? '' : nowChip()}
+            <button type="button" class="button primary when-done" data-done>Gotowe</button>
+        </div>`;
+}
+
 function openWheels() {
+    wheelsExact = !phoneLayout.active();
+    whenSnapshot = {arrive: arriveBy, chosen: timeChosen, time: timeInput.value, date: $('date').value};
+    typedDigits = '';
     const today = midnight(new Date());
     const days = [];
     for (let i = 0; i < daysInRange(WHEEL_DAYS); i++) {
@@ -8209,12 +8248,9 @@ function openWheels() {
         days.push([isoDay(day), whenDayLabel(day, false)]);
     }
     const hours = Array.from({length: 24}, (_, h) => [h, String(h).padStart(2, '0')]);
-    const minutes = Array.from({length: 12}, (_, i) => [i * 5, String(i * 5).padStart(2, '0')]);
-    whenSheet.innerHTML = `<div class="when-sheet-head">
-            ${nowChip()}
-            <span class="when-sheet-title">Odjazd</span>
-            <button type="button" class="button primary when-done" data-done>Gotowe</button>
-        </div>
+    const step = wheelsExact ? 1 : 5;
+    const minutes = Array.from({length: 60 / step}, (_, i) => [i * step, String(i * step).padStart(2, '0')]);
+    whenSheet.innerHTML = `<div class="when-sheet-top">${sheetTopHtml()}</div>
         <div class="when-wheels">
             ${wheelHtml('day', 'Dzień', days)}${wheelHtml('hour', 'Godzina', hours)}${wheelHtml('min', 'Minuta', minutes)}
             <div class="when-band"></div>
@@ -8236,6 +8272,7 @@ function openWheels() {
     }
     wheelsChanged = false;
     scrollWheels('instant');
+    if (wheelsExact) whenSheet.querySelector('[data-wheel="hour"]').focus();
 }
 
 function closeWheels() {
@@ -8261,7 +8298,7 @@ function scrollWheels(behavior) {
         day: [...whenSheet.querySelectorAll('[data-wheel="day"] .when-item')]
             .findIndex(item => item.dataset.v === isoDay(at)),
         hour: at.getHours(),
-        min: Math.min(11, Math.round(at.getMinutes() / 5)),
+        min: wheelsExact ? at.getMinutes() : Math.min(11, Math.round(at.getMinutes() / 5)),
     };
     for (const wheel of whenSheet.querySelectorAll('.when-wheel')) {
         wheel.scrollTo({top: Math.max(0, indexOf[wheel.dataset.wheel]) * WHEEL_H, behavior});
@@ -8288,11 +8325,12 @@ function settleWheels() {
     const picked = new Date(y, m - 1, d, Number(value('hour')), Number(value('min')));
     const at = whenMoment();
     const shown = new Date(at.getFullYear(), at.getMonth(), at.getDate(), at.getHours(),
-                           Math.min(55, Math.round(at.getMinutes() / 5) * 5));
+                           wheelsExact ? at.getMinutes() : Math.min(55, Math.round(at.getMinutes() / 5) * 5));
     if (picked.getTime() === shown.getTime()) return;
     writeWhen(picked);
     paintPill();
-    whenSheet.querySelector('[data-now]').classList.remove('on');
+    // „Teraz" jest tylko przy odjeździe.
+    whenSheet.querySelector('[data-now]')?.classList.remove('on');
     wheelsChanged = true;
 }
 
@@ -8304,7 +8342,13 @@ whenSheet.addEventListener('scroll', () => {
 whenSheet.addEventListener('click', event => {
     const item = event.target.closest('.when-item');
     const now = event.target.closest('[data-now]');
-    if (item) {
+    const mode = event.target.closest('[data-mode]');
+    if (mode) {
+        setWhenMode(mode.dataset.mode === 'arrive');
+        whenSheet.querySelector('.when-sheet-top').innerHTML = sheetTopHtml();
+        wheelsChanged = true;
+        scrollWheels('smooth');
+    } else if (item) {
         const wheel = item.parentElement;
         wheel.scrollTo({top: [...wheel.children].indexOf(item) * WHEEL_H, behavior: 'smooth'});
     } else if (now) {
@@ -8315,11 +8359,51 @@ whenSheet.addEventListener('click', event => {
     } else if (event.target.closest('[data-done]')) closeWheels();
 });
 
+// Na komputerze godzinę i minutę wpisuje się cyframi: pierwsza cyfra, która nie
+// może otwierać dwucyfrowej wartości, kończy wpis; po godzinie fokus idzie do minut.
+function typeIntoWheel(wheel, digit) {
+    const isHour = wheel.dataset.wheel === 'hour';
+    const max = isHour ? 23 : 59;
+    typedDigits = Number(typedDigits + digit) > max ? digit : typedDigits + digit;
+    clearTimeout(typedTimer);
+    typedTimer = setTimeout(() => { typedDigits = ''; }, 1500);
+    const index = [...wheel.children].findIndex(item => Number(item.dataset.v) === Number(typedDigits));
+    if (index < 0) return;
+    wheel.scrollTo({top: index * WHEEL_H, behavior: 'instant'});
+    if (typedDigits.length === 2 || Number(typedDigits) * 10 > max) {
+        typedDigits = '';
+        if (isHour) whenSheet.querySelector('[data-wheel="min"]').focus();
+    }
+}
+
+// Esc zamyka bez zmian: wraca to, co było przy otwarciu, łącznie z trybem.
+function cancelWheels() {
+    clearTimeout(wheelTimer);
+    setArriveBy(whenSnapshot.arrive);
+    timeChosen = whenSnapshot.chosen;
+    timeInput.value = whenSnapshot.time;
+    $('date').value = whenSnapshot.date;
+    wheelsChanged = false;
+    paintWhen();
+    closeWheels();
+}
+
+whenSheet.addEventListener('focusin', () => { typedDigits = ''; });
+
 whenSheet.addEventListener('keydown', event => {
     const wheel = event.target.closest('.when-wheel');
-    if (event.key === 'Escape' || event.key === 'Enter') {
+    if (event.key === 'Escape') {
         event.preventDefault();
+        cancelWheels();
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        clearTimeout(wheelTimer);
+        settleWheels();
+        wheelsChanged = true;
         closeWheels();
+    } else if (wheel && /^\d$/.test(event.key) && wheel.dataset.wheel !== 'day') {
+        event.preventDefault();
+        typeIntoWheel(wheel, event.key);
     } else if (wheel && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
         event.preventDefault();
         stepWheel(wheel, event.key === 'ArrowDown' ? 1 : -1);

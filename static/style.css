@@ -1245,8 +1245,30 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
     margin-bottom: 8px;
 }
 
-.when-sheet-title { color: var(--ink-faint); font-size: 12.5px; }
-.when-done { height: 34px; }
+.when-modes {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--surface-alt);
+}
+
+.when-mode {
+    flex: 1;
+    height: 32px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.when-mode.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
+.when-mode:disabled { opacity: 0.45; cursor: default; }
+.when-done { height: 34px; margin-left: auto; }
 
 /* Kolumny mają po 5 pozycji wysokości 40 px; wcięcie 80 px u góry i u dołu
    pozwala stanąć w środkowym pasku także pierwszej i ostatniej pozycji. */
