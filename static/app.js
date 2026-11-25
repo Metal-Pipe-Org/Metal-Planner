@@ -189,23 +189,6 @@ $('about-report').addEventListener('click', e => {
         + encodeURIComponent(body);
 });
 
-// Panel wyboru dnia
-const dayPanel = $('day-panel');
-const dayToggle = $('day-toggle');
-
-if (dayPanel && dayToggle) {
-    // Sterowanie widocznością panelu
-    const setDay = (open, persist = true) => {
-        dayPanel.classList.toggle('hidden', !open);
-        dayToggle.classList.toggle('active', open);
-        dayToggle.setAttribute('aria-expanded', String(open));
-        if (persist) saveUiState({ dayOpen: open });
-    };
-
-    setDay(!!uiState.dayOpen, false);
-    dayToggle.addEventListener('click', () => setDay(dayPanel.classList.contains('hidden')));
-}
-
 // Pole godziny to zwykły tekst, nie <input type="time"> - natywny widget w
 // niektórych przeglądarkach (np. Safari) pokazuje AM/PM zależnie od ustawień
 // regionalnych systemu i ignoruje atrybut lang strony, więc format 24h nie
@@ -302,7 +285,6 @@ let journeys = [];
 // Godzina z formularza to wyjazd albo - po przełączeniu - godzina, na którą
 // chce się być na miejscu (zgłoszenie #265). Z pokładu pojazdu przełącznik
 // nie działa: tam się już jedzie, więc wyjścia nie ma kiedy wybierać.
-const timeModeButton = $('time-mode');
 let arriveBy = false;
 let selectedJourney = null;   // indeks pozycji z listy albo null
 let resultsCollapsed = !!uiState.resultsCollapsed; // ukrywa samą listę propozycji (nie cały panel)
@@ -5330,7 +5312,7 @@ function warnOnboardRide(kurs) {
 function setStartMode(vehicle, focus = true) {
     onboardOn = vehicle;
     document.body.classList.toggle('start-onboard', vehicle);
-    syncTimeMode();
+    document.dispatchEvent(new Event('planner:startmode'));
     syncOnboardView();
     for (const [button, on] of [[modeVehicleButton, vehicle], [modePlaceButton, !vehicle]]) {
         button.classList.toggle('active', on);
@@ -7330,7 +7312,7 @@ function applyStage(run, data) {
         search.found = true;
         // Formularz na telefonie zwija się dopiero przy wyniku - przy
         // błędzie zostaje rozwinięty do poprawki (patrz phone.js).
-        document.dispatchEvent(new Event('planner:found'));
+        document.dispatchEvent(new CustomEvent('planner:found', {detail: {arrive: arriveBy && !onboardOn}}));
         playPipeDrop();
     }
 }
@@ -7642,7 +7624,6 @@ function applyLink() {
     if (/^\d{4}-\d{2}-\d{2}$/.test(query.get('date'))) {
         $('date').value = clampIso(query.get('date'));
         timeChosen = true;
-        if (dayPanel.classList.contains('hidden')) dayToggle.click();
     }
     paintWhen();
     const fill = (side, text) => {
@@ -7955,19 +7936,11 @@ document.addEventListener('visibilitychange', () => {
     if (!document.hidden && !timeChosen) setTimeNow();
 });
 
-$('time-now').addEventListener('click', () => {
-    setTimeNow();
-    if (startInput.value && endInput.value) search();
-});
-
 // ------------------------------------- wybór godziny i daty (#501) ---
-// Tymczasowe prototypy do porównania, przełączane ustawieniem „when-picker".
-// Każdy wariant to tylko inna twarz pól #time i #date: wyszukiwanie, link
-// i zapamiętana trasa czytają je tak samo jak dotąd.
-const whenBox = $('when-proto');
-const whenClassic = $('when-classic');
+// Kółka są tylko twarzą pól #time i #date (leżą w #when-fields i jeżdżą też do
+// Rozkładów): wyszukiwanie, link i zapamiętana trasa czytają je tak samo jak zawsze.
+const whenBox = $('when');
 const WEEKDAYS = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
-const WHEN_CHIP_DAYS = 7;
 const WHEEL_DAYS = 14;
 const WHEEL_H = 40;
 // Przełączenie z „teraz" na „Przyjazd": od której chwili liczy się domyślną godzinę.
@@ -7987,8 +7960,8 @@ const clockOf = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}
     + String(minutes % 60).padStart(2, '0');
 const minutesOf = d => d.getHours() * 60 + d.getMinutes();
 
-// Ostatni dzień z rozkładem jedzie z serwera jako max pola daty; bez bazy go nie ma.
-const lastDayIso = () => $('date').max;
+// Ostatni dzień z rozkładem jedzie z serwera; bez bazy go nie ma.
+const lastDayIso = () => $('when-fields').dataset.last;
 function clampIso(iso) {
     const last = lastDayIso();
     if (iso < isoDay(new Date())) return isoDay(new Date());
@@ -8018,12 +7991,11 @@ function whenMoment() {
     return new Date(y, m - 1, d, hh, mm);
 }
 
-function whenDayLabel(day, short) {
+function whenDayLabel(day) {
     const diff = Math.round((midnight(day) - midnight(new Date())) / 86400000);
     if (diff === 0) return 'Dziś';
     if (diff === 1) return 'Jutro';
-    const name = `${WEEKDAYS[day.getDay()]} ${day.getDate()}`;
-    return short ? name : `${name}.${String(day.getMonth() + 1).padStart(2, '0')}`;
+    return `${WEEKDAYS[day.getDay()]} ${day.getDate()}.${String(day.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function writeWhen(moment) {
@@ -8040,12 +8012,6 @@ function searchWhenSoon() {
     }, 600);
 }
 
-function setWhen(moment) {
-    writeWhen(clampMoment(moment));
-    paintWhen();
-    searchWhenSoon();
-}
-
 function whenModeName() {
     return arriveBy && !onboardOn ? 'Przyjazd' : 'Odjazd';
 }
@@ -8056,156 +8022,26 @@ function setWhenMode(arrive) {
     paintWhen();
 }
 
-function modeButton() {
-    return `<button type="button" class="time-mode-button" data-mode-toggle aria-pressed="${arriveBy && !onboardOn}"`
-        + `${onboardOn ? ' disabled' : ''}>${whenModeName()}</button>`;
-}
-
-function shiftWhen(minutes) {
-    const at = whenMoment();
-    at.setMinutes(at.getMinutes() + minutes);
-    setWhen(at);
-}
-
-function pickDay(iso) {
-    const [y, m, d] = iso.split('-').map(Number);
-    const at = whenMoment();
-    setWhen(new Date(y, m - 1, d, at.getHours(), at.getMinutes()));
-}
-
-function dayChipsHtml(at) {
-    const today = midnight(new Date());
-    const chosen = isoDay(at);
-    let html = '<div class="when-days" role="group" aria-label="Dzień">';
-    let listed = false;
-    for (let i = 0; i < Math.min(WHEN_CHIP_DAYS, daysInRange(WHEN_CHIP_DAYS)); i++) {
-        const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
-        const on = isoDay(day) === chosen;
-        listed = listed || on;
-        html += `<button type="button" class="when-chip${on ? ' on' : ''}" data-day="${isoDay(day)}">`
-            + `${whenDayLabel(day, true)}</button>`;
-    }
-    return html + `<span class="when-chip when-cal${listed ? '' : ' on'}" title="Inny dzień">`
-        + `📅${listed ? '' : ' ' + whenDayLabel(at, false)}`
-        + `<input type="date" class="when-cal-input" value="${chosen}" min="${isoDay(today)}"${lastDayIso() ? ` max="${lastDayIso()}"` : ''} aria-label="Inny dzień"></span></div>`;
-}
-
 function nowChip() {
     return `<button type="button" class="when-chip${timeChosen ? '' : ' on'}" data-now>Teraz</button>`;
-}
-
-function paintChips() {
-    const at = whenMoment();
-    whenBox.innerHTML = `<div class="when-line">
-            ${modeButton()}
-            <input type="text" class="when-clock" inputmode="numeric" maxlength="5"
-                   placeholder="GG:MM" autocomplete="off" aria-label="Godzina odjazdu"
-                   value="${clockOf(minutesOf(at))}">
-            ${nowChip()}
-            <button type="button" class="when-chip" data-shift="-15">−15</button>
-            <button type="button" class="when-chip" data-shift="15">+15</button>
-            <button type="button" class="when-chip" data-shift="60">+1 h</button>
-        </div>` + dayChipsHtml(at);
-}
-
-function paintSlider() {
-    const at = whenMoment();
-    const now = new Date();
-    const today = isoDay(now);
-    // Na dziś część osi przed „teraz" jest szara - tamte odjazdy już minęły.
-    const past = isoDay(at) === today ? minutesOf(now) / 1435 * 100 : isoDay(at) < today ? 100 : 0;
-    whenBox.innerHTML = dayChipsHtml(at) + `<div class="when-line">
-            ${modeButton()}
-            <b class="when-big">${clockOf(minutesOf(at))}</b>
-            <button type="button" class="when-chip" data-shift="-5">−5</button>
-            <button type="button" class="when-chip" data-shift="5">+5</button>
-            ${nowChip()}
-        </div>
-        <div class="when-track">
-            <input type="range" class="when-range" min="0" max="1435" step="5"
-                   value="${minutesOf(at)}" style="--past: ${past}%" aria-label="Godzina odjazdu">
-            <div class="when-ticks">${[0, 3, 6, 9, 12, 15, 18, 21, 24].map(h => `<span>${h}</span>`).join('')}</div>
-        </div>`;
 }
 
 function paintPill() {
     const at = whenMoment();
     whenBox.querySelector('.when-pill').innerHTML = `${whenModeName()} `
-        + (timeChosen ? `<b>${clockOf(minutesOf(at))}</b>, ${whenDayLabel(at, false).toLowerCase()}` : '<b>teraz</b>')
+        + (timeChosen ? `<b>${clockOf(minutesOf(at))}</b>, ${whenDayLabel(at).toLowerCase()}` : '<b>teraz</b>')
         + ' <span class="when-caret">▾</span>';
 }
 
 function paintWhen() {
-    const variant = setting('when-picker');
-    whenClassic.classList.toggle('when-off', variant !== 'current');
-    whenBox.hidden = variant === 'current';
-    whenBox.classList.toggle('when-wide', variant === 'chips' || variant === 'slider');
-    if (variant !== 'wheels') closeWheels();
-    const days = whenBox.querySelector('.when-days');
-    const scrolled = days ? days.scrollLeft : 0;
-    if (variant === 'chips') paintChips();
-    else if (variant === 'slider') paintSlider();
-    else if (variant === 'wheels') {
-        if (whenBox.dataset.built !== 'wheels') {
-            whenBox.innerHTML = '<button type="button" class="when-pill" aria-haspopup="dialog"></button>';
-        }
-        paintPill();
+    if (!whenBox.firstChild) {
+        whenBox.innerHTML = '<button type="button" class="when-pill" aria-haspopup="dialog"></button>';
+        whenBox.firstChild.addEventListener('click', openWheels);
     }
-    whenBox.dataset.built = variant;
-    const after = whenBox.querySelector('.when-days');
-    if (after) after.scrollLeft = scrolled;
+    paintPill();
 }
 
-whenBox.addEventListener('click', event => {
-    const target = event.target.closest('button, .when-cal-input');
-    if (!target) return;
-    if (target.matches('.when-cal-input')) {
-        // Na komputerze klik w pole daty nie otwiera kalendarza sam.
-        try { target.showPicker(); } catch { /* starsza przeglądarka - zostaje pole */ }
-    } else if (target.hasAttribute('data-now')) {
-        setTimeNow();
-        searchWhenSoon();
-    } else if (target.hasAttribute('data-mode-toggle')) {
-        setWhenMode(!arriveBy);
-        searchWhenSoon();
-    } else if (target.dataset.shift) shiftWhen(Number(target.dataset.shift));
-    else if (target.dataset.day) pickDay(target.dataset.day);
-    else if (target.matches('.when-pill')) openWheels();
-});
-
-whenBox.addEventListener('input', event => {
-    if (event.target.matches('.when-range')) {
-        const at = whenMoment();
-        const minutes = Number(event.target.value);
-        writeWhen(new Date(at.getFullYear(), at.getMonth(), at.getDate(), Math.floor(minutes / 60), minutes % 60));
-        whenBox.querySelector('.when-big').textContent = clockOf(minutes);
-        whenBox.querySelector('[data-now]').classList.remove('on');
-    } else if (event.target.matches('.when-clock')) {
-        if (!timeChosen) $('date').value = isoDay(new Date());
-        timeInput.value = event.target.value;
-        timeInput.dispatchEvent(new Event('input'));
-        event.target.value = timeInput.value;
-    }
-});
-
-whenBox.addEventListener('change', event => {
-    if (event.target.matches('.when-range')) {
-        paintWhen();
-        searchWhenSoon();
-    } else if (event.target.matches('.when-cal-input') && event.target.value) pickDay(event.target.value);
-});
-
-whenBox.addEventListener('focusout', event => {
-    if (!event.target.matches('.when-clock')) return;
-    timeInput.dispatchEvent(new Event('blur'));
-    paintWhen();
-});
-
-whenBox.addEventListener('keydown', event => {
-    if (event.key !== 'Enter' || !event.target.matches('.when-clock')) return;
-    event.target.blur();
-    if (startInput.value && endInput.value) search();
-});
+document.addEventListener('planner:startmode', paintWhen);
 
 // Kółka: arkusz leży w <body>, bo panel z kartą przycina to, co z niego wystaje.
 const whenBackdrop = document.createElement('div');
@@ -8245,7 +8081,7 @@ function openWheels() {
     const days = [];
     for (let i = 0; i < daysInRange(WHEEL_DAYS); i++) {
         const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
-        days.push([isoDay(day), whenDayLabel(day, false)]);
+        days.push([isoDay(day), whenDayLabel(day)]);
     }
     const hours = Array.from({length: 24}, (_, h) => [h, String(h).padStart(2, '0')]);
     const step = wheelsExact ? 1 : 5;
@@ -8412,32 +8248,11 @@ whenSheet.addEventListener('keydown', event => {
 
 whenBackdrop.addEventListener('click', () => closeWheels());
 
-// Przełącznik „Odjazd"/„Przyjazd" - stan jest wyżej (arriveBy), bo
-// setStartMode woła syncTimeMode już przy starcie strony.
-function syncTimeMode() {
-    const on = arriveBy && !onboardOn;
-    timeModeButton.textContent = on ? 'Przyjazd' : 'Odjazd';
-    timeModeButton.setAttribute('aria-pressed', String(on));
-    timeModeButton.disabled = onboardOn;
-    timeModeButton.title = onboardOn
-        ? 'Z pojazdu godzina to zawsze wyjazd - już jedziesz'
-        : on ? 'Godzina to przyjazd: być na miejscu najpóźniej o tej godzinie. Stuknij, żeby szukać od godziny wyjazdu.'
-             : 'Godzina to wyjazd. Stuknij, żeby podać, na którą chcesz być na miejscu.';
-}
-
 function setArriveBy(on) {
     arriveBy = on;
-    syncTimeMode();
 }
 
-timeModeButton.addEventListener('click', () => {
-    setArriveBy(!arriveBy);
-    // „Być na teraz" nie jest pytaniem: bez wpisanej godziny kursor idzie do
-    // pola godziny, a szuka się dopiero po jej podaniu.
-    if (arriveBy && !timeChosen) { timeInput.focus(); timeInput.select(); return; }
-    if (startInput.value && endInput.value) search();
-});
-syncTimeMode();
+paintWhen();
 
 $('clear').addEventListener('click', () => {
     const previous = [sel.start, sel.end];
@@ -8826,7 +8641,6 @@ const SETTING_EFFECTS = {
     // i kropki na mapie oraz schemat.
     'walk-time': {react: () => { applyDotOpts(); if (lastSchemeData) renderScheme(lastSchemeData); }},
     'line-colors': {react: repaintLineColors},
-    'when-picker': {paint: () => paintWhen(), react: () => paintWhen()},
     'bikes-merged': {paint: () => paintBikeButtons()},
     'start-mode-switch': {paint: showStartMode},
     'routes-on': {paint: showRoutes, react: on => {

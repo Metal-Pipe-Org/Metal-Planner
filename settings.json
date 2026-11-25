@@ -205,13 +205,6 @@
       "dev": true
     },
     {
-      "id": "when-picker",
-      "name": "Wybór godziny i daty",
-      "description": "Prototypy do porównania (#501). Skróty: przyciski „Teraz”, ±15 min, +1 h i dni tygodnia. Kółka: jeden przycisk z dniem i godziną, a pod nim przewijane kolumny dzień–godzina–minuta. Suwak: dni tygodnia i oś doby do przeciągania.",
-      "tags": ["Czas"],
-      "dev": true
-    },
-    {
       "id": "line-colors",
       "name": "Kolory linii",
       "tags": ["Mapa"]

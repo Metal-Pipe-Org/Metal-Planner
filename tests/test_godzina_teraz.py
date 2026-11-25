@@ -115,7 +115,6 @@ def test_godzina_z_tras_jest_w_rozkladach(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
         page.fill("#time", "09:30")
-        page.click("#day-toggle")
         page.fill("#date", "2030-01-02")
         _rozklady(page)
         assert _gdzie(page) == {"time": "rozklady", "date": "rozklady"}
@@ -148,7 +147,6 @@ def test_teraz_w_rozkladach_wraca_oba_widoki_do_teraz(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
         page.fill("#time", "09:30")
-        page.click("#day-toggle")
         page.fill("#date", "2030-01-02")
         _rozklady(page)
         assert _gdzie(page) == {"time": "rozklady", "date": "rozklady"}
@@ -176,7 +174,9 @@ def test_teraz_w_trasach_wraca_rozklady_do_teraz(przegladarka, adres):
         _trasy(page)
         assert _gdzie(page)["time"] == "trasy"
         assert page.input_value("#time") == "09:30"
-        page.click("#time-now")
+        page.click(".when-pill")
+        page.click("[data-now]")
+        page.click("[data-done]")
         teraz = page.input_value("#time")
         assert teraz != "09:30"
         assert _minuty_temu(page, teraz)

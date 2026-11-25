@@ -136,11 +136,10 @@ def test_teraz_zostaje_teraz_a_wybrana_godzina_wraca(adres, otworz):
     assert _parametry_adresu(z_godzina)["time"] == "17:40"
 
 
-def test_data_w_linku_pokazuje_panel_daty(adres, otworz):
+def test_data_w_linku_wraca_do_kolejnego_linku(adres, otworz):
     jutro = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     page = otworz(f"{adres}?from=Sosnowiecka&to=Wojszyce&date={jutro}")
     page.wait_for_selector(".journey")
-    assert page.is_visible("#date")
     assert _parametry_adresu(page)["date"] == jutro
     # Wybrana data robi z godziny wybraną (ta sama zasada co w formularzu).
     assert _parametry_adresu(page)["time"] == page.input_value("#time")

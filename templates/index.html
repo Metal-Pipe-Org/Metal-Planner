@@ -435,26 +435,14 @@
         <script id="stop-abbrev" type="application/json">{{ abbreviations|tojson }}</script>
 
         <div class="search-row">
-            {# Tymczasowo, do porównania wyboru godziny i daty (#501): warianty
-               rysuje app.js (patrz paintWhen), a pola #time i #date niżej
-               zostają jedynym miejscem, z którego czyta wyszukiwanie. #}
-            <div id="when-proto" class="when-proto" hidden></div>
-            <div class="time-field" id="when-classic">
-                <div class="time-row">
-                    {# Wyjście o tej godzinie albo bycie na miejscu o tej godzinie
-                       (zgłoszenie #265) - stuknięcie przełącza. #}
-                    <button type="button" id="time-mode" class="time-mode-button" aria-pressed="false"
-                            title="Przełącz: wyjazd o tej godzinie / być na miejscu o tej godzinie">Odjazd</button>
-                    <input type="text" id="time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
-                           maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" value="{{ form_time }}">
-                    <button type="button" id="time-now" class="time-now-button">teraz</button>
-                    <button type="button" id="day-toggle" class="icon-button" title="Więcej opcji czasu"
-                            aria-label="Więcej opcji czasu" aria-expanded="false" aria-controls="day-panel">⌵</button>
-                </div>
-                <div id="day-panel" class="day-panel hidden time-row">
-                    <span>Data</span>
-                    <input type="date" id="date" value="{{ form_date }}" min="{{ form_date }}"{% if form_last_date %} max="{{ form_last_date }}"{% endif %}>
-                </div>
+            {# Wybór godziny, dnia i trybu (Odjazd/Przyjazd) rysuje app.js (paintWhen).
+               Pola #time i #date leżą tu niewidoczne, bo to z nich czyta wyszukiwanie
+               i to je Rozkłady przenoszą do własnego panelu na czas swojego widoku. #}
+            <div id="when" class="when-box"></div>
+            <div id="when-fields" class="when-fields" aria-hidden="true"{% if form_last_date %} data-last="{{ form_last_date }}"{% endif %}>
+                <input type="text" id="time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
+                       maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" tabindex="-1" value="{{ form_time }}">
+                <input type="date" id="date" tabindex="-1" value="{{ form_date }}">
             </div>
             <button id="search" class="button primary">
                 <span class="spinner" aria-hidden="true"></span>Szukaj
@@ -922,17 +910,6 @@
         </label>
     <label class="dev-check{{ dev('vehicles-stats') }} set-row" {{ attrs('vehicles-stats') }}>
             <input type="checkbox" id="vehicles-stats"> {{ name('vehicles-stats') }} {{ info('vehicles-stats') }}
-        </label>
-
-    {# Tymczasowo, do porównania wyboru godziny i daty (#501). #}
-    <label class="dev-check{{ dev('when-picker') }} set-row" {{ attrs('when-picker') }}>
-        {{ name('when-picker') }}
-        <select id="when-picker">
-            <option value="current">Obecny</option>
-            <option value="chips">Skróty</option>
-            <option value="wheels">Kółka</option>
-            <option value="slider">Suwak</option>
-        </select> {{ info('when-picker') }}
         </label>
 
     <label class="dev-check{{ dev('line-colors') }} set-row" {{ attrs('line-colors') }}>

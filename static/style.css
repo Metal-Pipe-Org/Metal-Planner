@@ -1008,16 +1008,6 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
     gap: 8px;
 }
 
-.day-panel {
-    margin-top: 6px;
-    padding-top: 8px;
-    padding-bottom: 8px;
-}
-
-.day-panel.hidden {
-    display: none;
-}
-
 .time-field input {
     border: none;
     background: none;
@@ -1042,51 +1032,21 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 
 .time-now-button:hover { background: #e8edf3; color: var(--ink); }
 
-/* „Odjazd"/„Przyjazd" przed godziną (#265): wygląda jak dawny napis, a że
-   się przełącza, mówi podkreślenie. Włączony „Przyjazd" ma kolor, żeby nie
-   przeoczyć, że godzina znaczy coś innego niż zwykle. */
-.time-mode-button {
-    flex: 0 0 auto;
-    border: none;
-    background: none;
-    padding: 0;
-    font: inherit;
-    color: inherit;
-    text-decoration: underline dotted;
-    text-underline-offset: 3px;
-    cursor: pointer;
-}
-.time-mode-button[aria-pressed="true"] { color: var(--accent, #1a73e8); font-weight: 600; }
-.time-mode-button:disabled { cursor: default; text-decoration: none; }
-
 .search-row .button.primary { flex: 1; }
 
-/* TYMCZASOWO (#501): prototypy wyboru godziny i daty, przełączane ustawieniem
-   „Wybór godziny i daty". Po wyborze wariantu zostaje jeden. */
-.time-field.when-off,
-.when-proto[hidden],
+/* Wybór godziny i daty: jedna pastylka, a pod nią kółka (patrz paintWhen).
+   Pola #time i #date leżą obok niewidoczne - czyta z nich wyszukiwanie. */
 .when-sheet[hidden],
 .when-backdrop[hidden] { display: none; }
 
-.search-row:has(> .when-wide) { flex-wrap: wrap; }
-.when-proto.when-wide { flex: 1 1 100%; min-width: 0; }
-
-.when-proto {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    color: var(--ink-soft);
-    font-size: 12.5px;
+.when-fields {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
 }
-
-.when-line {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.when-label { color: var(--ink-faint); }
 
 .when-chip {
     position: relative;
@@ -1106,101 +1066,6 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 .when-chip:hover { background: #e8edf3; color: var(--ink); }
 .when-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-.when-days {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-/* Pole daty leży niewidoczne na całym 📅: stuknięcie trafia prosto w nie, więc
-   telefon otwiera swój kalendarz. */
-.when-cal-input {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    cursor: pointer;
-}
-
-/* 16 px: mniejsze pole iPhone powiększa przy stuknięciu. */
-.when-clock {
-    width: 68px;
-    padding: 5px 8px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--surface-alt);
-    font: inherit;
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--ink);
-    text-align: center;
-}
-
-.when-clock:focus {
-    outline: none;
-    border-color: var(--accent);
-    background: var(--surface);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.when-big {
-    min-width: 58px;
-    font-size: 20px;
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-}
-
-.when-range {
-    width: 100%;
-    height: 30px;
-    margin: 0;
-    background: transparent;
-    -webkit-appearance: none;
-    appearance: none;
-    cursor: pointer;
-}
-
-.when-range::-webkit-slider-runnable-track {
-    height: 8px;
-    border-radius: 4px;
-    background: linear-gradient(to right, #d3dae3 var(--past), #dbe7fd var(--past));
-}
-
-.when-range::-moz-range-track {
-    height: 8px;
-    border-radius: 4px;
-    background: linear-gradient(to right, #d3dae3 var(--past), #dbe7fd var(--past));
-}
-
-.when-range::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 26px;
-    height: 26px;
-    margin-top: -9px;
-    border: 3px solid #fff;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 1px 4px rgba(16, 32, 48, 0.35);
-}
-
-.when-range::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    border: 3px solid #fff;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 1px 4px rgba(16, 32, 48, 0.35);
-}
-
-.when-ticks {
-    display: flex;
-    justify-content: space-between;
-    padding: 0 6px;
-    color: var(--ink-faint);
-    font-size: 11px;
-}
-
 .when-pill {
     display: inline-flex;
     align-items: center;
@@ -1218,7 +1083,6 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 }
 
 .when-pill:hover { background: #e8edf3; }
-.when-pill small { color: var(--ink-faint); font-size: 12px; }
 .when-caret { color: var(--ink-faint); }
 
 .when-backdrop {

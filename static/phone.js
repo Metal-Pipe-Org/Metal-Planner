@@ -126,7 +126,7 @@ const phoneLayout = (() => {
 
         // Zwija się przy pierwszym wyniku, nie przy samym kliknięciu
         // „Szukaj": przy błędzie formularz zostaje do poprawki.
-        document.addEventListener('planner:found', () => {
+        document.addEventListener('planner:found', event => {
             const onboard = document.body.classList.contains('start-onboard');
             const from = onboard
                 ? 'linia ' + document.getElementById('ob-line').value.trim()
@@ -136,8 +136,7 @@ const phoneLayout = (() => {
                 part('search-summary-arrow', '→'),
                 part('search-summary-to', document.getElementById('end').value),
                 part('search-summary-time',
-                     (document.getElementById('time-mode').getAttribute('aria-pressed') === 'true'
-                         ? 'na ' : '') + document.getElementById('time').value),
+                     (event.detail.arrive ? 'na ' : '') + document.getElementById('time').value),
                 // Kółko na końcu linijki, za godziną: kolejne etapy wyniku
                 // jeszcze się liczą (patrz setSearching w app.js).
                 busy,

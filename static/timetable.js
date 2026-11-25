@@ -264,8 +264,7 @@ function setMode(on) {
         else { render(); draw(true); }
         queryInput.focus();
     } else {
-        $('time-now').before(timeInput);
-        $('day-panel').append(dateInput);
+        $('when-fields').append(timeInput, dateInput);
         clearMap();
         dimBase(false);
         B.resumePlanner();
