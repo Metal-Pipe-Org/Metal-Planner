@@ -44,7 +44,8 @@ def mpk(monkeypatch):
 
     monkeypatch.setattr(serverlog, "get_logger", _Log)
     monkeypatch.setattr(serverlog, "time", fake_time)
-    monkeypatch.setattr(serverlog, "_streak", {"reason": None, "message": None, "count": 0, "since": 0.0, "logged": 0.0})
+    monkeypatch.setattr(serverlog, "_streak",
+                        {"reason": None, "message": None, "count": 0, "since": 0.0, "logged": 0.0})
     return clock, calls, answers, logged
 
 

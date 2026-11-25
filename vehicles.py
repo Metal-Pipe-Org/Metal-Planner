@@ -145,7 +145,8 @@ def _feed_failed(reason):
     wpis co kilkanaście sekund przez całą noc: seria błędów trwa, dopóki kanał
     nie przepracuje FEED_OK_SEC bez błędu (patrz serverlog.log_repeating_error)."""
     _cache["failed"] = time.monotonic()
-    serverlog.log_repeating_error("pozycje pojazdów", f"Pozycje pojazdów z MPK: pobranie nie powiodło się - {reason}")
+    serverlog.log_repeating_error("pozycje pojazdów",
+                                  f"Pozycje pojazdów z MPK: pobranie nie powiodło się - {reason}")
 
 
 def _refresh(max_age):
@@ -455,12 +456,13 @@ def _learn_offsets(vehicles, trips, db, now):
             for t in by_line.get((v["line"], _ROUTE_TYPE[v["kind"]]), []) if spots[t["id"]]
         )
         if ranked and ranked[0][0] < LEARN_NEAR_M and (len(ranked) == 1 or ranked[1][0] > LEARN_RIVAL_M):
-            offset, point = v["key"] - ranked[0][1], (v["lat"], v["lon"])
+            offset, here = v["key"] - ranked[0][1], (v["lat"], v["lon"])
             old = _anchors.get(v["key"])
             if old and old[0] == offset:
-                point = old[2]
-            _anchors[v["key"]] = (offset, now, point,
-                                  bool(old and old[0] == offset and (old[3] or _metres(point, (v["lat"], v["lon"])) >= OWN_MOVED_M)))
+                confirmed = old[3] or _metres(old[2], here) >= OWN_MOVED_M
+                _anchors[v["key"]] = (offset, now, old[2], confirmed)
+            else:
+                _anchors[v["key"]] = (offset, now, here, False)
     for key in [k for k, (_, t, *_) in _anchors.items() if now - t > OFFSET_TTL_SEC]:
         del _anchors[key]
 
