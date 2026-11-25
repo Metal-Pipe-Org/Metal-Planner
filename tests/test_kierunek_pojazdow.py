@@ -74,7 +74,7 @@ def _vehicle(feed_path, n, key=None, late_sec=0):
     lat = next(la + (lb - la) * (sec - a) / (b - a)
                for (la, a), (lb, b) in zip(rows, rows[1:]) if a <= sec <= b)
     return {"line": "D", "kind": "bus", "lat": lat, "lon": 17.0,
-            "key": n + OFFSET if key is None else key, "steps": []}
+            "key": n + OFFSET if key is None else key, "steps": [], "still_sec": 0}
 
 
 def _seen_twice(feed_path, plan):
@@ -149,7 +149,7 @@ def test_the_rest_of_the_course_tells_which_way_it_goes(feed):
 
 def test_a_vehicle_with_an_unknown_course_carries_no_rest(feed):
     _seen_twice(feed, {n + OFFSET: n for n in range(1, 6)})
-    obcy = {"line": "D", "kind": "bus", "lat": 51.5, "lon": 17.5, "key": 999999, "steps": []}
+    obcy = {"line": "D", "kind": "bus", "lat": 51.5, "lon": 17.5, "key": 999999, "steps": [], "still_sec": 0}
     vehicles._add_courses([obcy])
     assert "rest" not in obcy and "course" not in obcy
 
@@ -167,7 +167,8 @@ def test_a_vetoed_course_leaves_nothing_behind(feed):
 
 def _moving(lat, lon, bearing=0):
     """Pojazd bez kursu, który dwa razy przesunął się w tę samą stronę."""
-    return {"line": "D", "kind": "bus", "lat": lat, "lon": lon, "key": 999999, "steps": [bearing, bearing]}
+    return {"line": "D", "kind": "bus", "lat": lat, "lon": lon, "key": 999999, "steps": [bearing, bearing],
+            "still_sec": 0}
 
 
 def test_just_past_a_stop_the_route_still_has_one_next_stop(feed):
@@ -200,3 +201,31 @@ def test_the_route_is_matched_along_its_bend_not_the_straight_line(bend):
     vehicles._add_courses([na_luku])
     vehicles._add_headings([na_luku])
     assert na_luku["source"] == "route" and na_luku["next"] == "S2"
+
+
+def test_a_vehicle_the_feed_froze_on_the_route_loses_its_arrow(feed):
+    """Kanał od ponad STALE_SEC podaje pojazd w tym samym miejscu w trasie:
+    strzałka wskazywałaby z miejsca, w którym go już nie ma."""
+    pojazdy = _seen_twice(feed, {n + OFFSET: n for n in range(1, 6)})
+    zamrozony = pojazdy[0]
+    zamrozony["still_sec"] = vehicles.STALE_SEC + 1
+    vehicles._add_courses([zamrozony])
+    vehicles._add_headings([zamrozony])
+    assert zamrozony["stale"] and zamrozony["heading"] is None and "rest" not in zamrozony
+
+
+def test_a_vehicle_waiting_at_its_terminus_is_not_stale(feed):
+    na_petli = {**_moving(LAT["S0"], 17.0), "still_sec": 600}
+    vehicles._add_courses([na_petli])
+    assert na_petli["stale"] is False
+
+
+def test_the_feed_tells_how_long_ago_a_vehicle_last_moved(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(vehicles, "time", type("T", (), {"monotonic": staticmethod(lambda: clock[0])}))
+    monkeypatch.setattr(vehicles, "_tracks", {})
+    for sec, lat in ((100, 51.1), (110, 51.1), (130, 51.1), (140, 51.101), (150, 51.101)):
+        clock[0] = sec
+        pojazd = {"lat": lat, "lon": 17.0, "key": 7}
+        vehicles._track_motion([pojazd])
+    assert pojazd["still_sec"] == 10

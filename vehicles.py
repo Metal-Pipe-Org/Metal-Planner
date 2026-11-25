@@ -270,6 +270,8 @@ ROUTE_NEAR_M = 100            # kropka tak blisko przebiegu wariantu trasy ...
 ROUTE_DEG = 45                # ... a przebieg biegnie tam tak zgodnie z ruchem: pasuje
 PATH_FAR_M = 1000             # dalej od prostej między przystankami przebiegu nie liczymy
 TRACK_TTL_SEC = 300
+STALE_SEC = 90                # kanał tyle nie ruszył pojazdu poza pętlą: pozycja nieaktualna
+TERMINUS_M = 300              # tak blisko końca kursu swojej linii pojazd po prostu czeka
 
 _TRIP_ID = re.compile(r"\d+_\d+")
 WARSAW = ZoneInfo("Europe/Warsaw")
@@ -300,18 +302,22 @@ def _angle_diff(a, b):
 
 def _track_motion(vehicles):
     """Dopisuje przy pojeździe kierunki dwóch ostatnich przesunięć o co najmniej
-    STEP_M (najstarsze pierwsze): v["steps"]."""
+    STEP_M (najstarsze pierwsze): v["steps"], i od ilu sekund kanał podaje go
+    w tym samym miejscu: v["still_sec"]."""
     now = time.monotonic()
     for k in [k for k, t in _tracks.items() if now - t["seen"] > TRACK_TTL_SEC]:
         del _tracks[k]
     for v in vehicles:
         point = (v["lat"], v["lon"])
-        track = _tracks.setdefault(v["key"], {"pts": [point], "seen": now})
+        track = _tracks.setdefault(v["key"], {"pts": [point], "seen": now, "at": point, "moved": now})
         track["seen"] = now
+        if track["at"] != point:
+            track["at"], track["moved"] = point, now
         if _metres(track["pts"][-1], point) >= STEP_M:
             track["pts"] = (track["pts"] + [point])[-3:]
         pts = track["pts"]
         v["steps"] = [_bearing(a, b) for a, b in zip(pts, pts[1:])]
+        v["still_sec"] = round(now - track["moved"])
 
 
 def _day_trips(day, db):
@@ -513,6 +519,7 @@ def _add_courses(vehicles):
                 v["course"] = (trip, stops[where[1]])
                 v["rest"] = [[round(s[0], 5), round(s[1], 5)] for s in stops[where[1]:]]
         _add_routes(vehicles, trips, db)
+        _mark_stale(vehicles, trips, db)
     finally:
         db.close()
 
@@ -559,16 +566,36 @@ def _add_routes(vehicles, trips, db):
             v["route"] = (headsign, (lat, lon, None, name))
 
 
+def _mark_stale(vehicles, trips, db):
+    """v["stale"]: kanał MPK od ponad STALE_SEC podaje pojazd co do cyfry w tym
+    samym miejscu, a ten nie czeka na pętli swojej linii ani w zajezdni (linia
+    nie ma teraz żadnego kursu). Pojazd, który naprawdę stoi, ma drżące
+    współrzędne; takie zamrożenie w pomiarze 2026-11-25 zwykle kończyło się
+    skokiem o kilometr - pojazd jechał, a kanał go nie odświeżał."""
+    ends = {}
+    for t in trips:
+        stops = _trip_stops(t, db)
+        ends.setdefault((t["route"], t["type"]), set()).update((stops[0][:2], stops[-1][:2]))
+    for v in vehicles:
+        line_ends = ends.get((v["line"], _ROUTE_TYPE[v["kind"]]))
+        v["stale"] = bool(v["still_sec"] > STALE_SEC and line_ends
+                          and all(_metres((v["lat"], v["lon"]), e) > TERMINUS_M for e in line_ends))
+
+
 def _add_headings(vehicles):
     """Składa z kursu (albo wariantu trasy) i ruchu to, co dostaje front: heading
     (stopnie), source ("trip"/"route") oraz to (cel) i next (następny przystanek).
-    Strzałka jest tylko tam, gdzie znamy cel - bez celu pojazd ma samo kółko."""
+    Strzałka jest tylko tam, gdzie znamy cel - bez celu pojazd ma samo kółko.
+    Pojazd z nieaktualną pozycją (stale) nie ma strzałki: wskazywałaby z miejsca,
+    w którym go już nie ma."""
     for v in vehicles:
         steps = v.pop("steps")
         course = v.pop("course", None)
         route = v.pop("route", None)
         v["heading"] = v["source"] = None
-        if course or route:
+        if v["stale"]:
+            v.pop("rest", None)
+        elif course or route:
             headsign, stop = (course[0]["headsign"], course[1]) if course else route
             bearing = _bearing((v["lat"], v["lon"]), stop[:2])
             if steps and _angle_diff(steps[-1], bearing) > VETO_DEG:

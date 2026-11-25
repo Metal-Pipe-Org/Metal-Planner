@@ -330,7 +330,9 @@ def init_routes(app):
         strzałkę (heading), cel (to), następny przystanek (next) i dalszą trasę
         kursu (rest). Kierunek bierze się z kursu dopasowanego po kluczu albo
         z ruchu pojazdu; ruch przeczący rozkładowi kasuje całe dopasowanie.
-        Front zawęża pojazdy do linii narysowanych na mapie.
+        Każdy pojazd niesie też, od ilu sekund kanał podaje go w tym samym
+        miejscu (still_sec), i czy to już nieaktualna pozycja w trasie (stale) -
+        taki nie ma strzałki. Front zawęża pojazdy do linii narysowanych na mapie.
         """
         try:
             found = vehicles.get_vehicles()
