@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 
@@ -8,7 +7,6 @@ import pytest
 
 import bikes
 import gtfs
-import nowosci
 import pkp
 import planner
 import traficar
@@ -108,8 +106,11 @@ def _wspolny_kontekst_przegladarki():
     except ImportError:
         yield
         return
+    import json
     import time
     import urllib.request
+
+    import nowosci
 
     pobrane = {}
 
