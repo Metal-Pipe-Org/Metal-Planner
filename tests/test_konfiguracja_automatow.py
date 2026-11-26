@@ -47,6 +47,17 @@ def test_sito_etykiety_stale_zgodne_z_configiem():
     assert set(stale_like) == {label}
 
 
+@pytest.mark.parametrize("path", sorted(
+    [p for p in SCRIPTS.glob("*.sh") if p != CONFIG] + list(WORKFLOWS.glob("*.yml")),
+    key=str), ids=lambda p: p.name)
+def test_nikt_nie_przypisuje_wartosci_z_configu_po_swojemu(path):
+    text = path.read_text()
+    for name in _config():
+        # Przypisanie w bashu (`X=`) albo w `env:` workflowu (`X:`).
+        assert not re.search(rf"^\s*(?:local\s+|export\s+)?{name}(=|:\s)", text, re.M), \
+            f"{path.name} przypisuje {name} — wartość ma stać tylko w config.sh"
+
+
 SPRZATANIE = SCRIPTS / "sprzatanie.sh"
 OBSZARY = ROOT / ".github" / "sprzatanie-obszary.json"
 
@@ -221,17 +232,6 @@ def test_link_do_pr_sprzatania():
     assert parts.path == "/o/r/compare/main...sprzatanie/pkp-2026-11-30"
     q = parse_qs(parts.query)
     assert q == {"quick_pull": ["1"], "title": ["Sprzątanie: PKP"], "body": ["Refs #531\n\nDla pasażera & reszta"]}
-
-
-@pytest.mark.parametrize("path", sorted(
-    [p for p in SCRIPTS.glob("*.sh") if p != CONFIG] + list(WORKFLOWS.glob("*.yml")),
-    key=str), ids=lambda p: p.name)
-def test_nikt_nie_przypisuje_wartosci_z_configu_po_swojemu(path):
-    text = path.read_text()
-    for name in _config():
-        # Przypisanie w bashu (`X=`) albo w `env:` workflowu (`X:`).
-        assert not re.search(rf"^\s*(?:local\s+|export\s+)?{name}(=|:\s)", text, re.M), \
-            f"{path.name} przypisuje {name} — wartość ma stać tylko w config.sh"
 
 
 def _refs(title, body, branch):
