@@ -56,3 +56,50 @@ def test_zwykle_wyszukiwanie_bez_zmian(install_day):
 
     assert result["starts"] == "00:30"
     assert "arrive_by" not in result
+
+
+def _teraz(monkeypatch, kiedy):
+    """Dziś = dzień pytania, a teraz = `kiedy` (planner pyta zegara)."""
+    import datetime as dt
+    import planner
+
+    class _Dzis(dt.date):
+        @classmethod
+        def today(cls):
+            return kiedy.date()
+
+    class _Teraz(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return kiedy
+    monkeypatch.setattr(planner, "date", _Dzis)
+    monkeypatch.setattr(planner, "datetime", _Teraz)
+
+
+def test_dzis_nie_ma_wyjsc_ktore_juz_minely(install_day, monkeypatch):
+    install_day(make_day(DAY + _bus("b", "Autobus 2", [(33, 58)])))
+    _teraz(monkeypatch, datetime(2026, 1, 5, 0, 45))
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 1, 0), arrive_by=True)
+
+    # 0:33 odjechało ponad 10 min temu, 0:40 jeszcze zdąży
+    assert [j["departure"] for j in result["journeys"]] == ["00:40"]
+    assert all(move["board_sec"] >= 35 * M for move in result["scheme"]["moves"])
+
+
+def test_dzis_gdy_nic_juz_nie_zdazy_mowi_to_wprost(install_day, monkeypatch):
+    install_day(make_day(DAY))
+    _teraz(monkeypatch, datetime(2026, 1, 5, 0, 52))
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 1, 0), arrive_by=True)
+
+    assert result["error"] == "Na przyjazd do 01:00 nie zdążysz już żadnym połączeniem."
+
+
+def test_odjazd_z_minionej_godziny_dalej_dziala(install_day, monkeypatch):
+    install_day(make_day(DAY))
+    _teraz(monkeypatch, datetime(2026, 1, 5, 0, 52))
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 25))
+
+    assert result["starts"] == "00:30"

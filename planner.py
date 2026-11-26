@@ -1045,6 +1045,10 @@ DEFAULT_MAP_CARS = 3
 # zębatką, zgłoszenie #490); None = bez limitu. Dalej niż to ich pozycje to już
 # zgadywanie, więc zamiast aut jest wyjaśnienie, dlaczego ich nie ma.
 DEFAULT_CAR_HORIZON_H = 3
+# Ile wstecz od teraz odjazd jest jeszcze „teraz", a nie przeszłością: godzina
+# wpisana przed chwilą albo zaokrąglona w dół. Wcześniejszy odjazd przy „być na"
+# już nikogo nie dowiezie.
+DEPARTED_SLACK_SEC = 10 * 60
 MIN_MAP_CARS = 1
 MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
@@ -2280,6 +2284,11 @@ def _latest_start(day, source_stops, target_stops, arrive_sec):
     return lo
 
 
+def _too_late(arrive_sec):
+    return {"error": f"Na przyjazd do {_fmt_time(arrive_sec)} nie zdążysz już "
+                     f"żadnym połączeniem."}
+
+
 def _no_arrival(start_name, end_name, arrive_sec):
     return {"error": f"Nie znaleziono połączenia {start_name} → {end_name} "
                      f"z przyjazdem do {_fmt_time(arrive_sec)} tego dnia."}
@@ -2508,10 +2517,19 @@ def plan_flow_stages(start_query, end_query, when=None,
     # jeszcze dowozi na godzinę z formularza - dalej wszystko jak przy
     # „wyjściu o", z tą godziną jako końcem okna.
     arrive_sec = asked_sec if arrive_by and ride is None else None
+    # Dziś odjazd, który już minął, nikogo nie dowiezie: „być na" nie
+    # proponuje wyjścia wcześniejszego niż teraz (z luzem na „teraz").
+    earliest_exit = None
+    if arrive_sec is not None and when.date() == date.today():
+        now = datetime.now()
+        earliest_exit = now.hour * 3600 + now.minute * 60 + now.second - DEPARTED_SLACK_SEC
     if arrive_sec is not None:
         dep_sec = _latest_start(day, source_stops, target_stops, arrive_sec)
         if dep_sec is None:
             yield "error", _no_arrival(start_name, end_name, arrive_sec)
+            return
+        if earliest_exit is not None and dep_sec < earliest_exit:
+            yield "error", _too_late(arrive_sec)
             return
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek") i jest zapasowym
@@ -2632,7 +2650,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         if arrive_sec is not None:
             # Okno „być na" sięga tyle przed najpóźniejsze wyjście, ile przy
             # „wyjściu o" sięga za najszybszy przyjazd (patrz _moves_map).
-            dep_sec = max(0, dep_sec - int(min(
+            dep_sec = max(0, earliest_exit or 0, dep_sec - int(min(
                 MOVES_SEARCH_MAX_SEC,
                 2 * gain_sec + moves.reasonable_sec(best_arr, dep_sec))))
         ride_legs = [leg for leg in best_legs if leg["kind"] == "ride"]
