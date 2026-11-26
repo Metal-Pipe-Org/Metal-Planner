@@ -10,6 +10,7 @@ import pytest
 sync_api = pytest.importorskip("playwright.sync_api")
 
 import gtfs
+from test_odswiezanie_pozycji import tryb_deweloperski  # noqa: F401
 from tests.test_uklad_telefonu import PUSTE_ZRODLA, _chromium, _odpowiedz
 
 KLUCZ = "hlk_testowy"
@@ -25,27 +26,20 @@ TABLICA_JS = """(data) => {
 }"""
 
 
-def _serwer(dev):
-    import os
-    from werkzeug.serving import make_server
-    import app as aplikacja
-    if dev:
-        os.environ["DEV_MODE"] = "1"
-    else:
-        os.environ.pop("DEV_MODE", None)
-    serwer = make_server("127.0.0.1", 0, aplikacja.app, threaded=True)
-    threading.Thread(target=serwer.serve_forever, daemon=True).start()
-    return serwer
-
-
-@pytest.fixture(scope="module", params=[True, False], ids=["dev", "bez-dev"])
-def adres(request):
+@pytest.fixture(scope="module")
+def adres():
+    """Serwer w trybie deweloperskim (tryb_deweloperski); test o tym, co jest
+    bez niego, sam go zdejmuje na swój czas - serwer czyta tryb przy każdym
+    zapytaniu."""
     try:
         gtfs.all_stop_names()
     except FileNotFoundError:
         pytest.skip("brak bazy rozkładów (data/gtfs.sqlite)")
-    serwer = _serwer(request.param)
-    yield request.param, f"http://127.0.0.1:{serwer.server_port}/"
+    from werkzeug.serving import make_server
+    import app as aplikacja
+    serwer = make_server("127.0.0.1", 0, aplikacja.app, threaded=True)
+    threading.Thread(target=serwer.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{serwer.server_port}/"
     serwer.shutdown()
 
 
@@ -107,10 +101,7 @@ def _kliknij_godzine(page, potwierdzaj):
 
 
 def test_z_kluczem_klik_pyta_i_wysyla(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, wyslane = _strona(przegladarka, url, klucz=True)
+    page, wyslane = _strona(przegladarka, adres, klucz=True)
     pytania = _kliknij_godzine(page, potwierdzaj=True)
     assert "5 → Księże Małe, 22:57" in pytania[0]
     assert wyslane[0][0] == KLUCZ
@@ -119,10 +110,7 @@ def test_z_kluczem_klik_pyta_i_wysyla(przegladarka, adres):
 
 
 def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, wyslane = _strona(przegladarka, url, klucz=True)
+    page, wyslane = _strona(przegladarka, adres, klucz=True)
     # Strona stoi na 127.0.0.1, więc link ma iść na wdrożoną kopię, nie na localhost.
     page.evaluate("""() => {
         document.getElementById('start').value = 'Sosnowiecka';
@@ -132,9 +120,9 @@ def test_wysylka_niesie_link_do_biezacego_wyszukiwania_pod_publicznym_adresem(pr
     assert wyslane[0][1]["link"] == "https://metal-testing.sze.one/?from=Sosnowiecka&to=Wojszyce"
 
 
-def _link_z_klikniecia(przegladarka, url, kurs, zewnetrzny):
+def _link_z_klikniecia(przegladarka, adres, kurs, zewnetrzny):
     tablica = {**TABLICA, "departures": [{**TABLICA["departures"][0], **kurs}]}
-    page, wyslane = _strona(przegladarka, url, klucz=True, tablica=tablica)
+    page, wyslane = _strona(przegladarka, adres, klucz=True, tablica=tablica)
     if zewnetrzny:
         page.evaluate("document.getElementById('pushward-link').checked = true")
     _kliknij_godzine(page, potwierdzaj=True)
@@ -152,42 +140,33 @@ def _link_z_klikniecia(przegladarka, url, kurs, zewnetrzny):
     ({"stop_id": "886", "siechnice_stop": None}, "https://metal-testing.sze.one/"),
 ])
 def test_wlaczone_ustawienie_wysyla_link_do_przystanku(przegladarka, adres, kurs, link):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    wyslany = _link_z_klikniecia(przegladarka, url, kurs, zewnetrzny=True)
+    wyslany = _link_z_klikniecia(przegladarka, adres, kurs, zewnetrzny=True)
     assert wyslany.startswith(link)
 
 
 def test_wylaczone_ustawienie_zostawia_link_do_metal_plannera(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    link = _link_z_klikniecia(przegladarka, url, {"stop_id": "1605"}, zewnetrzny=False)
+    link = _link_z_klikniecia(przegladarka, adres, {"stop_id": "1605"}, zewnetrzny=False)
     assert link.startswith("https://metal-testing.sze.one/")
 
 
 def test_odmowa_w_potwierdzeniu_nic_nie_wysyla(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, wyslane = _strona(przegladarka, url, klucz=True)
+    page, wyslane = _strona(przegladarka, adres, klucz=True)
     _kliknij_godzine(page, potwierdzaj=False)
     assert wyslane == []
 
 
-def test_bez_klucza_nic_sie_nie_dzieje(przegladarka, adres):
-    dev, url = adres
-    page, wyslane = _strona(przegladarka, url, klucz=False)
+@pytest.mark.parametrize("dev", [True, False], ids=["dev", "bez-dev"])
+def test_bez_klucza_nic_sie_nie_dzieje(przegladarka, adres, monkeypatch, dev):
+    if not dev:
+        monkeypatch.delenv("DEV_MODE")
+    page, wyslane = _strona(przegladarka, adres, klucz=False)
     assert _kliknij_godzine(page, potwierdzaj=True) == []
     assert wyslane == []
 
 
-def test_poza_trybem_dev_klucz_nic_nie_znaczy(przegladarka, adres):
-    dev, url = adres
-    if dev:
-        pytest.skip("sprawdzane bez trybu dev")
-    page, wyslane = _strona(przegladarka, url, klucz=True)
+def test_poza_trybem_dev_klucz_nic_nie_znaczy(przegladarka, adres, monkeypatch):
+    monkeypatch.delenv("DEV_MODE")
+    page, wyslane = _strona(przegladarka, adres, klucz=True)
     assert _kliknij_godzine(page, potwierdzaj=True) == []
     assert wyslane == []
     assert not page.is_visible("#pushward-key")
@@ -209,11 +188,8 @@ def _tablica(*sekundy):
 
 
 def test_podkreslone_tylko_odjazdy_w_oknie_osmiu_godzin(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
     # Teraz 21:00: 20:59 minął, 21:01 i 04:59 w oknie, 05:01 dalej niż 8 h.
-    page, _ = _strona(przegladarka, url, klucz=True,
+    page, _ = _strona(przegladarka, adres, klucz=True,
                       tablica=_tablica(20 * 3600 + 59 * 60, 21 * 3600 + 60,
                                        28 * 3600 + 59 * 60, 29 * 3600 + 60))
     assert page.locator("#flow-panel-body .tt-times > span").count() == 4
@@ -223,10 +199,7 @@ def test_podkreslone_tylko_odjazdy_w_oknie_osmiu_godzin(przegladarka, adres):
 
 
 def test_odjazd_juz_miniony_nie_jest_klikalny(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, wyslane = _strona(przegladarka, url, klucz=True, teraz="2026-01-05T23:30:00+01:00")
+    page, wyslane = _strona(przegladarka, adres, klucz=True, teraz="2026-01-05T23:30:00+01:00")
     assert _klikalne(page) == 0
     page.click("#flow-panel-body .tt-times > span")
     page.wait_for_timeout(200)
@@ -234,10 +207,7 @@ def test_odjazd_juz_miniony_nie_jest_klikalny(przegladarka, adres):
 
 
 def test_jutrzejszy_odjazd_w_oknie_jest_klikalny(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, _ = _strona(przegladarka, url, klucz=True, teraz="2026-01-05T23:00:00+01:00",
+    page, _ = _strona(przegladarka, adres, klucz=True, teraz="2026-01-05T23:00:00+01:00",
                       tablica=_tablica(30 * 3600))
     assert _klikalne(page) == 1
 
@@ -254,10 +224,7 @@ def _zapisz(page, klucz):
 
 
 def test_przyciski_klucza_mieszcza_sie_w_panelu_ustawien(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, _ = _strona(przegladarka, url, klucz=False)
+    page, _ = _strona(przegladarka, adres, klucz=False)
     page.click("#dev-toggle")
     page.fill("#settings-search", "PushWard")
     panel = page.locator("#dev-panel").bounding_box()
@@ -266,10 +233,7 @@ def test_przyciski_klucza_mieszcza_sie_w_panelu_ustawien(przegladarka, adres):
 
 
 def test_zapis_poprawnego_klucza_pokazuje_zuzycie(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, _ = _strona(przegladarka, url, klucz=False,
+    page, _ = _strona(przegladarka, adres, klucz=False,
                       sprawdzenie=(200, {"used": 12, "limit": 250}))
     status, zapisany = _zapisz(page, KLUCZ)
     assert status == "Włączone — wykorzystano 12 z 250 aktualizacji w tym miesiącu."
@@ -277,29 +241,20 @@ def test_zapis_poprawnego_klucza_pokazuje_zuzycie(przegladarka, adres):
 
 
 def test_zapis_zlego_klucza_nic_nie_zapisuje(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, _ = _strona(przegladarka, url, klucz=False, sprawdzenie=(502, {"status": 401}))
+    page, _ = _strona(przegladarka, adres, klucz=False, sprawdzenie=(502, {"status": 401}))
     status, zapisany = _zapisz(page, KLUCZ)
     assert status == "Nieprawidłowy klucz."
     assert zapisany is None
 
 
 def test_zapis_bez_polaczenia_nic_nie_zapisuje(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, _ = _strona(przegladarka, url, klucz=False, sprawdzenie=(502, {"status": 0}))
+    page, _ = _strona(przegladarka, adres, klucz=False, sprawdzenie=(502, {"status": 0}))
     status, zapisany = _zapisz(page, KLUCZ)
     assert "Nie dało się sprawdzić" in status
     assert zapisany is None
 
 
 def test_zapisany_klucz_odswieza_licznik_przy_wejsciu(przegladarka, adres):
-    dev, url = adres
-    if not dev:
-        pytest.skip("sprawdzane w trybie dev")
-    page, _ = _strona(przegladarka, url, klucz=True,
+    page, _ = _strona(przegladarka, adres, klucz=True,
                       sprawdzenie=(200, {"used": 7, "limit": 250}))
     page.wait_for_function("document.getElementById('pushward-status').textContent.includes('7 z 250')")

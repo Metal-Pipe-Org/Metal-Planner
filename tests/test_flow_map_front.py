@@ -25,15 +25,16 @@ są macOS-owe i gdzie indziej się pominą (patrz pytest.skip niżej); gdyby
 kiedyś doszło CI na Linuksie, trzeba będzie tu dołożyć drugi silnik.
 
 Odświeżenie fixture'a po zmianie w plannerze (data - dzień powszedni
-z bieżącego rozkładu; źródła na żywo wyłączone, żeby plik nie zależał od
-sieci):
+z bieżącego rozkładu, ta sama w FIXTURE_DATE niżej; jedno „Pokaż więcej",
+bo przy domyślnej gęstości ta relacja ma za mało grupek numerów dla punktu 7;
+źródła na żywo wyłączone, żeby plik nie zależał od sieci):
 
     .venv/bin/python -c "
     from datetime import datetime; import planner, json, pkp, traficar, bikes
     pkp.enabled = traficar.enabled = lambda: False
     traficar.zone = lambda: None
     bikes._fetch = lambda url: (_ for _ in ()).throw(OSError(url))
-    r = planner.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 10, 6, 15, 37))
+    r = planner.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 12, 1, 15, 37), more=1)
     json.dump(r, open('tests/js/flow_fixture.json', 'w'),
               ensure_ascii=False, separators=(',', ':'))"
 """
@@ -51,6 +52,8 @@ import settings_registry
 
 ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = ROOT / "tests" / "js"
+# Dzień z przepisu na nagranie flow_fixture.json - front czyta go z pola daty.
+FIXTURE_DATE = "2026-12-01"
 
 
 class _SettingRows(HTMLParser):
@@ -108,6 +111,7 @@ def _bundle_source():
     return "\n".join([
         "const APP_SOURCE = " + json.dumps(app_js) + ";",
         "const FLOW_FIXTURE = " + fixture + ";",
+        "const FIXTURE_DATE = " + json.dumps(FIXTURE_DATE) + ";",
         "const SETTING_ROWS = " + json.dumps(_setting_rows()) + ";",
         (JS_DIR / "harness.js").read_text(encoding="utf-8"),
         (JS_DIR / "checks.js").read_text(encoding="utf-8"),

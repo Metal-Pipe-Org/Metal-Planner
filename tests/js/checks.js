@@ -1108,6 +1108,11 @@ checks.pokaz_wiecej_doklada_gestosc = (() => {
     };
 })();
 
+/* Numer linii ze znacznika pojazdu: stoi w opakowaniu, które nadaje mu wygląd
+   linii (#256), a za nim może iść strzałka kierunku. */
+const numerPojazdu = marker =>
+    (marker.options.icon.html.match(/class="vehicle-marker[^>]*>([^<]*)</) || [])[1];
+
 /* Warstwa żywych pojazdów (przycisk ◉) przy narysowanej mapie przepływów:
    pokazuje TYLKO linie, które są na tej mapie. Pojazd linii, której mapa nie
    rysuje, odpowiada na inne pytanie i ma jej nie zasłaniać; bez mapy nie ma
@@ -1125,7 +1130,7 @@ checks.pojazdy_zawezone_do_linii_z_mapy = (function () {
     // włączenie warstwy nie doczekałoby się rysowania.
     app.setVehiclesOn(true);
     app.renderVehicles();
-    const przyMapie = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const przyMapie = app.vehiclesLayer.layers.map(numerPojazdu);
     const slupki = app.map.hasLayer(app.stopsLayer);   // włącznik ich nie chowa
 
     // Zgaszona mapa = brak powodu do zawężania.
@@ -1432,11 +1437,11 @@ checks.pojazdy_w_rozkladach_ida_za_ekranem = (function () {
 
     window.timetableMode = {vehicleLines: () => new Set(['bus 999'])};
     app.renderVehicles();
-    const wRozkladach = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const wRozkladach = app.vehiclesLayer.layers.map(numerPojazdu);
 
     window.timetableMode = {vehicleLines: () => null};
     app.renderVehicles();
-    const poWyjsciu = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const poWyjsciu = app.vehiclesLayer.layers.map(numerPojazdu);
 
     delete window.timetableMode;
     app.setVehiclesOn(false);

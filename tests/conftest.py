@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 
 import bikes
 import gtfs
+import nowosci
 import pkp
 import planner
 import traficar
@@ -79,13 +81,28 @@ LEAFLET_URLS = {
 }
 
 
+# Nowości oznaczone jako widziane, tak jak po kliknięciu „Zamknij" (klucz
+# z static/nowosci/nowosci.js). Ramka bez własnego adresu nie ma localStorage.
+NOWOSCI_WIDZIANE_JS = """try {
+    localStorage.setItem('metal-planner:news-seen', %s);
+} catch (e) {}"""
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _leaflet_pobrany_raz():
-    """Strona ładuje Leaflet z CDN (templates/index.html), a każdy z setek
+def _wspolny_kontekst_przegladarki():
+    """Każdy kontekst przeglądarki w testach przechodzi tędy.
+
+    Strona ładuje Leaflet z CDN (templates/index.html), a każdy z setek
     testów w przeglądarce otwiera ją od nowa. Przy tylu zapytaniach CDN
     co jakiś czas odpowiada błędem i strona zostaje bez `L` i `map` - test
     pada na czymś, co nie jest jego przedmiotem. Biblioteka jest więc pobrana
-    raz na przebieg i podawana z pamięci każdemu kontekstowi przeglądarki."""
+    raz na przebieg i podawana z pamięci każdemu kontekstowi przeglądarki.
+
+    Okienko nowości (static/nowosci/) leży na przyciskach, w które testy
+    stukają, a widzi je każdy, kto ma już coś w pamięci przeglądarki - testy
+    wpisują tam ustawienia przed wejściem na stronę. Każda nowość z rejestru
+    jest więc z góry widziana; inaczej każda kolejna nowość czerwieniłaby
+    testy, które jej nie dotyczą."""
     try:
         from playwright import sync_api
     except ImportError:
@@ -117,10 +134,14 @@ def _leaflet_pobrany_raz():
 
     oryginal = sync_api.Browser.new_context
 
+    widziane = NOWOSCI_WIDZIANE_JS % json.dumps(json.dumps(
+        [entry["id"] for entry in nowosci.load()]))
+
     def new_context(self, *args, **kwargs):
         context = oryginal(self, *args, **kwargs)
         for url in LEAFLET_URLS:
             context.route(url, podaj)
+        context.add_init_script(widziane)
         return context
 
     sync_api.Browser.new_context = new_context

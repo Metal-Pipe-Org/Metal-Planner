@@ -11,13 +11,7 @@ Uruchomienie i wymagania (część testów potrzebuje `data/gtfs.sqlite`, testy
 frontu — macOS): [README.md](../README.md#testy). Tu: który test pilnuje
 którego punktu kontraktu.
 
-Mapa jest jedna — z wartości podróży — i wszystkie testy sprawdzają ją.
-Testy frontu (emulator, `tests/test_flow_map_front.py` + `tests/js/`) jadą na
-zapisanej odpowiedzi `/api/flow` (`tests/js/flow_fixture.json`, Sosnowiecka →
-Wojszyce, wtorek 6.10, 15:37; przepis na odświeżenie w opisie
-`test_flow_map_front.py`). Scenariusze syntetyczne, w których mapa przy
-domyślnej gęstości nie sięgnęłaby tego, co test sprawdza, pytają o najwyższą
-gęstość z suwaka (`MAX_MAP_DENSITY`).
+Mapa jest jedna — z wartości podróży — i wszystkie testy sprawdzają ją. Testy frontu (emulator, `tests/test_flow_map_front.py` + `tests/js/`) jadą na zapisanej odpowiedzi `/api/flow` (`tests/js/flow_fixture.json`, Sosnowiecka → Wojszyce, wtorek 1.12, 15:37, po jednym „Pokaż więcej”; przepis na odświeżenie w opisie `test_flow_map_front.py`). Scenariusze syntetyczne, w których mapa przy domyślnej gęstości nie sięgnęłaby tego, co test sprawdza, pytają o najwyższą gęstość z suwaka (`MAX_MAP_DENSITY`).
 
 | Punkt | Backend | Front (emulator) |
 |---|---|---|
