@@ -5,15 +5,20 @@ do historii.
     python wskazniki_balaganu.py              # pełny zestaw testów + reszta
     python wskazniki_balaganu.py --bez-testow # tylko pliki i martwy kod
 
-Testy puszczamy tak jak CI (świeży klon, bez data/gtfs.sqlite), więc liczba
-czerwonych to ta, którą widziałby automat.
+Wynik testów zależy od środowiska, więc skrypt podaje, czy była baza rozkładu
+(bez niej część testów pada, a przeglądarkowe są pomijane). Testy przeglądarkowe
+(playwright) wymagają uruchomienia poza sandboxem Claude'a, a emulator frontu
+wymaga macOS (osascript). Pełny zestaw z bazą trwa kilkanaście minut.
 """
 import ast
 import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
+import xml.etree.ElementTree as ET
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -34,17 +39,31 @@ def pliki_zrodlowe():
 
 
 def testy():
-    start = time.monotonic()
-    proces = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
-        cwd=ROOT, capture_output=True, text=True,
-    )
-    czas = time.monotonic() - start
-    liczby = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
-    for ile, nazwa in re.findall(r"(\d+) (passed|failed|errors?|skipped)", proces.stdout.splitlines()[-1]):
-        liczby["error" if nazwa.startswith("error") else nazwa] = int(ile)
-    return {"czas_s": round(czas, 1), "zaliczone": liczby["passed"],
-            "czerwone": liczby["failed"] + liczby["error"], "pominiete": liczby["skipped"]}
+    with tempfile.TemporaryDirectory() as katalog:
+        raport = Path(katalog) / "junit.xml"
+        start = time.monotonic()
+        subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests", f"--junitxml={raport}"],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+        czas = time.monotonic() - start
+        przypadki = list(ET.parse(raport).getroot().iter("testcase"))
+    wynik = {"czas_s": round(czas, 1), "zaliczone": 0, "czerwone": 0, "bledy_ustawienia": 0, "pominiete": 0}
+    pominiecia = Counter()
+    for przypadek in przypadki:
+        blad, usterka, pominiety = przypadek.find("failure"), przypadek.find("error"), przypadek.find("skipped")
+        if blad is not None:
+            wynik["czerwone"] += 1
+        elif usterka is not None:
+            wynik["bledy_ustawienia"] += 1
+        elif pominiety is not None:
+            wynik["pominiete"] += 1
+            pominiecia[(pominiety.get("message") or "")[:70]] += 1
+        else:
+            wynik["zaliczone"] += 1
+    wynik["baza_rozkladu"] = (ROOT / "data" / "gtfs.sqlite").exists()
+    wynik["pominiecia"] = dict(pominiecia.most_common(5))
+    return wynik
 
 
 def najwieksze_pliki():
@@ -82,7 +101,10 @@ def main():
 
     if "testy" in wynik:
         t = wynik["testy"]
-        print(f"Testy: {t['czas_s']} s, zaliczone {t['zaliczone']}, czerwone {t['czerwone']}, pominięte {t['pominiete']}")
+        print(f"Testy: {t['czas_s']} s, zaliczone {t['zaliczone']}, czerwone {t['czerwone']}, błędy ustawienia {t['bledy_ustawienia']}, pominięte {t['pominiete']}")
+        print(f"  baza rozkładu data/gtfs.sqlite: {'jest' if t['baza_rozkladu'] else 'BRAK (jak na świeżym klonie; część testów pada lub jest pominięta)'}")
+        for powod, ile in t["pominiecia"].items():
+            print(f"  pominięte {ile}: {powod}")
     print("Największe pliki (linie):")
     for sciezka, linie in wynik["najwieksze_pliki"].items():
         print(f"  {linie:6d}  {sciezka}")
