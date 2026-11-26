@@ -4,6 +4,12 @@ do historii.
 
     python wskazniki_balaganu.py              # pełny zestaw testów + reszta
     python wskazniki_balaganu.py --bez-testow # tylko pliki i martwy kod
+    python wskazniki_balaganu.py --benchmark wskazniki.json
+
+`--benchmark` zapisuje dodatkowo te same liczby w formacie, który zbiera
+cotygodniowy workflow `wskazniki-balaganu.yml` (github-action-benchmark,
+`customSmallerIsBetter`: lista `{name, unit, value, extra}`). Nazwy wpisów są
+kluczami wykresów, więc ich zmiana zaczyna wykres od nowa.
 
 Wynik testów zależy od środowiska, więc skrypt podaje, czy była baza rozkładu
 (bez niej część testów pada, a przeglądarkowe są pomijane). Testy przeglądarkowe
@@ -91,6 +97,25 @@ def martwy_kod():
     return martwe
 
 
+def wpisy_benchmarku(wynik):
+    # Wszystkie wpisy muszą być „im mniej, tym lepiej”, bo narzędzie ma jeden
+    # kierunek na cały zestaw; zaliczone idą więc tylko do opisu.
+    wpisy = []
+    if "testy" in wynik:
+        t = wynik["testy"]
+        srodowisko = f"zaliczone {t['zaliczone']}, baza rozkładu: {'jest' if t['baza_rozkladu'] else 'brak'}"
+        wpisy += [
+            {"name": "Testy: czerwone", "unit": "testy", "value": t["czerwone"], "extra": srodowisko},
+            {"name": "Testy: błędy ustawienia", "unit": "testy", "value": t["bledy_ustawienia"], "extra": srodowisko},
+            {"name": "Testy: pominięte", "unit": "testy", "value": t["pominiete"], "extra": srodowisko},
+            {"name": "Testy: czas", "unit": "s", "value": t["czas_s"], "extra": srodowisko},
+        ]
+    wpisy.append({"name": "Martwy kod (heurystyka)", "unit": "funkcje", "value": wynik["martwy_kod_heurystyka"]})
+    wpisy += [{"name": f"Linie: {sciezka}", "unit": "linie", "value": linie}
+              for sciezka, linie in wynik["najwieksze_pliki"].items()]
+    return wpisy
+
+
 def main():
     wynik = {"data": date.today().isoformat()}
     if "--bez-testow" not in sys.argv:
@@ -114,6 +139,9 @@ def main():
     if len(martwe) > 15:
         print(f"  ... i {len(martwe) - 15} kolejnych")
     print(json.dumps(wynik, ensure_ascii=False))
+    if "--benchmark" in sys.argv:
+        Path(sys.argv[sys.argv.index("--benchmark") + 1]).write_text(
+            json.dumps(wpisy_benchmarku(wynik), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

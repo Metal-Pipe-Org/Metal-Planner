@@ -78,3 +78,63 @@ def test_dopisane_slowo_dziala_bez_zmiany_skryptu():
     out = _bash(f'source "{SCRIPTS}/refs.sh"; REFS_MENTION_WORDS="$REFS_MENTION_WORDS|see also"; '
                 "mention_refs '' 'See  also #7'")
     assert out.split() == ["7"]
+
+
+def test_akcja_wskaznikow_przypieta_do_commitu():
+    # Akcja dostaje token z prawem zapisu, a tag da się przesunąć (#532).
+    uses = re.findall(r"uses:\s*(benchmark-action/github-action-benchmark@\S+)",
+                      (WORKFLOWS / "wskazniki-balaganu.yml").read_text())
+    assert uses and all(re.fullmatch(r".+@[0-9a-f]{40}", u) for u in uses), uses
+
+
+def _data_js(tmp_path, *pomiary):
+    import json
+    entries = [{"commit": {"id": str(i)}, "benches": [
+        {"name": n, "unit": "s" if n == "Testy: czas" else "testy", "value": v, "extra": "baza rozkładu: brak"}
+        for n, v in pomiar.items()]} for i, pomiar in enumerate(pomiary)]
+    path = tmp_path / "data.js"
+    path.write_text("window.BENCHMARK_DATA = " + json.dumps({"entries": {"Wskaźniki bałaganu": entries}}))
+    return path
+
+
+def _karta(path):
+    return _bash(f'source "{SCRIPTS}/wskazniki.sh"; DRY_RUN=1 wskazniki_karta "$1" "Wskaźniki bałaganu" 150% Metal-Pipe-Org/Metal-Planner',
+                 str(path))
+
+
+def test_karta_wskaznikow_strzalki_i_alarm(tmp_path):
+    out = _karta(_data_js(tmp_path,
+                          {"Testy: czerwone": 33, "Testy: błędy ustawienia": 0, "Testy: czas": 412.34, "Linie: static/app.js": 9200},
+                          {"Testy: czerwone": 28, "Testy: błędy ustawienia": 2, "Testy: czas": 412.34, "Linie: static/app.js": 9219,
+                           "Linie: planner.py": 4978}))
+    assert "[warn]" in out
+    assert "https://metal-pipe-org.github.io/Metal-Planner/wskazniki/" in out
+    assert "czerwone 33 → 28 ▼\n" in out
+    assert "błędy ustawienia 0 → 2 ▲ ⚠️" in out
+    assert "czas testów 412.3 s → 412.3 s =" in out
+    # Na karcie tylko największy plik; reszta jest na wykresach.
+    assert "największy plik (static/app.js) 9200 → 9219 ▲" in out and "planner.py" not in out
+    assert "bez bazy rozkładu" in out
+
+
+def test_karta_wskaznikow_pierwszy_pomiar_bez_strzalek(tmp_path):
+    out = _karta(_data_js(tmp_path, {"Testy: czerwone": 28}))
+    assert "[info]" in out and "czerwone 28\n" in out and "→" not in out
+
+
+def test_wpisy_benchmarku_w_formacie_akcji():
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from wskazniki_balaganu import wpisy_benchmarku
+    wpisy = wpisy_benchmarku({
+        "testy": {"czas_s": 12.5, "zaliczone": 9, "czerwone": 1, "bledy_ustawienia": 0, "pominiete": 2,
+                  "baza_rozkladu": False, "pominiecia": {}},
+        "najwieksze_pliki": {"static/app.js": 9219, "planner.py": 4978},
+        "martwy_kod_heurystyka": 1,
+    })
+    # customSmallerIsBetter: lista {name, unit, value[, extra]}, nazwy są kluczami wykresów.
+    assert all(set(w) <= {"name", "unit", "value", "extra"} and {"name", "unit", "value"} <= set(w) for w in wpisy)
+    assert len({w["name"] for w in wpisy}) == len(wpisy)
+    nazwy = {w["name"]: w["value"] for w in wpisy}
+    assert nazwy["Testy: czerwone"] == 1 and nazwy["Testy: czas"] == 12.5 and nazwy["Linie: static/app.js"] == 9219
+    assert "baza rozkładu: brak" in wpisy[0]["extra"]

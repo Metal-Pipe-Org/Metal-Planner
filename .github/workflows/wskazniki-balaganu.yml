@@ -1,0 +1,154 @@
+name: Wskaźniki bałaganu
+
+# Raz w tygodniu (#532): `wskazniki_balaganu.py` na czystym `main` — czas
+# i wyniki testów, największe pliki, heurystyka martwego kodu — a liczby
+# trafiają do historii, z której widać trend. Historię trzyma i rysuje
+# github-action-benchmark: dopisuje pomiar do `data.js` na gałęzi `gh-pages`
+# i stawia tam stronę z wykresem dla każdego wskaźnika (GitHub Pages z tej
+# gałęzi). Na koniec karta na #metal-statystyki: zmiana od poprzedniego
+# pomiaru strzałkami i link do wykresów (`.github/scripts/wskazniki.sh`).
+#
+# Runner nie ma bazy rozkładu (`data/gtfs.sqlite`) ani przeglądarki, więc
+# część testów pada albo jest pominięta — tak jak na świeżym klonie. Skrypt
+# zapisuje to przy każdym pomiarze, a trend i tak mierzymy zawsze w tych
+# samych warunkach.
+#
+# Dwa joby, żeby kod repo (testy) nigdy nie biegł z tokenem do zapisu: pomiar
+# ma tylko odczyt i oddaje liczby jako wyjście joba, a zapis na `gh-pages`
+# robi drugi job, który kodu repo nie uruchamia.
+#
+# Cron w UTC, nierówna minuta jak w innych workflow: poniedziałek 0:17 UTC to
+# w Warszawie noc z niedzieli na poniedziałek (1:17 zimą, 2:17 latem).
+on:
+  schedule:
+    - cron: "17 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wskazniki-balaganu
+  cancel-in-progress: false
+
+jobs:
+  pomiar:
+    if: github.repository == 'Metal-Pipe-Org/Metal-Planner'
+    runs-on: ubuntu-latest
+    # Pełny zestaw testów mieści się dziś w 10 minutach (tests.yml), reszta
+    # skryptu to sekundy.
+    timeout-minutes: 20
+    outputs:
+      wpisy: ${{ steps.pomiar.outputs.wpisy }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Policz wskaźniki
+        id: pomiar
+        run: |
+          set -euo pipefail
+          python wskazniki_balaganu.py --benchmark "$RUNNER_TEMP/wskazniki.json"
+          echo "wpisy=$(jq -c . "$RUNNER_TEMP/wskazniki.json")" >> "$GITHUB_OUTPUT"
+
+  zapis:
+    needs: pomiar
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # Tylko tu: akcja wypycha pomiar na `gh-pages`.
+      contents: write
+    env:
+      REPO: ${{ github.repository }}
+    steps:
+      # Pełny checkout, nie sparse: akcja przełącza to drzewo na `gh-pages`
+      # i czyta stamtąd `data.js`; w sparse nie zobaczyłaby historii i zaczęła
+      # ją od zera.
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Pobierz skrypty z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Ustawienia i plik pomiaru
+        id: cfg
+        env:
+          WPISY: ${{ needs.pomiar.outputs.wpisy }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/config.sh
+          printf '%s' "$WPISY" > "$RUNNER_TEMP/wskazniki.json"
+          {
+            echo "nazwa=$WSKAZNIKI_NAZWA"
+            echo "katalog=$WSKAZNIKI_KATALOG"
+            echo "prog=$WSKAZNIKI_PROG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Załóż gałąź gh-pages przy pierwszym biegu
+        # Akcja zakłada, że gałąź już jest (pobiera ją i się na nią przełącza),
+        # a stronę i `data.js` tworzy sama. Pusty commit bez rodzica, żeby
+        # gałąź nie niosła kodu aplikacji.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            exit 0
+          fi
+          c=$(git -c user.name="github-actions[bot]" \
+                  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                  commit-tree "$(git mktree </dev/null)" -m "Historia wskaźników bałaganu (#532)")
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            push origin "$c:refs/heads/gh-pages"
+
+      - name: Dopisz pomiar do historii i wykresów
+        # Przypięte do commitu wydania v1.22.2, nie do tagu: akcja dostaje
+        # token z prawem zapisu, a tag da się przesunąć.
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
+        with:
+          name: ${{ steps.cfg.outputs.nazwa }}
+          tool: customSmallerIsBetter
+          output-file-path: ${{ runner.temp }}/wskazniki.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: ${{ steps.cfg.outputs.katalog }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          # Alarm idzie kartą na Discorda (zasada 2 w docs/WORKFLOWS.md), nie
+          # komentarzem bota pod commitem, którego nikt by nie zobaczył; bieg
+          # zostaje zielony, bo pomiar jest zapisany. W podsumowaniu biegu
+          # akcja i tak pokazuje tabelę z porównaniem.
+          alert-threshold: ${{ steps.cfg.outputs.prog }}
+          comment-on-alert: false
+          fail-on-alert: false
+          summary-always: true
+
+      - name: Karta na Discordzie
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DIGEST }}
+          DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
+          NAZWA: ${{ steps.cfg.outputs.nazwa }}
+          KATALOG: ${{ steps.cfg.outputs.katalog }}
+          PROG: ${{ steps.cfg.outputs.prog }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/wskazniki.sh
+          # Akcja zostawia lokalną gałąź `gh-pages` z właśnie dopisanym pomiarem.
+          git show "gh-pages:$KATALOG/data.js" > "$RUNNER_TEMP/data.js"
+          wskazniki_karta "$RUNNER_TEMP/data.js" "$NAZWA" "$PROG" "$REPO"
