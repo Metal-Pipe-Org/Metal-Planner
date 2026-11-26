@@ -439,7 +439,7 @@
                Pola #time i #date leżą tu niewidoczne, bo to z nich czyta wyszukiwanie
                i to je Rozkłady przenoszą do własnego panelu na czas swojego widoku. #}
             <div id="when" class="when-box"></div>
-            <div id="when-fields" class="when-fields" aria-hidden="true"{% if form_last_date %} data-last="{{ form_last_date }}"{% endif %}>
+            <div id="when-fields" class="when-fields" aria-hidden="true"{% if form_first_date %} data-first="{{ form_first_date }}"{% endif %}{% if form_last_date %} data-last="{{ form_last_date }}"{% endif %}>
                 <input type="text" id="time" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}"
                        maxlength="5" size="5" placeholder="GG:MM" autocomplete="off" tabindex="-1" value="{{ form_time }}">
                 <input type="date" id="date" tabindex="-1" value="{{ form_date }}">

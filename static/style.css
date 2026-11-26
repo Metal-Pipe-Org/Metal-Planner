@@ -1037,6 +1037,8 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 }
 
 .when-pill:hover { background: #e8edf3; }
+.when-pill:disabled { cursor: default; color: var(--ink-soft); }
+.when-pill:disabled:hover { background: var(--surface-alt); }
 .when-caret { color: var(--ink-faint); }
 
 .when-backdrop {

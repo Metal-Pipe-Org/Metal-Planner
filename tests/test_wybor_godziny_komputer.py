@@ -66,7 +66,7 @@ def test_esc_cofa_zmiany(przegladarka, adres):
     context, page = _otworz(przegladarka, adres)
     try:
         page.keyboard.type("0815")
-        page.click(".when-day >> nth=1")
+        page.click('.when-day >> text="Jutro"')
         page.keyboard.press("Escape")
         assert page.is_hidden(".when-sheet")
         assert _pastylka(page) == "Odjazd teraz"
@@ -87,7 +87,7 @@ def test_strzalki_i_dni(przegladarka, adres):
         page.keyboard.press("Home")
         page.keyboard.press("ArrowUp")
         assert page.input_value(".when-time") == "01:00"
-        page.click(".when-day >> nth=0")
+        page.click('.when-day >> text="Dziś"')
         assert _pastylka(page) == "Odjazd 01:00, dziś"
         page.keyboard.press("ArrowRight")
         assert _pastylka(page) == "Odjazd 01:00, jutro"

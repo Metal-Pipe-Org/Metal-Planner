@@ -37,13 +37,14 @@ def test_godzina_wpisana_recznie_przezywa_powrot_z_tla(przegladarka, adres):
         page.evaluate("""() => {
             const sheet = document.querySelector('.when-sheet');
             sheet.querySelector('.when-wheels').dispatchEvent(new Event('pointerdown', {bubbles: true}));  // palec
-            sheet.querySelector('[data-wheel="hour"]').scrollTop = 9 * 40;
+            sheet.querySelector('[data-wheel="hour"]').scrollTop = 14 * 40;
             sheet.querySelector('[data-wheel="min"]').scrollTop = 6 * 40;
         }""")
-        page.wait_for_function("document.getElementById('time').value === '09:30'")
+        page.wait_for_function("document.getElementById('time').value === '14:30'")
         page.click("[data-done]")
+        # zegar stoi na 12:00, po godzinie 14:30 jeszcze nie minęła
         _po_godzinie(page)
-        assert page.input_value("#time") == "09:30"
+        assert page.input_value("#time") == "14:30"
     finally:
         context.close()
 
@@ -144,7 +145,9 @@ def test_godzina_z_rozkladow_jest_w_trasach(przegladarka, adres):
             sheet.querySelector('.when-wheels').dispatchEvent(new Event('pointerdown', {bubbles: true}));  // palec
             sheet.querySelector('[data-wheel="hour"]').scrollTop = 7 * 40;
             sheet.querySelector('[data-wheel="min"]').scrollTop = 9 * 40;
-            sheet.querySelector('[data-wheel="day"]').scrollTop = 40;
+            const dni = [...sheet.querySelectorAll('[data-wheel="day"] .when-item')];
+            sheet.querySelector('[data-wheel="day"]').scrollTop
+                = dni.findIndex(dzien => dzien.textContent === 'Jutro') * 40;
         }""")
         page.wait_for_function("document.getElementById('time').value === '07:45'")
         page.click("[data-done]")
