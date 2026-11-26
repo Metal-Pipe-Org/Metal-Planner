@@ -2283,18 +2283,28 @@ def _latest_start(day, source_stops, target_stops, arrive_sec):
     return lo
 
 
-def _no_arrival(start_name, end_name, arrive_sec):
-    return {"error": f"Nie znaleziono połączenia {start_name} → {end_name} "
-                     f"z przyjazdem do {_fmt_time(arrive_sec)} tego dnia."}
-
-
-def _no_connection(start_name, end_name, dep_sec, when):
+def _unpublished(when):
+    """Komunikat o dniu za rozkładem albo None - wspólny dla odjazdu i przyjazdu:
+    za ostatnim dniem paczki nie ma połączeń dlatego, że rozkładu jeszcze nie ma."""
     last = gtfs.last_service_date()
     if last and when.date() > last:
         return {
             "error": f"Rozkładu na {when:%d.%m} jeszcze nie opublikowano — "
                      f"obecny sięga do {last:%d.%m}."
         }
+    return None
+
+
+def _no_arrival(start_name, end_name, arrive_sec, when):
+    return _unpublished(when) or {
+        "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
+                 f"z przyjazdem do {_fmt_time(arrive_sec)} tego dnia."}
+
+
+def _no_connection(start_name, end_name, dep_sec, when):
+    unpublished = _unpublished(when)
+    if unpublished:
+        return unpublished
     return {
         "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
                  f"po {_fmt_time(dep_sec)} tego dnia."
@@ -2514,7 +2524,7 @@ def plan_flow_stages(start_query, end_query, when=None,
     if arrive_sec is not None:
         dep_sec = _latest_start(day, source_stops, target_stops, arrive_sec)
         if dep_sec is None:
-            yield "error", _no_arrival(start_name, end_name, arrive_sec)
+            yield "error", _no_arrival(start_name, end_name, arrive_sec, when)
             return
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek") i jest zapasowym

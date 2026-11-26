@@ -3,8 +3,9 @@
 Lustro zwykłego wyszukiwania: pasek mówi o najpóźniejszym wyjściu, które
 jeszcze dowozi na czas, a na mapie nie ma niczego, co dowozi później.
 """
-from datetime import datetime
+from datetime import date, datetime
 
+import gtfs
 from tests import flow
 from tests.gtfs_builder import make_day
 
@@ -47,6 +48,17 @@ def test_bez_polaczenia_mowi_o_przyjezdzie(install_day):
     result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 35), arrive_by=True)
 
     assert result["error"] == "Nie znaleziono połączenia S → E z przyjazdem do 00:35 tego dnia."
+
+
+def test_dzien_za_rozkladem_mowi_ze_rozkladu_jeszcze_nie_ma(install_day, monkeypatch):
+    """Tak samo jak przy odjeździe: za ostatnim dniem paczki połączeń nie ma,
+    bo rozkładu jeszcze nie opublikowano - a nie dlatego, że nic nie dowozi."""
+    install_day(make_day(DAY))
+    monkeypatch.setattr(gtfs, "last_service_date", lambda: date(2026, 1, 4))
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 35), arrive_by=True)
+
+    assert result["error"] == "Rozkładu na 05.01 jeszcze nie opublikowano — obecny sięga do 04.01."
 
 
 def test_zwykle_wyszukiwanie_bez_zmian(install_day):
