@@ -207,3 +207,14 @@ def test_rozklad_linii_ma_te_sama_pastylke(strona):
     assert _w_dwoch_wierszach(m) and _miesci_sie(m), m
 
 
+
+
+def test_podpowiedzi_nie_wracaja_na_pastylke_po_powrocie(strona):
+    telefon = strona.evaluate("innerWidth") < 600
+    strona.fill("#tt-query", PRZYSTANEK)
+    strona.wait_for_selector("#tt-query-list:not([hidden])")
+    strona.click('#view-tabs [data-view="list"]' if telefon else "#mode-toggle")
+    strona.click('#view-tabs [data-view="timetable"]' if telefon else "#mode-toggle")
+    assert strona.is_hidden("#tt-query-list")
+    strona.click("#tt-time-field .when-pill")
+    assert strona.is_visible(".when-sheet")

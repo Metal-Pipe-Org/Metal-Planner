@@ -259,8 +259,11 @@ function setMode(on) {
         // Godzina mogła się zmienić w Trasach, gdy rozkład stał schowany.
         if (data && data.date !== currentDate()) load(kind);
         else { render(); draw(true); }
-        queryInput.focus();
+        // Wpisany już przystanek czy linia nie potrzebuje podpowiedzi: fokus
+        // otworzyłby listę na pastylce godziny. Pustemu polu kursor się należy.
+        if (!queryInput.value.trim()) queryInput.focus();
     } else {
+        suggestions.close();
         $('when-fields').before($('when'));
         B.paintWhen();
         clearMap();
@@ -373,7 +376,7 @@ function suggestionRow(item) {
          + `<span class="ac-kind">przystanek</span>`;
 }
 
-B.attachAutocomplete(queryInput, item => load(item.kind), {
+const suggestions = B.attachAutocomplete(queryInput, item => load(item.kind), {
     suggest,
     render: suggestionRow,
     onEnter: () => load(),
