@@ -1,16 +1,15 @@
 name: Automatyczne testy
 
-# Uruchamiany wyłącznie ręcznie (Actions -> Automatyczne testy -> Run workflow).
-# Część testów sięga po data/gtfs.sqlite, którego nie ma w repo, więc na świeżym
-# klonie `main` pada ich ponad sto — z `FileNotFoundError` z `gtfs.py`, a nie na
-# asercji. Runner tej bazy nie ma, a budowanie jej na każdy bieg trwałoby dłużej
-# niż same testy. Automatyczne wyzwalacze wracają, gdy cały zestaw będzie
-# hermetyczny, czyli gdy i te testy przejdą na syntetyczne dane
-# z `tests/gtfs_builder.py`:
-#   push:
-#     branches: [main, stable]
-#   pull_request:
+# Na runnerze nie ma data/gtfs.sqlite, a testy jej nie potrzebują: dzień
+# rozkładu budują same (tests/gtfs_builder.py), a do pliku bazy zaglądają
+# w pustą bazę ze schematem (tests/conftest.py). Testy w przeglądarce i emulator
+# mapy pomijają się tu same (brak Playwrighta w requirements-dev.txt i brak
+# osascript), dlatego liczba i powody pominięć idą na stronę podsumowania -
+# zielony wynik nie mówi, ile testów się nie odbyło.
 on:
+  push:
+    branches: [main, stable]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -28,4 +27,22 @@ jobs:
 
       - run: pip install -r requirements-dev.txt
 
-      - run: pytest -q tests
+      - run: |
+          set -o pipefail
+          pytest -q -rs tests | tee pytest.log
+
+      - if: always()
+        run: |
+          {
+            echo '### Wynik'
+            echo
+            echo '```'
+            tail -n 1 pytest.log
+            echo '```'
+            echo
+            echo '### Pominięte'
+            echo
+            echo '```'
+            grep '^SKIPPED' pytest.log || echo 'brak'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -13,6 +13,8 @@ Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 import random
 from datetime import date, datetime, time, timedelta
 
+import pytest
+
 import gtfs
 import planner
 import traficar
@@ -31,6 +33,13 @@ E = (51.16, 17.00)          # cel
 # Auto ~33 m od M - poniżej minimalnego czasu dojścia (gtfs.WALK_MIN_SEC).
 CAR = {"lat": 51.1203, "lon": 17.00, "plate": "WE1AA11", "model": "Renault Clio",
        "van": False, "where": "ul. Testowa", "fuel": 80, "range": 300, "ogarniam": []}
+
+
+@pytest.fixture(autouse=True)
+def _teraz_to_godzina_pytania(zegar_plannera):
+    """Auta są na mapie tylko do kilku godzin od teraz, a testy pytają
+    o północ - „teraz" stoi więc na WHEN, o której porze by ich nie puścić."""
+    zegar_plannera(WHEN)
 
 
 def _day():

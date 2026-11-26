@@ -142,14 +142,11 @@ któregokolwiek zabiera tylko jego warstwę — reszta działa bez zmian.
 .venv/bin/python -m pytest tests/ -v
 ```
 
-22. Większość testów buduje syntetyczny rozkład (`tests/gtfs_builder.py`),
-    ale część sięga po prawdziwą bazę `data/gtfs.sqlite` — przed pierwszym
-    uruchomieniem trzeba zrobić `update_gtfs.py`.
+22. Testy budują syntetyczny rozkład (`tests/gtfs_builder.py`) i przechodzą bez `data/gtfs.sqlite`. Prawdziwą bazę widzą tylko testy w przeglądarce (Playwright) — bez niej się pomijają, a do pełnego przebiegu trzeba raz zrobić `update_gtfs.py`.
 23. Testy frontu (`tests/js/`) uruchamiają prawdziwy `static/app.js`
     w JavaScriptCore przez `osascript`, więc działają tylko na macOS;
     gdzie indziej są pomijane.
-24. Workflow `tests.yml` w GitHub Actions odpala się wyłącznie ręcznie, bo
-    runner nie ma bazy rozkładu.
+24. Workflow `tests.yml` w GitHub Actions odpala się przy pushu do `main` i `stable` oraz przy każdym PR-ze. Testy w przeglądarce i testy frontu pomijają się tam same, a liczba i powody pominięć są na stronie podsumowania biegu.
 
 Który test pilnuje którego punktu kontraktu mapy, opisuje
 [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md#testy).
