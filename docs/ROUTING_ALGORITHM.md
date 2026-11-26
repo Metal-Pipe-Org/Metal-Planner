@@ -132,3 +132,16 @@ The payoff of doing it this way instead of running a separate search: a
 proposal can *never* name a transfer that isn't actually drawn on the map,
 because it's built from nothing but the map's own already-decided shape.
 Whatever moves the map draws, the list shrinks or grows in lockstep with it, automatically, for free.
+
+---
+
+## Speeding the search up further (ideas that change the result, not implemented)
+
+Almost all of the search time now goes into `_value_journeys` — the labels of the journey search within the 40-minute departure window — and into the second, wider pass that the moves map runs when the first one finds only tight transfers (everything else is a few hundredths of a second). The ideas below would make the search faster, but each of them can change what the map shows, so they were measured (25.11.2026, 27 routes, timings after the optimisations) and deliberately left out.
+
+1. Skip the second, wider pass when every move is tight: worst case 13.0 s → 5.4 s, Kozanów → Krzyki at 14:15 11.8 s → 1.4 s, median unchanged. All 27 maps came out the same, but in general a move with some slack, which only the second pass would have found, could go missing.
+2. A 30-minute window instead of 40 (55 for the wider pass): median 1.42 s → 0.64 s, worst case 13.0 s → 7.0 s. All 27 maps came out the same, but in general a journey with 2–3 transfers that still fits the reasonable window could drop out. A 45-minute window gains little (median 1.55 s).
+3. At most 2 vehicles instead of 3: median 0.60 s, worst case 3.7 s, but 9 of 27 maps change. Not recommended.
+4. A wider search from the start instead of two passes: slower (median 5.0 s) and 5 maps change. Not recommended.
+
+27 routes is a small sample. Before adopting idea 1 or 2, compare the maps on a much larger random set of routes and departure times.
