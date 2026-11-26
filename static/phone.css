@@ -175,16 +175,6 @@ body.view-list .places-bar { display: none; }
     padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
     border-radius: var(--radius) var(--radius) 0 0;
 }
-/* Wąskie okno na komputerze: okienko z polem godziny przy pastylce, jak na
-   szerokim ekranie (wybór zależy od wskaźnika, patrz openWhen). */
-.when-backdrop.when-desk { background: transparent; }
-.when-sheet.when-desk {
-    right: auto;
-    bottom: auto;
-    width: 320px;
-    padding: 12px;
-    border-radius: var(--radius);
-}
 
 /* Zwinięta: jedna linijka „skąd → dokąd  godzina" (tworzy ją phone.js).
    Stuknięcie rozwija formularz z powrotem. */

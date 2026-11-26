@@ -7983,10 +7983,9 @@ const arriveFromNow = now => {
 let whenSearchTimer = null;
 let wheelsChanged = false;
 let wheelTimer = null;
+// Koła w układzie telefonu, okienko z polem godziny w układzie komputera - to
+// samo przełączenie, co dla całej reszty aplikacji (phoneLayout).
 let whenWheels = false;
-// Koła są dla palca, okienko z polem godziny - dla myszy i gładzika, także
-// w wąskim oknie: o rodzaju wyboru decyduje wskaźnik, a nie szerokość.
-const finePointer = window.matchMedia('(pointer: fine)');
 // Czy od otwarcia wyboru pasażer sam zmienił godzinę albo dzień (patrz setWhenMode).
 let whenTouched = false;
 let whenSnapshot = null;
@@ -8178,13 +8177,12 @@ function rangeDays() {
 
 function openWhen() {
     whenSnapshot = {arrive: arriveBy, chosen: timeChosen, time: timeInput.value, date: $('date').value};
-    whenWheels = !finePointer.matches;
+    whenWheels = phoneLayout.active();
     wheelsChanged = false;
     whenTouched = false;
     whenBackdrop.hidden = false;
     whenSheet.hidden = false;
     whenSheet.classList.toggle('when-desk', !whenWheels);
-    whenBackdrop.classList.toggle('when-desk', !whenWheels);
     if (whenWheels) openWheels();
     else openDesk();
 }
@@ -8290,7 +8288,11 @@ function placeDesk() {
     whenSheet.style.left = `${left}px`;
 }
 
-window.addEventListener('resize', placeDesk);
+window.addEventListener('resize', () => {
+    if (whenSheet.hidden) return;
+    if (phoneLayout.active() !== whenWheels) closeWheels();
+    else placeDesk();
+});
 
 // Godzina z pola: „1745", „17:45", „17.45", „930". W trakcie pisania liczy się
 // tylko pełna godzina (cztery cyfry albo minuty po dwukropku) - „250" to może
@@ -8461,13 +8463,81 @@ whenSheet.addEventListener('scroll', () => {
     wheelTimer = setTimeout(settleWheels, 120);
 }, true);
 
-// Palec na kolumnie: od teraz liczy się to, gdzie ją zostawi.
-for (const type of ['touchstart', 'pointerdown', 'wheel']) {
+// Palec albo mysz na kolumnie: od teraz liczy się to, gdzie ją zostawi.
+for (const type of ['touchstart', 'pointerdown']) {
     whenSheet.addEventListener(type, event => {
         if (!event.target.closest('.when-wheels')) return;
         for (const wheel of whenSheet.querySelectorAll('.when-wheel')) delete wheel.dataset.target;
     }, {passive: true});
 }
+
+// Koła w zwężonym oknie komputera: przewijanie przeglądarki rzucało kolumną
+// o dwie godziny na ząbek kółka, a przeciągnięcie myszą nic nie robiło. Ząbek
+// kółka to jedna pozycja; gładzik zbiera przesunięcie i co pół pozycji z hakiem
+// przesuwa o jedną. Dotyk telefonu idzie dalej zwykłym przewijaniem.
+const WHEEL_STEP_PX = 60;
+const WHEEL_NOTCH_PX = 50;
+let wheelPx = 0;
+let wheelPxAt = 0;
+
+function stepWheel(wheel, step) {
+    const index = Math.max(0, Math.min(wheel.children.length - 1, wheelIndex(wheel) + step));
+    scrollWheelTo(wheel, index, 'smooth');
+    markWheels();
+}
+
+whenSheet.addEventListener('wheel', event => {
+    const wheel = event.target.closest('.when-wheel');
+    if (!wheel) return;
+    event.preventDefault();
+    const px = event.deltaY * (event.deltaMode === 1 ? WHEEL_H
+        : event.deltaMode === 2 ? wheel.clientHeight : 1);
+    if (!px) return;
+    if (event.timeStamp - wheelPxAt > 200 || Math.sign(px) !== Math.sign(wheelPx)) wheelPx = 0;
+    wheelPxAt = event.timeStamp;
+    wheelPx += px;
+    if (Math.abs(wheelPx) < WHEEL_STEP_PX && Math.abs(px) < WHEEL_NOTCH_PX) return;
+    const step = Math.sign(wheelPx);
+    wheelPx = 0;
+    stepWheel(wheel, step);
+}, {passive: false});
+
+// Przeciąganie myszą: kolumna jedzie za kursorem, a po puszczeniu staje na
+// najbliższej pozycji. Samo kliknięcie (bez ruchu) wybiera pozycję jak dotąd.
+let wheelDrag = null;
+let wheelDragged = false;
+
+whenSheet.addEventListener('pointerdown', event => {
+    const wheel = event.target.closest('.when-wheel');
+    if (!wheel || event.pointerType !== 'mouse' || event.button !== 0) return;
+    wheelDragged = false;
+    wheelDrag = {wheel, id: event.pointerId, y: event.clientY, top: wheel.scrollTop, moved: false};
+});
+
+whenSheet.addEventListener('pointermove', event => {
+    if (!wheelDrag || event.pointerId !== wheelDrag.id) return;
+    const dy = event.clientY - wheelDrag.y;
+    if (!wheelDrag.moved && Math.abs(dy) > 4) {
+        wheelDrag.moved = true;
+        wheelDrag.wheel.setPointerCapture(event.pointerId);
+        wheelDrag.wheel.style.scrollSnapType = 'none';
+    }
+    if (wheelDrag.moved) wheelDrag.wheel.scrollTop = wheelDrag.top - dy;
+});
+
+function endWheelDrag(event) {
+    if (!wheelDrag || event.pointerId !== wheelDrag.id) return;
+    const {wheel, moved} = wheelDrag;
+    wheelDrag = null;
+    if (!moved) return;
+    wheelDragged = true;
+    wheel.style.scrollSnapType = '';
+    const index = Math.max(0, Math.min(wheel.children.length - 1, Math.round(wheel.scrollTop / WHEEL_H)));
+    scrollWheelTo(wheel, index, 'smooth');
+    markWheels();
+}
+whenSheet.addEventListener('pointerup', endWheelDrag);
+whenSheet.addEventListener('pointercancel', endWheelDrag);
 
 whenSheet.addEventListener('click', event => {
     const item = event.target.closest('.when-item');
@@ -8487,6 +8557,8 @@ whenSheet.addEventListener('click', event => {
             input.focus();
             input.select();
         }
+    } else if (item && wheelDragged) {
+        wheelDragged = false;   // puszczenie po przeciągnięciu to nie kliknięcie
     } else if (item) {
         const wheel = item.parentElement;
         scrollWheelTo(wheel, [...wheel.children].indexOf(item), 'smooth');

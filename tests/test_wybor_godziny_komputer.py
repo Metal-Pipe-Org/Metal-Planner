@@ -160,15 +160,28 @@ def test_pastylka_nie_lapie_godziny_w_trakcie_pisania(przegladarka, adres):
         context.close()
 
 
-def test_waskie_okno_z_myszka_ma_okienko_a_nie_kola(przegladarka, adres):
-    context, page = _otworz(przegladarka, adres, (700, 800))
-    try:
-        assert page.query_selector(".when-sheet .when-wheel") is None
-        assert page.is_visible(".when-sheet .when-time")
-        okienko = page.locator(".when-sheet").bounding_box()
-        assert okienko["x"] >= 0 and okienko["x"] + okienko["width"] <= 700
-    finally:
-        context.close()
+def test_waskie_okno_ma_kola_jak_reszta_ukladu_telefonu_i_dzialaja_mysza(przegladarka, adres):
+    for szerokosc in (700, 500):
+        context, page = _otworz(przegladarka, adres, (szerokosc, 800))
+        try:
+            assert page.query_selector(".when-sheet .when-time") is None
+            kolumna = page.locator('[data-wheel="hour"]').bounding_box()
+            x, y = kolumna["x"] + kolumna["width"] / 2, kolumna["y"] + kolumna["height"] / 2
+            page.mouse.move(x, y)
+            page.mouse.wheel(0, 100)        # jeden ząbek kółka = jedna pozycja
+            page.wait_for_function("document.getElementById('time').value === '13:00'")
+            for _ in range(20):             # krótki ruch gładzikiem = jedna pozycja
+                page.mouse.wheel(0, 4)
+            page.wait_for_function("document.getElementById('time').value === '14:00'")
+            page.mouse.down()               # przeciągnięcie o dwie pozycje
+            page.mouse.move(x, y - 80, steps=8)
+            page.mouse.up()
+            page.wait_for_function("document.getElementById('time').value === '16:00'")
+            minuty = page.locator('[data-wheel="min"]').bounding_box()
+            page.mouse.click(minuty["x"] + minuty["width"] / 2, minuty["y"] + minuty["height"] / 2 + 40)
+            page.wait_for_function("document.getElementById('time').value === '16:05'")
+        finally:
+            context.close()
 
 
 def test_niskie_okno_nie_zaslania_pastylki(przegladarka, adres):
