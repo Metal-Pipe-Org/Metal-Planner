@@ -13,7 +13,7 @@ Kanał GBFS operatora jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
 import http.client
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 import bikes
 import gtfs
@@ -399,11 +399,22 @@ def test_plan_flow_mowi_czy_liczby_sa_z_tej_chwili(install_day, monkeypatch):
     install_day(_day())
     _feed(monkeypatch)
 
+    class _Teraz(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return WHEN
+    monkeypatch.setattr(planner, "datetime", _Teraz)
+
     dzis = flow.plan_flow("Start", "Cel", WHEN)
     kiedys = flow.plan_flow("Start", "Cel", datetime(2026, 1, 5, 0, 0, 0))
+    # stan stojaka jest z teraz - godzinę temu go nie znamy
+    monkeypatch.setattr(planner, "datetime", type("_Pozniej", (datetime,), {
+        "now": classmethod(lambda cls, tz=None: WHEN + timedelta(hours=1))}))
+    godzine_temu = flow.plan_flow("Start", "Cel", WHEN)
 
     assert dzis["bike_places_live"] is True
     assert kiedys["bike_places_live"] is False
+    assert godzine_temu["bike_places_live"] is False
 
 
 # ------------------------------- dojazd i dalsza droga z narysowanej mapy ----

@@ -46,7 +46,14 @@ def _dzien_pytania_jest_dzisiaj(monkeypatch):
         @classmethod
         def today(cls):
             return WHEN.date()
+
+    class _Teraz(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return WHEN
     monkeypatch.setattr(planner, "date", _Dzis)
+    # Godzina, która minęła, też nie jest „dziś" stojaków - teraz to WHEN.
+    monkeypatch.setattr(planner, "datetime", _Teraz)
 
 
 @pytest.fixture

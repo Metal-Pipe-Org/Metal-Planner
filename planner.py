@@ -1045,6 +1045,9 @@ DEFAULT_MAP_CARS = 3
 # zębatką, zgłoszenie #490); None = bez limitu. Dalej niż to ich pozycje to już
 # zgadywanie, więc zamiast aut jest wyjaśnienie, dlaczego ich nie ma.
 DEFAULT_CAR_HORIZON_H = 3
+# Ile wstecz od teraz auta jeszcze stoją: „teraz" wpisane przed chwilą albo
+# godzina zaokrąglona w dół to wciąż ta chwila, a nie przeszłość.
+CARS_PAST_SLACK_SEC = 10 * 60
 MIN_MAP_CARS = 1
 MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
@@ -2854,8 +2857,10 @@ def plan_flow_stages(start_query, end_query, when=None,
         # zgadywaniem podanym jako fakt. `live` w odpowiedzi mówi to wprost,
         # żeby zero propozycji z tego powodu nie wyglądało jak zero z powodu
         # milczącego kanału operatora.
+        # Godzina, która już minęła, to też nie „dziś" stojaków.
         bikes_live = (use_bikes and with_journeys and day_offset == 0
-                      and when.date() == date.today())
+                      and when.date() == date.today()
+                      and when >= datetime.now() - timedelta(seconds=CARS_PAST_SLACK_SEC))
 
         def extras():
             """Wszystko, co stoi na danych na żywo (rowery WRM, auta
@@ -2911,6 +2916,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # od tego zależy, czy dzisiejsze pozycje aut jeszcze coś mówią.
             cars_ahead_sec = None
             cars_beyond = False
+            cars_past = False
             # Na starcie jest się od godziny z pytania, nie od początku
             # mapy - do auta czy roweru pod nosem idzie się od razu (tak
             # samo jak przy propozycjach z rowerem wyżej).
@@ -2921,10 +2927,13 @@ def plan_flow_stages(start_query, end_query, when=None,
             searched_at = (datetime.combine(when.date(), datetime.min.time())
                            + timedelta(days=day_offset, seconds=report_dep_sec))
             cars_ahead_sec = int((searched_at - datetime.now()).total_seconds())
-            # Pozycje aut są z teraz, więc tak samo mało mówią o dniu
-            # sprzed doby, jak o dniu za dobę.
-            cars_beyond = (car_horizon_h is not None
-                           and abs(cars_ahead_sec) > car_horizon_h * 3600)
+            # Pozycje aut są z teraz, więc o przeszłości nie mówią nic: auta
+            # stojącego teraz nie dało się wziąć godzinę temu. Zasięg z
+            # ustawienia liczy się tylko w przód, a wstecz luz na „teraz"
+            # wpisane przed chwilą.
+            cars_past = cars_ahead_sec < -CARS_PAST_SLACK_SEC
+            cars_beyond = cars_past or (car_horizon_h is not None
+                                        and cars_ahead_sec > car_horizon_h * 3600)
             if not cars_beyond:
                 # Nowa mapa zna też auta o krótką jazdę od startu linią,
                 # której nie rysuje, bo nie wiezie do celu: auto dowiezie
@@ -3000,9 +3009,12 @@ def plan_flow_stages(start_query, end_query, when=None,
             # Nieznany jest wtedy sam STAN stojaka i `bike_places_live`
             # mówi to wprost, żeby front nie podał zgadywania jako liczby
             # rowerów.
+            # Stan stojaka jest z teraz, więc tak jak auta nie mówi nic o
+            # godzinie, która już minęła.
+            bike_counts_live = day_offset == 0 and when.date() == date.today() and not cars_past
             bike_places = bikes.map_places(
                 day, drawn_arrivals, drawn_onward, target_set, bike_count,
-                live=day_offset == 0 and when.date() == date.today(),
+                live=bike_counts_live,
                 electric=bike_electric, regular=bike_regular,
                 ride_mps=bike_mps, overhead_sec=bike_overhead)
             # Rower ze schematu ma swoją kropkę na mapie, także gdy mapa
@@ -3058,6 +3070,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                 # z tego notkę (zgłoszenie #490).
                 "cars_ahead_sec": cars_ahead_sec,
                 "cars_beyond": cars_beyond,
+                "cars_past": cars_past,
                 # Rowery miejskie w zasięgu tej mapy, każdy z listą przejazdów,
                 # które jeszcze mieszczą się w oknie (patrz bikes.map_places).
                 # Przejazdów mapa NIE rysuje - front pokazuje je po najechaniu.
@@ -3069,7 +3082,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                 # dzień kropki stacji zostają, ale stan stojaka jest nieznany -
                 # front ma to napisać, a nie pokazać wczorajszą liczbę jako
                 # dzisiejszą.
-                "bike_places_live": day_offset == 0 and when.date() == date.today(),
+                "bike_places_live": bike_counts_live,
                 # Schemat nowej mapy jeszcze raz, z autami z tej odpowiedzi.
                 **({"scheme": live_scheme} if live_scheme is not None else {}),
                 # Stan warstwy rowerowej - tylko gdy o nią pytano (i jest
