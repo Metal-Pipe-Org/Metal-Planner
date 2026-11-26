@@ -39,6 +39,28 @@ CLAUDE_MENTION="@claude"
 # `<przedrostek><numer>-run<id biegu>`.
 CLAUDE_BRANCH_PREFIX="claude/issue-"
 
+# --- Cotygodniowe sprzątanie (sprzatanie.yml, sprzatanie.sh, #531) ---
+# Zgłoszenie sprzątania: pod nim ląduje link do założenia PR-a, PR wskazuje
+# je przez `Refs`, a jego przypisani to kolejka opiekunów.
+SPRZATANIE_ZGLOSZENIE=531
+# Opiekun pierwszego tygodnia; potem co tydzień następny przypisany.
+SPRZATANIE_PIERWSZY_OPIEKUN="EgorexW"
+# Poniedziałek pierwszego tygodnia kolejki opiekunów (RRRR-MM-DD).
+SPRZATANIE_START="2026-11-30"
+# Gałąź sprzątania to `<przedrostek><id obszaru>-<data>`.
+SPRZATANIE_GALAZ="sprzatanie/"
+# Bramka: najwyżej tyle zmienionych linii (dodane + usunięte)…
+SPRZATANIE_MAX_LINII=200
+# …a usuniętych co najmniej tyle razy więcej niż dodanych.
+SPRZATANIE_USUNIETE_NA_DODANE=3
+# Plik obszaru jest zajęty (obszar w tym tygodniu odpada przed Claude'em),
+# gdy otwarty PR go usuwa, przenosi albo zmienia co najmniej tyle procent
+# jego linii.
+SPRZATANIE_ZAJETY_PROCENT=25
+# Początki ścieżek, których sprzątanie nie rusza nigdy, nawet gdyby trafiły
+# na listę obszaru. Rozdzielone spacją.
+SPRZATANIE_ZAKAZANE=".github/ .claude/ CLAUDE.md docs/ settings.json settings.schema.json requirements Dockerfile docker/ docker-compose.yml data/"
+
 # --- Słowa wskazujące zgłoszenie w PR-ze (refs.sh, syntax.sh) ---
 # Słowo przed `#numer` w tytule albo opisie, bez względu na wielkość liter.
 # Rozdzielone `|`; same litery, a w słowie z kilku wyrazów zwykła spacja
