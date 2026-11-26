@@ -570,8 +570,10 @@ def add_branches(ctx, shown, insts, by_sig, origin_sec, anchor):
         latest = max(i["dep"] + i.get("last", i["first"]) - i["first"]
                      for i in [main, *move["branches"]])
         limit = move["cost"] + ctx["reasonable_sec"]
+        # Dojście nie może być gorsze od ruchu w tym, o co pyta tryb: nie
+        # dowozić później, a w trybie „być na" - nie kazać wyjść wcześniej.
         pool = [i for i in by_last.get(conns[main["rides"][-1][0]][4], ())
-                if i["arr"] <= main["arr"] and cost(i, gain) <= limit
+                if sooner(i)[0] <= sooner(main)[0] and cost(i, gain) <= limit
                 and _last_slack(day, i) <= BRANCH_MAX_SLACK_SEC
                 and i["rides"][:-1] != main["rides"][:-1]
                 and lead_of(i) <= lead_of(main) + NEAR_EQUAL_SEC]
