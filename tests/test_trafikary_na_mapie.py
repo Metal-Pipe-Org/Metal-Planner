@@ -10,8 +10,10 @@ prostej i - szacunkiem, jak przy rowerze - o której auto tam dowiezie
 Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
+import copy
 import random
 from datetime import date, datetime, time, timedelta
+from types import SimpleNamespace
 
 import gtfs
 import planner
@@ -202,7 +204,7 @@ def test_ogarniam_czytamy_z_feedu_takie_jakie_jest(monkeypatch):
     monkeypatch.setattr(traficar, "_fetch", lambda url: feed)
     monkeypatch.setattr(traficar, "_models", lambda: {1: ("Renault Clio", False)})
     monkeypatch.setattr(traficar, "_cars_cache",
-                        {"at": 0.0, "cars": [], "generation": 0})
+                        {"at": traficar._NEVER, "cars": [], "generation": 0})
 
     z_nagroda, bez_nagrody = traficar.car_list()
 
@@ -382,13 +384,41 @@ def test_rodzaj_auta_czytamy_z_listy_modeli(monkeypatch):
     monkeypatch.setattr(traficar, "_models", lambda: {1: ("RENAULT Clio V", False),
                                                       2: ("RENAULT Master", True)})
     monkeypatch.setattr(traficar, "_cars_cache",
-                        {"at": 0.0, "cars": [], "generation": 0})
+                        {"at": traficar._NEVER, "cars": [], "generation": 0})
 
     osobowe, dostawcze, nieznane = traficar.car_list()
 
     assert (osobowe["model"], osobowe["van"]) == ("RENAULT Clio V", False)
     assert (dostawcze["model"], dostawcze["van"]) == ("RENAULT Master", True)
     assert (nieznane["model"], nieznane["van"]) == ("Traficar", False)
+
+
+# Pamięć świeżego procesu: moduły testów wczytują się przed pierwszym testem.
+_PO_STARCIE = {name: copy.deepcopy(getattr(traficar, name))
+               for name in ("_cars_cache", "_models_cache")}
+
+
+def test_zaraz_po_starcie_maszyny_auta_znaja_swoje_modele(monkeypatch):
+    """Zegar pobrań liczy od startu maszyny. Lista modeli, której jeszcze
+    nikt nie pobrał, nie jest świeża tylko dlatego, że maszyna działa krócej
+    niż jej ważność - inaczej każde auto byłoby „Traficarem", a dostawczak
+    osobowym, którego przełącznik dostawczaków nie chowa."""
+    odpowiedzi = {
+        "/cars?": {"cars": [
+            {"lat": "51.12", "lng": "17.00", "regPlate": "DOSTAWCZE", "modelId": 2,
+             "location": "Wrocław", "fuel": 80.0, "range": 300, "available": True,
+             "discounts": None}]},
+        "/car-models": {"carModels": [{"id": 2, "name": "RENAULT Master", "type": 2}]},
+    }
+    monkeypatch.setattr(traficar, "_fetch",
+                        lambda url: next(v for k, v in odpowiedzi.items() if k in url))
+    monkeypatch.setattr(traficar, "time", SimpleNamespace(monotonic=lambda: 60.0))
+    for name, stan in _PO_STARCIE.items():
+        monkeypatch.setattr(traficar, name, copy.deepcopy(stan))
+
+    [auto] = traficar.car_list()
+
+    assert (auto["model"], auto["van"]) == ("RENAULT Master", True)
 
 
 def test_dostawczakow_domyslnie_nie_ma_wcale():

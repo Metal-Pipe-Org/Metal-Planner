@@ -108,9 +108,14 @@ RANGE_RESERVE_M = 5000
 
 UNKNOWN_MODEL = ("Traficar", False)   # patrz _models
 
-_cars_cache = {"at": 0.0, "cars": [], "generation": 0}
-_models_cache = {"at": 0.0, "models": {}}
-_zone_cache = {"at": 0.0, "zone": None}
+# "at" to chwila pobrania na zegarze time.monotonic(), który liczy od startu
+# maszyny. Zero znaczyłoby "pobrane przy starcie maszyny", więc przez dobę po
+# jej restarcie strefa uchodziłaby za świeżą i nie pobrałaby się wcale.
+# Niepobrane jest nieskończenie stare.
+_NEVER = float("-inf")
+_cars_cache = {"at": _NEVER, "cars": [], "generation": 0}
+_models_cache = {"at": _NEVER, "models": {}}
+_zone_cache = {"at": _NEVER, "zone": None}
 
 
 class TraficarDataError(Exception):

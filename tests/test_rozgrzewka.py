@@ -93,7 +93,8 @@ def test_poza_wyszukiwaniem_auta_pobieraja_sie_od_razu(monkeypatch):
 
 def test_wyszukiwanie_bierze_stara_strefe(monkeypatch, w_tle):
     strefa = {"end": [], "no_end": [], "relocation": []}
-    monkeypatch.setattr(traficar, "_zone_cache", {"at": 0.0, "zone": strefa})
+    monkeypatch.setattr(traficar, "_zone_cache", {
+        "at": time.monotonic() - traficar.ZONE_TTL_SEC, "zone": strefa})
     monkeypatch.setattr(traficar, "_fetch", _bez_sieci)
     with warmup.no_waiting():
         assert ZONE() is strefa

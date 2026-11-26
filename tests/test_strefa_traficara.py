@@ -6,11 +6,16 @@ auta i tak pokazuje, a gdy cel leży poza strefą, mówi o tym w dymku auta.
 Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
+import copy
+from types import SimpleNamespace
+
 import traficar
 from tests.test_trafikary_na_mapie import CAR, E, _flow
 
 # Prawdziwe pobieranie strefy - conftest podmienia je na "nieznana".
 _real_zone = traficar.zone
+# Pamięć świeżego procesu: moduły testów wczytują się przed pierwszym testem.
+_PO_STARCIE = copy.deepcopy(traficar._zone_cache)
 
 
 def _square(lat, lon, half):
@@ -59,6 +64,20 @@ def test_strefa_z_feedu_rozdzielona_po_typach(monkeypatch):
     monkeypatch.setattr(traficar, "_zone_cache", {"at": -traficar.ZONE_TTL_SEC,
                                                   "zone": None})
     assert _real_zone() == {"end": [[1]], "no_end": [[2]], "relocation": [[3]]}
+
+
+def test_zaraz_po_starcie_maszyny_strefa_sie_pobiera(monkeypatch):
+    """Zegar pobrań liczy od startu maszyny. Strefa, której jeszcze nikt nie
+    pobrał, nie jest świeża tylko dlatego, że maszyna działa krócej niż doba -
+    inaczej przez tę dobę nie byłoby ostrzeżenia o celu poza strefą, a warstwa
+    strefy pokazywałaby błąd."""
+    feed = {"shapes": [
+        {"name": "A", "type": 1, "geo": {"type": "MultiPolygon", "coordinates": [[1]]}},
+    ]}
+    monkeypatch.setattr(traficar, "_fetch", lambda url: feed)
+    monkeypatch.setattr(traficar, "time", SimpleNamespace(monotonic=lambda: 60.0))
+    monkeypatch.setattr(traficar, "_zone_cache", copy.deepcopy(_PO_STARCIE))
+    assert _real_zone() == {"end": [[1]], "no_end": [], "relocation": []}
 
 
 def test_mapa_ostrzega_o_celu_poza_strefa(install_day, monkeypatch):
