@@ -61,6 +61,19 @@ def test_dzien_za_rozkladem_mowi_ze_rozkladu_jeszcze_nie_ma(install_day, monkeyp
     assert result["error"] == "Rozkładu na 05.01 jeszcze nie opublikowano — obecny sięga do 04.01."
 
 
+def test_odjazd_za_rozkladem_mowi_to_od_razu_bez_szukania(monkeypatch):
+    """Odjazd tak jak przyjazd: komunikat bez przeszukiwania kolejnych pustych dób."""
+    monkeypatch.setattr(gtfs, "last_service_date", lambda: date(2026, 1, 4))
+
+    def nie_szukaj(*args, **kwargs):
+        raise AssertionError("dzień za rozkładem nie powinien wczytywać rozkładu")
+    monkeypatch.setattr(gtfs, "load_day", nie_szukaj)
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 35))
+
+    assert result["error"] == "Rozkładu na 05.01 jeszcze nie opublikowano — obecny sięga do 04.01."
+
+
 def test_zwykle_wyszukiwanie_bez_zmian(install_day):
     install_day(make_day(DAY))
 

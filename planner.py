@@ -2470,6 +2470,13 @@ def plan_flow_stages(start_query, end_query, when=None,
     car_overhead = (traficar.MAP_OVERHEAD_SEC if car_overhead_sec is None
                     else int(max(0, min(MAX_CAR_OVERHEAD_SEC, car_overhead_sec))))
 
+    # Dzień za rozkładem nie ma odpowiedzi w żadnym trybie - mówimy to od razu,
+    # zamiast przeszukiwać kolejne puste doby.
+    unpublished = _unpublished(when)
+    if unpublished:
+        yield "error", unpublished
+        return
+
     try:
         day = gtfs.with_pace(gtfs.load_day(when.date(), trains), walk_pace)
         if not walking:
