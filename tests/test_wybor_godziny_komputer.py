@@ -9,11 +9,11 @@ import datetime
 from test_uklad_telefonu import PUSTE_ZRODLA, _odpowiedz, adres, przegladarka  # noqa: F401
 
 
-def _otworz(przegladarka, adres, ekran=(1280, 720)):
+def _otworz(przegladarka, adres, ekran=(1280, 720), godzina=datetime.time(12, 0)):
     context = przegladarka.new_context(viewport={"width": ekran[0], "height": ekran[1]},
                                        locale="pl-PL", service_workers="block")
     page = context.new_page()
-    page.clock.install(time=datetime.datetime.combine(datetime.date.today(), datetime.time(12, 0)))
+    page.clock.install(time=datetime.datetime.combine(datetime.date.today(), godzina))
     for wzor, odpowiedz in PUSTE_ZRODLA.items():
         page.route(wzor, _odpowiedz(odpowiedz))
     page.route("**/tile.openstreetmap.org/**", lambda route: route.abort())
@@ -181,5 +181,28 @@ def test_niskie_okno_nie_zaslania_pastylki(przegladarka, adres):
                         and a["y"] < b["y"] + b["height"] and b["y"] < a["y"] + a["height"])
             assert not zachodzi, (wysokosc, a, b)
             assert a["y"] >= 0 and a["y"] + a["height"] <= wysokosc
+        finally:
+            context.close()
+
+
+def test_przyjazd_z_teraz_to_pelna_godzina_co_najmniej_pol_godziny_naprzod(przegladarka, adres):
+    for godzina, przyjazd in ((datetime.time(3, 58), "05:00"), (datetime.time(3, 20), "04:00")):
+        context, page = _otworz(przegladarka, adres, godzina=godzina)
+        try:
+            page.click('[data-mode="arrive"]')
+            assert _pastylka(page) == f"Przyjazd {przyjazd}, dziś"
+        finally:
+            context.close()
+
+
+def test_gotowe_i_teraz_widac_zawsze_w_niskim_oknie(przegladarka, adres):
+    for ekran in ((700, 400), (1280, 300)):
+        context, page = _otworz(przegladarka, adres, ekran)
+        try:
+            for przycisk in ("[data-done]", "[data-now]"):
+                b = page.locator(przycisk).bounding_box()
+                assert b["y"] >= 0 and b["y"] + b["height"] <= ekran[1], (ekran, przycisk, b)
+            page.click("[data-done]")
+            assert page.is_hidden(".when-sheet")
         finally:
             context.close()

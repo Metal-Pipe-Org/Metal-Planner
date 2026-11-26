@@ -1140,7 +1140,14 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 
 /* Na komputerze okienko bez kół: pole godziny do wpisania i dni do kliknięcia
    (patrz openDesk). */
-.when-sheet.when-desk { width: 320px; max-width: calc(100vw - 16px); overflow-y: auto; }
+.when-sheet.when-desk:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    max-width: calc(100vw - 16px);
+}
+
+.when-desk-body { min-height: 0; overflow-y: auto; padding: 3px; margin: -3px; }
 .when-sheet:focus { outline: none; }
 
 .when-desk-time {
@@ -1193,7 +1200,14 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 .when-mode:focus-visible,
 .when-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.when-desk-foot { display: flex; justify-content: flex-end; }
+.when-desk-foot {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
 
 /* ----------------------------------------------------- lista propozycji --- */
 

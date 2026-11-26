@@ -8206,17 +8206,22 @@ function openWheels() {
 // Kółko myszy i gładzik nie umieją kręcić kolumną o jedną pozycję (gładzik
 // rzucał godziną na koniec doby), a przeciąganie myszą nie działa w ogóle.
 function openDesk() {
-    whenSheet.innerHTML = `${modesHtml()}
-        <div class="when-desk-time">
-            <input type="text" class="when-time" inputmode="numeric" maxlength="5" autocomplete="off"
-                   aria-label="Godzina" title="Wpisz godzinę, np. 1745; strzałki ↑↓ zmieniają godzinę albo minuty">
-            ${nowChip()}
-        </div>
-        <div class="when-days" role="radiogroup" aria-label="Dzień">
-            ${rangeDays().map(day => `<button type="button" role="radio" class="when-day" data-day="${isoDay(day)}"
-                    >${whenDayLabel(day)}</button>`).join('')}
+    // Przyciski na dole zostają widoczne zawsze; w niskim oknie przewija się
+    // tylko to, co nad nimi (pasek przewijania bywa schowany, więc „Gotowe"
+    // pod krawędzią łatwo przeoczyć).
+    whenSheet.innerHTML = `<div class="when-desk-body">
+            ${modesHtml()}
+            <div class="when-desk-time">
+                <input type="text" class="when-time" inputmode="numeric" maxlength="5" autocomplete="off"
+                       aria-label="Godzina" title="Wpisz godzinę, np. 1745; strzałki ↑↓ zmieniają godzinę albo minuty">
+            </div>
+            <div class="when-days" role="radiogroup" aria-label="Dzień">
+                ${rangeDays().map(day => `<button type="button" role="radio" class="when-day" data-day="${isoDay(day)}"
+                        >${whenDayLabel(day)}</button>`).join('')}
+            </div>
         </div>
         <div class="when-desk-foot">
+            ${nowChip()}
             <button type="button" class="button primary when-done" data-done>Gotowe</button>
         </div>`;
     paintDesk();
