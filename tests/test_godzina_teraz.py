@@ -243,3 +243,24 @@ def test_godzina_z_linku_jest_w_rozkladach(przegladarka, adres):
         assert page.input_value("#date") == jutro
     finally:
         context.close()
+
+
+def test_zwinieta_linijka_mowi_o_dniu_innym_niz_dzis(przegladarka, adres):
+    context, page, _ = _otworz(przegladarka, adres)
+    try:
+        page.click(".when-pill")
+        page.evaluate("""() => {
+            const sheet = document.querySelector('.when-sheet');
+            sheet.querySelector('.when-wheels').dispatchEvent(new Event('pointerdown', {bubbles: true}));  // palec
+            const dni = [...sheet.querySelectorAll('[data-wheel="day"] .when-item')];
+            sheet.querySelector('[data-wheel="day"]').scrollTop
+                = dni.findIndex(dzien => dzien.textContent === 'Jutro') * 40;
+        }""")
+        page.wait_for_function("document.querySelector('.when-pill').textContent.includes('jutro')")
+        page.click("[data-done]")
+        _wybierz(page, "#start", TRASA[0])
+        _wybierz(page, "#end", TRASA[1])
+        page.wait_for_selector(".search-summary", state="visible", timeout=20000)
+        assert page.inner_text(".search-summary-time").endswith(", jutro")
+    finally:
+        context.close()

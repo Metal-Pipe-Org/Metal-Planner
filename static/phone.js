@@ -136,7 +136,8 @@ const phoneLayout = (() => {
                 part('search-summary-arrow', '→'),
                 part('search-summary-to', document.getElementById('end').value),
                 part('search-summary-time',
-                     (event.detail.arrive ? 'na ' : '') + document.getElementById('time').value),
+                     (event.detail.arrive ? 'na ' : '') + document.getElementById('time').value
+                     + (event.detail.day ? ', ' + event.detail.day : '')),
                 // Kółko na końcu linijki, za godziną: kolejne etapy wyniku
                 // jeszcze się liczą (patrz setSearching w app.js).
                 busy,

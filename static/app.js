@@ -7317,7 +7317,12 @@ function applyStage(run, data) {
         search.found = true;
         // Formularz na telefonie zwija się dopiero przy wyniku - przy
         // błędzie zostaje rozwinięty do poprawki (patrz phone.js).
-        document.dispatchEvent(new CustomEvent('planner:found', {detail: {arrive: arriveBy && !onboardOn}}));
+        const at = whenMoment();
+        document.dispatchEvent(new CustomEvent('planner:found', {detail: {
+            arrive: arriveBy && !onboardOn,
+            // Dzień tak jak w pastylce („jutro", „sb 28.11"); dziś bez dnia.
+            day: isoDay(at) === isoDay(new Date()) ? '' : whenDayLabel(at).toLowerCase(),
+        }}));
         playPipeDrop();
     }
 }
