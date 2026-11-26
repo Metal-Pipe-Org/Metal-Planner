@@ -8087,11 +8087,24 @@ function paintWhen() {
 }
 
 // Z pokładu jedzie się teraz: wybrana godzina wskazywałaby inny kurs niż ten,
-// którym się jedzie. Pastylka stoi wtedy na „teraz" i się nie otwiera.
+// którym się jedzie. Pastylka stoi wtedy na „teraz" i się nie otwiera, a po
+// wyjściu z pojazdu wraca wcześniejszy wybór - o ile jeszcze nie minął.
+let whenBeforeOnboard = null;
 document.addEventListener('planner:startmode', () => {
-    if (onboardOn) {
+    if (onboardOn && !whenBeforeOnboard) {
+        whenBeforeOnboard = timeChosen
+            ? {arrive: arriveBy, time: timeInput.value, date: $('date').value} : {};
         setArriveBy(false);
         setTimeNow();
+    } else if (!onboardOn && whenBeforeOnboard) {
+        const before = whenBeforeOnboard;
+        whenBeforeOnboard = null;
+        if (savedWhenFresh(before)) {
+            timeInput.value = before.time;
+            $('date').value = before.date;
+            timeChosen = true;
+            setArriveBy(before.arrive);
+        }
     }
     paintWhen();
 });

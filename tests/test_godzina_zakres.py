@@ -65,18 +65,24 @@ def test_reczna_godzina_wraca_do_teraz_dopiero_gdy_minie(przegladarka, adres):
         context.close()
 
 
-def test_w_pojezdzie_tylko_teraz(przegladarka, adres):
+def test_w_pojezdzie_tylko_teraz_a_potem_wraca_wybor(przegladarka, adres):
     context, page = _otworz(przegladarka, adres)
     try:
         page.click(".when-pill")
+        page.click('[data-mode="arrive"]')
         page.keyboard.type("1800")
         page.keyboard.press("Enter")
         page.click("#mode-vehicle")
         assert _pastylka(page) == "Odjazd teraz"
         assert page.is_disabled(".when-pill")
         page.click("#mode-place")
-        assert _pastylka(page) == "Odjazd teraz"
+        assert _pastylka(page) == "Przyjazd 18:00, dziś"
         assert page.is_enabled(".when-pill")
+        # wybór, który w pojeździe minął, nie wraca
+        page.click("#mode-vehicle")
+        page.clock.run_for(7 * 60 * 60 * 1000)
+        page.click("#mode-place")
+        assert _pastylka(page) == "Odjazd teraz"
     finally:
         context.close()
 
