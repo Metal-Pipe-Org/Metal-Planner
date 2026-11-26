@@ -397,12 +397,14 @@ def departures_of_move(ctx, own, everything):
 
 def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
            origin_sec=None, exact=None, back=False):
-    """(ruchy do pokazania, ile ukryto): [{sig, shown: [egzemplarze], first,
-    cost, far_walk, branches}] od najlepszego. `exact` to najszybsza podróż
-    z paska (patrz rides_key): jest kręgosłupem - ruch z jej sygnaturą ma ją
-    za `first` dokładnie w tej postaci, a reszta się do niej dokleja."""
+    """(ruchy do pokazania, ile ukryto, czy jest co złapać, kotwica):
+    [{sig, shown: [egzemplarze], first, cost, far_walk, branches}] od
+    najlepszego. `exact` to najszybsza podróż z paska (patrz rides_key): jest
+    kręgosłupem - ruch z jej sygnaturą ma ją za `first` dokładnie w tej
+    postaci, a reszta się do niej dokleja. Kotwica to ruch, od którego mapa
+    się zaczyna (kręgosłup albo fastest) - jest zawsze wśród pokazanych."""
     if not insts:
-        return [], 0, True
+        return [], 0, True, None
     ctx = {"day": day, "query_sec": query_sec, "gain_sec": gain_sec,
            "reasonable_sec": reasonable_sec(best_arr, query_sec, wider),
            "exact": tuple(exact) if exact else None, "back": back}
@@ -452,7 +454,7 @@ def choose(day, insts, query_sec, best_arr, gain_sec, wider=0, prefer=None,
     shown, hidden = readable(day, moves, anchor, by_sig_all, back)
     add_branches(ctx, shown, insts, by_sig_all, origin_sec or {}, anchor)
     return shown, hidden, any(m["safe_alt"] or is_safe(day, i)
-                          for m in shown for i in [m["first"], *m["branches"]])
+                          for m in shown for i in [m["first"], *m["branches"]]), anchor
 
 
 def add_branches(ctx, shown, insts, by_sig, origin_sec, anchor):
