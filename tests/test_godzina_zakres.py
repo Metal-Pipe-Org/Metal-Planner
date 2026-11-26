@@ -43,7 +43,7 @@ def test_dni_od_pierwszego_do_ostatniego_z_rozkladem(przegladarka, adres):
         dni = page.eval_on_selector_all(".when-day", "els => els.map(e => e.dataset.day)")
         assert dni[0] == gtfs.first_service_date().isoformat()
         assert dni[-1] == gtfs.last_service_date().isoformat()
-        assert page.inner_text(".when-day.on") == "Dziś"
+        assert page.get_attribute(".when-day.on", "data-day") == datetime.date.today().isoformat()
     finally:
         context.close()
 

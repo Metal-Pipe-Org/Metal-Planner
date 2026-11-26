@@ -1175,24 +1175,50 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 .when-time:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .when-time.bad { border-color: #dc2626; outline-color: #dc2626; }
 
-.when-days {
+.when-cal {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 3px;
     margin-bottom: 10px;
 }
 
+.when-cal-head {
+    text-align: center;
+    color: var(--ink-faint);
+    font-size: 11px;
+    line-height: 18px;
+}
+
+.when-cal-off { height: 34px; }
+
 .when-day {
-    height: 32px;
-    border: 1px solid var(--line);
+    position: relative;
+    height: 34px;
+    border: 1px solid transparent;
     border-radius: 8px;
-    background: var(--surface);
-    color: var(--ink-soft);
+    background: var(--surface-alt);
+    color: var(--ink);
     font: inherit;
     font-size: 13px;
-    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
     cursor: pointer;
 }
+
+/* Dziś - obwódka; wybrany dzień - wypełniony. */
+.when-day.today { border-color: var(--accent); }
+
+.when-cal-month {
+    position: absolute;
+    top: 1px;
+    left: 0;
+    right: 0;
+    color: var(--ink-faint);
+    font-size: 9px;
+    line-height: 10px;
+}
+
+.when-day.on .when-cal-month { color: rgba(255, 255, 255, 0.85); }
+.when-day:has(.when-cal-month) { padding-top: 9px; }
 
 .when-day:hover { background: #e8edf3; color: var(--ink); }
 .when-day.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }

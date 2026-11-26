@@ -8213,10 +8213,7 @@ function openDesk() {
                 <input type="text" class="when-time" inputmode="numeric" maxlength="5" autocomplete="off"
                        aria-label="Godzina" title="Wpisz godzinę, np. 1745; strzałki ↑↓ zmieniają godzinę albo minuty">
             </div>
-            <div class="when-days" role="radiogroup" aria-label="Dzień">
-                ${rangeDays().map(day => `<button type="button" role="radio" class="when-day" data-day="${isoDay(day)}"
-                        >${whenDayLabel(day)}</button>`).join('')}
-            </div>
+            ${calendarHtml()}
         </div>
         <div class="when-desk-foot">
             ${nowChip()}
@@ -8227,6 +8224,37 @@ function openDesk() {
     const input = whenSheet.querySelector('.when-time');
     input.focus();
     input.select();
+}
+
+// Mały kalendarz dni z rozkładem: tygodnie od poniedziałku, w komórce numer
+// dnia, a na początku nowego miesiąca jego skrót. Dni spoza rozkładu są puste.
+const MONTHS = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+
+function calendarHtml() {
+    const days = rangeDays();
+    const inRange = new Set(days.map(isoDay));
+    const first = days[0];
+    const last = days[days.length - 1];
+    const monday = new Date(first.getFullYear(), first.getMonth(), first.getDate() - (first.getDay() + 6) % 7);
+    const today = isoDay(new Date());
+    const cells = [];
+    for (let day = monday; day <= last || cells.length % 7;
+         day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)) {
+        const iso = isoDay(day);
+        if (!inRange.has(iso)) {
+            cells.push('<span class="when-cal-off" aria-hidden="true"></span>');
+            continue;
+        }
+        const newMonth = day.getMonth() !== first.getMonth() && day.getDate() === 1;
+        cells.push(`<button type="button" role="radio" class="when-day${iso === today ? ' today' : ''}"
+                data-day="${iso}" aria-label="${whenDayLabel(day)}">`
+            + (newMonth ? `<span class="when-cal-month">${MONTHS[day.getMonth()]}</span>` : '')
+            + `${day.getDate()}</button>`);
+    }
+    return `<div class="when-cal" role="radiogroup" aria-label="Dzień">
+            ${['pn', 'wt', 'śr', 'cz', 'pt', 'sb', 'nd'].map(name => `<span class="when-cal-head">${name}</span>`).join('')}
+            ${cells.join('')}
+        </div>`;
 }
 
 function paintDesk() {
@@ -8598,7 +8626,7 @@ function trapTab(event) {
     if (stops[next].classList.contains('when-time')) stops[next].select();
 }
 
-const DAY_KEYS = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -4, ArrowDown: 4};
+const DAY_KEYS = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7};
 
 // Klawisze łapie dokument: fokus bywa w okienku albo, po kliknięciu obok
 // pola, na samej stronie pod nim - a tło i tak zasłania resztę.
@@ -8628,9 +8656,12 @@ document.addEventListener('keydown', event => {
         stepClock(event.target, event.key === 'ArrowUp');
     } else if (day && event.key in DAY_KEYS) {
         event.preventDefault();
-        const days = [...whenSheet.querySelectorAll('.when-day')];
-        const to = Math.max(0, Math.min(days.length - 1, days.indexOf(day) + DAY_KEYS[event.key]));
-        pickDay(days[to]);
+        // Strzałki po kalendarzu: w bok o dzień, w górę i w dół o tydzień;
+        // poza dni z rozkładem się nie wychodzi.
+        const at = dayOfIso(day.dataset.day);
+        const to = whenSheet.querySelector(`.when-day[data-day="${isoDay(
+            new Date(at.getFullYear(), at.getMonth(), at.getDate() + DAY_KEYS[event.key]))}"]`);
+        if (to) pickDay(to);
     }
 });
 

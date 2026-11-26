@@ -36,7 +36,9 @@ def test_okienko_bez_kol_z_polem_godziny_i_dniami(przegladarka, adres):
         okienko = page.locator(".when-sheet").bounding_box()
         assert okienko["y"] >= pastylka["y"] + pastylka["height"]
         assert okienko["y"] + okienko["height"] <= 720
-        assert page.inner_text(".when-day.on") == "Dziś"
+        dzis = datetime.date.today().isoformat()
+        assert page.get_attribute(".when-day.on", "data-day") == dzis
+        assert page.get_attribute(".when-day.today", "data-day") == dzis
     finally:
         context.close()
 
@@ -66,7 +68,7 @@ def test_esc_cofa_zmiany(przegladarka, adres):
     context, page = _otworz(przegladarka, adres)
     try:
         page.keyboard.type("0815")
-        page.click('.when-day >> text="Jutro"')
+        page.click(f'.when-day[data-day="{(datetime.date.today() + datetime.timedelta(days=1)).isoformat()}"]')
         page.keyboard.press("Escape")
         assert page.is_hidden(".when-sheet")
         assert _pastylka(page) == "Odjazd teraz"
@@ -87,7 +89,7 @@ def test_strzalki_i_dni(przegladarka, adres):
         page.keyboard.press("Home")
         page.keyboard.press("ArrowUp")
         assert page.input_value(".when-time") == "01:00"
-        page.click('.when-day >> text="Dziś"')
+        page.click(f'.when-day[data-day="{datetime.date.today().isoformat()}"]')
         assert _pastylka(page) == "Odjazd 01:00, dziś"
         page.keyboard.press("ArrowRight")
         assert _pastylka(page) == "Odjazd 01:00, jutro"
@@ -219,3 +221,39 @@ def test_gotowe_i_teraz_widac_zawsze_w_niskim_oknie(przegladarka, adres):
             assert page.is_hidden(".when-sheet")
         finally:
             context.close()
+
+
+def test_kalendarz_tygodniami_od_poniedzialku(przegladarka, adres):
+    context, page = _otworz(przegladarka, adres)
+    try:
+        assert page.eval_on_selector_all(".when-cal-head", "els => els.map(e => e.textContent)") \
+            == ["pn", "wt", "śr", "cz", "pt", "sb", "nd"]
+        komorki = page.eval_on_selector_all(
+            ".when-cal > :not(.when-cal-head)", "els => els.map(e => e.dataset.day || null)")
+        assert len(komorki) % 7 == 0
+        pierwszy = next(d for d in komorki if d)
+        assert datetime.date.fromisoformat(pierwszy).weekday() == komorki.index(pierwszy)
+        # strzałki: w bok o dzień, w dół o tydzień
+        page.focus(".when-day.on")
+        page.keyboard.press("ArrowDown")
+        za_tydzien = datetime.date.today() + datetime.timedelta(days=7)
+        if za_tydzien.isoformat() in komorki:
+            assert page.input_value("#date") == za_tydzien.isoformat()
+    finally:
+        context.close()
+
+
+def test_kalendarz_zaczyna_sie_w_srodku_tygodnia(przegladarka, adres):
+    context, page = _otworz(przegladarka, adres)
+    try:
+        page.keyboard.press("Escape")
+        page.evaluate("document.getElementById('when-fields').dataset.first"
+                      " = new Date(Date.now()).toISOString().slice(0, 10)")
+        page.click(".when-pill")
+        komorki = page.eval_on_selector_all(
+            ".when-cal > :not(.when-cal-head)", "els => els.map(e => e.dataset.day || null)")
+        dzis = datetime.date.today()
+        assert komorki[:dzis.weekday()] == [None] * dzis.weekday()
+        assert komorki[dzis.weekday()] == dzis.isoformat()
+    finally:
+        context.close()
