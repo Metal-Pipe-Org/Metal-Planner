@@ -2460,16 +2460,29 @@ def plan_flow_stages(start_query, end_query, when=None,
     car_overhead = (traficar.MAP_OVERHEAD_SEC if car_overhead_sec is None
                     else int(max(0, min(MAX_CAR_OVERHEAD_SEC, car_overhead_sec))))
 
+    asked_sec = when.hour * 3600 + when.minute * 60 + when.second
+    # Doba, na której osi się liczy, względem dnia z pytania. „Być na" tuż po
+    # północy szuka wyjścia ARRIVE_LOOKBACK_SEC wstecz, czyli jeszcze
+    # poprzedniego wieczoru - liczy się wtedy na osi poprzedniej doby (00:20
+    # to tam 24:20), z porankiem tej doby doklejonym za północą
+    # (gtfs.with_next_morning). Szukanie w kolejnej dobie niżej przesuwa ją
+    # w drugą stronę.
+    day_offset = (-1 if arrive_by and not in_vehicle and asked_sec < ARRIVE_LOOKBACK_SEC
+                  else 0)
+
     try:
-        day = gtfs.with_pace(gtfs.load_day(when.date(), trains), walk_pace)
+        base = gtfs.load_day(when.date(), trains)
+        if day_offset:
+            base = gtfs.with_next_morning(
+                gtfs.load_day(when.date() + timedelta(days=day_offset), trains),
+                base, ARRIVE_LOOKBACK_SEC)
+        day = gtfs.with_pace(base, walk_pace)
         if not walking:
             day = gtfs.without_walking(day)
         day = gtfs.with_walk_radius(day, MOVES_WALK_M)
     except FileNotFoundError as e:
         yield "error", {"error": str(e)}
         return
-
-    asked_sec = when.hour * 3600 + when.minute * 60 + when.second
 
     # Start z pokładu pojazdu: najpierw trzeba wiedzieć, KTÓRY to kurs - bo
     # dopiero on mówi, gdzie i kiedy zaczyna się podróż (patrz onboard.py).
@@ -2516,13 +2529,16 @@ def plan_flow_stages(start_query, end_query, when=None,
     # Tryb „być na": wyszukiwanie rusza z najpóźniejszego wyjścia, które
     # jeszcze dowozi na godzinę z formularza - dalej wszystko jak przy
     # „wyjściu o", z tą godziną jako końcem okna.
-    arrive_sec = asked_sec if arrive_by and ride is None else None
+    arrive_sec = asked_sec - day_offset * gtfs.PREV_DAY_SEC if arrive_by and ride is None else None
     # Dziś odjazd, który już minął, nikogo nie dowiezie: „być na" nie
-    # proponuje wyjścia wcześniejszego niż teraz (z luzem na „teraz").
+    # proponuje wyjścia wcześniejszego niż teraz (z luzem na „teraz"). Teraz
+    # liczy się na osi doby, więc o 23:30 pytanie „na 00:20 jutro" też nie
+    # proponuje wyjść sprzed 23:20.
     earliest_exit = None
-    if arrive_sec is not None and when.date() == date.today():
-        now = datetime.now()
-        earliest_exit = now.hour * 3600 + now.minute * 60 + now.second - DEPARTED_SLACK_SEC
+    service_day = when.date() + timedelta(days=day_offset)
+    if arrive_sec is not None and date.today() in (when.date(), service_day):
+        earliest_exit = int((datetime.now() - datetime.combine(
+            service_day, datetime.min.time())).total_seconds()) - DEPARTED_SLACK_SEC
     if arrive_sec is not None:
         dep_sec = _latest_start(day, source_stops, target_stops, arrive_sec)
         if dep_sec is None:
@@ -2545,7 +2561,6 @@ def plan_flow_stages(start_query, end_query, when=None,
     # zrobić z TYM przejazdem", a on kończy się dzisiaj. Odpowiedź "pojedź
     # jutro" byłaby odpowiedzią na inne pytanie - i to z przystanku, na którym
     # pasażer za chwilę stanie tylko przejazdem.
-    day_offset = 0
     asked_sec = dep_sec        # godzina, od której liczy się czekanie: z pytania,
                                # a z pokładu - odjazd pojazdu spod najbliższego
                                # przystanku (czekaniem nie jest jazda w nim)

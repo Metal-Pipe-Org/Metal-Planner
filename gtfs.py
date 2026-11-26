@@ -6,6 +6,7 @@ przez update_gtfs.py dane przeładują się same przy pierwszym zapytaniu.
 """
 
 import copy
+import heapq
 import math
 import re
 import sqlite3
@@ -1585,6 +1586,61 @@ def with_shifted_trip(day, trip_id, from_stop, late_sec):
     data._paced = {}          # tempa liczy się z dnia bazowego (patrz with_pace)
     data._points = {}         # punkt z mapy na tym dniu nie może trafić do bazowego
     return data, new_id
+
+
+def with_next_morning(day, next_day, until_sec):
+    """Doba `day` z porankiem doby następnej (`next_day`) doklejonym za
+    północą: jej własne kursy z odjazdem przed `until_sec` jadą tu o dobę
+    później, jako kursy przesunięte (patrz with_shifted_trip), więc każde
+    sięgnięcie do bazy samo odkręca przesunięcie.
+
+    To lustro ogona doby D-1 w load_day. Tryb „być na" tuż po północy
+    (zgłoszenie #265) liczy na osi doby poprzedniej, bo wyjście wypada
+    często jeszcze przed północą - a na miejsce dowozi też to, co należy
+    do kalendarza nowej doby (Siechnice zapisują noc jako 00:30, nie 24:30).
+    Ogona `day` w `next_day` (prefiks PREV_DAY_PREFIX) się nie dokleja: to te
+    same kursy, które `day` ma już jako swoje.
+
+    Kopia płytka; tablica połączeń jest nowa. Trzymana na dniu bazowym jak
+    w with_pace, póki `next_day` jest tym samym obiektem z cache load_day.
+    """
+    key = ("poranek", until_sec)
+    cached = day._paced.get(key)
+    if cached is not None and cached[0] is next_day:
+        return cached[1]
+    morning, renamed = [], {}
+    for dep, arr, from_s, to_s, trip in next_day.conns:
+        if dep >= until_sec:
+            break
+        if trip.startswith(PREV_DAY_PREFIX):
+            continue
+        new_id = renamed.get(trip)
+        if new_id is None:
+            new_id = renamed[trip] = sys.intern(f"{SHIFT_PREFIX}{PREV_DAY_SEC}{SHIFT_PREFIX}{trip}")
+        morning.append((dep + PREV_DAY_SEC, arr + PREV_DAY_SEC, from_s, to_s, new_id))
+
+    data = copy.copy(day)
+    data.conns = list(heapq.merge(day.conns, morning, key=lambda conn: conn[0]))
+    data.dep_times = [conn[0] for conn in data.conns]
+    data.conns_by_trip = None
+    data.deps_by_stop = None
+    data.trip_info = {**day.trip_info,
+                      **{new: next_day.trip_info[old] for old, new in renamed.items()}}
+    data.trip_shape = {**day.trip_shape,
+                       **{new: next_day.trip_shape[old] for old, new in renamed.items()
+                          if old in next_day.trip_shape}}
+    # Pociąg przesunięty czyta swój przebieg spod własnego identyfikatora
+    # (pkp.trip_path), a słupki nowej doby muszą mieć nazwę i położenie.
+    data.pkp_trip_stops = {**{old: next_day.pkp_trip_stops[old] for old in renamed
+                              if old in next_day.pkp_trip_stops},
+                           **day.pkp_trip_stops}
+    data.stop_names = {**next_day.stop_names, **day.stop_names}
+    data.stop_coords = {**next_day.stop_coords, **day.stop_coords}
+    data._reach = {}
+    data._paced = {}
+    data._points = {}
+    day._paced[key] = (next_day, data)
+    return data
 
 
 def deps_by_stop(data):

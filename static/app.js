@@ -5610,7 +5610,9 @@ function showRailOnlyNotice() {
 const WAIT_NOTICE_SEC = 20 * 60;
 
 function waitNoticeHtml(data) {
-    if (data.day_offset) {
+    // Doba wcześniej (-1) to „być na" tuż po północy: wyjście wieczorem
+    // przed dniem z pytania to odpowiedź, a nie czekanie.
+    if (data.day_offset > 0) {
         const dzien = data.day_offset === 1 ? 'jutro' : `za ${data.day_offset} dni`;
         return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
             + `Najbliższy wyjazd ${dzien} o ${esc(data.starts)}.</p></div>`;
