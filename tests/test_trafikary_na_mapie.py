@@ -25,6 +25,24 @@ from tests import flow
 # Północ, żeby dep_sec wyszło zerem i liczby dały się czytać w głowie.
 WHEN = datetime.combine(date.today(), time())
 
+
+
+def _teraz(monkeypatch, kiedy):
+    class _Teraz(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return kiedy
+    monkeypatch.setattr(planner, "datetime", _Teraz)
+
+
+@pytest.fixture(autouse=True)
+def _teraz_to_polnoc(monkeypatch):
+    """„Teraz" to WHEN: auta stoją tam, gdzie teraz, więc zasięg w przód i brak
+    aut wstecz liczą się od zegara - a test nie może zależeć od pory, o której
+    leci (wcześniej po 3:00 auta z północy były już „poza zasięgiem")."""
+    _teraz(monkeypatch, WHEN)
+
+
 # Trzy punkty na jednym południku: 0,01° szerokości to ~1113 m.
 S = (51.10, 17.00)          # start
 M = (51.12, 17.00)          # przystanek w połowie
@@ -460,9 +478,9 @@ def _day_from(when):
 @pytest.mark.parametrize("wstecz, przeszlosc", [(timedelta(hours=1), True),
                                                 (timedelta(minutes=2), False)])
 def test_godzina_temu_aut_nie_ma_a_przed_chwila_sa(install_day, monkeypatch, wstecz, przeszlosc):
-    kiedy = (datetime.now() - wstecz).replace(second=0, microsecond=0)
-    if kiedy.date() != date.today():
-        pytest.skip("tuż po północy „wstecz” to wczoraj")
+    teraz = WHEN + timedelta(hours=2)
+    _teraz(monkeypatch, teraz)
+    kiedy = teraz - wstecz
     install_day(_day_from(kiedy))
     _cars(monkeypatch, [CAR])
 

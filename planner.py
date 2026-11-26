@@ -1045,9 +1045,10 @@ DEFAULT_MAP_CARS = 3
 # zębatką, zgłoszenie #490); None = bez limitu. Dalej niż to ich pozycje to już
 # zgadywanie, więc zamiast aut jest wyjaśnienie, dlaczego ich nie ma.
 DEFAULT_CAR_HORIZON_H = 3
-# Ile wstecz od teraz auta jeszcze stoją: „teraz" wpisane przed chwilą albo
-# godzina zaokrąglona w dół to wciąż ta chwila, a nie przeszłość.
-CARS_PAST_SLACK_SEC = 10 * 60
+# Ile wstecz od teraz to wciąż „teraz", a nie przeszłość: godzina wpisana przed
+# chwilą albo zaokrąglona w dół. Dalej wstecz nie ma już aut stojących teraz ani
+# odjazdów, na które przy „być na" da się zdążyć.
+PAST_SLACK_SEC = 10 * 60
 MIN_MAP_CARS = 1
 MAX_MAP_CARS = 30            # sufit suwaka pod zębatką - pilnowany tutaj
 
@@ -2295,6 +2296,11 @@ def _unpublished(when):
     return None
 
 
+def _too_late(arrive_sec):
+    return {"error": f"Na przyjazd do {_fmt_time(arrive_sec)} nie zdążysz już "
+                     f"żadnym połączeniem."}
+
+
 def _no_arrival(start_name, end_name, arrive_sec, when):
     return _unpublished(when) or {
         "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
@@ -2521,10 +2527,19 @@ def plan_flow_stages(start_query, end_query, when=None,
     # jeszcze dowozi na godzinę z formularza - dalej wszystko jak przy
     # „wyjściu o", z tą godziną jako końcem okna.
     arrive_sec = asked_sec if arrive_by and ride is None else None
+    # Dziś odjazd, który już minął, nikogo nie dowiezie: „być na" nie
+    # proponuje wyjścia wcześniejszego niż teraz (z luzem jak przy autach).
+    earliest_exit = None
+    if arrive_sec is not None and when.date() == date.today():
+        now = datetime.now()
+        earliest_exit = now.hour * 3600 + now.minute * 60 + now.second - PAST_SLACK_SEC
     if arrive_sec is not None:
         dep_sec = _latest_start(day, source_stops, target_stops, arrive_sec)
         if dep_sec is None:
             yield "error", _no_arrival(start_name, end_name, arrive_sec, when)
+            return
+        if earliest_exit is not None and dep_sec < earliest_exit:
+            yield "error", _too_late(arrive_sec)
             return
 
     # Najszybsza trasa wyznacza skalę ("większość mrówek") i jest zapasowym
@@ -2645,7 +2660,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         if arrive_sec is not None:
             # Okno „być na" sięga tyle przed najpóźniejsze wyjście, ile przy
             # „wyjściu o" sięga za najszybszy przyjazd (patrz _moves_map).
-            dep_sec = max(0, dep_sec - int(min(
+            dep_sec = max(0, earliest_exit or 0, dep_sec - int(min(
                 MOVES_SEARCH_MAX_SEC,
                 2 * gain_sec + moves.reasonable_sec(best_arr, dep_sec))))
         ride_legs = [leg for leg in best_legs if leg["kind"] == "ride"]
@@ -2870,7 +2885,7 @@ def plan_flow_stages(start_query, end_query, when=None,
         # Godzina, która już minęła, to też nie „dziś" stojaków.
         bikes_live = (use_bikes and with_journeys and day_offset == 0
                       and when.date() == date.today()
-                      and when >= datetime.now() - timedelta(seconds=CARS_PAST_SLACK_SEC))
+                      and when >= datetime.now() - timedelta(seconds=PAST_SLACK_SEC))
 
         def extras():
             """Wszystko, co stoi na danych na żywo (rowery WRM, auta
@@ -2941,7 +2956,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             # stojącego teraz nie dało się wziąć godzinę temu. Zasięg z
             # ustawienia liczy się tylko w przód, a wstecz luz na „teraz"
             # wpisane przed chwilą.
-            cars_past = cars_ahead_sec < -CARS_PAST_SLACK_SEC
+            cars_past = cars_ahead_sec < -PAST_SLACK_SEC
             cars_beyond = cars_past or (car_horizon_h is not None
                                         and cars_ahead_sec > car_horizon_h * 3600)
             if not cars_beyond:
