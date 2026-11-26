@@ -7972,7 +7972,12 @@ const arriveFromNow = now => new Date(now.getFullYear(), now.getMonth(), now.get
 let whenSearchTimer = null;
 let wheelsChanged = false;
 let wheelTimer = null;
-let whenOnPhone = false;
+let whenWheels = false;
+// Koła są dla palca, okienko z polem godziny - dla myszy i gładzika, także
+// w wąskim oknie: o rodzaju wyboru decyduje wskaźnik, a nie szerokość.
+const finePointer = window.matchMedia('(pointer: fine)');
+// Czy od otwarcia wyboru pasażer sam zmienił godzinę albo dzień (patrz setWhenMode).
+let whenTouched = false;
 let whenSnapshot = null;
 
 const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -8046,9 +8051,15 @@ function whenModeName() {
     return whenArrive() ? 'Przyjazd' : 'Odjazd';
 }
 
+// Przyjazd z „teraz" dostaje najbliższą pełną godzinę; powrót do odjazdu bez
+// ruszania godziny i dnia oddaje „teraz", które było przy otwarciu wyboru.
 function setWhenMode(arrive) {
     setArriveBy(arrive);
     if (arrive && !timeChosen) writeWhen(clampMoment(arriveFromNow(new Date())));
+    if (!arrive && whenSnapshot && !whenSnapshot.chosen && !whenTouched) {
+        setTimeNow();
+        return;
+    }
     paintWhen();
 }
 
@@ -8094,6 +8105,8 @@ whenSheet.className = 'when-sheet';
 whenSheet.hidden = true;
 whenSheet.setAttribute('role', 'dialog');
 whenSheet.setAttribute('aria-label', 'Godzina odjazdu');
+// Klik w puste miejsce okienka zostawia fokus w nim, więc Enter i Esc działają dalej.
+whenSheet.tabIndex = -1;
 document.body.append(whenBackdrop, whenSheet);
 
 function wheelHtml(name, label, items) {
@@ -8141,12 +8154,14 @@ function rangeDays() {
 
 function openWhen() {
     whenSnapshot = {arrive: arriveBy, chosen: timeChosen, time: timeInput.value, date: $('date').value};
-    whenOnPhone = phoneLayout.active();
+    whenWheels = !finePointer.matches;
     wheelsChanged = false;
+    whenTouched = false;
     whenBackdrop.hidden = false;
     whenSheet.hidden = false;
-    whenSheet.classList.toggle('when-desk', !whenOnPhone);
-    if (whenOnPhone) openWheels();
+    whenSheet.classList.toggle('when-desk', !whenWheels);
+    whenBackdrop.classList.toggle('when-desk', !whenWheels);
+    if (whenWheels) openWheels();
     else openDesk();
 }
 
@@ -8213,34 +8228,54 @@ function paintDays() {
     }
 }
 
-// Okienko stoi pod pastylką, a gdy pod nią brakuje miejsca - nad nią.
+// Okienko stoi pod pastylką, a gdy pod nią brakuje miejsca - nad nią; w niskim
+// oknie obok panelu, a gdy i tam się nie mieści - pod pastylką z przewijaniem
+// w środku. Pastylki nie zasłania nigdy.
 function placeDesk() {
-    if (whenSheet.hidden || whenOnPhone) return;
+    if (whenSheet.hidden || whenWheels) return;
+    const GAP = 6, EDGE = 8;
+    whenSheet.style.maxHeight = '';
     const pill = whenBox.querySelector('.when-pill').getBoundingClientRect();
+    const panel = $('sidebar').getBoundingClientRect();
+    const width = whenSheet.offsetWidth;
     const height = whenSheet.offsetHeight;
-    let top = pill.bottom + 6;
-    if (top + height > window.innerHeight - 8) top = Math.max(8, pill.top - 6 - height);
+    const below = window.innerHeight - EDGE - (pill.bottom + GAP);
+    const above = pill.top - GAP - EDGE;
+    let top, left = Math.max(EDGE, Math.min(pill.left, window.innerWidth - width - EDGE));
+    if (height <= below) {
+        top = pill.bottom + GAP;
+    } else if (height <= above) {
+        top = pill.top - GAP - height;
+    } else if (panel.right + GAP + width <= window.innerWidth - EDGE) {
+        left = panel.right + GAP;
+        top = Math.max(EDGE, Math.min(pill.top, window.innerHeight - EDGE - height));
+        if (height > window.innerHeight - 2 * EDGE) whenSheet.style.maxHeight = `${window.innerHeight - 2 * EDGE}px`;
+    } else if (below >= above) {
+        top = pill.bottom + GAP;
+        whenSheet.style.maxHeight = `${below}px`;
+    } else {
+        whenSheet.style.maxHeight = `${above}px`;
+        top = pill.top - GAP - above;
+    }
     whenSheet.style.top = `${top}px`;
-    whenSheet.style.left = `${Math.max(8, Math.min(pill.left, window.innerWidth - whenSheet.offsetWidth - 8))}px`;
+    whenSheet.style.left = `${left}px`;
 }
 
-window.addEventListener('resize', () => {
-    if (whenSheet.hidden) return;
-    if (phoneLayout.active() !== whenOnPhone) closeWheels();
-    else placeDesk();
-});
+window.addEventListener('resize', placeDesk);
 
-// Godzina z pola: „1745", „17:45", „17.45", „930"; same cyfry godziny („9") liczą
-// się dopiero przy zatwierdzeniu, żeby w trakcie pisania „17" nie było 17:00.
+// Godzina z pola: „1745", „17:45", „17.45", „930". W trakcie pisania liczy się
+// tylko pełna godzina (cztery cyfry albo minuty po dwukropku) - „250" to może
+// być początek „2500", a nie 2:50. Krótsze („9", „930") dopiero przy zatwierdzeniu.
 function parseClock(text, whole) {
     const digits = text.trim().replace(/[:.\s]/g, '');
     if (!/^\d{1,4}$/.test(digits)) return null;
-    if (digits.length <= 2 && !whole) return null;
+    if (!whole && digits.length < 4 && !/[:.]\d{2}$/.test(text.trim())) return null;
     const [h, m] = digits.length <= 2 ? [digits, '0'] : [digits.slice(0, -2), digits.slice(-2)];
     return Number(h) <= 23 && Number(m) <= 59 ? Number(h) * 60 + Number(m) : null;
 }
 
 function pickDesk(moment) {
+    whenTouched = true;
     writeWhen(clampMoment(moment));
     wheelsChanged = true;
     paintPill();
@@ -8311,7 +8346,7 @@ function closeWheels() {
     }
     whenSheet.hidden = true;
     whenBackdrop.hidden = true;
-    if (!whenOnPhone) whenBox.querySelector('.when-pill').focus();
+    if (!whenWheels) whenBox.querySelector('.when-pill').focus();
     if (!wheelsChanged) return;
     document.dispatchEvent(new Event('planner:when'));
     if (inTimetable()) whenChangedAway = true;
@@ -8327,7 +8362,7 @@ function whenEnterTimetable() {
 // Na komputerze „Gotowe", Enter i klik obok przyjmują też godzinę dopiero
 // wpisywaną („9" to 9:00); błędnej nie przyjmują, okienko zostaje otwarte.
 function finishWhen() {
-    if (!whenOnPhone && !typedClock(true)) {
+    if (!whenWheels && !typedClock(true)) {
         whenSheet.querySelector('.when-time').focus();
         return;
     }
@@ -8383,6 +8418,7 @@ function settleWheels() {
     const shown = new Date(at.getFullYear(), at.getMonth(), at.getDate(), at.getHours(),
                            Math.min(55, Math.round(at.getMinutes() / 5) * 5));
     if (picked.getTime() === shown.getTime()) return;
+    whenTouched = true;
     writeWhen(picked);
     paintPill();
     // „Teraz" jest tylko przy odjeździe.
@@ -8412,7 +8448,7 @@ whenSheet.addEventListener('click', event => {
     if (mode) {
         setWhenMode(mode.dataset.mode === 'arrive');
         wheelsChanged = true;
-        if (whenOnPhone) {
+        if (whenWheels) {
             whenSheet.querySelector('.when-sheet-top').innerHTML = sheetTopHtml();
             scrollWheels('smooth');
         } else {
@@ -8433,7 +8469,7 @@ whenSheet.addEventListener('click', event => {
         setTimeNow();
         wheelsChanged = true;
         now.classList.add('on');
-        if (whenOnPhone) scrollWheels('smooth');
+        if (whenWheels) scrollWheels('smooth');
         else paintDesk();
     } else if (event.target.closest('[data-done]')) finishWhen();
 });
@@ -8463,21 +8499,25 @@ function trapTab(event) {
 
 const DAY_KEYS = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -4, ArrowDown: 4};
 
-whenSheet.addEventListener('keydown', event => {
+// Klawisze łapie dokument: fokus bywa w okienku albo, po kliknięciu obok
+// pola, na samej stronie pod nim - a tło i tak zasłania resztę.
+document.addEventListener('keydown', event => {
+    if (whenSheet.hidden) return;
+    if (!whenSheet.contains(event.target) && event.target !== document.body) return;
     const day = event.target.closest('.when-day');
     if (event.key === 'Escape') {
         event.preventDefault();
         cancelWheels();
     } else if (event.key === 'Enter' && !event.target.closest('[data-mode], [data-now]')) {
         event.preventDefault();
-        if (whenOnPhone) {
+        if (whenWheels) {
             clearTimeout(wheelTimer);
             settleWheels();
             wheelsChanged = true;
         }
         if (day) pickDay(day);
         finishWhen();
-    } else if (whenOnPhone) {
+    } else if (whenWheels) {
         // na telefonie klawiatury nie ma
     } else if (event.key === 'Tab') {
         event.preventDefault();

@@ -1140,7 +1140,8 @@ body.start-onboard .endpoint-fields .for-end { display: block; }
 
 /* Na komputerze okienko bez kół: pole godziny do wpisania i dni do kliknięcia
    (patrz openDesk). */
-.when-desk { width: 320px; }
+.when-sheet.when-desk { width: 320px; max-width: calc(100vw - 16px); overflow-y: auto; }
+.when-sheet:focus { outline: none; }
 
 .when-desk-time {
     display: flex;
