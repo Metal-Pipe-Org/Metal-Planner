@@ -971,13 +971,8 @@ function paintCarsNote() {
     const notes = [];
     if (carsOn && !plannerSuspended && flowOnScreen()) {
         if (lastFlow.cars_beyond) {
-            // Auta stoją tam, gdzie są teraz: przeszłość ich nie ma, a przyszłość
-            // tylko do zasięgu z ustawienia.
-            const horizon = setting('cars-horizon');
-            const text = !lastFlow.cars_past ? `Auta Traficara tylko do ${horizon} h od teraz`
-                : horizon === 'none' ? 'Auta Traficara tylko od teraz'
-                : `Auta Traficara tylko od teraz do ${horizon} h`;
-            notes.push({level: 'warn', setting: 'cars-horizon', text});
+            notes.push({level: 'warn', setting: 'cars-horizon',
+                        text: `Auta Traficara tylko do ${setting('cars-horizon')} h od teraz`});
         }
         if (lastFlow.cars_dest_in_zone === false) {
             notes.push({level: 'info', text: 'Cel poza strefą Traficara'});

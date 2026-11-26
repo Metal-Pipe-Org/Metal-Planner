@@ -447,9 +447,7 @@ def test_zasieg_aut_z_ustawienia_przesuwa_granice(install_day, monkeypatch):
     assert doba["cars_ahead_sec"] > 3600
 
 
-def test_wstecz_aut_nie_ma_nawet_bez_limitu(install_day, monkeypatch):
-    """Auto stojące teraz nie stało tam wczoraj ani godzinę temu: przeszłość
-    nie ma aut niezależnie od zasięgu z ustawienia, który liczy się w przód."""
+def test_zasieg_aut_dziala_tak_samo_wstecz(install_day, monkeypatch):
     install_day(_day())
     _cars(monkeypatch, [CAR])
     wczoraj = datetime.combine(date.today() - timedelta(days=1), time())
@@ -457,38 +455,10 @@ def test_wstecz_aut_nie_ma_nawet_bez_limitu(install_day, monkeypatch):
     domyslnie = flow.plan_flow("Start", "Cel", wczoraj)
     bez_limitu = flow.plan_flow("Start", "Cel", wczoraj, car_horizon_h=None)
 
-    for wynik in (domyslnie, bez_limitu):
-        assert wynik["cars"] == []
-        assert wynik["cars_beyond"] is True
-        assert wynik["cars_past"] is True
-
-
-def _day_from(when):
-    """_day() z odjazdami o godzinie `when`, a nie o północy."""
-    sec = when.hour * 3600 + when.minute * 60
-    trips = [
-        {"trip_id": "SZYBKI", "label": "Tramwaj 1",
-         "stops": [("S", sec, sec), ("M", sec + 600, sec + 600), ("E", sec + 1200, sec + 1200)]},
-    ]
-    day = make_day(trips, names={"S": "Start", "M": "Środek", "E": "Cel"})
-    day.stop_coords.update({"S": S, "M": M, "E": E})
-    return day
-
-
-@pytest.mark.parametrize("wstecz, przeszlosc", [(timedelta(hours=1), True),
-                                                (timedelta(minutes=2), False)])
-def test_godzina_temu_aut_nie_ma_a_przed_chwila_sa(install_day, monkeypatch, wstecz, przeszlosc):
-    teraz = WHEN + timedelta(hours=2)
-    _teraz(monkeypatch, teraz)
-    kiedy = teraz - wstecz
-    install_day(_day_from(kiedy))
-    _cars(monkeypatch, [CAR])
-
-    wynik = flow.plan_flow("Start", "Cel", kiedy, car_horizon_h=None)
-
-    assert wynik["cars_past"] is przeszlosc
-    if przeszlosc:
-        assert wynik["cars"] == []
+    assert domyslnie["cars"] == []
+    assert domyslnie["cars_beyond"] is True
+    assert _tablice(bez_limitu["cars"]) == ["WE1AA11"]
+    assert bez_limitu["cars_beyond"] is False
 
 
 def test_wylacznik_gasi_auta_na_mapie(install_day, monkeypatch):
