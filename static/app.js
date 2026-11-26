@@ -7973,7 +7973,13 @@ const WEEKDAYS = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
 const WHEEL_DAYS = 14;
 const WHEEL_H = 40;
 // Przełączenie z „teraz" na „Przyjazd": od której chwili liczy się domyślną godzinę.
-const arriveFromNow = now => new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0);
+// Pierwsza pełna godzina co najmniej pół godziny od teraz: tuż przed pełną
+// godziną (3:58) najbliższa (4:00) nie dawała szans dojechać, więc 5:00.
+const arriveFromNow = now => {
+    const soonest = new Date(now.getTime() + 30 * 60000);
+    const hour = new Date(soonest.getFullYear(), soonest.getMonth(), soonest.getDate(), soonest.getHours());
+    return hour < soonest ? new Date(hour.getTime() + 3600000) : hour;
+};
 let whenSearchTimer = null;
 let wheelsChanged = false;
 let wheelTimer = null;
