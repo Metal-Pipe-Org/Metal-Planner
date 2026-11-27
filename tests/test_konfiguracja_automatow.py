@@ -117,14 +117,18 @@ def test_plik_zajety_przez_otwarty_pr(tmp_path):
     assert json.loads(out) == {"duzy.py": [7], "stary.py": [8]}
 
 
-def test_opiekun_co_tydzien_nastepny_od_pierwszego():
-    def opiekun(weeks, *who):
-        return _sprzatanie('sprzatanie_opiekun "$@"', str(weeks), *who).stdout.strip()
-    first = _config()["SPRZATANIE_PIERWSZY_OPIEKUN"]
-    assert opiekun(0, "zbyszek", first, "ala") == first
-    assert opiekun(-3, "zbyszek", first, "ala") == first
-    assert [opiekun(w, "zbyszek", first, "ala") for w in (1, 2, 3)] == ["zbyszek", "ala", first]
-    assert opiekun(5) == first
+def test_opiekun_co_tydzien_nastepny_z_kolejki():
+    config = _config()
+    assert config["SPRZATANIE_OPIEKUNOWIE"].split() == ["EgorexW", "SzymonEls"]
+    assert config["SPRZATANIE_START"] == "2026-11-30"
+
+    def opiekun(data):
+        return _sprzatanie('sprzatanie_opiekun "$1"', data).stdout.strip()
+    # Tydzień od poniedziałku 30.11.2026 (ISO 49) to EgorexW, przed nim też.
+    assert [opiekun(d) for d in ("2026-11-20", "2026-11-30", "2026-12-06")] == ["EgorexW"] * 3
+    assert [opiekun(d) for d in ("2026-12-07", "2026-12-13", "2026-12-14")] == ["SzymonEls", "SzymonEls", "EgorexW"]
+    # 2026 ma 53 tygodnie ISO: kolejka nie powtarza opiekuna na przełomie lat.
+    assert [opiekun(d) for d in ("2026-12-28", "2027-01-04")] == ["EgorexW", "SzymonEls"]
 
 
 def _repo(tmp_path):
@@ -227,11 +231,53 @@ def test_kolizja_z_otwartym_pr(tmp_path):
 def test_link_do_pr_sprzatania():
     from urllib.parse import parse_qs, urlsplit
     url = _sprzatanie('sprzatanie_link "$@"', "o/r", "sprzatanie/pkp-2026-11-30", "Sprzątanie: PKP",
-                      "Refs #531\n\nDla pasażera & reszta").stdout.strip()
+                      "Closes #600\n\nDla pasażera & reszta").stdout.strip()
     parts = urlsplit(url)
     assert parts.path == "/o/r/compare/main...sprzatanie/pkp-2026-11-30"
     q = parse_qs(parts.query)
-    assert q == {"quick_pull": ["1"], "title": ["Sprzątanie: PKP"], "body": ["Refs #531\n\nDla pasażera & reszta"]}
+    assert q == {"quick_pull": ["1"], "title": ["Sprzątanie: PKP"], "body": ["Closes #600\n\nDla pasażera & reszta"]}
+
+
+def _zglos(*args):
+    import json
+    import os
+    r = subprocess.run(["bash", "-c", f'source "{SPRZATANIE}"; sprzatanie_zglos "$@"', "bash", *args],
+                       check=True, capture_output=True, text=True, cwd=ROOT,
+                       env={**os.environ, "DRY_RUN": "1", "REPO": "o/r", "GH_TOKEN": ""})
+    lines = r.stderr.splitlines()
+    nowe = [json.loads(x.split(": ", 2)[2]) for x in lines if x.startswith("DRY_RUN: założyłbym zgłoszenie: ")]
+    tresc = [json.loads(x.split(": ", 2)[2]) for x in lines if x.startswith("DRY_RUN: treść #0 po założeniu: ")]
+    assert len(nowe) == 1 and len(tresc) == 1, r.stderr
+    return r.stdout.strip(), nowe[0], tresc[0]["body"]
+
+
+def test_nowe_zgloszenie_sprzatania_na_sucho():
+    from urllib.parse import parse_qs, urlsplit
+    url, nowe, body = _zglos("Sprzątanie: PKP (tydzień 49)", "SzymonEls", "PKP", "sprzatanie/pkp-2026-11-30",
+                             "Dla pasażera nic się nie zmienia.\n- `foo()` — nieużywana",
+                             "Testy: 5 zielonych na `main` przed zmianą — wszystkie dalej zielone.",
+                             "https://github.com/o/r/actions/runs/1")
+    assert url == "https://github.com/o/r/issues/0"
+    zgloszenie = _config()["SPRZATANIE_ZGLOSZENIE"]
+    assert nowe["title"] == "Sprzątanie: PKP (tydzień 49)"
+    assert nowe["assignees"] == ["SzymonEls"]
+    assert nowe["type"] == _config()["SPRZATANIE_TYP"] == "Task"
+    assert "Link do założenia PR-a pojawi się tu za chwilę." in nowe["body"]
+
+    # Po założeniu: co usunięte, testy, odwołanie do zgłoszenia procesu i link do PR-a.
+    for part in ("- `foo()` — nieużywana", "Testy: 5 zielonych", f"#{zgloszenie}", "@SzymonEls"):
+        assert part in body, part
+    link = re.search(r"\[Otwórz PR do `main`\]\(([^)]+)\)", body).group(1)
+    parts = urlsplit(link)
+    assert parts.path == "/o/r/compare/main...sprzatanie/pkp-2026-11-30"
+    pr_body = parse_qs(parts.query)["body"][0]
+    assert pr_body.startswith("Closes #0\n\nDla pasażera nic się nie zmienia.")
+
+    # Opis PR-a przechodzi pr-syntax.yml: wskazuje tylko nowe zgłoszenie (opiekun jest do niego
+    # przypisany), nie zgłoszenie procesu, do którego przypisany być nie musi.
+    refs = _bash(f'source "{SCRIPTS}/refs.sh"; keyword_refs "$1" "$2" "$3"; echo "|"; mention_refs "$1" "$2"',
+                 "Sprzątanie: PKP", pr_body, "sprzatanie/pkp-2026-11-30")
+    assert refs.split() == ["0", "|"]
 
 
 def _refs(title, body, branch):

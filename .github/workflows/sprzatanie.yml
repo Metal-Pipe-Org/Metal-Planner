@@ -4,9 +4,10 @@ name: Sprzątanie obszaru
 # Claude usuwa martwy kod, scala duble i usuwa nieaktualne testy — tylko w tym
 # obszarze, bez zmiany zachowania. Potem workflow sam, bez Claude'a, sprawdza
 # wynik i dopiero gdy wszystko się zgadza, wypycha gałąź `sprzatanie/...`
-# i daje opiekunowi tygodnia pod zgłoszeniem sprzątania link, który jednym
-# kliknięciem zakłada PR. PR zakłada człowiek, nie bot (powód
-# w `sprzatanie_link`), i od tej chwili to zwykły PR.
+# i zakłada nowe zgłoszenie przypisane do opiekuna tygodnia, z linkiem, który
+# jednym kliknięciem zakłada PR z `Closes` do tego zgłoszenia. PR zakłada
+# człowiek, nie bot (powód w `sprzatanie_link`), i od tej chwili to zwykły
+# PR. #531 zostaje stałym zgłoszeniem procesu.
 #
 # Obszary: `.github/sprzatanie-obszary.json` — `id` (do nazwy gałęzi),
 # `nazwa`, `kod` (pliki, które wolno sprzątać), `testy` (testy obszaru, które
@@ -25,14 +26,17 @@ name: Sprzątanie obszaru
 #     `main`, bo drzewo robocze zmienia Claude): tylko pliki obszaru, nic
 #     z zakazanych ścieżek, mała zmiana z ujemnym bilansem, każdy test
 #     zielony przed zielony po, żadnej nowej kolizji z otwartym PR-em,
-#  5. wynik: link pod zgłoszeniem i ping na Discordzie; „nic do sprzątania”,
-#     odrzucenie przez bramkę albo tydzień bez wolnego obszaru — jedno szare
-#     zdanie do opiekuna na Discordzie, bez komentarza. Odrzucona zmiana
-#     zostaje do pobrania z biegu przez 7 dni.
+#  5. wynik: nowe zgłoszenie z linkiem i ping na Discordzie; „nic do
+#     sprzątania”, odrzucenie przez bramkę albo tydzień bez wolnego obszaru —
+#     jedno szare zdanie do opiekuna na Discordzie, bez zgłoszenia. Odrzucona
+#     zmiana zostaje do pobrania z biegu przez 7 dni.
+#
+# Opiekun tygodnia: kolejka SPRZATANIE_OPIEKUNOWIE z config.sh, co tydzień
+# następny (`sprzatanie_opiekun`).
 #
 # Dwa joby: Claude i testy biegną z tokenem tylko do odczytu, a wypchnięcie
-# gałęzi i komentarz robi drugi job, który kodu z pracy Claude'a nie
-# uruchamia — dostaje gotowe commity w paczce gita.
+# gałęzi i zgłoszenie robi drugi job, który kodu z repo nie uruchamia (tylko
+# skrypty z `main`) — dostaje gotowe commity w paczce gita.
 #
 # Cron w UTC: poniedziałek 1:37 UTC to w Warszawie noc z niedzieli na
 # poniedziałek (2:37 zimą, 3:37 latem) — po `wskazniki-balaganu.yml`, poza
@@ -66,7 +70,6 @@ jobs:
     timeout-minutes: 75
     permissions:
       contents: read
-      issues: read
       pull-requests: read
       # Akcja Claude'a loguje się przez OIDC, jak w claude-review-pr.yml.
       id-token: write
@@ -78,6 +81,7 @@ jobs:
       wynik: ${{ steps.wynik.outputs.wynik || steps.wybor.outputs.wynik }}
       nazwa: ${{ steps.wybor.outputs.nazwa }}
       opiekun: ${{ steps.wybor.outputs.opiekun }}
+      tydzien: ${{ steps.wybor.outputs.tydzien }}
       galaz: ${{ steps.wybor.outputs.galaz }}
       main_sha: ${{ steps.wybor.outputs.main_sha }}
     steps:
@@ -126,8 +130,7 @@ jobs:
           week=$(TZ=Europe/Warsaw date +%V)
           obszar=$(sprzatanie_wybor "$OBSZARY" "$((10#$week))" "$zajete" "$WYMUSZONY")
 
-          weeks=$(( ($(date +%s) - $(date -d "$SPRZATANIE_START" +%s)) / 604800 ))
-          opiekun=$(sprzatanie_opiekun "$weeks" $(gh api "repos/$REPO/issues/$SPRZATANIE_ZGLOSZENIE" --jq '.assignees[].login'))
+          opiekun=$(sprzatanie_opiekun "$(TZ=Europe/Warsaw date +%F)")
 
           {
             echo "### Sprzątanie, tydzień $week"
@@ -141,6 +144,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "opiekun=$opiekun" >> "$GITHUB_OUTPUT"
+          echo "tydzien=$week" >> "$GITHUB_OUTPUT"
           echo "main_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           if [ -z "$obszar" ]; then
             echo "wynik=zablokowane" >> "$GITHUB_OUTPUT"
@@ -309,9 +313,11 @@ jobs:
       && needs.praca.outputs.wynik != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Jedyny job z zapisem; kodu z repo nie uruchamia, tylko skrypty z `main`.
     permissions:
-      # Wypchnięcie gałęzi sprzątania i komentarz pod zgłoszeniem.
+      # Wypchnięcie gałęzi sprzątania.
       contents: write
+      # Nowe zgłoszenie sprzątania (`sprzatanie_zglos`).
       issues: write
     env:
       REPO: ${{ github.repository }}
@@ -319,6 +325,7 @@ jobs:
       WYNIK: ${{ needs.praca.outputs.wynik }}
       NAZWA: ${{ needs.praca.outputs.nazwa }}
       OPIEKUN: ${{ needs.praca.outputs.opiekun }}
+      TYDZIEN: ${{ needs.praca.outputs.tydzien }}
       GALAZ: ${{ needs.praca.outputs.galaz }}
       MAIN: ${{ needs.praca.outputs.main_sha }}
       RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -345,7 +352,7 @@ jobs:
           name: sprzatanie
           path: ${{ runner.temp }}/wynik
 
-      - name: Gałąź, link i Discord
+      - name: Gałąź, zgłoszenie i Discord
         run: |
           set -euo pipefail
           source .discord/.github/scripts/sprzatanie.sh
@@ -377,24 +384,7 @@ jobs:
             + (if (.usuniete | length) > 0 then "\n\nUsunięte testy:\n" + (.usuniete | map("- `\(.)`") | join("\n")) else "" end)' \
             "$OUT/testy.json")
           opis=$(cat "$OUT/opis.md" 2>/dev/null || echo "Dla pasażera nic się nie zmienia.")
-          body="Refs #$SPRZATANIE_ZGLOSZENIE"$'\n\n'"$opis"$'\n\n'"$testy"$'\n\n'"Cotygodniowe sprzątanie obszaru „$NAZWA” ([bieg]($RUN))."
-          link=$(sprzatanie_link "$REPO" "$GALAZ" "Sprzątanie: $NAZWA" "$body")
-          # Za długi adres GitHub odrzuca; wtedy opis zostaje tylko w komentarzu.
-          if [ "${#link}" -gt 7000 ]; then
-            link=$(sprzatanie_link "$REPO" "$GALAZ" "Sprzątanie: $NAZWA" \
-              "Refs #$SPRZATANIE_ZGLOSZENIE"$'\n\n'"Opis i wynik testów: komentarz automatu sprzątania pod #$SPRZATANIE_ZGLOSZENIE ([bieg]($RUN)).")
-          fi
-
-          {
-            echo "🧹 **Sprzątanie: $NAZWA** — gotowe do PR-a"
-            echo
-            echo "$opis"
-            echo
-            echo "$testy"
-            echo
-            echo "**[Otwórz PR do \`main\`]($link)** — @$OPIEKUN, w tym tygodniu to Twoje sprzątanie: sprawdź opis i kliknij „Create pull request”. Dalej to zwykły PR."
-          } > "$RUNNER_TEMP/komentarz.md"
-          url=$(gh issue comment "$SPRZATANIE_ZGLOSZENIE" --repo "$REPO" --body-file "$RUNNER_TEMP/komentarz.md")
+          url=$(sprzatanie_zglos "Sprzątanie: $NAZWA (tydzień $TYDZIEN)" "$OPIEKUN" "$NAZWA" "$GALAZ" "$opis" "$testy" "$RUN")
 
           discord_send info "" "🧹 Sprzątanie do PR-a: $NAZWA" "$url" \
-            "Link do założenia PR-a jest pod zgłoszeniem." "" "$OPIEKUN"
+            "Nowe zgłoszenie z linkiem do założenia PR-a." "" "$OPIEKUN"

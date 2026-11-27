@@ -65,7 +65,7 @@ Zapisz dokładnie jeden z dwóch plików (nie commituj go):
   „Dla pasażera nic się nie zmienia.” Potem lista: co usunięte albo scalone
   i dlaczego to bezpieczne (np. „`foo()` — nie używa jej nic w repo, także
   szablony i testy”). Usunięte testy wypisz osobno, z nazwy, z powodem.
-  Bez nagłówka z tytułem i bez `Refs` — to dokłada workflow.
+  Bez nagłówka z tytułem i bez `Closes`/`Refs` — to dokłada workflow.
 - **`NIC_FILE`**, gdy nie ma czego bezpiecznie sprzątać: jedno zdanie
   dlaczego, bez commitów.
 

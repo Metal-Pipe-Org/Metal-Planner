@@ -1,8 +1,9 @@
 # Cotygodniowe sprzątanie jednego obszaru (#531): wybór obszaru i opiekuna,
-# kolizje z otwartymi PR-ami, bramka po pracy Claude'a i porównanie testów.
-# Wołający (`sprzatanie.yml`) robi `source`; funkcje liczą na lokalnym gicie
-# i na tym, co dostaną, a po API sięga sam workflow — dzięki temu całość da
-# się sprawdzić lokalnie (tests/test_konfiguracja_automatow.py).
+# kolizje z otwartymi PR-ami, bramka po pracy Claude'a, porównanie testów
+# i nowe zgłoszenie z linkiem do PR-a. Wołający (`sprzatanie.yml`) robi
+# `source`; funkcje liczą na lokalnym gicie i na tym, co dostaną, a po API
+# sięga sam workflow — poza `sprzatanie_zglos`, który ma DRY_RUN. Dzięki temu
+# całość da się sprawdzić lokalnie (tests/test_konfiguracja_automatow.py).
 #
 # Bramka to cała gwarancja, że sprzątanie samo nie zrobi bałaganu: Claude może
 # się pomylić, a gałąź wychodzi do ludzi dopiero, gdy wszystkie sprawdzenia
@@ -64,22 +65,17 @@ sprzatanie_zajete() {
     | group_by(.f) | map({(.[0].f): (map(.n) | unique)}) | add // {}' <<<"$prs"
 }
 
-# sprzatanie_opiekun TYGODNIE PRZYPISANI... — opiekun tego tygodnia: osoby
-# przypisane do zgłoszenia sprzątania po kolei, co tydzień następna, od
-# SPRZATANIE_PIERWSZY_OPIEKUN. TYGODNIE to pełne tygodnie od
-# SPRZATANIE_START (przed nim 0). Opiekun musi być przypisany do zgłoszenia,
-# bo PR wskazuje je przez `Refs` (pr-syntax.yml), stąd lista z przypisanych.
+# sprzatanie_opiekun DATA — opiekun tygodnia, w który wypada DATA
+# (RRRR-MM-DD, czas warszawski): SPRZATANIE_OPIEKUNOWIE po kolei, co tydzień
+# następny, od pierwszego w tygodniu SPRZATANIE_START (przed nim też
+# pierwszy). Tygodnie liczone od poniedziałku SPRZATANIE_START, a nie numerem
+# tygodnia ISO: rok z 53 tygodniami (np. 2026) dałby na przełomie lat dwa
+# tygodnie pod rząd temu samemu opiekunowi.
 sprzatanie_opiekun() {
-  local weeks=$1
-  shift
-  if [ $# -eq 0 ]; then
-    echo "$SPRZATANIE_PIERWSZY_OPIEKUN"
-    return 0
-  fi
-  printf '%s\n' "$@" | jq -Rrs --argjson w "$weeks" --arg first "$SPRZATANIE_PIERWSZY_OPIEKUN" '
-    split("\n") | map(select(. != "")) | sort_by(ascii_downcase) as $l
-    | ([$l | to_entries[] | select(.value | ascii_downcase == ($first | ascii_downcase)) | .key] | first // 0) as $s
-    | $l[($s + ([$w, 0] | max)) % ($l | length)]'
+  jq -rn --arg d "$1" --arg s "$SPRZATANIE_START" --arg l "$SPRZATANIE_OPIEKUNOWIE" '
+    ($l | split(" ") | map(select(. != ""))) as $l
+    | ((($d | strptime("%Y-%m-%d") | mktime) - ($s | strptime("%Y-%m-%d") | mktime)) / 604800 | floor) as $w
+    | $l[([$w, 0] | max) % ($l | length)]'
 }
 
 # sprzatanie_bramka BAZA CZUBEK OBSZAR_JSON — zakres i wielkość zmiany.
@@ -200,4 +196,65 @@ sprzatanie_kolizja() {
 sprzatanie_link() {
   jq -rn --arg repo "$1" --arg b "$2" --arg t "$3" --arg body "$4" \
     '"https://github.com/\($repo)/compare/main...\($b)?quick_pull=1&title=\($t | @uri)&body=\($body | @uri)"'
+}
+
+# sprzatanie_opis_pr NUMER OPIS TESTY BIEG NAZWA — opis PR-a sprzątania.
+# Zaczyna się od `Closes #NUMER`: nowe zgłoszenie jest przypisane do
+# opiekuna, który zakłada PR, więc PR przechodzi sprawdzenie składni
+# (pr-syntax.yml, syntax.sh), a po merge'u zgłoszenie się zamyka. Do
+# stałego zgłoszenia procesu PR celowo się nie odwołuje: opiekun nie musi
+# być do niego przypisany.
+sprzatanie_opis_pr() {
+  printf 'Closes #%s\n\n%s\n\n%s\n\nCotygodniowe sprzątanie obszaru „%s” ([bieg](%s)).' \
+    "$1" "$2" "$3" "$5" "$4"
+}
+
+# sprzatanie_tresc OPIS TESTY LINK BIEG OPIEKUN NAZWA — treść nowego
+# zgłoszenia: co usunięte i dlaczego, wynik testów, link do założenia PR-a
+# i odwołanie do stałego zgłoszenia procesu. Pusty LINK — zgłoszenie jeszcze
+# bez numeru, link dochodzi zaraz po założeniu.
+sprzatanie_tresc() {
+  local link=$3
+  if [ -n "$link" ]; then
+    link="**[Otwórz PR do \`main\`]($link)** — @$5, w tym tygodniu to Twoje sprzątanie: sprawdź opis i kliknij „Create pull request”. Dalej to zwykły PR."
+  else
+    link="Link do założenia PR-a pojawi się tu za chwilę."
+  fi
+  printf '%s\n\n%s\n\n%s\n\nCotygodniowe sprzątanie obszaru „%s” ([bieg](%s)); proces opisuje #%s.' \
+    "$1" "$2" "$link" "$6" "$4" "$SPRZATANIE_ZGLOSZENIE"
+}
+
+# sprzatanie_zglos TYTUŁ OPIEKUN NAZWA GAŁĄŹ OPIS TESTY BIEG — zakłada nowe
+# zgłoszenie sprzątania (typ SPRZATANIE_TYP, przypisany opiekun), a gdy zna
+# już jego numer, dopisuje do treści link, który zakłada PR z `Closes`.
+# Wypisuje adres zgłoszenia. Potrzebuje REPO i GH_TOKEN z `issues: write`;
+# z DRY_RUN=1 tylko wypisuje na stderr, co by wysłał, i udaje zgłoszenie #0.
+sprzatanie_zglos() {
+  local title=$1 who=$2 name=$3 branch=$4 desc=$5 tests=$6 run=$7 payload json n url link
+  payload=$(jq -cn --arg t "$title" --arg b "$(sprzatanie_tresc "$desc" "$tests" "" "$run" "$who" "$name")" \
+    --arg a "$who" --arg type "$SPRZATANIE_TYP" '{title: $t, body: $b, assignees: [$a], type: $type}')
+  if [ "${DRY_RUN:-}" = 1 ]; then
+    echo "DRY_RUN: założyłbym zgłoszenie: $payload" >&2
+    json='{"number": 0, "html_url": "https://github.com/'"$REPO"'/issues/0"}'
+  elif ! json=$(gh api -X POST "repos/$REPO/issues" --input - <<<"$payload"); then
+    # Typ zgłoszenia zależy od ustawień organizacji i uprawnień tokena.
+    echo "::notice::Zgłoszenie z typem $SPRZATANIE_TYP nie przeszło — zakładam bez typu." >&2
+    json=$(gh api -X POST "repos/$REPO/issues" --input - <<<"$(jq 'del(.type)' <<<"$payload")")
+  fi
+  n=$(jq -r .number <<<"$json")
+  url=$(jq -r .html_url <<<"$json")
+
+  link=$(sprzatanie_link "$REPO" "$branch" "Sprzątanie: $name" "$(sprzatanie_opis_pr "$n" "$desc" "$tests" "$run" "$name")")
+  # Za długi adres GitHub odrzuca; wtedy opis zostaje tylko w zgłoszeniu.
+  if [ "${#link}" -gt 7000 ]; then
+    link=$(sprzatanie_link "$REPO" "$branch" "Sprzątanie: $name" \
+      "Closes #$n"$'\n\n'"Opis i wynik testów: #$n ([bieg]($run)).")
+  fi
+  payload=$(jq -cn --arg b "$(sprzatanie_tresc "$desc" "$tests" "$link" "$run" "$who" "$name")" '{body: $b}')
+  if [ "${DRY_RUN:-}" = 1 ]; then
+    echo "DRY_RUN: treść #$n po założeniu: $payload" >&2
+  else
+    gh api -X PATCH "repos/$REPO/issues/$n" --input - <<<"$payload" >/dev/null
+  fi
+  echo "$url"
 }

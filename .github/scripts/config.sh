@@ -40,13 +40,17 @@ CLAUDE_MENTION="@claude"
 CLAUDE_BRANCH_PREFIX="claude/issue-"
 
 # --- Cotygodniowe sprzątanie (sprzatanie.yml, sprzatanie.sh, #531) ---
-# Zgłoszenie sprzątania: pod nim ląduje link do założenia PR-a, PR wskazuje
-# je przez `Refs`, a jego przypisani to kolejka opiekunów.
+# Stałe zgłoszenie procesu sprzątania. Każde udane sprzątanie dostaje własne
+# nowe zgłoszenie, które tylko się do niego odwołuje; PR zamyka to nowe.
 SPRZATANIE_ZGLOSZENIE=531
-# Opiekun pierwszego tygodnia; potem co tydzień następny przypisany.
-SPRZATANIE_PIERWSZY_OPIEKUN="EgorexW"
-# Poniedziałek pierwszego tygodnia kolejki opiekunów (RRRR-MM-DD).
+# Kolejka opiekunów (loginy GitHuba, rozdzielone spacją): co tydzień
+# następny, po kolei. Opiekun dostaje przypisanie do nowego zgłoszenia
+# i zakłada PR, więc musi mieć w repo prawo zapisu.
+SPRZATANIE_OPIEKUNOWIE="EgorexW SzymonEls"
+# Poniedziałek tygodnia pierwszego opiekuna z listy (RRRR-MM-DD).
 SPRZATANIE_START="2026-11-30"
+# Typ nowego zgłoszenia; gdy GitHub go nie przyjmie, zgłoszenie idzie bez typu.
+SPRZATANIE_TYP="Task"
 # Gałąź sprzątania to `<przedrostek><id obszaru>-<data>`.
 SPRZATANIE_GALAZ="sprzatanie/"
 # Bramka: najwyżej tyle zmienionych linii (dodane + usunięte)…
