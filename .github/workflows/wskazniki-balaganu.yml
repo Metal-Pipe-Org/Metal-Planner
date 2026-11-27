@@ -5,7 +5,7 @@ name: Wskaźniki bałaganu
 # trafiają do historii, z której widać trend. Historię trzyma i rysuje
 # github-action-benchmark: dopisuje pomiar do `data.js` na gałęzi `gh-pages`
 # i stawia tam stronę z wykresem dla każdego wskaźnika (GitHub Pages z tej
-# gałęzi). Na koniec karta na #metal-statystyki: zmiana od poprzedniego
+# gałęzi). Na koniec karta na #metal-planner: zmiana od poprzedniego
 # pomiaru strzałkami i link do wykresów (`.github/scripts/wskazniki.sh`).
 #
 # Runner nie ma bazy rozkładu (`data/gtfs.sqlite`) ani przeglądarki, więc
@@ -141,7 +141,7 @@ jobs:
 
       - name: Karta na Discordzie
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DIGEST }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_IDS: ${{ vars.DISCORD_IDS || '{}' }}
           NAZWA: ${{ steps.cfg.outputs.nazwa }}
           KATALOG: ${{ steps.cfg.outputs.katalog }}
