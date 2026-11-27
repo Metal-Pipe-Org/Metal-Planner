@@ -48,3 +48,14 @@ CLAUDE_BRANCH_PREFIX="claude/issue-"
 REFS_CLOSE_WORDS="close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved"
 # Tylko wskazuje zgłoszenie, bez zamykania (ścieżka B):
 REFS_MENTION_WORDS="ref|refs|related to|relates to|part of|dotyczy"
+
+# --- Wskaźniki bałaganu (wskazniki-balaganu.yml, wskazniki.sh, #532) ---
+# Nazwa zestawu w historii github-action-benchmark — zmiana zaczyna wykresy
+# od nowa.
+WSKAZNIKI_NAZWA="Wskaźniki bałaganu"
+# Katalog na gałęzi `gh-pages`, a zarazem ścieżka strony z wykresami.
+WSKAZNIKI_KATALOG="wskazniki"
+# Wyraźne pogorszenie: wartość większa niż tyle procent poprzedniej (wzrost
+# od zera liczy się zawsze). Pomiar co tydzień, więc próg łapie skok, a nie
+# powolny przyrost — ten widać na wykresie.
+WSKAZNIKI_PROG="150%"

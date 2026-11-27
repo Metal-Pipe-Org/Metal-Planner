@@ -38,6 +38,7 @@
 #               ⏳ cisza w zgłoszeniu        💤 zamknięte po ciszy
 #               🤖 Claude skończył / ocenił  ⚠️ Claude nie dał rady
 #               📊 podsumowanie dnia         📋 ogólnie — do zrobienia
+#               📈 wskaźniki bałaganu (co tydzień)
 #   OPIS      linijka od nas z tym, czego nie ma w tytule; tu padają pingi.
 #             Przy pojedynczym zdarzeniu linkiem jest tu najwyżej sam numer
 #             (np. „PR [#298](url) Tytuł”): tytuł jest już linkiem, a drugi
