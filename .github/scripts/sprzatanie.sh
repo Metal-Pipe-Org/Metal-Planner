@@ -1,6 +1,6 @@
 # Cotygodniowe sprzątanie jednego obszaru (#531): wybór obszaru i opiekuna,
 # kolizje z otwartymi PR-ami, bramka po pracy Claude'a, porównanie testów
-# i nowe zgłoszenie z linkiem do PR-a. Wołający (`sprzatanie.yml`) robi
+# i zgłoszenie tygodnia z wynikiem. Wołający (`sprzatanie.yml`) robi
 # `source`; funkcje liczą na lokalnym gicie i na tym, co dostaną, a po API
 # sięga sam workflow — poza `sprzatanie_zglos`, który ma DRY_RUN. Dzięki temu
 # całość da się sprawdzić lokalnie (tests/test_konfiguracja_automatow.py).
@@ -199,62 +199,116 @@ sprzatanie_link() {
 }
 
 # sprzatanie_opis_pr NUMER OPIS TESTY BIEG NAZWA — opis PR-a sprzątania.
-# Zaczyna się od `Closes #NUMER`: nowe zgłoszenie jest przypisane do
+# Zaczyna się od `Closes #NUMER`: zgłoszenie tygodnia jest przypisane do
 # opiekuna, który zakłada PR, więc PR przechodzi sprawdzenie składni
 # (pr-syntax.yml, syntax.sh), a po merge'u zgłoszenie się zamyka. Do
-# stałego zgłoszenia procesu PR celowo się nie odwołuje: opiekun nie musi
-# być do niego przypisany.
+# SPRZATANIE_ZGLOSZENIE PR celowo się nie odwołuje: opiekun nie musi być do
+# niego przypisany.
 sprzatanie_opis_pr() {
   printf 'Closes #%s\n\n%s\n\n%s\n\nCotygodniowe sprzątanie obszaru „%s” ([bieg](%s)).' \
     "$1" "$2" "$3" "$5" "$4"
 }
 
-# sprzatanie_tresc OPIS TESTY LINK BIEG OPIEKUN NAZWA — treść nowego
-# zgłoszenia: co usunięte i dlaczego, wynik testów, link do założenia PR-a
-# i odwołanie do stałego zgłoszenia procesu. Pusty LINK — zgłoszenie jeszcze
-# bez numeru, link dochodzi zaraz po założeniu.
-sprzatanie_tresc() {
-  local link=$3
-  if [ -n "$link" ]; then
-    link="**[Otwórz PR do \`main\`]($link)** — @$5, w tym tygodniu to Twoje sprzątanie: sprawdź opis i kliknij „Create pull request”. Dalej to zwykły PR."
-  else
-    link="Link do założenia PR-a pojawi się tu za chwilę."
-  fi
-  printf '%s\n\n%s\n\n%s\n\nCotygodniowe sprzątanie obszaru „%s” ([bieg](%s)); proces opisuje #%s.' \
-    "$1" "$2" "$link" "$6" "$4" "$SPRZATANIE_ZGLOSZENIE"
+# sprzatanie_tytul WYNIK TYDZIEŃ NAZWA — tytuł zgłoszenia tygodnia; widać
+# w nim wynik biegu. WYNIK jak w `sprzatanie.yml`: pr, odrzucone, nic,
+# limit, blad, zablokowane albo na_sucho.
+sprzatanie_tytul() {
+  case "$1" in
+    zablokowane) echo "Sprzątanie (tydzień $2) — brak wolnego obszaru" ;;
+    pr) echo "Sprzątanie: $3 (tydzień $2)" ;;
+    odrzucone) echo "Sprzątanie: $3 (tydzień $2) — odrzucone przez bramkę" ;;
+    nic) echo "Sprzątanie: $3 (tydzień $2) — nic do sprzątania" ;;
+    na_sucho) echo "Sprzątanie: $3 (tydzień $2) — bieg na sucho" ;;
+    *) echo "Sprzątanie: $3 (tydzień $2) — Claude nie dokończył" ;;
+  esac
 }
 
-# sprzatanie_zglos TYTUŁ OPIEKUN NAZWA GAŁĄŹ OPIS TESTY BIEG — zakłada nowe
-# zgłoszenie sprzątania (typ SPRZATANIE_TYP, przypisany opiekun), a gdy zna
-# już jego numer, dopisuje do treści link, który zakłada PR z `Closes`.
-# Wypisuje adres zgłoszenia. Potrzebuje REPO i GH_TOKEN z `issues: write`;
-# z DRY_RUN=1 tylko wypisuje na stderr, co by wysłał, i udaje zgłoszenie #0.
-sprzatanie_zglos() {
-  local title=$1 who=$2 name=$3 branch=$4 desc=$5 tests=$6 run=$7 payload json n url link
-  payload=$(jq -cn --arg t "$title" --arg b "$(sprzatanie_tresc "$desc" "$tests" "" "$run" "$who" "$name")" \
-    --arg a "$who" --arg type "$SPRZATANIE_TYP" '{title: $t, body: $b, assignees: [$a], type: $type}')
+# sprzatanie_tresc WYNIK DANE_JSON LINK — treść zgłoszenia tygodnia.
+# DANE: {nazwa, opiekun, bieg, powod, lista, opis, testy, zmiany}, puste
+# pola pomijane: `powod` to zdanie z biegu, `lista` — linie z powodami
+# (naruszenia bramki, zablokowane obszary), `opis` — opis Claude'a,
+# `testy` — wynik testów, `zmiany` — `git diff --stat` pracy Claude'a. LINK
+# zakłada PR (tylko przy `pr`); pusty — zgłoszenie jeszcze bez numeru.
+sprzatanie_tresc() {
+  jq -r --arg w "$1" --arg link "$3" --arg z "$SPRZATANIE_ZGLOSZENIE" '
+    def lista: split("\n") | map(select(. != "") | "- " + .) | join("\n");
+    ({nazwa: "", opiekun: "", bieg: "", powod: "", lista: "", opis: "", testy: "", zmiany: ""} + .) as $d
+    | (if $w == "pr" then
+         [$d.opis, $d.testy,
+          if $link != "" then "**[Otwórz PR do `main`](\($link))** — @\($d.opiekun), w tym tygodniu to Twoje sprzątanie: sprawdź opis i kliknij „Create pull request”. Dalej to zwykły PR."
+          else "Link do założenia PR-a pojawi się tu za chwilę." end]
+       elif $w == "odrzucone" then
+         ["Bramka odrzuciła zmianę: \($d.powod).", ($d.lista | lista),
+          (if $d.zmiany != "" then "Co Claude zmienił:\n\n```\n\($d.zmiany)\n```" else "" end),
+          (if $d.opis != "" then "Opis Claude'"'"'a:\n\n\($d.opis)" else "" end),
+          "Zmiana (paczka gita i diff) do pobrania z [biegu](\($d.bieg)) przez 7 dni, artefakt `sprzatanie`."]
+       elif $w == "nic" then
+         ["Claude nie znalazł w obszarze „\($d.nazwa)” nic do bezpiecznego usunięcia. Jego uzasadnienie:",
+          ($d.powod | split("\n") | map("> " + .) | join("\n"))]
+       elif $w == "zablokowane" then
+         ["W tym tygodniu żaden obszar nie był wolny:", ($d.lista | lista)]
+       elif $w == "na_sucho" then
+         ["Bieg na sucho: wybór obszaru „\($d.nazwa)” i opiekuna, bez Claude'"'"'a."]
+       else
+         ["Claude nie dokończył pracy: \($d.powod).", "Szczegóły w [biegu](\($d.bieg))."]
+       end)
+    + (if $w == "pr" then [] else ["@\($d.opiekun), w tym tygodniu to Twoje sprzątanie: oceń wynik automatu i zamknij zgłoszenie."] end)
+    + ["Cotygodniowe sprzątanie\(if $d.nazwa != "" and $w != "zablokowane" then " obszaru „\($d.nazwa)”" else "" end) ([bieg](\($d.bieg))), z #\($z)."]
+    | map(select(. != "")) | join("\n\n")' <<<"$2"
+}
+
+# _sprzatanie_api METODA ŚCIEŻKA JSON — wywołanie API; z DRY_RUN=1 tylko
+# linia „DRY_RUN: METODA ŚCIEŻKA JSON” na stderr, a nowe zgłoszenie udaje #0.
+_sprzatanie_api() {
   if [ "${DRY_RUN:-}" = 1 ]; then
-    echo "DRY_RUN: założyłbym zgłoszenie: $payload" >&2
-    json='{"number": 0, "html_url": "https://github.com/'"$REPO"'/issues/0"}'
-  elif ! json=$(gh api -X POST "repos/$REPO/issues" --input - <<<"$payload"); then
-    # Typ zgłoszenia zależy od ustawień organizacji i uprawnień tokena.
-    echo "::notice::Zgłoszenie z typem $SPRZATANIE_TYP nie przeszło — zakładam bez typu." >&2
-    json=$(gh api -X POST "repos/$REPO/issues" --input - <<<"$(jq 'del(.type)' <<<"$payload")")
+    echo "DRY_RUN: $1 $2 $3" >&2
+    if [ "$1 $2" = "POST repos/$REPO/issues" ]; then
+      jq -cn --arg r "$REPO" '{number: 0, html_url: "https://github.com/\($r)/issues/0"}'
+    else
+      echo '{}'
+    fi
+    return 0
   fi
+  gh api -X "$1" "$2" --input - <<<"$3"
+}
+
+# sprzatanie_zglos WYNIK TYTUŁ DANE_JSON [GAŁĄŹ] — zakłada otwarte
+# zgłoszenie tygodnia przypisane do opiekuna (DANE jak w `sprzatanie_tresc`),
+# przy `pr` dopisuje do treści link, który zakłada PR z `Closes` do tego
+# zgłoszenia, i nadaje typ SPRZATANIE_TYP oraz etykietę SPRZATANIE_ETYKIETA.
+# Typ i etykieta idą osobno, po założeniu: gdy GitHub ich nie przyjmie,
+# zgłoszenie i tak zostaje, a log biegu o tym mówi. Wypisuje adres
+# zgłoszenia. Potrzebuje REPO i GH_TOKEN z `issues: write`; z DRY_RUN=1
+# niczego nie zakłada, tylko wypisuje na stderr, co by wysłał.
+sprzatanie_zglos() {
+  local res=$1 title=$2 data=$3 branch=${4:-} json n url link name run
+  json=$(_sprzatanie_api POST "repos/$REPO/issues" "$(jq -cn --arg t "$title" \
+    --arg b "$(sprzatanie_tresc "$res" "$data" "")" --argjson d "$data" \
+    '{title: $t, body: $b, assignees: [$d.opiekun]}')")
   n=$(jq -r .number <<<"$json")
   url=$(jq -r .html_url <<<"$json")
 
-  link=$(sprzatanie_link "$REPO" "$branch" "Sprzątanie: $name" "$(sprzatanie_opis_pr "$n" "$desc" "$tests" "$run" "$name")")
-  # Za długi adres GitHub odrzuca; wtedy opis zostaje tylko w zgłoszeniu.
-  if [ "${#link}" -gt 7000 ]; then
+  if [ "$res" = pr ]; then
+    name=$(jq -r .nazwa <<<"$data")
+    run=$(jq -r .bieg <<<"$data")
     link=$(sprzatanie_link "$REPO" "$branch" "Sprzątanie: $name" \
-      "Closes #$n"$'\n\n'"Opis i wynik testów: #$n ([bieg]($run)).")
+      "$(sprzatanie_opis_pr "$n" "$(jq -r .opis <<<"$data")" "$(jq -r .testy <<<"$data")" "$run" "$name")")
+    # Za długi adres GitHub odrzuca; wtedy opis zostaje tylko w zgłoszeniu.
+    if [ "${#link}" -gt 7000 ]; then
+      link=$(sprzatanie_link "$REPO" "$branch" "Sprzątanie: $name" \
+        "Closes #$n"$'\n\n'"Opis i wynik testów: #$n ([bieg]($run)).")
+    fi
+    _sprzatanie_api PATCH "repos/$REPO/issues/$n" \
+      "$(jq -cn --arg b "$(sprzatanie_tresc "$res" "$data" "$link")" '{body: $b}')" >/dev/null
   fi
-  payload=$(jq -cn --arg b "$(sprzatanie_tresc "$desc" "$tests" "$link" "$run" "$who" "$name")" '{body: $b}')
-  if [ "${DRY_RUN:-}" = 1 ]; then
-    echo "DRY_RUN: treść #$n po założeniu: $payload" >&2
-  else
-    gh api -X PATCH "repos/$REPO/issues/$n" --input - <<<"$payload" >/dev/null
+
+  if ! _sprzatanie_api PATCH "repos/$REPO/issues/$n" \
+      "$(jq -cn --arg t "$SPRZATANIE_TYP" '{type: $t}')" >/dev/null; then
+    echo "::notice::Zgłoszenie #$n zostaje bez typu $SPRZATANIE_TYP — GitHub go nie przyjął." >&2
+  fi
+  if ! _sprzatanie_api POST "repos/$REPO/issues/$n/labels" \
+      "$(jq -cn --arg l "$SPRZATANIE_ETYKIETA" '{labels: [$l]}')" >/dev/null; then
+    echo "::notice::Zgłoszenie #$n zostaje bez etykiety „$SPRZATANIE_ETYKIETA” — GitHub jej nie przyjął." >&2
   fi
   echo "$url"
 }

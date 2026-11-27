@@ -4,10 +4,13 @@ name: Sprzątanie obszaru
 # Claude usuwa martwy kod, scala duble i usuwa nieaktualne testy — tylko w tym
 # obszarze, bez zmiany zachowania. Potem workflow sam, bez Claude'a, sprawdza
 # wynik i dopiero gdy wszystko się zgadza, wypycha gałąź `sprzatanie/...`
-# i zakłada nowe zgłoszenie przypisane do opiekuna tygodnia, z linkiem, który
-# jednym kliknięciem zakłada PR z `Closes` do tego zgłoszenia. PR zakłada
-# człowiek, nie bot (powód w `sprzatanie_link`), i od tej chwili to zwykły
-# PR. #531 zostaje stałym zgłoszeniem procesu.
+# z linkiem, który jednym kliknięciem zakłada PR z `Closes` do zgłoszenia
+# tygodnia. PR zakłada człowiek, nie bot (powód w `sprzatanie_link`), i od
+# tej chwili to zwykły PR.
+#
+# Każdy bieg, bez względu na wynik, zakłada otwarte zgłoszenie tygodnia
+# (typ Task, etykieta `claude`) przypisane do opiekuna, żeby wynik automatu
+# trafił na jego listę do oceny; źródło automatu (#531) podaje w treści.
 #
 # Obszary: `.github/sprzatanie-obszary.json` — `id` (do nazwy gałęzi),
 # `nazwa`, `kod` (pliki, które wolno sprzątać), `testy` (testy obszaru, które
@@ -26,10 +29,13 @@ name: Sprzątanie obszaru
 #     `main`, bo drzewo robocze zmienia Claude): tylko pliki obszaru, nic
 #     z zakazanych ścieżek, mała zmiana z ujemnym bilansem, każdy test
 #     zielony przed zielony po, żadnej nowej kolizji z otwartym PR-em,
-#  5. wynik: nowe zgłoszenie z linkiem i ping na Discordzie; „nic do
-#     sprzątania”, odrzucenie przez bramkę albo tydzień bez wolnego obszaru —
-#     jedno szare zdanie do opiekuna na Discordzie, bez zgłoszenia. Odrzucona
-#     zmiana zostaje do pobrania z biegu przez 7 dni.
+#  5. wynik: zgłoszenie tygodnia i ping opiekuna na Discordzie z linkiem do
+#     niego. Gotowa zmiana — opis, testy i link do założenia PR-a;
+#     odrzucenie przez bramkę — powody, skrót zmiany i bieg, z którego
+#     zmianę da się pobrać przez 7 dni; „nic do sprzątania” — uzasadnienie
+#     Claude'a; tydzień bez wolnego obszaru — co odpadło i przez który PR.
+#     Na sucho niczego nie zakłada ani nie wysyła, tylko wypisuje w logu
+#     zgłoszenie, które by założył.
 #
 # Opiekun tygodnia: kolejka SPRZATANIE_OPIEKUNOWIE z config.sh, co tydzień
 # następny (`sprzatanie_opiekun`).
@@ -51,7 +57,7 @@ on:
         required: false
         default: ""
       na_sucho:
-        description: "Na sucho: tylko wybór obszaru i blokady, bez Claude'a i bez wiadomości"
+        description: "Na sucho: tylko wybór obszaru, opiekuna i blokady, bez Claude'a; zgłoszenie tylko w logu"
         type: boolean
         default: false
 
@@ -82,6 +88,7 @@ jobs:
       nazwa: ${{ steps.wybor.outputs.nazwa }}
       opiekun: ${{ steps.wybor.outputs.opiekun }}
       tydzien: ${{ steps.wybor.outputs.tydzien }}
+      blokady: ${{ steps.wybor.outputs.blokady }}
       galaz: ${{ steps.wybor.outputs.galaz }}
       main_sha: ${{ steps.wybor.outputs.main_sha }}
     steps:
@@ -145,6 +152,8 @@ jobs:
 
           echo "opiekun=$opiekun" >> "$GITHUB_OUTPUT"
           echo "tydzien=$week" >> "$GITHUB_OUTPUT"
+          # Jako napis JSON: wyjście kroku musi zmieścić się w jednej linii.
+          echo "blokady=$(sprzatanie_blokady "$OBSZARY" "$zajete" | jq -Rsc .)" >> "$GITHUB_OUTPUT"
           echo "main_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           if [ -z "$obszar" ]; then
             echo "wynik=zablokowane" >> "$GITHUB_OUTPUT"
@@ -161,7 +170,12 @@ jobs:
             echo "nazwa=$(jq -r .nazwa <<<"$obszar")"
             echo "pliki=$(jq -r '(.kod + .testy) | join(" ")' <<<"$obszar")"
             echo "galaz=$galaz"
-            echo "go=$([ "$NA_SUCHO" = true ] && echo false || echo true)"
+            if [ "$NA_SUCHO" = true ]; then
+              echo "go=false"
+              echo "wynik=na_sucho"
+            else
+              echo "go=true"
+            fi
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v5
@@ -237,10 +251,13 @@ jobs:
           git reset -q --hard
           git clean -fdq
 
+          # koniec WYNIK POWÓD [LISTA] — LISTA to szczegóły po jednym w linii
+          # (do zgłoszenia tygodnia).
           koniec() {
             echo "wynik=$1" >> "$GITHUB_OUTPUT"
             printf '%s\n' "$2" > "$OUT/powod.txt"
-            printf '%s: %s\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "${3:-}" > "$OUT/lista.txt"
+            { printf '%s: %s\n' "$1" "$2"; printf '%s\n' "${3:-}" | sed '/^$/d; s/^/- /'; } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
 
@@ -263,12 +280,12 @@ jobs:
           fi
 
           if [ ! -s "$OUT/sprzatanie.bundle" ]; then
-            powod=$(tr '\n' ' ' < .claude-nic.md 2>/dev/null | head -c 300 || true)
+            powod=$(head -c 1000 .claude-nic.md 2>/dev/null || true)
             koniec nic "${powod:-Claude nie znalazł nic, co dałoby się bezpiecznie usunąć.}"
           fi
 
           if ! naruszenia=$(sprzatanie_bramka "$MAIN" HEAD "$obszar"); then
-            koniec odrzucone "bramka: ${naruszenia//$'\n'/; }"
+            koniec odrzucone "zakres albo wielkość zmiany poza progami" "$naruszenia"
           fi
 
           pytest -q -p no:cacheprovider tests --junitxml="$RUNNER_TEMP/po.xml" || true
@@ -278,7 +295,8 @@ jobs:
                     "$(sprzatanie_wyniki "$RUNNER_TEMP/po.xml")" "$(git diff --name-only "$MAIN" HEAD)")
           printf '%s' "$testy" > "$OUT/testy.json"
           if [ "$(jq '(.zepsute + .usuniete_czerwone) | length' <<<"$testy")" -gt 0 ]; then
-            koniec odrzucone "testy: $(jq -r '[(.zepsute[] | "przestał przechodzić \(.)"), (.usuniete_czerwone[] | "usunięty czerwony \(.)")] | .[:5] | join("; ")' <<<"$testy")"
+            koniec odrzucone "test zielony na \`main\` przestał przechodzić albo usunięty został czerwony" \
+              "$(jq -r '[(.zepsute[] | "przestał przechodzić `\(.)`"), (.usuniete_czerwone[] | "usunięty czerwony `\(.)`")] | .[:20][]' <<<"$testy")"
           fi
 
           # Każdy otwarty PR, także wersja robocza. Konflikt liczy się tylko
@@ -288,11 +306,11 @@ jobs:
           for n in $(gh pr list --repo "$REPO" --state open --limit 100 --json number --jq '.[].number'); do
             git fetch -q --no-tags origin "+refs/pull/$n/head:refs/remotes/pr/$n"
             if ! k=$(sprzatanie_kolizja "$MAIN" HEAD "refs/remotes/pr/$n" "$zniknione"); then
-              kolizje="$kolizje; PR #$n $k"
+              kolizje="$kolizje"$'\n'"PR #$n: $k"
             fi
           done
           if [ -n "$kolizje" ]; then
-            koniec odrzucone "kolizja z otwartym PR-em:${kolizje#;}"
+            koniec odrzucone "kolizja z otwartym PR-em" "${kolizje#$'\n'}"
           fi
 
           koniec pr "wszystkie sprawdzenia przeszły"
@@ -309,7 +327,6 @@ jobs:
     needs: praca
     if: >-
       !cancelled() && needs.praca.result == 'success'
-      && github.event.inputs.na_sucho != 'true'
       && needs.praca.outputs.wynik != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -317,7 +334,7 @@ jobs:
     permissions:
       # Wypchnięcie gałęzi sprzątania.
       contents: write
-      # Nowe zgłoszenie sprzątania (`sprzatanie_zglos`).
+      # Zgłoszenie tygodnia (`sprzatanie_zglos`).
       issues: write
     env:
       REPO: ${{ github.repository }}
@@ -326,6 +343,9 @@ jobs:
       NAZWA: ${{ needs.praca.outputs.nazwa }}
       OPIEKUN: ${{ needs.praca.outputs.opiekun }}
       TYDZIEN: ${{ needs.praca.outputs.tydzien }}
+      BLOKADY: ${{ needs.praca.outputs.blokady }}
+      # Na sucho: zgłoszenie i Discord tylko w logu.
+      DRY_RUN: ${{ github.event.inputs.na_sucho == 'true' && '1' || '' }}
       GALAZ: ${{ needs.praca.outputs.galaz }}
       MAIN: ${{ needs.praca.outputs.main_sha }}
       RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -346,7 +366,7 @@ jobs:
           persist-credentials: false
 
       - name: Pobierz wynik pracy
-        if: needs.praca.outputs.wynik != 'zablokowane'
+        if: needs.praca.outputs.wynik != 'zablokowane' && needs.praca.outputs.wynik != 'na_sucho'
         uses: actions/download-artifact@v8
         with:
           name: sprzatanie
@@ -359,32 +379,41 @@ jobs:
           source .discord/.github/scripts/discord.sh
           OUT="$RUNNER_TEMP/wynik"
           powod=$(cat "$OUT/powod.txt" 2>/dev/null || true)
+          lista=$(cat "$OUT/lista.txt" 2>/dev/null || true)
+          opis=$(cat "$OUT/opis.md" 2>/dev/null || true)
+          testy=""
+          zmiany=""
 
-          case "$WYNIK" in
-            zablokowane)
-              discord_send grey "" "🧹 Sprzątanie: w tym tygodniu bez obszaru" "$RUN" \
-                "Każdy obszar jest wstrzymany albo zajęty przez otwarty PR — lista w podsumowaniu biegu." "" "$OPIEKUN"
-              exit 0 ;;
-            nic)
-              discord_send grey "" "🧹 Sprzątanie: $NAZWA — nic do sprzątania" "$RUN" "$powod" "" "$OPIEKUN"
-              exit 0 ;;
-            pr) ;;
-            *)
-              discord_send grey "" "🧹 Sprzątanie: $NAZWA — bez PR-a" "$RUN" \
-                "${powod^}. Zmiana do pobrania z biegu przez 7 dni." "" "$OPIEKUN"
-              exit 0 ;;
-          esac
+          if [ "$WYNIK" = zablokowane ]; then
+            lista=$(jq -r . <<<"$BLOKADY")
+          fi
+          if [ -s "$OUT/sprzatanie.bundle" ]; then
+            git fetch -q "$OUT/sprzatanie.bundle" HEAD
+            zmiany=$(git diff --stat "$MAIN" FETCH_HEAD)
+          fi
+          if [ "$WYNIK" = pr ]; then
+            # Commity Claude'a dokładnie takie, jakie przeszły bramkę.
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+              push origin "FETCH_HEAD:refs/heads/$GALAZ"
+            testy=$(jq -r '"Testy: \(.zielone) zielonych na `main` przed zmianą — wszystkie\(if (.usuniete | length) > 0 then " poza usuniętymi" else "" end) dalej zielone."
+              + (if (.usuniete | length) > 0 then "\n\nUsunięte testy:\n" + (.usuniete | map("- `\(.)`") | join("\n")) else "" end)' \
+              "$OUT/testy.json")
+            opis=${opis:-Dla pasażera nic się nie zmienia.}
+          fi
 
-          # Commity Claude'a dokładnie takie, jakie przeszły bramkę.
-          git fetch -q "$OUT/sprzatanie.bundle" HEAD
-          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
-            push origin "FETCH_HEAD:refs/heads/$GALAZ"
+          dane=$(jq -cn --arg nazwa "$NAZWA" --arg opiekun "$OPIEKUN" --arg bieg "$RUN" --arg powod "$powod" \
+            --arg lista "$lista" --arg opis "$opis" --arg testy "$testy" --arg zmiany "$zmiany" \
+            '{$nazwa, $opiekun, $bieg, $powod, $lista, $opis, $testy, $zmiany}')
+          tytul=$(sprzatanie_tytul "$WYNIK" "$TYDZIEN" "$NAZWA")
+          url=$(sprzatanie_zglos "$WYNIK" "$tytul" "$dane" "$GALAZ")
 
-          testy=$(jq -r '"Testy: \(.zielone) zielonych na `main` przed zmianą — wszystkie\(if (.usuniete | length) > 0 then " poza usuniętymi" else "" end) dalej zielone."
-            + (if (.usuniete | length) > 0 then "\n\nUsunięte testy:\n" + (.usuniete | map("- `\(.)`") | join("\n")) else "" end)' \
-            "$OUT/testy.json")
-          opis=$(cat "$OUT/opis.md" 2>/dev/null || echo "Dla pasażera nic się nie zmienia.")
-          url=$(sprzatanie_zglos "Sprzątanie: $NAZWA (tydzień $TYDZIEN)" "$OPIEKUN" "$NAZWA" "$GALAZ" "$opis" "$testy" "$RUN")
-
-          discord_send info "" "🧹 Sprzątanie do PR-a: $NAZWA" "$url" \
-            "Nowe zgłoszenie z linkiem do założenia PR-a." "" "$OPIEKUN"
+          if [ "$WYNIK" = pr ]; then
+            kolor=info opis_discord="Link do założenia PR-a jest w zgłoszeniu."
+          else
+            kolor=grey opis_discord="Wynik automatu do oceny w zgłoszeniu."
+          fi
+          if [ "${DRY_RUN:-}" = 1 ]; then
+            echo "DRY_RUN: Discord do $OPIEKUN: 🧹 $tytul"
+          else
+            discord_send "$kolor" "" "🧹 $tytul" "$url" "$opis_discord" "" "$OPIEKUN"
+          fi

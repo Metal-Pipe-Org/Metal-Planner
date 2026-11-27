@@ -238,34 +238,54 @@ def test_link_do_pr_sprzatania():
     assert q == {"quick_pull": ["1"], "title": ["Sprzątanie: PKP"], "body": ["Closes #600\n\nDla pasażera & reszta"]}
 
 
-def _zglos(*args):
+def _zglos(wynik, tydzien, nazwa, dane, galaz=""):
+    """Zgłoszenie tygodnia w DRY_RUN: tytuł, wywołania API i adres."""
     import json
     import os
-    r = subprocess.run(["bash", "-c", f'source "{SPRZATANIE}"; sprzatanie_zglos "$@"', "bash", *args],
+    dane = {"opiekun": "SzymonEls", "bieg": "https://github.com/o/r/actions/runs/1", "nazwa": nazwa, **dane}
+    r = subprocess.run(["bash", "-c", f'source "{SPRZATANIE}"; t=$(sprzatanie_tytul "$1" "$2" "$3"); '
+                        'echo "$t"; sprzatanie_zglos "$1" "$t" "$4" "$5"', "bash",
+                        wynik, tydzien, nazwa, json.dumps(dane), galaz],
                        check=True, capture_output=True, text=True, cwd=ROOT,
                        env={**os.environ, "DRY_RUN": "1", "REPO": "o/r", "GH_TOKEN": ""})
-    lines = r.stderr.splitlines()
-    nowe = [json.loads(x.split(": ", 2)[2]) for x in lines if x.startswith("DRY_RUN: założyłbym zgłoszenie: ")]
-    tresc = [json.loads(x.split(": ", 2)[2]) for x in lines if x.startswith("DRY_RUN: treść #0 po założeniu: ")]
-    assert len(nowe) == 1 and len(tresc) == 1, r.stderr
-    return r.stdout.strip(), nowe[0], tresc[0]["body"]
-
-
-def test_nowe_zgloszenie_sprzatania_na_sucho():
-    from urllib.parse import parse_qs, urlsplit
-    url, nowe, body = _zglos("Sprzątanie: PKP (tydzień 49)", "SzymonEls", "PKP", "sprzatanie/pkp-2026-11-30",
-                             "Dla pasażera nic się nie zmienia.\n- `foo()` — nieużywana",
-                             "Testy: 5 zielonych na `main` przed zmianą — wszystkie dalej zielone.",
-                             "https://github.com/o/r/actions/runs/1")
+    tytul, url = r.stdout.strip().split("\n")
+    calls = []
+    for line in r.stderr.splitlines():
+        assert line.startswith("DRY_RUN: "), line
+        method, path, payload = line.removeprefix("DRY_RUN: ").split(" ", 2)
+        calls.append((method, path, json.loads(payload)))
     assert url == "https://github.com/o/r/issues/0"
-    zgloszenie = _config()["SPRZATANIE_ZGLOSZENIE"]
-    assert nowe["title"] == "Sprzątanie: PKP (tydzień 49)"
-    assert nowe["assignees"] == ["SzymonEls"]
-    assert nowe["type"] == _config()["SPRZATANIE_TYP"] == "Task"
-    assert "Link do założenia PR-a pojawi się tu za chwilę." in nowe["body"]
+    return tytul, calls
 
-    # Po założeniu: co usunięte, testy, odwołanie do zgłoszenia procesu i link do PR-a.
-    for part in ("- `foo()` — nieużywana", "Testy: 5 zielonych", f"#{zgloszenie}", "@SzymonEls"):
+
+def _zgloszenie_tygodnia(calls, tytul, opiekun):
+    """Wspólne dla każdego wyniku: jedno nowe, otwarte zgłoszenie z opiekunem, typem i etykietą."""
+    config = _config()
+    nowe = [c for c in calls if c[:2] == ("POST", "repos/o/r/issues")]
+    assert len(nowe) == 1
+    assert nowe[0][2]["title"] == tytul
+    assert nowe[0][2]["assignees"] == [opiekun]
+    # Otwarte: nic nie zmienia stanu ani go nie zamyka.
+    assert not any("state" in c[2] for c in calls)
+    assert ("PATCH", "repos/o/r/issues/0", {"type": "Task"}) in calls and config["SPRZATANIE_TYP"] == "Task"
+    assert ("POST", "repos/o/r/issues/0/labels", {"labels": ["claude"]}) in calls
+    assert config["SPRZATANIE_ETYKIETA"] == "claude"
+    bodies = [c[2]["body"] for c in calls if "body" in c[2]]
+    body = bodies[-1]
+    assert f"z #{config['SPRZATANIE_ZGLOSZENIE']}." in body and f"@{opiekun}" in body
+    return body
+
+
+def test_zgloszenie_tygodnia_gotowa_zmiana():
+    from urllib.parse import parse_qs, urlsplit
+    tytul, calls = _zglos("pr", "49", "PKP", {
+        "opis": "Dla pasażera nic się nie zmienia.\n- `foo()` — nieużywana",
+        "testy": "Testy: 5 zielonych na `main` przed zmianą — wszystkie dalej zielone."},
+        "sprzatanie/pkp-2026-11-30")
+    assert tytul == "Sprzątanie: PKP (tydzień 49)"
+    body = _zgloszenie_tygodnia(calls, tytul, "SzymonEls")
+    assert "Link do założenia PR-a pojawi się tu za chwilę." in calls[0][2]["body"]
+    for part in ("- `foo()` — nieużywana", "Testy: 5 zielonych"):
         assert part in body, part
     link = re.search(r"\[Otwórz PR do `main`\]\(([^)]+)\)", body).group(1)
     parts = urlsplit(link)
@@ -273,11 +293,41 @@ def test_nowe_zgloszenie_sprzatania_na_sucho():
     pr_body = parse_qs(parts.query)["body"][0]
     assert pr_body.startswith("Closes #0\n\nDla pasażera nic się nie zmienia.")
 
-    # Opis PR-a przechodzi pr-syntax.yml: wskazuje tylko nowe zgłoszenie (opiekun jest do niego
-    # przypisany), nie zgłoszenie procesu, do którego przypisany być nie musi.
+    # Opis PR-a przechodzi pr-syntax.yml: wskazuje tylko zgłoszenie tygodnia (opiekun jest do niego
+    # przypisany), nie #531, do którego przypisany być nie musi.
     refs = _bash(f'source "{SCRIPTS}/refs.sh"; keyword_refs "$1" "$2" "$3"; echo "|"; mention_refs "$1" "$2"',
                  "Sprzątanie: PKP", pr_body, "sprzatanie/pkp-2026-11-30")
     assert refs.split() == ["0", "|"]
+
+
+def test_zgloszenie_tygodnia_odrzucone_przez_bramke():
+    tytul, calls = _zglos("odrzucone", "50", "PKP", {
+        "powod": "zakres albo wielkość zmiany poza progami",
+        "lista": "b.py: poza obszarem\nzmienionych linii 300, a wolno najwyżej 200",
+        "zmiany": " pkp.py | 300 ---\n 1 file changed, 300 deletions(-)",
+        "opis": "Dla pasażera nic się nie zmienia."})
+    assert tytul == "Sprzątanie: PKP (tydzień 50) — odrzucone przez bramkę"
+    body = _zgloszenie_tygodnia(calls, tytul, "SzymonEls")
+    for part in ("zakres albo wielkość zmiany poza progami", "- b.py: poza obszarem",
+                 "- zmienionych linii 300, a wolno najwyżej 200", "1 file changed, 300 deletions(-)",
+                 "przez 7 dni", "](https://github.com/o/r/actions/runs/1)"):
+        assert part in body, part
+    assert "Otwórz PR" not in body
+
+
+def test_zgloszenie_tygodnia_nic_do_sprzatania():
+    tytul, calls = _zglos("nic", "51", "Polinka", {"powod": "Każda funkcja ma wywołanie w app.py."})
+    assert tytul == "Sprzątanie: Polinka (tydzień 51) — nic do sprzątania"
+    body = _zgloszenie_tygodnia(calls, tytul, "SzymonEls")
+    assert "„Polinka”" in body and "> Każda funkcja ma wywołanie w app.py." in body
+
+
+def test_zgloszenie_tygodnia_brak_wolnego_obszaru():
+    tytul, calls = _zglos("zablokowane", "52", "", {
+        "opiekun": "EgorexW", "lista": "PKP: zajęte pkp.py (PR #7)\nPolinka: wstrzymany — czeka na #1"})
+    assert tytul == "Sprzątanie (tydzień 52) — brak wolnego obszaru"
+    body = _zgloszenie_tygodnia(calls, tytul, "EgorexW")
+    assert "- PKP: zajęte pkp.py (PR #7)" in body and "- Polinka: wstrzymany — czeka na #1" in body
 
 
 def _refs(title, body, branch):
