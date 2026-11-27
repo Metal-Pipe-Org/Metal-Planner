@@ -910,6 +910,15 @@
             <option value="line">Każda linia osobno</option>
         </select> {{ info('line-colors') }}
         </label>
+    <label class="dev-check{{ dev('map-after-search') }} set-row" {{ attrs('map-after-search') }}>
+        {{ name('map-after-search') }}
+        <select id="map-after-search">
+            <option value="auto">Auto</option>
+            <option value="all">Pokaż wszystko</option>
+            <option value="start">Pokaż start</option>
+            <option value="none">Nie ruszaj</option>
+        </select> {{ info('map-after-search') }}
+        </label>
 
 {#
       TYMCZASOWE (2026-08-15) — suwaki wyglądu mapy.

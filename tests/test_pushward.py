@@ -84,6 +84,7 @@ def test_przejazd_zaklada_nowa_karte_i_wypelnia_ja_bez_kasowania(api):
     assert tworzenie["name"] == "5 → Księże Małe"
     assert tworzenie["ended_ttl"] == 600
     assert tworzenie["dismissal_ttl"] == 300
+    assert tworzenie["priority"] == 8
 
 
 @pytest.mark.parametrize("num,oczekiwany", [("A", "A"), ("149", "149"), ("810+81", "810+")])

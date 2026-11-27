@@ -5,9 +5,12 @@ jeszcze dowozi na czas, a na mapie nie ma niczego, co dowozi później.
 """
 from datetime import date, datetime
 
+import pytest
+
 import gtfs
 from tests import flow
 from tests.gtfs_builder import make_day
+from tests.test_mapa_ruchy import PIATEK, SOSNOWIECKA, _real
 
 M = 60
 # Godzina, od której liczą minuty _bus: rano, z dala od północy (tę
@@ -241,3 +244,71 @@ def test_tablica_przystanku_jak_przy_wyjsciu_o(install_day):
         return [(start["sec"], line["depart_by"]) for line in start["lines"]]
     assert okno(odjazd) == [(H, H)]
     assert okno(przyjazd) == [(H + 20 * M, H + 20 * M)]
+
+
+def _pasek_jest_na_mapie_i_nic_nie_dowozi_po_godzinie(result, arrive_sec):
+    """Pasek mówi o podróży, którą mapa rysuje (każda jego linia jest na
+    mapie), a żadna propozycja nie dowozi po godzinie z formularza."""
+    bar = [leg["num"] for leg in result["fastest"]["legs"] if leg["kind"] != "walk"]
+    assert set(bar) <= {s.get("num") for s in result["segments"]}, bar
+    late = [(j["departure"], j["arrival"]) for j in result["journeys"]
+            if j["arrival_sec"] > arrive_sec]
+    assert not late
+
+
+# Najpóźniejsze wyjście, które jeszcze zdąża, to cztery autobusy na styk
+# (3, 4, 5 i 6 z 8:05) - takiej podróży mapa nie rysuje, bo to objazd
+# miasta, a nie ruch. Pasek mówi wtedy o najpóźniejszym wyjściu z mapy:
+# jedynką z przesiadką na siódemkę o 8:00.
+CZTERY_NA_STYK = [
+    _kurs("p1", "Autobus 1", [("S", 0), ("A", 10)]),
+    _kurs("p7", "Autobus 7", [("A", 15), ("E", 40)]),
+    _kurs("q3", "Autobus 3", [("S", 5), ("B", 8)]),
+    _kurs("q4", "Autobus 4", [("B", 10), ("C", 13)]),
+    _kurs("q5", "Autobus 5", [("C", 15), ("D", 18)]),
+    _kurs("q6", "Autobus 6", [("D", 20), ("E", 50)]),
+]
+
+
+def test_pasek_mowi_o_wyjsciu_z_mapy_a_nie_o_objezdzie_miasta(install_day):
+    install_day(make_day(CZTERY_NA_STYK))
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 9, 0), arrive_by=True)
+
+    assert result["starts"] == "08:00"
+    assert result["best_arrival"] == "08:40"
+    _pasek_jest_na_mapie_i_nic_nie_dowozi_po_godzinie(result, H + 60 * M)
+
+
+def test_propozycja_nie_dowozi_po_godzinie_dojsciem_z_przesiadki(install_day):
+    # Mapa rysuje jedynkę do A i dziewiątkę z A do celu (8:50). A leży
+    # niecałe półtora kilometra od celu, więc z narysowanych kawałków da się
+    # złożyć też jedynkę i dojście pieszo - tyle że to jest w celu po 9:00.
+    day = make_day([
+        _kurs("j1", "Autobus 1", [("S", 0), ("A", 40)]),
+        _kurs("j9", "Autobus 9", [("A", 42), ("E", 50)]),
+    ])
+    lat, lon = day.stop_coords["E"]
+    day.stop_coords["A"] = (lat - 0.0108, lon)
+    install_day(day)
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 9, 0), arrive_by=True)
+
+    _pasek_jest_na_mapie_i_nic_nie_dowozi_po_godzinie(result, H + 60 * M)
+
+
+# Na prawdziwym rozkładzie: spod Radwanic na Plac Grunwaldzki na 21:00 pasek
+# mówił o czterech pojazdach na styk (87+870, 134, 143, 4), których na mapie
+# nie było, a lista proponowała 114 z trójką z przyjazdem 21:14.
+@pytest.mark.parametrize("start,end,day,hhmm", [
+    ((51.0589, 17.0990), "PL. GRUNWALDZKI", PIATEK, "21:00"),
+    (None, SOSNOWIECKA, PIATEK, "19:00"),
+    ("Pl. Jana Pawła II", "Krzyki", PIATEK, "06:15"),
+    ("Katedra", "Wojszyce", date(2026, 11, 10), "15:00"),
+])
+def test_na_prawdziwym_rozkladzie_pasek_na_mapie_i_nic_po_godzinie(start, end, day, hhmm):
+    point = {"start_point": start} if isinstance(start, tuple) else {}
+    result = _real("" if point else start, end, day, hhmm, arrive_by=True, **point)
+
+    hour, minute = map(int, hhmm.split(":"))
+    _pasek_jest_na_mapie_i_nic_nie_dowozi_po_godzinie(result, hour * 3600 + minute * 60)
