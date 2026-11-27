@@ -4666,7 +4666,7 @@ const WALK_ICON =
 
 function walkBadgeHtml(leg) {
     const dokad = leg.from === leg.to ? ' na inne stanowisko' : ` do: ${leg.to}`;
-    return `<span class="badge walk" title="Przejście pieszo${esc(dokad)}` +
+    return `<span class="badge walk" title="Przejście pieszo${escAttr(dokad)}` +
            ` · ok. ${leg.minutes} min">${WALK_ICON}${leg.minutes}</span>`;
 }
 
@@ -5027,7 +5027,7 @@ function renderJourneys() {
         return `
             <li class="journey${selected ? ' selected' : ''}" data-index="${i}"
                 tabindex="0" role="button" aria-expanded="${selected}"
-                aria-label="${esc(label)}">
+                aria-label="${escAttr(label)}">
                 <div class="j-head">
                     <span class="j-clock">${esc(j.departure)} – ${esc(j.arrival)}</span>
                     <span class="j-duration${j.traficar ? ' est' : ''}"${
@@ -5472,7 +5472,7 @@ function showError(message, suggestions) {
     let html = `<div class="notice error"><p>${esc(message)}</p>`;
     if (suggestions && suggestions.length) {
         html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(name =>
-            `<li><a href="#" data-name="${esc(name)}">${esc(name)}</a></li>`
+            `<li><a href="#" data-name="${escAttr(name)}">${esc(name)}</a></li>`
         ).join('') + '</ul>';
     }
     resultsBox.innerHTML = html + '</div>';

@@ -3,6 +3,7 @@ import http.client
 import json
 import math
 import re
+import sys
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -213,6 +214,13 @@ def _onboard_arg():
     }
 
 
+def _log_feed_error(feed, error):
+    """Szczegóły awarii cudzego feedu idą do logu serwera, a do przeglądarki
+    sam komunikat: treść wyjątku potrafi nieść adresy i ścieżki z serwera,
+    a front i tak jej nie pokazuje (patrz loadVehicles/loadCityCars w app.js)."""
+    print(f"BŁĄD feedu {feed}: {error!r}", file=sys.stderr, flush=True)
+
+
 def init_routes(app):
 
     @app.route("/")
@@ -221,10 +229,10 @@ def init_routes(app):
             stops = gtfs.all_stop_names(pkp.all_stations_geo())
             lines = timetables.all_lines()
             data_error = None
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             stops = []
             lines = []
-            data_error = str(e)
+            data_error = gtfs.MISSING_DB_MESSAGE
 
         # Stacje PKP (patrz pkp.py) w tej samej liście podpowiedzi co
         # przystanki MPK - to jedyne miejsce, gdzie formularz w ogóle
@@ -306,8 +314,8 @@ def init_routes(app):
     def api_stops():
         try:
             stops = [{**s, "kind": "stop"} for s in gtfs.all_stops_geo()]
-        except FileNotFoundError as e:
-            return jsonify({"error": str(e)}), 503
+        except FileNotFoundError:
+            return jsonify({"error": gtfs.MISSING_DB_MESSAGE}), 503
         # Stacje PKP z ustalonymi współrzędnymi (patrz pkp.all_stations_geo -
         # dogadane osobno przez geokodowanie, update_pkp.py) dostają marker
         # na mapie tak jak słupki MPK, tylko oznaczone `kind: "train"`, żeby
@@ -335,10 +343,11 @@ def init_routes(app):
         try:
             found = vehicles.get_vehicles()
             return jsonify({"vehicles": found, "stale_sec": vehicles.stale_sec()})
-        except FileNotFoundError as e:
-            return jsonify({"error": str(e)}), 503
+        except FileNotFoundError:
+            return jsonify({"error": gtfs.MISSING_DB_MESSAGE}), 503
         except (OSError, ValueError) as e:
-            return jsonify({"error": f"Nie udało się pobrać pozycji pojazdów: {e}"}), 503
+            _log_feed_error("pojazdy", e)
+            return jsonify({"error": "Nie udało się pobrać pozycji pojazdów."}), 503
 
     @app.route("/api/cars")
     def api_cars():
@@ -349,7 +358,8 @@ def init_routes(app):
         try:
             return jsonify({"cars": traficar.car_list()})
         except traficar.TraficarDataError as e:
-            return jsonify({"error": f"Nie udało się pobrać aut: {e}"}), 503
+            _log_feed_error("Traficar", e)
+            return jsonify({"error": "Nie udało się pobrać aut."}), 503
 
     @app.route("/api/traficar-zone")
     def api_traficar_zone():
@@ -367,7 +377,8 @@ def init_routes(app):
         try:
             return jsonify({"stations": bikes.stations(), "free": bikes.free_bikes()})
         except (OSError, ValueError, http.client.HTTPException) as e:
-            return jsonify({"error": f"Nie udało się pobrać rowerów: {e}"}), 503
+            _log_feed_error("WRM", e)
+            return jsonify({"error": "Nie udało się pobrać rowerów."}), 503
 
     @app.route("/api/plan")
     def api_plan():

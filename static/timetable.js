@@ -309,7 +309,7 @@ window.timetableMode = {
     vehicleLines() {
         if (!active() || !data) return null;
         if (kind === 'line') return new Set([`${data.mode} ${data.num}`]);
-        return new Set([...picked].map(key => key.replace('|', ' ')));
+        return new Set([...picked].map(key => key.replace(/\|/g, ' ')));
     },
 
     /** Przerysowanie po zmianie kolorów linii (patrz repaintLineColors w app.js). */
