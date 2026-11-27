@@ -1,8 +1,8 @@
 # Merge na kredyt (#506): PR z zielonym werdyktem oceny Claude'a może wejść do
 # `main` bez recenzji człowieka, dopóki kolejka takich PR-ów jest krótsza niż
-# CREDIT_LIMIT. Kolejka to fakty z API: PR-y scalone do `main` od dnia
-# CREDIT_SINCE (config.sh), które nie mają stojącego zatwierdzenia człowieka
-# (liczonego jak w approvals.sh). Etykieta LABEL_CREDIT jest tylko widokiem tych
+# CREDIT_LIMIT. Kolejka to fakty z API: PR-y scalone do `main` od merge'a
+# CREDIT_PR (config.sh), które nie mają stojącego zatwierdzenia osoby
+# z zespołu (liczonego jak w approvals.sh). Etykieta LABEL_CREDIT jest tylko widokiem tych
 # faktów, żeby kolejkę widać było na liście PR-ów: credit_sweep dokłada ją na
 # scalony PR bez zatwierdzenia i zdejmuje z zatwierdzonego, więc ręczne zdjęcie
 # albo dołożenie etykiety niczego nie zmienia i przy następnym biegu wraca jak
@@ -25,16 +25,30 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
 LABEL_COLOR_CREDIT="fef2c0"
 
-# credit_facts — scalone do `main` PR-y od dnia CREDIT_SINCE jako tablica JSON
+# credit_since — chwila startu kolejki: merge CREDIT_PR, z API. Liczona
+# z faktów, żeby nikt nie musiał przy merge'u wpisywać daty. PR jeszcze
+# niescalony (albo błąd API) wywraca bieg, zamiast liczyć kolejkę od zera.
+credit_since() {
+  local at
+  at=$(gh api "repos/$REPO/pulls/$CREDIT_PR" --jq '.merged_at // empty') || return 1
+  if [ -z "$at" ]; then
+    echo "::error::#$CREDIT_PR (start kredytu) nie jest scalony — nie ma od czego liczyć kolejki." >&2
+    return 1
+  fi
+  echo "$at"
+}
+
+# credit_facts — scalone do `main` PR-y od merge'a CREDIT_PR jako tablica JSON
 # `{number, labeled, approved}`: czy PR ma etykietę kredytu i czy ma stojące
-# zatwierdzenie człowieka. Jedno zapytanie GraphQL na 50 PR-ów razem z ich
-# recenzjami i etykietami, a nie recenzje po jednym. Lista idzie od ostatnio
-# zmienionych i urywa się, gdy cała strona jest starsza niż CREDIT_SINCE: PR
-# scalony od tego dnia ma `updatedAt` nie wcześniejszy niż merge, więc dalej
-# nic już nie ma. Nie wyszukiwarka: ta spóźnia się z indeksem, a po merge'u
-# przeliczamy kolejkę od razu.
+# zatwierdzenie osoby z zespołu. Jedno zapytanie GraphQL na 50 PR-ów razem
+# z ich recenzjami i etykietami, a nie recenzje po jednym. Lista idzie od
+# ostatnio zmienionych i urywa się, gdy cała strona jest starsza niż start:
+# PR scalony od tej chwili ma `updatedAt` nie wcześniejszy niż merge, więc
+# dalej nic już nie ma. Nie wyszukiwarka: ta spóźnia się z indeksem, a po
+# merge'u przeliczamy kolejkę od razu.
 credit_facts() {
-  local cursor="" page rows="" args pr
+  local cursor="" page rows="" args pr since
+  since=$(credit_since) || return 1
   while :; do
     args=(-f owner="${REPO%/*}" -f name="${REPO#*/}")
     [ -z "$cursor" ] || args+=(-f after="$cursor")
@@ -54,22 +68,23 @@ credit_facts() {
           }
         }
       }')
-    # Recenzje w kształcie REST, żeby standing_approvals liczył je tak samo
-    # jak wszędzie (konto skasowane po fakcie to `user: null`).
-    rows+=$(jq -c --arg since "$CREDIT_SINCE" --arg label "$LABEL_CREDIT" '
+    # Recenzje w kształcie REST, żeby team_reviews i standing_approvals
+    # liczyły je tak samo jak wszędzie (konto skasowane po fakcie to
+    # `user: null`). Zatwierdzenie konta spoza zespołu nie zwalnia miejsca.
+    rows+=$(jq -c --arg since "$since" --arg label "$LABEL_CREDIT" '
       .data.repository.pullRequests.nodes[]
       | select(.mergedAt >= $since)
       | {number, labeled: any(.labels.nodes[]; .name == $label),
          reviews: [.reviews.nodes[] | {id: .databaseId, state, submitted_at: .submittedAt,
            commit_id: .commit.oid,
            user: (if .author == null then null else {login: .author.login, type: .author.__typename} end)}]}' <<<"$page")$'\n'
-    jq -e --arg since "$CREDIT_SINCE" '.data.repository.pullRequests
+    jq -e --arg since "$since" '.data.repository.pullRequests
         | .pageInfo.hasNextPage and ((.nodes | last.updatedAt) >= $since)' <<<"$page" > /dev/null || break
     cursor=$(jq -r '.data.repository.pullRequests.pageInfo.endCursor' <<<"$page")
   done
   while IFS= read -r pr; do
     [ -n "$pr" ] || continue
-    jq -c --argjson a "$(jq -c .reviews <<<"$pr" | standing_approvals | jq length)" \
+    jq -c --argjson a "$(jq -c .reviews <<<"$pr" | team_reviews | standing_approvals | jq length)" \
       '{number, labeled, approved: ($a > 0)}' <<<"$pr"
   done <<<"$rows" | jq -s .
 }
@@ -85,39 +100,61 @@ credit_count() {
 }
 
 # human_approvals N — ile stojących zatwierdzeń człowieka ma PR (liczy się jak
-# w approvals.sh: ostatnia recenzja zmieniająca stan każdej osoby, bez botów).
+# w approvals.sh: ostatnia recenzja zmieniająca stan każdej osoby z zespołu).
 human_approvals() {
   pr_reviews "$1" | standing_approvals | jq length
 }
 
-# credit_status SUMA STATUSY KOLEJKA — status „Recenzja albo kredyt” jako
-# `{state, description}`. SUMA to `{approvals, changes_requested}` z
-# `review_summary`, STATUSY to `commit_statuses` czubka PR-a, KOLEJKA to
-# `credit_count`. Zielony, gdy:
+# credit_status SUMA STATUSY KOLEJKA CZUBEK ZESPÓŁ — status „Recenzja albo
+# kredyt” jako `{state, description}`. SUMA to `{approved_commits,
+# changes_requested}` z `review_summary` (recenzje już tylko od zespołu),
+# STATUSY to `commit_statuses` czubka PR-a, KOLEJKA to `credit_count`,
+# CZUBEK to SHA czubka PR-a, ZESPÓŁ to `true`, gdy autor PR-a ma prawo zapisu.
+# Zielony, gdy:
 #
-#   • PR ma stojące zatwierdzenie człowieka (i nikt nie ma czekającej prośby
-#     o zmiany — GitHub przy zerowej liczbie wymaganych zatwierdzeń jej już
-#     nie pilnuje, więc pilnujemy sami), albo
-#   • (kredyt) ostatnia ocena Claude'a na tym commicie jest skończona
-#     z zielonym werdyktem, a w kolejce jest jeszcze miejsce.
+#   • PR ma stojące zatwierdzenie osoby z zespołu, które dotyczy czubka (i nikt
+#     nie ma czekającej prośby o zmiany — GitHub przy zerowej liczbie
+#     wymaganych zatwierdzeń jej już nie pilnuje, więc pilnujemy sami), albo
+#   • (kredyt) autor jest z zespołu, ostatnia ocena Claude'a na tym commicie
+#     jest skończona z zielonym werdyktem, a w kolejce jest jeszcze miejsce.
+#
+# Zatwierdzenie dotyczy czubka, gdy na nim powstało albo gdy ocena Claude'a
+# na czubku jest skończona: ona kończy się dopiero po rozstrzygnięciu
+# o zatwierdzeniach sprzed zmian (approvals.sh) — zatwierdzenie, które dalej
+# stoi, Claude uznał za aktualne, a resztę workflow już cofnął. Do tego czasu
+# zatwierdzenie sprzed pushu nie liczy się, tak jak przy wbudowanym
+# „Dismiss stale pull request approvals”, tylko bez wołania recenzenta od
+# nowa po samym „Update branch”.
 #
 # Status oceny jest przypięty do commita, więc „dotyczy dokładnie czubka PR-a”
-# wynika z tego, że bierzemy go z `STATUSY` czubka. Opis oceny ma werdykt po
-# „Ocena gotowa: ”, a set_status zamienia 🟢 na ✅ (GitHub odrzuca znaki
-# 4-bajtowe) — rozpoznajemy oba zapisy. Brak zielonego światła to nigdy
-# `failure`: to „jeszcze nie”, nie „źle”.
+# wynika z tego, że bierzemy go z `STATUSY` czubka. Liczy się tylko status
+# postawiony przez nasze workflow (STATUS_CREATOR) — taki sam od kogoś innego
+# to podróbka. Opis oceny ma werdykt po „Ocena gotowa: ”, a set_status
+# zamienia 🟢 na ✅ (GitHub odrzuca znaki 4-bajtowe) — rozpoznajemy oba
+# zapisy. Kredyt tylko dla autorów z zespołu: oceny Claude'a dostają i tak
+# tylko PR-y z gałęzi tego repo, ale prawo zapisu mogło zostać odebrane.
+# Brak zielonego światła to nigdy `failure`: to „jeszcze nie”, nie „źle”.
 credit_status() {
-  jq -nc --argjson sum "$1" --argjson st "$2" --argjson q "$3" \
-    --argjson max "$CREDIT_LIMIT" --arg ctx "$REVIEW_CONTEXT" '
-    ([$st[] | select(.context == $ctx)] | first // null) as $rv
+  jq -nc --argjson sum "$1" --argjson st "$2" --argjson q "$3" --arg head "$4" --argjson team "$5" \
+    --argjson max "$CREDIT_LIMIT" --arg ctx "$REVIEW_CONTEXT" --arg creator "$STATUS_CREATOR" '
+    ([$st[] | select(.context == $ctx)] | first // null) as $raw
+    | (if $raw != null and $raw.creator == $creator then $raw else null end) as $rv
+    | ($rv != null and $rv.state == "success") as $judged
+    | ([$sum.approved_commits[] | select($judged or . == $head)] | length) as $fresh
     | if ($sum.changes_requested | length) > 0 then
         {state: "pending", description: ("Czeka prośba o zmiany od " + ($sum.changes_requested | join(", ")))}
-      elif $sum.approvals > 0 then
+      elif $fresh > 0 then
         {state: "success", description: "Zatwierdzenie człowieka"}
+      elif $raw != null and $rv == null then
+        {state: "pending", description: "Status oceny Claude'\''a nie pochodzi z GitHub Actions — pomijam go; potrzebna recenzja człowieka"}
+      elif ($sum.approved_commits | length) > 0 then
+        {state: "pending", description: "Zatwierdzenie sprzed ostatnich zmian — liczy się po ocenie Claude'\''a albo nowym zatwierdzeniu"}
       elif $rv == null or $rv.state != "success" then
         {state: "pending", description: "Czeka na ocenę Claude'\''a albo recenzję człowieka"}
       elif ($rv.description | test("^Ocena gotowa: (✅|🟢)") | not) then
         {state: "pending", description: "Werdykt oceny nie jest zielony — potrzebna recenzja człowieka"}
+      elif ($team | not) then
+        {state: "pending", description: "Kredyt tylko dla autorów z prawem zapisu — potrzebna recenzja człowieka"}
       elif $q < $max then
         {state: "success", description: "kredyt: \($q)/\($max) w kolejce"}
       else

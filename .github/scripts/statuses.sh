@@ -48,17 +48,28 @@ set_status() {
   gh api -X POST "repos/$REPO/statuses/$sha" --input - <<<"$body" > /dev/null
 }
 
+# Konto, jako które piszą statusy nasze workflow (token `github.token`).
+# Status tej samej nazwy od kogokolwiek innego — ktoś z prawem zapisu przez
+# API albo inna aplikacja — jest podróbką: nie czytamy go jako oceny ani
+# zatwierdzenia, a nasze nazwy nadpisujemy. Reguły `main` mają ponadto każdy
+# wymagany status przypięty do źródła „GitHub Actions” (WORKFLOWS.md, zasada
+# 14), więc taki status i tak nie odblokuje merge'a.
+STATUS_CREATOR="github-actions[bot]"
+
 # get_status SHA NAZWA — najnowszy status NAZWA na commicie jako
-# `{state, description, target_url}` albo nic, gdy go nie ma. Zbiorczy status
-# commitu podaje już tylko najnowszy status każdej nazwy.
+# `{state, description, target_url, creator}` albo nic, gdy go nie ma.
 get_status() {
-  commit_statuses "$1" | jq -c --arg c "$2" '.[] | select(.context == $c) | {state, description, target_url}'
+  commit_statuses "$1" | jq -c --arg c "$2" '.[] | select(.context == $c) | {state, description, target_url, creator}'
 }
 
 # commit_statuses SHA — najnowszy status każdej nazwy na commicie, jako
-# tablica `{context, state, description, target_url}`. Jedno wywołanie API
-# dla wszystkich nazw naraz — pr-state.sh potrzebuje kilku.
+# tablica `{context, state, description, target_url, creator}`. Jedno
+# wywołanie API dla wszystkich nazw naraz — pr-state.sh potrzebuje kilku.
+# Lista statusów, a nie zbiorczy status commitu: tylko ona mówi, kto status
+# postawił. Idzie od najnowszego, więc pierwszy z każdej nazwy jest aktualny;
+# sto ostatnich wystarcza, bo statusy piszemy tylko przy zmianie.
 commit_statuses() {
-  gh api "repos/$REPO/commits/$1/status?per_page=100" \
-    | jq -c '[.statuses[]? | {context, state, description, target_url}]'
+  gh api "repos/$REPO/commits/$1/statuses?per_page=100" \
+    | jq -c '[group_by(.context)[] | first
+              | {context, state, description, target_url, creator: (.creator.login // null)}]'
 }

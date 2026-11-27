@@ -19,12 +19,13 @@ name: "PR-y: stan"
 # w regułach `main` jest wtedy zerowa.
 #
 # „Recenzja albo kredyt” (#506, logika w `.github/scripts/credit.sh`) jest
-# zielony, gdy PR ma stojące zatwierdzenie człowieka (i nikt nie czeka na
-# zmiany), albo gdy ostatnia ocena Claude'a na czubku PR-a ma werdykt 🟢,
-# a w kolejce PR-ów scalonych bez recenzji jest mniej niż CREDIT_LIMIT
-# (config.sh) — to „kredyt”. Opis mówi, ile miejsc zajęto („kredyt: 7/15
-# w kolejce”) albo że kolejka jest pełna. Kolejkę tworzą PR-y scalone do `main`
-# od CREDIT_SINCE bez zatwierdzenia człowieka (fakty z API, nie etykieta);
+# zielony, gdy PR ma stojące zatwierdzenie osoby z zespołu dotyczące czubka
+# (i nikt z zespołu nie czeka na zmiany), albo gdy autor jest z zespołu,
+# ostatnia ocena Claude'a na czubku PR-a ma werdykt 🟢, a w kolejce PR-ów
+# scalonych bez recenzji jest mniej niż CREDIT_LIMIT (config.sh) — to
+# „kredyt”. Opis mówi, ile miejsc zajęto („kredyt: 7/15 w kolejce”) albo że
+# kolejka jest pełna. Kolejkę tworzą PR-y scalone do `main` od merge'a
+# CREDIT_PR bez zatwierdzenia osoby z zespołu (fakty z API, nie etykieta);
 # po merge'u i po zatwierdzeniu scalonego PR-a biegnie pr-credit.yml, a jego
 # zakończenie budzi ten workflow, bo zmiana kolejki przestawia status
 # wszystkich otwartych PR-ów.

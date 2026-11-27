@@ -38,12 +38,11 @@ LABEL_PR_OTHER="waiting for other PR"
 # dopóki w kolejce czeka mniej niż tyle PR-ów scalonych bez recenzji. Miejsce
 # w kolejce zwalnia zatwierdzenie scalonego PR-a przez człowieka.
 CREDIT_LIMIT=15
-# Dzień startu mechanizmu: kolejkę tworzą PR-y scalone do `main` od tego dnia
-# (włącznie) i bez stojącego zatwierdzenia człowieka; starsze merge'e, np.
-# przez obejście admina, się nie liczą. Ma to być dzień merge'a #507 — ustawiony
-# na dzień, w którym zmiana powstała (2026-11-24), więc jeśli #507 wejdzie
-# później, trzeba tu wpisać dzień merge'a.
-CREDIT_SINCE="2026-11-24"
+# PR, który wprowadził mechanizm. Chwila jego merge'a (z API, credit.sh) to
+# start kolejki: tworzą ją PR-y scalone do `main` od tej chwili i bez
+# stojącego zatwierdzenia człowieka; starsze merge'e, np. przez obejście
+# admina, się nie liczą. Bez ręcznego wpisywania daty przy merge'u.
+CREDIT_PR=507
 # Etykieta scalonego PR-a, który wszedł bez recenzji. Tylko widok kolejki na
 # liście PR-ów: kolejkę liczymy z faktów (merge + brak zatwierdzenia), a
 # etykietę sweep w pr-credit.yml sam zgrywa z tymi faktami w obie strony.

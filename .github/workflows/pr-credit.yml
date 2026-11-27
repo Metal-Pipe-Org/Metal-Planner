@@ -5,13 +5,13 @@ name: "PR-y: kredyt"
 # (config.sh) PR-ów scalonych bez recenzji. Przed merge'em decyduje o tym
 # wymagany status „Recenzja albo kredyt” (pr-state.yml); ten workflow
 # pilnuje etykiety po merge'u. Kolejka to fakty z API — PR-y scalone do `main`
-# od CREDIT_SINCE bez stojącego zatwierdzenia człowieka — a etykieta kredytu
+# od merge'a CREDIT_PR bez stojącego zatwierdzenia osoby z zespołu — a etykieta kredytu
 # (LABEL_CREDIT) tylko pokazuje ją na liście PR-ów; reguły w
 # `.github/scripts/credit.sh`. Każdy bieg zgrywa etykietę z faktami w obie
 # strony:
 #
 #  • merge — PR, który nie ma zatwierdzenia człowieka, dostaje etykietę;
-#  • zatwierdzenie scalonego PR-a przez człowieka „spłaca” kredyt: etykieta
+#  • zatwierdzenie scalonego PR-a przez osobę z zespołu „spłaca” kredyt: etykieta
 #    schodzi, miejsce się zwalnia. GitHub pozwala zatwierdzać scalone PR-y;
 #    recenzji nie słuchamy tu wprost (`pull_request_review` nie ma wersji
 #    „_target”), tylko przez przekaźnik z pr-review-relay.yml — jego
