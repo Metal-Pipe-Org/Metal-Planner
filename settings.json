@@ -225,6 +225,12 @@
       "tags": ["Mapa"]
     },
     {
+      "id": "map-after-search",
+      "name": "Mapa po wyszukaniu",
+      "description": "Jak mapa ustawia się, gdy narysuje nowe wyszukiwanie.",
+      "tags": ["Mapa"]
+    },
+    {
       "id": "dot-size",
       "name": "Wielkość kropek",
       "tags": ["Wygląd mapy"],

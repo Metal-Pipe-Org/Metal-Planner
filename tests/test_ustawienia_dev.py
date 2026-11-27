@@ -25,7 +25,8 @@ DEV_ROWS = {"density", "car-count", "bike-count", "time-hover", "time-ends",
 USER_ROWS = {"time-show-headline", "tt-past", "car-vans", "cars-horizon", "walk-pace",
              "bike-kmh", "bike-overhead", "car-kmh", "car-overhead",
              "bikes-merged", "no-pull-refresh", "start-mode-switch",
-             "routes-on", "via-open", "sound-level", "line-colors", "scheme-on"}
+             "routes-on", "via-open", "sound-level", "line-colors", "scheme-on",
+             "map-after-search"}
 
 
 def _index(dev_mode):
