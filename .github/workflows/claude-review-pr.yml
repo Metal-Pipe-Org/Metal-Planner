@@ -829,7 +829,7 @@ jobs:
             workflow:*)
               echo "PR zmienia workflow oceny — status czeka na @claude." ;;
             review:success)
-              set_status "$SHA" "$REVIEW_CONTEXT" success "Ocena gotowa: ${VERDICT:-bez werdyktu}" "$URL" ;;
+              set_status "$SHA" "$REVIEW_CONTEXT" success "$(review_done_desc "$VERDICT")" "$URL" ;;
             review:*)
               set_status "$SHA" "$REVIEW_CONTEXT" failure \
                 "Ocena jest, ale nie udało się rozstrzygnąć o zatwierdzeniach — napisz pod PR-em @claude" "$RUN" ;;

@@ -268,6 +268,33 @@ def test_podrobiony_status_jest_nadpisywany_i_nie_przenoszony(tmp_path):
     assert "DRY_RUN" not in res.stdout
 
 
+def _carry(tmp_path, desc, before="old1234567"):
+    """Przenosi zielony status oceny z `before` na `nowy` (samo dociągnięcie
+    bazy) i zwraca status, który by poszedł na nowy commit."""
+    listed = [{"context": "Ocena Claude'a", "state": "success", "description": desc,
+               "target_url": "u", "creator": {"login": "github-actions[bot]"}}]
+    out = _run(tmp_path, f"carry_review_status 9 {before} nowy",
+               responses={f"repos/o/r/commits/{before}/statuses?per_page=100": listed}).stdout
+    body = json.loads(out.split("DRY_RUN: status na nowy: ", 1)[1].splitlines()[0])
+    return {"state": body["state"], "description": body["description"], "creator": "github-actions[bot]"}
+
+
+def test_przeniesienie_po_dociagnieciu_bazy_zachowuje_kredyt(tmp_path):
+    fresh = _run(tmp_path, 'review_done_desc "🟢 Bez zastrzeżeń"').stdout
+    assert _credit_status(tmp_path, review={**GREEN, "description": fresh})["state"] == "success"
+    carried = _carry(tmp_path, fresh)
+    assert "old1234" in carried["description"]
+    assert _credit_status(tmp_path, review=carried) == {"state": "success", "description": "kredyt: 3/15 w kolejce"}
+    # Drugie „Update branch” zastępuje dopisek, a nie dokleja następny.
+    again = _carry(tmp_path, carried["description"], before="nowy777777")
+    assert again["description"].count("przeniesiona") == 1 and "nowy777" in again["description"]
+    assert _credit_status(tmp_path, review=again)["state"] == "success"
+    # Przeniesiony werdykt inny niż zielony dalej nie daje kredytu, a podrobiony
+    # status nie daje go bez względu na opis.
+    assert _credit_status(tmp_path, review=_carry(tmp_path, YELLOW["description"]))["state"] == "pending"
+    assert _credit_status(tmp_path, review={**carried, "creator": "ktos"})["state"] == "pending"
+
+
 @pytest.mark.parametrize("path", sorted(
     [p for p in SCRIPTS.glob("*.sh") if p != CONFIG] + list(WORKFLOWS.glob("*.yml")),
     key=str), ids=lambda p: p.name)

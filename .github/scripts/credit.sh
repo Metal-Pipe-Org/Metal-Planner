@@ -129,14 +129,14 @@ human_approvals() {
 # Status oceny jest przypięty do commita, więc „dotyczy dokładnie czubka PR-a”
 # wynika z tego, że bierzemy go z `STATUSY` czubka. Liczy się tylko status
 # postawiony przez nasze workflow (STATUS_CREATOR) — taki sam od kogoś innego
-# to podróbka. Opis oceny ma werdykt po „Ocena gotowa: ”, a set_status
-# zamienia 🟢 na ✅ (GitHub odrzuca znaki 4-bajtowe) — rozpoznajemy oba
-# zapisy. Kredyt tylko dla autorów z zespołu: oceny Claude'a dostają i tak
+# to podróbka. Werdykt z opisu czyta `review_green` (statuses.sh) — tak samo
+# ze świeżej oceny i z przeniesionej po dociągnięciu bazy. Kredyt tylko dla autorów z zespołu: oceny Claude'a dostają i tak
 # tylko PR-y z gałęzi tego repo, ale prawo zapisu mogło zostać odebrane.
 # Brak zielonego światła to nigdy `failure`: to „jeszcze nie”, nie „źle”.
 credit_status() {
   jq -nc --argjson sum "$1" --argjson st "$2" --argjson q "$3" --arg head "$4" --argjson team "$5" \
-    --argjson max "$CREDIT_LIMIT" --arg ctx "$REVIEW_CONTEXT" --arg creator "$STATUS_CREATOR" '
+    --argjson max "$CREDIT_LIMIT" --arg ctx "$REVIEW_CONTEXT" --arg creator "$STATUS_CREATOR" \
+    "$(review_green_jq)"'
     ([$st[] | select(.context == $ctx)] | first // null) as $raw
     | (if $raw != null and $raw.creator == $creator then $raw else null end) as $rv
     | ($rv != null and $rv.state == "success") as $judged
@@ -151,7 +151,7 @@ credit_status() {
         {state: "pending", description: "Zatwierdzenie sprzed ostatnich zmian — liczy się po ocenie Claude'\''a albo nowym zatwierdzeniu"}
       elif $rv == null or $rv.state != "success" then
         {state: "pending", description: "Czeka na ocenę Claude'\''a albo recenzję człowieka"}
-      elif ($rv.description | test("^Ocena gotowa: (✅|🟢)") | not) then
+      elif ($rv | review_green | not) then
         {state: "pending", description: "Werdykt oceny nie jest zielony — potrzebna recenzja człowieka"}
       elif ($team | not) then
         {state: "pending", description: "Kredyt tylko dla autorów z prawem zapisu — potrzebna recenzja człowieka"}

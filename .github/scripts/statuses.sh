@@ -24,6 +24,40 @@ REVIEWERS_CONTEXT="Recenzenci konieczni"
 # wbudowany wymóg „1 zatwierdzenie” w regułach `main`.
 CREDIT_CONTEXT="Recenzja albo kredyt"
 
+# Opis zielonego statusu „Ocena Claude'a” to umowa między tym, kto go pisze
+# (claude-review-pr.yml), kto go przenosi (drafts.sh) i kto z niego czyta
+# werdykt (credit.sh) — dlatego tylko trzy funkcje niżej znają jego kształt.
+# Werdykt stoi zawsze na samym początku, po REVIEW_DONE_PREFIX: tak przetrwa
+# przycięcie opisu do 140 znaków, a przeniesienie dopisuje swoje na końcu.
+REVIEW_DONE_PREFIX="Ocena gotowa: "
+REVIEW_CARRIED_MARK=" · przeniesiona z "
+
+# review_done_desc WERDYKT — opis statusu po skończonej ocenie.
+review_done_desc() {
+  printf '%s%s' "$REVIEW_DONE_PREFIX" "${1:-bez werdyktu}"
+}
+
+# review_carried_desc OPIS SHA — opis statusu przeniesionego z commitu SHA po
+# samym dociągnięciu bazy: werdykt zostaje na początku, a skąd przyszedł,
+# mówi dopisek na końcu. Dopisek z wcześniejszego przeniesienia zastępujemy,
+# żeby kolejne „Update branch” nie doklejały następnych.
+review_carried_desc() {
+  jq -rn --arg d "$1" --arg m "$REVIEW_CARRIED_MARK" --arg s "${2:0:7}" \
+    '($d | split($m) | first) + $m + $s + " (samo dociągnięcie bazy)"'
+}
+
+# review_green_jq — definicja jq `review_green`: czy status (obiekt z
+# `description`) niesie zielony werdykt. set_status zamienia 🟢 na ✅
+# (GitHub odrzuca znaki 4-bajtowe) — rozpoznajemy oba zapisy. Patrzymy
+# tylko na początek opisu: dalej może stać tekst werdyktu od Claude'a.
+review_green_jq() {
+  cat <<JQ
+    def review_green:
+      (.description // "") as \$d
+      | any("${REVIEW_DONE_PREFIX}✅", "${REVIEW_DONE_PREFIX}🟢"; . as \$p | \$d | startswith(\$p));
+JQ
+}
+
 # set_status SHA NAZWA STAN OPIS [LINK] — stawia status NAZWA na commicie.
 # STAN: pending / success / failure / error. GitHub odrzuca opis dłuższy niż
 # 140 znaków, więc przycinamy go sami — lepiej urwany opis niż brak statusu,
