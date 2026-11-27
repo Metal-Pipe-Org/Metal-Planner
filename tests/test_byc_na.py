@@ -171,6 +171,18 @@ def test_po_polnocy_wyjscie_poprzedniego_wieczoru(monkeypatch):
                for move in result["scheme"]["moves"])
 
 
+def test_po_polnocy_pierwszego_dnia_za_rozkladem_liczy_ostatni_wieczor(monkeypatch):
+    """Szuka się na osi doby poprzedniej, więc o tym, czy rozkład już jest,
+    decyduje ona: wyjście z ostatniego opublikowanego wieczoru, nie komunikat."""
+    _dwie_doby(monkeypatch)
+    monkeypatch.setattr(gtfs, "last_service_date", lambda: date(2026, 1, 5))
+
+    result = flow.plan_flow("S", "E", DZIEN.replace(minute=20), arrive_by=True)
+
+    assert result["starts"] == "23:50"
+    assert result["day_offset"] == -1
+
+
 def test_po_polnocy_dowozi_tez_poranek_nowej_doby(monkeypatch):
     _dwie_doby(monkeypatch)
 
