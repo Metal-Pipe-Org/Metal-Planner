@@ -13,20 +13,19 @@ from flask import Flask, render_template
 
 ROOT = Path(__file__).resolve().parent.parent
 
-DEV_ROWS = {"density", "car-count", "bike-count", "time-hover", "time-ends",
+DEV_ROWS = {"car-count", "bike-count", "time-hover", "time-ends",
             "time-chips", "time-ride", "dot-center", "dot-rows", "names-zoom",
-            "tip-cursor", "tip-panel", "bike-times", "bike-rides", "car-times",
-            "zone-button", "debug-why", "debug-why-seg", "dot-size",
+            "tip-cursor", "tip-panel", "walk-time", "bike-rides", "car-times",
+            "zone-button", "debug-why", "dot-size",
             "look-weight", "look-dim", "look-label-step", "look-label-size",
             "look-label-op", "look-dump", "siechnice-file", "dev-access", "pushward", "pushward-link", "sw-check",
             "transfer-gain", "onboard-slack", "location-refresh", "stats",
-            "order-limit", "new-map", "walking",
-            "scheme-layout", "scheme-walks-count", "headline-map-range",
+            "order-limit", "walking", "headline-map-range",
             "vehicles-direction", "vehicles-stats", "server-logs"}
 USER_ROWS = {"time-show-headline", "tt-past", "car-vans", "cars-horizon", "walk-pace",
              "bike-kmh", "bike-overhead", "car-kmh", "car-overhead",
              "bikes-merged", "no-pull-refresh", "start-mode-switch",
-             "routes-on", "via-open", "sound-level", "line-colors",
+             "routes-on", "via-open", "sound-level", "line-colors", "scheme-on",
              "map-after-search"}
 
 

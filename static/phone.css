@@ -322,7 +322,6 @@ body:not(.search-collapsed) #map-dock { display: none; }
     margin: 0;
     padding: 0;
 }
-.headline-more { margin: 0; }
 /* Na tej szerokości zakres mapy i tak stoi zwykle w drugiej linijce, więc
    kreska oddzielająca go od trasy zostawałaby na początku pustego miejsca. */
 .headline-sep { display: none; }
@@ -340,7 +339,7 @@ body.dev-open #flow-panel {
     overscroll-behavior: contain;
 }
 
-/* Schemat (eksperyment „nowa mapa”) to na telefonie kolejny kawałek doku,
+/* Schemat („Schemat obok mapy”) to na telefonie kolejny kawałek doku,
    nad paskiem - mapa zostaje nad nim widoczna, a zwinięty schemat to sam
    nagłówek. */
 .scheme-panel {

@@ -8,6 +8,11 @@
       "obsolete": "2026-11-15"
     },
     {
+      "id": "scheme-on",
+      "name": "Schemat obok mapy",
+      "tags": ["Mapa", "Schemat"]
+    },
+    {
       "id": "tt-past",
       "name": "Szare godziny w tablicy",
       "description": "Odjazdy, na które już nie zdążysz, zostają w tablicy na szaro. Wyłączone — tablica zaczyna się od chwili, w której według mapy tu jesteś.",
@@ -80,13 +85,6 @@
       "name": "Zawsze pokazuj przystanki po drodze",
       "description": "Przystanki między wsiadaniem a wysiadaniem są w szczegółach trasy od razu rozwinięte, zamiast zwinięte za przyciskiem.",
       "tags": ["Propozycje tras", "Przystanki"]
-    },
-    {
-      "id": "density",
-      "name": "Gęstość mapy",
-      "description": "Ile kilometrów różnych korytarzy mapa rysuje na kilometr boku kadru. Godzina „mapa pokazuje do” jest tego skutkiem.",
-      "tags": ["Mapa"],
-      "dev": true
     },
     {
       "id": "car-count",
@@ -166,13 +164,6 @@
       "dev": true
     },
     {
-      "id": "bike-times",
-      "name": "Godziny przejazdu rowerem",
-      "description": "Obok drugiego końca przejazdu staje godzina policzona z odległości, a nie sama odległość.",
-      "tags": ["Rower", "Czas"],
-      "dev": true
-    },
-    {
       "id": "bike-rides",
       "name": "Przejazdy rowerem zawsze widoczne",
       "tags": ["Rower", "Mapa"],
@@ -198,12 +189,6 @@
       "name": "Dlaczego rower i auto są na mapie",
       "description": "Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych je bije i które.",
       "tags": ["Debug", "Mapa", "Rower", "Traficar"],
-      "dev": true
-    },
-    {
-      "id": "debug-why-seg",
-      "name": "Dlaczego kawałek jest na mapie",
-      "tags": ["Debug", "Mapa"],
       "dev": true
     },
     {
@@ -337,12 +322,6 @@
       "dev": true
     },
     {
-      "id": "new-map",
-      "name": "Nowa mapa (eksperyment)",
-      "tags": ["Mapa", "Funkcje"],
-      "dev": true
-    },
-    {
       "id": "walking",
       "name": "Chodzenie pieszo",
       "tags": ["Mapa", "Chodzenie"],
@@ -357,17 +336,11 @@
       "obsolete": "2026-11-15"
     },
     {
-      "id": "scheme-layout",
-      "name": "Układ schematu",
-      "tags": ["Mapa", "Schemat"],
+      "id": "walk-time",
+      "name": "Czas zamiast odległości",
+      "description": "Przy przejściach pieszo i przejazdach rowerem: na schemacie, na mapie i w dymkach. Czas jest policzony z odległości.",
+      "tags": ["Mapa", "Schemat", "Chodzenie", "Rower", "Czas"],
       "dev": true
-    },
-    {
-      "id": "scheme-walks-count",
-      "name": "Ile dodatkowych najszybszych przejść:",
-      "tags": ["Mapa", "Schemat", "Chodzenie"],
-      "dev": true,
-      "obsolete": "2026-11-15"
     },
     {
       "id": "location-refresh",

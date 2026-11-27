@@ -398,7 +398,7 @@ def ma_rodzaj(place, electric, regular):
 
 
 def map_places(day, arrivals, onward, target_set, limit, live=True,
-               min_level=0, electric=True, regular=True, ride_mps=MAP_RIDE_MPS,
+               electric=True, regular=True, ride_mps=MAP_RIDE_MPS,
                overhead_sec=MAP_OVERHEAD_SEC):
     """Rowery na mapie przepływów (punkt 16): [{lat, lon, ..., rides: [...]}, ...].
 
@@ -516,6 +516,7 @@ def map_places(day, arrivals, onward, target_set, limit, live=True,
                 "lat": target["lat"],
                 "lon": target["lon"],
                 "bikes": target["bikes"],
+                "electric": target["electric"],
                 "docks": target["docks"],
                 "m": round(metres),
                 "sec": ride_sec_,
@@ -532,7 +533,7 @@ def map_places(day, arrivals, onward, target_set, limit, live=True,
                       for option in ride["options"]])
               for _, rides in found]
     beaten_by = _station_beaten_by(fronts)
-    chosen = _skyband([len(b) for b in beaten_by], limit, min_level)
+    chosen = _skyband([len(b) for b in beaten_by], limit)
 
     out = []
     for i, (place, all_rides) in enumerate(found):
@@ -736,14 +737,13 @@ def _station_rides(rides):
     return out
 
 
-def _skyband(beaten, limit, min_level=0):
+def _skyband(beaten, limit):
     """Które stacje pokazać (punkt 16): indeksy, k-skyband - jak auta.
 
     `beaten[i]` to liczba stacji, które biją stację i. Pierwszy poziom - te,
     których nie bije nic - jest zawsze; kolejne poziomy wchodzą w całości,
-    aż uzbiera się `limit`. `min_level` to gwarancja "pokaż więcej": każde
-    kliknięcie luzuje regułę o co najmniej jeden poziom."""
+    aż uzbiera się `limit`."""
     if len(beaten) <= limit:
         return set(range(len(beaten)))
-    level = max(sorted(beaten)[limit - 1], min_level)
+    level = sorted(beaten)[limit - 1]
     return {i for i, count in enumerate(beaten) if count <= level}

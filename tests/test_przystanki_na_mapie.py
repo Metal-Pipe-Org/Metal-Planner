@@ -18,6 +18,7 @@ from flask import Flask, render_template
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 ROOT = Path(__file__).resolve().parent.parent
 WHEN = datetime(2026, 1, 5, 0, 0, 0)
@@ -34,7 +35,7 @@ def _kawalki(wynik):
 def test_kawalek_niesie_nazwy_swoich_przystankow(install_day):
     install_day(make_day([CZWORKA], names=NAZWY))
 
-    [kawalek] = _kawalki(planner.plan_flow("Start", "Koniec", WHEN))
+    [kawalek] = _kawalki(flow.plan_flow("Start", "Koniec", WHEN))
 
     assert kawalek["stops_n"] == ["Start", "Alfa", "Beta", "Koniec"]
     assert len(kawalek["stops_n"]) == len(kawalek["stops_t"])
@@ -64,7 +65,7 @@ def test_peron_kierunkowy_podpisuje_sie_nazwa_miejsca(install_day):
     install_day(_z_miejscami(make_day([CZWORKA], names={**NAZWY, "B": "Beta W/t"}),
                              {"B0": ("Beta", "B")}))
 
-    [kawalek] = _kawalki(planner.plan_flow("Start", "Koniec", WHEN))
+    [kawalek] = _kawalki(flow.plan_flow("Start", "Koniec", WHEN))
 
     assert kawalek["stops_n"] == ["Start", "Alfa", "Beta", "Koniec"]
     assert kawalek["stops_pf"] == [None, None, "Beta W/t", None]
@@ -77,7 +78,7 @@ def test_stacja_scalona_z_przystankiem_ma_jego_nazwe(install_day):
         make_day([CZWORKA], names={**NAZWY, "B": "Wrocław Główny"}),
         {"DG": ("DWORZEC GŁÓWNY", "B")}))
 
-    [kawalek] = _kawalki(planner.plan_flow("Start", "Koniec", WHEN))
+    [kawalek] = _kawalki(flow.plan_flow("Start", "Koniec", WHEN))
 
     assert kawalek["stops_n"] == ["Start", "Alfa", "DWORZEC GŁÓWNY", "Koniec"]
     assert kawalek["stops_pf"] == [None, None, "Wrocław Główny", None]
@@ -89,7 +90,7 @@ def test_kropka_przesiadki_mowi_jakie_to_miejsce(install_day):
     install_day(_z_miejscami(make_day([CZWORKA], names={**NAZWY, "S": "Start W/t"}),
                              {"S0": ("Start", "S")}))
 
-    wynik = planner.plan_flow("Start W/t", "Koniec", WHEN)
+    wynik = flow.plan_flow("Start W/t", "Koniec", WHEN)
 
     [kawalek] = _kawalki(wynik)
     assert wynik["nodes"]

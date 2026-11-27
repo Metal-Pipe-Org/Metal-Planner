@@ -38,8 +38,17 @@ import traficar
 import vehicles
 import warmup
 from planner import (MAX_JOURNEY_LIMIT, TIMETABLE_LIMIT, TIMETABLE_MAX,
-                     plan_flow, stop_timetable)
+                     plan_flow_stages, stop_timetable)
 from routes import LIVE_REFRESH_WAIT_SEC
+
+
+def plan_flow(*args, **kwargs):
+    """Cała odpowiedź wyszukiwania naraz: narzędzie oddaje jedną odpowiedź,
+    więc etapy, które strona dostaje po kolei, skleja się w jeden słownik."""
+    result = {}
+    for _, delta in plan_flow_stages(*args, **kwargs):
+        result.update(delta)
+    return result
 
 
 INSTRUCTIONS = (
@@ -371,8 +380,6 @@ def _in_vehicle(arguments, when):
                       "description": f"Tempo marszu (domyślnie {gtfs.DEFAULT_WALK_PACE})."},
         "bike_kmh": {"type": "number", "description": "Prędkość roweru w km/h."},
         "car_kmh": {"type": "number", "description": "Prędkość auta w km/h."},
-        "more": {"type": "integer",
-                 "description": "Ile razy kliknąć „Pokaż więcej” (0-3): dłuższe, ale inne trasy."},
         "limit": {"type": "integer", "description": f"Ile propozycji szukać (1-{MAX_JOURNEY_LIMIT})."},
     },
     required=("to",),
@@ -388,7 +395,6 @@ def plan_trip(arguments):
     search = partial(
         plan_flow, start_name, end_name, when, start_point, end_point,
         journey_limit=None if limit is None else _count(arguments, "limit", 1, MAX_JOURNEY_LIMIT),
-        more=_count(arguments, "more", 0, 3, floor=0),
         use_bikes=_flag(arguments, "bikes", False),
         bike_electric=_flag(arguments, "electric_bikes", True),
         bike_regular=_flag(arguments, "regular_bikes", True),

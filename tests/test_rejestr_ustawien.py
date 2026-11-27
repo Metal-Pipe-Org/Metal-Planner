@@ -113,7 +113,7 @@ def test_teksty_na_stronie_pochodza_z_rejestru():
     html = _strona()
     assert "Szare godziny w tablicy" in html
     assert 'data-tip="Odjazdy, na które już nie zdążysz' in html
-    assert re.search(r'class="[^"]*dev-only[^"]*" data-setting="density" data-labels="Mapa"', html)
+    assert re.search(r'class="[^"]*dev-only[^"]*" data-setting="car-count" data-labels="Traficar"', html)
     assert 'data-setting="tt-past" data-labels="Przystanki, Czas"' in html
 
 
@@ -186,10 +186,10 @@ def test_strona_obsolete_widoczny_z_odnosnikiem_potem_schowany(monkeypatch):
 def test_strona_dev_i_obsolete_niesie_oba_znaczniki(monkeypatch):
     wpisy = settings_registry.load()
     for wpis in wpisy:
-        if wpis["id"] == "density":
+        if wpis["id"] == "car-count":
             wpis["obsolete"] = "2026-11-15"
     monkeypatch.setattr(settings_registry, "load", lambda: wpisy)
-    wiersz = re.search(r'<div[^>]*data-setting="density"[^>]*>', _strona(dzis=date(2026, 11, 15))).group(0)
+    wiersz = re.search(r'<div[^>]*data-setting="car-count"[^>]*>', _strona(dzis=date(2026, 11, 15))).group(0)
     assert "dev-only" in wiersz and 'data-obsolete="2026-11-15"' in wiersz
     kod = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
     assert re.search(r"if \(row\.classList\.contains\('dev-only'\)\) tags\.push\('DEV'\);\s*if \(row\.dataset\.obsolete !== undefined\) tags\.push\('obsolete'\);", kod)

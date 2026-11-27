@@ -1,5 +1,5 @@
-/* Sprawdzenia kontraktu mapy, które mieszkają WE FRONCIE (docs/
-   FLOW_MAP_CONTRACT.md, punkty 7, 8 i 10). Uruchamiane na prawdziwym
+/* Sprawdzenia kontraktu mapy, które mieszkają WE FRONCIE (punkty 7, 8
+   i 10). Uruchamiane na prawdziwym
    static/app.js przez emulator z harness.js, na prawdziwej odpowiedzi
    /api/flow z flow_fixture.json.
 
@@ -246,32 +246,6 @@ checks.pelna_mapa_bez_listy_nie_jest_bledem = (() => {
             && bezMapy.includes('notice error')   // pusta mapa to nadal błąd
             && bezMapy.includes('Nie znaleziono'),
         zMapa: zMapa.slice(0, 200), bezMapy: bezMapy.slice(0, 160),
-    };
-})();
-
-// --- tryb awaryjny widoczny na ekranie ------------------------------------
-
-checks.tryb_awaryjny_mowi_o_sobie_na_ekranie = (() => {
-    // Zwykła odpowiedź: żadnego ostrzeżenia.
-    app.renderPlan({...FLOW_FIXTURE, degraded: false}, false);
-    const zwykla = app.resultsBox.innerHTML;
-
-    // Ta sama odpowiedź oznaczona jako awaryjna: ostrzeżenie NAD listą,
-    // w tym samym stylu co pozostałe komunikaty błędów, a lista zostaje.
-    app.renderPlan({...FLOW_FIXTURE, degraded: true}, false);
-    const awaryjna = app.resultsBox.innerHTML;
-
-    const ma = awaryjna.indexOf('notice error') >= 0
-        && awaryjna.toLowerCase().indexOf('awaryjny') >= 0;
-    const na_gorze = awaryjna.indexOf('notice error') === 0
-        || awaryjna.indexOf('notice error') < awaryjna.indexOf('journey');
-    return {
-        ok: ma && na_gorze
-            && zwykla.toLowerCase().indexOf('awaryjny') < 0
-            && awaryjna.length > 0,
-        zwykla_ma_ostrzezenie: zwykla.toLowerCase().indexOf('awaryjny') >= 0,
-        awaryjna_ma_ostrzezenie: ma,
-        ostrzezenie_nad_lista: na_gorze,
     };
 })();
 
@@ -1039,72 +1013,6 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
             && !bezDymki.includes('Sama jazda')
             && z.includes('12:4015 min') && zDymki.includes('Sama jazda: 15 min'),
         bez, z, bezDymki,
-    };
-})();
-
-/* Grupa stacji miasta: na ekranie czytelna etykieta, na serwer nazwa
-   kanoniczna. Para prettyStopName/rawStopName musi się znosić - inaczej
-   ładna nazwa poleci do /api/flow i wróci jako "nie znaleziono przystanku"
-   (błąd, przez który etykieta wróciła kiedyś do myślnika - patrz
-   gtfs._match_city_group). */
-checks.grupa_stacji_wraca_kanoniczna = (() => {
-    const etykieta = app.prettyStopName('WROCŁAW -');
-    const zwykly = app.prettyStopName('PL. GRUNWALDZKI');
-
-    // Najważniejsze: to, co widzi użytkownik w polu, wychodzi na serwer
-    // w postaci, którą rozumie wyszukiwarka.
-    app.startInput.value = etykieta;
-    app.endInput.value = 'Sosnowiecka';
-    const params = app.queryParams();
-
-    // Nazwa kanoniczna z odpowiedzi /api/flow wraca do pola jako etykieta.
-    app.adoptNames({start: 'WROCŁAW -', end: 'Sosnowiecka'});
-    const wPolu = app.startInput.value;
-
-    return {
-        ok: etykieta === 'WROCŁAW (dowolna stacja)'
-            && zwykly === 'PL. GRUNWALDZKI'
-            && app.rawStopName(etykieta) === 'WROCŁAW -'
-            && app.rawStopName(zwykly) === 'PL. GRUNWALDZKI'
-            && params.get('start') === 'WROCŁAW -'
-            && params.get('end') === 'Sosnowiecka'
-            && wPolu === 'WROCŁAW (dowolna stacja)',
-        etykieta, zwykly, start: params.get('start'), end: params.get('end'), wPolu,
-    };
-})();
-
-/* Przycisk "Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie dokłada
-   jedną wyjściową gęstość i leci do serwera jako `more` razem z gęstością
-   z suwaka. Po trzecim kliknięciu przycisku nie ma - to zwykły licznik, bez
-   pytania serwera, czy jest jeszcze co dołożyć. */
-checks.pokaz_wiecej_doklada_gestosc = (() => {
-    const pasek = () => document.getElementById('time-headline').innerHTML;
-
-    app.drawFlow({...FLOW_FIXTURE, more: 0, at_ceiling: false}, false);
-    const naStarcie = pasek();
-
-    app.showMore();
-    const zapytanie = app.queryParams().toString();
-
-    app.drawFlow({...FLOW_FIXTURE, more: app.MAX_MAP_MORE, at_ceiling: false}, false);
-    const poTrzecim = pasek();
-    app.drawFlow({...FLOW_FIXTURE, more: 1, at_ceiling: true}, false);
-    const przySuficie = pasek();
-    app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
-
-    return {
-        ok: naStarcie.includes('headline-more')
-            && app.mapMore === 1
-            && zapytanie.includes('more=1')              // i to leci do serwera
-            && zapytanie.includes('density=')            // razem z gęstością z suwaka
-            && zapytanie.includes('cars=')               // i liczbą aut, którą też mnoży
-            && !zapytanie.includes('horizon_sec')
-            && !poTrzecim.includes('headline-more')      // po trzecim nie ma przycisku
-            && przySuficie.includes('headline-more'),    // sufit serwera go nie chowa
-        more: app.mapMore,
-        zapytanie: zapytanie.slice(0, 200),
-        naStarcie: naStarcie.slice(-200),
-        poTrzecim: poTrzecim.slice(-200),
     };
 })();
 
