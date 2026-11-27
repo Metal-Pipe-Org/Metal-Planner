@@ -299,14 +299,14 @@
       "id": "pushward",
       "name": "Dynamic Island (PushWard)",
       "description": "Klik w godzinę odjazdu na tablicy przystanku wysyła odliczenie do Dynamic Island i na ekran blokady iPhone'a. Wymaga darmowej aplikacji PushWard na iPhonie (App Store). Klucz: w PushWard wejdź w Ustawienia → Integration Key. Darmowy limit to 250 aktualizacji miesięcznie, a jeden przejazd zużywa dwie. Godziny pochodzą z rozkładu, bez opóźnień na żywo. Klucz zostaje na tym urządzeniu, w tej przeglądarce. Usunięcie klucza wyłącza funkcję.",
-      "tags": ["Pushward"],
+      "tags": ["PushWard"],
       "dev": true
     },
     {
       "id": "pushward-link",
       "name": "Klik w kartę otwiera przystanek w Kiedy przyjedzie / Czy na czas (zamiast Metal-Plannera)",
       "description": "Wyłączone: klik w kartę Dynamic Island otwiera Metal-Planner z tą trasą. Włączone: otwiera tablicę tego przystanku w zewnętrznym rozkładzie. Kursy z Siechnic otwierają Kiedy przyjedzie, wszystkie pozostałe Czy na czas.",
-      "tags": ["Pushward"],
+      "tags": ["PushWard"],
       "dev": true
     },
     {
