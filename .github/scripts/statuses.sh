@@ -20,6 +20,43 @@
 REVIEW_CONTEXT="Ocena Claude'a"
 # Zatwierdzenie od każdego recenzenta koniecznego (#352) — stawia pr-state.sh.
 REVIEWERS_CONTEXT="Recenzenci konieczni"
+# Zatwierdzenie człowieka albo kredyt (#506) — stawia pr-state.sh; zastępuje
+# wbudowany wymóg „1 zatwierdzenie” w regułach `main`.
+CREDIT_CONTEXT="Recenzja albo kredyt"
+
+# Opis zielonego statusu „Ocena Claude'a” to umowa między tym, kto go pisze
+# (claude-review-pr.yml), kto go przenosi (drafts.sh) i kto z niego czyta
+# werdykt (credit.sh) — dlatego tylko trzy funkcje niżej znają jego kształt.
+# Werdykt stoi zawsze na samym początku, po REVIEW_DONE_PREFIX: tak przetrwa
+# przycięcie opisu do 140 znaków, a przeniesienie dopisuje swoje na końcu.
+REVIEW_DONE_PREFIX="Ocena gotowa: "
+REVIEW_CARRIED_MARK=" · przeniesiona z "
+
+# review_done_desc WERDYKT — opis statusu po skończonej ocenie.
+review_done_desc() {
+  printf '%s%s' "$REVIEW_DONE_PREFIX" "${1:-bez werdyktu}"
+}
+
+# review_carried_desc OPIS SHA — opis statusu przeniesionego z commitu SHA po
+# samym dociągnięciu bazy: werdykt zostaje na początku, a skąd przyszedł,
+# mówi dopisek na końcu. Dopisek z wcześniejszego przeniesienia zastępujemy,
+# żeby kolejne „Update branch” nie doklejały następnych.
+review_carried_desc() {
+  jq -rn --arg d "$1" --arg m "$REVIEW_CARRIED_MARK" --arg s "${2:0:7}" \
+    '($d | split($m) | first) + $m + $s + " (samo dociągnięcie bazy)"'
+}
+
+# review_green_jq — definicja jq `review_green`: czy status (obiekt z
+# `description`) niesie zielony werdykt. set_status zamienia 🟢 na ✅
+# (GitHub odrzuca znaki 4-bajtowe) — rozpoznajemy oba zapisy. Patrzymy
+# tylko na początek opisu: dalej może stać tekst werdyktu od Claude'a.
+review_green_jq() {
+  cat <<JQ
+    def review_green:
+      (.description // "") as \$d
+      | any("${REVIEW_DONE_PREFIX}✅", "${REVIEW_DONE_PREFIX}🟢"; . as \$p | \$d | startswith(\$p));
+JQ
+}
 
 # set_status SHA NAZWA STAN OPIS [LINK] — stawia status NAZWA na commicie.
 # STAN: pending / success / failure / error. GitHub odrzuca opis dłuższy niż
@@ -45,17 +82,28 @@ set_status() {
   gh api -X POST "repos/$REPO/statuses/$sha" --input - <<<"$body" > /dev/null
 }
 
+# Konto, jako które piszą statusy nasze workflow (token `github.token`).
+# Status tej samej nazwy od kogokolwiek innego — ktoś z prawem zapisu przez
+# API albo inna aplikacja — jest podróbką: nie czytamy go jako oceny ani
+# zatwierdzenia, a nasze nazwy nadpisujemy. Reguły `main` mają ponadto każdy
+# wymagany status przypięty do źródła „GitHub Actions” (WORKFLOWS.md, zasada
+# 14), więc taki status i tak nie odblokuje merge'a.
+STATUS_CREATOR="github-actions[bot]"
+
 # get_status SHA NAZWA — najnowszy status NAZWA na commicie jako
-# `{state, description, target_url}` albo nic, gdy go nie ma. Zbiorczy status
-# commitu podaje już tylko najnowszy status każdej nazwy.
+# `{state, description, target_url, creator}` albo nic, gdy go nie ma.
 get_status() {
-  commit_statuses "$1" | jq -c --arg c "$2" '.[] | select(.context == $c) | {state, description, target_url}'
+  commit_statuses "$1" | jq -c --arg c "$2" '.[] | select(.context == $c) | {state, description, target_url, creator}'
 }
 
 # commit_statuses SHA — najnowszy status każdej nazwy na commicie, jako
-# tablica `{context, state, description, target_url}`. Jedno wywołanie API
-# dla wszystkich nazw naraz — pr-state.sh potrzebuje kilku.
+# tablica `{context, state, description, target_url, creator}`. Jedno
+# wywołanie API dla wszystkich nazw naraz — pr-state.sh potrzebuje kilku.
+# Lista statusów, a nie zbiorczy status commitu: tylko ona mówi, kto status
+# postawił. Idzie od najnowszego, więc pierwszy z każdej nazwy jest aktualny;
+# sto ostatnich wystarcza, bo statusy piszemy tylko przy zmianie.
 commit_statuses() {
-  gh api "repos/$REPO/commits/$1/status?per_page=100" \
-    | jq -c '[.statuses[]? | {context, state, description, target_url}]'
+  gh api "repos/$REPO/commits/$1/statuses?per_page=100" \
+    | jq -c '[group_by(.context)[] | first
+              | {context, state, description, target_url, creator: (.creator.login // null)}]'
 }

@@ -119,16 +119,24 @@ own_patch_ids() {
 # zostaje — nowy commit bez statusu blokuje merge tak samo, a ratunek ten sam:
 # `@claude`. Kod różny od zera, gdy przeniesienie się nie udało: PR stoi
 # wtedy zablokowany bez powodu, więc ma to być widać na czerwono.
+#
+# Przenosimy tylko status postawiony przez nasze workflow (STATUS_CREATOR):
+# przeniesiony szedłby już naszym tokenem, więc podróbka zmieniłaby się
+# w status nie do odróżnienia od prawdziwego.
 carry_review_status() {
   local n=$1 before=$2 after=$3 st desc
 
   st=$(get_status "$before" "$REVIEW_CONTEXT")
   if [ -z "$st" ] || [ "$(jq -r .state <<<"$st")" != success ]; then
-    echo "#$n: na ${before:0:7} nie ma zielonego statusu „$REVIEW_CONTEXT” — nie przenoszę."
+    echo "#$n: na ${before:0:7} nie ma zielonego statusu „${REVIEW_CONTEXT}” — nie przenoszę."
     return 0
   fi
-  desc="Z ${before:0:7} (samo dociągnięcie bazy) — $(jq -r '.description // ""' <<<"$st")"
+  if [ "$(jq -r '.creator // ""' <<<"$st")" != "$STATUS_CREATOR" ]; then
+    echo "::warning::#$n: status „${REVIEW_CONTEXT}” na ${before:0:7} postawił $(jq -r '.creator // "nieznany"' <<<"$st"), nie GitHub Actions — nie przenoszę."
+    return 0
+  fi
+  desc=$(review_carried_desc "$(jq -r '.description // ""' <<<"$st")" "$before")
   set_status "$after" "$REVIEW_CONTEXT" success "$desc" "$(jq -r '.target_url // ""' <<<"$st")" || return 1
-  echo "#$n: status „$REVIEW_CONTEXT” przeniesiony z ${before:0:7} na ${after:0:7}." \
+  echo "#$n: status „${REVIEW_CONTEXT}” przeniesiony z ${before:0:7} na ${after:0:7}." \
     | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 }

@@ -13,7 +13,10 @@
 # Wołający pobiera ten plik z `main`, tak jak skrypt Discorda: decyduje on
 # o cofaniu cudzych zatwierdzeń.
 #
-# Liczymy tak jak GitHub przy blokowaniu merge'a: dla każdej osoby (bez botów)
+# Liczymy tak jak GitHub przy blokowaniu merge'a: liczą się tylko osoby
+# z prawem zapisu w repo (`team_reviews`) — recenzję może wystawić każde konto
+# GitHuba, także spoza zespołu, a jego zatwierdzenie ani prośba o zmiany nie
+# mogą niczego odblokować ani zablokować. Dla każdej takiej osoby (bez botów)
 # ważna jest jej ostatnia recenzja, która zmienia stan — zatwierdzenie, prośba
 # o zmiany albo recenzja już cofnięta. Sam komentarz (COMMENTED) po
 # zatwierdzeniu go nie znosi, a prośbę o zmiany znosi tylko późniejsze
@@ -23,12 +26,59 @@
 # Zanim ustawienie zostanie wyłączone, GitHub sam zdejmuje zatwierdzenia przy
 # pushu — wtedy po ocenie nie stoi żadne i nic tu się nie dzieje.
 
+source "$(dirname "${BASH_SOURCE[0]}")/guard.sh"
+
 APPROVALS_DOC="https://github.com/${REPO:-Metal-Pipe-Org/Metal-Planner}/blob/main/CONTRIBUTING.md#review-i-mergowanie"
 APPROVAL_NOTE_MARK='<!-- claude-approval-note -->'
 
-# pr_reviews N — wszystkie recenzje PR-a jako jedna tablica JSON.
+# Uprawnienia osób sprawdzonych w tym biegu, `login<TAB>uprawnienie`
+# w linijce. Plik, a nie zmienna: recenzje liczymy w podpowłokach `$(…)`,
+# a zmienna ustawiona w podpowłoce znika razem z nią.
+TEAM_CACHE=${TEAM_CACHE:-$(mktemp)}
+touch "$TEAM_CACHE"
+
+# pr_reviews N — recenzje PR-a od osób z zespołu (`team_reviews`) jako jedna
+# tablica JSON.
 pr_reviews() {
-  gh api --paginate --slurp "repos/$REPO/pulls/$1/reviews" | jq 'add // []'
+  gh api --paginate --slurp "repos/$REPO/pulls/$1/reviews" | jq 'add // []' | team_reviews
+}
+
+# review_permission LOGIN — uprawnienie osoby w repo (`caller_permission`
+# z guard.sh), o każdą osobę pytamy raz na bieg.
+review_permission() {
+  local perm
+  perm=$(awk -F'\t' -v l="$1" '$1 == l { print $2; exit }' "$TEAM_CACHE")
+  if [ -z "$perm" ]; then
+    perm=$(caller_permission "$1") || return 1
+    [ -n "$perm" ] || return 1
+    printf '%s\t%s\n' "$1" "$perm" >> "$TEAM_CACHE"
+  fi
+  echo "$perm"
+}
+
+# team_reviews — filtr: z tablicy recenzji (kształt REST) zostawia tylko
+# recenzje osób z prawem zapisu w repo. Recenzję — także zatwierdzenie
+# i prośbę o zmiany — może wystawić każde konto GitHuba; liczymy je wtedy tak
+# jak GitHub, który do wymaganych zatwierdzeń bierze tylko osoby z prawem
+# zapisu. Uprawnienia sprawdzamy wprost, nie przez `author_association`: przy
+# prywatnym członkostwie w organizacji GitHub zwraca tam CONTRIBUTOR albo
+# NONE nawet dla osoby z prawem zapisu (guard.sh), a MEMBER nie mówi, że ktoś
+# ma zapis. Błąd API wywraca wołającego, zamiast liczyć recenzje bez sita.
+# Boty odpadają już tu, jak w `_review_states_jq`.
+team_reviews() {
+  local reviews login perm team=""
+  reviews=$(cat)
+  while IFS= read -r login; do
+    [ -n "$login" ] || continue
+    perm=$(review_permission "$login") || return 1
+    if is_team_permission "$perm"; then
+      team="$team$login"$'\n'
+    fi
+  done < <(jq -r '[.[] | select(.user != null)
+      | select((.user.type // "User") != "Bot" and (.user.login | endswith("[bot]") | not))
+      | .user.login] | unique[]' <<<"$reviews")
+  jq -c --arg team "$team" '($team | split("\n")) as $t
+    | map(select(.user != null and (.user.login as $l | any($t[]; . == $l))))' <<<"$reviews"
 }
 
 # standing_approvals — filtr: z tablicy recenzji wypisuje tablicę zatwierdzeń

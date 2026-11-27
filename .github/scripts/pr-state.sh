@@ -1,6 +1,6 @@
-# Stan PR-a liczony od zera z API, za każdym razem w całości: wymagany
-# status „Recenzenci konieczni” (#352) i etykieta mówiąca, na czyj ruch PR
-# czeka (#353). Wołający robi `source` (razem ze statuses.sh i approvals.sh)
+# Stan PR-a liczony od zera z API, za każdym razem w całości: wymagane
+# statusy „Recenzenci konieczni” (#352) i „Recenzja albo kredyt” (#506,
+# credit.sh) oraz etykieta mówiąca, na czyj ruch PR czeka (#353). Wołający robi `source` (razem ze statuses.sh i approvals.sh)
 # i woła `pr_state`; resztę bierze z env:
 #
 #   GH_TOKEN  token ze `statuses: write`, zapisem etykiet i odczytem PR-ów
@@ -24,6 +24,7 @@
 # statusów jednej nazwy na commicie, a przeliczeń jest dużo.
 
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/credit.sh"
 
 REVIEWERS_DOC="https://github.com/${REPO:-Metal-Pipe-Org/Metal-Planner}/blob/main/CONTRIBUTING.md#review-i-mergowanie"
 
@@ -88,10 +89,10 @@ required_reviewers() {
   printf '%s\n' "$out" | reviewers_list | jq -R . | jq -sc 'unique'
 }
 
-# reviewers_status RECENZENCI AUTOR — filtr: z tablicy recenzji PR-a liczy
-# status „Recenzenci konieczni” jako `{state, description}`. Zatwierdzenie
-# stoi tak samo jak w approvals.sh: ostatnia recenzja zmieniająca stan danej
-# osoby to zatwierdzenie (boty pomijamy). Autor nie zatwierdzi własnego PR-a
+# reviewers_status RECENZENCI AUTOR — filtr: z tablicy recenzji PR-a (od
+# zespołu, `pr_reviews`) liczy status „Recenzenci konieczni” jako `{state,
+# description}`. Zatwierdzenie stoi tak samo jak w approvals.sh: ostatnia
+# recenzja zmieniająca stan danej osoby to zatwierdzenie (boty pomijamy). Autor nie zatwierdzi własnego PR-a
 # (GitHub nie pozwala), więc jego samego nie wymagamy. Loginy porównujemy bez
 # wielkości liter — w liście ktoś mógł je wpisać inaczej niż na koncie.
 reviewers_status() {
@@ -108,22 +109,26 @@ reviewers_status() {
       end'
 }
 
-# review_summary — filtr: z tablicy recenzji wypisuje `{approvals,
-# changes_requested}`: ile zatwierdzeń ludzi stoi i kto ma czekające „Request
+# review_summary — filtr: z tablicy recenzji (od zespołu, `pr_reviews`)
+# wypisuje `{approvals, approved_commits, changes_requested}`: ile zatwierdzeń
+# ludzi stoi, na których commitach powstały i kto ma czekające „Request
 # changes” — według tej samej reguły co wyżej i w approvals.sh.
 review_summary() {
   jq -c "$(_review_states_jq)"' as $last
     | {approvals: ($last | map(select(.state == "APPROVED")) | length),
+       approved_commits: ($last | map(select(.state == "APPROVED") | .commit_id)),
        changes_requested: ($last | map(select(.state == "CHANGES_REQUESTED") | .user.login))}'
 }
 
 # put_status SHA NAZWA NOWY STATUSY — stawia status NOWY (`{state,
 # description}`) z linkiem do CONTRIBUTING.md, chyba że na commicie stoi już
-# dokładnie taki (STATUSY z `commit_statuses`).
+# dokładnie taki od naszych workflow (STATUSY z `commit_statuses`). Taki sam
+# status od kogoś innego nadpisujemy z ostrzeżeniem — to podróbka.
 put_status() {
   local sha=$1 ctx=$2 new=$3 statuses=$4
-  if jq -e --arg c "$ctx" --argjson n "$new" \
-      'any(.[]; .context == $c and .state == $n.state and .description == $n.description)' \
+  if jq -e --arg c "$ctx" --argjson n "$new" --arg creator "$STATUS_CREATOR" \
+      'any(.[]; .context == $c and .state == $n.state and .description == $n.description
+               and .creator == $creator)' \
       <<<"$statuses" > /dev/null; then
     return 0
   fi
@@ -131,8 +136,10 @@ put_status() {
 }
 
 # pr_facts PR REQUIRED — dla jednego otwartego PR-a (obiekt z listy PR-ów
-# z API) stawia status „Recenzenci konieczni” i wypisuje jedną linijkę JSON
-# ze wszystkim, czego potrzebuje `labels_plan`. Trzy wywołania API na PR.
+# z API) stawia statusy „Recenzenci konieczni” i „Recenzja albo kredyt”
+# (kolejkę kredytu bierze z CREDIT_QUEUE, policzonej raz na bieg w `pr_state`)
+# i wypisuje jedną linijkę JSON ze wszystkim, czego potrzebuje `labels_plan`.
+# Trzy wywołania API na PR.
 #
 # `mergeable_state` jest tylko w pojedynczym PR-ze, lista PR-ów go nie ma —
 # stąd osobne pytanie. Konflikt powinien i tak cofnąć PR do wersji roboczej
@@ -141,7 +148,7 @@ put_status() {
 # GitHub stanu nie policzył (`null`, `unknown`), traktujemy PR jak bez
 # konfliktu — następne przeliczenie go poprawi.
 pr_facts() {
-  local pr=$1 req=$2 n sha author reviews statuses reviewers mergeable
+  local pr=$1 req=$2 n sha author reviews statuses reviewers mergeable summary credit team
 
   n=$(jq -r .number <<<"$pr")
   sha=$(jq -r .head.sha <<<"$pr")
@@ -149,19 +156,38 @@ pr_facts() {
   reviews=$(pr_reviews "$n")
   statuses=$(commit_statuses "$sha")
   mergeable=$(gh api "repos/$REPO/pulls/$n" --jq '.mergeable_state // ""')
+  team=false
+  if is_team_permission "$(review_permission "$author")"; then
+    team=true
+  fi
+
+  # Nasze statusy na czubku postawione przez kogoś innego niż nasze workflow:
+  # nadpisujemy je niżej (albo pomijamy, jak ocenę Claude'a), a tu tylko
+  # zostawiamy ślad w logu biegu.
+  jq -r --arg creator "$STATUS_CREATOR" \
+      --arg a "$REVIEW_CONTEXT" --arg b "$REVIEWERS_CONTEXT" --arg c "$CREDIT_CONTEXT" '
+    .[] | select(.context == $a or .context == $b or .context == $c)
+    | select(.creator != $creator)
+    | "::warning::„\(.context)” postawił \(.creator // "nieznany"), nie GitHub Actions — pomijam ten status."' \
+    <<<"$statuses" | sed "s/^::warning::/::warning::#$n (${sha:0:7}): /" >&2
 
   reviewers=$(reviewers_status "$req" "$author" <<<"$reviews")
   echo "#$n (${sha:0:7}): $REVIEWERS_CONTEXT → $(jq -r '"\(.state): \(.description)"' <<<"$reviewers")" >&2
   put_status "$sha" "$REVIEWERS_CONTEXT" "$reviewers" "$statuses" >&2
 
+  summary=$(review_summary <<<"$reviews")
+  credit=$(credit_status "$summary" "$statuses" "$CREDIT_QUEUE" "$sha" "$team")
+  echo "#$n (${sha:0:7}): $CREDIT_CONTEXT → $(jq -r '"\(.state): \(.description)"' <<<"$credit")" >&2
+  put_status "$sha" "$CREDIT_CONTEXT" "$credit" "$statuses" >&2
+
   jq -nc --argjson pr "$pr" --argjson st "$statuses" --argjson rv "$reviewers" \
-    --argjson sum "$(review_summary <<<"$reviews")" --arg ctx "$REVIEW_CONTEXT" --arg repo "$REPO" \
+    --argjson sum "$summary" --arg ctx "$REVIEW_CONTEXT" --arg repo "$REPO" --arg creator "$STATUS_CREATOR" \
     --arg mergeable "$mergeable" '
     $pr | {number, draft, base: .base.ref, head: .head.ref,
            same_repo: ((.head.repo.full_name // "") == $repo),
            conflict: ($mergeable == "dirty"),
            requested: ((.requested_reviewers | length) + (.requested_teams | length)),
-           review: ([$st[] | select(.context == $ctx)] | first // null),
+           review: ([$st[] | select(.context == $ctx and .creator == $creator)] | first // null),
            reviewers_ok: ($rv.state == "success")} + $sum'
 }
 
@@ -365,6 +391,10 @@ pr_state() {
 
   req=$(required_reviewers)
   echo "Recenzenci konieczni (REQUIRED_REVIEWERS na main): $(jq -r 'if length == 0 then "nikt" else join(", ") end' <<<"$req")"
+  # Kolejkę kredytu (fakty z API) liczymy raz na bieg; błąd API wywraca bieg, zamiast
+  # puścić PR-y na kredyt z pustej kolejki.
+  CREDIT_QUEUE=$(credit_count)
+  echo "Kolejka kredytu: $CREDIT_QUEUE/$CREDIT_LIMIT"
   prs=$(open_prs)
 
   if [ $# -eq 0 ] || [ "$1" = all ]; then

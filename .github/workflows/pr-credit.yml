@@ -1,0 +1,90 @@
+name: "PR-y: kredyt"
+
+# Merge na kredyt (#506): PR z zielonym werdyktem oceny Claude'a może wejść do
+# `main` bez recenzji człowieka, dopóki w kolejce czeka mniej niż CREDIT_LIMIT
+# (config.sh) PR-ów scalonych bez recenzji. Przed merge'em decyduje o tym
+# wymagany status „Recenzja albo kredyt” (pr-state.yml); ten workflow
+# pilnuje etykiety po merge'u. Kolejka to fakty z API — PR-y scalone do `main`
+# od merge'a CREDIT_PR bez stojącego zatwierdzenia osoby z zespołu — a etykieta kredytu
+# (LABEL_CREDIT) tylko pokazuje ją na liście PR-ów; reguły w
+# `.github/scripts/credit.sh`. Każdy bieg zgrywa etykietę z faktami w obie
+# strony:
+#
+#  • merge — PR, który nie ma zatwierdzenia człowieka, dostaje etykietę;
+#  • zatwierdzenie scalonego PR-a przez osobę z zespołu „spłaca” kredyt: etykieta
+#    schodzi, miejsce się zwalnia. GitHub pozwala zatwierdzać scalone PR-y;
+#    recenzji nie słuchamy tu wprost (`pull_request_review` nie ma wersji
+#    „_target”), tylko przez przekaźnik z pr-review-relay.yml — jego
+#    zakończenie budzi ten workflow przez `workflow_run`, a stan i tak
+#    ustalamy z API. Dla pewności, gdyby GitHub nie uruchamiał przekaźnika
+#    przy recenzjach scalonych PR-ów, całą kolejkę sprawdza też cykliczny bieg;
+#  • ręczne zdjęcie (albo dołożenie) etykiety niczego nie zmienia: kolejka jej
+#    nie liczy, a najbliższy bieg przywraca etykietę zgodną z faktami.
+#
+# Po każdej zmianie kolejki pr-state.yml przelicza statusy wszystkich
+# otwartych PR-ów: słucha zakończenia tego workflow (`workflow_run`), bo
+# etykieta nałożona tokenem workflow nie budzi niczego sama.
+#
+# `pull_request_target` bierze workflow z `main`; kodu z PR-a nie pobieramy
+# wcale — wszystko idzie z API (zasada 9 w WORKFLOWS.md). Problemy znalezione
+# w recenzji po fakcie zespół zgłasza ręcznie, nic się tu nie dzieje samo.
+# Kredyt zajmują tylko PR-y scalone do `main`: piętra stosu scalane do gałęzi
+# pośrednich i wydanie `main` -> `stable` go nie zajmują (filtr `branches`).
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+  workflow_run:
+    workflows:
+      - "PR-y: recenzja (przekaźnik)"
+    types: [completed]
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  # Odczyt skryptów z `main`.
+  contents: read
+  # Recenzje (czy PR ma zatwierdzenie) i etykiety kredytu. Etykiety PR-a idą
+  # przez API zgłoszeń, więc jak w pr-state.yml dajemy oba zapisy.
+  pull-requests: read
+  issues: write
+
+jobs:
+  credit:
+    if: >-
+      github.repository == 'Metal-Pipe-Org/Metal-Planner'
+      && (github.event_name != 'pull_request_target'
+          || github.event.pull_request.merged)
+      && (github.event_name != 'workflow_run'
+          || github.event.workflow_run.conclusion == 'success')
+    # Jeden bieg naraz na PR, po kolei; czekający bieg tego samego PR-a GitHub
+    # zastępuje nowszym, a stan i tak bierzemy z API. Biegi bez PR-a (przekaźnik,
+    # cykl) mają wspólną grupę z tego samego powodu.
+    concurrency:
+      group: pr-credit-${{ github.event.pull_request.number || 'sweep' }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Pobierz skrypty z main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .discord
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Zgraj etykietę kredytu z kolejką
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          source .discord/.github/scripts/approvals.sh
+          source .discord/.github/scripts/pr-state.sh
+
+          # Przy każdym biegu sprawdzamy całą kolejkę, nie tylko PR z tego
+          # zdarzenia: merge, zatwierdzenie scalonego PR-a i ręczne ruszanie
+          # etykietą kończą się tym samym.
+          credit_sweep

@@ -33,6 +33,21 @@ LABEL_PR_CLAUDE="waiting for claude review"
 LABEL_PR_HUMAN="waiting for human review"
 LABEL_PR_OTHER="waiting for other PR"
 
+# --- Merge na kredyt (#506; credit.sh, pr-state.sh, pr-credit.yml) ---
+# PR z zielonym werdyktem oceny Claude'a może wejść bez recenzji człowieka,
+# dopóki w kolejce czeka mniej niż tyle PR-ów scalonych bez recenzji. Miejsce
+# w kolejce zwalnia zatwierdzenie scalonego PR-a przez człowieka.
+CREDIT_LIMIT=15
+# PR, który wprowadził mechanizm. Chwila jego merge'a (z API, credit.sh) to
+# start kolejki: tworzą ją PR-y scalone do `main` od tej chwili i bez
+# stojącego zatwierdzenia człowieka; starsze merge'e, np. przez obejście
+# admina, się nie liczą. Bez ręcznego wpisywania daty przy merge'u.
+CREDIT_PR=507
+# Etykieta scalonego PR-a, który wszedł bez recenzji. Tylko widok kolejki na
+# liście PR-ów: kolejkę liczymy z faktów (merge + brak zatwierdzenia), a
+# etykietę sweep w pr-credit.yml sam zgrywa z tymi faktami w obie strony.
+LABEL_CREDIT="merged on credit"
+
 # --- Wołanie Claude'a (guard.sh, claude-issue.yml, claude-review-pr.yml) ---
 CLAUDE_MENTION="@claude"
 # Gałąź solvera to `<przedrostek><numer zgłoszenia>`, a jej robocze odnogi
