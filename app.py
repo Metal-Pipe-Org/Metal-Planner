@@ -9,6 +9,7 @@ import config  # noqa: F401
 import update_gtfs
 import update_pkp
 import warmup
+from mcp_server import init_mcp
 from nowosci import init_nowosci
 from routes import init_routes
 
@@ -24,6 +25,8 @@ mimetypes.add_type("audio/mp4", ".m4a")
 app = Flask(__name__)
 
 init_routes(app)
+# Endpoint MCP pod /mcp - te same dane co /api/*, dla Claude'a (mcp_server.py).
+init_mcp(app)
 init_nowosci(app)
 
 if __name__ == "__main__":
