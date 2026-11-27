@@ -3591,12 +3591,13 @@ function timetableLinesHtml(data, mapSec) {
     for (const d of [...data.departures].sort((a, b) => a.sec - b.sec)) {
         const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
             + '|' + (d.flow || '');
-        if (!groups.has(key)) groups.set(key, {d, secs: []});
+        if (!groups.has(key)) groups.set(key, {d, secs: [], byTime: new Map()});
         const group = groups.get(key);
         group.secs.push(d.sec);
+        group.byTime.set(d.sec, d);
     }
     const rows = [];
-    for (const {d, secs} of groups.values()) {
+    for (const {d, secs, byTime} of groups.values()) {
         const przed = mapSec === undefined ? [] : secs.filter(s => s < mapSec);
         const po = mapSec === undefined ? secs : secs.filter(s => s >= mapSec);
         // Z szarych tylko ostatnia - "uciekło ci o 3 minuty" - bo starsze
@@ -3609,7 +3610,7 @@ function timetableLinesHtml(data, mapSec) {
         const ciete = po.length > miejsce;
         const pokazane = [...szare, ...(ciete ? po.slice(0, miejsce - 1) : po)];
         if (!pokazane.length) continue;
-        rows.push({d, pokazane, ostatni: ciete ? po[po.length - 1] : null,
+        rows.push({d, byTime, pokazane, ostatni: ciete ? po[po.length - 1] : null,
                    zdazy: po.length > 0, first: po.length ? po[0] : pokazane[0]});
     }
     // Linie, na które według mapy już się nie zdąży (same szare godziny), na
@@ -3623,13 +3624,13 @@ function timetableLinesHtml(data, mapSec) {
     // więc jej ostatnia godzina niczego nie znaczy.
     const doKonca = ostatni => ostatni === null ? ''
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
-    const html = list.map(({d, pokazane, ostatni}) =>
+    const html = list.map(({d, byTime, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
         `<span class="badge ${escClass(d.mode)}"${lineStyle(d.mode, d.num)}>${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}` +
-            (d.flow === 'end' ? '' : departureAttrs(d, data.stop, s)) + '>' +
+            (d.flow === 'end' ? '' : departureAttrs(byTime.get(s), data.stop, s)) + '>' +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
             // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
             (d.trip ? `<span class="tt-live" data-trip="${escAttr(d.trip)}"`
@@ -3750,6 +3751,8 @@ function withLate(data, where) {
         num: l.num,
         mode: l.kind,
         headsign: l.headsign,
+        stop_id: l.stop_id,
+        ...('siechnice_stop' in l ? {siechnice_stop: l.siechnice_stop} : {}),
         flow: flow.get(lineKey(l)),
     })).filter(d => !known.has(key(d)));
     return {...data, departures: [...rows, ...data.departures]};

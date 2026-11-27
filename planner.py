@@ -3651,16 +3651,16 @@ def _late_departures(day, stops, at_sec, arrive_by, arrival_of):
     for stop_id in stops:
         deps = index.get(stop_id, ())
         for dep_sec, trip in deps[:bisect_left(deps, (at_sec,))]:
-            if dep_sec < first.get(trip, INF):
-                first[trip] = dep_sec
+            if dep_sec < first.get(trip, (INF,))[0]:
+                first[trip] = (dep_sec, stop_id)
     previous = {}
-    for trip, dep_sec in first.items():
+    for trip, (dep_sec, stop_id) in first.items():
         key = day.trip_info[trip]
         if key not in previous or dep_sec > previous[key][0]:
-            previous[key] = (dep_sec, trip)
+            previous[key] = (dep_sec, trip, stop_id)
 
     out = []
-    for dep_sec, trip in sorted(previous.values()):
+    for dep_sec, trip, stop_id in sorted(previous.values()):
         # Kurs, który według rozkładu skończył już bieg, nie stoi spóźniony
         # na przystanku - z niego zostałby nocny autobus sprzed czterech
         # godzin, bo spóźnienie przesuwa jazdę dokładnie do "teraz".
@@ -3673,7 +3673,13 @@ def _late_departures(day, stops, at_sec, arrive_by, arrival_of):
             continue
         label, headsign = day.trip_info[trip]
         num, mode = _line_parts(label)
-        out.append({"num": num, "kind": mode, "headsign": headsign, "sec": dep_sec})
+        # Słupek jedzie z godziną, bo z niej front składa kartę Dynamic Island
+        # i jej link (jak w stop_timetable).
+        out.append({"num": num, "kind": mode, "headsign": headsign, "sec": dep_sec,
+                    "stop_id": stop_id,
+                    **({"siechnice_stop": siechnice.post_of(
+                            stop_id, day.stop_names[stop_id], *day.stop_coords[stop_id], num)}
+                       if trip.startswith(siechnice.ID_PREFIX) else {})})
     return out
 
 
