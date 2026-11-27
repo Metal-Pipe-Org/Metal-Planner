@@ -26,7 +26,7 @@
     },
     {
       "id": "car-vans",
-      "name": "Pokazuj też dostawczaki",
+      "name": "Pokazuj też dostawczaki Traficara",
       "description": "Dostawczaki wybierane są osobno od osobówek, z tą samą liczbą z suwaka, i stoją na mapie jako puste pierścienie.",
       "tags": ["Traficar", "Mapa"]
     },
@@ -91,14 +91,16 @@
       "name": "Ile aut Traficara",
       "description": "Auta, których nic nie bije godziną przy aucie ani kwotą z „Ogarniam”, są zawsze. Suwak dokłada kolejne, coraz słabsze, aż uzbiera się tyle.",
       "tags": ["Traficar"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "bike-count",
       "name": "Ile stacji z rowerem",
       "description": "Stacje, których żadna inna nie bije godziną przy rowerze, godziną w celu ani liczbą pojazdów, są zawsze. Suwak dokłada kolejne.",
       "tags": ["Rower"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "time-hover",
@@ -127,14 +129,16 @@
       "name": "Sam czas jazdy w pasku nad mapą",
       "description": "Czas jazdy liczy się od wejścia do pierwszego pojazdu, bez czekania na niego.",
       "tags": ["Czas", "Mapa"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "dot-center",
       "name": "Kropka w środku wszystkich słupków",
       "description": "Kropka stoi pośrodku wszystkich słupków miejsca zamiast na peronie, z którego wzięta jest godzina.",
       "tags": ["Przystanki", "Mapa"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "dot-rows",
@@ -154,14 +158,16 @@
       "id": "tip-cursor",
       "name": "Dymek przy kursorze",
       "tags": ["Przystanki"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "tip-panel",
       "name": "Okienko w rogu ekranu",
       "description": "Okienko zostaje do zamknięcia. Można włączyć dymek, okienko, oba albo żadne.",
       "tags": ["Przystanki"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "bike-rides",
@@ -175,7 +181,8 @@
       "name": "Godzina dojazdu autem",
       "description": "Godzina szacowana z odległości w linii prostej i założeń czasowych. Auta wybierane są nią zawsze — przełącznik tylko ją pokazuje.",
       "tags": ["Traficar", "Czas"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "zone-button",
@@ -189,7 +196,8 @@
       "name": "Dlaczego rower i auto są na mapie",
       "description": "Dymek roweru i auta mówi dodatkowo, w czym są najlepsze, ile innych je bije i które.",
       "tags": ["Debug", "Mapa", "Rower", "Traficar"],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "vehicles-direction",
@@ -284,28 +292,29 @@
     {
       "id": "server-logs",
       "name": "Pobierz logi",
-      "tags": ["Logi"],
+      "tags": [],
       "dev": true
     },
     {
       "id": "pushward",
       "name": "Dynamic Island (PushWard)",
       "description": "Klik w godzinę odjazdu na tablicy przystanku wysyła odliczenie do Dynamic Island i na ekran blokady iPhone'a. Wymaga darmowej aplikacji PushWard na iPhonie (App Store). Klucz: w PushWard wejdź w Ustawienia → Integration Key. Darmowy limit to 250 aktualizacji miesięcznie, a jeden przejazd zużywa dwie. Godziny pochodzą z rozkładu, bez opóźnień na żywo. Klucz zostaje na tym urządzeniu, w tej przeglądarce. Usunięcie klucza wyłącza funkcję.",
-      "tags": [],
+      "tags": ["PushWard"],
       "dev": true
     },
     {
       "id": "pushward-link",
       "name": "Klik w kartę otwiera przystanek w Kiedy przyjedzie / Czy na czas (zamiast Metal-Plannera)",
       "description": "Wyłączone: klik w kartę Dynamic Island otwiera Metal-Planner z tą trasą. Włączone: otwiera tablicę tego przystanku w zewnętrznym rozkładzie. Kursy z Siechnic otwierają Kiedy przyjedzie, wszystkie pozostałe Czy na czas.",
-      "tags": [],
+      "tags": ["PushWard"],
       "dev": true
     },
     {
       "id": "sw-check",
       "name": "Wersja aplikacji",
       "tags": [],
-      "dev": true
+      "dev": true,
+      "obsolete": "2026-11-27"
     },
     {
       "id": "transfer-gain",
@@ -339,7 +348,7 @@
       "id": "walk-time",
       "name": "Czas zamiast odległości",
       "description": "Przy przejściach pieszo i przejazdach rowerem: na schemacie, na mapie i w dymkach. Czas jest policzony z odległości.",
-      "tags": ["Mapa", "Schemat", "Chodzenie", "Rower", "Czas"],
+      "tags": ["Mapa", "Schemat", "Chodzenie", "Rower", "Czas", "Traficar"],
       "dev": true
     },
     {
