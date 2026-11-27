@@ -397,12 +397,14 @@ def test_tablica_wspolnego_slupka_zna_tramwaj_i_autobus_gminy(tmp_path, monkeypa
 # --- statyczna kopia -------------------------------------------------------
 
 def _snapshot(days=7, start=date(2026, 10, 12)):
-    """Kopia w formacie wgrywanego pliku: dwa słupki, jeden kurs dziennie."""
+    """Kopia w formacie wgrywanego pliku: trzy słupki, jeden kurs dziennie,
+    kończący się na pętli "c", której żadna tablica odjazdów nie pokazuje."""
     return {
         "source": "test",
         "stops": [
             ["a", 1, "Siechnice - Rynek", 17140000, 51030000, 0],
             ["b", 2, "Sucha", 17038200, 51096800, 0],
+            ["c", 3, "Galeria Dominikańska", 17040268, 51107384, 0],
         ],
         "lines_by_stop": {"a": ["800+80"], "b": ["800+80"]},
         "days": [
@@ -413,6 +415,11 @@ def _snapshot(days=7, start=date(2026, 10, 12)):
              }}
             for offset in range(days)
         ],
+        "trips": {"4403": [
+            {"place_id": "a", "index": 1, "departure_time": "05:33"},
+            {"place_id": "b", "index": 2, "departure_time": "05:50"},
+            {"place_id": "c", "index": 3, "departure_time": "05:54"},
+        ]},
     }
 
 
@@ -427,10 +434,46 @@ def test_feed_from_snapshot_sklada_kursy_po_przejsciu_przez_json():
 
     stops, days = siechnice.feed_from_snapshot(snapshot, log=lambda *_: None)
 
-    assert [s["designator"] for s in stops] == ["a", "b"]
+    assert [s["designator"] for s in stops] == ["a", "b", "c"]
     assert days == [(date(2026, 10, 13), [
-        {"trip_id": 4403, "line": "800+80", "stops": [("a", 20000), ("b", 21000)]},
+        {"trip_id": 4403, "line": "800+80",
+         "stops": [("a", 20000), ("b", 21000), ("c", 21240)]},
     ])]
+
+
+def test_feed_from_snapshot_bez_przebiegow_konczy_kurs_na_ostatnim_odjezdzie():
+    # Kopia wgrana przed #474 nie ma `trips` - ma się dalej doklejać.
+    snapshot = _snapshot(days=1, start=date(2026, 10, 13))
+    del snapshot["trips"]
+
+    _, days = siechnice.feed_from_snapshot(snapshot, log=lambda *_: None)
+
+    assert days[0][1][0]["stops"] == [("a", 20000), ("b", 21000)]
+
+
+def test_terminus_stops_bierze_przyjazd_a_nie_odjazd():
+    times = [
+        {"place_id": "b", "index": 2, "departure_time": "05:50"},
+        {"place_id": "c", "index": 3, "departure_time": "05:59", "arrival_time": "05:54"},
+    ]
+
+    assert siechnice.terminus_stops(2, 21000, times) == [("c", 21240)]
+
+
+def test_terminus_stops_przechodzi_przez_polnoc():
+    # Ostatni odjazd po doliczeniu doby (86400 + 23:58), pętla o 00:03.
+    times = [
+        {"place_id": "b", "index": 5, "departure_time": "23:58"},
+        {"place_id": "c", "index": 6, "departure_time": "00:03"},
+    ]
+
+    assert siechnice.terminus_stops(5, 86280, times) == [("c", 86580)]
+
+
+def test_terminus_stops_bez_ostatniego_odjazdu_w_przebiegu_nie_zgaduje():
+    times = [{"place_id": "c", "index": 6, "departure_time": "00:03"}]
+
+    assert siechnice.terminus_stops(5, 86280, times) == []
 
 
 def test_update_bez_kopii_nie_dokleja_niczego(tmp_path):
@@ -485,6 +528,11 @@ def _broken(change):
     (_broken(lambda s: s["days"][0]["departures_by_stop"]["a"][0].pop("index")),
      "departure, trip_id i index"),
     (_broken(lambda s: s.update(lines_by_stop={})), "ani jednego kursu"),
+    (_broken(lambda s: s.pop("trips")), "Brak pól: trips"),
+    (_broken(lambda s: s["trips"]["4403"].append(
+        {"place_id": "z", "index": 4, "departure_time": "06:00"})), "Kurs 4403 w trips"),
+    (_broken(lambda s: s["trips"]["4403"][2].update(departure_time=21240)),
+     "Kurs 4403 w trips"),
 ])
 def test_validate_snapshot_odrzuca_zly_plik_z_powodem(raw, fragment):
     assert fragment in siechnice.validate_snapshot(raw)
