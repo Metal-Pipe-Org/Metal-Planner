@@ -331,13 +331,11 @@ def test_plan_trip_przekazuje_ustawienia_spod_zebatki(klient, monkeypatch):
     dostal = {}
     monkeypatch.setattr(mcp_tools, "plan_flow", lambda *a, **k: dostal.update(k) or {"journeys": []})
     blad, _ = _narzedzie(klient, "plan_trip", {
-        "from": "Start", "to": "Cel", "walk_pace": "wolno", "walking": False, "more": 2,
+        "from": "Start", "to": "Cel", "walk_pace": "wolno", "walking": False,
         "vans": True, "bike_kmh": 20, **DZIEN})
     assert not blad
-    assert (dostal["walk_pace"], dostal["walking"], dostal["more"], dostal["car_vans"],
-            dostal["bike_kmh"]) == ("wolno", False, 2, True, 20.0)
-    blad, wynik = _narzedzie(klient, "plan_trip", {"from": "Start", "to": "Cel", "more": 9})
-    assert not blad
+    assert (dostal["walk_pace"], dostal["walking"], dostal["car_vans"],
+            dostal["bike_kmh"]) == ("wolno", False, True, 20.0)
     blad, wynik = _narzedzie(klient, "plan_trip", {"from": "Start", "to": "Cel", "walk_pace": "biegiem"})
     assert blad
 
