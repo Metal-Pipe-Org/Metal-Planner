@@ -10,12 +10,16 @@ from tests import flow
 from tests.gtfs_builder import make_day
 
 M = 60
+# Godzina, od której liczą minuty _bus: rano, z dala od północy (tę
+# sprawdzają osobne testy niżej).
+H = 8 * 3600
 
 
-def _bus(prefix, label, rows):
-    """Kursy z S do E: rows = [(minuta odjazdu, minuta przyjazdu)]."""
+def _bus(prefix, label, rows, base=H):
+    """Kursy z S do E: rows = [(minuta odjazdu, minuta przyjazdu)] od `base`."""
     return [{"trip_id": f"{prefix}{k}", "label": label,
-             "stops": [("S", dep * M, dep * M), ("E", arr * M, arr * M)]}
+             "stops": [("S", base + dep * M, base + dep * M),
+                       ("E", base + arr * M, base + arr * M)]}
             for k, (dep, arr) in enumerate(rows)]
 
 
@@ -25,29 +29,29 @@ DAY = _bus("a", "Autobus 1", [(20, 40), (30, 50), (40, 60)])
 def test_najpozniejsze_wyjscie_ktore_zdaza(install_day):
     install_day(make_day(DAY))
 
-    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 55), arrive_by=True)
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 55), arrive_by=True)
 
-    assert result["starts"] == "00:30"
-    assert result["best_arrival"] == "00:50"
-    assert result["arrive_by"] == "00:55"
+    assert result["starts"] == "08:30"
+    assert result["best_arrival"] == "08:50"
+    assert result["arrive_by"] == "08:55"
 
 
 def test_na_mapie_nic_nie_dowozi_po_godzinie(install_day):
     install_day(make_day(DAY + _bus("b", "Autobus 2", [(33, 58)])))
 
-    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 55), arrive_by=True)
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 55), arrive_by=True)
 
     assert result["scheme"]["moves"]
-    assert all(move["arrival_sec"] <= 55 * M for move in result["scheme"]["moves"])
+    assert all(move["arrival_sec"] <= H + 55 * M for move in result["scheme"]["moves"])
     assert "2" not in {s["num"] for s in result["segments"]}
 
 
 def test_bez_polaczenia_mowi_o_przyjezdzie(install_day):
     install_day(make_day(DAY))
 
-    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 35), arrive_by=True)
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 35), arrive_by=True)
 
-    assert result["error"] == "Nie znaleziono połączenia S → E z przyjazdem do 00:35 tego dnia."
+    assert result["error"] == "Nie znaleziono połączenia S → E z przyjazdem do 08:35 tego dnia."
 
 
 def test_dzien_za_rozkladem_mowi_ze_rozkladu_jeszcze_nie_ma(install_day, monkeypatch):
@@ -77,9 +81,9 @@ def test_odjazd_za_rozkladem_mowi_to_od_razu_bez_szukania(monkeypatch):
 def test_zwykle_wyszukiwanie_bez_zmian(install_day):
     install_day(make_day(DAY))
 
-    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 25))
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 25))
 
-    assert result["starts"] == "00:30"
+    assert result["starts"] == "08:30"
     assert "arrive_by" not in result
 
 
@@ -103,28 +107,137 @@ def _teraz(monkeypatch, kiedy):
 
 def test_dzis_nie_ma_wyjsc_ktore_juz_minely(install_day, monkeypatch):
     install_day(make_day(DAY + _bus("b", "Autobus 2", [(33, 58)])))
-    _teraz(monkeypatch, datetime(2026, 1, 5, 0, 45))
+    _teraz(monkeypatch, datetime(2026, 1, 5, 8, 45))
 
-    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 1, 0), arrive_by=True)
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 9, 0), arrive_by=True)
 
-    # 0:33 odjechało ponad 10 min temu, 0:40 jeszcze zdąży
-    assert [j["departure"] for j in result["journeys"]] == ["00:40"]
-    assert all(move["board_sec"] >= 35 * M for move in result["scheme"]["moves"])
+    # 8:33 odjechało ponad 10 min temu, 8:40 jeszcze zdąży
+    assert [j["departure"] for j in result["journeys"]] == ["08:40"]
+    assert all(move["board_sec"] >= H + 35 * M for move in result["scheme"]["moves"])
 
 
 def test_dzis_gdy_nic_juz_nie_zdazy_mowi_to_wprost(install_day, monkeypatch):
     install_day(make_day(DAY))
-    _teraz(monkeypatch, datetime(2026, 1, 5, 0, 52))
+    _teraz(monkeypatch, datetime(2026, 1, 5, 8, 52))
 
-    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 1, 0), arrive_by=True)
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 9, 0), arrive_by=True)
 
-    assert result["error"] == "Na przyjazd do 01:00 nie zdążysz już żadnym połączeniem."
+    assert result["error"] == "Na przyjazd do 09:00 nie zdążysz już żadnym połączeniem."
 
 
 def test_odjazd_z_minionej_godziny_dalej_dziala(install_day, monkeypatch):
     install_day(make_day(DAY))
-    _teraz(monkeypatch, datetime(2026, 1, 5, 0, 52))
+    _teraz(monkeypatch, datetime(2026, 1, 5, 8, 52))
 
-    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 25))
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 25))
 
-    assert result["starts"] == "00:30"
+    assert result["starts"] == "08:30"
+
+
+# Tuż po północy wyjście wypada często poprzedniego wieczoru: kurs nocny
+# z 23:50 należy do kalendarza doby, w której wyruszył (jego przyjazd to
+# 24:15), a poranek nowej doby bywa zapisany w jej własnym kalendarzu
+# (Siechnice: 00:05, nie 24:05). Rozkład dnia sam w sobie zaczyna się
+# o północy, więc nie widzi ani jednego z tych wyjść przed nią.
+WIECZOR = _bus("w", "Autobus 3", [(23 * 60 + 10, 23 * 60 + 40),
+                                   (23 * 60 + 50, 24 * 60 + 15)], base=0)
+PORANEK = _bus("r", "Autobus 4", [(5, 25)], base=0)
+DZIEN = datetime(2026, 1, 6)
+
+
+def _dwie_doby(monkeypatch):
+    """Doba z pytania (6.01) ma swój poranek, poprzednia (5.01) - wieczór."""
+    import gtfs
+    days = {DZIEN.date(): make_day(PORANEK),
+            datetime(2026, 1, 5).date(): make_day(WIECZOR)}
+    monkeypatch.setattr(gtfs, "load_day", lambda d, trains=True: days[d])
+
+
+def test_po_polnocy_wyjscie_poprzedniego_wieczoru(monkeypatch):
+    _dwie_doby(monkeypatch)
+
+    result = flow.plan_flow("S", "E", DZIEN.replace(minute=20), arrive_by=True)
+
+    assert result["starts"] == "23:50"
+    assert result["best_arrival"] == "00:15"
+    assert result["arrive_by"] == "00:20"
+    # Godziny są na osi doby poprzedniej - i odpowiedź mówi, której.
+    assert result["day_offset"] == -1
+    assert result["scheme"]["moves"]
+    assert all(move["arrival_sec"] <= 24 * 3600 + 20 * M
+               for move in result["scheme"]["moves"])
+
+
+def test_po_polnocy_dowozi_tez_poranek_nowej_doby(monkeypatch):
+    _dwie_doby(monkeypatch)
+
+    result = flow.plan_flow("S", "E", DZIEN.replace(minute=30), arrive_by=True)
+
+    assert result["starts"] == "00:05"
+    assert result["best_arrival"] == "00:25"
+    assert {j["departure"] for j in result["journeys"]} >= {"00:05", "23:50"}
+
+
+def test_wieczorem_na_jutro_po_polnocy_nie_ma_wyjsc_ktore_juz_minely(monkeypatch):
+    _dwie_doby(monkeypatch)
+    _teraz(monkeypatch, datetime(2026, 1, 5, 23, 30))
+
+    result = flow.plan_flow("S", "E", DZIEN.replace(minute=20), arrive_by=True)
+
+    # 23:10 odjechało 20 min temu, choć pytanie jest o jutro
+    assert [j["departure"] for j in result["journeys"]] == ["23:50"]
+
+
+def test_po_polnocy_gdy_wieczorny_juz_odjechal_mowi_to_wprost(monkeypatch):
+    _dwie_doby(monkeypatch)
+    _teraz(monkeypatch, datetime(2026, 1, 6, 0, 5))
+
+    result = flow.plan_flow("S", "E", DZIEN.replace(minute=20), arrive_by=True)
+
+    assert result["error"] == "Na przyjazd do 00:20 nie zdążysz już żadnym połączeniem."
+
+
+def _kurs(trip_id, label, stops):
+    """Jeden kurs: stops = [(przystanek, minuta po 8:00)]."""
+    return {"trip_id": trip_id, "label": label,
+            "stops": [(stop, H + minute * M, H + minute * M) for stop, minute in stops]}
+
+
+# Dwa dojścia do tej samej dziewiątki: dwójką z wyjściem o 8:10 i trójką
+# o 8:05 (dalej na trasie dziewiątki, w B). Obie dowożą o 8:55.
+DOJSCIA = [
+    _kurs("d2", "Autobus 2", [("S", 10), ("A", 20)]),
+    _kurs("d3", "Autobus 3", [("S", 5), ("B", 22)]),
+    _kurs("d9", "Autobus 9", [("A", 25), ("B", 30), ("E", 55)]),
+]
+
+
+def test_dojscie_do_tego_samego_pojazdu_nie_kaze_wyjsc_wczesniej(install_day):
+    # Lustro reguły z „wyjścia o": dojście do tego samego ostatniego pojazdu
+    # nie może dowozić później niż ruch, a przy „być na" - kazać wyjść
+    # wcześniej. Trójka z 8:05 to ten sam przyjazd, tylko wcześniejsze wyjście:
+    # przy „być na" nie ma po co jej rysować obok dwójki z 8:10.
+    install_day(make_day(DOJSCIA))
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 9, 0), arrive_by=True)
+
+    assert result["starts"] == "08:10"
+    assert {s["num"] for s in result["segments"]} == {"2", "9"}
+
+
+def test_tablica_przystanku_jak_przy_wyjsciu_o(install_day):
+    # Tablica pod kropką pokazuje odjazdy od chwili, w której mapa stawia tu
+    # pasażera (`sec`), do ostatniego, który jeszcze zdąży (`depart_by`). Przy
+    # „wyjściu o" to zwykle jedna godzina na linię - przy „być na" też: mapa
+    # stawia pasażera na starcie na najpóźniejsze wyjście, a nie na całą
+    # zbitkę wcześniejszych kursów tej samej linii.
+    install_day(make_day(_bus("c", "Autobus 1", [(k, k + 30) for k in range(0, 25, 5)])))
+
+    odjazd = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 0))
+    przyjazd = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 52), arrive_by=True)
+
+    def okno(result):
+        start = next(n for n in result["nodes"] if n.get("start"))
+        return [(start["sec"], line["depart_by"]) for line in start["lines"]]
+    assert okno(odjazd) == [(H, H)]
+    assert okno(przyjazd) == [(H + 20 * M, H + 20 * M)]
