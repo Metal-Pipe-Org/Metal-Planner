@@ -89,6 +89,21 @@ tablicy połączeń dnia trzymanej w pamięci; `routes.py` wystawia API;
 `static/app.js` to cały front mapy. Architektura i algorytmy — w
 [docs/PROJECT.md](docs/PROJECT.md).
 
+## Claude i inne klienty MCP
+
+Pod `/mcp` stoi publiczny serwer MCP (bez tokena, tylko odczyt). Daje
+Claude'owi te same dane co strona: propozycje przejazdu z linkiem do mapy
+(`plan_trip`), odjazdy z przystanku (`departures`), kurs (`trip`), trasę
+linii (`line`) i sprawdzenie nazwy przystanku (`find_stop`). Dodanie do
+Claude Code:
+
+```bash
+claude mcp add --transport http metal-planner https://<adres-strony>/mcp
+```
+
+Na claude.ai: Ustawienia → Konektory → Dodaj własny konektor, z tym samym
+adresem. Lokalnie: `http://localhost:5001/mcp`.
+
 ## Wdrożenie
 
 Cały deployment opisuje `docker-compose.yml` (komentarze w nim mówią, co
