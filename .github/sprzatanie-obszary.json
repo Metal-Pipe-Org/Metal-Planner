@@ -1,0 +1,22 @@
+[
+  {"id": "rozklady", "nazwa": "Rozkłady jazdy przystanków", "kod": ["timetables.py"], "testy": ["tests/test_rozklady.py", "tests/test_powtarzanie_rozkladu.py"]},
+  {"id": "ustawienia", "nazwa": "Rejestr ustawień", "kod": ["settings_registry.py"], "testy": ["tests/test_rejestr_ustawien.py", "tests/test_ustawienia_dev.py"]},
+  {"id": "nazewnictwo", "nazwa": "Nazewnictwo przystanków", "kod": ["naming.py"], "testy": ["tests/test_nazewnictwo.py"]},
+  {"id": "polinka", "nazwa": "Polinka", "kod": ["polinka.py"], "testy": ["tests/test_polinka.py"]},
+  {"id": "nowosci", "nazwa": "Okienka nowości", "kod": ["nowosci.py"], "testy": ["tests/test_nowosci.py"]},
+  {"id": "opoznienia-pkp", "nazwa": "Opóźnienia pociągów", "kod": ["pkp_live.py"], "testy": ["tests/test_opoznienia_pociagow.py"]},
+  {"id": "pkp", "nazwa": "Pociągi PKP i ich rozkład", "kod": ["pkp.py", "update_pkp.py"], "testy": ["tests/test_jedna_siec.py"]},
+  {"id": "aktualizacja-gtfs", "nazwa": "Pobieranie i aktualizacja rozkładu", "kod": ["update_gtfs.py"], "testy": ["tests/test_update_schedule.py", "tests/test_service_day.py"]},
+  {"id": "pushward", "nazwa": "PushWard", "kod": ["pushward.py"], "testy": ["tests/test_pushward.py"]},
+  {"id": "siechnice", "nazwa": "Siechnice", "kod": ["siechnice.py"], "testy": ["tests/test_siechnice.py"]},
+  {"id": "traficar", "nazwa": "Traficar", "kod": ["traficar.py"], "testy": ["tests/test_traficar.py", "tests/test_strefa_traficara.py"]},
+  {"id": "rowery", "nazwa": "Rowery miejskie", "kod": ["bikes.py"], "testy": ["tests/test_rower.py"]},
+  {"id": "pojazdy", "nazwa": "Pojazdy na żywo", "kod": ["vehicles.py"], "testy": ["tests/test_kierunek_pojazdow.py", "tests/test_pojazd_i_kurs.py"]},
+  {"id": "w-pojezdzie", "nazwa": "Jestem w pojeździe", "kod": ["onboard.py"], "testy": ["tests/test_w_pojezdzie.py"]},
+  {"id": "kod-z-discorda", "nazwa": "Kod z Discorda (tryb deweloperski)", "kod": ["devcode.py"], "testy": ["tests/test_kod_z_discorda.py"]},
+  {"id": "rozgrzewka", "nazwa": "Rozgrzewka i dziennik serwera", "kod": ["warmup.py", "serverlog.py"], "testy": ["tests/test_rozgrzewka.py"]},
+  {"id": "pwa", "nazwa": "Aplikacja na telefonie i tryb offline", "kod": ["static/pwa.js", "static/sw.js"], "testy": []},
+  {"id": "telefon", "nazwa": "Układ na telefonie", "kod": ["static/phone.js"], "testy": []},
+  {"id": "statystyki", "nazwa": "Statystyki", "kod": ["static/statystyki.js"], "testy": []},
+  {"id": "ekran-2137", "nazwa": "Ekran 21:37", "kod": ["static/rura.js"], "testy": []}
+]

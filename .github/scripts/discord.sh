@@ -35,6 +35,7 @@
 #               🚫 nie robimy / PR zamknięty bez merge'a
 #               📑 duplikat                  ⚔️ konflikt z bazą
 #               🏷️ błędna składnia PR-a
+#               🧹 sprzątanie obszaru (co tydzień)
 #               ⏳ cisza w zgłoszeniu        💤 zamknięte po ciszy
 #               🤖 Claude skończył / ocenił  ⚠️ Claude nie dał rady
 #               📊 podsumowanie dnia         📋 ogólnie — do zrobienia

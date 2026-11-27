@@ -39,6 +39,34 @@ CLAUDE_MENTION="@claude"
 # `<przedrostek><numer>-run<id biegu>`.
 CLAUDE_BRANCH_PREFIX="claude/issue-"
 
+# --- Cotygodniowe sprzątanie (sprzatanie.yml, sprzatanie.sh, #531) ---
+# Zgłoszenie, z którego wziął się automat; zgłoszenia tygodniowe podają je
+# jako źródło. Każdy bieg zakłada własne zgłoszenie, a PR zamyka to nowe.
+SPRZATANIE_ZGLOSZENIE=531
+# Kolejka opiekunów (loginy GitHuba, rozdzielone spacją): co tydzień
+# następny, po kolei. Opiekun dostaje przypisanie do nowego zgłoszenia
+# i zakłada PR, więc musi mieć w repo prawo zapisu.
+SPRZATANIE_OPIEKUNOWIE="EgorexW SzymonEls"
+# Poniedziałek tygodnia pierwszego opiekuna z listy (RRRR-MM-DD).
+SPRZATANIE_START="2026-11-30"
+# Typ i etykieta zgłoszenia tygodniowego; gdy GitHub któregoś nie przyjmie,
+# zgłoszenie i tak powstaje, a log biegu o tym mówi.
+SPRZATANIE_TYP="Task"
+SPRZATANIE_ETYKIETA="claude"
+# Gałąź sprzątania to `<przedrostek><id obszaru>-<data>`.
+SPRZATANIE_GALAZ="sprzatanie/"
+# Bramka: najwyżej tyle zmienionych linii (dodane + usunięte)…
+SPRZATANIE_MAX_LINII=200
+# …a usuniętych co najmniej tyle razy więcej niż dodanych.
+SPRZATANIE_USUNIETE_NA_DODANE=3
+# Plik obszaru jest zajęty (obszar w tym tygodniu odpada przed Claude'em),
+# gdy otwarty PR go usuwa, przenosi albo zmienia co najmniej tyle procent
+# jego linii.
+SPRZATANIE_ZAJETY_PROCENT=25
+# Początki ścieżek, których sprzątanie nie rusza nigdy, nawet gdyby trafiły
+# na listę obszaru. Rozdzielone spacją.
+SPRZATANIE_ZAKAZANE=".github/ .claude/ CLAUDE.md docs/ settings.json settings.schema.json requirements Dockerfile docker/ docker-compose.yml data/"
+
 # --- Słowa wskazujące zgłoszenie w PR-ze (refs.sh, syntax.sh) ---
 # Słowo przed `#numer` w tytule albo opisie, bez względu na wielkość liter.
 # Rozdzielone `|`; same litery, a w słowie z kilku wyrazów zwykła spacja
