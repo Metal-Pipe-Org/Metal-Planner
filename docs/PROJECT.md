@@ -119,6 +119,22 @@ Od zgłoszenia #364 Polinka nie jest kursem: w wyszukiwaniu jej nie ma, więc ni
   `/api/stops`, `/api/plan`, `/api/flow`, `/api/timetable`, `/api/line`,
   `/api/onboard`, `/api/stop_board`, `/api/trip`, `/api/vehicles`,
   `/api/cars`, `/api/traficar-zone`, `/api/bikes` (szczegóły w `routes.py`).
+- **`mcp_server.py`** + **`mcp_tools.py`** — `/mcp`, serwer MCP dla Claude'a.
+  Transport Streamable HTTP w wersji bezstanowej (każda wiadomość to jeden
+  POST z JSON-RPC, odpowiedź to zwykły JSON), mówiony wprost, bez pakietu
+  `mcp` (ten chce serwera ASGI), więc chodzi na tych samych workerach co
+  reszta. Publiczny i bez tokena, bo pokazuje tylko to, co i tak leży pod
+  `/api/*`. Narzędzia pokrywają to, co pasażer może zrobić na stronie:
+  wyszukiwanie (`plan_trip`, też z pokładu pojazdu i z ustawieniami spod ⚙),
+  tablice i pełne rozkłady przystanków (`departures`, `stop_schedule`),
+  linie, kursy i pociągi z opóźnieniami (`line`, `trip`, `train`), dane na
+  żywo (`vehicles`, `bikes_near`, `cars_near`) i `find_stop`. Wołają te same
+  funkcje co endpointy i tylko czytają; `_plain` wycina z odpowiedzi
+  geometrię, sekundy i id słupków (narzędzia na żywo oddają położenie, bo
+  ono jest treścią, i najbliższy przystanek obok). Start z pojazdu przyjmuje
+  nazwę następnego przystanku, a słupek wyszukuje sam, w kierunkach linii.
+  Błędna data, godzina czy opcja jest odmową, a nie cichym „teraz” jak
+  w `/api/*`.
 
 ### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 

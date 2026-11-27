@@ -201,8 +201,8 @@ def test_start_niesie_poprzednie_kursy_ktore_spoznione_by_dowiozly(install_day):
 
     start = [n for n in wynik["nodes"] if n.get("start")][0]
     assert start["late"] == [
-        {"num": "16", "kind": "tram", "headsign": "OSOBOWICE", "sec": 940},
-        {"num": "4", "kind": "tram", "headsign": "BISKUPIN", "sec": 990},
+        {"num": "16", "kind": "tram", "headsign": "OSOBOWICE", "sec": 940, "stop_id": "START"},
+        {"num": "4", "kind": "tram", "headsign": "BISKUPIN", "sec": 990, "stop_id": "START"},
     ]
     assert {s["num"] for s in wynik["segments"]} == {"16"}
     assert wynik["fastest"]["arrival"] == "00:28"
@@ -242,7 +242,7 @@ def test_przesiadka_ma_te_sama_regule_co_start(install_day):
     assert wynik["fastest"]["arrival"] == "00:31"
     wezly = {n["name"]: n for n in wynik["nodes"]}
     assert wezly["X"]["late"] == [{"num": "3", "kind": "tram", "headsign": "CEL",
-                                   "sec": 1250}]
+                                   "sec": 1250, "stop_id": "X"}]
     assert "late" not in wezly["START"]
 
 
@@ -277,7 +277,7 @@ def test_start_z_punktu_ma_tablice_startu_u_przystanku_do_ktorego_sie_idzie(
     assert wynik["fastest"]["arrival"] == "18:43"
     wezel = [n for n in wynik["nodes"] if n["name"] == "GRUNWALDZKI"][0]
     assert wezel["late"] == [{"num": "146", "kind": "bus", "headsign": "GAJ pętla",
-                              "sec": 64260}]
+                              "sec": 64260, "stop_id": "GRUNWALDZKI"}]
 
 
 def test_kropka_wezla_z_numerowanymi_peronami_zamawia_tablice_nazwa_wezla(install_day):
