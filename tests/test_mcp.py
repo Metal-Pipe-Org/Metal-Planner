@@ -6,10 +6,18 @@ data/gtfs.sqlite ani sieci.
 """
 
 import json
+from datetime import date
 
 import pytest
 
+import bikes
+import gtfs
 import mcp_tools
+import onboard
+import pkp_live
+import timetables
+import traficar
+import vehicles
 from tests.gtfs_builder import make_day
 
 DZIEN = {"date": "2026-01-05", "time": "00:00"}
@@ -69,7 +77,9 @@ def test_initialize_z_nieznana_wersja_dostaje_najnowsza(klient):
 def test_wszystkie_narzedzia_tylko_czytaja(klient):
     _, odpowiedz = _rpc(klient, "tools/list")
     narzedzia = odpowiedz["result"]["tools"]
-    assert {t["name"] for t in narzedzia} == {"plan_trip", "find_stop", "departures", "trip", "line"}
+    assert {t["name"] for t in narzedzia} == {
+        "plan_trip", "find_stop", "departures", "stop_schedule", "trip", "line", "train",
+        "vehicles", "bikes_near", "cars_near"}
     for narzedzie in narzedzia:
         assert narzedzie["annotations"]["readOnlyHint"] is True
         assert narzedzie["annotations"]["destructiveHint"] is False
@@ -192,3 +202,196 @@ def test_trip_nieznanego_kursu(klient):
     blad, wynik = _narzedzie(klient, "trip", {"trip": "NIE_MA", **DZIEN})
     assert blad
     assert "kursu" in wynik["error"]
+
+
+# --- rozkład z przystanku ----------------------------------------------------------------
+
+
+@pytest.fixture
+def tablica(klient, monkeypatch):
+    """Tablica z przystanku na syntetycznym dniu: stop_board woła load_day
+    z drugim argumentem, a kalendarz powtórzeń czyta SQLite - obu tu nie ma."""
+    day = make_day([
+        {"trip_id": f"T{i}", "label": "Tramwaj 3", "headsign": "KSIĘŻE MAŁE",
+         "stops": [("S", sec, sec), ("E", sec + 300, sec + 300)]}
+        for i, sec in enumerate((7 * 3600 + 5 * 60, 7 * 3600 + 25 * 60, 8 * 3600))
+    ] + [
+        {"trip_id": "N1", "label": "Autobus N", "headsign": "JAGODNO",
+         "stops": [("S", 9 * 3600, 9 * 3600), ("E", 9 * 3600 + 60, 9 * 3600 + 60)]},
+        {"trip_id": "PKP:1", "label": "Pociąg IC 6123", "headsign": "Kraków Główny",
+         "stops": [("S", 10 * 3600, 10 * 3600), ("E", 11 * 3600, 11 * 3600)]},
+    ], names={"S": "Rynek", "E": "Cel"})
+    monkeypatch.setattr(gtfs, "load_day", lambda *a, **k: day)
+    monkeypatch.setattr(timetables, "repeat_note", lambda stop_ids, d: "w dni robocze")
+    return klient
+
+
+def test_stop_schedule_bez_linii_wypisuje_linie(tablica):
+    blad, wynik = _narzedzie(tablica, "stop_schedule", {"stop": "rynek", **DZIEN})
+    assert not blad
+    assert wynik["repeats"] == "w dni robocze"
+    assert {(l["num"], l["headsign"], l["count"]) for l in wynik["lines"]} >= {
+        ("3", "KSIĘŻE MAŁE", 3), ("N", "JAGODNO", 1)}
+    assert "schedules" not in wynik
+
+
+def test_stop_schedule_z_linia_to_godziny_jak_na_slupku(tablica):
+    blad, wynik = _narzedzie(tablica, "stop_schedule",
+                             {"stop": "Rynek", "line": "3", "headsign": "księże", **DZIEN})
+    assert not blad
+    [rozklad] = wynik["schedules"]
+    assert rozklad["hours"] == {"07": "05 25", "08": "00"}
+
+
+def test_stop_schedule_pociag_po_samym_numerze(tablica):
+    blad, wynik = _narzedzie(tablica, "stop_schedule", {"stop": "Rynek", "line": "6123", **DZIEN})
+    assert not blad
+    assert wynik["schedules"][0]["hours"] == {"10": "00"}
+
+
+def test_stop_schedule_nieznana_linia_mowi_co_odjezdza(tablica):
+    blad, wynik = _narzedzie(tablica, "stop_schedule", {"stop": "Rynek", "line": "33", **DZIEN})
+    assert blad
+    assert "3" in wynik["error"] and "N" in wynik["error"]
+
+
+# --- pociągi i opóźnienia ----------------------------------------------------------------
+
+
+def test_train_po_numerze_z_opoznieniem_dzis(tablica, monkeypatch):
+    monkeypatch.setattr(timetables, "trip_detail", lambda trip, d, *a: {
+        "trip": trip, "line": "Pociąg IC 6123",
+        "stops": [{"id": "S", "name": "Rynek", "lat": 1, "lon": 2, "t": "10:00", "sec": 36000},
+                  {"id": "E", "name": "Cel", "lat": 1, "lon": 2, "t": "11:00", "sec": 39600}]})
+    monkeypatch.setattr(pkp_live, "delays", lambda day, trips, when: {
+        "PKP:1": {"Cel": {"arr": 7, "dep": None}}})
+    blad, wynik = _narzedzie(tablica, "train", {"num": "IC 6123", "date": date.today().isoformat()})
+    assert not blad
+    [kurs] = wynik["runs"]
+    assert [s["name"] for s in kurs["stops"]] == ["Rynek", "Cel"]
+    assert "delay_min" not in kurs["stops"][0]
+    assert kurs["stops"][1]["delay_min"] == {"arr": 7, "dep": None}
+    assert not _klucze(kurs) & {"lat", "lon", "sec", "id"}
+
+
+def test_train_opoznien_nie_ma_dla_innego_dnia(tablica, monkeypatch):
+    monkeypatch.setattr(timetables, "trip_detail", lambda trip, d, *a: {
+        "trip": trip, "stops": [{"name": "Cel", "t": "11:00"}]})
+    monkeypatch.setattr(pkp_live, "delays", lambda *a: pytest.fail("pytanie o inny dzień"))
+    blad, wynik = _narzedzie(tablica, "train", {"num": "6123", **DZIEN})
+    assert not blad
+    assert "delay_min" not in wynik["runs"][0]["stops"][0]
+
+
+def test_train_nieznany_numer(tablica):
+    blad, wynik = _narzedzie(tablica, "train", {"num": "9999", **DZIEN})
+    assert blad
+    assert "9999" in wynik["error"]
+
+
+# --- start z pokładu pojazdu -------------------------------------------------------------
+
+
+def _kierunki(monkeypatch):
+    monkeypatch.setattr(onboard, "directions", lambda num, d, mode=None: {
+        "num": "5", "mode": "tram", "label": "Tramwaj 5", "directions": [
+            {"headsign": "BISKUPIN", "stops": [{"id": "S", "name": "Start"}, {"id": "B", "name": "Most"}]},
+            {"headsign": "OPORÓW", "stops": [{"id": "B", "name": "Most"}, {"id": "S", "name": "Start"}]},
+        ]})
+
+
+def test_plan_trip_z_pokladu_szuka_slupka_po_nazwie(klient, monkeypatch):
+    _kierunki(monkeypatch)
+    pojazd = {}
+    oryginal = mcp_tools.plan_flow
+
+    def plan_flow(*args, **kwargs):
+        pojazd.update(kwargs["in_vehicle"] or {})
+        return oryginal(*args, **kwargs)
+    monkeypatch.setattr(mcp_tools, "plan_flow", plan_flow)
+
+    blad, wynik = _narzedzie(klient, "plan_trip", {
+        "to": "Cel", "onboard_line": "5", "onboard_next_stop": "start",
+        "onboard_headsign": "bisk", **DZIEN})
+    assert not blad, wynik
+    assert pojazd == {"num": "5", "mode": "tram", "headsign": "BISKUPIN", "stop": "S",
+                      "slack_sec": None}
+    assert "link" not in wynik
+
+
+def test_plan_trip_z_pokladu_bez_kierunku_pyta_o_niego(klient, monkeypatch):
+    _kierunki(monkeypatch)
+    blad, wynik = _narzedzie(klient, "plan_trip", {
+        "to": "Cel", "onboard_line": "5", "onboard_next_stop": "Most", **DZIEN})
+    assert blad
+    assert "BISKUPIN" in wynik["error"] and "OPORÓW" in wynik["error"]
+
+
+def test_plan_trip_przekazuje_ustawienia_spod_zebatki(klient, monkeypatch):
+    dostal = {}
+    monkeypatch.setattr(mcp_tools, "plan_flow", lambda *a, **k: dostal.update(k) or {"journeys": []})
+    blad, _ = _narzedzie(klient, "plan_trip", {
+        "from": "Start", "to": "Cel", "walk_pace": "wolno", "walking": False, "more": 2,
+        "vans": True, "bike_kmh": 20, **DZIEN})
+    assert not blad
+    assert (dostal["walk_pace"], dostal["walking"], dostal["more"], dostal["car_vans"],
+            dostal["bike_kmh"]) == ("wolno", False, 2, True, 20.0)
+    blad, wynik = _narzedzie(klient, "plan_trip", {"from": "Start", "to": "Cel", "more": 9})
+    assert not blad
+    blad, wynik = _narzedzie(klient, "plan_trip", {"from": "Start", "to": "Cel", "walk_pace": "biegiem"})
+    assert blad
+
+
+# --- na żywo -----------------------------------------------------------------------------
+
+PRZYSTANKI = [{"name": "Rynek", "lat": 51.11, "lon": 17.03},
+              {"name": "Dworzec", "lat": 51.10, "lon": 17.04}]
+
+
+def test_vehicles_z_najblizszym_przystankiem(klient, monkeypatch):
+    monkeypatch.setattr(vehicles, "get_vehicles", lambda: [
+        {"line": "3", "kind": "tram", "lat": 51.1101, "lon": 17.0301},
+        {"line": "33", "kind": "bus", "lat": 51.10, "lon": 17.04},
+    ])
+    monkeypatch.setattr(gtfs, "all_stops_geo", lambda: PRZYSTANKI)
+    blad, wynik = _narzedzie(klient, "vehicles", {"line": "3"})
+    assert not blad
+    [pojazd] = wynik["vehicles"]
+    assert pojazd["near_stop"] == "Rynek"
+    assert pojazd["near_m"] < 50
+
+
+def test_vehicles_awaria_feedu_to_odmowa(klient, monkeypatch):
+    def _awaria():
+        raise OSError("timeout")
+    monkeypatch.setattr(vehicles, "get_vehicles", _awaria)
+    blad, wynik = _narzedzie(klient, "vehicles", {"line": "3"})
+    assert blad
+    assert "timeout" in wynik["error"]
+
+
+def test_bikes_near_tylko_w_promieniu_od_najblizszych(klient, monkeypatch):
+    monkeypatch.setattr(bikes, "stations", lambda: [
+        {"name": "Daleko", "lat": 51.20, "lon": 17.03, "bikes": 1},
+        {"name": "Dalej", "lat": 51.113, "lon": 17.03, "bikes": 2},
+        {"name": "Blisko", "lat": 51.1101, "lon": 17.03, "bikes": 3, "electric": 1},
+    ])
+    monkeypatch.setattr(bikes, "free_bikes", lambda: [{"lat": 51.1102, "lon": 17.03, "electric": True}])
+    monkeypatch.setattr(gtfs, "all_stops_geo", lambda: PRZYSTANKI)
+    blad, wynik = _narzedzie(klient, "bikes_near", {"place": "51.11,17.03"})
+    assert not blad
+    assert [s["name"] for s in wynik["stations"]] == ["Blisko", "Dalej"]
+    assert wynik["free_bikes"][0]["near_stop"] == "Rynek"
+
+
+def test_cars_near_bez_dostawczakow(klient, monkeypatch):
+    monkeypatch.setattr(traficar, "car_list", lambda: [
+        {"lat": 51.1101, "lon": 17.03, "plate": "VAN1", "van": True},
+        {"lat": 51.1102, "lon": 17.03, "plate": "OSO1", "van": False, "range": 200},
+    ])
+    blad, wynik = _narzedzie(klient, "cars_near", {"place": "51.11,17.03"})
+    assert not blad
+    assert [c["plate"] for c in wynik["cars"]] == ["OSO1"]
+    assert wynik["cars"][0]["range_km"] == 200
+    _, wynik = _narzedzie(klient, "cars_near", {"place": "51.11,17.03", "vans": True})
+    assert [c["plate"] for c in wynik["cars"]] == ["VAN1", "OSO1"]

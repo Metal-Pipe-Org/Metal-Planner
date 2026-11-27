@@ -125,10 +125,17 @@ Od zgłoszenia #364 Polinka nie jest kursem: w wyszukiwaniu jej nie ma, więc ni
   POST z JSON-RPC, odpowiedź to zwykły JSON), mówiony wprost, bez pakietu
   `mcp` (ten chce serwera ASGI), więc chodzi na tych samych workerach co
   reszta. Publiczny i bez tokena, bo pokazuje tylko to, co i tak leży pod
-  `/api/*`. Narzędzia (`plan_trip`, `find_stop`, `departures`, `trip`,
-  `line`) wołają te same funkcje co endpointy i tylko czytają; `_plain`
-  wycina z odpowiedzi geometrię, sekundy i id słupków. Błędna data albo
-  godzina jest odmową, a nie cichym „teraz” jak w `/api/*`.
+  `/api/*`. Narzędzia pokrywają to, co pasażer może zrobić na stronie:
+  wyszukiwanie (`plan_trip`, też z pokładu pojazdu i z ustawieniami spod ⚙),
+  tablice i pełne rozkłady przystanków (`departures`, `stop_schedule`),
+  linie, kursy i pociągi z opóźnieniami (`line`, `trip`, `train`), dane na
+  żywo (`vehicles`, `bikes_near`, `cars_near`) i `find_stop`. Wołają te same
+  funkcje co endpointy i tylko czytają; `_plain` wycina z odpowiedzi
+  geometrię, sekundy i id słupków (narzędzia na żywo oddają położenie, bo
+  ono jest treścią, i najbliższy przystanek obok). Start z pojazdu przyjmuje
+  nazwę następnego przystanku, a słupek wyszukuje sam, w kierunkach linii.
+  Błędna data, godzina czy opcja jest odmową, a nie cichym „teraz” jak
+  w `/api/*`.
 
 ### 3. Frontend — `templates/index.html` + `static/app.js` + `static/style.css`
 

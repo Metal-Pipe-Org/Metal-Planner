@@ -92,10 +92,20 @@ tablicy połączeń dnia trzymanej w pamięci; `routes.py` wystawia API;
 ## Claude i inne klienty MCP
 
 Pod `/mcp` stoi publiczny serwer MCP (bez tokena, tylko odczyt). Daje
-Claude'owi te same dane co strona: propozycje przejazdu z linkiem do mapy
-(`plan_trip`), odjazdy z przystanku (`departures`), kurs (`trip`), trasę
-linii (`line`) i sprawdzenie nazwy przystanku (`find_stop`). Dodanie do
-Claude Code:
+Claude'owi to samo, co pasażer może sprawdzić na stronie:
+
+- `plan_trip` — propozycje przejazdu z linkiem do mapy, też z pokładu
+  pojazdu i z ustawieniami spod ⚙ (tempo marszu, rower, Traficar,
+  „Pokaż więcej”);
+- `departures` i `stop_schedule` — najbliższe odjazdy i pełny rozkład ze
+  słupka na cały dzień;
+- `line`, `trip`, `train` — trasa linii, jeden kurs z godzinami, pociąg po
+  numerze (dziś z opóźnieniami);
+- `vehicles`, `bikes_near`, `cars_near` — pojazdy MPK, rowery WRM i auta
+  Traficara na żywo;
+- `find_stop` — jak wyszukiwarka rozumie nazwę przystanku.
+
+Dodanie do Claude Code:
 
 ```bash
 claude mcp add --transport http metal-planner https://<adres-strony>/mcp
