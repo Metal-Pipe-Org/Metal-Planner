@@ -19,6 +19,7 @@ import pytest
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)
 
@@ -54,8 +55,7 @@ def test_cel_to_zwykly_wezel_z_przyjazdami(install_day):
     """Cel jest węzłem jak każdy inny - z flagą `end` i liniami, którymi mapa
     tu dowozi, każda z godziną przyjazdu kursu z mapy."""
     install_day(_dzien())
-    wynik = planner.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000),
-                              more=3)
+    wynik = flow.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
 
     cel = _wezel(wynik, "CEL")
     assert cel["end"] is True
@@ -70,14 +70,15 @@ def test_cel_to_zwykly_wezel_z_przyjazdami(install_day):
 
 
 def test_cel_idzie_za_mapa(install_day):
-    """Bez „pokaż więcej" mapa nie rysuje 16 - węzeł celu też jej nie zna.
-    7 i wcześniejsza 16 dojeżdżają, tylko nie z tego startu i nie o tej
-    godzinie - nie ma ich nigdy."""
+    """Węzeł celu zna dokładnie te linie, które mapa tu dowozi, z godziną
+    przyjazdu kursu z mapy. 7 i wcześniejsza 16 dojeżdżają, tylko nie z tego
+    startu i nie o tej godzinie - nie ma ich nigdy."""
     install_day(_dzien())
-    wynik = planner.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
+    wynik = flow.plan_flow("START", "CEL", WHEN + datetime.timedelta(seconds=1000))
 
-    assert [(l["num"], l["arrive"]) for l in _wezel(wynik, "CEL")["lines"]] == [("2", 1600)]
-    assert {s["num"] for s in wynik["segments"]} == {"1", "2"}
+    assert [(l["num"], l["arrive"]) for l in _wezel(wynik, "CEL")["lines"]] == [
+        ("16", 1700), ("2", 1600)]
+    assert {s["num"] for s in wynik["segments"]} == {"1", "2", "16"}
 
 
 def _dzien_z_dojsciem():
@@ -99,7 +100,7 @@ def test_wysiadka_przed_dojsciem_ma_kropke(install_day):
     """Na WOJSZYCE da się tylko wysiąść, ale to tu kończy się przejazd
     podróży - przystanek dostaje zwykłą kropkę, nie czerwoną."""
     install_day(_dzien_z_dojsciem())
-    wynik = planner.plan_flow("GRUNWALDZKI", "CEL", WHEN + datetime.timedelta(seconds=900))
+    wynik = flow.plan_flow("GRUNWALDZKI", "CEL", WHEN + datetime.timedelta(seconds=900))
 
     wysiadka = _wezel(wynik, "WOJSZYCE")
     assert "end" not in wysiadka
@@ -118,7 +119,7 @@ def test_cel_z_punktu_bez_wezla(install_day):
     ])
     install_day(day)
     lat, lon = day.stop_coords["WOJSZYCE"]
-    wynik = planner.plan_flow("GRUNWALDZKI", "", WHEN + datetime.timedelta(seconds=900),
+    wynik = flow.plan_flow("GRUNWALDZKI", "", WHEN + datetime.timedelta(seconds=900),
                               end_point=(lat + 0.0004, lon))
 
     assert [(l["num"], l["flow"], l["arrive"]) for l in _wezel(wynik, "WOJSZYCE")["lines"]] \
@@ -259,9 +260,6 @@ def przebieg(request, adres, przegladarka):
     page.goto(adres)
     page.wait_for_selector("#start")
     page.fill("#time", "12:00")
-    # Przy domyślnej gęstości 2 ta trasa nie ma przystanku z samą wysiadką -
-    # przy 2,5 (dawnej domyślnej) ma go: Pl. Orląt Lwowskich.
-    page.evaluate("document.getElementById('density').value = '2.5'")
     _wybierz(page, "#start", TRASA[0])
     _wybierz(page, "#end", TRASA[1])
     if not page.evaluate("document.body.classList.contains('searching')") \

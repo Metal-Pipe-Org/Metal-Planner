@@ -762,8 +762,12 @@
     <label class="dev-check{{ dev('time-show-headline') }} set-row" {{ attrs('time-show-headline') }}>
             <input type="checkbox" id="time-show-headline" checked> {{ name('time-show-headline') }} {{ info('time-show-headline') }}
         </label>
+    {# Przycisk na mapie i wygląd na telefonie przyjdą osobno; na razie tylko tutaj. #}
+    <label class="dev-check{{ dev('scheme-on') }} set-row" {{ attrs('scheme-on') }}>
+            <input type="checkbox" id="scheme-on"> {{ name('scheme-on') }} {{ info('scheme-on') }}
+        </label>
     <label class="dev-check{{ dev('tt-past') }} set-row" {{ attrs('tt-past') }}>
-            <input type="checkbox" id="tt-past" checked> {{ name('tt-past') }} {{ info('tt-past') }}
+            <input type="checkbox" id="tt-past"> {{ name('tt-past') }} {{ info('tt-past') }}
         </label>
     <div class="field{{ dev('cars-horizon') }} set-row" {{ attrs('cars-horizon') }}>
         <label for="cars-horizon">
@@ -837,12 +841,6 @@
             <input type="checkbox" id="via-open"> {{ name('via-open') }} {{ info('via-open') }}
         </label>
 
-    <div class="field{{ dev('density') }} set-row" {{ attrs('density') }}>
-        <label for="density">
-            {{ name('density') }} <output id="density-value">2</output> {{ info('density') }}
-        </label>
-        <input type="range" id="density" min="0.5" max="15" step="0.5" value="2">
-    </div>
     <div class="field{{ dev('car-count') }} set-row" {{ attrs('car-count') }}>
         <label for="car-count">
             {{ name('car-count') }} <output id="car-count-value">3</output> {{ info('car-count') }}
@@ -895,9 +893,6 @@
             <input type="checkbox" id="tip-panel" checked> {{ name('tip-panel') }} {{ info('tip-panel') }}
         </label>
 
-    <label class="dev-check{{ dev('bike-times') }} set-row" {{ attrs('bike-times') }}>
-            <input type="checkbox" id="bike-times"> {{ name('bike-times') }} {{ info('bike-times') }}
-        </label>
     <label class="dev-check{{ dev('bike-rides') }} set-row" {{ attrs('bike-rides') }}>
             <input type="checkbox" id="bike-rides"> {{ name('bike-rides') }} {{ info('bike-rides') }}
         </label>
@@ -915,9 +910,6 @@
     <label class="dev-check{{ dev('debug-why') }} set-row" {{ attrs('debug-why') }}>
             <input type="checkbox" id="debug-why"> {{ name('debug-why') }} {{ info('debug-why') }}
         </label>
-    <label class="dev-check{{ dev('debug-why-seg') }} set-row" {{ attrs('debug-why-seg') }}>
-            <input type="checkbox" id="debug-why-seg"> {{ name('debug-why-seg') }} {{ info('debug-why-seg') }}
-        </label>
     <label class="dev-check{{ dev('vehicles-direction') }} set-row" {{ attrs('vehicles-direction') }}>
             <input type="checkbox" id="vehicles-direction"> {{ name('vehicles-direction') }} {{ info('vehicles-direction') }}
         </label>
@@ -931,6 +923,15 @@
             <option value="type">Według rodzaju</option>
             <option value="line">Każda linia osobno</option>
         </select> {{ info('line-colors') }}
+        </label>
+    <label class="dev-check{{ dev('map-after-search') }} set-row" {{ attrs('map-after-search') }}>
+        {{ name('map-after-search') }}
+        <select id="map-after-search">
+            <option value="auto">Auto</option>
+            <option value="all">Pokaż wszystko</option>
+            <option value="start">Pokaż start</option>
+            <option value="none">Nie ruszaj</option>
+        </select> {{ info('map-after-search') }}
         </label>
 
 {#
@@ -1087,11 +1088,6 @@
         <input type="range" id="onboard-slack" min="0" max="15" step="1" value="3">
     </div>
 
-    {# Nowa mapa rośnie za tym przełącznikiem, stara zostaje domyślna (docs/FLOW_MAP_CONTRACT_V2.md). #}
-    <label class="dev-check{{ dev('new-map') }} set-row" {{ attrs('new-map') }}>
-        <input type="checkbox" id="new-map"> {{ name('new-map') }} {{ info('new-map') }}
-        </label>
-
     <label class="dev-check{{ dev('walking') }} set-row" {{ attrs('walking') }}>
         <input type="checkbox" id="walking" checked> {{ name('walking') }} {{ info('walking') }}
         </label>
@@ -1100,19 +1096,9 @@
         <input type="checkbox" id="headline-map-range"> {{ name('headline-map-range') }} {{ info('headline-map-range') }}
         </label>
 
-    {# Tymczasowo, do porównania układów schematu (#367). #}
-    <label class="dev-check{{ dev('scheme-layout') }} set-row" {{ attrs('scheme-layout') }} id="scheme-layout-row" hidden>
-        {{ name('scheme-layout') }}
-        <select id="scheme-layout">
-            <option value="dagre">dagre (krzywe)</option>
-            <option value="elk">ELK (kąty proste)</option>
-        </select> {{ info('scheme-layout') }}
-        </label>
-
-    {# Demo (#367): ile najszybszych podróży z przejściem pieszo w środku dorzucić do schematu. #}
-    <label class="dev-check{{ dev('scheme-walks-count') }} set-row" {{ attrs('scheme-walks-count') }} id="scheme-walks-count-row" hidden>
-        {{ name('scheme-walks-count') }} <output id="scheme-walks-count-value">2</output>
-        <input type="range" id="scheme-walks-count" min="0" max="20" step="1" value="2"> {{ info('scheme-walks-count') }}
+    {# Przy przejściach i rowerze cała aplikacja pisze odległość; czas tylko na życzenie. #}
+    <label class="dev-check{{ dev('walk-time') }} set-row" {{ attrs('walk-time') }}>
+        <input type="checkbox" id="walk-time"> {{ name('walk-time') }} {{ info('walk-time') }}
         </label>
 
     {# Ukryta funkcja (#379): bez tego drugie ◎ nie przełącza odświeżania, a #locate-peek jest schowany. #}
@@ -1155,9 +1141,8 @@
 <div id="map-dock">
 
     {#
-      Schemat blokowy znalezionych tras obok mapy - eksperyment „nowa mapa”
-      (⚙ → Eksperymenty, patrz renderScheme w app.js). Bez przełącznika
-      zostaje schowany i pusty.
+      Schemat blokowy znalezionych tras obok mapy - ustawienie „Schemat obok
+      mapy” (patrz renderScheme w app.js). Bez niego zostaje schowany i pusty.
     #}
     <div id="scheme-panel" class="scheme-panel" hidden>
         <div class="scheme-head">
@@ -1171,6 +1156,7 @@
         <div id="scheme-viewport" class="scheme-viewport">
             <div id="scheme-canvas"></div>
         </div>
+        <ol id="scheme-moves" class="scheme-moves" hidden></ol>
     </div>
     {# Tablica odjazdów węzła schematu - poza panelem, żeby nie ucinał jej
        brzeg okna z rysunkiem. #}

@@ -149,6 +149,8 @@ CLAUDE.md
 # =========================
 .claude/*
 !.claude/commands/
+# wspolne zasady zespolu; CLAUDE.md zostaje prywatny, a rules Claude Code czyta tak samo
+!.claude/rules/
 /.mcp.json
 
 # Czas budowy obrazu (Dockerfile, #446) - lokalnie go nie ma.

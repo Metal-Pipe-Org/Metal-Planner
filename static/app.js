@@ -307,28 +307,8 @@ const samePlace = (a, b) => isPoint(a) || isPoint(b)
     ? isPoint(a) === isPoint(b) && a.lat === b.lat && a.lon === b.lon
     : a === b;
 
-// Grupa stacji jednego miasta (patrz gtfs._match_city_group) przyjeżdża
-// z serwera jako "WROCŁAW -". Myślnik to konwencja słownika PKP i ZARAZEM
-// kształt, po którym wyszukiwarka rozpoznaje takie zapytanie, więc nazwa nie
-// może zmienić postaci w drodze na serwer - zmieniamy tylko to, co widać:
-// prettyStopName na ekran, rawStopName z powrotem przed wysłaniem.
-//
-// Zawsze PARĄ, nigdy samo prettyStopName: samo ładne wyświetlanie oznacza, że
-// ładna nazwa siedzi w polu formularza, a stamtąd leci prosto do /api/flow -
-// i wraca jako "nie znaleziono przystanku" (błąd zgłoszony na żywo, przez
-// który etykieta wróciła kiedyś do myślnika - patrz docstring
-// gtfs._match_city_group). Stan (`sel`), klucze markerów i zapis ostatniego
-// wyszukiwania zostają przy postaci KANONICZNEJ, z myślnikiem.
-const CITY_GROUP_LABEL = '(dowolna stacja)';
-const prettyStopName = name => typeof name === 'string' && name.trimEnd().endsWith('-')
-    ? `${name.trimEnd().slice(0, -1).trimEnd()} ${CITY_GROUP_LABEL}`
-    : name;
-const rawStopName = name => typeof name === 'string' && name.trimEnd().endsWith(CITY_GROUP_LABEL)
-    ? `${name.trimEnd().slice(0, -CITY_GROUP_LABEL.length).trimEnd()} -`
-    : name;
-
 const displayValue = v => !v ? ''
-    : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : prettyStopName(v);
+    : isPoint(v) ? `(${v.lat.toFixed(4)}, ${v.lon.toFixed(4)})` : v;
 
 function esc(text) {
     const div = document.createElement('div');
@@ -1044,9 +1024,12 @@ function refreshBikeLayer() {
     if (flowBikeLayer) { map.removeLayer(flowBikeLayer); flowBikeLayer = null; }
     if (!bikesOn || plannerSuspended) return;   // patrz refreshCarLayer
     if (flowOnScreen()) {
-        flowBikeLayer = L.layerGroup(flowBikeMarkers(
-            lastFlow.bike_places, lastFlow.bike_places_live)).addTo(map);
-        if (setting('bike-rides')) showAllBikeRides(lastFlow.bike_places);
+        flowBikeLayer = L.layerGroup([
+            ...flowBikeMarkers(lastFlow.bike_places, lastFlow.bike_places_live),
+            ...flowBikeSpotMarkers(lastFlow.bike_spots, lastFlow.bike_places,
+                                   lastFlow.bike_places_live),
+        ]).addTo(map);
+        restBikeRides();
         return;
     }
     loadCityBikes();
@@ -1223,10 +1206,55 @@ function hideCarZone() {
 function carMarker(car, tooltipHtml) {
     const dot = L.circleMarker([car.lat, car.lon], carStyle(car))
         .bindTooltip(tooltipHtml, {direction: 'top', offset: [0, -4], opacity: 1})
-        .on('mouseover', () => showCarZone(car))
-        .on('mouseout', hideCarZone);
+        .on('mouseover', () => showCarOnMap(car, true))
+        .on('mouseout', () => showCarOnMap(car, false));
     dot.tapRank = TAP_RANK.shared;
+    dot.car = car;
     return dot;
+}
+
+/** Auto wskazane na mapie: jego strefa i jazda do niego - a na schemacie
+    jego kropka i ta sama jazda (markSchemeCar), skądkolwiek je wskazano. */
+function showCarOnMap(car, on) {
+    if (on) { showCarZone(car); showCarRide(car); }
+    else { hideCarZone(); hideCarRide(); }
+    markSchemeCar(car, on);
+}
+
+/** To samo z zewnątrz mapy (kropka auta na schemacie): do tego dymek kropki
+    auta na mapie. */
+function pointCar(car, on) {
+    showCarOnMap(car, on);
+    if (!flowCarLayer) return;
+    flowCarLayer.eachLayer(dot => {
+        if (dot.car !== car) return;
+        if (on) dot.openTooltip(); else dot.closeTooltip();
+    });
+}
+
+/** Auto o krótką jazdę od startu (pole `ride`, patrz planner._short_hops):
+    po najechaniu mapa rysuje tę jazdę, bo linii, która do niego wiezie, nie
+    ma wśród narysowanych - nie prowadzi do celu. */
+let carRideLayer = null;
+
+function showCarRide(car) {
+    hideCarRide();
+    if (!car.ride || !car.ride.path || car.ride.path.length < 2) return;
+    const latlngs = car.ride.path.map(p => L.latLng(p));
+    carRideLayer = L.layerGroup([
+        L.polyline(latlngs, {color: '#111', opacity: 0.85, weight: 9,
+                             lineCap: 'round', lineJoin: 'round', interactive: false}),
+        L.polyline(latlngs, {color: lineColor(car.ride.kind, car.ride.num), opacity: 1,
+                             weight: 5, lineCap: 'round', lineJoin: 'round', interactive: false}),
+        L.polyline([latlngs[latlngs.length - 1], L.latLng(car.lat, car.lon)],
+                   {color: WALK_COLOR, weight: 4, opacity: 1, dashArray: '1,7',
+                    lineCap: 'round', interactive: false}),
+    ]).addTo(map);
+}
+
+function hideCarRide() {
+    if (carRideLayer) map.removeLayer(carRideLayer);
+    carRideLayer = null;
 }
 
 /** Jeden przycisk rowerów zamiast dwóch (opcja w „Wyglądzie aplikacji”): ⚡ znika, a 🚲
@@ -1385,7 +1413,7 @@ function offerNearestStop(point) {
     }
     if (!best) return;
     offeredStop = {name: best, point};
-    locateOfferName.textContent = prettyStopName(best);
+    locateOfferName.textContent = best;
     locateOffer.hidden = false;
 }
 
@@ -1654,38 +1682,35 @@ if (navigator.geolocation && navigator.permissions) {
 
 // ---------------------------------------------------- kadrowanie widoku ----
 
-function fitTo(points) {
+function fitTo(points, maxZoom = 16) {
     if (!points.length) return;
     const panelVisible = !document.body.classList.contains('panel-hidden');
     const gutter = 40;
     // maxZoom: krótka trasa nie ma wjeżdżać w widok pojedynczej ulicy.
-    const options = {maxZoom: 16};
+    const options = {maxZoom};
     if (phoneLayout.active()) {
         const inset = phoneLayout.mapInsets();
         options.paddingTopLeft = [gutter, inset.top];
         options.paddingBottomRight = [gutter, inset.bottom];
     } else {
         options.paddingTopLeft = [panelVisible ? sidebar.offsetWidth + gutter : gutter, gutter];
-        // Schemat (eksperyment „nowa mapa”) stoi po prawej - trasa ma się
+        // Schemat (gdy włączony) stoi po prawej - trasa ma się
         // zmieścić obok niego, nie pod nim.
         options.paddingBottomRight = [gutter + schemeInset(), gutter];
     }
     map.fitBounds(L.latLngBounds(points), options);
 }
 
+function placePoints(endpoint) {
+    if (isPoint(endpoint)) return [[endpoint.lat, endpoint.lon]];
+    return (markersByName.get(endpoint) || []).map(m => {
+        const p = m.getLatLng();
+        return [p.lat, p.lng];
+    });
+}
+
 function endpointPoints() {
-    const points = [];
-    for (const endpoint of [sel.start, sel.end]) {
-        if (isPoint(endpoint)) {
-            points.push([endpoint.lat, endpoint.lon]);
-            continue;
-        }
-        for (const m of markersByName.get(endpoint) || []) {
-            const p = m.getLatLng();
-            points.push([p.lat, p.lng]);
-        }
-    }
-    return points;
+    return [sel.start, sel.end].flatMap(placePoints);
 }
 
 // ------------------------------------------------------ mapa przepływów ----
@@ -1789,9 +1814,9 @@ const LEGACY_SETTINGS_KEYS = {
     },
     'metal-planner:dot-prefs': {
         size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past', center: 'dot-center',
-        tipCursor: 'tip-cursor', tipPanel: 'tip-panel', bikeTimes: 'bike-times',
+        tipCursor: 'tip-cursor', tipPanel: 'tip-panel', bikeTimes: 'walk-time',
         bikeRides: 'bike-rides', carTimes: 'car-times', why: 'debug-why',
-        whySeg: 'debug-why-seg', namesZoom: 'names-zoom',
+        namesZoom: 'names-zoom',
     },
     'metal-planner:look-prefs': {
         maxWeight: 'look-weight', dimFactor: 'look-dim', labelStep: 'look-label-step',
@@ -2129,7 +2154,7 @@ function drawFlow(flow, refit) {
     renderTimeHeadline();
     if (selectedJourney !== null) dimFlow(true);
     // Okienko w rogu otwiera się samo przy nowej relacji. Przy przerysowaniu
-    // tej samej (suwaki, „Pokaż więcej", kolejne etapy wyszukiwania) zostaje
+    // tej samej (suwaki, kolejne etapy wyszukiwania) zostaje
     // to, co user w nim zostawił - także zamknięte.
     if (refit || !timetableTarget) seedStartPanel();
     // Nowa mapa = inny zestaw linii, więc i inne pojazdy dotyczą tego, co
@@ -2137,6 +2162,14 @@ function drawFlow(flow, refit) {
     renderVehicles();
     if (!refit) return;
 
+    let framing = setting('map-after-search');
+    if (framing === 'auto') framing = phoneLayout.active() ? 'start' : 'all';
+    if (framing === 'none') return;
+    // Przybliżenie jak po wskazaniu startu ◎ (useMyLocation).
+    if (framing === 'start') {
+        fitTo(placePoints(sel.start), 15);
+        return;
+    }
     const points = flow.segments.flatMap(s => s.path);
     fitTo([...points, ...endpointPoints()]);   // start i cel zawsze w kadrze
 }
@@ -2146,7 +2179,7 @@ function drawFlow(flow, refit) {
 // Jedyna liczba na mapie, której nie trzeba szukać kursorem - i jedyna, która
 // odpowiada na pytanie zadawane najpierw: "ile to w ogóle zajmuje". Podaje
 // dwie granice całego wachlarza: najszybszy dojazd i najpóźniejszy, jaki mapa
-// jeszcze rysuje (czyli skutek progu mapy - patrz showMore).
+// jeszcze rysuje.
 // Najechanie na najszybszy czas pokazuje, KTÓRĄ trasą się go osiąga - obie
 // liczby przychodzą z serwera (best_sec/limit_sec/fastest), razem z gotową
 // geometrią tej trasy. Obie strony paska podają godzinę i czas jazdy w tej
@@ -2185,25 +2218,6 @@ function showFastest() {
 
 function hideFastest() {
     if (fastestLayer) { map.removeLayer(fastestLayer); fastestLayer = null; }
-}
-
-// "Pokaż więcej" tuż za granicą mapy (punkt 2 kontraktu): każde kliknięcie
-// dokłada jedną WYJŚCIOWĄ gęstość - pierwsze do dwukrotności, drugie do
-// trzykrotności, trzecie do czterokrotności. Próg z tego dobiera serwer i to
-// on pilnuje sufitu (MAX_MAP_MORE w plannerze), tutaj liczba służy tylko
-// temu, żeby przycisk zniknął, gdy nie ma już czego dokładać. Dokładka żyje
-// do NASTĘPNEGO wyszukiwania - nowa relacja zaczyna od gęstości z suwaka.
-const MAX_MAP_MORE = 3;
-let mapMore = 0;                   // ile razy kliknięto "pokaż więcej"
-let moreBusy = false;              // klik w locie - drugi klik ma poczekać
-
-/** Gęstsza mapa dorysowuje się na tę, która już jest - bez kadrowania i bez
-    gubienia wybranej trasy (patrz renderPlan). Przycisk kręci się, aż
-    dojdą wszystkie etapy, a bez kółka klik wyglądał na zignorowany. */
-function showMore() {
-    if (moreBusy) return;
-    mapMore += 1;
-    loadPlan('more').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
 /** Plakietki w pasku nad mapa - ta sama regula, co na karcie propozycji
@@ -2272,18 +2286,10 @@ function renderTimeHeadline() {
     // przez escAttr w jednym miejscu, a nie sklejany z esc() po kawałku.
     const item = (cls, tip, html) =>
         `<span class="headline-item${cls}" data-tip="${escAttr(tip)}">${html}</span>`;
-    // Zwykły licznik: trzy kliknięcia i przycisku nie ma. Bez pytania serwera,
-    // czy jest jeszcze co dołożyć (decyzja użytkownika, 28.09) - mapa
-    // z wartości podróży wie to dopiero po szerszym szukaniu.
     // Zanim przyjdzie mapa, pasek zna tylko najszybszą trasę - zakresu mapy
-    // i przycisku jeszcze nie ma.
+    // jeszcze nie ma.
     const mapped = typeof flow.limit_sec === 'number';
     const showMapRange = $('headline-map-range').checked;
-    const more = mapped && flow.more < MAX_MAP_MORE
-        ? '<button type="button" class="headline-more" data-tip="'
-          + escAttr(`Rysuj też gorsze opcje - mapa ${flow.more + 2}× gęstsza niż wyjściowa.`)
-          + '"><span class="spinner" aria-hidden="true"></span>Pokaż więcej</button>'
-        : '';
     // Sama jazda to osobna liczba na życzenie.
     const ride = setting('time-ride') && typeof flow.ride_sec === 'number'
         ? item('', `Sama jazda: ${fmtMins(flow.ride_sec)}, od odjazdu pierwszego pojazdu`
@@ -2327,17 +2333,16 @@ function renderTimeHeadline() {
                                               + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
                            `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
                   : '')
-              + more
               + '</span>'
             : '');
     el.hidden = false;
     const best = el.querySelector('.headline-best');
     best.addEventListener('mouseenter', showFastest);
     best.addEventListener('mouseleave', hideFastest);
+    best.addEventListener('mouseenter', highlightSchemeFastest);
+    best.addEventListener('mouseleave', clearSchemeHighlight);
     best.addEventListener('focus', showFastest);
     best.addEventListener('blur', hideFastest);
-    const moreBtn = el.querySelector('.headline-more');
-    if (moreBtn) moreBtn.addEventListener('click', showMore);
     // Na dotyku nie ma "mouseenter" - to jedyny sposób, żeby zobaczyć trasę
     // najszybszego dojazdu na telefonie. Toggle, nie show: drugie stuknięcie
     // (albo stuknięcie gdzie indziej, które i tak odpala renderTimeHeadline
@@ -2386,18 +2391,14 @@ function hideHeadlineTip() {
     bar.addEventListener('pointerout', event => {
         if (event.pointerType === 'mouse' && itemOf(event)) hideHeadlineTip();
     });
-    // "Pokaż więcej" to przycisk, a nie opis: klik i stuknięcie mają tylko
-    // zagęścić mapę. Kliknięty przycisk dostaje też fokus, więc fokus
-    // z myszy albo palca (bez :focus-visible) nie otwiera jego dymka.
-    const isMore = item => item.classList.contains('headline-more');
     bar.addEventListener('focusin', event => {
         const item = itemOf(event);
-        if (item && !(isMore(item) && !item.matches(':focus-visible'))) showHeadlineTip(item);
+        if (item) showHeadlineTip(item);
     });
     bar.addEventListener('focusout', hideHeadlineTip);
     bar.addEventListener('click', event => {
         const item = itemOf(event);
-        if (item && !isMore(item)) showHeadlineTip(item);
+        if (item) showHeadlineTip(item);
     }, true);
     document.addEventListener('click', event => {
         if (!bar.contains(event.target)) hideHeadlineTip();
@@ -2670,14 +2671,17 @@ function chipTimesAt(at, roster) {
     });
 }
 
-function clusterMarker(at, roster, weight, times) {
+/** Grupka numerów - TA SAMA na mapie i na plakietkach schematu: ten sam
+    wygląd i to samo wskazywanie linii najechaniem na numer. */
+function clusterHtml(roster, times) {
     let index = 0;
     const rows = clusterRows(roster).map(row =>
         '<span class="line-cluster-row">' + row.map(l => {
             const sec = times ? times[index] : null;
             // Slot jest celem myszy (patrz bindCluster) - dzięki temu wskazanie
             // linii działa tak samo, gdy kursor stoi na czasie pod numerem.
-            const html = `<span class="line-chip-slot" data-i="${index++}">`
+            const html = `<span class="line-chip-slot" data-i="${index++}" `
+                + `data-num="${escAttr(l.num)}" data-kind="${escAttr(l.kind)}">`
                 + `<span class="line-chip ${escClass(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
                 + (times
                     ? `<span class="chip-time">${sec === null ? '' : esc(fmtClock(sec))}</span>`
@@ -2686,10 +2690,14 @@ function clusterMarker(at, roster, weight, times) {
             return html;
         }).join('') + '</span>',
     ).join('');
+    return `<span class="line-cluster">${rows}</span>`;
+}
+
+function clusterMarker(at, roster, weight, times) {
     const marker = L.marker(at, {
         icon: L.divIcon({
             className: 'line-cluster-anchor',
-            html: `<span class="line-cluster">${rows}</span>`,
+            html: clusterHtml(roster, times),
             iconSize: null,
         }),
         keyboard: false,
@@ -2839,6 +2847,8 @@ function flowPickHtml(when) {
     const options = flowPick.options;
     const sel = options[flowPick.index];
     if (sel.hit && sel.hit.seg.tip) return segTipHtml(sel.hit.seg.tip);
+    const moveTip = mapMoveTip(sel, when);
+    if (moveTip) return moveTip;
     const mode = MODE_LABEL[sel.kind] || MODE_LABEL.other;
     let html = `<span class="flow-tip-line ${escClass(sel.kind)}"${lineStyle(sel.kind, sel.num)}>${esc(mode)} ${esc(sel.num)}</span>`;
     html += flowTipTimeHtml(when);
@@ -2847,9 +2857,6 @@ function flowPickHtml(when) {
             `<span class="line-chip ${escClass(o.kind)}${i === flowPick.index ? ' picked' : ''}"${lineStyle(o.kind, o.num)}>`
             + `${esc(o.num)}</span>`,
         ).join('') + '</span>';
-    }
-    if (setting('debug-why-seg') && sel.hit && sel.hit.seg.why) {
-        html += segWhyHtml(sel.hit.seg.why);
     }
     return html;
 }
@@ -2871,49 +2878,6 @@ function segTipHtml(tip) {
     ].join('<br>');
 }
 
-/** Debug: dlaczego kawałek jest na mapie z wartości podróży (pole `why`,
-    patrz planner._value_map). Każda podróż, która tędy jedzie, to jeden
-    wiersz: numerki, godziny i słowami, od jakiej tolerancji jest na mapie
-    i czemu tyle - tolerancja to suma dwóch strat w minutach. Pod spodem
-    warianty, które ukryły numerki, i przez co. */
-function segWhyHtml(why) {
-    const span = (from, to) => `${fmtClock(from)} → ${fmtClock(to)}`;
-    let html = '<span class="flow-tip-why">'
-        + `<span class="why-head">Dlaczego tu jest · tolerancja mapy ${why.tolerance} min`
-        + ` · najszybciej w celu ${fmtClock(why.fastest)}</span>`;
-    for (const j of why.journeys) {
-        const reasons = [];
-        if (j.late) reasons.push(`w celu ${j.late} min po najszybszej`);
-        if (j.early) {
-            reasons.push(`wychodzi ${j.early} min wcześniej niż ${esc(j.early_by.lines)} ` +
-                         `(${span(j.early_by.dep, j.early_by.arr)}), która w celu nie jest później`);
-        }
-        html += '<span class="why-journey">'
-            + `<b>${j.lines.map(esc).join(' lub ')}</b> ${span(j.dep, j.arr)}`
-            + ` · ${j.transfers} ` + plural(j.transfers, 'przesiadka', 'przesiadki', 'przesiadek')
-            + '<span class="why-reason">'
-            + (j.entry ? `od ${j.entry} min: ${reasons.join(' + ')}` : 'od razu — najwcześniej w celu')
-            + '</span></span>';
-    }
-    if (why.others) {
-        html += `<span class="why-more">i ${why.others} ` +
-                plural(why.others, 'inna podróż', 'inne podróże', 'innych podróży') +
-                ' tędy, później na mapie</span>';
-    }
-    if (why.hidden.length) {
-        html += '<span class="why-head">Ukryte przez numerki</span>';
-        for (const h of why.hidden) {
-            const same = h.added.length
-                ? `to ${esc(h.by.lines)} z dołożonym ${h.added.map(esc).join(', ')}`
-                : `te same numerki co ${esc(h.by.lines)}`;
-            html += `<span class="why-journey"><b>${esc(h.lines)}</b> ${span(h.dep, h.arr)}`
-                + `<span class="why-reason">${same} (${span(h.by.dep, h.by.arr)})` +
-                  ', a nie jest w niczym lepsza</span></span>';
-        }
-    }
-    return html + '</span>';
-}
-
 /** Godziny w dymku - odpowiedz na "o ktorej tu jestem i o ktorej bede u celu".
     Duza liczba to godzina DOKLADNIE w punkcie pod kursorem (interpolowana,
     patrz timeAtPos). Pod nia przyjazd do celu, gdy jedzie sie dalej stad -
@@ -2924,7 +2888,7 @@ function flowTipTimeHtml(when) {
     let html = '<span class="flow-tip-time">'
         + `<b>${esc(fmtClock(when.now))}</b>`
         + '<span class="flow-tip-what">tu jesteś'
-        + (when.stop ? ` · najbliżej <b>${esc(prettyStopName(when.stop))}</b>` : '')
+        + (when.stop ? ` · najbliżej <b>${esc(when.stop)}</b>` : '')
         + '</span></span>';
     // Bez odczytanego przyjazdu do celu (kawalek bez widocznej kontynuacji)
     // nie pokazujemy NICZEGO o dalszej drodze - zgadnieta godzina lamalaby
@@ -2957,23 +2921,33 @@ function hideTimeDot() {
     nie tylko ten pod kursorem. Najpierw ciemna otoczka pod spodem, potem
     linia w pełnym kryciu - warstwa idzie na wierzch całej mapy, więc wskazana
     linia wychodzi przed wszystkie inne, także jaśniejsze od siebie. */
+/** Styl podświetlonej linii - jeden dla mapy i schematu: ciemna otoczka
+    pod spodem, a na niej linia w pełnym kryciu, obie grubsze od zwykłej. */
+function lineHighlightStyles(kind, num, weight) {
+    return [
+        {color: '#111', opacity: 0.85, weight: weight + HALO_EXTRA_PX,
+         lineCap: 'round', lineJoin: 'round', interactive: false},
+        {color: lineColor(kind, num), opacity: 1,
+         weight: weight + HIGHLIGHT_EXTRA_PX, lineCap: 'round', lineJoin: 'round',
+         interactive: false},
+    ];
+}
+
 function showLineHighlight(num, kind) {
     const key = kind + ' ' + num;
     if (flowHighlightKey === key) return;      // ta sama linia - nie przerysowujemy
     hideLineHighlight();
+    // Wskazana linia jest wskazana wszędzie naraz: na mapie, na schemacie
+    // i w każdej grupce numerów (wypełniony numer).
+    flowHighlightKey = key;
+    markPickedChips(num, kind);
+    schemeLineHighlight(num, kind);
     const parts = flowHits.filter(h => h.seg.num === num && h.seg.kind === kind);
     if (!parts.length) return;
     const color = lineColor(kind, num);
-    const halos = parts.map(h => L.polyline(h.latlngs, {
-        color: '#111', opacity: 0.85, weight: h.weight + HALO_EXTRA_PX,
-        lineCap: 'round', lineJoin: 'round', interactive: false,
-    }));
-    const cores = parts.map(h => L.polyline(h.latlngs, {
-        color, opacity: 1, weight: h.weight + HIGHLIGHT_EXTRA_PX,
-        lineCap: 'round', lineJoin: 'round', interactive: false,
-    }));
+    const halos = parts.map(h => L.polyline(h.latlngs, lineHighlightStyles(kind, num, h.weight)[0]));
+    const cores = parts.map(h => L.polyline(h.latlngs, lineHighlightStyles(kind, num, h.weight)[1]));
     flowHighlight = L.layerGroup([...halos, ...cores]).addTo(map);
-    flowHighlightKey = key;
     // Przystanki tej linii - tylko dopóki jest wskazana (zgłoszenie #252).
     // Na wierzchu podświetlenia, bo ono przykryłoby je tak samo jak linię.
     flowLineStopLayer = L.layerGroup(lineStopsOf(parts.map(h => h.seg))
@@ -2982,10 +2956,26 @@ function showLineHighlight(num, kind) {
 }
 
 function hideLineHighlight() {
+    if (flowHighlightKey) {
+        markPickedChips(null);
+        schemeLineHighlight(null);
+    }
     if (flowHighlight) { map.removeLayer(flowHighlight); flowHighlight = null; }
     if (flowLineStopLayer) { map.removeLayer(flowLineStopLayer); flowLineStopLayer = null; }
     hoveredLineStop = null;
     flowHighlightKey = null;
+}
+
+function markPickedChips(num, kind) {
+    for (const chip of document.querySelectorAll('.line-chip-slot .line-chip.picked')) {
+        chip.classList.remove('picked');
+    }
+    if (num === null) return;
+    for (const slot of document.querySelectorAll('.line-chip-slot')) {
+        if (slot.dataset.num === num && slot.dataset.kind === kind) {
+            slot.querySelector('.line-chip').classList.add('picked');
+        }
+    }
 }
 
 function renderFlowPick() {
@@ -3143,8 +3133,8 @@ function flowStopsOf(flow) {
 function lineStopTipHtml(st) {
     const lines = [...st.lines.values()].sort((a, b) => a.sec - b.sec);
     let html = lines.length === 1 ? `${esc(fmtClock(lines[0].sec))} · ` : '';
-    html += `<b>${esc(prettyStopName(st.name))}</b>`;
-    if (st.pole) html += `<span class="tip-platform">${esc(prettyStopName(st.pole))}</span>`;
+    html += `<b>${esc(st.name)}</b>`;
+    if (st.pole) html += `<span class="tip-platform">${esc(st.pole)}</span>`;
     if (lines.length > 1) {
         html += '<span class="tip-line-times">' + lines.map(l =>
             `<span><span class="badge ${escAttr(l.kind)}"${lineStyle(l.kind, l.num)}>${esc(l.num)}</span>`
@@ -3268,7 +3258,7 @@ function placeStopNames() {
     const taken = [...clusterBoxes];
     const markers = [];
     for (const p of places) {
-        const text = prettyStopName(p.name);
+        const text = p.name;
         const width = nameWidthPx(text);
         const others = places.filter(o => o !== p).flatMap(o => o.dots);
         const box = nameBox(p.anchors, width, [...taken, ...others], p.dots);
@@ -3591,12 +3581,13 @@ function timetableLinesHtml(data, mapSec) {
     for (const d of [...data.departures].sort((a, b) => a.sec - b.sec)) {
         const key = lineKey({kind: d.mode, num: d.num, headsign: d.headsign})
             + '|' + (d.flow || '');
-        if (!groups.has(key)) groups.set(key, {d, secs: []});
+        if (!groups.has(key)) groups.set(key, {d, secs: [], byTime: new Map()});
         const group = groups.get(key);
         group.secs.push(d.sec);
+        group.byTime.set(d.sec, d);
     }
     const rows = [];
-    for (const {d, secs} of groups.values()) {
+    for (const {d, secs, byTime} of groups.values()) {
         const przed = mapSec === undefined ? [] : secs.filter(s => s < mapSec);
         const po = mapSec === undefined ? secs : secs.filter(s => s >= mapSec);
         // Z szarych tylko ostatnia - "uciekło ci o 3 minuty" - bo starsze
@@ -3609,7 +3600,7 @@ function timetableLinesHtml(data, mapSec) {
         const ciete = po.length > miejsce;
         const pokazane = [...szare, ...(ciete ? po.slice(0, miejsce - 1) : po)];
         if (!pokazane.length) continue;
-        rows.push({d, pokazane, ostatni: ciete ? po[po.length - 1] : null,
+        rows.push({d, byTime, pokazane, ostatni: ciete ? po[po.length - 1] : null,
                    zdazy: po.length > 0, first: po.length ? po[0] : pokazane[0]});
     }
     // Linie, na które według mapy już się nie zdąży (same szare godziny), na
@@ -3623,13 +3614,13 @@ function timetableLinesHtml(data, mapSec) {
     // więc jej ostatnia godzina niczego nie znaczy.
     const doKonca = ostatni => ostatni === null ? ''
         : `<span class="tt-until">… ${data.horizon ? 'do ' + esc(fmtClock(ostatni)) : ''}</span>`;
-    const html = list.map(({d, pokazane, ostatni}) =>
+    const html = list.map(({d, byTime, pokazane, ostatni}) =>
         '<li>' + (flows ? flowIcon(d.flow) : '') +
         `<span class="badge ${escClass(d.mode)}"${lineStyle(d.mode, d.num)}>${esc(d.num)}</span>` +
         `<span class="tip-dir">${esc(d.headsign)}${platformHtml(d.platform)}</span>` +
         '<span class="tt-times">' + pokazane.map(s =>
             `<span${mapSec !== undefined && s < mapSec ? ' class="tt-past"' : ''}` +
-            (d.flow === 'end' ? '' : departureAttrs(d, data.stop, s)) + '>' +
+            (d.flow === 'end' ? '' : departureAttrs(byTime.get(s), data.stop, s)) + '>' +
             `${esc(fmtClock(s))}</span>`).join('') + doKonca(ostatni) +
             // Zegar opóźnienia pociągu (#71) - wypełnia go fillBoardDelays.
             (d.trip ? `<span class="tt-live" data-trip="${escAttr(d.trip)}"`
@@ -3750,6 +3741,8 @@ function withLate(data, where) {
         num: l.num,
         mode: l.kind,
         headsign: l.headsign,
+        stop_id: l.stop_id,
+        ...('siechnice_stop' in l ? {siechnice_stop: l.siechnice_stop} : {}),
         flow: flow.get(lineKey(l)),
     })).filter(d => !known.has(key(d)));
     return {...data, departures: [...rows, ...data.departures]};
@@ -4128,8 +4121,8 @@ function flowCarMarkers(cars) {
 function carTooltipHtml(car) {
     return [
         `<b>${carName(car)}</b>`,
-        `Jesteś przy nim ${fmtClock(car.at)} — ${fmtMins(car.walk_sec)} ` +
-        `pieszo z „${esc(car.from)}”`,
+        // Gdzie wysiąść, pokazuje mapa (showCarRide).
+        reachLineHtml(car, 'przy aucie'),
         `Do celu ${fmtDist(car.to_dest_m)} w linii prostej`,
         // Auta i tak zostają na mapie - oddać je na granicy strefy bywa
         // sensowne, byle wiedzieć przed wyruszeniem (zgłoszenie #157).
@@ -4165,7 +4158,7 @@ function whyText(why) {
     wzięcia i za ile. Zdanie pada ZAWSZE, także gdy nie ma nic: brak wiersza
     znaczyłby naraz „nic tu nie ma" i „nie wiadomo", a to dwie różne rzeczy. */
 function ogarniamText(tasks) {
-    if (!tasks || !tasks.length) return 'Ogarniam: nic do wzięcia';
+    if (!tasks || !tasks.length) return '<span class="ogarniam-none">Ogarniam: nic do wzięcia</span>';
     return 'Ogarniam: ' + tasks
         .map(task => `${esc(task.co.toLowerCase())} ${task.ile} zł`)
         .join(' · ');
@@ -4177,6 +4170,18 @@ function fmtDist(metres) {
         : `${(metres / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
+// Stacja ma tylko dwie wielkości (decyzja użytkownika z 2026-11-24): duża
+// kropka tam, gdzie na rower da się liczyć - przez kwadrans nikt nie wybierze
+// wszystkich, a jeden zepsuty nie zostawi z niczym - i mniejsza, ale dalej
+// dobrze widoczna, przy rowerze luzem i stacji z ledwie kilkoma.
+const BIKE_SURE_COUNT = 4;
+const BIKE_BIG_RADIUS = 8;
+const BIKE_SMALL_RADIUS = 5.5;
+
+function bikeRadius(bikes) {
+    return bikes >= BIKE_SURE_COUNT ? BIKE_BIG_RADIUS : BIKE_SMALL_RADIUS;
+}
+
 // Rower miejski na mapie. Pomarańcz jest ten sam, co plakietka etapu
 // rowerowego na wybranej trasie - „to jest rower" ma znaczyć jedno, niezależnie
 // czy patrzy się na kropkę stacji, czy na kreskę przejazdu.
@@ -4184,17 +4189,12 @@ const BIKE_STYLE = {weight: 1, color: '#e65100', fillColor: '#ffb74d',
                     fillOpacity: 0.9};
 // Rower stojący luzem, poza stojakiem: ta sama rodzina koloru, ale pusty
 // środek - to jeden rower, a nie miejsce, w którym stoi ich kilka.
-const BIKE_LOOSE_STYLE = {radius: 4, weight: 2, color: '#e65100',
+const BIKE_LOOSE_STYLE = {radius: BIKE_SMALL_RADIUS, weight: 2, color: '#e65100',
                           fillColor: '#fff', fillOpacity: 1};
 // Pytanie o inny dzień: stacja stoi tam zawsze, ale ile w niej będzie
 // rowerów - nie wiadomo. Szarość mówi to, zanim się przeczyta dymek.
-const BIKE_UNKNOWN_STYLE = {radius: 4, weight: 1.5, color: '#9e9e9e',
+const BIKE_UNKNOWN_STYLE = {radius: BIKE_SMALL_RADIUS, weight: 1.5, color: '#9e9e9e',
                             fillColor: '#fff', fillOpacity: 0.35};
-// Drugi koniec przejazdu. Blada i bez własnego życia: pojawia się razem ze
-// strzałką, pod kursorem, bo opisuje przejazd, a nie miejsce, z którego coś
-// się bierze. Stacja, na której da się WSIĄŚĆ na rower, ma własną kropkę.
-const BIKE_TARGET_STYLE = {radius: 4, weight: 1.5, color: '#e65100',
-                           fillColor: '#ffe0b2', fillOpacity: 0.85};
 // Kreska przejazdu kropkowana tak samo, jak etap rowerowy wybranej trasy.
 const BIKE_RIDE_STYLE = {color: '#e65100', weight: 2, opacity: 0.8,
                          dashArray: '1, 6', interactive: false};
@@ -4215,31 +4215,68 @@ function flowBikeMarkers(places, live) {
             .bindTooltip(bikeTooltipHtml(place, live),
                          {direction: 'top', offset: [0, -4], opacity: 1});
         dot.tapRank = TAP_RANK.shared;
-        dot.on('mouseover', () => showBikeRides(place));
+        dot.on('mouseover', () => {
+            markSchemeBike(place.id, true);
+        });
         dot.on('mouseout', () => {
-            if (!setting('bike-rides')) clearBikeRides();
-            else if (lastFlow) showAllBikeRides(lastFlow.bike_places);
+            markSchemeBike(place.id, false);
+            restBikeRides();
         });
         return dot;
     });
 }
 
+/** Stacje, na których kończą się przejazdy (planner: bike_spots) - kropki
+    jak każda inna stacja, bez kresek. Koniec przejazdu ze schematu ma już
+    swoją kropkę przy kresce. */
+function flowBikeSpotMarkers(spots, places, live) {
+    const drawn = new Set((places || []).flatMap(place => place.rides)
+        .filter(ride => ride.move).map(ride => String(ride.id)));
+    return (spots || []).filter(spot => !drawn.has(String(spot.id))).map(spot => {
+        const dot = L.circleMarker([spot.lat, spot.lon], bikeStyle(spot, live))
+            .bindTooltip(bikeSpotTooltipHtml(spot, live), {direction: 'top', offset: [0, -4], opacity: 1});
+        dot.tapRank = TAP_RANK.shared;
+        dot.on('mouseover', () => markSchemeBike(spot.id, true));
+        dot.on('mouseout', () => markSchemeBike(spot.id, false));
+        return dot;
+    });
+}
+
+function bikeSpotTooltipHtml(spot, live) {
+    return [`<b>${esc(spot.name)}</b>`, bikeCountLine(spot, live)].join('<br>');
+}
+
+/** Przejazdy rowerem, gdy nic nie jest wskazane: stale te, które schemat
+    pokazuje osobno (z kreską i drugim końcem). */
+function restBikeRides() {
+    if (!lastFlow) clearBikeRides();
+    else {
+        showAllBikeRides((lastFlow.bike_places || [])
+            .map(place => ({...place, rides: place.rides.filter(ride => ride.move)})));
+    }
+}
+
 function bikeStyle(place, live) {
     if (!live) return BIKE_UNKNOWN_STYLE;
     if (place.loose) return BIKE_LOOSE_STYLE;
-    // Wielkość niesie liczbę rowerów, więc pełna i pusta stacja różnią się
-    // od siebie bez czytania. Sufit, bo powyżej kilkunastu "więcej" już nic
-    // nie zmienia w decyzji, a kropka zaczyna zasłaniać mapę.
-    return {...BIKE_STYLE, radius: 4 + Math.min(place.bikes, 16) * 0.4};
+    return {...BIKE_STYLE, radius: bikeRadius(place.bikes)};
+}
+
+/** Jak się dostać do auta albo roweru - jedna linijka, ta sama w dymku auta
+    i roweru: jazda pokazaną podróżą i godzina przy nim w jednym zdaniu
+    („Dojazd: [10] z „…” o 19:05, przy aucie 19:12”) albo dojście pieszo. */
+function reachLineHtml(item, near) {
+    return item.ride
+        ? `Dojazd: <span class="badge ${escClass(item.ride.kind)}"${lineStyle(item.ride.kind, item.ride.num)}>${esc(item.ride.num)}</span> ` +
+          `z „${esc(item.ride.from)}” o ${fmtClock(item.ride.dep)}, ${near} ${fmtClock(item.at)}`
+        : `Jesteś przy nim ${fmtClock(item.at)} — ${walkAmount(item.walk_m, item.walk_sec)} ` +
+          `pieszo z „${esc(item.from)}”`;
 }
 
 function bikeTooltipHtml(place, live) {
     const rows = [`<b>${esc(place.name || 'Rower luzem')}</b>`];
-    rows.push(`Jesteś przy nim ${fmtClock(place.at)} — ` +
-              `${fmtMins(place.walk_sec)} pieszo z „${esc(place.from)}”`);
-    rows.push(live ? bikeCountText(place)
-                   : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
-                     'jest z tej chwili, a pytasz o inny dzień');
+    rows.push(reachLineHtml(place, 'przy rowerze'));
+    rows.push(bikeCountLine(place, live));
     if (setting('debug-why') && place.why) {
         // Wybór przechodzi STACJA (punkt 16), więc powód stoi przy niej, a pod
         // nim podróże, które stacja pokazuje - każda ze swoimi trzema liczbami.
@@ -4253,6 +4290,12 @@ function bikeTooltipHtml(place, live) {
         }
     }
     return rows.join('<br>');
+}
+
+function bikeCountLine(place, live) {
+    return live ? bikeCountText(place)
+                : '<b>Nie wiadomo, czy będą tu rowery</b> — liczba rowerów ' +
+                  'jest z tej chwili, a pytasz o inny dzień';
 }
 
 function bikeCountText(place) {
@@ -4306,11 +4349,12 @@ function clearBikeRides() {
 
 function bikeRideLayers(place, labels) {
     const layers = [];
+    const live = !lastFlow || lastFlow.bike_places_live;
     for (const ride of place.rides) {
         layers.push(L.polyline([[place.lat, place.lon], [ride.lat, ride.lon]],
                                BIKE_RIDE_STYLE));
         if (!labels) continue;
-        const target = L.circleMarker([ride.lat, ride.lon], BIKE_TARGET_STYLE)
+        const target = L.circleMarker([ride.lat, ride.lon], bikeStyle(ride, live))
             .bindTooltip(bikeRideTooltipHtml(ride),
                          {direction: 'top', offset: [0, -4], opacity: 1});
         target.tapRank = TAP_RANK.shared;
@@ -4319,7 +4363,7 @@ function bikeRideLayers(place, labels) {
         // dla kursora: leży dokładnie na kropce wyżej, a to ona ma łapać
         // najechanie.
         layers.push(L.circleMarker([ride.lat, ride.lon],
-                                   {...BIKE_TARGET_STYLE, opacity: 0,
+                                   {...bikeStyle(ride, live), opacity: 0,
                                     fillOpacity: 0, interactive: false})
             .bindTooltip(bikeRideLabel(ride),
                          {permanent: true, direction: 'right', offset: [6, 0],
@@ -4328,23 +4372,18 @@ function bikeRideLayers(place, labels) {
     return layers;
 }
 
-/** Etykietka przy drugim końcu. Domyślnie SAMA odległość: godzina przejazdu
-    jest policzona, nie odczytana - wraca przełącznikiem pod zębatką. */
+/** Etykietka przy drugim końcu: odległość, a czas przejazdu (policzony, nie
+    odczytany) tylko pod jednym ustawieniem dla całej aplikacji (walkAmount). */
 function bikeRideLabel(ride) {
-    const parts = [];
-    if (setting('bike-times')) parts.push(fmtClock(ride.at));
-    parts.push(fmtDist(ride.m));
-    return parts.join(' · ');
+    return walkAmount(ride.m, ride.sec);
 }
 
 function bikeRideTooltipHtml(ride) {
     const rows = [`<b>${esc(ride.name)}</b>`];
-    rows.push(setting('bike-times')
-        ? `Stąd ${fmtDist(ride.m)} w linii prostej — ${fmtMins(ride.sec)} ` +
-          `z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`
-        : `Stąd ${fmtDist(ride.m)} w linii prostej`);
-    rows.push(`${ride.bikes} ` + plural(ride.bikes, 'rower', 'rowery', 'rowerów') +
-              ` na miejscu, ${ride.docks} wolnych stojaków`);
+    if (setting('walk-time'))
+        rows.push(`Stąd ${fmtMins(ride.sec)} z wypożyczeniem i oddaniem, jesteś tu ${fmtClock(ride.at)}`);
+    rows.push(bikeCountLine(ride, !lastFlow || lastFlow.bike_places_live));
+    if (ride.arrival) rows.push(`${GOAL_ICON}<b>${esc(fmtClock(ride.arrival))}</b> u celu`);
     return rows.join('<br>');
 }
 
@@ -4694,7 +4733,7 @@ function exitHtml(exit) {
     if (!exit) return '';
     const [co, gdzie] = exitText(exit);
     return `<div class="j-exit"><span class="j-exit-what">${esc(co)}</span>`
-         + `<span class="j-exit-stop">${esc(prettyStopName(gdzie))}</span>`
+         + `<span class="j-exit-stop">${esc(gdzie)}</span>`
          + `<span class="j-exit-time">${esc(exit.time)}</span></div>`;
 }
 
@@ -4950,7 +4989,7 @@ function onboardNoteHtml() {
     return `<p class="onboard-head">`
         + `<span class="badge ${escClass(kurs.mode)}"${lineStyle(kurs.mode, kurs.num)}>${esc(kurs.num)}</span>`
         + `<span>w stronę <b>${esc(kurs.headsign)}</b> — najbliższy przystanek `
-        + `<b>${esc(prettyStopName(kurs.stop_name))}</b> o ${esc(kurs.at)}</span></p>`;
+        + `<b>${esc(kurs.stop_name)}</b> o ${esc(kurs.at)}</span></p>`;
 }
 
 function renderJourneys() {
@@ -5059,7 +5098,7 @@ resultsBox.addEventListener('click', event => {
     event.preventDefault();
     const known = new Set([...markersByName.keys()].map(n => n.toLowerCase()));
     if (!isPoint(sel.start)
-            && !known.has(rawStopName(startInput.value.trim()).toLowerCase())) {
+            && !known.has(startInput.value.trim().toLowerCase())) {
         startInput.value = name;
         sel.start = null;
         updatePointMarker('start', null);
@@ -5216,8 +5255,7 @@ function syncOnboardView() {
     if (zwiniete) { obLineInput.blur(); if (obLineAuto) obLineAuto.close(); }
     if (!kurs) return;
     const kierunek = obDirection();
-    const przystanek = prettyStopName(
-        obStopSelect.options[obStopSelect.selectedIndex].text);
+    const przystanek = obStopSelect.options[obStopSelect.selectedIndex].text;
     obSummary.innerHTML =
         `<span class="badge ${escClass(kurs.mode || 'other')}"${lineStyle(kurs.mode || 'other', kurs.num)}>${esc(kurs.num)}</span>`
         // Przystanek PRZED kierunkiem, choć wybiera się go później: z tej
@@ -5254,7 +5292,7 @@ function hideObWarn() {
 
 function warnOnboardRide(kurs) {
     if (!kurs || !kurs.late_sec) { hideObWarn(); return; }
-    const przystanek = esc(prettyStopName(kurs.stop_name));
+    const przystanek = esc(kurs.stop_name);
     const rozklad = `<b>${esc(kurs.at_sched)}</b>`;
     const ile = `${Math.round(Math.abs(kurs.late_sec) / 60)} min`;
     // Dwie krótkie linijki - fakt i co z nim zrobić - czytane w biegu, nad
@@ -5264,12 +5302,12 @@ function warnOnboardRide(kurs) {
         ? ['🕒', `${esc(kurs.num)} prawdopodobnie spóźniony ~${ile} (rozkład ${rozklad})`,
            '⏩', 'Godziny pojazdu przesunięte',
            `${kurs.num} jedzie prawdopodobnie ok. ${ile} po rozkładzie — według rozkładu był `
-           + `na przystanku ${prettyStopName(kurs.stop_name)} o ${kurs.at_sched}. `
+           + `na przystanku ${kurs.stop_name} o ${kurs.at_sched}. `
            + `Godziny tego pojazdu na mapie są przesunięte o ${ile}.`]
         : ['⚠️', `${esc(kurs.num)} na ${przystanek} dopiero o ${rozklad} (za ${ile})`,
            '🔎', 'Sprawdź linię i przystanek',
            `Najbliższy kurs ${kurs.num} jest według rozkładu na przystanku `
-           + `${prettyStopName(kurs.stop_name)} dopiero o ${kurs.at_sched}, za `
+           + `${kurs.stop_name} dopiero o ${kurs.at_sched}, za `
            + `${ile}. Liczę tak, jakby jechał teraz — sprawdź linię i przystanek.`];
     $('ob-warn-text').innerHTML =
         `<span aria-hidden="true">${ikona}</span> ${fakt}`
@@ -5347,7 +5385,7 @@ function fillStops() {
     const stops = kierunek ? kierunek.stops : [];
     obStopSelect.innerHTML = '<option value="">Przystanek</option>'
         + stops.map(stop =>
-            `<option value="${escAttr(stop.id)}">${esc(prettyStopName(stop.name))}</option>`).join('');
+            `<option value="${escAttr(stop.id)}">${esc(stop.name)}</option>`).join('');
     obStopSelect.disabled = !stops.length;
     hideObWarn();
     syncOnboardView();
@@ -5433,10 +5471,7 @@ function resetResults() {
 function showError(message, suggestions) {
     let html = `<div class="notice error"><p>${esc(message)}</p>`;
     if (suggestions && suggestions.length) {
-        // I napis, i data-name to ETYKIETA (patrz prettyStopName) - klik
-        // wstawia ją wprost do pola, a rawStopName w queryParams zamienia ją
-        // z powrotem przy wysyłaniu.
-        html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(prettyStopName).map(name =>
+        html += '<p>Czy chodziło o:</p><ul>' + suggestions.map(name =>
             `<li><a href="#" data-name="${escAttr(name)}">${esc(name)}</a></li>`
         ).join('') + '</ul>';
     }
@@ -5453,14 +5488,11 @@ function queryParams() {
     const params = new URLSearchParams({
         time: $('time').value,
         date: $('date').value,
-        density: $('density').value,
         cars: $('car-count').value,
         bike_count: $('bike-count').value,
         car_vans: $('car-vans').checked ? '1' : '0',
         car_horizon_h: $('cars-horizon').value,
-        newmap: $('new-map').checked ? '1' : '0',
         walking: $('walking').checked ? '1' : '0',
-        scheme_extra: $('scheme-walks-count').value,
         bike_electric: bikeElectricOn ? '1' : '0',
         bike_regular: bikeRegularOn ? '1' : '0',
         transfer_gain_sec: (Number($('transfer-gain').value) * 60).toFixed(0),
@@ -5472,9 +5504,6 @@ function queryParams() {
     });
     // Wyłączonych propozycji serwer nie składa wcale - patrz routes.api_flow.
     if (!$('routes-on').checked) params.set('routes', '0');
-    // "Pokaż więcej" nad mapą - tylko gdy user je kliknął; bez tego próg
-    // wynika z samej gęstości z suwaka.
-    if (mapMore) params.set('more', mapMore);
     // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
@@ -5502,16 +5531,13 @@ function queryParams() {
         params.set('start_lat', sel.start.lat);
         params.set('start_lon', sel.start.lon);
     } else {
-        // rawStopName, nie surowa wartość pola: w polu stoi ETYKIETA
-        // (patrz prettyStopName), a wyszukiwarka zna grupę stacji tylko
-        // pod jej kanoniczną postacią z myślnikiem.
-        params.set('start', rawStopName(startInput.value));
+        params.set('start', startInput.value);
     }
     if (isPoint(sel.end)) {
         params.set('end_lat', sel.end.lat);
         params.set('end_lon', sel.end.lon);
     } else {
-        params.set('end', rawStopName(endInput.value));
+        params.set('end', endInput.value);
     }
     return params;
 }
@@ -5537,31 +5563,7 @@ function adoptNames(data) {
 
 /** Jedno zapytanie do /api/flow niesie teraz i mapę (segments), i listę
     propozycji (journeys) - to ta sama, współdzielona odpowiedź, więc obie
-    nie mogą już się rozjechać (patrz planner.plan_flow). */
-/** Ostrzeżenie o TRYBIE AWARYJNYM mapy - ten sam wygląd, co pozostałe
-    komunikaty błędów, ale dopisywane NAD listą, nie zamiast niej: w tym
-    trybie jakaś trasa i tak jest pokazana i ma zostać widoczna.
-
-    Kiedy się pojawia: serwer nie zdołał złożyć wachlarza opcji i przysłał
-    samą najszybszą trasę (pole `degraded` w odpowiedzi /api/flow, patrz
-    plan_flow). Bez tego komunikatu rzadka mapa wygląda dokładnie tak samo
-    jak "tędy naprawdę nic nie jedzie" i nie da się tych dwóch rzeczy
-    odróżnić na ekranie.
-
-    Mówi też, CO z tym zrobić. Najczęstsza przyczyna to nie awaria, tylko za
-    wąskie okno na rzadkim kierunku: Bielany Wrocławskie - PKP -> Wojszyce
-    o 13:29 mieści w oknie z suwaków (12 min naddatku) dokładnie jeden kurs,
-    bo następny jedzie pół godziny później - wachlarz nie ma z czego powstać.
-    Poszerzenie zakresu jest wtedy jedynym wyjściem i to ono ma stać
-    w komunikacie, a nie sam fakt porażki. */
-function showDegradedNotice() {
-    resultsBox.insertAdjacentHTML('afterbegin',
-        '<div class="notice error degraded"><p>Tryb awaryjny: w tym oknie '
-        + 'czasowym nie ułożył się wachlarz połączeń — mapa pokazuje samą '
-        + 'najszybszą trasę. Zakres poszerzysz przyciskiem „Pokaż więcej” nad mapą.'
-        + '</p></div>');
-}
-
+    nie mogą już się rozjechać (patrz planner.plan_flow_stages). */
 /** Mapa narysowana, lista obok pusta. To NIE jest błąd i nie ma go udawać:
     czerwona ramka nad kompletem połączeń mówiła "coś się zepsuło", a mapa
     pod nią była w porządku. Do 2026-09-04 kazała w dodatku zawęzić okno
@@ -5578,7 +5580,7 @@ function showWideWindowNotice() {
     w odpowiedzi /api/flow, patrz routes.py) - lista pokazuje same
     bezpośrednie połączenia kolejowe, bez mapy przepływów (nie ma jej z
     czego złożyć: MPK w ogóle nie zna jednego z dwóch miejsc). To nie błąd
-    (styl neutralny, nie czerwony jak showDegradedNotice), tylko wyjaśnienie,
+    (styl neutralny, nie czerwony jak błąd), tylko wyjaśnienie,
     czemu mapa jest pusta, mimo że lista poniżej ma wyniki. */
 function showRailOnlyNotice() {
     resultsBox.insertAdjacentHTML('afterbegin',
@@ -5674,7 +5676,7 @@ function missedTransfer(legs, i, late) {
     ją uruchomić bez sieci (patrz tests/js/harness.js).
 
     Wybrana trasa zostaje wybrana, jeśli nowa lista ją ma (ta sama trasa po
-    „Pokaż więcej", po suwaku) - inaczej przerysowanie zabierałoby ją spod
+    suwaku) - inaczej przerysowanie zabierałoby ją spod
     ręki. */
 function renderPlan(data, refit) {
     adoptNames(data);
@@ -5688,24 +5690,16 @@ function renderPlan(data, refit) {
 
 // ------------------------------------------- schemat obok mapy (#367) --
 //
-// Eksperyment „nowa mapa”: ta sama mapa zdjęta z geografii - te same kropki
-// przesiadek, start na górze, cel na dole, jedna linia to jedna jazda od
-// wsiadania do wysiadania. Graf składa serwer (pole `scheme`, patrz
+// Ta sama mapa zdjęta z geografii (za ustawieniem „Schemat obok mapy”) - te
+// same kropki przesiadek, start na górze, cel na dole, jedna linia to jedna
+// jazda od wsiadania do wysiadania. Graf składa serwer (pole `scheme`, patrz
 // planner._scheme), bo tylko on wie, gdzie podróże z mapy wysiadają i dokąd
-// dochodzą pieszo. Biblioteka ELK liczy tylko położenie pudełek, a kreski
-// i napisy rysujemy sami: linia, która przez węzeł tylko przejeżdża, ma
-// iść przez jego pudełko jedną ciągłą kreską, a to nie jest coś, co układacz
-// strzałek umie narysować. ELK przychodzi z sieci dopiero przy pierwszym
-// schemacie - bez przełącznika strona go w ogóle nie pobiera.
-const ELK_URL = 'https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js';
-const DAGRE_URL = 'https://cdn.jsdelivr.net/npm/@dagrejs/dagre@1.1.4/dist/dagre.min.js';
-let elkReady = null;
-let dagreReady = null;
+// dochodzą pieszo. Układ i kreski liczymy sami (layoutLayers): linia, która
+// przez węzeł tylko przejeżdża, ma iść przez jego pudełko jedną ciągłą kreską.
 let lastSchemeData = null;
 let schemeLast = null;
-let schemeToken = 0;
 let schemeCollapsed = !!uiState.schemeCollapsed;
-// Przybliżenie i przesunięcie rysunku w panelu: rysunek po „Pokaż więcej”
+// Przybliżenie i przesunięcie rysunku w panelu: rysunek
 // bywa kilka razy szerszy niż panel, więc trzeba go dać obejrzeć z bliska.
 const schemeView = {scale: 1, x: 0, y: 0};
 const SCHEME_MIN_SCALE = 0.1;
@@ -5713,36 +5707,10 @@ const SCHEME_MAX_SCALE = 4;
 // Węzeł, którego tablica jest teraz w dymku (patrz showSchemeTip).
 let schemeTipOwner = null;
 
-const SCHEME_TRIALS = 24;     // ile układów dagre sprawdzamy (patrz layoutDagre)
+const SCHEME_TRIALS = 24;     // ile układów sprawdzamy (patrz layoutLayers)
 const SCHEME_BOX_H = 38;
 const SCHEME_LANE = 30;       // odstęp między sąsiednimi liniami przy pudełku
 const SCHEME_MARGIN = 28;
-
-function loadElk() {
-    if (!elkReady) {
-        elkReady = new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = ELK_URL;
-            script.onload = () => resolve(new ELK());
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
-    }
-    return elkReady;
-}
-
-function loadDagre() {
-    if (!dagreReady) {
-        dagreReady = new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = DAGRE_URL;
-            script.onload = () => resolve(dagre);
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
-    }
-    return dagreReady;
-}
 
 let schemeMeasure = null;
 function schemeTextWidth(text) {
@@ -5751,7 +5719,7 @@ function schemeTextWidth(text) {
     return schemeMeasure.measureText(text).width;
 }
 
-const schemeKey = line => `${line.kind}|${line.num}`;
+const schemeKey = line => `${line.kind}|${line.num}|${line.run === undefined ? '' : line.run}`;
 
 /** Jedna kreska na jednym odcinku między dwoma węzłami: wszystkie linie
     jadące tym odcinkiem naraz (tak jak jedna grupka numerków na mapie).
@@ -5761,68 +5729,11 @@ const schemeKey = line => `${line.kind}|${line.num}`;
     węźle wysiadają, odchodzą od kreski krótką odnogą ze strzałką w pudełko
     (`alight`, patrz schemeBranches); strzałką kończy się cały odcinek tylko
     wtedy, gdy nic nie jedzie dalej. */
-/** Linie jadą jedną kreską tylko wtedy, gdy mają ten sam los przy następnym
-    pudełku (jadą dalej tą samą krawędzią albo wysiadają) i to samo
-    pochodzenie przy poprzednim - inaczej wysiadająca 18 i jadąca dalej 145
-    byłyby jedną kreską, która w pudełku się rozdwaja. */
-function schemeSplitEdges(scheme) {
-    const edges = scheme.edges;
-    // Rekord na każdą linię każdego odcinka: jej następnik i poprzednik, czyli
-    // ta sama linia (`chain` po obu stronach węzła) na odcinku za węzłem albo
-    // przed nim.
-    const records = edges.map((edge, e) => edge.lines.map(line => ({e, line, group: ''})));
-    const find = (edge, line, dir) => {
-        const f = edges.findIndex(o => (dir === 'dst' ? o.from === edge.to : o.to === edge.from)
-            && o.lines.some(m => m.chain && schemeKey(m) === schemeKey(line)));
-        return f < 0 ? null : records[f].find(r => schemeKey(r.line) === schemeKey(line));
-    };
-    for (const list of records) {
-        for (const r of list) {
-            r.next = r.line.chain ? find(edges[r.e], r.line, 'dst') : null;
-            r.prev = r.line.chain ? find(edges[r.e], r.line, 'src') : null;
-            r.group = `${r.next ? r.next.e : -1}|${r.prev ? r.prev.e : -1}`;
-        }
-    }
-    // Grupa, której linie jadą dalej w różne grupy (albo skądś zbiegają się
-    // z różnych grup), rozpada się na osobne kreski - inaczej w pudełku
-    // trzeba by ją łączyć bokiem. Wysiadanie i wsiadanie tu nie liczą się:
-    // dla nich jest odnoga. Do skutku, bo rozpad idzie wzdłuż całej jazdy.
-    for (let pass = 0; pass < 24; pass++) {
-        let changed = false;
-        for (const list of records) {
-            const groups = new Map();
-            for (const r of list) {
-                if (!groups.has(r.group)) groups.set(r.group, []);
-                groups.get(r.group).push(r);
-            }
-            for (const [group, members] of groups) {
-                const nexts = [...new Set(members.filter(r => r.next).map(r => `${r.next.e}:${r.next.group}`))];
-                const prevs = [...new Set(members.filter(r => r.prev).map(r => `${r.prev.e}:${r.prev.group}`))];
-                if (nexts.length < 2 && prevs.length < 2) continue;
-                for (const r of members) {
-                    const n = r.next ? `${r.next.e}:${r.next.group}` : nexts[0];
-                    const pv = r.prev ? `${r.prev.e}:${r.prev.group}` : prevs[0];
-                    r.group = `${group}#${nexts.length > 1 ? n : ''}#${prevs.length > 1 ? pv : ''}`;
-                }
-                changed = true;
-            }
-        }
-        if (!changed) break;
-    }
-    const out = [];
-    records.forEach((list, e) => {
-        const groups = new Map();
-        for (const r of list) {
-            if (!groups.has(r.group)) groups.set(r.group, []);
-            groups.get(r.group).push(r.line);
-        }
-        for (const lines of groups.values()) out.push({...edges[e], lines});
-    });
-    return out;
-}
-
 function schemeStrands(scheme) {
-    const strands = schemeSplitEdges(scheme).map(edge => ({
+    // Linie między tymi samymi dwoma pudełkami to jedna kreska, także gdy
+    // jedna z nich w pudełku wysiada, a druga jedzie dalej: pudełka leżą nad
+    // kreskami, więc jadąca dalej po prostu wychodzi z niego dołem.
+    const strands = scheme.edges.map(edge => ({
         from: edge.from, to: edge.to, lines: edge.lines, next: null, prev: null,
         label: edge.lines.map(line => line.num).join(' '),
     }));
@@ -5863,7 +5774,7 @@ function schemeBoxes(scheme, strands, data) {
     for (const node of scheme.nodes) {
         const label = node.role === 'start' ? 'Start: ' + displayValue(data.start)
             : node.role === 'end' ? 'Cel: ' + displayValue(data.end)
-            : prettyStopName(node.place);
+            : node.place;
         // Przejazd przez węzeł zajmuje jedno miejsce na górze i na dole naraz.
         const lanes = strands.filter(s => s.to === node.id && !s.next).length
             + strands.filter(s => s.from === node.id).length;
@@ -5985,7 +5896,9 @@ function planRoutes(boxes, strands, hintX) {
             candidates.sort((p, q) => Math.abs(p - meanS) + Math.abs(p - meanT)
                                     - Math.abs(q - meanS) - Math.abs(q - meanT));
             const fits = x => clear(x - spread, from, to) && clear(x + spread, from, to);
-            base = candidates.find(fits);
+            // Gdy w gęstym rysunku żaden korytarz nie jest wolny, kreska idzie
+            // najbliższym (przez pudełko), a nie znika w NaN.
+            base = candidates.find(fits) ?? candidates[0];
             // Dwie grupy jednym korytarzem nie mogą leżeć na sobie.
             for (const shift of [0, 40, -40, 80, -80]) {
                 if (fits(base + shift) && !taken.some(t => Math.abs(t.x - (base + shift)) < 2 * spread + 10
@@ -6082,7 +5995,7 @@ function schemeCost(boxes, strands) {
     for (const s of strands) {
         add(strandSamples(s, 8), s, [s.from, s.to], 'strand');
         const [x, top] = s.points[s.points.length - 1];
-        if (s.next) add([[x, top], [x, boxes.get(s.to).y + boxes.get(s.to).h]], s, [s.to], 'through');
+        if (s.next) add([[x, top], [x, s.up ? boxes.get(s.to).y : boxes.get(s.to).y + boxes.get(s.to).h]], s, [s.to], 'through');
         for (const merge of s.merges) {
             const target = merge.to.points[0];
             add(strandSamples({curved: true, points: [[x, top], target]}, 8), s, [s.to], 'merge');
@@ -6172,16 +6085,15 @@ function schemeBadges(boxes, strands, branches) {
             || fractions.map(rectAt).find(free) || rectAt(0.5);
         placed.push(spot);
         s.badge = spot;
-        let x = spot.x + PAD;
-        const texts = s.lines.map((line, i) => {
-            const t = `<text class="scheme-num" fill="${lineColor(line.kind, line.num)}" `
-                + `x="${(x + widths[i] / 2).toFixed(1)}" y="${spot.cy.toFixed(1)}">${esc(line.num)}</text>`;
-            x += widths[i] + GAP;
-            return t;
-        }).join('');
-        out += `<g class="scheme-badge" data-lines="${escAttr(s.label)}" data-cx="${spot.cx.toFixed(1)}" `
-            + `data-cy="${spot.cy.toFixed(1)}"><rect x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" `
-            + `width="${w.toFixed(1)}" height="${H}" rx="9"/>${texts}</g>`;
+        // Ta sama grupka numerów co na mapie (clusterHtml), wyśrodkowana na
+        // kresce - ten sam wygląd i to samo wskazywanie numerem.
+        const fw = w + 40, fh = H + 30;
+        out += `<foreignObject class="scheme-badge" data-lines="${escAttr(s.label)}" `
+            + `data-from="${escAttr(s.from || '')}" data-to="${escAttr(s.to || '')}" `
+            + `data-cx="${spot.cx.toFixed(1)}" data-cy="${spot.cy.toFixed(1)}" `
+            + `x="${(spot.cx - fw / 2).toFixed(1)}" y="${(spot.cy - fh / 2).toFixed(1)}" `
+            + `width="${fw.toFixed(1)}" height="${fh}"><div xmlns="http://www.w3.org/1999/xhtml" `
+            + `class="scheme-cluster-anchor">${clusterHtml(s.lines)}</div></foreignObject>`;
     }
     return out;
 }
@@ -6196,34 +6108,16 @@ function schemeBadgeWidth(text) {
     dalej: odchodzi od kreski kawałek nad pudełkiem w bok i kończy się strzałką
     w jego górną krawędź. Ma własną plakietkę z numerami wysiadających. */
 function schemeBranches(boxes, strands) {
-    const out = [];
-    for (const s of strands) {
-        if ((!s.next && !s.merges.length) || !s.alight.length) continue;
-        const box = boxes.get(s.to);
-        const [xt, top] = s.points[s.points.length - 1];
-        const half = (s.alight.reduce((sum, line) => sum + schemeBadgeWidth(line.num) + 4, 0) + 10) / 2;
-        const dx = half + 16;
-        const side = xt + dx <= box.x + box.w - 8 ? xt + dx : xt - dx;
-        const xe = Math.max(box.x + 8, Math.min(box.x + box.w - 8, side));
-        // Odnoga startuje z samej kreski (jej krzywa nie jest nad pudełkiem
-        // pionowa), nie z punktu nad pudełkiem.
-        const samples = strandSamples(s);
-        let start = samples[0];
-        for (let i = samples.length - 1; i >= 0; i--) {
-            if (samples[i][1] <= top - 44) { start = samples[i]; break; }
-        }
-        out.push({lines: s.alight, label: s.alight.map(line => line.num).join(' '), curved: true,
-                  points: [start, [xe, top]], owner: s});
-    }
-    return out;
+    // Odnóg nie ma: linie między tymi samymi pudełkami są jedną kreską, która
+    // wchodzi w pudełko cała, a jadące dalej wychodzą z niego dołem. Osobna
+    // odnoga z drugą grupką numerków powtarzała to samo.
+    return [];
 }
 
 /** Które przejścia pieszo schemat rysuje: te, które wybrał serwer z powodu
-    najszybszej podróży i dojścia (patrz planner._scheme_pairs), i przejścia
-    z `count` kolejnych podróży, które mają przejście w środku. */
+    najszybszej podróży i dojścia (patrz planner._scheme_pairs). */
 function schemeWalksOf(pairs) {
-    const count = Number($('scheme-walks-count').value);
-    return pairs.filter(p => p.why !== 'extra' || p.rank <= count);
+    return pairs.filter(p => p.why !== 'extra');
 }
 
 /** Odległość do napisu: do 10 m poniżej kilometra, do 0,1 km powyżej. */
@@ -6233,80 +6127,46 @@ function fmtWalkDistance(m) {
     return `${(Math.round(m / 100) / 10).toFixed(1).replace('.', ',')} km`;
 }
 
-/** Przejścia pieszo wyglądają inaczej niż linie jazd, żeby się z nimi nie
-    myliły: cienka klamra w osobnym pasie na prawo od wszystkiego (`laneX`
-    to jego początek), więc nie przecina jazd ani nie ściska się między
-    pudełkami. Poziome dojścia do pasa omijają plakietki numerów `badges`;
-    linie jazd mogą przejść nad nimi, bo warstwa leży pod spodem. */
-function schemeWalkLayer(boxes, walks, laneX, badges) {
-    const out = {svg: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
-    const grow = (x, y) => {
-        out.minX = Math.min(out.minX, x); out.maxX = Math.max(out.maxX, x);
-        out.minY = Math.min(out.minY, y); out.maxY = Math.max(out.maxY, y);
-    };
-    const texts = walks.map(pair => `pieszo, ${fmtWalkDistance(pair.m)}`);
-    const widthOf = text => text.length * 5.8 + 14;
-    // Napis stoi na pionowej części klamry, więc pasy są szersze od napisu:
-    // żaden napis nie przykrywa cudzej klamry ani cudzego napisu.
-    const pitch = Math.max(0, ...texts.map(widthOf)) + 12;
-    const placed = [];
-    const pill = (spots, text, x) => {
-        const w = widthOf(text);
-        const free = y => !placed.some(o => Math.abs(o.x - x) < (o.w + w) / 2 + 2 && Math.abs(o.y - y) < 20);
-        const cy = spots.find(free) ?? spots[0];
-        placed.push({x, y: cy, w});
-        grow(x - w / 2, cy - 9); grow(x + w / 2, cy + 9);
-        return `<rect class="scheme-walk-pill" x="${x - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
-            + `<text class="scheme-walk-text" x="${x}" y="${cy}">${text}</text>`;
-    };
-    // Wysokość, na której klamra wychodzi z pudełka: najbliżej środka, byle
-    // poziomy odcinek do pasa nie trafił w plakietkę i nie leżał na odcinku
-    // innej klamry z tego samego pudełka.
-    const used = new Map();
-    const exit = box => {
-        const mid = box.y + box.h / 2, taken = used.get(box) || [];
-        const clear = y => !badges.some(r => r.x < laneX && r.x + r.w > box.x + box.w
-            && y > r.y - 3 && y < r.y + r.h + 3);
-        const offsets = [0, -6, 6, -12, 12, -16, 16];
-        const y = offsets.map(o => mid + o).find(c => clear(c) && !taken.some(t => Math.abs(t - c) < 4))
-            ?? offsets.map(o => mid + o).find(clear) ?? mid;
-        used.set(box, [...taken, y]);
-        return y;
-    };
-    const spans = walks.map((pair, i) => {
-        const a = boxes.get(pair.from), b = boxes.get(pair.to);
-        return {pair, text: texts[i], a, b, length: Math.abs((a.y + a.h / 2) - (b.y + b.h / 2))};
-    });
-    // Krótkie klamry stoją bliżej pudełek; każda następna, która zachodzi
-    // na wcześniejszą, idzie o pas dalej.
-    const lanes = [];
-    for (const span of spans.sort((p, q) => p.length - q.length)) {
-        span.ya = exit(span.a);
-        span.yb = exit(span.b);
-        span.top = Math.min(span.ya, span.yb); span.bottom = Math.max(span.ya, span.yb);
-        let lane = 0;
-        while (lanes.some(o => o.lane === lane && o.top < span.bottom + 16 && span.top < o.bottom + 16)) lane++;
-        span.lane = lane;
-        lanes.push(span);
-    }
-    for (const {pair, text, a, b, ya, yb, top, bottom, lane} of spans) {
-        const ra = a.x + a.w, rb = b.x + b.w, x = laneX + pitch / 2 + lane * pitch;
-        const sy = yb > ya ? 1 : -1, r = Math.min(6, Math.abs(yb - ya) / 2);
-        const d = `M${ra} ${ya}H${x - r}Q${x} ${ya} ${x} ${ya + sy * r}V${yb - sy * r}Q${x} ${yb} ${x - r} ${yb}H${rb}`;
-        grow(x + pitch / 2, ya); grow(x + pitch / 2, yb);
-        // Napis najchętniej w środku pionu, a gdy odcinek jest za krótki -
-        // tuż nad albo pod nim, nie na poziomych dojściach.
-        const mid = (top + bottom) / 2, spots = [mid];
-        for (let k = 1; k * 20 <= (bottom - top) / 2 - 9; k++) spots.push(mid + k * 20, mid - k * 20);
-        const clear = spots.filter(y => Math.abs(y - ya) > 11 && Math.abs(y - yb) > 11);
-        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}"><title>Przejście pieszo, ${fmtWalkDistance(pair.m)}</title>`
-            + `<path d="${d}"/><circle cx="${ra}" cy="${ya}" r="2.5"/><circle cx="${rb}" cy="${yb}" r="2.5"/>`
-            + `${pill([...clear, top - 14, bottom + 14, ...spots], text, x)}</g>`;
+/** Ile przejścia pieszo albo przejazdu rowerem - wszędzie w aplikacji tak
+    samo: odległość, a czas (szacunek z odległości) tylko pod ustawieniem. */
+function walkAmount(m, sec) {
+    return setting('walk-time') || m === undefined ? fmtMins(sec) : fmtWalkDistance(m);
+}
+
+/** Przejście pieszo: przerywana kreska w dół od jednego pudełka do drugiego
+    z małą etykietą minut (czas z odległości w linii prostej, liczy serwer).
+    Przejście dłuższe niż jeden rząd idzie krzywą przez punkty, które układ
+    zostawił wolne od pudełek (`routes`). Leży pod pudełkami i kreskami jazd. */
+function schemeWalkLayer(boxes, walks, routes = new Map()) {
+    const out = {svg: '', paths: [], minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
+    for (const pair of walks) {
+        let a = boxes.get(pair.from), b = boxes.get(pair.to);
+        if (a.y > b.y) [a, b] = [b, a];
+        const points = [[a.x + a.w / 2, a.y + a.h], ...(routes.get(pair) || []), [b.x + b.w / 2, b.y]];
+        const d = points.length > 2 ? curvePath(points) : `M${points[0][0]} ${points[0][1]}L${points[1][0]} ${points[1][1]}`;
+        const [x1, y1] = points[0], [x2, y2] = points[points.length - 1];
+        const bike = pair.why === 'bike';
+        // Odległość, a czas tylko na życzenie (⚙): minuty marszu i jazdy
+        // rowerem to szacunek, odległość - nie.
+        const amount = walkAmount(pair.m, pair.min * 60);
+        const text = bike ? `${BIKE_ICON} ${amount}` : amount;
+        const w = text.length * 5.8 + 14;
+        out.paths.push(strandSamples({curved: points.length > 2, points}, 8));
+        const [cx, cy] = pointAlong(strandSamples({curved: points.length > 2, points}), 0.6);
+        out.minX = Math.min(out.minX, x1, x2, cx - w / 2); out.maxX = Math.max(out.maxX, x1, x2, cx + w / 2);
+        out.minY = Math.min(out.minY, y1); out.maxY = Math.max(out.maxY, y2);
+        out.svg += `<g class="scheme-walk scheme-walk-brace${pair.why === 'extra' ? ' scheme-walk-extra' : ''}`
+            + `${bike ? ' scheme-walk-bike' : ''}" data-walk="${escAttr(`${pair.from}>${pair.to}`)}"`
+            + `${bike ? ` data-station="${escAttr(pair.station_id)}"` : ''}>`
+            + (bike ? '' : `<title>Przejście pieszo, ${walkAmount(pair.m, pair.min * 60)}</title>`)
+            + `<path d="${d}"/>${bike ? `<path class="scheme-hit" d="${d}"/>` : ""}<circle cx="${x1}" cy="${y1}" r="2.5"/><circle cx="${x2}" cy="${y2}" r="2.5"/>`
+            + `<rect class="scheme-walk-pill" x="${cx - w / 2}" y="${cy - 9}" width="${w}" height="18" rx="9"/>`
+            + `<text class="scheme-walk-text" x="${cx}" y="${cy}">${text}</text></g>`;
     }
     return out;
 }
 
-function schemeSvg(boxes, strands, pairs) {
+function schemeSvg(boxes, strands, pairs, routes = new Map(), cars = [], bikePlaces = []) {
     const branches = schemeBranches(boxes, strands);
     const labels = schemeBadges(boxes, strands, branches);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -6322,28 +6182,36 @@ function schemeSvg(boxes, strands, pairs) {
     }
     // Przejścia pieszo leżą pod pudełkami i kreskami jazd, żeby nie zasłaniały
     // linii.
-    const badgeRects = [...strands, ...branches].filter(s => s.badge).map(s => s.badge);
-    const laneX = maxX + 20;
-    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs), laneX, badgeRects);
+    const walkLayer = schemeWalkLayer(boxes, schemeWalksOf(pairs).filter(p => boxes.has(p.from) && boxes.has(p.to)), routes);
     minX = Math.min(minX, walkLayer.minX); maxX = Math.max(maxX, walkLayer.maxX);
     minY = Math.min(minY, walkLayer.minY); maxY = Math.max(maxY, walkLayer.maxY);
+    const carLayer = schemeCarLayer(boxes, strands, branches, cars, walkLayer.paths);
+    minX = Math.min(minX, carLayer.minX); maxX = Math.max(maxX, carLayer.maxX);
+    minY = Math.min(minY, carLayer.minY); maxY = Math.max(maxY, carLayer.maxY);
     const width = maxX - minX + 2 * SCHEME_MARGIN, height = maxY - minY + 2 * SCHEME_MARGIN;
     const colors = new Set();
     const DASH = 9;
     let rects = '', lines = '', names = '';
     for (const [id, b] of boxes) {
-        // Miejsce, w którym mapa urywa linię, ale nie stawia kropki: ramka
-        // kreskowana, bez wypełnienia, z podpowiedzią.
-        const bare = b.node.bare ? ' bare' : '';
-        const title = b.node.bare
-            ? '<title>Tu linia kończy się na mapie, ale mapa nie stawia tu kropki</title>' : '';
-        rects += `<g class="node${bare}" data-node="${id}">${title}<rect class="scheme-box${bare}" `
+        rects += `<g class="node" data-node="${id}"><rect class="scheme-box" `
             + `x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12"/></g>`;
-        names += `<text class="scheme-name${bare}" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+        names += `<text class="scheme-name" x="${b.x + b.w / 2}" y="${b.y + b.h / 2}">${esc(b.label)}</text>`;
+        // Stacje roweru spod tego przystanku (te same co kropki na mapie) - bez
+        // osobnych odnóg, w rogu pudełka; odnogą jest tylko konkretny
+        // przejazd, który zastępuje czekanie albo przesiadkę.
+        const stations = bikePlaces.filter(place => place.box === id);
+        if (stations.length) {
+            const text = `${BIKE_ICON} ${stations.length}`;
+            const w = text.length * 5.8 + 12, x = b.x + b.w - w + 6, y = b.y - 9;
+            names += `<g class="scheme-bike-corner" data-node="${id}" `
+                + `data-stations="${escAttr(stations.map(place => place.id).join(' '))}">`
+                + `<rect x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="16" rx="8"/>`
+                + `<text x="${(x + w / 2).toFixed(1)}" y="${y + 8}">${text}</text></g>`;
+        }
     }
     // Jedna kreska dla grupy linii; z różnych pojazdów jest w paski: po jednej
     // kresce na rodzaj, każda kreskowana tak, że wypełnia przerwy pozostałych.
-    const stroke = (group, label, d, arrow, extra = '') => {
+    const stroke = (group, label, d, arrow, extra = '', from = '', edge = '', to = '') => {
         // Przy kolorze na linię pasek jest na linię, nie na rodzaj.
         const tints = [...new Set([...group].sort((a, b) => a.kind.localeCompare(b.kind))
             .map(line => lineColor(line.kind, line.num)))];
@@ -6355,36 +6223,497 @@ function schemeSvg(boxes, strands, pairs) {
             : `<path class="scheme-line" stroke="${color}" stroke-linejoin="miter" `
               + `stroke-dasharray="${DASH} ${DASH * (tints.length - 1)}" stroke-dashoffset="${-i * DASH}"`
               + `${i === tints.length - 1 ? marker : ''} d="${d}"/>`).join('');
-        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}">${strokes}</g>`;
+        return `<g class="scheme-stroke${extra}" data-lines="${escAttr(label)}" data-from="${escAttr(from)}" data-to="${escAttr(to)}" data-edge="${escAttr(edge)}">`
+            + `${strokes}<path class="scheme-hit" d="${d}"/></g>`;
     };
     const pathOf = (curved, points) => curved ? curvePath(points)
         : points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
     for (const s of strands) {
-        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow);
+        lines += stroke(s.lines, s.label, pathOf(s.curved, s.points), s.arrow, '', s.from, `${s.from}>${s.to}`, s.to);
         if (s.next) {
             // Linie jadące dalej przechodzą przez pudełko jedną prostą kreską.
             const [x, top] = s.points[s.points.length - 1];
             const box = boxes.get(s.to);
             lines += stroke(s.through, s.through.map(line => line.num).join(' '),
-                            `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(box.y + box.h).toFixed(1)}`,
-                            false, ' scheme-through');
+                            `M${x.toFixed(1)} ${top.toFixed(1)}L${x.toFixed(1)} ${(s.up ? box.y : box.y + box.h).toFixed(1)}`,
+                            false, ' scheme-through', s.to, `${s.from}>${s.to}`);
         }
         for (const merge of s.merges) {
             const [x, top] = s.points[s.points.length - 1];
             const [x2, bottom] = merge.to.points[0];
             lines += stroke(merge.lines, merge.lines.map(line => line.num).join(' '),
-                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge');
+                            curvePath([[x, top], [x2, bottom]]), false, ' scheme-through scheme-merge', s.to,
+                            `${s.from}>${s.to}`);
         }
     }
     for (const branch of branches) {
-        lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch');
+        lines += stroke(branch.lines, branch.label, curvePath(branch.points), true, ' scheme-branch',
+                        branch.owner.from, `${branch.owner.from}>${branch.owner.to}`, branch.owner.to);
     }
     const markers = [...colors].map(color => `<marker id="scheme-arrow-${color.slice(1)}" `
         + `viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" `
         + `markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - SCHEME_MARGIN} ${minY - SCHEME_MARGIN} `
         + `${width} ${height}" width="${width}" height="${height}"><defs>${markers}</defs>`
-        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${rects}${lines}${names}${labels}</svg>`;
+        + `<g id="scheme-walk-layer">${walkLayer.svg}</g>${lines}<g id="scheme-pick-layer"></g>${carLayer.svg}${rects}${names}`
+        + `${carLayer.labels}${labels}</svg>`;
+}
+
+const SCHEME_LINE_PX = 3;     // grubość kreski schematu (.scheme-line)
+
+/** Auta z mapy na schemacie: nie kreska do celu (ile potrwa jazda autem, nie
+    wiadomo), tylko kropka auta w jego stylu z mapy (carStyle) na krótkiej,
+    przerywanej odnodze od miejsca, w którym się wysiada - przy pudełku, przy
+    kresce w miejscu mijanego przystanku, albo na końcu krótkiej jazdy linią,
+    której schemat poza tym nie rysuje (planner._car_spots). Przystanku
+    wysiadania nie ma: mówi o nim dymek kropki. */
+function schemeCarLayer(boxes, strands, branches, spots, walkPaths = []) {
+    const out = {svg: '', labels: '', minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity};
+    const cars = new Map(((lastFlow && lastFlow.cars) || []).map(car => [car.plate, car]));
+    const groups = new Map();
+    for (const spot of spots) {
+        if (!cars.has(spot.plate)) continue;
+        const key = spot.hop ? `hop|${spot.node}|${spot.hop.kind}|${spot.hop.num}`
+            : spot.edge ? `edge|${spot.edge.join('>')}|${spot.at}` : `node|${spot.node}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(spot);
+    }
+    const grow = (x, y) => {
+        out.minX = Math.min(out.minX, x - 10); out.maxX = Math.max(out.maxX, x + 10);
+        out.minY = Math.min(out.minY, y - 10); out.maxY = Math.max(out.maxY, y + 10);
+    };
+    // Odnoga i kropki nie mogą zasłaniać grupki numerów (plakietek kresek,
+    // z zapasem na grupkę, która bywa szersza od wyliczonej), cudzych pudełek
+    // ani innych kropek - i nie przecinają bez potrzeby żadnej kreski:
+    // jazdy, przejazdu przez pudełko, łączenia ani przejścia pieszo.
+    const taken = [...strands, ...branches].map(s => s.badge).filter(Boolean)
+        .map(r => ({x: r.x - 8, y: r.y - 6, w: r.w + 16, h: r.h + 12}));
+    const lines = [];
+    for (const s of [...strands, ...branches]) {
+        lines.push({owner: s, points: strandSamples(s, 8)});
+        const [x, top] = s.points[s.points.length - 1];
+        if (s.next) {
+            const box = boxes.get(s.to);
+            lines.push({owner: s, points: [[x, top], [x, s.up ? box.y : box.y + box.h]]});
+        }
+        for (const merge of s.merges || []) {
+            lines.push({owner: s, points: strandSamples({curved: true, points: [[x, top], merge.to.points[0]]}, 8)});
+        }
+    }
+    for (const points of walkPaths) lines.push({owner: null, points});
+    const orient = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+    const crosses = (p1, p2, q1, q2) => orient(p1, p2, q1) * orient(p1, p2, q2) < 0
+        && orient(q1, q2, p1) * orient(q1, q2, p2) < 0;
+    const inRect = (p1, p2, r) => {
+        const x1 = Math.min(p1[0], p2[0]) - 9, x2 = Math.max(p1[0], p2[0]) + 9;
+        const y1 = Math.min(p1[1], p2[1]) - 9, y2 = Math.max(p1[1], p2[1]) + 9;
+        return x1 < r.x + r.w && x2 > r.x && y1 < r.y + r.h && y2 > r.y;
+    };
+    // Ile przeszkód ma droga od kreski (pudełka) do ostatniej kropki: odcinki
+    // `path`, pomijając kreskę `own`, od której odnoga odchodzi, i pudełko
+    // `home`, z którego wychodzi.
+    const near = (p, a, b) => {
+        const dx = b[0] - a[0], dy = b[1] - a[1];
+        const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+        return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+    };
+    const conflicts = (path, own, home) => {
+        let n = 0;
+        // Kropki (co 16 px od końca odnogi) nie leżą na żadnej kresce.
+        const [ox, oy] = path[path.length - 2], [lx] = path[path.length - 1];
+        const step = Math.sign(lx - ox) * 16;
+        for (let x = lx; step && Math.abs(x - ox) >= 21; x -= step) {
+            for (const line of lines) {
+                if (own && line.owner === own) continue;
+                for (let k = 1; k < line.points.length; k++) {
+                    if (near([x, oy], line.points[k - 1], line.points[k]) < 13) { n += 10; break; }
+                }
+            }
+        }
+        for (let i = 1; i < path.length; i++) {
+            const [p1, p2] = [path[i - 1], path[i]];
+            for (const line of lines) {
+                if (own && line.owner === own) continue;
+                for (let k = 1; k < line.points.length; k++) {
+                    if (crosses(p1, p2, line.points[k - 1], line.points[k])) n += 10;
+                }
+            }
+            n += taken.filter(r => inRect(p1, p2, r)).length * 5;
+            n += [...boxes.values()].filter(b => b !== home && inRect(p1, p2, b)).length * 5;
+        }
+        return n;
+    };
+    const reach = (n, side) => side * (22 + (n - 1) * 16);
+    const dots = (x, y, group, side = 1) => {
+        let svg = '';
+        group.forEach((spot, i) => {
+            const style = carStyle(cars.get(spot.plate));
+            const cx = x + side * (22 + i * 16);
+            svg += `<g class="scheme-car" data-plate="${escAttr(spot.plate)}">`
+                + `<circle cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="${style.radius + 1}" `
+                + `fill="${style.fillColor || style.color}" fill-opacity="${style.fillOpacity === undefined ? 1 : style.fillOpacity}" `
+                + `stroke="${style.color}" stroke-width="${style.weight}"/>`
+                + `<circle class="scheme-car-hit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="9"/></g>`;
+            grow(cx, y);
+        });
+        const end = x + reach(group.length, side);
+        taken.push({x: Math.min(x, end) - 9, y: y - 9, w: Math.abs(end - x) + 18, h: 18});
+        return `<path class="scheme-car-stub" d="M${x.toFixed(1)} ${y.toFixed(1)}L${end.toFixed(1)} ${y.toFixed(1)}"/>` + svg;
+    };
+    // Pierwsza droga bez przeszkód z kolejnych prób, a gdy każda jakieś ma -
+    // ta z najmniejszą liczbą.
+    const best = (tries, pathOf, own, home) => {
+        let pick = null, score = Infinity;
+        for (const t of tries) {
+            const n = conflicts(pathOf(t), own, home);
+            if (n < score) { pick = t; score = n; }
+            if (!n) break;
+        }
+        return pick;
+    };
+    for (const group of groups.values()) {
+        const first = group[0];
+        if (first.hop) {
+            const b = boxes.get(first.node);
+            if (!b) continue;
+            // Odnoga wychodzi z dołu albo z boku pudełka tam, gdzie nie ma
+            // innych kresek; najpierw jak dotąd, z prawego dolnego rogu.
+            const tries = [
+                ...[b.w - 14, 14, b.w * 0.75, b.w * 0.25, b.w / 2]
+                    .flatMap(dx => [[b.x + dx, b.y + b.h, 22, 34], [b.x + dx, b.y + b.h, -22, 34]]),
+                [b.x + b.w, b.y + b.h / 2, 30, 18], [b.x, b.y + b.h / 2, -30, 18],
+            ];
+            const pathOf = ([sx, sy, dx, dy]) => [[sx, sy], [sx + dx, sy + dy],
+                                                  [sx + dx + reach(group.length, Math.sign(dx)), sy + dy]];
+            const [sx, sy, dx, dy] = best(tries, pathOf, null, b);
+            const ex = sx + dx, ey = sy + dy;
+            const plates = escAttr(group.map(spot => spot.plate).join(' '));
+            out.svg += `<path class="scheme-line scheme-hop-line" data-plates="${plates}" `
+                + `stroke="${lineColor(first.hop.kind, first.hop.num)}" `
+                + `d="M${sx.toFixed(1)} ${sy.toFixed(1)}L${ex.toFixed(1)} ${ey.toFixed(1)}"/>`
+                + dots(ex, ey, group, Math.sign(dx));
+            // Numer na środku odnogi, jak plakietka na każdej kresce.
+            const mx = (sx + ex) / 2, my = (sy + ey) / 2;
+            out.labels += `<foreignObject class="scheme-hop-badge" data-plates="${plates}" `
+                + `x="${(mx - 30).toFixed(1)}" y="${(my - 15).toFixed(1)}" width="60" height="30">`
+                + `<div xmlns="http://www.w3.org/1999/xhtml" class="scheme-cluster-anchor">`
+                + `${clusterHtml([first.hop])}</div></foreignObject>`;
+            taken.push({x: mx - 20, y: my - 13, w: 40, h: 26});
+            grow(sx, sy); grow(ex, ey); grow(mx - 20, my); grow(mx + 20, my);
+        } else if (first.edge) {
+            const s = strands.find(st => st.from === first.edge[0] && st.to === first.edge[1]);
+            if (!s) continue;
+            const samples = strandSamples(s);
+            // Najpierw miejsce mijanego przystanku, potem coraz dalej od niego,
+            // po obu stronach kreski.
+            const tries = [0, 0.06, -0.06, 0.12, -0.12, 0.18, -0.18, 0.24, -0.24]
+                .map(d => Math.min(0.95, Math.max(0.05, first.at + d)))
+                .flatMap(at => [[at, 1], [at, -1]]);
+            const pathOf = ([at, side]) => {
+                const [x, y] = pointAlong(samples, at);
+                return [[x, y], [x + reach(group.length, side), y]];
+            };
+            const [at, side] = best(tries, pathOf, s, null);
+            const [x, y] = pointAlong(samples, at);
+            out.svg += dots(x, y, group, side);
+            grow(x, y);
+        } else {
+            const b = boxes.get(first.node);
+            if (!b) continue;
+            const tries = [[b.x + b.w, 1], [b.x, -1]];
+            const side = best(tries, ([x, side]) => [[x, b.y + b.h / 2],
+                                                     [x + reach(group.length, side), b.y + b.h / 2]], null, b)[1];
+            out.svg += dots(side > 0 ? b.x + b.w : b.x, b.y + b.h / 2, group, side);
+        }
+    }
+    return out;
+}
+
+/** Auto wskazane (na mapie albo na schemacie): na schemacie jego kropka
+    i jazda do niego - odnoga z numerem albo narysowana linia, którą się do
+    niego dojeżdża (ten sam styl co wskazana linia). */
+function markSchemeCar(car, on) {
+    const canvas = $('scheme-canvas');
+    const layer = canvas && canvas.querySelector('#scheme-pick-layer');
+    if (!layer) return;
+    for (const dot of canvas.querySelectorAll('g.scheme-car')) {
+        dot.classList.toggle('picked', on && dot.dataset.plate === car.plate);
+    }
+    if (!on) {
+        layer.innerHTML = '';
+        markPickedChips(null);
+        return;
+    }
+    if (!car.ride) return;
+    const hop = [...canvas.querySelectorAll('path.scheme-hop-line')]
+        .find(path => path.dataset.plates.split(' ').includes(car.plate));
+    if (hop) {
+        layer.innerHTML = lineHighlightStyles(car.ride.kind, car.ride.num, SCHEME_LINE_PX).map(style =>
+            `<path d="${hop.getAttribute('d')}" fill="none" stroke="${style.color}" `
+            + `stroke-opacity="${style.opacity}" stroke-width="${style.weight}" stroke-linecap="round"/>`).join('');
+    } else {
+        schemeLineHighlight(car.ride.num, car.ride.kind);
+    }
+    markPickedChips(car.ride.num, car.ride.kind);
+}
+
+/** Stacja roweru wskazana na mapie: na schemacie jej przejazd i róg
+    pudełka, w którym stoi. */
+function markSchemeBike(id, on) {
+    const canvas = $('scheme-canvas');
+    if (!canvas) return;
+    for (const element of canvas.querySelectorAll('g.scheme-walk-bike, g.scheme-bike-corner')) {
+        const ids = element.dataset.station ? [element.dataset.station] : element.dataset.stations.split(' ');
+        if (ids.includes(String(id))) element.classList.toggle('picked', on);
+    }
+}
+
+let schemeMarkLayer = null;
+
+/** Róg pudełka ze stacjami roweru wskazany na schemacie: na mapie ten
+    przystanek i te stacje. */
+function markBikeCorner(node, ids, on) {
+    if (schemeMarkLayer) { map.removeLayer(schemeMarkLayer); schemeMarkLayer = null; }
+    if (!on || !lastFlow) return;
+    const layers = [...(lastFlow.bike_places || []), ...(lastFlow.bike_spots || [])]
+        .filter(place => ids.includes(String(place.id)))
+        .map(place => L.circleMarker([place.lat, place.lon],
+                                     {radius: 11, color: '#e65100', weight: 3, fill: false, interactive: false}));
+    const mapNode = node && (lastFlow.nodes || []).find(n => (node.role === 'start' ? n.start : n.place === node.place));
+    if (mapNode) {
+        layers.push(L.circleMarker(nodePoint(mapNode),
+                                   {radius: 11, color: '#111', weight: 3, fill: false, interactive: false}));
+    }
+    schemeMarkLayer = L.layerGroup(layers).addTo(map);
+}
+
+/** Pod schematem nie ma już listy ruchów: godziny są w samym rysunku (patrz
+    bindSchemeLines). */
+let schemeMoves = [];
+function renderSchemeMoves(moves) {
+    schemeMoves = moves;
+    const list = $('scheme-moves');
+    list.hidden = true;
+    list.innerHTML = '';
+}
+
+/** Okienko po najechaniu na linię - JEDNO dla mapy i schematu: (1) linia
+    i godzina odjazdu, (2) godzina u celu. Obie
+    strony różni tylko to, skąd bierze się odjazd (patrz mapMoveTip i
+    schemeMoveTip). Dane to ruchy ze schematu (planner._scheme_moves). */
+const GOAL_ICON =
+    '<svg class="move-tip-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<path d="M3.5 14V2.2M3.5 2.8h8.6l-2 3 2 3H3.5" fill="none" stroke="currentColor"'
+    + ' stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function moveTipHtml(line, depSec, depName, move) {
+    // Pierwszy wiersz to wiersz tablicy odjazdów (patrz timetableLinesHtml):
+    // ta sama plakietka, kierunek i godzina.
+    return '<div class="move-tip">'
+        + '<ul class="tt-rows tt-lines"><li>'
+        + `<span class="badge ${escClass(line.mode)}"${lineStyle(line.mode, line.num)}>${esc(line.num)}</span>`
+        + `<span class="tip-dir">${esc(line.headsign || '')}</span>`
+        + `<span class="tt-times"><span>${esc(depSec === null ? line.dep : fmtClock(depSec))}</span>`
+        + (line.last && depName === line.from ? `<span class="tip-last">ostatni ${esc(line.last)}</span>` : '')
+        + '</span></li></ul>'
+        + `<div class="move-tip-row move-tip-goal">${GOAL_ICON}<b>${esc(move.arrival)}</b> u celu</div>`
+        + '</div>';
+}
+
+/** Mapa: odjazd z przystanku, który leży najbliżej (z tyłu) punktu pod
+    kursorem - poprzedniego realnego przystanku tej linii. */
+function mapMoveTip(sel, when) {
+    if (!when) return null;
+    for (const move of schemeMoves) {
+        for (const line of move.lines) {
+            if (line.num !== sel.num || !line.stops) continue;
+            const last = line.stops[line.stops.length - 1];
+            if (when.now < line.stops[0][1] - 30 || when.now > last[1] + 30) continue;
+            let at = line.stops[0];
+            for (const stop of line.stops) {
+                if (stop !== last && stop[1] <= when.now + 30) at = stop;
+            }
+            return moveTipHtml(line, at[1], at[0], move);
+        }
+    }
+    return null;
+}
+
+/** Schemat: odjazd z przystanku, od którego zaczyna się ten odcinek kreski,
+    kursem, który jedzie tym odcinkiem W TĘ STRONĘ: jego przystanek końca
+    odcinka leży za przystankiem początku (`toPlace` null - odcinek wewnątrz
+    pudełka, 'end' - cel, do którego kurs dojeżdża końcem jazdy). Sam numer
+    i początek nie rozróżniają kierunków tej samej linii. */
+function schemeMoveTip(num, fromPlace, toPlace) {
+    for (const move of schemeMoves) {
+        for (const line of move.lines) {
+            if (line.num !== num || !line.stops) continue;
+            const i = line.stops.findIndex(stop => stop[0] === fromPlace);
+            if (i < 0 || i === line.stops.length - 1) continue;
+            if (toPlace && toPlace !== 'end'
+                && !line.stops.some((stop, j) => j > i && stop[0] === toPlace)) continue;
+            return moveTipHtml(line, line.stops[i][1], fromPlace, move);
+        }
+    }
+    return null;
+}
+
+/** Najechanie na linię (dotknięcie na telefonie) pokazuje okienko ruchu. */
+function bindSchemeLines(canvas) {
+    const placeOf = id => {
+        const box = id && schemeLast && schemeLast.boxes.get(id);
+        return box ? (box.node.role === 'end' ? 'end' : box.node.place) : null;
+    };
+    // Wskazanie linii na schemacie to to samo wskazanie co na mapie
+    // (showLineHighlight) i ten sam dymek (moveTipHtml) w tym samym stylu.
+    const pick = (num, kind, from, to, e) => {
+        showLineHighlight(num, kind);
+        const html = schemeMoveTip(num, placeOf(from), placeOf(to));
+        if (html) showSchemeLineTip(html, e.clientX, e.clientY);
+        else hideSchemeTip();
+    };
+    const unpick = () => {
+        hideSchemeTip();
+        hideLineHighlight();
+    };
+    for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
+        const strand = schemeLast.strands.find(s => `${s.from}>${s.to}` === element.dataset.edge);
+        const nums = element.dataset.lines.split(' ');
+        const line = strand && strand.lines.find(l => nums.includes(l.num));
+        if (!line) continue;
+        const show = e => pick(line.num, line.kind, element.dataset.from, element.dataset.to, e);
+        element.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
+        element.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') unpick(); });
+        element.addEventListener('click', show);
+    }
+    for (const badge of canvas.querySelectorAll('foreignObject.scheme-badge')) {
+        const cluster = badge.querySelector('.line-cluster');
+        const slotPick = e => {
+            const slot = e.target.closest && e.target.closest('.line-chip-slot');
+            if (slot) pick(slot.dataset.num, slot.dataset.kind, badge.dataset.from, badge.dataset.to, e);
+        };
+        cluster.addEventListener('mouseover', slotPick);
+        cluster.addEventListener('click', slotPick);
+        cluster.addEventListener('mouseleave', unpick);
+    }
+    // Auto i rower: ten sam dymek co ich kropka na mapie, a na mapie samo
+    // auto (stacja roweru) wskazane tak, jak przy najechaniu na kropkę.
+    for (const dot of canvas.querySelectorAll('g.scheme-car')) {
+        const car = (lastFlow && lastFlow.cars || []).find(c => c.plate === dot.dataset.plate);
+        if (!car) continue;
+        const show = e => {
+            showSchemeLineTip(carTooltipHtml(car), e.clientX, e.clientY);
+            pointCar(car, true);
+        };
+        dot.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
+        dot.addEventListener('pointerleave', () => { hideSchemeTip(); pointCar(car, false); });
+        dot.addEventListener('click', show);
+    }
+    // Numer na odnodze auta: ta jazda - na mapie i na schemacie - i dymek
+    // auta, które się nią dojeżdża.
+    for (const badge of canvas.querySelectorAll('foreignObject.scheme-hop-badge')) {
+        const car = (lastFlow && lastFlow.cars || []).find(c => c.plate === badge.dataset.plates.split(' ')[0]);
+        if (!car) continue;
+        const show = e => {
+            showSchemeLineTip(carTooltipHtml(car), e.clientX, e.clientY);
+            showCarOnMap(car, true);
+        };
+        const cluster = badge.querySelector('.line-cluster');
+        cluster.addEventListener('mouseover', show);
+        cluster.addEventListener('click', show);
+        cluster.addEventListener('mouseleave', () => { hideSchemeTip(); showCarOnMap(car, false); });
+    }
+    for (const corner of canvas.querySelectorAll('g.scheme-bike-corner')) {
+        const box = schemeLast && schemeLast.boxes.get(corner.dataset.node);
+        const ids = corner.dataset.stations.split(' ');
+        corner.addEventListener('pointerenter', () => markBikeCorner(box && box.node, ids, true));
+        corner.addEventListener('pointerleave', () => markBikeCorner(null, ids, false));
+        corner.addEventListener('click', () => markBikeCorner(box && box.node, ids, true));
+    }
+    for (const walk of canvas.querySelectorAll('g.scheme-walk-bike')) {
+        const place = (lastFlow && lastFlow.bike_places || []).find(p => p.id === walk.dataset.station);
+        if (!place) continue;
+        const show = e => {
+            showSchemeLineTip(bikeTooltipHtml(place, lastFlow.bike_places_live), e.clientX, e.clientY);
+            showBikeRides(place);
+        };
+        walk.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(e); });
+        walk.addEventListener('pointerleave', () => {
+            hideSchemeTip();
+            restBikeRides();
+        });
+        walk.addEventListener('click', show);
+    }
+}
+
+/** Podświetlenie linii na schemacie - ten sam styl co na mapie
+    (lineHighlightStyles), w osobnej warstwie nad kreskami. */
+function schemeLineHighlight(num, kind) {
+    const canvas = $('scheme-canvas');
+    const layer = canvas && canvas.querySelector('#scheme-pick-layer');
+    if (!layer) return;
+    if (num === null) { layer.innerHTML = ''; return; }
+    let out = '';
+    for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
+        if (!element.dataset.lines.split(' ').includes(num)) continue;
+        const d = element.querySelector('.scheme-hit').getAttribute('d');
+        for (const style of lineHighlightStyles(kind, num, SCHEME_LINE_PX)) {
+            out += `<path d="${d}" fill="none" stroke="${style.color}" stroke-opacity="${style.opacity}" `
+                + `stroke-width="${style.weight}" stroke-linecap="round" stroke-linejoin="round"/>`;
+        }
+    }
+    layer.innerHTML = out;
+}
+
+/** Dymek linii, auta albo roweru na schemacie - ten sam wygląd co dymek na
+    mapie (klasy dymka Leafletu), nad kursorem. */
+function showSchemeLineTip(html, x, y) {
+    const tip = $('scheme-tip');
+    schemeTipOwner = null;
+    tip.className = 'scheme-tip scheme-map-tip leaflet-tooltip leaflet-tooltip-top';
+    tip.innerHTML = html;
+    tip.hidden = false;
+    const box = tip.getBoundingClientRect();
+    tip.style.left = `${Math.max(8, Math.min(innerWidth - box.width - 8, x - box.width / 2))}px`;
+    tip.style.top = `${Math.max(8, y - box.height - 12)}px`;
+}
+
+/** Najechanie na najszybszą trasę na pasku podświetla w schemacie CAŁĄ tę
+    podróż: tylko jej odcinki (skąd, dokąd, numer), nie każde wystąpienie
+    numeru linii na innych ruchach i gałęziach. */
+function highlightSchemeFastest() {
+    const canvas = $('scheme-canvas');
+    clearSchemeHighlight();
+    const edges = lastSchemeData && lastSchemeData.scheme && lastSchemeData.scheme.fastest_edges;
+    if (!edges) return;
+    const keys = new Set(edges.map(([from, to, num]) => `${from}>${to}|${num}`));
+    // Przejścia tej podróży: dojście ze startu do pierwszego przystanku, każde
+    // przejście między jazdami i dojście do celu - tak jak kropki na mapie.
+    const nodes = lastSchemeData.scheme.nodes;
+    const start = (nodes.find(n => n.role === 'start') || {}).id;
+    const end = (nodes.find(n => n.role === 'end') || {}).id;
+    const stops = [start, ...edges.flatMap(([from, to]) => [from, to]), end];
+    const walks = new Set();
+    for (let i = 0; i + 1 < stops.length; i += 2) {
+        if (stops[i] !== stops[i + 1]) walks.add(`${stops[i]}>${stops[i + 1]}`);
+    }
+    for (const element of canvas.querySelectorAll('g.scheme-walk')) {
+        if (walks.has(element.dataset.walk)) element.classList.add('scheme-pick');
+    }
+    let any = false;
+    for (const element of canvas.querySelectorAll('g.scheme-stroke')) {
+        if (element.dataset.lines.split(' ').some(num => keys.has(`${element.dataset.edge}|${num}`))) {
+            element.classList.add('scheme-pick');
+            any = true;
+        }
+    }
+    canvas.classList.toggle('has-pick', any);
+}
+
+function clearSchemeHighlight() {
+    const canvas = $('scheme-canvas');
+    canvas.classList.remove('has-pick');
+    for (const element of canvas.querySelectorAll('g.scheme-pick')) element.classList.remove('scheme-pick');
 }
 
 /** Schemat do panelu obok mapy - albo panel schowany, gdy przełącznik jest
@@ -6392,80 +6721,40 @@ function schemeSvg(boxes, strands, pairs) {
 function renderScheme(data) {
     lastSchemeData = data;
     const panel = $('scheme-panel');
-    const mine = ++schemeToken;
     hideSchemeTip();
-    if (!data || !data.scheme || !$('new-map').checked) {
+    if (!data || !data.scheme || !setting('scheme-on')) {
         panel.hidden = true;
         $('scheme-canvas').innerHTML = '';
+        $('scheme-moves').innerHTML = '';
         return;
     }
     const scheme = data.scheme;
+    renderSchemeMoves(scheme.moves || []);
     const strands = schemeStrands(scheme);
     const boxes = schemeBoxes(scheme, strands, data);
-    // Węzły bez strzałki jazdy między sobą (przejścia piesze i gałęzie bez nich) układają się w tej
-    // kolejności dzięki dodatkowym, niewidocznym krawędziom.
-    const hidden = (scheme.order || []).map(([from, to]) => ({from, to}));
-    const graph = {
-        id: 'root',
-        layoutOptions: {
-            'elk.algorithm': 'layered',
-            'elk.direction': 'DOWN',
-            'elk.edgeRouting': 'POLYLINE',
-            'elk.spacing.nodeNode': '56',
-            'elk.layered.spacing.nodeNodeBetweenLayers': '110',
-            'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-        },
-        children: [...boxes].map(([id, b]) => ({id, width: b.w, height: b.h})),
-        edges: [...scheme.edges, ...hidden].map((e, i) => ({
-            id: `e${i}`, sources: [e.from], targets: [e.to],
-        })),
-    };
-    const finish = (boxes, strands) => {
-        schemeLast = {boxes, strands};
+    const finish = (boxes, strands, routes = new Map()) => {
+        schemeLast = {boxes, strands, scheme, routes};
         window.schemeLast = schemeLast;
         const canvas = $('scheme-canvas');
-        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs);
+        canvas.innerHTML = schemeSvg(boxes, strands, scheme.pairs, routes, scheme.cars || [],
+                                     [...(data.bike_places || []), ...(data.bike_spots || [])]);
         panel.hidden = false;
         setSchemeCollapsed(schemeCollapsed);
         bindSchemeNodes(canvas, data);
+        bindSchemeLines(canvas);
         fitScheme();
     };
-    if ($('scheme-layout').value === 'dagre') {
-        loadDagre().then(lib => {
-            if (mine !== schemeToken) return;
-            let best = null;
-            for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
-                const trialStrands = schemeStrands(scheme);
-                const trialBoxes = schemeBoxes(scheme, trialStrands, data);
-                layoutDagre(lib, scheme, trialBoxes, trialStrands, seed);
-                const cost = schemeCost(trialBoxes, trialStrands).total;
-                if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost};
-                if (!cost) break;
-            }
-            finish(best.boxes, best.strands);
-        });
-        return;
+    const walkPairs = schemeWalksOf(scheme.pairs).filter(p => boxes.has(p.from) && boxes.has(p.to));
+    let best = null;
+    for (let seed = 0; seed < SCHEME_TRIALS; seed++) {
+        const trialStrands = schemeStrands(scheme);
+        const trialBoxes = schemeBoxes(scheme, trialStrands, data);
+        const routes = layoutLayers(scheme, trialBoxes, trialStrands, walkPairs, seed);
+        const cost = schemeCost(trialBoxes, trialStrands).total;
+        if (!best || cost < best.cost) best = {boxes: trialBoxes, strands: trialStrands, cost, routes};
+        if (!cost) break;
     }
-    loadElk()
-        .then(elk => elk.layout(graph))
-        .then(laid => {
-            if (mine !== schemeToken) return;
-            for (const child of laid.children) {
-                // Całkowite współrzędne pudełek: kreski kończą się dokładnie na ich krawędziach.
-                Object.assign(boxes.get(child.id), {x: Math.round(child.x), y: Math.round(child.y)});
-            }
-            // Zakręty, którymi ELK obszedł pudełka długiej krawędzi, to
-            // gotowe korytarze wolne od pudełek.
-            const hintX = new Map();
-            for (const s of strands) {
-                const routed = (laid.edges || []).find(e => e.sources[0] === s.from && e.targets[0] === s.to);
-                const bends = routed && routed.sections && routed.sections[0].bendPoints;
-                if (bends) hintX.set(s, bends.map(p => p.x));
-            }
-            assignPorts(boxes, strands);
-            schemeRoutes(boxes, strands, hintX);
-            finish(boxes, strands);
-        });
+    finish(best.boxes, best.strands, best.routes);
 }
 
 /** Kreski tych samych dwóch węzłów, które nie mają nic do powiedzenia po
@@ -6479,7 +6768,7 @@ function schemeMergeSiblings(strands) {
         groups.get(key).push(s);
     }
     for (const group of groups.values()) {
-        if (group.length < 2 || group.some(s => s.points.length !== 2 || s.next || s.merges.length)) continue;
+        if (group.length < 2 || group.some(s => s.up || s.points.length !== 2 || s.next || s.merges.length)) continue;
         const xt = group[0].points[1][0], y1 = group[0].points[1][1];
         const top = Math.max(...group.map(s => s.points[0][1]));
         const ym = top + 0.55 * (y1 - top);
@@ -6496,52 +6785,192 @@ function schemeMergeSiblings(strands) {
     }
 }
 
-/** Układ dagre (ten sam, którego używa Mermaid) ze zwartymi odstępami,
-    a kreski jako gładkie krzywe: każdy odcinek wychodzi z pudełka i wchodzi
-    do następnego pionowo, więc kreska przejeżdżająca przez pudełko idzie przez
-    nie prosto. Pośrednie punkty dagre długiej krawędzi to punkty, przez
-    które krzywa ma przejść, żeby ominąć pudełka warstw pomiędzy. */
-function layoutDagre(lib, scheme, boxes, strands, seed = 0) {
-    const g = new lib.graphlib.Graph();
-    g.setGraph({rankdir: 'TB', nodesep: 40,
-                ranksep: 100, marginx: 0, marginy: 0});
-    g.setDefaultEdgeLabel(() => ({}));
-    // Kolejność wstawiania wpływa na to, w którym lokalnym optimum utknie
-    // heurystyka dagre; renderScheme próbuje kilku i wybiera najmniej
-    // przecięć kresek, które naprawdę rysujemy.
-    let state = seed * 2654435761 + 1;
-    const shuffled = list => {
-        if (!seed) return list;
-        const out = [...list];
-        for (let i = out.length - 1; i > 0; i--) {
-            state = (state * 1664525 + 1013904223) >>> 0;
-            const j = state % (i + 1);
-            [out[i], out[j]] = [out[j], out[i]];
-        }
-        return out;
+/** Układ warstwowy schematu: start sam w pierwszym rzędzie, cel sam w ostatnim,
+    przepływ tylko z góry w dół. Rząd węzła to najdłuższa droga do niego
+    (jazdą albo dojściem), więc kolejne rzędy to kolejne przesiadki; kolejność
+    w rzędzie dobiera barycentrum (kilka przebiegów góra-dół i dół-góra), z tym,
+    że kreska dłuższa niż jeden rząd ma w każdym rzędzie pośrednim punkt
+    przejścia, który też się układa (i omija pudełka). Zwraca trasy przejść
+    pieszych dłuższych niż jeden rząd (para -> punkty pośrednie). */
+function layoutLayers(scheme, boxes, strands, walkPairs, seed = 0) {
+    let rng = seed * 2654435761 + 1;
+    const random = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 4294967296; };
+    const startId = [...boxes.values()].find(b => b.node.role === 'start').node.id;
+    const endId = [...boxes.values()].find(b => b.node.role === 'end').node.id;
+    const links = new Map();
+    const link = (from, to) => {
+        if (from === to || from === endId || to === startId || !boxes.has(from) || !boxes.has(to)) return;
+        const key = `${from}>${to}`;
+        if (!links.has(key)) links.set(key, {from, to});
     };
-    for (const [id, b] of shuffled([...boxes])) g.setNode(id, {width: b.w, height: b.h});
-    for (const [from, to] of shuffled([...(scheme.order || []),
-                                       ...strands.map(s => [s.from, s.to])])) g.setEdge(from, to);
-    lib.layout(g);
-    for (const [id, b] of boxes) {
-        const node = g.node(id);
-        b.x = Math.round(node.x - b.w / 2);
-        b.y = Math.round(node.y - b.h / 2);
+    for (const s of strands) link(s.from, s.to);
+    for (const [from, to] of scheme.order || []) link(from, to);
+    for (const pair of walkPairs) {
+        if (pair.to === startId || pair.from === endId) link(pair.to, pair.from);
+        else link(pair.from, pair.to);
     }
+    // Rzędy: najdłuższa droga od startu, krawędzie zawracające (cykl) pomijamy.
+    const ids = [...boxes.keys()];
+    const out = new Map(ids.map(id => [id, []]));
+    for (const l of links.values()) out.get(l.from).push(l);
+    const rank = new Map(), seen = new Map(), topo = [];
+    const visit = id => {
+        seen.set(id, 1);
+        const outs = out.get(id);
+        if (seed) outs.sort(() => random() - 0.5);
+        for (const l of outs) {
+            if (seen.get(l.to) === 1) l.back = true;
+            else if (!seen.has(l.to)) visit(l.to);
+        }
+        seen.set(id, 2);
+        topo.push(id);
+    };
+    for (const id of [startId, ...ids]) if (!seen.has(id)) visit(id);
+    for (const id of ids) rank.set(id, id === startId ? 0 : 1);
+    for (const id of topo.reverse()) {
+        for (const l of out.get(id)) {
+            if (!l.back && l.to !== endId) rank.set(l.to, Math.max(rank.get(l.to), rank.get(id) + 1));
+        }
+    }
+    let last = 0;
+    for (const id of ids) if (id !== endId) last = Math.max(last, rank.get(id));
+    rank.set(endId, last + 1);
+    // Warstwy z punktami przejścia dla kresek dłuższych niż rząd.
+    const layers = Array.from({length: last + 2}, () => []);
+    const items = new Map();
+    for (const id of ids) {
+        const item = {id, w: boxes.get(id).w, up: [], down: []};
+        items.set(id, item);
+        layers[rank.get(id)].push(item);
+    }
+    const chains = new Map();
+    const segments = [];
+    for (const l of links.values()) {
+        const from = rank.get(l.from), to = rank.get(l.to);
+        if (to <= from) continue;
+        const chain = [items.get(l.from)];
+        for (let r = from + 1; r < to; r++) {
+            const dummy = {id: null, w: 22, up: [], down: []};
+            layers[r].push(dummy);
+            chain.push(dummy);
+        }
+        chain.push(items.get(l.to));
+        chains.set(`${l.from}>${l.to}`, chain);
+        chain.slice(1).forEach((item, i) => {
+            segments.push([chain[i], item]);
+            chain[i].down.push(item);
+            item.up.push(chain[i]);
+        });
+    }
+    if (seed) layers.forEach(layer => layer.sort(() => random() - 0.5));
+    const crossings = () => {
+        let n = 0;
+        for (let r = 0; r + 1 < layers.length; r++) {
+            const idx = new Map();
+            layers[r].forEach((item, i) => idx.set(item, i));
+            layers[r + 1].forEach((item, i) => idx.set(item, i));
+            const segs = segments.filter(([a]) => idx.has(a) && layers[r].includes(a));
+            for (let i = 0; i < segs.length; i++) {
+                for (let j = i + 1; j < segs.length; j++) {
+                    const d = (idx.get(segs[i][0]) - idx.get(segs[j][0])) * (idx.get(segs[i][1]) - idx.get(segs[j][1]));
+                    if (d < 0) n++;
+                }
+            }
+        }
+        return n;
+    };
+    const sweep = (r, side) => {
+        const layer = layers[r];
+        const pos = new Map();
+        layers[r + (side === 'up' ? -1 : 1)].forEach((item, i) => pos.set(item, i));
+        const key = new Map(layer.map((item, i) => {
+            const near = item[side === 'up' ? 'up' : 'down'];
+            return [item, near.length ? near.reduce((sum, o) => sum + pos.get(o), 0) / near.length : i];
+        }));
+        layer.sort((a, b) => key.get(a) - key.get(b));
+    };
+    let bestOrder = layers.map(layer => [...layer]), best = crossings();
+    for (let pass = 0; pass < 12 && best; pass++) {
+        if (pass % 2 === 0) for (let r = 1; r < layers.length; r++) sweep(r, 'up');
+        else for (let r = layers.length - 2; r >= 0; r--) sweep(r, 'down');
+        const now = crossings();
+        if (now < best) { best = now; bestOrder = layers.map(layer => [...layer]); }
+    }
+    bestOrder.forEach((layer, r) => { layers[r] = layer; });
+    // Położenie w poziomie: kolejność zachowana, stały odstęp, środek jak
+    // najbliżej środków sąsiadów (regresja izotoniczna po odjęciu odstępów).
+    const GAP = 34;
+    const cx = new Map();
+    layers.forEach(layer => {
+        let x = 0;
+        for (const item of layer) { cx.set(item, x + item.w / 2); x += item.w + GAP; }
+    });
+    const settle = (layer, want) => {
+        const offsets = [];
+        let at = 0;
+        for (const item of layer) { offsets.push(at); at += item.w + GAP; }
+        const q = layer.map((item, i) => want(item) - item.w / 2 - offsets[i]);
+        const blocks = [];
+        for (const value of q) {
+            blocks.push({sum: value, n: 1});
+            while (blocks.length > 1) {
+                const tail = blocks[blocks.length - 1], prev = blocks[blocks.length - 2];
+                if (tail.sum / tail.n >= prev.sum / prev.n) break;
+                blocks.splice(-2, 2, {sum: prev.sum + tail.sum, n: prev.n + tail.n});
+            }
+        }
+        const fit = blocks.flatMap(block => Array(block.n).fill(block.sum / block.n));
+        layer.forEach((item, i) => cx.set(item, fit[i] + offsets[i] + item.w / 2));
+    };
+    const mean = (list, fallback) => list.length ? list.reduce((sum, o) => sum + cx.get(o), 0) / list.length : fallback;
+    for (let pass = 0; pass < 16; pass++) {
+        const dir = pass % 4;
+        const order = dir < 2 ? layers.map((_, r) => r) : layers.map((_, r) => layers.length - 1 - r);
+        for (const r of order) {
+            settle(layers[r], item => {
+                const here = cx.get(item);
+                if (dir === 0 || dir === 2) return item.up.length ? mean(item.up, here) : mean(item.down, here);
+                return item.down.length ? mean(item.down, here) : mean(item.up, here);
+            });
+        }
+    }
+    // Start i cel stoją na środku reszty rysunku.
+    const inner = [...cx].filter(([item]) => item.id !== startId && item.id !== endId);
+    const lo = Math.min(...inner.map(([item, x]) => x - item.w / 2));
+    const hi = Math.max(...inner.map(([item, x]) => x + item.w / 2));
+    cx.set(items.get(startId), (lo + hi) / 2);
+    cx.set(items.get(endId), (lo + hi) / 2);
+    const ROW = SCHEME_BOX_H + 100;
+    for (const [id, box] of boxes) {
+        box.x = Math.round(cx.get(items.get(id)) - box.w / 2 - lo);
+        box.y = rank.get(id) * ROW;
+    }
+    const rowMid = r => r * ROW + SCHEME_BOX_H / 2;
+    const viaOf = key => {
+        const chain = chains.get(key) || [];
+        return chain.slice(1, -1).map((item, i) => [Math.round(cx.get(item) - lo), rowMid(rank.get(chain[0].id) + 1 + i)]);
+    };
     assignPorts(boxes, strands);
-    for (let sweep = 0; sweep < 3; sweep++) assignPorts(boxes, strands, true);
-    const {layerOf} = schemeLayers(boxes);
+    for (let pass = 0; pass < 3; pass++) assignPorts(boxes, strands, true);
     for (const s of strands) {
         const src = boxes.get(s.from), dst = boxes.get(s.to);
-        const points = g.edge(s.from, s.to).points || [];
-        const long = layerOf.get(s.to) - layerOf.get(s.from) > 1;
-        s.points = [[s.xs, src.y + src.h],
-                    ...(long ? points.slice(1, -1).map(p => [p.x, p.y]) : []),
-                    [s.xt, dst.y]];
+        // Kreska w górę (linia jedzie w stronę przeciwną do przepływu rysunku,
+        // np. ta sama linia w obu kierunkach między dwoma przystankami)
+        // zaczyna się na górnej krawędzi swojego pudełka i kończy na dolnej
+        // krawędzi pudełka celu: obie końcówki leżą na pudełkach.
+        s.up = rank.get(s.from) >= rank.get(s.to);
+        s.points = s.up ? [[s.xs, src.y], [s.xt, dst.y + dst.h]]
+                        : [[s.xs, src.y + src.h], ...viaOf(`${s.from}>${s.to}`), [s.xt, dst.y]];
         s.curved = true;
     }
     schemeMergeSiblings(strands);
+    const routes = new Map();
+    for (const pair of walkPairs) {
+        const [a, b] = rank.get(pair.from) <= rank.get(pair.to) ? [pair.from, pair.to] : [pair.to, pair.from];
+        const via = viaOf(`${a}>${b}`);
+        if (via.length) routes.set(pair, via);
+    }
+    return routes;
 }
 
 function setSchemeCollapsed(collapsed) {
@@ -6564,7 +6993,7 @@ setSchemeCollapsed(schemeCollapsed);
     brzegu. Liczona z reguły, a nie z panelu, bo przy pierwszym wyszukaniu
     mapa kadruje się, zanim schemat zdąży się pokazać. */
 function schemeInset() {
-    if (!$('new-map').checked || $('scheme-panel').classList.contains('collapsed')) return 0;
+    if (!setting('scheme-on') || $('scheme-panel').classList.contains('collapsed')) return 0;
     return Math.min(560, innerWidth * 0.45) + 16;
 }
 
@@ -6679,6 +7108,7 @@ function hideSchemeTip() {
 
 function showSchemeTip(element, where, sec) {
     const tip = $('scheme-tip');
+    tip.className = 'timetable-tip scheme-tip';
     const owner = {
         // Udaje kropkę mapy na tyle, ile loadTimetable jej potrzebuje: dymek,
         // do którego wpisuje się tablica, gdy dojdzie z sieci.
@@ -6710,12 +7140,13 @@ function placeSchemeTip(element) {
 function bindSchemeNodes(canvas, data) {
     const byId = new Map(data.scheme.nodes.map(node => [node.id, node]));
     const mapNodes = new Map((data.nodes || []).map(node => [node.place, node]));
+    const endNode = (data.nodes || []).find(node => node.end);
     for (const element of canvas.querySelectorAll('g.node')) {
         const node = byId.get(element.dataset.node);
-        const mapNode = node && node.place && mapNodes.get(node.place);
+        const mapNode = node && (node.role === 'end' ? endNode : node.place && mapNodes.get(node.place));
         if (!mapNode) continue;
         const where = {name: mapNode.name, lines: mapNode.lines, deadline: data.deadline_sec,
-                       start: mapNode.start, late: mapNode.late};
+                       start: mapNode.start, end: mapNode.end, late: mapNode.late};
         const show = () => showSchemeTip(element, where, mapNode.sec);
         // Najechanie i zjechanie tylko myszą: palec po dotknięciu też
         // „zjeżdża” z węzła i tablica znikałaby, zanim się pokaże.
@@ -6767,7 +7198,6 @@ function renderList(data) {
     }
     loadTrainDelays();
     showWaitNotice(data);
-    if (data.degraded) showDegradedNotice();
     if (data.rail_only) showRailOnlyNotice();
 }
 
@@ -6784,7 +7214,8 @@ function renderHeadlineOnly(data) {
 
 // Pola z autami i rowerami przy mapie - przychodzą etapem po mapie.
 const LIVE_FIELDS = {cars: [], cars_dest_in_zone: null, cars_ahead_sec: null,
-                     cars_beyond: false, bike_places: [], bike_places_live: false};
+                     cars_beyond: false, bike_places: [], bike_spots: [],
+                     bike_places_live: false};
 
 /** Mapa przychodzi bez aut i rowerów, a te liczą się po niej. Do tego czasu
     zostają te, które już są na ekranie, i podmieniają się naraz, gdy dojdą
@@ -6823,8 +7254,8 @@ let planRun = null;
 
 /** Zapytanie o mapę, czytane etapami (patrz routes.api_flow): każdy etap
     rysuje się, gdy tylko przyjdzie. `kind` mówi, kto pyta: 'search' - nowe
-    wyszukiwanie (kadruje, gra rurę, zwija formularz na telefonie), 'more' -
-    „Pokaż więcej", 'quiet' - suwaki i przełączniki. Kończy się, gdy dojdzie
+    wyszukiwanie (kadruje, gra rurę, zwija formularz na telefonie), 'quiet' -
+    suwaki i przełączniki. Kończy się, gdy dojdzie
     ostatni etap albo gdy zastąpi je następne zapytanie. `onMapped` woła się
     po narysowaniu mapy z listą - tylko gdy to zapytanie wciąż jest aktualne. */
 function loadPlan(kind, onMapped) {
@@ -6882,6 +7313,9 @@ function applyStage(run, data) {
         if (run.onMapped) run.onMapped();
     } else if (lastFlow === run.acc) {
         renderLive(run.acc);
+        // Auta z danych na żywo stoją też na schemacie - przychodzi z nimi
+        // jego nowa wersja.
+        if ('scheme' in delta) renderScheme(run.acc);
     }
     if (search && !search.found) {
         search.found = true;
@@ -6909,12 +7343,10 @@ async function readLines(response, onLine) {
     if (buffer.trim()) onLine(JSON.parse(buffer));
 }
 
-/** Kółka w toku: „Szukaj" (i linijka zwiniętego formularza na telefonie)
-    przy wyszukiwaniu, „Pokaż więcej" przy dokładaniu mapy. */
+/** Kółko w toku: „Szukaj" (i linijka zwiniętego formularza na telefonie)
+    przy wyszukiwaniu. */
 function showBusy(busy) {
     setSearching(busy.has('search'));
-    moreBusy = busy.has('more');
-    document.body.classList.toggle('more-busy', moreBusy);
 }
 
 /** Rower i auto zmieniają ODPOWIEDŹ, nie tylko wygląd mapy: propozycje
@@ -7073,7 +7505,6 @@ function search({fromLink = false} = {}) {
     // zasłaniają wynik.
     if (onboardOn) { obCollapsed = true; syncOnboardView(); }
     hideRecallOffer();
-    mapMore = 0;               // nowa relacja zaczyna od gęstości z suwaka
     selectedJourney = null;
     clearJourney();
     clearPreview();
@@ -7252,14 +7683,8 @@ const MAX_SUGGESTIONS = 8;
 // fragment oryginalnej nazwy (do podświetlenia).
 const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                          .toLowerCase().replace(/ł/g, 'l');
-// Podpowiedzi żyją w ETYKIETACH (patrz prettyStopName), nie w nazwach
-// kanonicznych: to etykieta się pokazuje, to ją wybrany wiersz wpisuje do pola
-// i po niej szuka wpisany tekst - więc "dowolna" znajduje grupy stacji, choć
-// w kanonicznej nazwie tego słowa nie ma. Na kanoniczną wraca dopiero
-// rawStopName przy wysyłaniu (patrz queryParams).
-const STOP_LABELS = STOP_NAMES.map(prettyStopName);
-const STOP_KIND = new Map(STOP_ENTRIES.map(e => [prettyStopName(e.name), e.kind]));
-const FOLDED_LABELS = STOP_LABELS.map(fold);
+const STOP_KIND = new Map(STOP_ENTRIES.map(e => [e.name, e.kind]));
+const FOLDED_LABELS = STOP_NAMES.map(fold);
 
 // Drugie złożenie: bez kropek i z rozwiniętymi skrótami, żeby "Plac
 // Grunwaldzki" podpowiadało "PL. GRUNWALDZKI". Tabela przychodzi z serwera
@@ -7273,16 +7698,16 @@ const ABBREV = new Map(Object.entries(JSON.parse($('stop-abbrev').textContent)))
 const expand = folded => folded.replace(/\./g, ' ').split(/\s+/)
                                .filter(Boolean)
                                .map(word => ABBREV.get(word) || word).join(' ');
-const ALIAS_LABELS = STOP_LABELS.map(label => expand(fold(label)));
+const ALIAS_LABELS = STOP_NAMES.map(label => expand(fold(label)));
 
 /** Trafienia od początku nazwy przed trafieniami w środku - wpisując "grun"
     chcemy najpierw "Grunwaldzki", a nie "pl. Grunwaldzki" alfabetycznie.
     Trafienia po rozwinięciu skrótu idą na koniec: są najluźniejsze, tak samo
     jak po stronie serwera (patrz gtfs.match_stop). */
-function suggestionsFor(query, names = STOP_LABELS, folded, limit = MAX_SUGGESTIONS) {
+function suggestionsFor(query, names = STOP_NAMES, folded, limit = MAX_SUGGESTIONS) {
     const needle = fold(query.trim());
     if (!needle) return [];
-    const own = names === STOP_LABELS;
+    const own = names === STOP_NAMES;
     folded = folded || (own ? FOLDED_LABELS : names.map(fold));
     // Złożenia aliasowe idą tą samą drogą co `folded`: gotowe dla domyślnej
     // listy przystanków, liczone w locie dla każdej innej (tryb rozkładów
@@ -7361,7 +7786,7 @@ const suggestRecentFirst = side => query => {
     const recent = (loadRecentPlaces()[side] || []).filter(
         name => STOP_KIND.has(name) && (trainsOn || STOP_KIND.get(name) !== 'train'));
     const hits = recentFirst(suggestionsFor(query, recent, undefined, Infinity), recent);
-    const rest = suggestionsFor(query, STOP_LABELS, undefined, MAX_SUGGESTIONS + hits.length)
+    const rest = suggestionsFor(query, STOP_NAMES, undefined, MAX_SUGGESTIONS + hits.length)
         .filter(item => !recent.includes(item.name));
     return [...hits, ...rest].slice(0, MAX_SUGGESTIONS);
 };
@@ -7637,7 +8062,7 @@ function parsePoint(text) {
 function placeFromField() {
     const text = placeWhere.value.trim();
     if (placeDraft && text === displayValue(placeDraft)) return placeDraft;
-    if (STOP_KIND.has(text)) return rawStopName(text);
+    if (STOP_KIND.has(text)) return text;
     return parsePoint(text);
 }
 
@@ -7815,15 +8240,8 @@ function replanQuietly() {
     loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
 }
 
-// Ruszenie suwakiem gęstości to nowa wyjściowa gęstość - dokładka
-// z "pokaż więcej" liczyłaby się inaczej od starej i suwak
-// wyglądałby na zepsuty.
-function replanSoon(resetsMore) {
-    const later = debounced(replanQuietly, 200);
-    return () => {
-        if (resetsMore) mapMore = 0;
-        later();
-    };
+function replanSoon() {
+    return debounced(replanQuietly, 200);
 }
 
 // „Stoję tutaj / Jestem w pojeździe" da się schować - kto nie jeździ
@@ -7878,57 +8296,40 @@ function repaintLineColors() {
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
 }
 
-// Układ schematu i liczba dodatkowych przejść mają sens tylko z nową mapą.
-function showSchemeRows() {
-    const on = setting('new-map');
-    $('scheme-layout-row').hidden = !on;
-    $('scheme-walks-count-row').hidden = !on;
-}
-
 // Zmiana rysuje stan (`paint`, też na starcie) i/albo coś robi po ruchu (`react`).
 const SETTING_EFFECTS = {
-    'density': {react: replanSoon(true)},
-    'car-count': {react: replanSoon(true)},
-    'bike-count': {react: replanSoon(true)},
-    'transfer-gain': {react: replanSoon(false)},
-    'walk-pace': {react: replanSoon(false)},
-    'bike-kmh': {react: replanSoon(false)},
-    'bike-overhead': {react: replanSoon(false)},
-    'car-kmh': {react: replanSoon(false)},
-    'car-overhead': {react: replanSoon(false)},
-    'onboard-slack': {react: replanSoon(false)},
+    'car-count': {react: replanSoon()},
+    'bike-count': {react: replanSoon()},
+    'transfer-gain': {react: replanSoon()},
+    'walk-pace': {react: replanSoon()},
+    'bike-kmh': {react: replanSoon()},
+    'bike-overhead': {react: replanSoon()},
+    'car-kmh': {react: replanSoon()},
+    'car-overhead': {react: replanSoon()},
+    'onboard-slack': {react: replanSoon()},
     // Dostawczaki zmieniają odpowiedź serwera, więc jak suwak: od razu nowe zapytanie.
     'cars-horizon': {react: () => {
-        mapMore = 0;
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     }},
     'car-vans': {react: () => {
-        mapMore = 0;
         if (!flowOnScreen()) refreshCarLayer();
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     }},
-    // Nowa mapa zmienia odpowiedź serwera, więc jak dostawczaki: od razu nowe zapytanie.
-    // Wiersze ustawień schematu widać tylko z nową mapą.
-    'new-map': {paint: showSchemeRows, react: () => {
-        showSchemeRows();
-        mapMore = 0;
-        if (!startInput.value || !endInput.value) return;
-        loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
-    }},
+    // Schemat przychodzi zawsze z mapą, więc włączenie tylko go rysuje (i mapa
+    // kadruje się obok niego przy następnym wyszukaniu).
+    'scheme-on': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
     // Chodzenie pieszo zmienia odpowiedź serwera, jak dostawczaki.
     'walking': {react: () => {
-        mapMore = 0;
         if (!startInput.value || !endInput.value) return;
         loadPlan('quiet').catch(() => showError('Nie udało się połączyć z serwerem.'));
     }},
     // Zakres mapy na pasku to tylko podgląd: zmiana przerysowuje pasek, bez nowego zapytania.
     'headline-map-range': {react: () => renderTimeHeadline()},
-    // Układ schematu (tymczasowy wybór do porównania): zmiana tylko przerysowuje to, co już przyszło.
-    'scheme-layout': {react: () => { if (lastSchemeData) renderScheme(lastSchemeData); }},
-    // Przejścia pieszo na schemacie (demo): ile przejść ze środka najszybszych podróży dodać do tych z dojścia.
-    'scheme-walks-count': {react: replanSoon(false)},
+    // Odległość albo czas przy przejściach i rowerze - wszędzie naraz: dymki
+    // i kropki na mapie oraz schemat.
+    'walk-time': {react: () => { applyDotOpts(); if (lastSchemeData) renderScheme(lastSchemeData); }},
     'line-colors': {react: repaintLineColors},
     'bikes-merged': {paint: () => paintBikeButtons()},
     'start-mode-switch': {paint: showStartMode},
@@ -7973,8 +8374,8 @@ for (const id of ['time-hover', 'time-ends', 'time-chips', 'time-show-headline',
 for (const id of ['vehicles-direction', 'vehicles-stats']) {
     SETTING_EFFECTS[id] = {react: () => renderVehicles()};
 }
-for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-times', 'bike-rides',
-                  'car-times', 'debug-why', 'debug-why-seg']) {
+for (const id of ['dot-center', 'tip-cursor', 'tip-panel', 'bike-rides',
+                  'car-times', 'debug-why']) {
     SETTING_EFFECTS[id] = {react: () => applyDotOpts()};
 }
 
@@ -9185,11 +9586,7 @@ refreshBikeLayer();
 window.plannerBridge = {
     map, esc, fitTo, setView, syncTabs, setBaseDim, renderVehicles,
     attachAutocomplete, suggestionsFor, suggestionHtml,
-    // STOP_LABELS, nie STOP_NAMES: na zewnątrz wychodzi to, co się pokazuje
-    // i wpisuje do pola (patrz prettyStopName). Dwie prawie identyczne
-    // tablice w jednym API to zaproszenie do sięgnięcia po złą.
-    LINE_COLORS, MODE_LABEL, STOP_LABELS, ROUTE_ICON, lineColor, lineStyle, escClass,
-    prettyStopName, rawStopName,
+    LINE_COLORS, MODE_LABEL, STOP_NAMES, ROUTE_ICON, lineColor, lineStyle, escClass,
     suspendPlanner, resumePlanner, setTimeNow,
     trainsOn: () => trainsOn,
 };

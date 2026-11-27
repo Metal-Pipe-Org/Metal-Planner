@@ -15,6 +15,7 @@ import datetime
 
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, dla czytelnych liczb
 
@@ -76,18 +77,17 @@ def test_profil_jest_niemalejacy_wzgledem_godziny(install_day):
         poprzedni = wartosc
 
 
-def test_mapa_podaje_odczytana_godzine_gorszego_wariantu(install_day):
-    """Ten sam scenariusz na całej mapie: gorszy dojazd do węzła ma dostać
-    swoją PRAWDZIWĄ godzinę przyjazdu (2700), nie tę przesuniętą (1800)."""
+def test_mapa_podaje_odczytana_godzine_narysowanych_kawalkow(install_day):
+    """Ten sam scenariusz na całej mapie: każdy narysowany kawałek ma swoją
+    PRAWDZIWĄ godzinę przyjazdu. Gorszego dojazdu (2700) mapa z ruchów nie
+    rysuje - wypiera go ten sam wyjazd z wcześniejszym przyjazdem - więc
+    odczyt profilu sprawdza test wyżej."""
     day = _zgubiona_przesiadka_day()
     install_day(day)
-    wynik = planner.plan_flow("S", "E", when=WHEN, density=planner.MAX_MAP_DENSITY)
+    wynik = flow.plan_flow("S", "E", when=WHEN)
 
     assert "error" not in wynik
-    gorszy = [s for s in wynik["segments"] if s["num"] == "2"]
-    assert gorszy, "wolniejszy dojazd do węzła w ogóle nie trafił na mapę"
-    assert all(s["arrive"] == 2700 for s in gorszy), \
-        [s.get("arrive") for s in gorszy]
+    assert not [s for s in wynik["segments"] if s["num"] == "2"]
 
     lepszy = [s for s in wynik["segments"] if s["num"] == "1"]
     assert all(s["arrive"] == 1500 for s in lepszy)

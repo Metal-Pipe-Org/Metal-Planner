@@ -19,6 +19,7 @@ import bikes
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 # Stan stojaków jest z tej chwili, więc pytamy o dziś - inaczej warstwa
 # przełącza się w tryb "stacje stoją, ale nie wiadomo, ile w nich rowerów".
@@ -398,8 +399,8 @@ def test_plan_flow_mowi_czy_liczby_sa_z_tej_chwili(install_day, monkeypatch):
     install_day(_day())
     _feed(monkeypatch)
 
-    dzis = planner.plan_flow("Start", "Cel", WHEN)
-    kiedys = planner.plan_flow("Start", "Cel", datetime(2026, 1, 5, 0, 0, 0))
+    dzis = flow.plan_flow("Start", "Cel", WHEN)
+    kiedys = flow.plan_flow("Start", "Cel", datetime(2026, 1, 5, 0, 0, 0))
 
     assert dzis["bike_places_live"] is True
     assert kiedys["bike_places_live"] is False
@@ -434,7 +435,7 @@ def test_przesiadki_licza_sie_z_rozkladu_po_narysowanej_mapie(install_day,
     install_day(day)
     seen = _podsluch(monkeypatch)
 
-    planner.plan_flow("Start", "Cel", WHEN)
+    flow.plan_flow("Start", "Cel", WHEN)
 
     assert seen["arrive"]["M"] == [(600, 1)]
     assert seen["arrive"]["E"] == [(1500, 2)]
@@ -442,15 +443,15 @@ def test_przesiadki_licza_sie_z_rozkladu_po_narysowanej_mapie(install_day,
     assert (0, 1500, 2) in seen["onward"]["S"]
 
 
-def test_suwak_i_pokaz_wiecej_mnoza_liczbe_przejazdow(install_day, monkeypatch):
+def test_suwak_wyznacza_liczbe_przejazdow(install_day, monkeypatch):
     install_day(_day())
     seen = _podsluch(monkeypatch)
 
-    planner.plan_flow("Start", "Cel", WHEN)
+    flow.plan_flow("Start", "Cel", WHEN)
     assert seen["limit"] == planner.DEFAULT_MAP_BIKES == 3
 
-    planner.plan_flow("Start", "Cel", WHEN, bike_count=2, more=1)
-    assert seen["limit"] == 4
+    flow.plan_flow("Start", "Cel", WHEN, bike_count=2)
+    assert seen["limit"] == 2
 
 
 # ------------------------------------------------ czego rower nie rusza ----
@@ -460,10 +461,10 @@ def test_rower_nie_jest_kursem_na_mapie(install_day, monkeypatch):
     te same jasności, te same węzły, co bez rowerów."""
     install_day(_day())
     _feed(monkeypatch)
-    z_rowerem = planner.plan_flow("Start", "Cel", WHEN)
+    z_rowerem = flow.plan_flow("Start", "Cel", WHEN)
 
     monkeypatch.setattr(bikes, "enabled", lambda: False)
-    bez_roweru = planner.plan_flow("Start", "Cel", WHEN)
+    bez_roweru = flow.plan_flow("Start", "Cel", WHEN)
 
     assert bez_roweru["bike_places"] == []
     assert z_rowerem["segments"] == bez_roweru["segments"]
@@ -481,7 +482,7 @@ def test_padniety_kanal_to_brak_kropek_a_nie_blad(install_day, monkeypatch):
 
     monkeypatch.setattr(bikes, "stations", padnij)
 
-    result = planner.plan_flow("Start", "Cel", WHEN)
+    result = flow.plan_flow("Start", "Cel", WHEN)
     assert result["bike_places"] == []
     assert result["segments"]
 
@@ -490,7 +491,7 @@ def test_wylacznik_gasi_rowery_na_mapie(install_day, monkeypatch):
     install_day(_day())
     monkeypatch.setattr(bikes, "enabled", lambda: False)
 
-    assert planner.plan_flow("Start", "Cel", WHEN)["bike_places"] == []
+    assert flow.plan_flow("Start", "Cel", WHEN)["bike_places"] == []
 
 
 # ------------------------------------------------------- czytanie kanału ----
@@ -541,17 +542,6 @@ def test_rower_przypisany_do_stacji_nie_jest_luzem(monkeypatch):
 
     assert [b["id"] for b in loose] == ["na-chodniku"]
     assert loose[0]["electric"] is True
-
-
-def test_pokaz_wiecej_luzuje_regule_przejazdow_o_poziom():
-    """To samo co przy autach (zgłoszenie #141): gdy pierwszy poziom mieści
-    się już w suwaku, podniesienie samej liczby nic nie dokłada. Kliknięcie
-    schodzi więc o poziom niżej - tu z jednej podróży na dwie."""
-    # Trzy stacje, których nic nie bije, i czwarta pobita dokładnie raz.
-    pobite = [0, 0, 0, 1]
-
-    assert bikes._skyband(pobite, 3) == {0, 1, 2}
-    assert bikes._skyband(pobite, 3, min_level=1) == {0, 1, 2, 3}
 
 
 # ------------------------------------------- rodzaj roweru (#147) --------

@@ -353,7 +353,7 @@ def init_routes(app):
     def api_cars():
         """Wszystkie wolne auta Traficara we Wrocławiu - warstwa 🚗 włączana
         w pasku warstw, gdy na mapie nie ma jeszcze wyszukiwania. Z narysowaną
-        mapą auta przychodzą razem z nią (patrz plan_flow), bo tam niosą też
+        mapą auta przychodzą razem z nią (patrz plan_flow_stages), bo tam niosą też
         godzinę dojścia; tutaj jest tylko to, co feed wie sam z siebie."""
         try:
             return jsonify({"cars": traficar.car_list()})
@@ -478,7 +478,7 @@ def init_routes(app):
     def api_flow():
         # Ani jedna wzmianka o PKP tutaj - patrz pkp.py: kursy kolejowe są
         # doklejone wprost do tablicy połączeń, którą wczytuje gtfs.load_day
-        # (wołane z wnętrza plan_flow), więc dla tego endpointu to zwykłe
+        # (wołane z wnętrza plan_flow_stages), więc dla tego endpointu to zwykłe
         # wyszukiwanie MPK, tylko z szerszą siecią pod spodem.
         #
         # Odpowiedź idzie ETAPAMI, po jednej linijce JSON na etap (NDJSON,
@@ -519,28 +519,16 @@ def init_routes(app):
             _parse_when(request.args.get("time"),request.args.get("date")),
             _point_arg("start"),
             _point_arg("end"),
-            # Docelowa gęstość mapy (suwak pod zębatką) i ile razy kliknięto
-            # "pokaż więcej" - z nich planner dobiera próg. Sufity obu pilnuje
-            # planner, nie front.
-            density=_float_arg("density"),
-            more=_float_arg("more"),
-            # Ile aut Traficara przy mapie (suwak pod zębatką) - "pokaż
-            # więcej" mnoży ją w plannerze tak samo jak gęstość.
+            # Ile aut Traficara przy mapie (suwak pod zębatką).
             car_count=_float_arg("cars"),
             # Dostawczaki dopiero na życzenie - przełącznik pod zębatką.
             car_vans=request.args.get("car_vans") == "1",
             # Do ilu godzin naprzód od teraz pokazywać auta ("none" = bez
             # limitu); bez parametru obowiązuje domyślny zasięg.
             car_horizon_h=_car_horizon_arg(),
-            # Nowa mapa rośnie za przełącznikiem pod zębatką (sekcja DEV
-            # "Eksperymenty"); stara zostaje domyślna.
-            new_map=request.args.get("newmap") == "1",
             # Chodzenie pieszo można wyłączyć (⚙ → Eksperymenty); bez
             # parametru zostaje włączone.
             walking=request.args.get("walking", "1") == "1",
-            # Ile dodatkowych tras z przejściem pieszo dołożyć do schematu
-            # (⚙ → Eksperymenty → Schemat).
-            scheme_extra=_float_arg("scheme_extra"),
             # To samo dla przejazdów rowerem - osobny suwak (punkt 16).
             bike_count=_float_arg("bike_count"),
             # Na jaki rodzaj roweru pasażer chce wsiąść - dwa przyciski w pasku

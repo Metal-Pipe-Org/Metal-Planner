@@ -126,8 +126,7 @@ def test_neither_name_is_swallowed_by_the_other(scalenie):
     """Scalenie miejsc NIE przemianowuje przystanków: każda nazwa wraca ze
     swoją pisownią. Nazwa zwrócona przez match_stop bywa podawana z powrotem
     na wejściu (front odsyła ją przy ponownym wyszukaniu), więc musi trafiać
-    w to samo miejsce - ten sam niezmiennik round-tripu, co przy "Miasto -"
-    (patrz gtfs._match_city_group)."""
+    w to samo miejsce."""
     day = _dzien()
     for query in (_MPK, _KOLEJ):
         name, stops, _ = gtfs.match_stop(query, day)

@@ -1,6 +1,6 @@
 # Zasady
 
-Do czego zmierza wszystko, co robimy: mapa, rozkłady i to, co dopiero powstanie. Jak konkretnie działa mapa, mówi kontrakt ([FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md)).
+Do czego zmierza wszystko, co robimy: mapa, rozkłady i to, co dopiero powstanie.
 
 > Zmienia się wyłącznie na wyraźne polecenie użytkownika.
 

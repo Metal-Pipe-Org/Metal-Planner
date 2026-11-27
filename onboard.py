@@ -17,7 +17,7 @@ pasażer może zrobić, zaczyna się właśnie tam i wtedy:
     z tego przystanku.
 
 Dzięki temu planer dostaje słupek i sekundę jak przy każdym innym
-wyszukiwaniu (patrz planner.plan_flow), a cały tryb sprowadza się do
+wyszukiwaniu (patrz planner.plan_flow_stages), a cały tryb sprowadza się do
 ROZPOZNANIA KURSU - który to właściwie pojazd - i do opisania wyniku tak, żeby
 było widać, gdzie z niego wysiąść. Jedyne, co planer musi o tym kursie
 wiedzieć, to że na przystanek startowy się nim PRZYJEŻDŻA: każdy inny pojazd
