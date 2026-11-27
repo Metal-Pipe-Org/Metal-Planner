@@ -303,3 +303,22 @@ def test_zapisany_klucz_odswieza_licznik_przy_wejsciu(przegladarka, adres):
     page, _ = _strona(przegladarka, url, klucz=True,
                       sprawdzenie=(200, {"used": 7, "limit": 250}))
     page.wait_for_function("document.getElementById('pushward-status').textContent.includes('7 z 250')")
+
+
+def test_godzina_w_wierszu_niesie_slupek_wlasnego_kursu_a_nie_pierwszej_godziny_wiersza(przegladarka, adres):
+    """810+81 z Radwanic: pierwsza godzina wiersza bez słupka nie może odebrać
+    kolejnej rozpoznania kursu gminy (karta otwierała Czy na czas z pustym przystankiem)."""
+    dev, url = adres
+    if not dev:
+        pytest.skip("sprawdzane w trybie dev")
+    wiersz = {"num": "810+81", "mode": "bus", "headsign": "Bastion Sakwowy", "trip": None}
+    tablica = {"stop": "Radwanice - ul. Skrajna", "from_time": "22:00", "departures": [
+        {**wiersz, "time": "22:50", "sec": 82200},
+        {**wiersz, "time": "22:57", "sec": 82620, "stop_id": "SIE:1:2", "siechnice_stop": "1:2"},
+    ]}
+    page, wyslane = _strona(przegladarka, url, klucz=True, tablica=tablica)
+    page.evaluate("document.getElementById('pushward-link').checked = true")
+    page.on("dialog", lambda d: d.accept())
+    page.click("#flow-panel-body [data-dep-sec='82620']")
+    page.wait_for_timeout(300)
+    assert wyslane[0][1]["link"].startswith("https://siechnice.kiedyprzyjedzie.pl/#/stops/1:2/")
