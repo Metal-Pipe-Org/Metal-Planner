@@ -32,7 +32,9 @@ Z tego składamy kursy: odjazdy o tym samym trip_id, posortowane po `index`,
 to jeden przejazd - dokładnie to, czym w GTFS jest trip + stop_times. Numer
 linii bierzemy z przecięcia zbiorów linii obsługujących kolejne słupki kursu
 (każdy słupek kursu obsługuje jego linię, więc prawdziwa linia jest w każdym
-z tych zbiorów).
+z tych zbiorów). Pętli, na której kurs się kończy, tablice odjazdów nie
+pokazują - jej przyjazd bierzemy z przebiegu kursu (`trips` w kopii,
+patrz terminus_stops).
 """
 
 import json
@@ -174,16 +176,52 @@ def make_times_monotonic(times):
     return result
 
 
-def build_trips(departures_by_stop, lines_by_stop):
+def _minutes(hh_mm):
+    hours, minutes = hh_mm.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def terminus_stops(last_index, last_seconds, times):
+    """Przystanki kursu za ostatnim odjazdem z tablic, z czasem przyjazdu.
+
+    Tablice słupków pokazują tylko odjazdy, więc pętla, na której kurs się
+    kończy, nigdy na nich nie widnieje - bez tego każdy kurs gubił ostatni
+    przystanek (810+81 do centrum "kończył się" na Bastionie Sakwowym zamiast
+    na Galerii Dominikańskiej, zgłoszenie #474).
+
+    times: surowa lista `times` z GET /api/trip/<trip_id>/<index>
+    ({place_id, index, departure_time "GG:MM", arrival_time?}). Czasy w niej
+    są tylko z dokładnością do minuty i bez doby, więc liczymy je jako
+    przyrost od ostatniego odjazdu z tablic: odjazd z tablicy (sekundy, już
+    po doliczeniu doby) + różnica minut w kursie, z przejściem przez północ.
+    """
+    by_index = {entry["index"]: entry for entry in times}
+    reference = by_index.get(last_index)
+    if reference is None:
+        return []
+    base = _minutes(reference["departure_time"])
+    result = []
+    for entry in sorted(times, key=lambda e: e["index"]):
+        if entry["index"] <= last_index:
+            continue
+        arrival = _minutes(entry.get("arrival_time") or entry["departure_time"])
+        result.append((entry["place_id"], last_seconds + (arrival - base) % (24 * 60) * 60))
+    return result
+
+
+def build_trips(departures_by_stop, lines_by_stop, trip_times=None):
     """Odjazdy pozbierane ze wszystkich słupków jednego dnia -> kursy.
 
     departures_by_stop: {designator: [{"departure", "trip_id", "index"}, ...]}
+    trip_times: {str(trip_id): surowe `times` kursu} - z nich dokładamy
+    przystanki za ostatnim odjazdem (terminus_stops).
     Zwraca ([{trip_id, line, stops: [(designator, sek), ...]}], statystyki).
 
     Kurs to wszystkie odjazdy o tym samym trip_id; `index` to pozycja słupka
     w kursie i po nim je układamy. Kursy jednoprzystankowe odrzucamy - nie da
     się nimi nigdzie dojechać, a biorą się z krańcówek na skraju sieci.
     """
+    trip_times = trip_times or {}
     by_trip = {}
     for designator, departures in departures_by_stop.items():
         for departure in departures:
@@ -205,10 +243,12 @@ def build_trips(departures_by_stop, lines_by_stop):
             skipped_no_line += 1
             continue
         times = make_times_monotonic([seconds for _, _, seconds in entries])
+        stops = list(zip(designators, times))
+        stops += terminus_stops(entries[-1][0], times[-1], trip_times.get(str(trip_id), []))
         trips.append({
             "trip_id": trip_id,
             "line": line,
-            "stops": list(zip(designators, times)),
+            "stops": stops,
         })
 
     stats = {"skipped_short": skipped_short, "skipped_no_line": skipped_no_line}
@@ -311,7 +351,9 @@ def feed_from_snapshot(snapshot, log=print):
     days = []
     for entry in snapshot["days"]:
         day = date.fromisoformat(entry["date"])
-        trips, stats = build_trips(entry["departures_by_stop"], lines_by_stop)
+        # .get: kopie sprzed #474 nie mają `trips`; jeżdżą dalej, tyle że bez pętli.
+        trips, stats = build_trips(
+            entry["departures_by_stop"], lines_by_stop, snapshot.get("trips"))
         log(f"  {day} ({WEEKDAYS[day.weekday()]}): kursów {len(trips)}"
             f" (pominięto: bez linii {stats['skipped_no_line']},"
             f" jednoprzystankowych {stats['skipped_short']})")
@@ -452,6 +494,10 @@ def _is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _is_hh_mm(value):
+    return isinstance(value, str) and re.fullmatch(r"\d{1,2}:\d{2}", value) is not None
+
+
 def validate_snapshot(raw):
     """Sprawdza wgrany plik. Zwraca powód odrzucenia albo None, gdy plik jest dobry.
 
@@ -462,7 +508,12 @@ def validate_snapshot(raw):
                  "departures_by_stop": {designator: [
                      {"departure": sek. od północy, "trip_id": liczba,
                       "index": pozycja słupka w kursie},
-                 ]}}, ...]}
+                 ]}}, ...],
+       "trips": {"trip_id": [{"place_id": designator, "index": pozycja,
+                              "departure_time": "GG:MM",
+                              "arrival_time": "GG:MM" (opcjonalnie)}, ...]}}
+    (`trips` to `times` z GET /api/trip/<trip_id>/<index> - jedyne źródło
+    przyjazdu na pętlę, patrz terminus_stops)
     z siedmioma dniami - po jednym na każdy dzień tygodnia, bo każdy z nich
     staje się regułą tygodniową (to_gtfs_rows). Pozostałe pola są ignorowane.
 
@@ -477,8 +528,9 @@ def validate_snapshot(raw):
     except (UnicodeDecodeError, json.JSONDecodeError):
         return "To nie jest plik JSON."
     if not isinstance(snapshot, dict):
-        return "Plik nie jest obiektem JSON z polami stops, lines_by_stop, days."
-    missing = [key for key in ("stops", "lines_by_stop", "days") if key not in snapshot]
+        return "Plik nie jest obiektem JSON z polami stops, lines_by_stop, days, trips."
+    missing = [key for key in ("stops", "lines_by_stop", "days", "trips")
+               if key not in snapshot]
     if missing:
         return "Brak pól: " + ", ".join(missing) + "."
 
@@ -535,6 +587,21 @@ def validate_snapshot(raw):
     if len(weekdays) != len(WEEKDAYS):
         return (
             f"Plik ma {len(weekdays)} z 7 dni tygodnia - potrzebny pełny tydzień.")
+
+    trips = snapshot["trips"]
+    if not isinstance(trips, dict):
+        return "Pole trips musi mapować trip_id na listę przystanków kursu."
+    for trip_id, times in trips.items():
+        if not (isinstance(times, list) and all(
+                isinstance(t, dict)
+                and t.get("place_id") in designators
+                and _is_int(t.get("index"))
+                and _is_hh_mm(t.get("departure_time"))
+                and (t.get("arrival_time") is None or _is_hh_mm(t["arrival_time"]))
+                for t in times)):
+            return (
+                f"Kurs {trip_id} w trips: każdy przystanek musi mieć place_id"
+                " ze stops, index i departure_time GG:MM.")
 
     _, built = feed_from_snapshot(snapshot, log=lambda *_: None)
     if not any(trips for _, trips in built):

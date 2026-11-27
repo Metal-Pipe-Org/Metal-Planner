@@ -29,6 +29,7 @@ ENDED_TTL_SEC = 600
 WINDOW_SEC = 8 * 3600
 WARNING_SEC = 120
 DISMISSAL_SEC = 300
+PRIORITY = 8
 ICONS = {"tram": "tram.fill", "bus": "bus.fill"}
 WARSAW = ZoneInfo("Europe/Warsaw")
 # Cloudflare przed API odrzuca domyślny User-Agent urllib kodem 403 (błąd 1010),
@@ -139,6 +140,7 @@ def send_departure(key, departure):
         "name": f'{departure["num"]} → {departure["headsign"]}',
         "ended_ttl": ENDED_TTL_SEC,
         "dismissal_ttl": DISMISSAL_SEC,
+        "priority": PRIORITY,
     })
     _request("PATCH", f"/activities/{slug}", key, body)
 
