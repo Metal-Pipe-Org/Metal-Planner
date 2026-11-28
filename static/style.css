@@ -1680,6 +1680,13 @@ body.routes-off #results .notice.loading { display: none; }
 .vehicle-marker.cable { background: var(--cable); }
 .vehicle-marker.other { background: var(--lc, var(--other)); }
 
+/* Kanał MPK od dawna podaje pojazd w tym samym miejscu, choć ten jedzie dalej
+   (patrz vehicles._mark_stale) - kółko zostaje, ale nie udaje aktualnego. */
+.vehicle-marker.stale {
+    opacity: 0.45;
+    filter: grayscale(0.7);
+}
+
 /* Kropka „tu jesteś" (#410): niebieska z białą obwódką jak w aplikacjach map. */
 .you-are-here {
     border-radius: 50%;

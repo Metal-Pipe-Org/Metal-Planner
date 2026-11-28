@@ -706,14 +706,24 @@ function vehicleIcon(v) {
         `<div class="vehicle-arrow ${escAttr(v.kind)}" style="${lineVar(v.kind, v.line)}transform: rotate(${v.heading}deg) translateY(-19px)"></div>`;
     return L.divIcon({
         className: 'vehicle-box',
-        html: `<div class="vehicle-marker ${escAttr(v.kind)}"${lineStyle(v.kind, v.line)}>${esc(v.line)}</div>${arrow}`,
+        html: `<div class="vehicle-marker ${escAttr(v.kind)}${v.stale ? ' stale' : ''}"${lineStyle(v.kind, v.line)}>${esc(v.line)}</div>${arrow}`,
         iconSize: [36, 36],
         iconAnchor: [18, 18],
     });
 }
 
+/** Ile czasu temu kanał MPK ostatni raz przesunął pojazd - liczy serwer
+    (still_sec), więc odświeża się z każdym odpytaniem warstwy. */
+function vehicleLastMove(sec) {
+    if (sec < 15) return 'przed chwilą';
+    if (sec < 60) return `${sec} s temu`;
+    const min = Math.floor(sec / 60);
+    return min < 10 ? `${min} min ${sec % 60} s temu` : `${min} min temu`;
+}
+
 function vehicleTooltipHtml(v) {
-    return `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}`;
+    const head = v.to ? `<b>${esc(v.line)} → ${esc(v.to)}</b><br>następny: ${esc(v.next)}` : `<b>${esc(v.line)}</b>`;
+    return `${head}<br>Ostatni ruch: ${vehicleLastMove(v.still_sec)}`;
 }
 
 const vehicleKey = (kind, num) => kind + ' ' + String(num).trim();
@@ -796,7 +806,7 @@ function renderVehicles() {
         if (only && !only.has(vehicleKey(v.kind, v.line))) continue;
         if (!vehicleGoesOurWay(v, drawn)) { hiddenByDirection++; continue; }
         const marker = L.marker([v.lat, v.lon], {icon: vehicleIcon(v)}).addTo(vehiclesLayer);
-        if (v.to) marker.bindTooltip(vehicleTooltipHtml(v));
+        marker.bindTooltip(vehicleTooltipHtml(v));
         marker.tapRank = TAP_RANK.vehicle;
         shown.push(v);
     }

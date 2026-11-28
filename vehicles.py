@@ -18,6 +18,7 @@ przeglądarce (front odpytuje się cyklicznie, patrz VEHICLES_REFRESH_MS w
 app.js) biłoby wprost w cudzy serwer.
 """
 
+import bisect
 import json
 import math
 import re
@@ -164,24 +165,33 @@ def stale_sec():
 # Szybki kanał nie mówi, dokąd jedzie pojazd. Kierunek składamy z dwóch
 # źródeł. (1) Kurs: ośmiocyfrowy klucz "k" przy pojeździe to numer kursu, a
 # numer kursu w rozkładzie GTFS (trip_id "3_17599100") różni się od niego o
-# stałą, wspólną dla grupy linii (zmierzone na żywych danych: wszystkie
-# tramwaje 11826866, linie 122-128 11866456 itd.; stałe zmieniają się z
-# kolejnymi wydaniami rozkładu). Stałe uczymy się w locie z pojazdów, których
-# kurs jest ponad wszelką wątpliwość (kropka stoi tam, gdzie kurs ma być wg
-# rozkładu, a żaden inny kurs tej linii nie jest blisko), a przyjmujemy dopiero
-# stałą potwierdzoną przez kilka różnych kursów. Potem pojazd wiążemy z kursem
+# stałą, wspólną dla ciągłego bloku kluczy (zmierzone na żywych danych
+# 2026-11-25: autobusy 101-130 jedną stałą na ok. 3000 kluczy, tramwaje kilkoma
+# blokami po kilkaset kluczy; stałe zmieniają się z kolejnymi wydaniami
+# rozkładu). Stałe uczymy się w locie z pojazdów, których kurs jest ponad
+# wszelką wątpliwość (kropka stoi tam, gdzie kurs ma być wg rozkładu, a żaden
+# inny kurs tej linii nie jest blisko). Raz to jeszcze przypadek (spóźniony
+# poprzedni kurs, postój na pętli), więc stała liczy się dopiero potwierdzona:
+# kropka po raz drugi, w innym miejscu trasy, stoi tam, gdzie ten kurs ma być
+# - niepotwierdzone stałe w tym samym pomiarze w 140 przypadkach na 163
+# przeczyły blokowi, w którym leżą. Klucz dostaje potwierdzoną stałą własną
+# albo swoich najbliższych kluczy, gdy wszystkie się co do niej zgadzają - na
+# granicy bloków nie zgadzają się i wtedy nic. Potem pojazd wiążemy z kursem
 # po samym kluczu i pokazujemy cel tylko wtedy, gdy kurs istnieje, jest tej
-# samej linii, trwa teraz i kropka leży na jego trasie. Strzałka celuje w
-# następny przystanek kursu, także gdy pojazd stoi.
+# samej linii, trwa teraz i kropka leży na jego trasie, a obie drogi nie
+# wskazują różnych kursów. Strzałka celuje w następny przystanek kursu, także
+# gdy pojazd stoi.
 # (2) Ruch: bez kursu strzałka pokazuje się tylko, gdy pojazd dwa razy z rzędu
-# przesunął się w tę samą stronę. Ruch jest też wetem dla kursu: jeśli
-# przesunięcie przeczy rozkładowi, wolimy nie pokazywać nic niż pokazać źle.
+# przesunął się w tę samą stronę, a przebieg trasy linii w tym miejscu (po
+# geometrii kursu, nie po prostej między przystankami) prowadzi w jedno
+# miejsce. Ruch jest też wetem dla kursu: jeśli przesunięcie przeczy
+# rozkładowi, wolimy nie pokazywać nic niż pokazać źle.
 
 LEARN_NEAR_M = 150            # kropka tak blisko pozycji rozkładowej kursu ...
 LEARN_RIVAL_M = 600           # ... a każdy inny kurs tej linii tak daleko: uczymy się stałej
-OFFSET_MIN_KEYS = 3           # tyle sąsiednich kursów musi potwierdzić stałą ...
-OFFSET_SHARE = 0.5            # ... i stanowić tyle wszystkich sąsiednich głosów
-KEY_WINDOW = 300              # sąsiad = klucz różniący się o nie więcej niż tyle
+OFFSET_KEYS = 3               # tylu najbliższych kluczy ze stałą musi się co do niej zgadzać
+KEY_WINDOW = 3000             # dalszy klucz nie jest już sąsiadem
+OWN_MOVED_M = 150             # drugi raz na pozycji rozkładowej kursu, tyle dalej: stała potwierdzona
 OFFSET_TTL_SEC = 6 * 3600
 WINDOW_SEC = 5 * 60           # o tyle kurs może się spóźnić z końcem rozkładu
 ON_ROUTE_M = 200              # dalej od trasy kursu - nie ufamy takiemu wiązaniu
@@ -189,19 +199,22 @@ STEP_M = 30                   # krótsze przesunięcie to szum GPS
 VETO_DEG = 90
 STRAIGHT_DEG = 30
 AT_STOP_M = 25
-ROUTE_NEAR_M = 100            # kropka tak blisko odcinka wariantu trasy ...
-ROUTE_DEG = 45                # ... a odcinek biegnie tak zgodnie z ruchem: pasuje
+ROUTE_NEAR_M = 100            # kropka tak blisko przebiegu wariantu trasy ...
+ROUTE_DEG = 45                # ... a przebieg biegnie tam tak zgodnie z ruchem: pasuje
+PATH_FAR_M = 1000             # dalej od prostej między przystankami przebiegu nie liczymy
 TRACK_TTL_SEC = 300
+STALE_SEC = 90                # kanał tyle nie ruszył pojazdu: pozycja nieaktualna
 
 _TRIP_ID = re.compile(r"\d+_\d+")
 WARSAW = ZoneInfo("Europe/Warsaw")
 _ROUTE_TYPE = {"tram": 0, "bus": 3}
 
 _tracks = {}                  # klucz kursu z szybkiego kanału -> {"pts": [...], "seen": t}
-_anchors = {}                 # klucz kursu -> (stała, kiedy widziany)
+_anchors = {}                 # klucz kursu -> (stała, kiedy widziana, gdzie pierwszy raz, potwierdzona?)
 _anchors_db = [None]          # mtime bazy, z której pochodzą stałe
 _window_cache = {}            # (dzień, mtime bazy) -> kursy z oknem czasu
 _stops_cache = {}             # trip_id -> przystanki; czyszczony razem z oknami
+_path_cache = {}              # (shape_id, przystanek, następny) -> przebieg; jak wyżej
 
 
 def _metres(a, b):
@@ -221,18 +234,22 @@ def _angle_diff(a, b):
 
 def _track_motion(vehicles):
     """Dopisuje przy pojeździe kierunki dwóch ostatnich przesunięć o co najmniej
-    STEP_M (najstarsze pierwsze): v["steps"]."""
+    STEP_M (najstarsze pierwsze): v["steps"], i od ilu sekund kanał podaje go
+    w tym samym miejscu: v["still_sec"]."""
     now = time.monotonic()
     for k in [k for k, t in _tracks.items() if now - t["seen"] > TRACK_TTL_SEC]:
         del _tracks[k]
     for v in vehicles:
         point = (v["lat"], v["lon"])
-        track = _tracks.setdefault(v["key"], {"pts": [point], "seen": now})
+        track = _tracks.setdefault(v["key"], {"pts": [point], "seen": now, "at": point, "moved": now})
         track["seen"] = now
+        if track["at"] != point:
+            track["at"], track["moved"] = point, now
         if _metres(track["pts"][-1], point) >= STEP_M:
             track["pts"] = (track["pts"] + [point])[-3:]
         pts = track["pts"]
         v["steps"] = [_bearing(a, b) for a, b in zip(pts, pts[1:])]
+        v["still_sec"] = round(now - track["moved"])
 
 
 def _day_trips(day, db):
@@ -245,7 +262,7 @@ def _day_trips(day, db):
     holes = ",".join("?" * len(services))
     rows = db.execute(
         f"""SELECT t.trip_id, TRIM(r.route_short_name), r.route_type,
-                   t.trip_headsign, MIN(st.departure_sec), MAX(st.arrival_sec)
+                   t.trip_headsign, t.shape_id, MIN(st.departure_sec), MAX(st.arrival_sec)
             FROM trips t
             JOIN routes r ON r.route_id = t.route_id
             JOIN stop_times st ON st.trip_id = t.trip_id
@@ -256,12 +273,13 @@ def _day_trips(day, db):
     # Doklejone kursy z innych źródeł (np. "SIE:friday:35169589") nie mają
     # numeru, który dałoby się porównać z kluczem - po kluczu ich nie wiążemy.
     trips = [{"id": i, "num": int(i.split("_")[1]), "route": n, "type": ty,
-              "headsign": h, "first": f, "last": la}
-             for i, n, ty, h, f, la in rows if _TRIP_ID.fullmatch(i)]
+              "headsign": h, "shape": sh, "first": f, "last": la}
+             for i, n, ty, h, sh, f, la in rows if _TRIP_ID.fullmatch(i)]
     for old in [k for k in _window_cache if k[1] != key[1] or abs((k[0] - day).days) > 1]:
         del _window_cache[old]
     if not _window_cache:
         _stops_cache.clear()
+        _path_cache.clear()
     _window_cache[key] = trips
     return trips
 
@@ -301,14 +319,41 @@ def _seg_distance(p, a, b):
     return math.hypot(ax + t * dx, ay + t * dy)
 
 
+def _segment_path(trip, j, db):
+    """Przebieg trasy kursu od przystanku j do następnego - z geometrii kursu,
+    a bez niej prosta między przystankami."""
+    stops = _trip_stops(trip, db)
+    a, b = stops[j][:2], stops[j + 1][:2]
+    key = (trip["shape"], a, b)
+    path = _path_cache.get(key)
+    if path is None:
+        # Wprost, nie przez gtfs.shape_slice: odcinków są tysiące i wypychałyby
+        # z jego ograniczonego cache to, co liczy się dla wyszukiwania.
+        points = gtfs._shape_points(trip["shape"], db) if trip["shape"] else []
+        path = _path_cache[key] = gtfs._compute_slice(points, [a, b]) if len(points) >= 2 else [a, b]
+    return path
+
+
+def _path_match(point, trip, j, db):
+    """(odległość kropki od przebiegu odcinka j, kierunek przebiegu w miejscu
+    najbliższym kropce) albo None, gdy odcinek jest daleko. Prosta między
+    przystankami ucina zakręty o setki metrów i w łuku pokazuje zły kierunek."""
+    stops = _trip_stops(trip, db)
+    if _seg_distance(point, stops[j][:2], stops[j + 1][:2]) > PATH_FAR_M:
+        return None
+    path = _segment_path(trip, j, db)
+    return min(((_seg_distance(point, a, b), _bearing(a, b)) for a, b in zip(path, path[1:]) if a != b),
+               default=None)
+
+
 def _locate(trip, point, db):
     """(odległość od trasy kursu, indeks następnego przystanku). Trasa to cały
     kurs; przy kilku równie bliskich odcinkach (pętla, wspólny odcinek tam i z
     powrotem) wygrywa ten bliższy temu, gdzie kurs ma być wg rozkładu."""
     stops = _trip_stops(trip, db)
     ahead = sum(1 for s in stops if s[2] <= trip["sec"])
-    near = [(_seg_distance(point, stops[j][:2], stops[j + 1][:2]), j + 1)
-            for j in range(len(stops) - 1)]
+    near = [(m[0], j + 1) for j in range(len(stops) - 1)
+            for m in [_path_match(point, trip, j, db)] if m]
     if not near:
         return None
     best = min(d for d, _ in near)
@@ -348,26 +393,31 @@ def _learn_offsets(vehicles, trips, db, now):
             for t in by_line.get((v["line"], _ROUTE_TYPE[v["kind"]]), []) if spots[t["id"]]
         )
         if ranked and ranked[0][0] < LEARN_NEAR_M and (len(ranked) == 1 or ranked[1][0] > LEARN_RIVAL_M):
-            _anchors[v["key"]] = (v["key"] - ranked[0][1], now)
-    for key in [k for k, (_, t) in _anchors.items() if now - t > OFFSET_TTL_SEC]:
+            offset, here = v["key"] - ranked[0][1], (v["lat"], v["lon"])
+            old = _anchors.get(v["key"])
+            if old and old[0] == offset:
+                confirmed = old[3] or _metres(old[2], here) >= OWN_MOVED_M
+                _anchors[v["key"]] = (offset, now, old[2], confirmed)
+            else:
+                _anchors[v["key"]] = (offset, now, here, False)
+    for key in [k for k, (_, t, *_) in _anchors.items() if now - t > OFFSET_TTL_SEC]:
         del _anchors[key]
 
 
-def _offset_for(key):
-    """Stała dla tego klucza, jeśli sąsiednie klucze (±KEY_WINDOW) w zdecydowanej
-    większości zgadzają się co do niej - stała jest bowiem stała tylko w obrębie
-    bloku kursów, a gdzie indziej (zmierzone) rozjeżdża się o kilkadziesiąt
-    numerów. Własny głos klucza się nie liczy."""
-    votes = {}
-    for k, (offset, _) in _anchors.items():
-        if k != key and abs(k - key) <= KEY_WINDOW:
-            votes[offset] = votes.get(offset, 0) + 1
-    if not votes:
-        return None
-    offset, top = max(votes.items(), key=lambda kv: kv[1])
-    if top >= OFFSET_MIN_KEYS and top >= OFFSET_SHARE * sum(votes.values()):
-        return offset
-    return None
+def _offsets_for(key, keys):
+    """Stałe, które mogą obowiązywać ten klucz (`keys` - posortowane klucze
+    z potwierdzoną stałą): wspólna stała OFFSET_KEYS najbliższych innych
+    kluczy, o ile wszystkie się zgadzają, i własna stała klucza."""
+    at = bisect.bisect_left(keys, key)
+    side = keys[max(0, at - OFFSET_KEYS):at] + [k for k in keys[at:at + OFFSET_KEYS + 1] if k != key]
+    near = sorted((abs(k - key), k) for k in side if abs(k - key) <= KEY_WINDOW)[:OFFSET_KEYS]
+    found = set()
+    if len(near) == OFFSET_KEYS and len({_anchors[k][0] for _, k in near}) == 1:
+        found.add(_anchors[near[0][1]][0])
+    own = _anchors.get(key)
+    if own and own[3]:
+        found.add(own[0])
+    return found
 
 
 def _add_courses(vehicles):
@@ -377,17 +427,19 @@ def _add_courses(vehicles):
     pojazdy dostają ten sam kurs, nie wiążemy żadnego."""
     now = datetime.now(WARSAW)
     db = gtfs.open_db()
+    gtfs.geo_generation()
     try:
         trips = _running_trips(now, db)
         _learn_offsets(vehicles, trips, db, time.time())
         by_num = {t["num"]: t for t in trips}
+        keys = sorted(k for k, a in _anchors.items() if a[3])
         found = {}
         for i, v in enumerate(vehicles):
-            offset = _offset_for(v["key"])
-            trip = by_num.get(v["key"] - offset) if offset is not None else None
-            if (trip and trip["route"] == v["line"] and trip["type"] == _ROUTE_TYPE[v["kind"]]
-                    and _scheduled_position(trip, db)):
-                found[i] = trip
+            fits = {t["id"]: t for t in (by_num.get(v["key"] - o) for o in _offsets_for(v["key"], keys))
+                    if t and t["route"] == v["line"] and t["type"] == _ROUTE_TYPE[v["kind"]]
+                    and _scheduled_position(t, db)}
+            if len(fits) == 1:
+                found[i] = next(iter(fits.values()))
         claims = {}
         for trip in found.values():
             claims[trip["id"]] = claims.get(trip["id"], 0) + 1
@@ -399,15 +451,17 @@ def _add_courses(vehicles):
                 v["course"] = (trip, stops[where[1]])
                 v["rest"] = [[round(s[0], 5), round(s[1], 5)] for s in stops[where[1]:]]
         _add_routes(vehicles, trips, db)
+        _mark_stale(vehicles)
     finally:
         db.close()
 
 
 def _add_routes(vehicles, trips, db):
     """Pojazdom bez kursu, ale z wiarygodnym ruchem: v["route"] = (cel, następny
-    przystanek), gdy wszystkie warianty trasy tej linii, które mijają kropkę
-    (≤ ROUTE_NEAR_M) w kierunku zgodnym z ruchem (< ROUTE_DEG), mają ten sam cel
-    i ten sam następny przystanek. Pętla, rozjazd albo brak dopasowania - nic."""
+    przystanek), gdy wszystkie warianty trasy tej linii, których przebieg mija
+    kropkę (≤ ROUTE_NEAR_M) w kierunku zgodnym z ruchem (< ROUTE_DEG), mają ten
+    sam cel i ten sam następny przystanek. Pętla, rozjazd albo brak dopasowania
+    - nic."""
     variants = {}
     for t in trips:
         stops = _trip_stops(t, db)
@@ -424,28 +478,50 @@ def _add_routes(vehicles, trips, db):
         found = set()
         for t in by_line.get((v["line"], _ROUTE_TYPE[v["kind"]]), []):
             stops = _trip_stops(t, db)
+            hits = []
             for j in range(len(stops) - 1):
-                if (_seg_distance(point, stops[j][:2], stops[j + 1][:2]) <= ROUTE_NEAR_M
-                        and _angle_diff(steps[1], _bearing(stops[j][:2], stops[j + 1][:2])) < ROUTE_DEG):
-                    nxt = j + 1
-                    if nxt + 1 < len(stops) and _metres(point, stops[nxt][:2]) < AT_STOP_M:
-                        nxt += 1
-                    found.add((t["headsign"], stops[nxt][3], stops[nxt][0], stops[nxt][1]))
+                m = _path_match(point, t, j, db)
+                if m and m[0] <= ROUTE_NEAR_M and _angle_diff(steps[1], m[1]) < ROUTE_DEG:
+                    hits.append((m[0], j))
+            # Kropka przy przystanku pasuje do odcinka przed nim i za nim - to
+            # wciąż jedno miejsce trasy, więc liczy się bliższy odcinek. Dwa
+            # odległe kawałki jednego wariantu (pętla) zostają niejednoznaczne.
+            if hits and max(j for _, j in hits) - min(j for _, j in hits) == len(hits) - 1:
+                hits = [min(hits)]
+            for _, j in hits:
+                nxt = j + 1
+                if nxt + 1 < len(stops) and _metres(point, stops[nxt][:2]) < AT_STOP_M:
+                    nxt += 1
+                found.add((t["headsign"], stops[nxt][3], stops[nxt][0], stops[nxt][1]))
         if len({f[:2] for f in found}) == 1:
             headsign, name, lat, lon = next(iter(found))
             v["route"] = (headsign, (lat, lon, None, name))
 
 
+def _mark_stale(vehicles):
+    """v["stale"]: kanał MPK od ponad STALE_SEC podaje pojazd co do cyfry w tym
+    samym miejscu. Bez wyjątków dla pętli i zajezdni: pasażer ma widzieć, że o
+    tym pojeździe nic świeżego nie wiemy, a nie zgadywać, czy stoi, czy kanał
+    go nie odświeża (pomiar 2026-11-25: takie zamrożenie zwykle kończyło się
+    skokiem o kilometr)."""
+    for v in vehicles:
+        v["stale"] = v["still_sec"] > STALE_SEC
+
+
 def _add_headings(vehicles):
     """Składa z kursu (albo wariantu trasy) i ruchu to, co dostaje front: heading
     (stopnie), source ("trip"/"route") oraz to (cel) i next (następny przystanek).
-    Strzałka jest tylko tam, gdzie znamy cel - bez celu pojazd ma samo kółko."""
+    Strzałka jest tylko tam, gdzie znamy cel - bez celu pojazd ma samo kółko.
+    Pojazd z nieaktualną pozycją (stale) nie ma strzałki: wskazywałaby z miejsca,
+    w którym go już nie ma."""
     for v in vehicles:
         steps = v.pop("steps")
         course = v.pop("course", None)
         route = v.pop("route", None)
         v["heading"] = v["source"] = None
-        if course or route:
+        if v["stale"]:
+            v.pop("rest", None)
+        elif course or route:
             headsign, stop = (course[0]["headsign"], course[1]) if course else route
             bearing = _bearing((v["lat"], v["lon"]), stop[:2])
             if steps and _angle_diff(steps[-1], bearing) > VETO_DEG:
