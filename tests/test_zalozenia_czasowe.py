@@ -13,6 +13,7 @@ import bikes
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, czytelne liczby
 
@@ -70,9 +71,9 @@ def test_tempo_liczy_sie_raz_na_dzien():
 def test_szybkie_tempo_lapie_przesiadke(install_day):
     install_day(_dzien_z_przejsciem())
 
-    zwykle = planner.plan_flow("S", "E", WHEN)
-    szybko = planner.plan_flow("S", "E", WHEN, walk_pace="szybko")
-    wolno = planner.plan_flow("S", "E", WHEN, walk_pace="wolno")
+    zwykle = flow.plan_flow("S", "E", WHEN)
+    szybko = flow.plan_flow("S", "E", WHEN, walk_pace="szybko")
+    wolno = flow.plan_flow("S", "E", WHEN, walk_pace="wolno")
 
     assert zwykle["fastest"]["arrival"] == "00:40"
     assert szybko["fastest"]["arrival"] == "00:25"
@@ -82,7 +83,7 @@ def test_szybkie_tempo_lapie_przesiadke(install_day):
 def test_nieznane_tempo_to_zwykle(install_day):
     """Z przeglądarki może przyjść cokolwiek - serwer bierze wtedy domyślne."""
     install_day(_dzien_z_przejsciem())
-    wynik = planner.plan_flow("S", "E", WHEN, walk_pace="biegiem")
+    wynik = flow.plan_flow("S", "E", WHEN, walk_pace="biegiem")
     assert wynik["fastest"]["arrival"] == "00:40"
 
 
@@ -105,10 +106,10 @@ def test_suwaki_roweru_maja_sufit_na_serwerze(install_day, monkeypatch):
         return []
     monkeypatch.setattr(bikes, "map_places", _zapamietaj)
 
-    planner.plan_flow("S", "E", WHEN, bike_kmh=500, bike_overhead_sec=-60)
+    flow.plan_flow("S", "E", WHEN, bike_kmh=500, bike_overhead_sec=-60)
     assert uzyte["ride_mps"] == planner.MAX_BIKE_KMH / 3.6
     assert uzyte["overhead_sec"] == 0
 
-    planner.plan_flow("S", "E", WHEN, bike_kmh=1, bike_overhead_sec=99999)
+    flow.plan_flow("S", "E", WHEN, bike_kmh=1, bike_overhead_sec=99999)
     assert uzyte["ride_mps"] == planner.MIN_BIKE_KMH / 3.6
     assert uzyte["overhead_sec"] == planner.MAX_BIKE_OVERHEAD_SEC

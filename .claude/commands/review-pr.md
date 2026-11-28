@@ -22,8 +22,7 @@ ma. Co z nimi zrobić, mówią podsekcje na końcu punktu 1.
   zacznij od `--name-only` i czytaj po pliku.
 - `gh pr view <PR_NUMBER> --repo <REPO> --comments` — dyskusja, o ile jakaś jest.
 - `README.md` i `docs/PROJECT.md`; przy zmianach w mapie przepływów albo
-  w wyszukiwaniu połączeń dołóż `docs/ROUTING_ALGORITHM.md`
-  i `docs/FLOW_MAP_CONTRACT.md`.
+  w wyszukiwaniu połączeń dołóż `docs/ROUTING_ALGORITHM.md`.
 - Repozytorium masz wypożyczone na commicie z czubka PR-a — czytaj **cały** plik
   wokół zmienionych linii, a nie sam diff. Połowa błędów siedzi w kodzie, którego
   w diffie nie widać, a który ta zmiana zaczyna wołać inaczej.
@@ -125,6 +124,7 @@ Szukaj rzeczy, które naprawdę bolą, w tej kolejności:
   komentarze i dokumentacja po polsku, aktualność `docs/` przy zmianie
   zachowania. Gdy PR dokłada testy — hermetyczne, przez `tests/gtfs_builder.py`,
   bez sieci i bez `data/gtfs.sqlite`.
+- **Porządek** — te same pytania, które autor ma w `.claude/rules/porzadek.md`: czy zmiana dubluje coś, co już jest w kodzie (funkcję, ustawienie, styl, pomocnika w testach); czy zostawia martwy kod, czyli nieużywane funkcje, ustawienia, style; czy nowy test sprawdza zachowanie, a nie jeden przypadek z konkretnego dnia rozkładu; czy usunięto kod, testy i opisy w `docs/`, które zmiana uczyniła nieaktualnymi. Przy dublowaniu podaj oba adresy: nowe miejsce i to, które już było.
 - **Wielkość PR-a** — czy da się to sensownie przejrzeć na raz, czy siedzi w nim
   kilka niezależnych zmian, które lepiej byłoby rozdzielić.
 
@@ -167,6 +167,8 @@ jeśli jest ich więcej niż jeden. Bez przepisywania diffa linijka po linijce.>
 **Wydajność**
 
 **Zgodność z architekturą i konwencjami**
+
+**Porządek**
 
 **Wielkość PR-a**
 

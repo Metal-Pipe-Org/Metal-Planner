@@ -64,6 +64,13 @@ niedokumentowane, ale kompletne - kontrakt odtworzony z bundla aplikacji:
 - `GET /api/directions/<słupek>` — linie i kierunki na słupku,
 - `GET /api/timetables/<słupek>?date=RRRR-MM-DD` — cały dzień odjazdów,
   z `trip_id` i `index` (pozycja słupka w kursie),
+- `GET /api/trip/<trip_id>/<index>` — cały przebieg kursu: każdy przystanek
+  z `place_id`, `index` i `departure_time` (`GG:MM`, a gdzie bus stoi dłużej -
+  też `arrival_time`). Jedyne miejsce z przyjazdem na pętlę: tablice
+  z `/api/timetables` pokazują tylko odjazdy, więc ostatni przystanek kursu
+  na żadnej z nich nie widnieje (zgłoszenie #474). `trip_id` jest ten sam
+  w każdym dniu, w którym kurs jeździ, a `index` wskazuje tylko zaznaczony
+  przystanek - odpowiedź jest ta sama,
 - `GET /api/departures/<słupek>` — najbliższe odjazdy, z czasem rozkładowym
   i rzeczywistym (tego jeszcze nie używamy).
 
@@ -97,11 +104,12 @@ Poza trybem deweloperskim tego wgrania w ogóle nie ma - ani sekcji, ani adresu 
 
 ### Format pliku
 
-JSON z trzema polami (inne pola są pomijane) - surowe odpowiedzi API, żeby całe przekształcenie w kursy żyło w jednym miejscu w kodzie (`siechnice.py`):
+JSON z czterema polami (inne pola są pomijane) - surowe odpowiedzi API, żeby całe przekształcenie w kursy żyło w jednym miejscu w kodzie (`siechnice.py`):
 
 1. `stops` - lista słupków `[designator, kod, nazwa, lon*1e6, lat*1e6, ...]` (współrzędne w mikrostopniach, najpierw długość) - tak jak `GET /stops`.
 2. `lines_by_stop` - `{designator: ["800+80", ...]}`: numery linii obsługujących słupek (z `GET /api/directions/<słupek>`).
 3. `days` - dokładnie siedem dni, po jednym na każdy dzień tygodnia: `{"date": "RRRR-MM-DD", "departures_by_stop": {designator: [{"departure": sekundy od północy, "trip_id": liczba, "index": pozycja słupka w kursie}, ...]}}` (z `GET /api/timetables/<słupek>?date=`). Odjazdy mogą być tylko ze słupków wymienionych w `stops`.
+4. `trips` - `{trip_id: [{"place_id": designator, "index": pozycja, "departure_time": "GG:MM", "arrival_time": "GG:MM" (gdy jest)}, ...]}`: lista `times` z `GET /api/trip/<trip_id>/<index>` dla każdego kursu z `days`. Z niej kurs dostaje przystanki za ostatnim odjazdem z tablic - pętlę z rzeczywistym czasem przyjazdu. Czas liczy się jako przyrost od ostatniego odjazdu z tablic, bo `GG:MM` nie mówi, która to doba. `place_id` musi być w `stops`. Kopia bez tego pola dalej się dokleja (kursy kończą się wtedy przystanek przed pętlą), ale nowej takiej wgrać się nie da.
 
 Plik musi dać co najmniej jeden kurs. Lepiej wziąć tydzień bez świąt.
 

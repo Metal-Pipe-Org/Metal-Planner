@@ -31,6 +31,7 @@ import pytest
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime(2026, 1, 5, 0, 0, 0)
 
@@ -72,19 +73,9 @@ def _wezel(place, *lines, start=False):
     return node
 
 
-def test_bez_flagi_odpowiedz_jest_taka_jak_dotad(install_day):
-    install_day(_dzien())
-    bez = planner.plan_flow("S", "E", WHEN, more=3)
-    z = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)
-    assert "scheme" not in bez
-    assert "scheme" in z
-    z.pop("scheme")
-    assert json.dumps(z, sort_keys=True) == json.dumps(bez, sort_keys=True)
-
-
 def test_start_na_gorze_cel_na_dole(install_day):
     install_day(_dzien())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     roles = [n["role"] for n in scheme["nodes"]]
     assert roles.count("start") == 1 and roles.count("end") == 1
     start = next(n["id"] for n in scheme["nodes"] if n["role"] == "start")
@@ -97,13 +88,14 @@ def test_start_na_gorze_cel_na_dole(install_day):
 
 def test_ten_sam_wybor_to_jedna_strzalka(install_day):
     install_day(_dzien())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     krawedzie = _po_nazwach(scheme)
-    # Dwójka i czwórka jadą ze startu do celu: jedna strzałka z dwiema
-    # liniami, nie dwie.
+    # Dwójka i czwórka jadą ze startu do celu tym samym ruchem: jedna strzałka
+    # z oboma numerami (moves.py).
     assert ("start", "end", ("2", "4")) in krawedzie
-    assert ("start", "B", ("5",)) in krawedzie
-    assert ("B", "end", ("17",)) in krawedzie
+    # Piątka z siedemnastką jedzie dłużej i przesiada się, a jest wyparta przez
+    # bezpośrednią dwójkę (moves.dominates) - nowa mapa jej nie rysuje.
+    assert ("start", "B", ("5",)) not in krawedzie
     # Godzin na strzałkach nie ma - są w tablicy węzła.
     assert all(set(e) - {"fast"} == {"from", "to", "lines"} for e in scheme["edges"])
 
@@ -214,6 +206,29 @@ def test_kawalki_tej_samej_linii_na_szwie_to_jedna_jazda():
     assert not [n for n in scheme["nodes"] if n.get("bare")]
 
 
+def test_ta_sama_linia_w_tym_samym_kierunku_to_jedna_kreska_od_najwczesniejszego_wsiadania():
+    # 4 wsiadana na Pl. (P) i na Moście (M) to jedna kreska od P przez M:
+    # pudełko M zostaje, bo wsiada się tu (kotwica), a drugiej "4" nie ma.
+    scheme = planner._scheme(
+        pieces=[_kawalek("4", "P", "M", "W"), _kawalek("4", "M", "W")],
+        nodes=[_wezel("P", ("4", "start"), start=True)],
+        target_places={"E"},
+        anchors={"P", "M", "W"},
+    )
+    assert _po_nazwach(scheme) == {("start", "M", ("4",)), ("M", "W", ("4",))}
+
+
+def test_ta_sama_linia_w_przeciwnych_kierunkach_to_dwie_kreski():
+    scheme = planner._scheme(
+        pieces=[_kawalek("4", "P", "M", "W"), _kawalek("4", "M", "P", "K")],
+        nodes=[_wezel("S", ("4", "start"), start=True)],
+        target_places={"E"},
+        anchors={"P", "M", "W", "K"},
+    )
+    lines = [line for e in scheme["edges"] for line in e["lines"]]
+    assert {line["run"] for line in lines} == {0, 1}
+
+
 def _podroz(*rides, arrival):
     """Podróż jak z planisty: rides to (numer, [(przystanek, godzina_s), ...])."""
     legs = []
@@ -299,7 +314,7 @@ def _dzien_z_przesiadka_pieszo(*, bezposredni=False):
 
 def test_przejscie_pieszo_z_mapy_jest_na_schemacie(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     name = {n["id"]: n.get("place") or n["role"] for n in scheme["nodes"]}
     assert [(name[w["from"]], name[w["to"]]) for w in scheme["walks"]] == [("A", "B")]
     # To nie jest jazda: nie ma na nim linii i nie jest strzałką.
@@ -309,7 +324,7 @@ def test_przejscie_pieszo_z_mapy_jest_na_schemacie(install_day):
 
 def test_bez_chodzenia_schemat_nie_ma_przejsc_pieszych(install_day):
     install_day(_dzien_z_przesiadka_pieszo(bezposredni=True))
-    bez = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, walking=False)["scheme"]
+    bez = flow.plan_flow("S", "E", WHEN, walking=False)["scheme"]
     assert bez["walks"] == []
 
 
@@ -497,7 +512,7 @@ def _wtorek():
     return (dzis + timedelta(days=(1 - dzis.weekday()) % 7 or 7)).isoformat()
 
 
-def _strona(przegladarka, adres, elk, uklad="elk"):
+def _strona(przegladarka, adres, elk):
     from tests.test_uklad_telefonu import PUSTE_ZRODLA, _odpowiedz
     context = przegladarka.new_context(viewport={"width": 1280, "height": 800},
                                        locale="pl-PL", service_workers="block")
@@ -515,18 +530,16 @@ def _strona(przegladarka, adres, elk, uklad="elk"):
                                 body=DAGRE_ATRAPA))
     page.goto(adres)
     page.wait_for_selector("#start")
-    page.evaluate("u => document.getElementById('scheme-layout').value = u", uklad)
     return context, page
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
 @pytest.mark.parametrize("flaga", [False, True])
-def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
+def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga):
     from tests.test_uklad_telefonu import _wybierz
     elk = []
-    context, page = _strona(przegladarka, adres, elk, uklad)
+    context, page = _strona(przegladarka, adres, elk)
     if flaga:
-        page.evaluate("document.getElementById('new-map').checked = true")
+        page.evaluate("document.getElementById('scheme-on').checked = true")
     page.fill("#time", "15:00")
     page.evaluate(f"document.getElementById('date').value = '{_wtorek()}'")
     _wybierz(page, "#start", "Katedra")
@@ -536,9 +549,8 @@ def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
     page.wait_for_selector("#time-headline .headline-map", state="attached", timeout=30000)
     if flaga:
         page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
-        # Przypięta wersja biblioteki, nie „latest”.
-        biblioteka = "/npm/@dagrejs/dagre@1.1.4/" if uklad == "dagre" else "/npm/elkjs@0.9.3/"
-        assert len(elk) == 1 and biblioteka in elk[0]
+        # Układ warstwowy nie ciągnie nic z sieci.
+        assert elk == []
         pomiar = page.evaluate(POMIAR)
         _plakietki_na_kreskach(pomiar)
         napisy = page.evaluate("[...document.querySelectorAll('.scheme-name')].map(t => t.textContent)")
@@ -553,8 +565,10 @@ def test_panel_schematu_tylko_z_flaga(adres, przegladarka, flaga, uklad):
         # n0 to start, ostatni - cel; między nimi węzły przesiadek.
         page.locator("#scheme-canvas g.node").nth(1).hover()
         page.wait_for_selector("#scheme-tip:not([hidden]) .tip-head", timeout=15000)
-        # Panel zwija się do nagłówka, jak lista propozycji.
-        page.click("#scheme-toggle")
+        # Panel zwija się do nagłówka, jak lista propozycji. Tablica węzła
+        # otwarta najechaniem potrafi wisieć nad przyciskiem (schemat bywa
+        # gęsty), więc klik idzie wprost w przycisk.
+        page.dispatch_event("#scheme-toggle", "click")
         assert not page.is_visible("#scheme-viewport")
         assert page.is_visible("#scheme-toggle")
     else:
@@ -598,11 +612,10 @@ RECZNY = {
 }
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka, uklad):
+def test_rysunek_grupy_przejazd_podzial_i_strzalki(adres, przegladarka):
     elk = []
-    context, page = _strona(przegladarka, adres, elk, uklad)
-    page.evaluate("document.getElementById('new-map').checked = true")
+    context, page = _strona(przegladarka, adres, elk)
+    page.evaluate("document.getElementById('scheme-on').checked = true")
     page.evaluate("data => renderScheme(data)",
                   {"scheme": RECZNY, "start": "S", "end": "E", "nodes": []})
     page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
@@ -657,7 +670,7 @@ def _pary(scheme):
 
 def test_przejscie_ze_srodka_najszybszej_podrozy_jest_zawsze_z_odlegloscia_w_linii_prostej(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN)["scheme"]
     pary = _pary(scheme)
     # Tylko to jedno: nie każda para pudełek, a odległość to linia prosta
     # między słupkami (a nie czas z krawędzi mostu, 120 s).
@@ -684,9 +697,9 @@ def _dzien_z_dwoma_przystankami_przy_punkcie(cel_blisko=False):
 def test_start_punkt_ma_dojscie_do_kazdego_przystanku_odjazdu(install_day):
     day, punkt = _dzien_z_dwoma_przystankami_przy_punkcie()
     install_day(day)
-    flow = planner.plan_flow("", "E", WHEN, start_point=punkt, more=3, new_map=True)
-    pary = _pary(flow["scheme"])
-    odjazdy = {leg["to"] for j in flow["journeys"] for leg in j["legs"][:1] if leg["kind"] == "walk"}
+    wynik = flow.plan_flow("", "E", WHEN, start_point=punkt)
+    pary = _pary(wynik["scheme"])
+    odjazdy = {leg["to"] for j in wynik["journeys"] for leg in j["legs"][:1] if leg["kind"] == "walk"}
     assert odjazdy == {"A", "B"}
     assert {tuple(sorted(k - {"start"})) for k, p in pary.items() if p["why"] == "access"} == {("A",), ("B",)}
 
@@ -695,16 +708,16 @@ def test_najszybsze_jest_dojscie_pieszo_start_cel(install_day):
     day, punkt = _dzien_z_dwoma_przystankami_przy_punkcie(cel_blisko=True)
     install_day(day)
     # Cel o 110 m od punktu: dwie minuty marszu wygrywają z każdym kursem.
-    flow = planner.plan_flow("", "E", WHEN, start_point=punkt, more=3, new_map=True)
-    assert frozenset(("start", "end")) in _pary(flow["scheme"])
-    assert _pary(flow["scheme"])[frozenset(("start", "end"))]["why"] == "fastest"
+    wynik = flow.plan_flow("", "E", WHEN, start_point=punkt)
+    assert frozenset(("start", "end")) in _pary(wynik["scheme"])
+    assert _pary(wynik["scheme"])[frozenset(("start", "end"))]["why"] == "fastest"
 
 
 def test_dojscie_pieszo_start_cel_znika_gdy_komunikacja_jest_szybsza(install_day):
     install_day(_dzien_z_przesiadka_pieszo(bezposredni=True))
     # E jest ~7 km od S, a autobus 3 jedzie 27 minut.
-    flow = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)
-    assert frozenset(("start", "end")) not in _pary(flow["scheme"])
+    wynik = flow.plan_flow("S", "E", WHEN)
+    assert frozenset(("start", "end")) not in _pary(wynik["scheme"])
 
 
 def _dzien_z_szybka_i_wolniejsza_z_przejsciem():
@@ -719,19 +732,18 @@ def _dzien_z_szybka_i_wolniejsza_z_przejsciem():
 
 def test_dodatkowe_przejscia_szuka_planner_poza_lista_wynikow(install_day):
     install_day(_dzien_z_szybka_i_wolniejsza_z_przejsciem())
-    bez = planner.plan_flow("S", "E", WHEN, more=3, new_map=True)["scheme"]
+    bez = flow.plan_flow("S", "E", WHEN)["scheme"]
     assert [p for p in bez["pairs"] if p["why"] == "extra"] == []
-    z = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, scheme_extra=4)["scheme"]
-    pary = _pary(z)
-    # Najszybsza podróż nie ma przejścia, więc "fastest" nie ma nic, a wolniejsza
-    # z przejściem jest pierwszą dodatkową.
-    assert [p["why"] for p in z["pairs"]] == ["extra"]
-    assert pary[frozenset(("A", "B"))]["rank"] == 1
+    z = flow.plan_flow("S", "E", WHEN, scheme_extra=4)["scheme"]
+    # Schemat nowej mapy powstaje z ruchów, które rysuje mapa: scheme_extra
+    # niczego do niego nie dokłada (patrz planner._scheme_of_map).
+    assert [p for p in z["pairs"] if p["why"] == "extra"] == []
+    assert z == bez
 
 
 def test_najszybsza_podroz_z_przejsciem_nie_liczy_sie_do_dodatkowych(install_day):
     install_day(_dzien_z_przesiadka_pieszo())
-    scheme = planner.plan_flow("S", "E", WHEN, more=3, new_map=True, scheme_extra=4)["scheme"]
+    scheme = flow.plan_flow("S", "E", WHEN, scheme_extra=4)["scheme"]
     assert [p["why"] for p in scheme["pairs"]] == ["fastest"]
 
 
@@ -746,50 +758,29 @@ PARY = [{"from": "n0", "to": "n1", "m": 740, "why": "access"},
         {"from": "n0", "to": "n5", "m": 2050, "why": "fastest"}]
 
 
-def _schemat_z_parami(przegladarka, adres, uklad, ile=3):
+def _schemat_z_parami(przegladarka, adres):
     elk = []
-    context, page = _strona(przegladarka, adres, elk, uklad)
-    page.evaluate("document.getElementById('new-map').checked = true")
-    page.evaluate("""c => { document.getElementById('scheme-walks-count').value = c; }""", ile)
+    context, page = _strona(przegladarka, adres, elk)
+    page.evaluate("document.getElementById('scheme-on').checked = true")
     page.evaluate("data => renderScheme(data)",
                   {"scheme": {**RECZNY, "pairs": PARY}, "start": "S", "end": "E", "nodes": []})
     page.wait_for_selector("#scheme-panel:not([hidden]) svg", timeout=10000)
     return context, page
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_przejscia_pieszo_dojscia_zawsze_a_dodatkowe_wedlug_ustawienia(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, 3)
-    assert page.evaluate("document.querySelectorAll('g.scheme-walk-brace').length") == len(PARY)
-    assert page.evaluate("document.querySelector('g.scheme-walk path').getAttribute('stroke')") is None
-    # Dodatkowe klamry mają inny kolor niż szare: to ustawienie debugowe.
-    kolory = page.evaluate("""[...document.querySelectorAll('g.scheme-walk-brace')].map(g => [
-        g.classList.contains('scheme-walk-extra'),
-        getComputedStyle(g.querySelector('path')).stroke,
-        getComputedStyle(g.querySelector('.scheme-walk-text')).fill])""")
-    assert sorted(k[0] for k in kolory) == [False, False, True, True, True]
-    assert {(k[1], k[2]) for k in kolory if k[0]} == {("rgb(230, 81, 0)", "rgb(230, 81, 0)")}
-    assert not {(k[1], k[2]) for k in kolory if not k[0]} & {("rgb(230, 81, 0)", "rgb(230, 81, 0)")}
+def test_przejscia_pieszo_tylko_dojscia_i_najszybsza(adres, przegladarka):
+    """Schemat rysuje przejścia z dojścia i z najszybszej podróży; dodatkowych
+    (dawne ustawienie „Ile dodatkowych najszybszych przejść”) już nie ma."""
+    context, page = _schemat_z_parami(przegladarka, adres)
     assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
-                                  .map(t => t.textContent)""")) == sorted([
-        "pieszo, 740 m", "pieszo, 120 m", "pieszo, 1,2 km", "pieszo, 260 m", "pieszo, 2,1 km"])
-    assert page.errors == []
-    context.close()
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, 1)
-    assert sorted(page.evaluate("""[...document.querySelectorAll('.scheme-walk-text')]
-                                  .map(t => t.textContent)""")) == [
-        "pieszo, 120 m", "pieszo, 2,1 km", "pieszo, 740 m"]
-    assert page.errors == []
-    context.close()
-    context, page = _schemat_z_parami(przegladarka, adres, uklad, 0)
-    assert _przejscia(page) == 2
+                                  .map(t => t.textContent)""")) == ["2,1 km", "740 m"]
+    assert page.evaluate("document.querySelectorAll('g.scheme-walk-extra').length") == 0
     assert page.errors == []
     context.close()
 
 
-@pytest.mark.parametrize("uklad", ["dagre", "elk"])
-def test_klamry_leza_na_prawo_od_wszystkiego_i_nie_nakladaja_sie(adres, przegladarka, uklad):
-    context, page = _schemat_z_parami(przegladarka, adres, uklad)
+def test_klamry_leza_na_prawo_od_wszystkiego_i_nie_nakladaja_sie(adres, przegladarka):
+    context, page = _schemat_z_parami(przegladarka, adres)
     pomiar = page.evaluate("""(() => {
         const svg = document.querySelector('#scheme-canvas svg');
         const prawy = Math.max(...[...svg.querySelectorAll('rect.scheme-box, .scheme-line, .scheme-badge')]

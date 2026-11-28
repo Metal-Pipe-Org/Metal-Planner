@@ -1,6 +1,6 @@
 """Testy tej połowy kontraktu mapy, która mieszka WE FRONCIE.
 
-Kontrakt (docs/FLOW_MAP_CONTRACT.md) ma 10 punktów, a test_flow_map_contract.py
+Kontrakt ma 10 punktów, a test_flow_map_contract.py
 sięga wyłącznie planner.py. Trzy punkty żyją jednak w całości albo w połowie
 w static/app.js i do 2026-08-27 nie były sprawdzane niczym:
 
@@ -26,14 +26,15 @@ kiedyś doszło CI na Linuksie, trzeba będzie tu dołożyć drugi silnik.
 
 Odświeżenie fixture'a po zmianie w plannerze (data - dzień powszedni
 z bieżącego rozkładu; źródła na żywo wyłączone, żeby plik nie zależał od
-sieci):
+sieci; uruchamiać z korzenia repo, stąd `from tests import flow`):
 
     .venv/bin/python -c "
-    from datetime import datetime; import planner, json, pkp, traficar, bikes
+    from datetime import datetime; import json, pkp, traficar, bikes
+    from tests import flow
     pkp.enabled = traficar.enabled = lambda: False
     traficar.zone = lambda: None
     bikes._fetch = lambda url: (_ for _ in ()).throw(OSError(url))
-    r = planner.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 10, 6, 15, 37))
+    r = flow.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 11, 25, 15, 37))
     json.dump(r, open('tests/js/flow_fixture.json', 'w'),
               ensure_ascii=False, separators=(',', ':'))"
 """
@@ -48,6 +49,7 @@ import pytest
 from flask import Flask, render_template
 
 import settings_registry
+from tests import flow
 
 ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = ROOT / "tests" / "js"
@@ -217,17 +219,6 @@ def test_a_dev_toggle_actually_changes_the_drawing(front):
     numerkiem powiększa grupkę w OBU wymiarach - i musi wejść do pomiaru
     kolizji, inaczej grupki zaczęłyby na siebie wchodzić."""
     _check(front, "przelacznik_czasu_zmienia_grupki")
-
-
-# --------------------------------------------------- tryb awaryjny ---------
-
-def test_fallback_mode_shows_a_notice_on_screen(front):
-    """Gdy serwer przyśle mapę w trybie awaryjnym (samą najszybszą trasę
-    zamiast wachlarza), ekran ma to powiedzieć - takim samym małym
-    komunikatem, jak pozostałe błędy, dopisanym NAD listą, żeby pokazana
-    trasa nadal była widoczna. Bez tego rzadka mapa wygląda identycznie jak
-    "tędy naprawdę nic nie jedzie"."""
-    _check(front, "tryb_awaryjny_mowi_o_sobie_na_ekranie")
 
 
 # ------------------------------------------- tablica odjazdów przesiadki -
@@ -486,17 +477,6 @@ def test_the_corner_window_opens_on_the_start_stop(front):
     _check(front, "okienko_startuje_od_przystanku_startowego")
 
 
-# ------------------------------------------------------- grupa stacji PKP -
-
-def test_a_station_group_travels_to_the_server_under_its_canonical_name(front):
-    """Na ekranie "WROCŁAW (dowolna stacja)", w zapytaniu "WROCŁAW -".
-    Para prettyStopName/rawStopName musi się znosić: samo ładne wyświetlanie
-    posyła ładną nazwę do /api/flow, a stamtąd wraca fałszywe "nie znaleziono
-    przystanku" (błąd zgłoszony na żywo, przez który etykieta wróciła kiedyś
-    do myślnika - patrz docstring gtfs._match_city_group)."""
-    _check(front, "grupa_stacji_wraca_kanoniczna")
-
-
 # ------------------------------------------------- przedłużanie zakresu ---
 
 def test_a_full_map_without_a_list_is_not_an_error(front):
@@ -505,13 +485,6 @@ def test_a_full_map_without_a_list_is_not_an_error(front):
     każe zawężać okna czasowego: to dokładne odwrócenie tego, co użytkownik
     przed chwilą zrobił przyciskiem „+X min". Pusta mapa zostaje błędem."""
     _check(front, "pelna_mapa_bez_listy_nie_jest_bledem")
-
-
-def test_show_more_adds_one_starting_density_per_click(front):
-    """„Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie wysyła do
-    serwera `more` razem z gęstością z suwaka, a po trzecim kliknięciu
-    przycisku nie ma - zwykły licznik, niezależny od serwera."""
-    _check(front, "pokaz_wiecej_doklada_gestosc")
 
 
 # ------------------------------------------------- pojazdy na żywo -
