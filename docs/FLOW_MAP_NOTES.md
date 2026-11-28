@@ -30,7 +30,7 @@ Wojszyce, wtorek 1.12, 15:37; przepis na odświeżenie w opisie
 | **13** | `test_the_departure_is_the_vehicle_not_the_question`, `test_a_journey_that_starts_with_a_walk_still_reports_its_departure`, `test_nothing_today_is_answered_with_tomorrow`, `test_the_wait_does_not_move_the_map_threshold`, `test_a_relation_with_no_service_at_all_still_says_so`, `test_the_headline_departure_is_the_latest_one` | `test_a_route_that_starts_much_later_says_so` |
 | **14** | `tests/test_dojscie_piesze.py`, `test_the_map_accepts_a_walking_transfer_the_search_accepts` | — |
 | **15** | `tests/test_trafikary_na_mapie.py`, `tests/test_strefa_traficara.py` | `test_a_car_is_a_place_on_the_map_not_a_ride`, `test_the_car_says_what_is_there_to_earn`, `test_the_drop_off_zone_shows_under_the_cursor`, `test_vans_are_a_switch_sent_to_the_server` |
-| **16** | `tests/test_rowery_na_mapie.py` (sedno: `test_przystanek_bez_narysowanego_odjazdu_niczego_nie_otwiera`, `test_przejazd_nie_musi_byc_szybszy_niz_tramwaj`) | `test_a_bike_shows_its_rides_only_under_the_cursor`, `test_a_bike_on_another_day_does_not_pretend_to_know`, `test_bike_rides_can_stay_on_the_map`, `test_bike_kinds_are_switches_sent_to_the_server` |
+| **16** | `tests/test_rowery_na_mapie.py` (sedno: `test_przystanek_bez_narysowanego_odjazdu_niczego_nie_otwiera`, `test_przejazd_nie_musi_byc_szybszy_niz_tramwaj`) | `test_a_bike_on_another_day_does_not_pretend_to_know`, `test_bike_kinds_are_switches_sent_to_the_server` |
 
 Start z pokładu pojazdu na mapie (poza kontraktem): `tests/test_w_pojezdzie.py`,
 sedno — `test_przesiadka_na_starcie_z_pokladu_wymaga_zapasu`,

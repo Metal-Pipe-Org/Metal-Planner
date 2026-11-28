@@ -693,6 +693,6 @@ app.timeOpts = settingView({hover: 'time-hover', ends: 'time-ends', chips: 'time
                             headline: 'time-show-headline', ride: 'time-ride'});
 app.dotOpts = settingView({size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past',
     center: 'dot-center', tipCursor: 'tip-cursor', tipPanel: 'tip-panel',
-    bikeTimes: 'walk-time', bikeRides: 'bike-rides', carTimes: 'car-times',
+    bikeTimes: 'walk-time', carTimes: 'car-times',
     why: 'debug-why', namesZoom: 'names-zoom'});
 app.soundOpts = settingView({level: 'sound-level'});
