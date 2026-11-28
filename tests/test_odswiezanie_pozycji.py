@@ -57,7 +57,10 @@ def _otworz(przegladarka, adres, przelacznik=True, init=None, **opcje):
         datetime.date.today(), datetime.time(12, 0)))
     bledy = []
     page.on("pageerror", lambda e: bledy.append(str(e)))
+    # Zapisane ustawienia robią z testu „starego" użytkownika, a ten dostaje
+    # okienka nowości, które zasłaniają formularz - test jest nowym.
     page.add_init_script(
+        "localStorage.setItem('metal-planner:first-visit', String(Date.now()));"
         "localStorage.setItem('metal-planner:settings', %s)"
         % json.dumps(json.dumps({"location-refresh": przelacznik})))
     if init:

@@ -160,15 +160,21 @@ body.view-list .places-bar { display: none; }
 
 /* --------------------------------------------- karta wyszukiwania --- */
 
-/* Na wąskim ekranie „Odjazd" przepychał ✕ poza kartę, a kółko ładowania na
-   „Szukaj" robiło to samo na każdym telefonie. Pole godziny z „teraz" obok
-   mówi samo za siebie, a przycisk ma się kurczyć, a nie pchać sąsiadów. */
-.time-row > span:first-child { display: none; }
-/* „Odjazd"/„Przyjazd" (#265) zostaje - bez niego nie wiadomo, co znaczy
-   godzina - ale ciaśniej, żeby „Szukaj" się zmieścił. */
-.time-mode-button { font-size: 11px; }
-.time-field .time-row { gap: 5px; }
+/* Kółko ładowania na „Szukaj" przepychało ✕ poza kartę na każdym telefonie:
+   przycisk ma się kurczyć, a nie pchać sąsiadów. */
 .search-row .button.primary { min-width: 0; padding: 0 12px; }
+
+/* Kółka wysuwają się od dołu ekranu. */
+.when-chip { padding: 7px 12px; }
+.when-backdrop { background: rgba(16, 32, 48, 0.35); }
+.when-sheet {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    border-radius: var(--radius) var(--radius) 0 0;
+}
 
 /* Zwinięta: jedna linijka „skąd → dokąd  godzina" (tworzy ją phone.js).
    Stuknięcie rozwija formularz z powrotem. */

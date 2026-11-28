@@ -2341,18 +2341,28 @@ def _too_late(arrive_sec):
                      f"żadnym połączeniem."}
 
 
-def _no_arrival(start_name, end_name, arrive_sec):
-    return {"error": f"Nie znaleziono połączenia {start_name} → {end_name} "
-                     f"z przyjazdem do {_fmt_time(arrive_sec)} tego dnia."}
-
-
-def _no_connection(start_name, end_name, dep_sec, when):
+def _unpublished(when):
+    """Komunikat o dniu za rozkładem albo None - wspólny dla odjazdu i przyjazdu:
+    za ostatnim dniem paczki nie ma połączeń dlatego, że rozkładu jeszcze nie ma."""
     last = gtfs.last_service_date()
     if last and when.date() > last:
         return {
             "error": f"Rozkładu na {when:%d.%m} jeszcze nie opublikowano — "
                      f"obecny sięga do {last:%d.%m}."
         }
+    return None
+
+
+def _no_arrival(start_name, end_name, arrive_sec, when):
+    return _unpublished(when) or {
+        "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
+                 f"z przyjazdem do {_fmt_time(arrive_sec)} tego dnia."}
+
+
+def _no_connection(start_name, end_name, dep_sec, when):
+    unpublished = _unpublished(when)
+    if unpublished:
+        return unpublished
     return {
         "error": f"Nie znaleziono połączenia {start_name} → {end_name} "
                  f"po {_fmt_time(dep_sec)} tego dnia."
@@ -2522,6 +2532,15 @@ def plan_flow_stages(start_query, end_query, when=None,
     day_offset = (-1 if arrive_by and not in_vehicle and asked_sec < ARRIVE_LOOKBACK_SEC
                   else 0)
 
+    # Dzień za rozkładem nie ma odpowiedzi w żadnym trybie - mówimy to od razu,
+    # zamiast przeszukiwać kolejne puste doby. Liczy się doba, na której osi
+    # się szuka: „być na" 00:20 pierwszego dnia za rozkładem to jeszcze
+    # wieczór ostatniego opublikowanego. Komunikat mówi o dniu z pytania.
+    unpublished = _unpublished(when + timedelta(days=day_offset)) and _unpublished(when)
+    if unpublished:
+        yield "error", unpublished
+        return
+
     try:
         day = gtfs.with_pace(schedule_day(when.date(), day_offset, trains), walk_pace)
         if not walking:
@@ -2589,7 +2608,7 @@ def plan_flow_stages(start_query, end_query, when=None,
     if arrive_sec is not None:
         dep_sec = _latest_start(day, source_stops, target_stops, arrive_sec)
         if dep_sec is None:
-            yield "error", _no_arrival(start_name, end_name, arrive_sec)
+            yield "error", _no_arrival(start_name, end_name, arrive_sec, when)
             return
         if earliest_exit is not None and dep_sec < earliest_exit:
             yield "error", _too_late(arrive_sec)

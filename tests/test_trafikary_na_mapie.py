@@ -10,6 +10,7 @@ prostej i - szacunkiem, jak przy rowerze - o której auto tam dowiezie
 Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
+import pytest
 import random
 from datetime import date, datetime, time, timedelta
 
@@ -23,6 +24,24 @@ from tests import flow
 # pytaniu o dziś - stąd dzisiejsza data zamiast stałej z pozostałych testów.
 # Północ, żeby dep_sec wyszło zerem i liczby dały się czytać w głowie.
 WHEN = datetime.combine(date.today(), time())
+
+
+
+def _teraz(monkeypatch, kiedy):
+    class _Teraz(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return kiedy
+    monkeypatch.setattr(planner, "datetime", _Teraz)
+
+
+@pytest.fixture(autouse=True)
+def _teraz_to_polnoc(monkeypatch):
+    """„Teraz" to WHEN: auta stoją tam, gdzie teraz, więc zasięg w przód i brak
+    aut wstecz liczą się od zegara - a test nie może zależeć od pory, o której
+    leci (wcześniej po 3:00 auta z północy były już „poza zasięgiem")."""
+    _teraz(monkeypatch, WHEN)
+
 
 # Trzy punkty na jednym południku: 0,01° szerokości to ~1113 m.
 S = (51.10, 17.00)          # start

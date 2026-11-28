@@ -758,6 +758,21 @@ def active_service_ids_for_days(db, days):
     return result
 
 
+def first_service_date():
+    """Pierwszy dzień, na który paczka GTFS ma jakiekolwiek kursy, albo None
+    bez bazy. Wcześniej pytanie nie ma odpowiedzi - paczka zaczyna się zwykle
+    kilka dni przed jej wydaniem."""
+    if not DB_PATH.exists():
+        return None
+    db = _connect()
+    first = db.execute(
+        "SELECT MIN(d) FROM (SELECT MIN(start_date) AS d FROM calendar UNION ALL "
+        "SELECT MIN(date) FROM calendar_dates WHERE exception_type = 1)"
+    ).fetchone()[0]
+    db.close()
+    return datetime.strptime(first, "%Y%m%d").date() if first else None
+
+
 def last_service_date():
     """Ostatni dzień, na który paczka GTFS ma jakiekolwiek kursy, albo None
     bez bazy. Paczka sięga zwykle ok. dwóch tygodni naprzód - dalej pytanie

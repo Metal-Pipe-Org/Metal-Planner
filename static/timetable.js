@@ -29,12 +29,10 @@ const {map, esc, escClass, fitTo, MODE_LABEL, ROUTE_ICON, lineColor, lineStyle} 
 const $ = id => document.getElementById(id);
 
 const queryInput = $('tt-query');
-// Godzina i data to te same dwa pola co w wyszukiwarce, przenoszone między
-// panelami (patrz setMode): jedno miejsce, w którym żyją, więc cokolwiek je
-// ustawia, nie musi wiedzieć o rozkładach.
+// Godzina i data to te same dwa pola co w wyszukiwarce, a wybiera się je tą
+// samą pastylką (#when), przenoszoną między panelami (patrz setMode).
 const dateInput = $('date');
 const timeInput = $('time');
-const timeField = $('tt-time-field');
 const clearButton = $('tt-clear');
 const resultsBox = $('tt-results');
 if (!queryInput || !resultsBox) return;
@@ -253,19 +251,21 @@ function setMode(on) {
     }
     B.syncTabs();
 
-    const datePart = document.querySelector('.tt-date-part');
     if (on) {
-        $('tt-now').before(timeInput);
-        datePart.append(dateInput);
+        $('tt-time-field').prepend($('when'));
+        B.whenEnterTimetable();
         document.body.classList.remove('panel-hidden');
         B.suspendPlanner();
         // Godzina mogła się zmienić w Trasach, gdy rozkład stał schowany.
         if (data && data.date !== currentDate()) load(kind);
         else { render(); draw(true); }
-        queryInput.focus();
+        // Wpisany już przystanek czy linia nie potrzebuje podpowiedzi: fokus
+        // otworzyłby listę na pastylce godziny. Pustemu polu kursor się należy.
+        if (!queryInput.value.trim()) queryInput.focus();
     } else {
-        $('time-now').before(timeInput);
-        $('day-panel').append(dateInput);
+        suggestions.close();
+        $('when-fields').before($('when'));
+        B.paintWhen();
         clearMap();
         dimBase(false);
         B.resumePlanner();
@@ -376,7 +376,7 @@ function suggestionRow(item) {
          + `<span class="ac-kind">przystanek</span>`;
 }
 
-B.attachAutocomplete(queryInput, item => load(item.kind), {
+const suggestions = B.attachAutocomplete(queryInput, item => load(item.kind), {
     suggest,
     render: suggestionRow,
     onEnter: () => load(),
@@ -423,11 +423,7 @@ function reset() {
 }
 
 function syncField() {
-    const filled = !!queryInput.value.trim();
-    clearButton.hidden = !filled;
-    // Rozkład linii nie używa godziny (patrz retime), więc zostaje w nim sama
-    // data; pusty wpis albo przystanek przywracają pełne pole.
-    timeField.classList.toggle('date-only', filled && !!data && kind === 'line');
+    clearButton.hidden = !queryInput.value.trim();
 }
 
 function fail(message, suggestions) {
@@ -530,13 +526,11 @@ queryInput.addEventListener('input', syncField);
 // dociąga się przy wejściu (patrz setMode).
 dateInput.addEventListener('change', () => { if (active() && data) load(kind); });
 timeInput.addEventListener('input', () => { if (active()) retime(); });
-// „teraz" to CHWILA, więc wraca też na dzisiejszy dzień - sama godzina przy
-// dacie zostawionej na innym dniu opisywałaby tamtą dobę. Zmiana dnia to nowy
-// rozkład; sama godzina tylko przesuwa tablicę (patrz retime).
-$('tt-now').addEventListener('click', () => {
-    const otherDay = dateInput.value !== isoToday();
-    B.setTimeNow();
-    if (otherDay && data) load(kind);
+// Wybór z pastylki: zmiana dnia to nowy rozkład, sama godzina tylko przesuwa
+// tablicę (patrz retime).
+document.addEventListener('planner:when', () => {
+    if (!active()) return;
+    if (data && data.date !== currentDate()) load(kind);
     else retime();
 });
 

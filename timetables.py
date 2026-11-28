@@ -382,8 +382,7 @@ def repeat_note(stop_ids, day):
                   for i in range(-REPEAT_WINDOW_DAYS, REPEAT_WINDOW_DAYS + 1)]
         # Poza paczką GTFS nie ma usług - "ten sam rozkład" znaczyłoby tam
         # "też pusty", a nie "ten sam".
-        first = db.execute("SELECT MIN(start_date) FROM calendar").fetchone()[0]
-        first = datetime.datetime.strptime(first, "%Y%m%d").date() if first else day
+        first = gtfs.first_service_date() or day
         last = gtfs.last_service_date() or day
         window = [d for d in window if first <= d <= last]
         active = gtfs.active_service_ids_for_days(db, set(window) | {day})

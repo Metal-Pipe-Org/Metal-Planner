@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 import pytest
 
+import gtfs
 from tests import flow
 from tests.gtfs_builder import make_day
 from tests.test_mapa_ruchy import PIATEK, SOSNOWIECKA, _real
@@ -54,6 +55,30 @@ def test_bez_polaczenia_mowi_o_przyjezdzie(install_day):
     result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 8, 35), arrive_by=True)
 
     assert result["error"] == "Nie znaleziono połączenia S → E z przyjazdem do 08:35 tego dnia."
+
+
+def test_dzien_za_rozkladem_mowi_ze_rozkladu_jeszcze_nie_ma(install_day, monkeypatch):
+    """Tak samo jak przy odjeździe: za ostatnim dniem paczki połączeń nie ma,
+    bo rozkładu jeszcze nie opublikowano - a nie dlatego, że nic nie dowozi."""
+    install_day(make_day(DAY))
+    monkeypatch.setattr(gtfs, "last_service_date", lambda: date(2026, 1, 4))
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 35), arrive_by=True)
+
+    assert result["error"] == "Rozkładu na 05.01 jeszcze nie opublikowano — obecny sięga do 04.01."
+
+
+def test_odjazd_za_rozkladem_mowi_to_od_razu_bez_szukania(monkeypatch):
+    """Odjazd tak jak przyjazd: komunikat bez przeszukiwania kolejnych pustych dób."""
+    monkeypatch.setattr(gtfs, "last_service_date", lambda: date(2026, 1, 4))
+
+    def nie_szukaj(*args, **kwargs):
+        raise AssertionError("dzień za rozkładem nie powinien wczytywać rozkładu")
+    monkeypatch.setattr(gtfs, "load_day", nie_szukaj)
+
+    result = flow.plan_flow("S", "E", datetime(2026, 1, 5, 0, 35))
+
+    assert result["error"] == "Rozkładu na 05.01 jeszcze nie opublikowano — obecny sięga do 04.01."
 
 
 def test_zwykle_wyszukiwanie_bez_zmian(install_day):
@@ -145,6 +170,18 @@ def test_po_polnocy_wyjscie_poprzedniego_wieczoru(monkeypatch):
     assert result["scheme"]["moves"]
     assert all(move["arrival_sec"] <= 24 * 3600 + 20 * M
                for move in result["scheme"]["moves"])
+
+
+def test_po_polnocy_pierwszego_dnia_za_rozkladem_liczy_ostatni_wieczor(monkeypatch):
+    """Szuka się na osi doby poprzedniej, więc o tym, czy rozkład już jest,
+    decyduje ona: wyjście z ostatniego opublikowanego wieczoru, nie komunikat."""
+    _dwie_doby(monkeypatch)
+    monkeypatch.setattr(gtfs, "last_service_date", lambda: date(2026, 1, 5))
+
+    result = flow.plan_flow("S", "E", DZIEN.replace(minute=20), arrive_by=True)
+
+    assert result["starts"] == "23:50"
+    assert result["day_offset"] == -1
 
 
 def test_po_polnocy_dowozi_tez_poranek_nowej_doby(monkeypatch):

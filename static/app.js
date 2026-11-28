@@ -189,23 +189,6 @@ $('about-report').addEventListener('click', e => {
         + encodeURIComponent(body);
 });
 
-// Panel wyboru dnia
-const dayPanel = $('day-panel');
-const dayToggle = $('day-toggle');
-
-if (dayPanel && dayToggle) {
-    // Sterowanie widocznością panelu
-    const setDay = (open, persist = true) => {
-        dayPanel.classList.toggle('hidden', !open);
-        dayToggle.classList.toggle('active', open);
-        dayToggle.setAttribute('aria-expanded', String(open));
-        if (persist) saveUiState({ dayOpen: open });
-    };
-
-    setDay(!!uiState.dayOpen, false);
-    dayToggle.addEventListener('click', () => setDay(dayPanel.classList.contains('hidden')));
-}
-
 // Pole godziny to zwykły tekst, nie <input type="time"> - natywny widget w
 // niektórych przeglądarkach (np. Safari) pokazuje AM/PM zależnie od ustawień
 // regionalnych systemu i ignoruje atrybut lang strony, więc format 24h nie
@@ -302,7 +285,6 @@ let journeys = [];
 // Godzina z formularza to wyjazd albo - po przełączeniu - godzina, na którą
 // chce się być na miejscu (zgłoszenie #265). Z pokładu pojazdu przełącznik
 // nie działa: tam się już jedzie, więc wyjścia nie ma kiedy wybierać.
-const timeModeButton = $('time-mode');
 let arriveBy = false;
 let selectedJourney = null;   // indeks pozycji z listy albo null
 let resultsCollapsed = !!uiState.resultsCollapsed; // ukrywa samą listę propozycji (nie cały panel)
@@ -5343,7 +5325,7 @@ function warnOnboardRide(kurs) {
 function setStartMode(vehicle, focus = true) {
     onboardOn = vehicle;
     document.body.classList.toggle('start-onboard', vehicle);
-    syncTimeMode();
+    document.dispatchEvent(new Event('planner:startmode'));
     syncOnboardView();
     for (const [button, on] of [[modeVehicleButton, vehicle], [modePlaceButton, !vehicle]]) {
         button.classList.toggle('active', on);
@@ -7345,7 +7327,12 @@ function applyStage(run, data) {
         search.found = true;
         // Formularz na telefonie zwija się dopiero przy wyniku - przy
         // błędzie zostaje rozwinięty do poprawki (patrz phone.js).
-        document.dispatchEvent(new Event('planner:found'));
+        const at = whenMoment();
+        document.dispatchEvent(new CustomEvent('planner:found', {detail: {
+            arrive: arriveBy && !onboardOn,
+            // Dzień tak jak w pastylce („jutro", „sb 28.11"); dziś bez dnia.
+            day: isoDay(at) === isoDay(new Date()) ? '' : whenDayLabel(at).toLowerCase(),
+        }}));
         playPipeDrop();
     }
 }
@@ -7454,8 +7441,17 @@ function restoreLastSearch() {
     };
     $('recall-offer-name').replaceChildren(
         end(displayValue(saved.start)), ' ', end('→ ' + displayValue(saved.end)),
-        ...(saved.time ? [' ', end('· ' + recalledTimeLabel(saved))] : []));
+        ...(savedWhenFresh(saved) ? [' ', end('· ' + recalledTimeLabel(saved))] : []));
     recallOffer.hidden = false;
+}
+
+/** Godzina zapamiętana z trasą wraca tylko, dopóki nie minęła - inaczej
+    przywrócona trasa szukałaby połączeń, które już odjechały. */
+function savedWhenFresh(saved) {
+    if (!saved.time || !saved.date) return false;
+    const [hh, mm] = saved.time.split(':').map(Number);
+    const day = dayOfIso(saved.date);
+    return !momentPassed(new Date(day.getFullYear(), day.getMonth(), day.getDate(), hh, mm));
 }
 
 /** „8:00" dla dzisiaj, „jutro 8:00" albo „24.10 8:00" - co wróci z trasą. */
@@ -7476,12 +7472,13 @@ function applyLastSearch(saved) {
     sel.end = saved.end;
     startInput.value = displayValue(sel.start);
     endInput.value = displayValue(sel.end);
-    // Wraca tylko godzina wpisana ręcznie; bez niej zostaje „teraz".
-    if (saved.time) {
+    // Wraca tylko godzina wpisana ręcznie i jeszcze aktualna; inaczej „teraz".
+    if (savedWhenFresh(saved)) {
         timeInput.value = saved.time;
         $('date').value = saved.date;
         timeChosen = true;
         setArriveBy(!!saved.arrive);
+        paintWhen();
     }
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
@@ -7648,16 +7645,22 @@ function applyLink() {
     // Cel z lokalizacji nie istnieje, więc `to=gps` zostawia „Dokąd" puste.
     const to = query.get('to') === 'gps' ? null : query.get('to');
     if (!from && !to) return;
-    if (/^\d{1,2}:\d{2}$/.test(query.get('time'))) {
-        $('time').value = query.get('time').padStart(5, '0');
-        timeChosen = true;
-        setArriveBy(query.get('arrive') === '1');
+    const time = /^\d{1,2}:\d{2}$/.test(query.get('time')) ? query.get('time').padStart(5, '0') : null;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(query.get('date')) ? query.get('date') : null;
+    // Dzień sprzed rozkładu nie ma odpowiedzi, więc zostaje „teraz". Dzień za
+    // rozkładem zostaje: wyszukiwanie powie, że rozkładu jeszcze nie opublikowano.
+    if (!(date && date < firstDayIso())) {
+        if (time) {
+            $('time').value = time;
+            timeChosen = true;
+            setArriveBy(query.get('arrive') === '1');
+        }
+        if (date) {
+            $('date').value = date;
+            timeChosen = true;
+        }
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(query.get('date'))) {
-        $('date').value = query.get('date');
-        timeChosen = true;
-        if (dayPanel.classList.contains('hidden')) dayToggle.click();
-    }
+    paintWhen();
     const fill = (side, text) => {
         const place = placeFromParam(text);
         if (isPoint(place)) { sel[side] = place; updatePointMarker(side, place); }
@@ -7959,45 +7962,726 @@ function setTimeNow() {
     $('time').value = now.toTimeString().slice(0, 5);
     $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
                     + `-${String(now.getDate()).padStart(2, '0')}`;
+    paintWhen();
 }
 
 // Powrót do aplikacji z tła: pole ma pokazywać dzisiejszą chwilę, zanim
-// pasażer kliknie Szukaj. Ręcznie ustawionej godziny nie ruszamy.
+// pasażer kliknie Szukaj. Ręcznie ustawiona godzina obowiązuje, dopóki nie
+// minie; potem wraca „teraz" (odjazd - „przyjazd teraz" nie ma sensu).
 document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !timeChosen) setTimeNow();
+    if (document.hidden) return;
+    const passed = whenPassed();
+    if (passed) setArriveBy(false);
+    if (!timeChosen || passed) setTimeNow();
 });
 
-$('time-now').addEventListener('click', () => {
-    setTimeNow();
-    if (startInput.value && endInput.value) search();
-});
+// ------------------------------------- wybór godziny i daty (#501) ---
+// Kółka są tylko twarzą pól #time i #date (leżą w #when-fields i jeżdżą też do
+// Rozkładów): wyszukiwanie, link i zapamiętana trasa czytają je tak samo jak zawsze.
+const whenBox = $('when');
+const WEEKDAYS = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
+const WHEEL_DAYS = 14;
+const WHEEL_H = 40;
+// Przełączenie z „teraz" na „Przyjazd": od której chwili liczy się domyślną godzinę.
+// Pierwsza pełna godzina co najmniej pół godziny od teraz: tuż przed pełną
+// godziną (3:58) najbliższa (4:00) nie dawała szans dojechać, więc 5:00.
+const arriveFromNow = now => {
+    const soonest = new Date(now.getTime() + 30 * 60000);
+    const hour = new Date(soonest.getFullYear(), soonest.getMonth(), soonest.getDate(), soonest.getHours());
+    return hour < soonest ? new Date(hour.getTime() + 3600000) : hour;
+};
+let whenSearchTimer = null;
+let wheelsChanged = false;
+let wheelTimer = null;
+// Koła w układzie telefonu, okienko z polem godziny w układzie komputera - to
+// samo przełączenie, co dla całej reszty aplikacji (phoneLayout).
+let whenWheels = false;
+// Czy od otwarcia wyboru pasażer sam zmienił godzinę albo dzień (patrz setWhenMode).
+let whenTouched = false;
+let whenSnapshot = null;
 
-// Przełącznik „Odjazd"/„Przyjazd" - stan jest wyżej (arriveBy), bo
-// setStartMode woła syncTimeMode już przy starcie strony.
-function syncTimeMode() {
-    const on = arriveBy && !onboardOn;
-    timeModeButton.textContent = on ? 'Przyjazd' : 'Odjazd';
-    timeModeButton.setAttribute('aria-pressed', String(on));
-    timeModeButton.disabled = onboardOn;
-    timeModeButton.title = onboardOn
-        ? 'Z pojazdu godzina to zawsze wyjazd - już jedziesz'
-        : on ? 'Godzina to przyjazd: być na miejscu najpóźniej o tej godzinie. Stuknij, żeby szukać od godziny wyjazdu.'
-             : 'Godzina to wyjazd. Stuknij, żeby podać, na którą chcesz być na miejscu.';
+const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    + `-${String(d.getDate()).padStart(2, '0')}`;
+const clockOf = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:`
+    + String(minutes % 60).padStart(2, '0');
+const minutesOf = d => d.getHours() * 60 + d.getMinutes();
+
+// Pierwszy i ostatni dzień z rozkładem jadą z serwera: tylko na nie da się
+// cokolwiek wyszukać. Bez bazy ich nie ma - wtedy od dziś.
+const firstDayIso = () => $('when-fields').dataset.first || isoDay(new Date());
+const lastDayIso = () => $('when-fields').dataset.last;
+const dayOfIso = iso => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+};
+function clampIso(iso) {
+    const last = lastDayIso();
+    if (iso < firstDayIso()) return firstDayIso();
+    return last && iso > last ? last : iso;
 }
+function clampMoment(moment) {
+    const iso = isoDay(moment);
+    const clamped = clampIso(iso);
+    if (clamped === iso) return moment;
+    const [y, m, d] = clamped.split('-').map(Number);
+    return clamped < iso ? new Date(y, m - 1, d, 23, 55) : new Date(y, m - 1, d, 0, 0);
+}
+
+// Nieustawiona ręcznie godzina to „teraz", a pola formularza odświeżają się
+// dopiero przy wyszukaniu albo powrocie z tła.
+function whenMoment() {
+    if (!timeChosen) return new Date();
+    const [y, m, d] = $('date').value.split('-').map(Number);
+    const [hh, mm] = (timeInput.value || '00:00').split(':').map(Number);
+    return new Date(y, m - 1, d, hh, mm);
+}
+
+function whenDayLabel(day) {
+    const diff = Math.round((midnight(day) - midnight(new Date())) / 86400000);
+    if (diff === 0) return 'Dziś';
+    if (diff === 1) return 'Jutro';
+    if (diff === -1) return 'Wczoraj';
+    return `${WEEKDAYS[day.getDay()]} ${day.getDate()}.${String(day.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Minuta wybrana ręcznie już minęła (ta, która trwa, jeszcze nie).
+const momentPassed = moment => moment.getTime() + 60000 <= Date.now();
+const whenPassed = () => timeChosen && momentPassed(whenMoment());
+
+function writeWhen(moment) {
+    timeInput.value = clockOf(minutesOf(moment));
+    $('date').value = isoDay(moment);
+    timeChosen = true;
+}
+
+// Kilka stuknięć pod rząd (+15, +15) to jedno wyszukiwanie.
+function searchWhenSoon() {
+    clearTimeout(whenSearchTimer);
+    whenSearchTimer = setTimeout(() => {
+        if (startInput.value && endInput.value) search();
+    }, 600);
+}
+
+// Rozkłady pokazują odjazdy, a z pokładu jedzie się teraz: tam przyjazdu nie ma.
+const inTimetable = () => document.body.classList.contains('mode-timetable');
+const whenArrive = () => arriveBy && !onboardOn && !inTimetable();
+
+function whenModeName() {
+    return whenArrive() ? 'Przyjazd' : 'Odjazd';
+}
+
+// Przyjazd z „teraz" dostaje najbliższą pełną godzinę; powrót do odjazdu bez
+// ruszania godziny i dnia oddaje „teraz", które było przy otwarciu wyboru.
+function setWhenMode(arrive) {
+    setArriveBy(arrive);
+    if (arrive && !timeChosen) writeWhen(clampMoment(arriveFromNow(new Date())));
+    if (!arrive && whenSnapshot && !whenSnapshot.chosen && !whenTouched) {
+        setTimeNow();
+        return;
+    }
+    paintWhen();
+}
+
+function nowChip() {
+    return `<button type="button" class="when-chip${timeChosen ? '' : ' on'}" data-now>Teraz</button>`;
+}
+
+function paintPill() {
+    const at = whenMoment();
+    const pill = whenBox.querySelector('.when-pill');
+    pill.disabled = onboardOn;
+    pill.title = onboardOn ? 'W pojeździe liczy się od teraz' : '';
+    // Tekst w jednym kawałku: odstęp pastylki rozsuwał „13:00 , dziś".
+    pill.innerHTML = `<span>${whenModeName()} `
+        + (timeChosen ? `<b>${clockOf(minutesOf(at))}</b>, ${whenDayLabel(at).toLowerCase()}` : '<b>teraz</b>')
+        + `</span>${onboardOn ? '' : ' <span class="when-caret">▾</span>'}`;
+}
+
+function paintWhen() {
+    if (!whenBox.firstChild) {
+        whenBox.innerHTML = '<button type="button" class="when-pill" aria-haspopup="dialog"></button>';
+        whenBox.firstChild.addEventListener('click', openWhen);
+    }
+    paintPill();
+}
+
+// Z pokładu jedzie się teraz: wybrana godzina wskazywałaby inny kurs niż ten,
+// którym się jedzie. Pastylka stoi wtedy na „teraz" i się nie otwiera, a po
+// wyjściu z pojazdu wraca wcześniejszy wybór - o ile jeszcze nie minął.
+let whenBeforeOnboard = null;
+document.addEventListener('planner:startmode', () => {
+    if (onboardOn && !whenBeforeOnboard) {
+        whenBeforeOnboard = timeChosen
+            ? {arrive: arriveBy, time: timeInput.value, date: $('date').value} : {};
+        setArriveBy(false);
+        setTimeNow();
+    } else if (!onboardOn && whenBeforeOnboard) {
+        const before = whenBeforeOnboard;
+        whenBeforeOnboard = null;
+        if (savedWhenFresh(before)) {
+            timeInput.value = before.time;
+            $('date').value = before.date;
+            timeChosen = true;
+            setArriveBy(before.arrive);
+        }
+    }
+    paintWhen();
+});
+
+// Kółka: arkusz leży w <body>, bo panel z kartą przycina to, co z niego wystaje.
+const whenBackdrop = document.createElement('div');
+whenBackdrop.className = 'when-backdrop';
+whenBackdrop.hidden = true;
+const whenSheet = document.createElement('div');
+whenSheet.className = 'when-sheet';
+whenSheet.hidden = true;
+whenSheet.setAttribute('role', 'dialog');
+whenSheet.setAttribute('aria-label', 'Godzina odjazdu');
+// Klik w puste miejsce okienka zostawia fokus w nim, więc Enter i Esc działają dalej.
+whenSheet.tabIndex = -1;
+document.body.append(whenBackdrop, whenSheet);
+
+function wheelHtml(name, label, items) {
+    return `<div class="when-wheel" data-wheel="${name}" tabindex="0" aria-label="${label}">`
+        + items.map(([value, text]) => `<div class="when-item" data-v="${value}">${text}</div>`).join('')
+        + '</div>';
+}
+
+function sheetTopHtml() {
+    return `${modesHtml()}
+        <div class="when-sheet-head">
+            ${whenArrive() ? '' : nowChip()}
+            <button type="button" class="button primary when-done" data-done>Gotowe</button>
+        </div>`;
+}
+
+function modesHtml() {
+    if (inTimetable()) return '';
+    return `<div class="when-modes" role="tablist">
+            <button type="button" role="tab" class="when-mode${arriveBy ? '' : ' on'}" data-mode="depart"
+                    aria-selected="${!arriveBy}">Odjazd</button>
+            <button type="button" role="tab" class="when-mode${arriveBy ? ' on' : ''}" data-mode="arrive"
+                    aria-selected="${arriveBy}"${onboardOn ? ' disabled' : ''}>Przyjazd</button>
+        </div>`;
+}
+
+// Dni z rozkładem, a do tego dzień już wybrany, gdy (z linku) leży poza nimi -
+// inaczej samo otwarcie wyboru przestawiłoby go na inny.
+function rangeDays() {
+    const first = dayOfIso(firstDayIso());
+    const lastIso = lastDayIso()
+        || isoDay(new Date(first.getFullYear(), first.getMonth(), first.getDate() + WHEEL_DAYS - 1));
+    const days = [];
+    for (let day = first; isoDay(day) <= lastIso;
+         day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)) {
+        days.push(day);
+    }
+    const picked = midnight(whenMoment());
+    if (!days.some(day => isoDay(day) === isoDay(picked))) {
+        days.push(picked);
+        days.sort((a, b) => a - b);
+    }
+    return days;
+}
+
+function openWhen() {
+    whenSnapshot = {arrive: arriveBy, chosen: timeChosen, time: timeInput.value, date: $('date').value};
+    whenWheels = phoneLayout.active();
+    wheelsChanged = false;
+    whenTouched = false;
+    whenBackdrop.hidden = false;
+    whenSheet.hidden = false;
+    whenSheet.classList.toggle('when-desk', !whenWheels);
+    if (whenWheels) openWheels();
+    else openDesk();
+}
+
+function openWheels() {
+    const days = rangeDays().map(day => [isoDay(day), whenDayLabel(day)]);
+    const hours = Array.from({length: 24}, (_, h) => [h, String(h).padStart(2, '0')]);
+    const minutes = Array.from({length: 12}, (_, i) => [i * 5, String(i * 5).padStart(2, '0')]);
+    whenSheet.innerHTML = `<div class="when-sheet-top">${sheetTopHtml()}</div>
+        <div class="when-wheels">
+            ${wheelHtml('day', 'Dzień', days)}${wheelHtml('hour', 'Godzina', hours)}${wheelHtml('min', 'Minuta', minutes)}
+            <div class="when-band"></div>
+        </div>`;
+    whenSheet.style.top = whenSheet.style.left = '';
+    scrollWheels('instant');
+}
+
+// Na komputerze zamiast kół: godzina wpisywana z klawiatury i dni do kliknięcia.
+// Kółko myszy i gładzik nie umieją kręcić kolumną o jedną pozycję (gładzik
+// rzucał godziną na koniec doby), a przeciąganie myszą nie działa w ogóle.
+function openDesk() {
+    // Przyciski na dole zostają widoczne zawsze; w niskim oknie przewija się
+    // tylko to, co nad nimi (pasek przewijania bywa schowany, więc „Gotowe"
+    // pod krawędzią łatwo przeoczyć).
+    whenSheet.innerHTML = `<div class="when-desk-body">
+            ${modesHtml()}
+            <div class="when-desk-time">
+                <input type="text" class="when-time" inputmode="numeric" maxlength="5" autocomplete="off"
+                       aria-label="Godzina" title="Wpisz godzinę, np. 1745; strzałki ↑↓ zmieniają godzinę albo minuty">
+            </div>
+            ${calendarHtml()}
+        </div>
+        <div class="when-desk-foot">
+            ${nowChip()}
+            <button type="button" class="button primary when-done" data-done>Gotowe</button>
+        </div>`;
+    paintDesk();
+    placeDesk();
+    const input = whenSheet.querySelector('.when-time');
+    input.focus();
+    input.select();
+}
+
+// Mały kalendarz dni z rozkładem: tygodnie od poniedziałku, w komórce numer
+// dnia, a na początku nowego miesiąca jego skrót. Dni spoza rozkładu są puste.
+const MONTHS = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+
+function calendarHtml() {
+    const days = rangeDays();
+    const inRange = new Set(days.map(isoDay));
+    const first = days[0];
+    const last = days[days.length - 1];
+    const monday = new Date(first.getFullYear(), first.getMonth(), first.getDate() - (first.getDay() + 6) % 7);
+    const today = isoDay(new Date());
+    const cells = [];
+    for (let day = monday; day <= last || cells.length % 7;
+         day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)) {
+        const iso = isoDay(day);
+        if (!inRange.has(iso)) {
+            cells.push('<span class="when-cal-off" aria-hidden="true"></span>');
+            continue;
+        }
+        const newMonth = day.getMonth() !== first.getMonth() && day.getDate() === 1;
+        cells.push(`<button type="button" role="radio" class="when-day${iso === today ? ' today' : ''}"
+                data-day="${iso}" aria-label="${whenDayLabel(day)}">`
+            + (newMonth ? `<span class="when-cal-month">${MONTHS[day.getMonth()]}</span>` : '')
+            + `${day.getDate()}</button>`);
+    }
+    return `<div class="when-cal" role="radiogroup" aria-label="Dzień">
+            ${['pn', 'wt', 'śr', 'cz', 'pt', 'sb', 'nd'].map(name => `<span class="when-cal-head">${name}</span>`).join('')}
+            ${cells.join('')}
+        </div>`;
+}
+
+function paintDesk() {
+    const at = whenMoment();
+    const input = whenSheet.querySelector('.when-time');
+    input.value = input.dataset.shown = clockOf(minutesOf(at));
+    input.classList.remove('bad');
+    for (const tab of whenSheet.querySelectorAll('[data-mode]')) {
+        const on = (tab.dataset.mode === 'arrive') === arriveBy;
+        tab.classList.toggle('on', on);
+        tab.setAttribute('aria-selected', on);
+    }
+    const now = whenSheet.querySelector('[data-now]');
+    now.hidden = whenArrive();
+    now.classList.toggle('on', !timeChosen);
+    paintDays();
+}
+
+function paintDays() {
+    const iso = isoDay(whenMoment());
+    for (const day of whenSheet.querySelectorAll('.when-day')) {
+        const on = day.dataset.day === iso;
+        day.classList.toggle('on', on);
+        day.setAttribute('aria-checked', on);
+        day.tabIndex = on ? 0 : -1;
+    }
+}
+
+// Okienko stoi pod pastylką, a gdy pod nią brakuje miejsca - nad nią; w niskim
+// oknie obok panelu, a gdy i tam się nie mieści - pod pastylką z przewijaniem
+// w środku. Pastylki nie zasłania nigdy.
+function placeDesk() {
+    if (whenSheet.hidden || whenWheels) return;
+    const GAP = 6, EDGE = 8;
+    whenSheet.style.maxHeight = '';
+    const pill = whenBox.querySelector('.when-pill').getBoundingClientRect();
+    const panel = $('sidebar').getBoundingClientRect();
+    const width = whenSheet.offsetWidth;
+    const height = whenSheet.offsetHeight;
+    const below = window.innerHeight - EDGE - (pill.bottom + GAP);
+    const above = pill.top - GAP - EDGE;
+    let top, left = Math.max(EDGE, Math.min(pill.left, window.innerWidth - width - EDGE));
+    if (height <= below) {
+        top = pill.bottom + GAP;
+    } else if (height <= above) {
+        top = pill.top - GAP - height;
+    } else if (panel.right + GAP + width <= window.innerWidth - EDGE) {
+        left = panel.right + GAP;
+        top = Math.max(EDGE, Math.min(pill.top, window.innerHeight - EDGE - height));
+        if (height > window.innerHeight - 2 * EDGE) whenSheet.style.maxHeight = `${window.innerHeight - 2 * EDGE}px`;
+    } else if (below >= above) {
+        top = pill.bottom + GAP;
+        whenSheet.style.maxHeight = `${below}px`;
+    } else {
+        whenSheet.style.maxHeight = `${above}px`;
+        top = pill.top - GAP - above;
+    }
+    whenSheet.style.top = `${top}px`;
+    whenSheet.style.left = `${left}px`;
+}
+
+window.addEventListener('resize', () => {
+    if (whenSheet.hidden) return;
+    if (phoneLayout.active() !== whenWheels) closeWheels();
+    else placeDesk();
+});
+
+// Godzina z pola: „1745", „17:45", „17.45", „930". W trakcie pisania liczy się
+// tylko pełna godzina (cztery cyfry albo minuty po dwukropku) - „250" to może
+// być początek „2500", a nie 2:50. Krótsze („9", „930") dopiero przy zatwierdzeniu.
+function parseClock(text, whole) {
+    const digits = text.trim().replace(/[:.\s]/g, '');
+    if (!/^\d{1,4}$/.test(digits)) return null;
+    if (!whole && digits.length < 4 && !/[:.]\d{2}$/.test(text.trim())) return null;
+    const [h, m] = digits.length <= 2 ? [digits, '0'] : [digits.slice(0, -2), digits.slice(-2)];
+    return Number(h) <= 23 && Number(m) <= 59 ? Number(h) * 60 + Number(m) : null;
+}
+
+function pickDesk(moment) {
+    whenTouched = true;
+    writeWhen(clampMoment(moment));
+    wheelsChanged = true;
+    paintPill();
+    whenSheet.querySelector('[data-now]').classList.remove('on');
+}
+
+// Nietknięte pole niczego nie zmienia: „teraz" zostaje „teraz".
+function typedClock(whole) {
+    const input = whenSheet.querySelector('.when-time');
+    if (input.value === input.dataset.shown) return true;
+    const minutes = parseClock(input.value, whole);
+    // W trakcie pisania „174" to jeszcze nie błąd, tylko początek „1745".
+    input.classList.toggle('bad', minutes === null && (whole || !/^\d{0,3}$|^\d{1,2}[:.]\d?$/.test(input.value.trim())));
+    if (minutes === null) return false;
+    const at = whenMoment();
+    if (minutes !== minutesOf(at) || !timeChosen) {
+        pickDesk(new Date(at.getFullYear(), at.getMonth(), at.getDate(), Math.floor(minutes / 60), minutes % 60));
+        paintDays();
+    }
+    input.dataset.shown = clockOf(minutes);
+    return true;
+}
+
+// Strzałki: kursor na godzinie zmienia godzinę, na minutach - minuty co 5;
+// przejście przez północ przenosi też dzień.
+function stepClock(input, up) {
+    if (!typedClock(true)) return;
+    const onHour = input.selectionStart <= 2 && input.selectionEnd <= 2;
+    const at = whenMoment();
+    const next = new Date(at);
+    if (onHour) next.setHours(at.getHours() + (up ? 1 : -1));
+    else next.setMinutes(up ? Math.floor(at.getMinutes() / 5) * 5 + 5 : Math.ceil(at.getMinutes() / 5) * 5 - 5);
+    pickDesk(next);
+    paintDesk();
+    if (onHour) input.setSelectionRange(0, 2);
+    else input.setSelectionRange(3, 5);
+}
+
+function pickDay(button) {
+    const at = whenMoment();
+    const [y, m, d] = button.dataset.day.split('-').map(Number);
+    if (button.dataset.day !== isoDay(at)) pickDesk(new Date(y, m - 1, d, at.getHours(), at.getMinutes()));
+    paintDays();
+    whenSheet.querySelector('.when-day.on').focus();
+}
+
+whenSheet.addEventListener('input', event => {
+    if (event.target.classList.contains('when-time')) typedClock(false);
+});
+
+whenSheet.addEventListener('focusout', event => {
+    // Po Esc pole gaśnie razem z okienkiem i nie może już niczego wpisać.
+    if (whenSheet.hidden) return;
+    if (event.target.classList.contains('when-time') && typedClock(true)) {
+        event.target.value = clockOf(minutesOf(whenMoment()));
+    }
+});
+
+// Zmiana w Rozkładach przelicza tablicę od razu, a trasę dopiero po powrocie
+// do wyszukiwarki (patrz resumePlanner) - schowanej nie ma po co liczyć.
+let whenChangedAway = false;
+
+function closeWheels() {
+    if (whenSheet.hidden) return;
+    if (wheelTimer) {
+        clearTimeout(wheelTimer);
+        settleWheels();
+    }
+    whenSheet.hidden = true;
+    whenBackdrop.hidden = true;
+    if (!whenWheels) whenBox.querySelector('.when-pill').focus();
+    if (!wheelsChanged) return;
+    document.dispatchEvent(new Event('planner:when'));
+    if (inTimetable()) whenChangedAway = true;
+    else searchWhenSoon();
+}
+
+// Rozkłady liczą tablicę od godziny z pola, więc „teraz" musi być świeże.
+function whenEnterTimetable() {
+    if (!timeChosen) setTimeNow();
+    paintWhen();
+}
+
+// Na komputerze „Gotowe", Enter i klik obok przyjmują też godzinę dopiero
+// wpisywaną („9" to 9:00); błędnej nie przyjmują, okienko zostaje otwarte.
+function finishWhen() {
+    if (!whenWheels && !typedClock(true)) {
+        whenSheet.querySelector('.when-time').focus();
+        return;
+    }
+    closeWheels();
+}
+
+// Kolumna przewijana przez aplikację (Teraz, stuknięta pozycja) pamięta, dokąd
+// jedzie: „Gotowe" w trakcie płynnego przewijania czytało pozycję z połowy
+// drogi, a po schowaniu arkusza nawet 00:00.
+function wheelIndex(wheel) {
+    if (wheel.dataset.target !== undefined) return Number(wheel.dataset.target);
+    return Math.max(0, Math.min(wheel.children.length - 1, Math.round(wheel.scrollTop / WHEEL_H)));
+}
+
+function scrollWheelTo(wheel, index, behavior) {
+    wheel.dataset.target = index;
+    wheel.scrollTo({top: index * WHEEL_H, behavior});
+}
+
+function scrollWheels(behavior) {
+    const at = whenMoment();
+    const indexOf = {
+        day: [...whenSheet.querySelectorAll('[data-wheel="day"] .when-item')]
+            .findIndex(item => item.dataset.v === isoDay(at)),
+        hour: at.getHours(),
+        min: Math.min(11, Math.round(at.getMinutes() / 5)),
+    };
+    for (const wheel of whenSheet.querySelectorAll('.when-wheel')) {
+        scrollWheelTo(wheel, Math.max(0, indexOf[wheel.dataset.wheel]), behavior);
+    }
+    markWheels();
+}
+
+function markWheels() {
+    for (const wheel of whenSheet.querySelectorAll('.when-wheel')) {
+        const index = wheelIndex(wheel);
+        [...wheel.children].forEach((item, i) => item.classList.toggle('on', i === index));
+    }
+}
+
+// Po zatrzymaniu kółek chwila z nich trafia do formularza. Ta sama chwila co
+// w formularzu (np. „teraz" zaokrąglone do 5 min) niczego nie zmienia.
+function settleWheels() {
+    wheelTimer = null;
+    markWheels();
+    const value = name => {
+        const wheel = whenSheet.querySelector(`[data-wheel="${name}"]`);
+        return wheel.children[wheelIndex(wheel)].dataset.v;
+    };
+    const [y, m, d] = value('day').split('-').map(Number);
+    const picked = new Date(y, m - 1, d, Number(value('hour')), Number(value('min')));
+    const at = whenMoment();
+    const shown = new Date(at.getFullYear(), at.getMonth(), at.getDate(), at.getHours(),
+                           Math.min(55, Math.round(at.getMinutes() / 5) * 5));
+    if (picked.getTime() === shown.getTime()) return;
+    whenTouched = true;
+    writeWhen(picked);
+    paintPill();
+    // „Teraz" jest tylko przy odjeździe.
+    whenSheet.querySelector('[data-now]')?.classList.remove('on');
+    wheelsChanged = true;
+}
+
+whenSheet.addEventListener('scroll', () => {
+    if (whenSheet.hidden) return;
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(settleWheels, 120);
+}, true);
+
+// Palec albo mysz na kolumnie: od teraz liczy się to, gdzie ją zostawi.
+for (const type of ['touchstart', 'pointerdown']) {
+    whenSheet.addEventListener(type, event => {
+        if (!event.target.closest('.when-wheels')) return;
+        for (const wheel of whenSheet.querySelectorAll('.when-wheel')) delete wheel.dataset.target;
+    }, {passive: true});
+}
+
+// Koła w zwężonym oknie komputera: przewijanie przeglądarki rzucało kolumną
+// o dwie godziny na ząbek kółka, a przeciągnięcie myszą nic nie robiło. Ząbek
+// kółka to jedna pozycja; gładzik zbiera przesunięcie i co pół pozycji z hakiem
+// przesuwa o jedną. Dotyk telefonu idzie dalej zwykłym przewijaniem.
+const WHEEL_STEP_PX = 60;
+const WHEEL_NOTCH_PX = 50;
+let wheelPx = 0;
+let wheelPxAt = 0;
+
+function stepWheel(wheel, step) {
+    const index = Math.max(0, Math.min(wheel.children.length - 1, wheelIndex(wheel) + step));
+    scrollWheelTo(wheel, index, 'smooth');
+    markWheels();
+}
+
+whenSheet.addEventListener('wheel', event => {
+    const wheel = event.target.closest('.when-wheel');
+    if (!wheel) return;
+    event.preventDefault();
+    const px = event.deltaY * (event.deltaMode === 1 ? WHEEL_H
+        : event.deltaMode === 2 ? wheel.clientHeight : 1);
+    if (!px) return;
+    if (event.timeStamp - wheelPxAt > 200 || Math.sign(px) !== Math.sign(wheelPx)) wheelPx = 0;
+    wheelPxAt = event.timeStamp;
+    wheelPx += px;
+    if (Math.abs(wheelPx) < WHEEL_STEP_PX && Math.abs(px) < WHEEL_NOTCH_PX) return;
+    const step = Math.sign(wheelPx);
+    wheelPx = 0;
+    stepWheel(wheel, step);
+}, {passive: false});
+
+// Przeciąganie myszą: kolumna jedzie za kursorem, a po puszczeniu staje na
+// najbliższej pozycji. Samo kliknięcie (bez ruchu) wybiera pozycję jak dotąd.
+let wheelDrag = null;
+let wheelDragged = false;
+
+whenSheet.addEventListener('pointerdown', event => {
+    const wheel = event.target.closest('.when-wheel');
+    if (!wheel || event.pointerType !== 'mouse' || event.button !== 0) return;
+    wheelDragged = false;
+    wheelDrag = {wheel, id: event.pointerId, y: event.clientY, top: wheel.scrollTop, moved: false};
+});
+
+whenSheet.addEventListener('pointermove', event => {
+    if (!wheelDrag || event.pointerId !== wheelDrag.id) return;
+    const dy = event.clientY - wheelDrag.y;
+    if (!wheelDrag.moved && Math.abs(dy) > 4) {
+        wheelDrag.moved = true;
+        wheelDrag.wheel.setPointerCapture(event.pointerId);
+        wheelDrag.wheel.style.scrollSnapType = 'none';
+    }
+    if (wheelDrag.moved) wheelDrag.wheel.scrollTop = wheelDrag.top - dy;
+});
+
+function endWheelDrag(event) {
+    if (!wheelDrag || event.pointerId !== wheelDrag.id) return;
+    const {wheel, moved} = wheelDrag;
+    wheelDrag = null;
+    if (!moved) return;
+    wheelDragged = true;
+    wheel.style.scrollSnapType = '';
+    const index = Math.max(0, Math.min(wheel.children.length - 1, Math.round(wheel.scrollTop / WHEEL_H)));
+    scrollWheelTo(wheel, index, 'smooth');
+    markWheels();
+}
+whenSheet.addEventListener('pointerup', endWheelDrag);
+whenSheet.addEventListener('pointercancel', endWheelDrag);
+
+whenSheet.addEventListener('click', event => {
+    const item = event.target.closest('.when-item');
+    const day = event.target.closest('.when-day');
+    const now = event.target.closest('[data-now]');
+    const mode = event.target.closest('[data-mode]');
+    if (mode) {
+        setWhenMode(mode.dataset.mode === 'arrive');
+        wheelsChanged = true;
+        if (whenWheels) {
+            whenSheet.querySelector('.when-sheet-top').innerHTML = sheetTopHtml();
+            scrollWheels('smooth');
+        } else {
+            // Po zmianie trybu wpisuje się godzinę: pole od razu gotowe, Enter zatwierdza.
+            paintDesk();
+            const input = whenSheet.querySelector('.when-time');
+            input.focus();
+            input.select();
+        }
+    } else if (item && wheelDragged) {
+        wheelDragged = false;   // puszczenie po przeciągnięciu to nie kliknięcie
+    } else if (item) {
+        const wheel = item.parentElement;
+        scrollWheelTo(wheel, [...wheel.children].indexOf(item), 'smooth');
+    } else if (day) {
+        pickDay(day);
+    } else if (now) {
+        // „Teraz" to odjazd: wybrane w Rozkładach nie zostawia trasie przyjazdu.
+        setArriveBy(false);
+        setTimeNow();
+        wheelsChanged = true;
+        now.classList.add('on');
+        if (whenWheels) scrollWheels('smooth');
+        else paintDesk();
+    } else if (event.target.closest('[data-done]')) finishWhen();
+});
+
+// Esc zamyka bez zmian: wraca to, co było przy otwarciu, łącznie z trybem.
+function cancelWheels() {
+    clearTimeout(wheelTimer);
+    wheelTimer = null;
+    setArriveBy(whenSnapshot.arrive);
+    timeChosen = whenSnapshot.chosen;
+    timeInput.value = whenSnapshot.time;
+    $('date').value = whenSnapshot.date;
+    wheelsChanged = false;
+    paintWhen();
+    closeWheels();
+}
+
+// Tab krąży po okienku, zamiast uciekać pod nie na stronę.
+function trapTab(event) {
+    const stops = [...whenSheet.querySelectorAll('button, input')]
+        .filter(el => !el.disabled && !el.hidden && el.tabIndex >= 0);
+    const at = stops.indexOf(document.activeElement);
+    const next = event.shiftKey ? (at <= 0 ? stops.length - 1 : at - 1) : (at + 1) % stops.length;
+    stops[next].focus();
+    if (stops[next].classList.contains('when-time')) stops[next].select();
+}
+
+const DAY_KEYS = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7};
+
+// Klawisze łapie dokument: fokus bywa w okienku albo, po kliknięciu obok
+// pola, na samej stronie pod nim - a tło i tak zasłania resztę.
+document.addEventListener('keydown', event => {
+    if (whenSheet.hidden) return;
+    if (!whenSheet.contains(event.target) && event.target !== document.body) return;
+    const day = event.target.closest('.when-day');
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelWheels();
+    } else if (event.key === 'Enter' && !event.target.closest('[data-mode], [data-now]')) {
+        event.preventDefault();
+        if (whenWheels) {
+            clearTimeout(wheelTimer);
+            settleWheels();
+            wheelsChanged = true;
+        }
+        if (day) pickDay(day);
+        finishWhen();
+    } else if (whenWheels) {
+        // na telefonie klawiatury nie ma
+    } else if (event.key === 'Tab') {
+        event.preventDefault();
+        trapTab(event);
+    } else if (event.target.classList.contains('when-time') && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        stepClock(event.target, event.key === 'ArrowUp');
+    } else if (day && event.key in DAY_KEYS) {
+        event.preventDefault();
+        // Strzałki po kalendarzu: w bok o dzień, w górę i w dół o tydzień;
+        // poza dni z rozkładem się nie wychodzi.
+        const at = dayOfIso(day.dataset.day);
+        const to = whenSheet.querySelector(`.when-day[data-day="${isoDay(
+            new Date(at.getFullYear(), at.getMonth(), at.getDate() + DAY_KEYS[event.key]))}"]`);
+        if (to) pickDay(to);
+    }
+});
+
+whenBackdrop.addEventListener('click', () => finishWhen());
 
 function setArriveBy(on) {
     arriveBy = on;
-    syncTimeMode();
 }
 
-timeModeButton.addEventListener('click', () => {
-    setArriveBy(!arriveBy);
-    // „Być na teraz" nie jest pytaniem: bez wpisanej godziny kursor idzie do
-    // pola godziny, a szuka się dopiero po jej podaniu.
-    if (arriveBy && !timeChosen) { timeInput.focus(); timeInput.select(); return; }
-    if (startInput.value && endInput.value) search();
-});
-syncTimeMode();
+paintWhen();
 
 $('clear').addEventListener('click', () => {
     const previous = [sel.start, sel.end];
@@ -9629,6 +10313,10 @@ function resumePlanner() {
     else { renderTimeHeadline(); renderVehicles();
            refreshCarLayer(); refreshBikeLayer(); }
     if (selectedJourney !== null) drawJourney(selectedJourney, true);
+    if (whenChangedAway) {
+        whenChangedAway = false;
+        searchWhenSoon();
+    }
 }
 
 // Pierwsze postawienie warstw aut i rowerów: zanim padnie jakiekolwiek
@@ -9642,7 +10330,7 @@ window.plannerBridge = {
     map, esc, fitTo, setView, syncTabs, setBaseDim, renderVehicles,
     attachAutocomplete, suggestionsFor, suggestionHtml,
     LINE_COLORS, MODE_LABEL, STOP_NAMES, ROUTE_ICON, lineColor, lineStyle, escClass,
-    suspendPlanner, resumePlanner, setTimeNow,
+    suspendPlanner, resumePlanner, setTimeNow, paintWhen, whenEnterTimetable,
     trainsOn: () => trainsOn,
 };
 

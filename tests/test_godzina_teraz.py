@@ -5,6 +5,8 @@ powrocie z tła i przy kliknięciu zapisanego miejsca. Ręcznie wpisana zostaje.
 Zegar w teście jest podstawiony (page.clock) - „po godzinie" trwa ułamek sekundy.
 """
 
+import datetime
+
 from test_odswiezanie_pozycji import (DATA_JS, UKRYJ_JS, _minuty_temu,  # noqa: F401
                                       _otworz, tryb_deweloperski)
 from test_uklad_telefonu import (PUSTE_ZRODLA, TRASA, _odpowiedz, _wybierz,  # noqa: F401
@@ -31,11 +33,18 @@ def test_powrot_z_tla_odswieza_godzine_nieustawiona_recznie(przegladarka, adres)
 def test_godzina_wpisana_recznie_przezywa_powrot_z_tla(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
-        page.click("#time", click_count=3)
-        page.keyboard.type("0930")
-        page.keyboard.press("Tab")
+        page.click(".when-pill")
+        page.evaluate("""() => {
+            const sheet = document.querySelector('.when-sheet');
+            sheet.querySelector('.when-wheels').dispatchEvent(new Event('pointerdown', {bubbles: true}));  // palec
+            sheet.querySelector('[data-wheel="hour"]').scrollTop = 14 * 40;
+            sheet.querySelector('[data-wheel="min"]').scrollTop = 6 * 40;
+        }""")
+        page.wait_for_function("document.getElementById('time').value === '14:30'")
+        page.click("[data-done]")
+        # zegar stoi na 12:00, po godzinie 14:30 jeszcze nie minęła
         _po_godzinie(page)
-        assert page.input_value("#time") == "09:30"
+        assert page.input_value("#time") == "14:30"
     finally:
         context.close()
 
@@ -103,22 +112,23 @@ def _trasy(page):
 
 
 def _gdzie(page):
-    """Panel, w którym naprawdę stoją pola: to samo pole #time i #date
-    przenosi się między widokami, więc samą wartość trzeba czytać razem z miejscem."""
-    return page.evaluate("""() => ({
-        time: document.getElementById('time').closest('#tt-time-field') ? 'rozklady' : 'trasy',
-        date: document.getElementById('date').closest('.tt-date-part') ? 'rozklady' : 'trasy',
-    })""")
+    """Panel, w którym stoi pastylka godziny: ta sama przenosi się między widokami."""
+    return page.evaluate("document.getElementById('when').closest('#tt-time-field') ? 'rozklady' : 'trasy'")
+
+
+def _teraz_z_pastylki(page):
+    page.click(".when-pill")
+    page.click(".when-sheet [data-now]")
+    page.click(".when-sheet [data-done]")
 
 
 def test_godzina_z_tras_jest_w_rozkladach(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
         page.fill("#time", "09:30")
-        page.click("#day-toggle")
         page.fill("#date", "2030-01-02")
         _rozklady(page)
-        assert _gdzie(page) == {"time": "rozklady", "date": "rozklady"}
+        assert _gdzie(page) == "rozklady"
         assert page.input_value("#time") == "09:30"
         assert page.input_value("#date") == "2030-01-02"
     finally:
@@ -129,14 +139,24 @@ def test_godzina_z_rozkladow_jest_w_trasach(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
         _rozklady(page)
-        page.click("#time", click_count=3)
-        page.keyboard.type("0745")
-        page.keyboard.press("Tab")
-        page.fill("#date", "2030-01-02")
+        page.click(".when-pill")
+        page.evaluate("""() => {
+            const sheet = document.querySelector('.when-sheet');
+            sheet.querySelector('.when-wheels').dispatchEvent(new Event('pointerdown', {bubbles: true}));  // palec
+            sheet.querySelector('[data-wheel="hour"]').scrollTop = 7 * 40;
+            sheet.querySelector('[data-wheel="min"]').scrollTop = 9 * 40;
+            const dni = [...sheet.querySelectorAll('[data-wheel="day"] .when-item')];
+            sheet.querySelector('[data-wheel="day"]').scrollTop
+                = dni.findIndex(dzien => dzien.textContent === 'Jutro') * 40;
+        }""")
+        page.wait_for_function("document.getElementById('time').value === '07:45'")
+        page.click("[data-done]")
+        jutro = page.input_value("#date")
+        assert jutro != page.evaluate(DATA_JS)
         _trasy(page)
-        assert _gdzie(page) == {"time": "trasy", "date": "trasy"}
+        assert _gdzie(page) == "trasy"
         assert page.input_value("#time") == "07:45"
-        assert page.input_value("#date") == "2030-01-02"
+        assert page.input_value("#date") == jutro
         # wpisana w Rozkładach jest ręczna także w Trasach
         _po_godzinie(page)
         assert page.input_value("#time") == "07:45"
@@ -148,17 +168,16 @@ def test_teraz_w_rozkladach_wraca_oba_widoki_do_teraz(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
         page.fill("#time", "09:30")
-        page.click("#day-toggle")
         page.fill("#date", "2030-01-02")
         _rozklady(page)
-        assert _gdzie(page) == {"time": "rozklady", "date": "rozklady"}
+        assert _gdzie(page) == "rozklady"
         assert page.input_value("#time") == "09:30"
-        page.click("#tt-now")
+        _teraz_z_pastylki(page)
         assert page.input_value("#date") == page.evaluate(DATA_JS)
         assert _minuty_temu(page, page.input_value("#time"))
         teraz = page.input_value("#time")
         _trasy(page)
-        assert _gdzie(page) == {"time": "trasy", "date": "trasy"}
+        assert _gdzie(page) == "trasy"
         assert page.input_value("#time") == teraz
         assert page.input_value("#date") == page.evaluate(DATA_JS)
         _po_godzinie(page)
@@ -172,16 +191,21 @@ def test_teraz_w_trasach_wraca_rozklady_do_teraz(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
         _rozklady(page)
-        page.fill("#time", "09:30")
+        # pole leży w schowanej karcie Tras - wpis jak z pastylki, ze zdarzeniem
+        page.evaluate("""() => {
+            const pole = document.getElementById('time');
+            pole.value = '09:30';
+            pole.dispatchEvent(new Event('input', {bubbles: true}));
+        }""")
         _trasy(page)
-        assert _gdzie(page)["time"] == "trasy"
+        assert _gdzie(page) == "trasy"
         assert page.input_value("#time") == "09:30"
-        page.click("#time-now")
+        _teraz_z_pastylki(page)
         teraz = page.input_value("#time")
         assert teraz != "09:30"
         assert _minuty_temu(page, teraz)
         _rozklady(page)
-        assert _gdzie(page)["time"] == "rozklady"
+        assert _gdzie(page) == "rozklady"
         assert page.input_value("#time") == teraz
         assert page.input_value("#date") == page.evaluate(DATA_JS)
     finally:
@@ -196,7 +220,7 @@ def test_nieruszana_godzina_starzeje_sie_w_obu_widokach(przegladarka, adres):
         w_trasach = page.input_value("#time")
         assert w_trasach != przed
         _rozklady(page)
-        assert _gdzie(page)["time"] == "rozklady"
+        assert _gdzie(page) == "rozklady"
         assert page.input_value("#time") == w_trasach
         assert page.input_value("#date") == page.evaluate(DATA_JS)
         _po_godzinie(page)
@@ -209,17 +233,34 @@ def test_nieruszana_godzina_starzeje_sie_w_obu_widokach(przegladarka, adres):
         context.close()
 
 
-def test_godzina_wpisana_wprost_w_pole_tras_jest_w_rozkladach(przegladarka, adres):
+def test_godzina_z_linku_jest_w_rozkladach(przegladarka, adres):
+    jutro = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+    context, page, _ = _otworz(przegladarka, f"{adres}?to={TRASA[1]}&time=06:15&date={jutro}")
+    try:
+        _rozklady(page)
+        assert page.inner_text("#tt-time-field .when-pill").startswith("Odjazd 06:15, jutro")
+        assert page.input_value("#time") == "06:15"
+        assert page.input_value("#date") == jutro
+    finally:
+        context.close()
+
+
+def test_zwinieta_linijka_mowi_o_dniu_innym_niz_dzis(przegladarka, adres):
     context, page, _ = _otworz(przegladarka, adres)
     try:
-        # tak ustawia godzinę link do wyszukiwania: bez zdarzeń, bez wiedzy o rozkładach
+        page.click(".when-pill")
         page.evaluate("""() => {
-            document.getElementById('time').value = '06:15';
-            document.getElementById('date').value = '2030-03-04';
+            const sheet = document.querySelector('.when-sheet');
+            sheet.querySelector('.when-wheels').dispatchEvent(new Event('pointerdown', {bubbles: true}));  // palec
+            const dni = [...sheet.querySelectorAll('[data-wheel="day"] .when-item')];
+            sheet.querySelector('[data-wheel="day"]').scrollTop
+                = dni.findIndex(dzien => dzien.textContent === 'Jutro') * 40;
         }""")
-        _rozklady(page)
-        assert page.is_visible("#time")
-        assert page.input_value("#time") == "06:15"
-        assert page.input_value("#date") == "2030-03-04"
+        page.wait_for_function("document.querySelector('.when-pill').textContent.includes('jutro')")
+        page.click("[data-done]")
+        _wybierz(page, "#start", TRASA[0])
+        _wybierz(page, "#end", TRASA[1])
+        page.wait_for_selector(".search-summary", state="visible", timeout=20000)
+        assert page.inner_text(".search-summary-time").endswith(", jutro")
     finally:
         context.close()

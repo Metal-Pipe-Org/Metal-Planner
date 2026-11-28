@@ -1,8 +1,7 @@
 """Formularz zakładki „Rozkłady" (#269) - sprawdzany w PRAWDZIWEJ przeglądarce.
 
 Pole szukania (z małym ✕ po prawej) stoi w pierwszym wierszu, a pod nim, na
-całą szerokość karty, czas - ten sam .time-field, co w wyszukiwarce. Rozkład linii nie
-używa godziny, więc zostaje w nim sama data.
+całą szerokość karty, czas - ta sama pastylka godziny i dnia, co w wyszukiwarce (#501).
 
 Pomija się bez playwright, bez przeglądarki albo bez bazy rozkładów (patrz
 test_uklad_telefonu.py - te same założenia).
@@ -42,8 +41,7 @@ POMIAR_JS = """() => {
     };
     return {
         pole: box('#tt-query'), wyczysc: box('#tt-clear'), zamknij: box('#tt-close'), czas: box('#tt-time-field'), karta: box('#timetable-card'),
-        godzina: box('#time'), teraz: box('#tt-now'), 
-        data: box('#date'), szerokosc: document.documentElement.scrollWidth,
+        pastylka: box('#tt-time-field .when-pill'), szerokosc: document.documentElement.scrollWidth,
         ekran: innerWidth,
     };
 }"""
@@ -169,48 +167,54 @@ def test_zamknij_rozklad_to_maly_krzyzyk_w_wierszu_pola_tylko_na_telefonie_z_map
     assert not strona.evaluate("document.body.classList.contains('mode-timetable')")
 
 
-def test_przystanek_ma_godzine_i_date_obok_siebie(strona):
+def test_przystanek_ma_pastylke_godziny(strona):
     _wybierz(strona, PRZYSTANEK)
     strona.wait_for_selector("#tt-results .tt-rows, #tt-results .card")
     m = strona.evaluate(POMIAR_JS)
-    assert m["godzina"] and m["teraz"] and m["data"], m
-    assert strona.query_selector("#tt-day-toggle") is None, "data nie jest już pod ⌵"
-    assert m["godzina"]["r"] <= m["data"]["l"] + 0.5, "data ma stać obok godziny"
-    assert m["godzina"]["t"] < m["data"]["b"] and m["data"]["t"] < m["godzina"]["b"]
-    # Miejsce na kółko ładowania przy prawej krawędzi ramki.
-    assert m["data"]["r"] <= m["czas"]["r"] - 25, m
-    assert m["czas"]["b"] - m["czas"]["t"] <= 46, "ramka ma zostać jednowierszowa"
-    telefon = strona.evaluate("innerWidth") < 600
-    if not telefon:
-        assert strona.inner_text("#tt-time-field .tt-hour-row span") == "Odjazd"
+    assert m["pastylka"], m
+    assert strona.query_selector("#tt-now") is None, "stare pole z „teraz” zniknęło"
+    assert strona.inner_text("#tt-time-field .when-pill").startswith("Odjazd")
     assert _w_dwoch_wierszach(m) and _miesci_sie(m), m
 
 
 def test_teraz_ustawia_dzis_i_te_chwile(strona):
-    strona.fill("#date", "2030-01-01")
-    strona.fill("#time", "03:00")
-    strona.click("#tt-now")
+    # Pola leżą w schowanej karcie wyszukiwarki - ustawia się je tak, jak pasażer w Trasach.
+    strona.evaluate("""() => {
+        for (const [id, value] of [['date', '2030-01-01'], ['time', '03:00']]) {
+            const field = document.getElementById(id);
+            field.value = value;
+            field.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+    }""")
+    strona.click("#tt-time-field .when-pill")
+    strona.click(".when-sheet [data-now]")
+    strona.click(".when-sheet [data-done]")
     assert strona.input_value("#date") == datetime.date.today().isoformat()
     assert strona.input_value("#time") != "03:00"
 
 
-def test_rozklad_linii_ma_sama_date(strona):
+def test_w_rozkladach_nie_ma_przyjazdu(strona):
+    strona.click("#tt-time-field .when-pill")
+    assert strona.query_selector(".when-sheet [data-mode]") is None
+    assert strona.is_visible(".when-sheet [data-now]")
+
+
+def test_rozklad_linii_ma_te_sama_pastylke(strona):
     _wybierz(strona, LINIA)
-    strona.wait_for_selector("#tt-time-field.date-only")
+    strona.wait_for_selector("#tt-results .card, #tt-results .tt-rows")
     m = strona.evaluate(POMIAR_JS)
-    assert m["data"], "w rozkładzie linii data ma być widoczna"
-    assert not (m["godzina"] or m["teraz"]), m
+    assert m["pastylka"], m
     assert _w_dwoch_wierszach(m) and _miesci_sie(m), m
 
-    strona.click("#tt-clear")
-    m = strona.evaluate(POMIAR_JS)
-    assert m["godzina"] and m["teraz"] and m["data"]
 
 
-def test_po_linii_przystanek_przywraca_pelne_pole(strona):
-    _wybierz(strona, LINIA)
-    strona.wait_for_selector("#tt-time-field.date-only")
-    _wybierz(strona, PRZYSTANEK)
-    strona.wait_for_selector("#tt-time-field:not(.date-only)")
-    m = strona.evaluate(POMIAR_JS)
-    assert m["godzina"] and m["teraz"]
+
+def test_podpowiedzi_nie_wracaja_na_pastylke_po_powrocie(strona):
+    telefon = strona.evaluate("innerWidth") < 600
+    strona.fill("#tt-query", PRZYSTANEK)
+    strona.wait_for_selector("#tt-query-list:not([hidden])")
+    strona.click('#view-tabs [data-view="list"]' if telefon else "#mode-toggle")
+    strona.click('#view-tabs [data-view="timetable"]' if telefon else "#mode-toggle")
+    assert strona.is_hidden("#tt-query-list")
+    strona.click("#tt-time-field .when-pill")
+    assert strona.is_visible(".when-sheet")
