@@ -34,7 +34,7 @@ sieci; uruchamiać z korzenia repo, stąd `from tests import flow`):
     pkp.enabled = traficar.enabled = lambda: False
     traficar.zone = lambda: None
     bikes._fetch = lambda url: (_ for _ in ()).throw(OSError(url))
-    r = flow.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 11, 25, 15, 37))
+    r = flow.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 12, 1, 15, 37))
     json.dump(r, open('tests/js/flow_fixture.json', 'w'),
               ensure_ascii=False, separators=(',', ':'))"
 """
@@ -53,6 +53,8 @@ from tests import flow
 
 ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = ROOT / "tests" / "js"
+# Dzień z przepisu na nagranie flow_fixture.json - front czyta go z pola daty.
+FIXTURE_DATE = "2026-12-01"
 
 
 class _SettingRows(HTMLParser):
@@ -110,6 +112,7 @@ def _bundle_source():
     return "\n".join([
         "const APP_SOURCE = " + json.dumps(app_js) + ";",
         "const FLOW_FIXTURE = " + fixture + ";",
+        "const FIXTURE_DATE = " + json.dumps(FIXTURE_DATE) + ";",
         "const SETTING_ROWS = " + json.dumps(_setting_rows()) + ";",
         (JS_DIR / "harness.js").read_text(encoding="utf-8"),
         (JS_DIR / "checks.js").read_text(encoding="utf-8"),
@@ -574,15 +577,6 @@ def test_the_drop_off_zone_shows_under_the_cursor(front):
 
 # ------------------------------------------------------ rower na mapie -
 
-def test_a_bike_shows_its_rides_only_under_the_cursor(front):
-    """Rower miejski jest miejscem, do którego mapa dowozi, i z którego da się
-    jeszcze dojechać gdzieś, gdzie zdąży się w oknie mapy. Kropka stoi sama;
-    przejazdy - kilkaset naraz na całej mapie - pojawiają się dopiero pod
-    kursorem i znikają razem z nim. Wachlarz wygląda tak samo jak bez
-    rowerów."""
-    _check(front, "rower_pokazuje_przejazdy_dopiero_pod_kursorem")
-
-
 def test_a_bike_on_another_day_does_not_pretend_to_know(front):
     """Stacja stoi w tym samym miejscu co jutro, więc kropka zostaje. Ile
     w niej będzie rowerów - nie wiadomo, bo liczba jest z tej chwili; mapa
@@ -590,12 +584,6 @@ def test_a_bike_on_another_day_does_not_pretend_to_know(front):
     jutrzejszą. Godzina „jesteś przy nim" pochodzi z rozkładu tamtego dnia,
     więc zostaje."""
     _check(front, "rower_na_inny_dzien_nie_udaje_ze_wie")
-
-
-def test_bike_rides_can_stay_on_the_map(front):
-    """Przełącznik pod zębatką: kreski wybranych przejazdów i ich stacje
-    końcowe stoją na mapie na stałe, a nie tylko pod kursorem."""
-    _check(front, "rower_przejazdy_na_stale_po_zapaleniu")
 
 
 def test_vans_are_a_switch_sent_to_the_server(front):

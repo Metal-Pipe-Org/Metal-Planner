@@ -643,19 +643,6 @@ function updatePointMarker(slot, value) {
 // rządzi to, co stoi na ekranie: rozkład linii - ta linia, tablica przystanku
 // - zaznaczone linie tablicy. Bez jednego i drugiego nie ma czego zawężać
 // i widać wszystko, co jeździ.
-//
-// ODSTAWIONE (2026-09-13): zawężanie dalej, do pojedynczych POJAZDÓW - tylko
-// tych, których kurs zatrzyma się jeszcze tam, gdzie mapa prowadzi jego linię
-// (zgłoszone: przy relacji Księże Małe - pl. Grunwaldzki warstwa pokazywała
-// 146 stojące na Biskupinie). Działało i było zmierzone (z 49 pojazdów linii
-// z mapy zostawało 12), ale zostało zdjęte na wyraźną prośbę - warstwa ma
-// pokazywać wszystkie pojazdy linii z mapy. Kod serwera czeka zakomentowany
-// w vehicles.py, a filtr wyglądał tak:
-//
-//     const drawn = only.stops && only.stops.get(key);   // przystanki z mapy
-//     if (!drawn || !v.stops) return true;               // kursu nie rozpoznano
-//     return v.stops.some(([lat, lon, sec]) =>
-//         sec <= only.until && drawn.has(lat + ',' + lon));
 
 const vehiclesLayer = L.layerGroup();
 
@@ -9591,7 +9578,7 @@ window.plannerBridge = {
     trainsOn: () => trainsOn,
 };
 
-}
+}   // koniec if (startInput) - przed tę klamrę tests/js/harness.js wstawia eksport do testów
 
 // X w polach tekstowych (#508): czyści pole jak ręczne skasowanie (zdarzenie input) i zostawia w nim kursor.
 // Widoczność robi CSS przez :placeholder-shown, więc działa też przy wartościach ustawionych z kodu.

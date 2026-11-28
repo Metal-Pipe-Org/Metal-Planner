@@ -21,14 +21,17 @@
 
    Wstrzykiwanie: cały kod mapy siedzi w app.js wewnątrz bloku
    `if (startInput) { ... }` (patrz tam), więc jego stałe są niewidoczne z
-   zewnątrz. Doklejamy więc eksport PRZED ostatnią klamrą pliku - patrz
-   INJECTION niżej. Gdyby ten blok kiedyś zniknął, eksport wyląduje w złym
-   miejscu i harness padnie z jasnym komunikatem, zamiast po cichu przestać
-   cokolwiek sprawdzać.
+   zewnątrz. Doklejamy więc eksport PRZED klamrą zamykającą ten blok, którą
+   w app.js znaczy komentarz BLOCK_END - patrz INJECTION niżej. Nie przed
+   ostatnią klamrą pliku: za blokiem stoi kod, który go nie potrzebuje (X
+   w polach, #508), i może go przybywać. Gdyby znacznik zniknął, harness
+   padnie z jasnym komunikatem, zamiast po cichu przestać cokolwiek
+   sprawdzać.
 
    Wejście (podstawia je runner z tests/test_flow_map_front.py):
    - APP_SOURCE   - treść static/app.js,
-   - FLOW_FIXTURE - odpowiedź /api/flow.
+   - FLOW_FIXTURE - odpowiedź /api/flow,
+   - FIXTURE_DATE - dzień, o który ta odpowiedź pytała (pole daty strony).
    Wyjście: globalThis.__app z uchwytami do wnętrza app.js. */
 
 const VIEW_SIZE = {x: 1200, y: 800};   // "okno przeglądarki" emulatora
@@ -339,6 +342,7 @@ function fakeElement(id) {
     if (id === 'stop-abbrev') el.textContent = '{}';  // jw. - tabela skrótów
     if (id === 'line-names') el.textContent = '[]';   // jw. - linie pod "jestem
                                                       // w pojeździe" (onboard.py)
+    if (id === 'date') el.value = FIXTURE_DATE;       // dzień, o który pytało nagranie
     return el;
 }
 
@@ -651,9 +655,14 @@ const INJECTION = `
 };
 `;
 
+const BLOCK_END = '}   // koniec if (startInput)';
+
 function runApp(source) {
-    const cut = source.lastIndexOf('}');
-    if (cut < 0) throw new Error('app.js nie kończy się klamrą - sprawdź INJECTION w harness.js');
+    const cut = source.indexOf(BLOCK_END);
+    if (cut < 0 || source.indexOf(BLOCK_END, cut + 1) >= 0) {
+        throw new Error('w app.js nie ma dokładnie jednego znacznika „' + BLOCK_END
+                        + '” na końcu bloku mapy - sprawdź INJECTION w harness.js');
+    }
     const patched = source.slice(0, cut) + INJECTION + source.slice(cut);
     // eval, nie osobny plik: kod mapy jest w bloku, więc eksport musi powstać
     // w TYM SAMYM zasięgu, a nie obok niego.
@@ -684,6 +693,6 @@ app.timeOpts = settingView({hover: 'time-hover', ends: 'time-ends', chips: 'time
                             headline: 'time-show-headline', ride: 'time-ride'});
 app.dotOpts = settingView({size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past',
     center: 'dot-center', tipCursor: 'tip-cursor', tipPanel: 'tip-panel',
-    bikeTimes: 'bike-times', bikeRides: 'bike-rides', carTimes: 'car-times',
+    bikeTimes: 'walk-time', carTimes: 'car-times',
     why: 'debug-why', namesZoom: 'names-zoom'});
 app.soundOpts = settingView({level: 'sound-level'});

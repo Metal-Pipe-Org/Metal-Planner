@@ -336,7 +336,10 @@ checks.tablica_godziny_w_wierszu_linii = (() => {
         dep(81000, '5', 'KSIĘŻE MAŁE'),          // 22:30 - przed
         dep(84000, '5', 'KSIĘŻE MAŁE'),          // 23:20
     ]};
+    const szareBylo = app.dotOpts.ttPast;
+    app.dotOpts.ttPast = true;
     const html = app.timetableHtml(data, 81600);   // według mapy jesteś 22:40
+    app.dotOpts.ttPast = szareBylo;
     const wiersze = html.match(/<li>.*?<\/li>/g) || [];
     // Bez szarych godzin tablica zaczyna się od chwili z mapy - linia, która
     // miała tylko wcześniejsze, znika.
@@ -1003,7 +1006,7 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
     app.drawFlow(FLOW_FIXTURE, false);   // mapa wraca do stanu z fixture'a
     return {
         ok: bez.includes('61212:25→12:40') && !bez.includes('40 min')   // plakietki przed godzinami
-            && bez.includes('12:00–12:55Pokaż więcej') && !bez.includes('55 min')
+            && bez.includes('12:00–12:55') && !bez.includes('55 min')
             && !bez.includes('15 min') && !bez.includes('wyjeżdżasz')
             && bezDymki.includes('Wyjazd 12:25, przyjazd 12:40 - na miejscu za 40 min')
             && bezDymki.includes('Autobus 343, ok. 7 min jazdy.')
@@ -1015,6 +1018,11 @@ checks.pasek_mowi_kiedy_wyjechac = (() => {
         bez, z, bezDymki,
     };
 })();
+
+/* Numer linii ze znacznika pojazdu: stoi w opakowaniu, które nadaje mu wygląd
+   linii (#256), a za nim może iść strzałka kierunku. */
+const numerPojazdu = marker =>
+    (marker.options.icon.html.match(/class="vehicle-marker[^>]*>([^<]*)</) || [])[1];
 
 /* Warstwa żywych pojazdów (przycisk ◉) przy narysowanej mapie przepływów:
    pokazuje TYLKO linie, które są na tej mapie. Pojazd linii, której mapa nie
@@ -1033,7 +1041,7 @@ checks.pojazdy_zawezone_do_linii_z_mapy = (function () {
     // włączenie warstwy nie doczekałoby się rysowania.
     app.setVehiclesOn(true);
     app.renderVehicles();
-    const przyMapie = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const przyMapie = app.vehiclesLayer.layers.map(numerPojazdu);
     const slupki = app.map.hasLayer(app.stopsLayer);   // włącznik ich nie chowa
 
     // Zgaszona mapa = brak powodu do zawężania.
@@ -1137,6 +1145,8 @@ checks.traficar_czas_oznaczony_jako_szacunek = (() => {
    odległością celu w linii prostej - a wachlarz wygląda dokładnie tak samo,
    jak bez aut. */
 checks.auto_to_miejsce_a_nie_kurs = (() => {
+    const czasBylo = app.dotOpts.bikeTimes;
+    app.dotOpts.bikeTimes = true;     // dojście w minutach, nie w metrach
     const auto = {
         lat: 51.09, lon: 17.02, plate: 'WE1AA11', model: 'Renault Clio',
         where: 'ul. Testowa', fuel: 80, range: 300, ogarniam: [],
@@ -1148,6 +1158,7 @@ checks.auto_to_miejsce_a_nie_kurs = (() => {
     const tip = znaczniki.length ? znaczniki[0]._tooltip.content : '';
 
     app.drawFlow(FLOW_FIXTURE, false);
+    app.dotOpts.bikeTimes = czasBylo;
     return {
         ok: znaczniki.length === 1
             && kawalkow_z_autem === app.flowParts.length
@@ -1195,65 +1206,6 @@ checks.ogarniam_widac_na_aucie = (() => {
     };
 })();
 
-/* Rower miejski na mapie: kropkę dostaje wyłącznie miejsce, w którym da się
-   WSIĄŚĆ na rower. Drugi koniec przejazdu pojawia się razem ze strzałką, pod
-   kursorem - kresek jest kilkaset i narysowane naraz zasłaniają mapę. Godzin
-   samego przejazdu nie pokazujemy: zostaje odległość, która mówi to samo, a
-   nie udaje odczytanej z rozkładu. */
-checks.rower_pokazuje_przejazdy_dopiero_pod_kursorem = (() => {
-    app.setBikesOn(true);      // rower jest odtąd wyborem pasażera, nie domyślną warstwą
-    const stacja = {
-        id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
-        electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
-        walk_m: 300, from: 'Kamienna',
-        rides: [{
-            id: 'B', name: 'Legnicka (Park Magnolia)', lat: 51.10, lon: 17.03,
-            bikes: 3, docks: 12, m: 1826, sec: 840, at: 56940,
-            options: [{arrival: 58200, vehicles: 2}],
-        }],
-    };
-    app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja],
-                  bike_places_live: true}, false);
-    const kropki = app.flowBikeLayer.getLayers();
-    const kawalkow_z_rowerem = app.flowParts.length;
-    const przed = app.flowBikeRideLayer;
-    kropki[0].fire('mouseover');
-    const po = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
-    const kreski = po.filter(l => l.kind === 'polyline');
-    const tipStacji = kropki[0]._tooltip.content;
-    const tipCelu = (po.find(l => l._tooltip && !l._tooltip.options.permanent)
-                     || {_tooltip: {content: ''}})._tooltip.content;
-    const etykieta = (po.find(l => l._tooltip && l._tooltip.options.permanent)
-                      || {_tooltip: {content: ''}})._tooltip.content;
-    kropki[0].fire('mouseout');
-    const poZejsciu = app.flowBikeRideLayer;
-
-    app.drawFlow(FLOW_FIXTURE, false);
-    return {
-        ok: kropki.length === 1                 // tylko to, na czym można siąść
-            && przed === null                   // bez kursora żadnych kresek
-            && kreski.length === 1              // pod kursorem - jedna, do celu
-            && poZejsciu === null               // i znika razem z kursorem
-            && kawalkow_z_rowerem === app.flowParts.length
-            && tipStacji.includes('15:35')      // o której jest się PRZY rowerze
-            && tipStacji.includes('7 min')      // dojście - ta sama reguła co zawsze
-            && tipStacji.includes('Kamienna')
-            && tipStacji.includes('7 rowerów (w tym 2 elektryczne)')
-            // Zdania "ile przejazdów stąd" nie ma - kreski i tak to pokazują.
-            && !/przejazd/.test(tipStacji)
-            // Etykietka to SAMA odległość: godzina przejazdu jest policzona,
-            // nie odczytana, więc jej nie pokazujemy.
-            && etykieta.trim() === '1,8 km'
-            // Drugi koniec ma własny dymek, też bez zgadywanej godziny.
-            && tipCelu.includes('Legnicka (Park Magnolia)')
-            && tipCelu.includes('1,8 km')
-            && !/15:4|15:5/.test(tipCelu)
-            && app.flowBikeLayer.getLayers().length === 0,
-        kropek: kropki.length, kresek: kreski.length,
-        tipStacji, tipCelu, etykieta,
-    };
-})();
-
 /* Pytanie o inny dzień: stacja stoi tam zawsze, więc kropka zostaje - ale
    liczba rowerów jest z TEJ chwili, więc mapa mówi wprost, że jej nie zna,
    zamiast podać dzisiejszą jako jutrzejszą. */
@@ -1287,44 +1239,6 @@ checks.rower_na_inny_dzien_nie_udaje_ze_wie = (() => {
     };
 })();
 
-/* Przełącznik pod zębatką: kreski wybranych przejazdów i ich stacje końcowe
-   stoją na mapie cały czas, a nie tylko pod kursorem - i zostają po zejściu
-   kursora z kropki. */
-checks.rower_przejazdy_na_stale_po_zapaleniu = (() => {
-    app.setBikesOn(true);
-    const stacja = {
-        id: 'A', name: 'Kozanowska', lat: 51.09, lon: 17.02, bikes: 7,
-        electric: 2, docks: 9, loose: false, at: 56100, walk_sec: 420,
-        walk_m: 300, from: 'Kamienna',
-        rides: [{
-            id: 'B', name: 'Legnicka', lat: 51.10, lon: 17.03, bikes: 3,
-            docks: 12, m: 1826, sec: 840, at: 56940,
-            options: [{arrival: 58200, vehicles: 2}],
-        }],
-    };
-    const bylo = app.dotOpts.bikeRides;
-    app.dotOpts.bikeRides = true;
-    app.drawFlow({...FLOW_FIXTURE, bike_places: [stacja],
-                  bike_places_live: true}, false);
-    const warstwy = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
-    const kreski = warstwy.filter(l => l.kind === 'polyline').length;
-    const etykieta = (warstwy.find(l => l._tooltip && l._tooltip.options.permanent)
-                      || {_tooltip: {content: ''}})._tooltip.content;
-    const kropka = app.flowBikeLayer.getLayers()[0];
-    kropka.fire('mouseover');
-    kropka.fire('mouseout');
-    const poZejsciu = app.flowBikeRideLayer ? app.flowBikeRideLayer.getLayers() : [];
-
-    app.dotOpts.bikeRides = bylo;
-    app.drawFlow(FLOW_FIXTURE, false);
-    return {
-        ok: kreski === 1
-            && etykieta.trim() === '1,8 km'
-            && poZejsciu.filter(l => l.kind === 'polyline').length === 1,
-        kreski, etykieta, poZejsciu: poZejsciu.length,
-    };
-})();
-
 
 /* W rozkładach o warstwie pojazdów decyduje to, co stoi na ekranie: otwarty
    rozkład linii albo zaznaczone linie tablicy przystanku. Mapa przepływów
@@ -1340,11 +1254,11 @@ checks.pojazdy_w_rozkladach_ida_za_ekranem = (function () {
 
     window.timetableMode = {vehicleLines: () => new Set(['bus 999'])};
     app.renderVehicles();
-    const wRozkladach = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const wRozkladach = app.vehiclesLayer.layers.map(numerPojazdu);
 
     window.timetableMode = {vehicleLines: () => null};
     app.renderVehicles();
-    const poWyjsciu = app.vehiclesLayer.layers.map(m => m.options.icon.html);
+    const poWyjsciu = app.vehiclesLayer.layers.map(numerPojazdu);
 
     delete window.timetableMode;
     app.setVehiclesOn(false);

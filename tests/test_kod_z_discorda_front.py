@@ -1,5 +1,6 @@
-"""Panel ⚙ blokuje wgrywanie Siechnic do czasu kodu (zgłoszenie #433), sprawdzane
-w prawdziwej przeglądarce. Trasy /api/dev/* są atrapami, bez Discorda."""
+"""Panel ⚙ blokuje wgrywanie Siechnic (zgłoszenie #433) i pobieranie logów serwera
+(#285) do czasu kodu, sprawdzane w prawdziwej przeglądarce. Trasy /api/dev/* są
+atrapami, bez Discorda."""
 
 import json
 import threading
@@ -50,6 +51,13 @@ def _strona(przegladarka, kod_info, siechnice):
     return context, page
 
 
+def _chronione(page):
+    """Każda chroniona kontrolka panelu: [czyja, zablokowana, z kłódką]."""
+    return page.locator("[data-protected]").evaluate_all("""els => els.map(e => [
+        e.id || e.htmlFor, e.classList.contains('locked'),
+        getComputedStyle(e, '::before').content.includes('\\u{1F512}')])""")
+
+
 def _otworz_panel(page):
     page.wait_for_selector("#dev-toggle")
     if not page.evaluate("document.body.classList.contains('dev-open')"):
@@ -68,9 +76,8 @@ def test_zablokowane_pokazuje_liste_osob_i_kladke_przy_wgrywaniu(przegladarka, a
         _otworz_panel(page)
         assert page.locator("#access-lock").evaluate("e => !e.hidden")
         assert page.locator("#siechnice-file").is_disabled()
-        assert page.locator("[data-protected]").evaluate("e => e.classList.contains('locked')")
-        assert "\U0001F512" in page.locator("[data-protected]").evaluate(
-            "e => getComputedStyle(e, '::before').content")
+        assert _chronione(page) == [["siechnice-file", True, True],
+                                    ["server-logs-download", True, True]]
         assert page.locator("#siechnice-person option").evaluate_all("o => o.map(e => e.textContent)") == ["Ala", "Olek"]
         assert page.locator("#siechnice-send").inner_text() == "Wyślij kod"
     finally:
@@ -85,7 +92,7 @@ def test_klik_w_kladke_przenosi_do_wiersza_dostepu(przegladarka, adres):
         page.wait_for_function("document.querySelector('#siechnice-person').options.length === 1")
         _otworz_panel(page)
         page.fill("#settings-search", "Siechnic")
-        page.click("[data-protected]", force=True)
+        page.click("[data-protected][for=siechnice-file]", force=True)
         page.wait_for_function(
             "document.querySelector('[data-setting=dev-access]').classList.contains('jump-flash')")
         assert page.input_value("#settings-search") == ""
@@ -113,7 +120,7 @@ def test_odblokowana_karta_nie_ma_kladki(przegladarka, adres):
     try:
         page.goto(adres)
         page.wait_for_function("!document.querySelector('#siechnice-file').disabled")
-        assert not page.locator("[data-protected]").evaluate("e => e.classList.contains('locked')")
+        assert [zablokowana for _, zablokowana, _ in _chronione(page)] == [False, False]
         assert page.locator("#access-lock").evaluate("e => e.hidden")
         assert page.locator("#access-unlocked").evaluate("e => !e.hidden")
     finally:
@@ -136,7 +143,7 @@ def test_poprawny_kod_zapisuje_token_w_sessionstorage_i_zdejmuje_kladke(przeglad
         assert not page.locator("[data-setting=dev-access]").evaluate("e => e.classList.contains('changed')")
         page.click("#siechnice-unlock")
         page.wait_for_function("!document.querySelector('#siechnice-file').disabled")
-        assert not page.locator("[data-protected]").evaluate("e => e.classList.contains('locked')")
+        assert [zablokowana for _, zablokowana, _ in _chronione(page)] == [False, False]
         assert page.evaluate("sessionStorage.getItem('siechnice-token')") == "tok"
     finally:
         context.close()
