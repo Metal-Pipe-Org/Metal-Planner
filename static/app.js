@@ -299,6 +299,11 @@ let hereStart = null;
 let autoRefreshTimer = null;
 let autoRefreshOn = false;   // ◎ świeci - patrz syncAutoRefresh
 let journeys = [];
+// Godzina z formularza to wyjazd albo - po przełączeniu - godzina, na którą
+// chce się być na miejscu (zgłoszenie #265). Z pokładu pojazdu przełącznik
+// nie działa: tam się już jedzie, więc wyjścia nie ma kiedy wybierać.
+const timeModeButton = $('time-mode');
+let arriveBy = false;
 let selectedJourney = null;   // indeks pozycji z listy albo null
 let resultsCollapsed = !!uiState.resultsCollapsed; // ukrywa samą listę propozycji (nie cały panel)
 
@@ -2302,8 +2307,11 @@ function renderTimeHeadline() {
     // najechaniu albo stuknięciu.
     el.innerHTML =
         '<span class="headline-best" tabindex="0" aria-label="'
-        + escAttr(`Najszybciej: wyjeżdżasz o ${flow.starts}, dojeżdżasz`
-                  + ` o ${flow.best_arrival}, za ${fmtMins(flow.best_sec)}`) + '">'
+        + escAttr(flow.arrive_by
+            ? `Najpóźniej: wyjeżdżasz o ${flow.starts}, dojeżdżasz o ${flow.best_arrival}`
+              + ` - na miejscu do ${flow.arrive_by}`
+            : `Najszybciej: wyjeżdżasz o ${flow.starts}, dojeżdżasz`
+              + ` o ${flow.best_arrival}, za ${fmtMins(flow.best_sec)}`) + '">'
         // Plakietki na początku (decyzja użytkownika, #247): najpierw czym się
         // jedzie, potem kiedy.
         + (chips ? `<span class="headline-item headline-chips">${chips}</span>` : '')
@@ -2312,9 +2320,12 @@ function renderTimeHeadline() {
         // razem z czekaniem na pierwszy pojazd (zgłoszenie #143). Wyjazd to
         // najpóźniejszy, który wciąż daje najszybszy przyjazd - wcześniej
         // wychodzi się tylko po to, żeby gdzieś czekać.
-        + item('', `Wyjazd ${flow.starts}, przyjazd ${flow.best_arrival} - na miejscu`
-                   + ` za ${fmtMins(flow.best_sec)}, licząc od ${flow.departure} (godzina`
-                   + ' wyszukania).',
+        + item('', flow.arrive_by
+                   ? `Wyjazd ${flow.starts}, przyjazd ${flow.best_arrival} - najpóźniejszy`
+                     + ` wyjazd, z którym jesteś na miejscu do ${flow.arrive_by}.`
+                   : `Wyjazd ${flow.starts}, przyjazd ${flow.best_arrival} - na miejscu`
+                     + ` za ${fmtMins(flow.best_sec)}, licząc od ${flow.departure} (godzina`
+                     + ' wyszukania).',
                `<b>${esc(flow.starts)}</b><span class="headline-arrow" aria-hidden="true">→</span>`
                + `<b>${esc(flow.best_arrival)}</b>`)
         + ride
@@ -2329,8 +2340,9 @@ function renderTimeHeadline() {
                   ? '<span class="headline-sep" aria-hidden="true"'
                     + ' data-tip="Z lewej najszybsza trasa, z prawej godziny, które obejmuje mapa."></span>'
                     + item(' headline-limit', `Mapa rysuje dojazdy wyjeżdżające od ${flow.map_from}`
-                                              + ` i dojeżdżające najpóźniej o ${flow.deadline}, czyli`
-                                              + ` za ${fmtMins(flow.limit_sec)} od wyszukania.`,
+                                              + ` i dojeżdżające najpóźniej o ${flow.deadline}`
+                                              + (flow.arrive_by ? '.'
+                                                 : `, czyli za ${fmtMins(flow.limit_sec)} od wyszukania.`),
                            `${HEADLINE_MAP_ICON}<b>${esc(flow.map_from)}</b>–<b>${esc(flow.deadline)}</b>`)
                   : '')
               + '</span>'
@@ -3856,7 +3868,7 @@ function timetableAnchor(sec) {
 
 /** Dzień, którego dotyczy mapa: data z formularza, a przy odpowiedzi
     z kolejnej doby (punkt 13) - tamten dzień. Godziny kropek są na jego osi,
-    więc tablica z daty formularza pokazywałaby odjazdy z innego dnia. */
+    więc dopiero z nim sekunda odjazdu staje się prawdziwą chwilą. */
 function mapDate() {
     const date = $('date').value;
     const offset = (lastFlow && lastFlow.day_offset) || 0;
@@ -3867,7 +3879,12 @@ function mapDate() {
 }
 
 function loadTimetable(dot, where, sec) {
-    const date = mapDate();
+    // Doba mapy tak, jak mapa ją wyznaczyła: data z formularza i przesunięcie
+    // z odpowiedzi, a nie sam dzień z mapDate - doba poprzednia przy „być na"
+    // po północy ma doklejony poranek dnia z pytania, więc to nie ten sam
+    // rozkład, co pytanie wprost o tamten dzień.
+    const date = $('date').value;
+    const dayOffset = (lastFlow && lastFlow.day_offset) || 0;
     const from = timetableAnchor(sec);
     // Do klucza wchodzi też `flow` i `arrive`: ta sama linia raz jest ofertą
     // do wsiadania, a raz pojazdem, którym się tu przyjechało - i wtedy dymek
@@ -3876,13 +3893,13 @@ function loadTimetable(dot, where, sec) {
         ? where.lines.map(l => `${lineKey(l)}/${l.flow || ''}/${l.arrive || ''}`).join('|')
         : '';
     const key = `${where.name || where.lat + ',' + where.lon}`
-        + `@${date}@${from}@${sec}@${filtr}@${where.deadline || ''}@${trainsOn}`;
+        + `@${date}@${dayOffset}@${from}@${sec}@${filtr}@${where.deadline || ''}@${trainsOn}`;
     const cached = timetableCache.get(key);
     if (cached !== undefined) { emitTimetable(dot, cached); return; }
 
     const query = where.name
-        ? {stop: where.name, date, from_sec: from}
-        : {lat: where.lat, lon: where.lon, date, from_sec: from};
+        ? {stop: where.name, date, day_offset: dayOffset, from_sec: from}
+        : {lat: where.lat, lon: where.lon, date, day_offset: dayOffset, from_sec: from};
     // Z zapasem PRZY KAŻDEJ kropce, nie tylko przy węźle wachlarza: przy
     // węźle część odjazdów odsiewamy, a przy kropce wybranej trasy pytamy
     // o tyle, ile suwak w ogóle pozwala pokazać. Bez tego serwerowa domyślna
@@ -4999,10 +5016,12 @@ function renderJourneys() {
         const transfers = j.transfers === 0
             ? 'bez przesiadek'
             : `${j.transfers} ${plural(j.transfers, 'przesiadka', 'przesiadki', 'przesiadek')}`;
-        const meta = [
-            transfers,
-            j.wait_min > 0 ? `odjazd za ${j.wait_min} min` : 'odjazd teraz',
-        ];
+        const meta = [transfers];
+        // W trybie „być na" godzina z formularza jest przyjazdem, więc „odjazd
+        // za" nie miałby od czego liczyć - godzinę wyjazdu karta ma i tak.
+        if (!(headlineFlow && headlineFlow.arrive_by)) {
+            meta.push(j.wait_min > 0 ? `odjazd za ${j.wait_min} min` : 'odjazd teraz');
+        }
         // Propozycja z autem kończy się czymś, czego nie ma w rozkładzie -
         // i czym się płaci za przejazd. To ma być widać na karcie, zanim się
         // ją rozwinie, a nie dopiero na osi trasy.
@@ -5324,6 +5343,7 @@ function warnOnboardRide(kurs) {
 function setStartMode(vehicle, focus = true) {
     onboardOn = vehicle;
     document.body.classList.toggle('start-onboard', vehicle);
+    syncTimeMode();
     syncOnboardView();
     for (const [button, on] of [[modeVehicleButton, vehicle], [modePlaceButton, !vehicle]]) {
         button.classList.toggle('active', on);
@@ -5504,6 +5524,8 @@ function queryParams() {
     });
     // Wyłączonych propozycji serwer nie składa wcale - patrz routes.api_flow.
     if (!$('routes-on').checked) params.set('routes', '0');
+    // „Być na" - godzina to przyjazd do celu (patrz routes.api_flow).
+    if (arriveBy && !onboardOn) params.set('arrive', '1');
     // Rower dokładamy do zapytania tylko wtedy, gdy pasażer o niego prosi -
     // patrz routes.api_flow. Bez tego odpowiedź jest co do bajtu taka sama
     // jak przed dodaniem warstwy rowerowej.
@@ -5601,7 +5623,9 @@ function showRailOnlyNotice() {
 const WAIT_NOTICE_SEC = 20 * 60;
 
 function waitNoticeHtml(data) {
-    if (data.day_offset) {
+    // Doba wcześniej (-1) to „być na" tuż po północy: wyjście wieczorem
+    // przed dniem z pytania to odpowiedź, a nie czekanie.
+    if (data.day_offset > 0) {
         const dzien = data.day_offset === 1 ? 'jutro' : `za ${data.day_offset} dni`;
         return `<div class="notice"><p>O tej porze nic już stąd nie jedzie. `
             + `Najbliższy wyjazd ${dzien} o ${esc(data.starts)}.</p></div>`;
@@ -7378,7 +7402,8 @@ function saveLastSearch() {
         // „teraz" z formularza po godzinie przestałoby nim być.
         localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify({
             start: sel.start, end: sel.end, savedAt: Date.now(),
-            ...(timeChosen ? {time: $('time').value, date: $('date').value} : {}),
+            ...(timeChosen ? {time: $('time').value, date: $('date').value,
+                              ...(arriveBy ? {arrive: true} : {})} : {}),
         }));
     } catch {
         // localStorage niedostępny - wyszukiwanie działa dalej, po prostu się nie zapamięta
@@ -7435,7 +7460,7 @@ function restoreLastSearch() {
 
 /** „8:00" dla dzisiaj, „jutro 8:00" albo „24.10 8:00" - co wróci z trasą. */
 function recalledTimeLabel(saved) {
-    const clock = saved.time.replace(/^0/, '');
+    const clock = (saved.arrive ? 'na ' : '') + saved.time.replace(/^0/, '');
     const day = new Date();
     const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
                    + `-${String(d.getDate()).padStart(2, '0')}`;
@@ -7456,6 +7481,7 @@ function applyLastSearch(saved) {
         timeInput.value = saved.time;
         $('date').value = saved.date;
         timeChosen = true;
+        setArriveBy(!!saved.arrive);
     }
     updatePointMarker('start', sel.start);
     updatePointMarker('end', sel.end);
@@ -7568,6 +7594,7 @@ function linkParams() {
     if (timeChosen) {
         params.set('time', $('time').value);
         if ($('date').value !== todayIso()) params.set('date', $('date').value);
+        if (arriveBy) params.set('arrive', '1');
     }
     return params;
 }
@@ -7624,6 +7651,7 @@ function applyLink() {
     if (/^\d{1,2}:\d{2}$/.test(query.get('time'))) {
         $('time').value = query.get('time').padStart(5, '0');
         timeChosen = true;
+        setArriveBy(query.get('arrive') === '1');
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(query.get('date'))) {
         $('date').value = query.get('date');
@@ -7943,6 +7971,33 @@ $('time-now').addEventListener('click', () => {
     setTimeNow();
     if (startInput.value && endInput.value) search();
 });
+
+// Przełącznik „Odjazd"/„Przyjazd" - stan jest wyżej (arriveBy), bo
+// setStartMode woła syncTimeMode już przy starcie strony.
+function syncTimeMode() {
+    const on = arriveBy && !onboardOn;
+    timeModeButton.textContent = on ? 'Przyjazd' : 'Odjazd';
+    timeModeButton.setAttribute('aria-pressed', String(on));
+    timeModeButton.disabled = onboardOn;
+    timeModeButton.title = onboardOn
+        ? 'Z pojazdu godzina to zawsze wyjazd - już jedziesz'
+        : on ? 'Godzina to przyjazd: być na miejscu najpóźniej o tej godzinie. Stuknij, żeby szukać od godziny wyjazdu.'
+             : 'Godzina to wyjazd. Stuknij, żeby podać, na którą chcesz być na miejscu.';
+}
+
+function setArriveBy(on) {
+    arriveBy = on;
+    syncTimeMode();
+}
+
+timeModeButton.addEventListener('click', () => {
+    setArriveBy(!arriveBy);
+    // „Być na teraz" nie jest pytaniem: bez wpisanej godziny kursor idzie do
+    // pola godziny, a szuka się dopiero po jej podaniu.
+    if (arriveBy && !timeChosen) { timeInput.focus(); timeInput.select(); return; }
+    if (startInput.value && endInput.value) search();
+});
+syncTimeMode();
 
 $('clear').addEventListener('click', () => {
     const previous = [sel.start, sel.end];

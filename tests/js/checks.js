@@ -953,14 +953,17 @@ checks.czekanie_jest_widoczne = (() => {
         {day_offset: 0, starts: '12:30', waits_sec: 88 * 60});
     const zaraz = app.waitNoticeHtml(
         {day_offset: 0, starts: '11:10', waits_sec: 8 * 60});
+    // „Być na 00:20" z wyjściem o 23:48 poprzedniego wieczoru (#265).
+    const wieczorem = app.waitNoticeHtml(
+        {day_offset: -1, starts: '23:48', waits_sec: 0});
     return {
         ok: jutro.includes('jutro') && jutro.includes('00:03')
             && zaDwa.includes('za 2 dni') && zaDwa.includes('05:10')
             && dzis.includes('Najszybszy dojazd wyjeżdża o 12:30')
             && dzis.includes('88 min')
             && !dzis.includes('nic już') && !dzis.includes('jutro')
-            && zaraz === '',
-        jutro, zaDwa, dzis, zaraz,
+            && zaraz === '' && wieczorem === '',
+        jutro, zaDwa, dzis, zaraz, wieczorem,
     };
 })();
 
