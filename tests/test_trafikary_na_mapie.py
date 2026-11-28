@@ -19,6 +19,7 @@ import gtfs
 import planner
 import traficar
 from tests.gtfs_builder import make_day
+from tests import flow
 
 # Auta stoją tam, gdzie stoją TERAZ, więc mapa pokazuje je wyłącznie przy
 # pytaniu o dziś - stąd dzisiejsza data zamiast stałej z pozostałych testów.
@@ -63,7 +64,7 @@ def _cars(monkeypatch, cars):
 def _flow(install_day, monkeypatch, cars=(CAR,), day=None):
     install_day(day or _day())
     _cars(monkeypatch, list(cars))
-    result = planner.plan_flow("Start", "Cel", WHEN)
+    result = flow.plan_flow("Start", "Cel", WHEN)
     assert "error" not in result
     return result
 
@@ -156,7 +157,7 @@ def test_zalozenia_auta_spod_zebatki_zmieniaja_szacunek(install_day,
     install_day(_day())
     _cars(monkeypatch, [CAR])
 
-    car = planner.plan_flow("Start", "Cel", WHEN, car_kmh=36,
+    car = flow.plan_flow("Start", "Cel", WHEN, car_kmh=36,
                             car_overhead_sec=0)["cars"][0]
 
     metry = round(gtfs._haversine_m(CAR["lat"], CAR["lon"], *E))
@@ -340,42 +341,16 @@ def test_schowane_auto_nigdy_nie_zostawia_nic_lepszego_w_ukryciu():
                        for p in pokazane), suwak
 
 
-def test_suwak_i_pokaz_wiecej_mnoza_liczbe_aut(install_day, monkeypatch):
+def test_suwak_wyznacza_liczbe_aut(install_day, monkeypatch):
     """Auto przy starcie i auto przy M. Przy starcie jest się wcześniej, więc
-    bije tamto: suwak na 1 pokazuje jedno, „pokaż więcej" dokłada drugie."""
+    bije tamto: suwak na 1 pokazuje jedno."""
     install_day(_day())
     _cars(monkeypatch, [{**CAR, "plate": "PRZY_M"},
                         {**CAR, "plate": "PRZY_STARCIE", "lat": 51.1003}])
 
-    jedno = planner.plan_flow("Start", "Cel", WHEN, car_count=1)
-    dwa = planner.plan_flow("Start", "Cel", WHEN, car_count=1, more=1)
+    jedno = flow.plan_flow("Start", "Cel", WHEN, car_count=1)
 
     assert _tablice(jedno["cars"]) == ["PRZY_STARCIE"]
-    assert _tablice(dwa["cars"]) == ["PRZY_M", "PRZY_STARCIE"]
-
-
-def test_pokaz_wiecej_luzuje_regule_nawet_gdy_suwak_jest_juz_przekroczony():
-    """Zgłoszenie #141: pierwszy poziom sam z siebie bywa liczniejszy niż
-    suwak - wtedy podniesienie limitu nie zmienia NIC i przycisk wygląda na
-    zepsuty. Kliknięcie ma więc luzować regułę o poziom, nie tylko podnosić
-    liczbę: tu trzy auta, których nic nie bije, przy suwaku na dwa - a czwarte,
-    pobite raz, wchodzi dopiero po kliknięciu."""
-    auta = [
-        {"plate": "NIEPOBITE_A", "at": 600, "ogarniam": [], "van": False},
-        {"plate": "NIEPOBITE_B", "at": 660, "ogarniam": [{"ile": 30}], "van": False},
-        {"plate": "NIEPOBITE_C", "at": 720, "ogarniam": [{"ile": 50}], "van": False},
-        {"plate": "POBITE_RAZ", "at": 660, "ogarniam": [{"ile": 20}], "van": False},
-    ]
-    for car in auta:
-        car["arrival"] = car["at"] + 3000
-
-    bez = traficar.map_skyband(auta, 2)
-    po_kliknieciu = traficar.map_skyband(auta, 2, min_level=1)
-
-    assert [car["plate"] for car in bez] == ["NIEPOBITE_A", "NIEPOBITE_B",
-                                             "NIEPOBITE_C"]
-    assert [car["plate"] for car in po_kliknieciu] == [
-        "NIEPOBITE_A", "NIEPOBITE_B", "NIEPOBITE_C", "POBITE_RAZ"]
 
 
 def test_rodzaj_auta_czytamy_z_listy_modeli(monkeypatch):
@@ -425,8 +400,8 @@ def test_przelacznik_dostawczakow_dochodzi_do_mapy(install_day, monkeypatch):
     install_day(_day())
     _cars(monkeypatch, [CAR, {**CAR, "plate": "MASTER", "van": True}])
 
-    domyslnie = planner.plan_flow("Start", "Cel", WHEN)
-    z_dostawczakami = planner.plan_flow("Start", "Cel", WHEN, car_vans=True)
+    domyslnie = flow.plan_flow("Start", "Cel", WHEN)
+    z_dostawczakami = flow.plan_flow("Start", "Cel", WHEN, car_vans=True)
 
     assert _tablice(domyslnie["cars"]) == ["WE1AA11"]
     assert _tablice(z_dostawczakami["cars"]) == ["MASTER", "WE1AA11"]
@@ -442,7 +417,7 @@ def test_poza_zasiegiem_z_ustawienia_nie_ma_aut_i_jest_powod(install_day, monkey
     _cars(monkeypatch, [CAR])
     jutro = datetime.combine(date.today() + timedelta(days=1), time())
 
-    result = planner.plan_flow("Start", "Cel", jutro)
+    result = flow.plan_flow("Start", "Cel", jutro)
 
     assert result["cars"] == []
     assert result["cars_beyond"] is True
@@ -453,8 +428,8 @@ def test_zasieg_aut_z_ustawienia_przesuwa_granice(install_day, monkeypatch):
     _cars(monkeypatch, [CAR])
     jutro = datetime.combine(date.today() + timedelta(days=1), time())
 
-    doba = planner.plan_flow("Start", "Cel", jutro, car_horizon_h=48)
-    bez_limitu = planner.plan_flow("Start", "Cel", jutro, car_horizon_h=None)
+    doba = flow.plan_flow("Start", "Cel", jutro, car_horizon_h=48)
+    bez_limitu = flow.plan_flow("Start", "Cel", jutro, car_horizon_h=None)
 
     assert _tablice(doba["cars"]) == ["WE1AA11"]
     assert _tablice(bez_limitu["cars"]) == ["WE1AA11"]
@@ -467,8 +442,8 @@ def test_zasieg_aut_dziala_tak_samo_wstecz(install_day, monkeypatch):
     _cars(monkeypatch, [CAR])
     wczoraj = datetime.combine(date.today() - timedelta(days=1), time())
 
-    domyslnie = planner.plan_flow("Start", "Cel", wczoraj)
-    bez_limitu = planner.plan_flow("Start", "Cel", wczoraj, car_horizon_h=None)
+    domyslnie = flow.plan_flow("Start", "Cel", wczoraj)
+    bez_limitu = flow.plan_flow("Start", "Cel", wczoraj, car_horizon_h=None)
 
     assert domyslnie["cars"] == []
     assert domyslnie["cars_beyond"] is True
@@ -481,7 +456,7 @@ def test_wylacznik_gasi_auta_na_mapie(install_day, monkeypatch):
     _cars(monkeypatch, [CAR])
     monkeypatch.setattr(traficar, "enabled", lambda: False)
 
-    assert planner.plan_flow("Start", "Cel", WHEN)["cars"] == []
+    assert flow.plan_flow("Start", "Cel", WHEN)["cars"] == []
 
 
 def test_padniety_feed_to_brak_aut_a_nie_blad(install_day, monkeypatch):
@@ -495,6 +470,6 @@ def test_padniety_feed_to_brak_aut_a_nie_blad(install_day, monkeypatch):
 
     monkeypatch.setattr(traficar, "car_list", padnij)
 
-    result = planner.plan_flow("Start", "Cel", WHEN)
+    result = flow.plan_flow("Start", "Cel", WHEN)
     assert result["cars"] == []
     assert result["segments"]

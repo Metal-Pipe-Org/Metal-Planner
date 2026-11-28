@@ -6,7 +6,7 @@ Sprawdzamy dwie rzeczy osobno:
 
 1. samo szukanie auta (`traficar.car_options`) - które pary "przystanek
    wysiadania + auto" w ogóle są propozycją, a które nie;
-2. złożenie tego w trasę (`planner.plan_flow`) - czy godziny etapów
+2. złożenie tego w trasę (`planner.plan_flow_stages`) - czy godziny etapów
    zazębiają się co do sekundy i czy lista dostaje pozycję z autem, nie
    tracąc żadnej ze swoich.
 """
@@ -17,6 +17,7 @@ import gtfs
 import planner
 import traficar
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, dla czytelnych liczb
 
@@ -155,7 +156,7 @@ def test_opis_postoju_bez_powtarzania_miasta():
 def _traficar_journey(install_day, monkeypatch, cars=(CAR,)):
     install_day(_day())
     _cars(monkeypatch, list(cars))
-    result = planner.plan_flow("S", "E", WHEN)
+    result = flow.plan_flow("S", "E", WHEN)
     assert "error" not in result
     return result
 
@@ -211,10 +212,10 @@ def test_bez_auta_lista_jest_dokladnie_taka_jak_byla(install_day, monkeypatch):
     komunikacji miejskiej - ma tylko dołożyć swoje."""
     install_day(_day())
     monkeypatch.setattr(traficar, "enabled", lambda: False)
-    bez = planner.plan_flow("S", "E", WHEN)["journeys"]
+    bez = flow.plan_flow("S", "E", WHEN)["journeys"]
 
     _cars(monkeypatch, [CAR])
-    z_autem = planner.plan_flow("S", "E", WHEN)["journeys"]
+    z_autem = flow.plan_flow("S", "E", WHEN)["journeys"]
 
     assert [j for j in z_autem if not j.get("traficar")] == bez
 
@@ -224,8 +225,8 @@ def test_zgaszony_przycisk_zdejmuje_propozycje_z_autem(install_day, monkeypatch)
     reszta listy i auta przy mapie zostają takie same jak przy zapalonym."""
     install_day(_day())
     _cars(monkeypatch, [CAR])
-    z_autem = planner.plan_flow("S", "E", WHEN)
-    bez = planner.plan_flow("S", "E", WHEN, use_cars=False)
+    z_autem = flow.plan_flow("S", "E", WHEN)
+    bez = flow.plan_flow("S", "E", WHEN, use_cars=False)
 
     assert any(j.get("traficar") for j in z_autem["journeys"])
     assert not any(j.get("traficar") for j in bez["journeys"])

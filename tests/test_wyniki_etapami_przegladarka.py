@@ -11,8 +11,6 @@ Sprawdzane jest to, co pasażer widzi:
     z mapą przepływów - a „Szukaj" kręci się do ostatniego etapu,
   - późniejsze etapy dokładają się do mapy - nie czyszczą jej, nie zabierają
     wybranej trasy ani okienka w rogu, a nowe propozycje idą na koniec listy,
-  - „Pokaż więcej" kręci się do końca i nie przestawia kadru, a auta nie
-    znikają razem ze starą mapą - zostają, aż przyjdą nowe,
   - na telefonie formularz zwija się przy pierwszym wyniku (a przy błędzie
     nie), a w zwiniętej linijce kręci się kółko, dopóki coś jeszcze dochodzi.
 """
@@ -46,7 +44,7 @@ class Bramki:
     dopiero po otwarciu jego bramki."""
 
     def __init__(self):
-        self.etapy = {}
+        self.etapy = []
         self.zamknij()
 
     def zamknij(self):
@@ -56,11 +54,11 @@ class Bramki:
         for name in names:
             self.otwarte[name].set()
 
-    def __call__(self, start, *args, more=None, live_refreshed=None, **kwargs):
+    def __call__(self, start, *args, live_refreshed=None, **kwargs):
         if start == "Nieznany":
             yield "error", {"error": "Nie znam przystanku „Nieznany”."}
             return
-        for name, delta in self.etapy[int(more or 0)]:
+        for name, delta in self.etapy:
             if not self.otwarte[name].wait(30):
                 return
             yield name, delta
@@ -83,9 +81,9 @@ def bramki(prawdziwa_baza):
 
 @pytest.fixture
 def etapy(bramki, monkeypatch, zegar_plannera):
-    """Prawdziwe etapy tej relacji, dla zwykłej mapy i po „Pokaż więcej".
-    „Teraz" stoi na godzinie pytania, bo auta są na mapie tylko do kilku
-    godzin od teraz, a test liczy na to, że etap aut coś dołoży."""
+    """Prawdziwe etapy tej relacji. „Teraz" stoi na godzinie pytania, bo auta
+    są na mapie tylko do kilku godzin od teraz, a test liczy na to, że etap
+    aut coś dołoży."""
     auta = {"teraz": STARE_AUTA}
     monkeypatch.setattr(traficar, "enabled", lambda: True)
     monkeypatch.setattr(traficar, "car_list", lambda: auta["teraz"])
@@ -96,11 +94,8 @@ def etapy(bramki, monkeypatch, zegar_plannera):
 
     kiedy = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
     zegar_plannera(kiedy)
-    for more in (0, 1):
-        auta["teraz"] = STARE_AUTA
-        bramki.etapy[more] = list(planner.plan_flow_stages(
-            *TRASA, kiedy, more=more, live_refreshed=odswiezone))
-    assert [name for name, _ in bramki.etapy[0]] == list(ETAPY)
+    bramki.etapy = list(planner.plan_flow_stages(*TRASA, kiedy, live_refreshed=odswiezone))
+    assert [name for name, _ in bramki.etapy] == list(ETAPY)
     bramki.zamknij()
     return bramki
 
@@ -235,28 +230,6 @@ def test_kolejne_etapy_dokladaja_sie_do_mapy(etapy, przegladarka):
     assert page.inner_text("#flow-panel-body") == "ZNACZNIK"
     auta = page.evaluate(AUTA_NA_MAPIE, SWIEZE_AUTA)
     assert auta
-
-    # „Pokaż więcej": przycisk kręci się do końca, kadr stoi, wybór zostaje,
-    # o ile gęstsza lista ma tę trasę.
-    etapy.zamknij()
-    page.click("#time-headline .headline-more")
-    assert page.evaluate("document.body.classList.contains('more-busy')")
-    assert page.is_visible("#time-headline .headline-more .spinner")
-    etapy.pusc("fastest", "map")
-    # Gęstsza mapa już stoi (przycisk obiecuje kolejne zagęszczenie), a auta
-    # jeszcze się liczą.
-    page.wait_for_selector('#time-headline .headline-more[data-tip*="3×"]')
-    assert page.evaluate("document.body.classList.contains('more-busy')")
-    assert page.is_visible("#time-headline .headline-more .spinner")
-    # Auta z poprzedniej mapy stoją dalej - do etapu z nowymi.
-    assert page.evaluate(AUTA_NA_MAPIE, SWIEZE_AUTA) == auta
-    etapy.pusc("extras", "fresh")
-    page.wait_for_function("!document.body.classList.contains('more-busy')")
-    assert page.evaluate(KADR) == kadr
-    karty = _karty(page)
-    assert len(karty) >= len(przed)
-    if any(k.startswith(wybrana.split("\n")[0]) for k in karty):
-        assert page.locator("#results .journey.selected").count() == 1
     assert not page.bledy, page.bledy
     page.context.close()
 

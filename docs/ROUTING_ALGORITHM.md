@@ -1,14 +1,8 @@
 # The flow-map algorithm, explained with worked examples
 
-This document covers exactly one thing: `plan_flow` in `planner.py`, the
-function behind the map you see in the UI (the "show every useful trip at
-once" view). Everything else — the data model, the single-route CSA scan,
-the frontend — is left out on purpose. *What* the map promises is in
-[FLOW_MAP_CONTRACT.md](FLOW_MAP_CONTRACT.md); this file is about *how*.
+This document covers exactly one thing: how `plan_flow_stages` in `planner.py` decides what the map you see in the UI draws. Everything else — the data model, the single-route CSA scan, the frontend — is left out on purpose. This file is about *how*.
 
-`plan_flow` decides what to draw with the value map (`_value_map`, issue
-#150) - since issue #187 the only map, also when the trip starts on board
-a vehicle. The old brightness map is gone.
+The map draws a few sensible **moves** from the start to the target (`_moves_map` in `planner.py`, the choice itself in `moves.py`), also when the trip starts on board a vehicle — see "The moves map" below. The trips the moves are made of come from one multi-criteria search, described in "The search behind the moves". The old brightness map and the value map (`_value_map`, issue #150, with its density threshold and "Pokaż więcej") are gone.
 
 Two terms you need before any of this makes sense:
 
@@ -20,26 +14,25 @@ Two terms you need before any of this makes sense:
    sweep that sorted list once, keeping track of the best arrival time found
    so far at every stop as you go.
 
-What frames the map:
+---
 
-3. **The fastest arrival** `best_arr`, from the ordinary single-route scan
-   (`_scan`). Everything else is measured against it.
-4. **A threshold chosen for readability, not set in minutes.** Showing
-   everything is the same as showing nothing, so the threshold moves until
-   the drawn network has a target density: total length of *distinct*
-   corridors divided by the side of the frame the relation is shown in
-   (`_corridor_km`, `_map_density`). Lines lying on top of each other count
-   once, and the frame is never narrower than a kilometre. The target is a slider under ⚙ (default 2.5, range 0.5–15); "Pokaż więcej"
-   ("show more") multiplies it by 2, 3 and 4, and every click is guaranteed
-   to add something — if the new target changes nothing, the threshold keeps
-   moving to the first thing that is actually new. How late the map reaches is a result of the threshold, not a setting.
-5. **Everything after the choice**: cutting into pieces, real street
-   geometry, corridor number groups, transfer dots, cars and bikes
-   (`_finalize_segments` onwards).
+# The moves map
+
+A passenger does not choose between lines or departures but between moves: "from here I get on and ride there". Five buses along the same road are one move; two stops next to each other are two moves.
+
+**Search.** The trips come from the multi-criteria scan (`_value_journeys`, Step 2 below), started two minutes before the asked time (a vehicle that has just left may be late), with walking from the start and to the target allowed up to 1.5 km (`MOVES_WALK_M`): whether a walk pays off is decided by its minutes in the trip's cost, not by a hard radius. Each trip is split into its line-number variants (Step 4), and each variant becomes an *instance*: one concrete trip with its rides, departure and arrival. A move is every instance with the same signature — the same sequence of (boarding place, alighting place) pairs.
+
+**Choice** (`moves.choose`, one user heuristic per step in `moves.STEPS`). The cost of a trip is its arrival plus `TRANSFER_GAIN_SEC` per transfer. In order: only trips at most 20 minutes costlier than the best catchable one; the same vehicles with a different transfer place are one trip; one instance per departure of the first vehicle; a move stays only when no other move beats it clearly (by 5 minutes or by a transfer) without being worse in arrival, departure or number of vehicles; a tight transfer gets the variant where the same vehicle rides on next to it; and when every move is tight, the best move with a margin is added. When none of the shown moves has a margin at all, the search runs again with a window twice as wide.
+
+**First view** (`moves.readable`). The fastest trip from the bar above the map is the spine; next to it at most two more moves (`READABLE_MOVES` = 3), and only really different ones: no vehicle passes another shown move's transfer place and no two moves change at the same place. The last slot goes, when there is one, to a move that lets you leave clearly later than all the others. Moves with a walk of 15 minutes or more at either end are not drawn (unless every move has one). Everything else stays one click away: the departure board of a stop.
+
+**Drawing.** Each shown move is drawn as its first instance plus its *branches* — other ways to reach the same last vehicle (`moves.add_branches`). The rides of one vehicle run that touch or overlap become one piece (`_value_segments`), so a line never lies on top of itself, and every piece is drawn the same (`w` = 1). Then the shared machinery takes over: cutting into pieces, real street geometry, corridor number groups, transfer dots (`_finalize_segments` onwards). There is no density threshold and no "Pokaż więcej". City bikes and Traficar are judged the same way, as separate options next to public transport: a bike where it replaces waiting or a transfer (`_bike_moves`), a car only when it belongs to the drawn trip. The scheme next to the map ("Schemat obok mapy") is drawn from the same moves.
+
+**Nothing found.** When the moves find nothing (`_moves_map` returns `None`), the search answers with the ordinary "no connection" error. There is no fallback map any more. "Any station in the city" ("WROCŁAW -") is not supported either: such a name is unknown like any other.
 
 ---
 
-# The value map
+# The search behind the moves
 
 The running example is the one that started it all (issue #150), with the
 times simplified: **Pl. Zgody → Klecina**, asked at **19:30**.
@@ -75,18 +68,10 @@ origin, and how many vehicles you've used (at most 5). Walking follows the
 same rule as everywhere else: from the origin, once after getting off, and
 to the target — never twice in a row.
 
-The important difference from ordinary CSA is what gets **dropped**. An
-earlier arrival or a later departure must not prune anything along the
-way, because the threshold may later forgive the worse label and it has to
-come back. A label is dropped only when it has lost for good: it left more
-than the search window earlier than another label standing at the same
-place no later. The search window starts at 20 minutes past `best_arr` and
-grows in 5-minute steps up to 40 only when the map needs it — the cost
-grows steeply with the width, because nothing else cuts off "riding around
-while waiting". In practice: tenths of a second for an ordinary map, up to a few seconds after three "Pokaż więcej" clicks on dense relations.
+The important difference from ordinary CSA is what gets **dropped**. An earlier arrival or a later departure must not prune anything along the way, because the moves' reasonable window may still want the worse label. A label is dropped only when it has lost for good: it left more than the search window earlier than another label standing at the same place no later. The window is set by the moves map: twice the transfer penalty plus the reasonable window past `best_arr`, at most 55 minutes (`MOVES_SEARCH_MAX_SEC`). The cost grows steeply with the width, because nothing else cuts off "riding around while waiting".
 
 Labels with the same minutes are **twins**: they travel on as one label and
-reach the map together. Two lines arriving at a transfer in the same minute
+reach the moves together. Two lines arriving at a transfer in the same minute
 are not "one of them is redundant"; they are "take whichever comes first".
 
 At the target, trips group by `(minute of arrival, minute of departure,
@@ -100,63 +85,18 @@ The vehicle you sit in counts as one of the trip's vehicles, so getting
 off and switching is two. Every trip leaves at that same second: the
 passenger is already travelling, so a later "departure" is worth nothing.
 
-## Step 3 — How many minutes does a trip need to be forgiven? (`_value_entries`)
+## Step 3 — Line-number variants (`_fill_variants`)
 
-Each trip gets a tolerance: the **sum** of
-
-8. how much later it arrives than the fastest trip, and
-9. how much earlier it leaves than a trip that arrives no later.
-
-In other words: how many minutes longer this journey takes. For the
-example:
-
-| Trip | Late | Leaves earlier than needed | Tolerance |
-|---|---|---|---|
-| A | 0 | 0 | **0** |
-| B | 8 | 0 | **8** |
-| D | 8 | 8 (B arrives the same and leaves 19:40) | 16 |
-| E | 11 | 0 | **11** |
-
-## Step 4 — Same line numbers, same trip (`_same_numbers_best`)
-
-Tolerance alone would eventually let C in: it is exactly as good as B in
-minutes. But C is B with one more vehicle added. The rule: a variant
-disappears **at every threshold** when another trip rides a subset of its
-line numbers (or all of them), is no worse in minutes, and — if the
-numbers are identical — is better in something. So:
-
-10. **C** never appears: B rides {5, 17} ⊂ {5, 14, 17} and is no worse.
-11. **D** never appears either: same numbers as B, and B leaves later for
-    the same arrival.
-12. **E** stays, even though it is slower than B: different numbers make it
-    a different route.
-
-Among twins with the same numbers, the variant that **walks where the same
+Each trip is split into variants by the line numbers it rides (C above is a variant of its own: 5 → 14 → 17). Among twins with the same numbers, the variant that **walks where the same
 vehicle would have carried it** goes first
 (`_rides_instead_of_walking` — e.g. ten minutes on foot along the route of
 the tram you could have stayed on, or caught three minutes from your bus),
 and of the rest the shortest ride wins (so "ride one stop past the
 transfer and come back on the same run" is a tail, not a variant).
 
-## Step 5 — Pick the threshold and draw (`_value_map`, `_value_segments`)
-
-The candidate thresholds are the distinct tolerances: 0, 8, 11, … The map
-takes the widest one whose drawn network is not denser than the target.
-Say the target allows 8: the map shows A and B. One "Pokaż więcej" raises
-the target and E (11) comes in. C and D never do.
-
-Drawing: the rides of the chosen trips are grouped by vehicle run; rides of
-the same run that touch or overlap become one piece, so a line never lies
-on top of itself. There is no brightness — every piece is drawn the same
-(`w` = 1). From here the shared machinery takes over (point 5 above).
-
-Each piece also carries `why` for the Debug preview: up to three trips
-through it, the tolerance at which each entered and why, and the variants
-hidden by the line-number rule.
-
 ---
 
-## Step 6 — Reading the sidebar's proposal list off the same map
+## Step 4 — Reading the sidebar's proposal list off the same map
 
 Everything above describes one thing: the cloud of segments the map draws.
 The ranked list of named proposals next to it ("18:45 → 19:22, 1 transfer")
@@ -191,9 +131,17 @@ different corridor could have used.
 The payoff of doing it this way instead of running a separate search: a
 proposal can *never* name a transfer that isn't actually drawn on the map,
 because it's built from nothing but the map's own already-decided shape.
-Move the threshold (the density target, "Pokaż więcej") and the list
-shrinks or grows in lockstep with the map, automatically, for free.
+Whatever moves the map draws, the list shrinks or grows in lockstep with it, automatically, for free.
 
-If the map ever selects nothing despite a connection provably existing,
-the map and list both fall back to drawing that one proven-fastest route
-directly (`degraded`), so neither one is ever left showing nothing.
+---
+
+## Speeding the search up further (ideas that change the result, not implemented)
+
+Almost all of the search time now goes into `_value_journeys` — the labels of the journey search within the 40-minute departure window — and into the second, wider pass that the moves map runs when the first one finds only tight transfers (everything else is a few hundredths of a second). The ideas below would make the search faster, but each of them can change what the map shows, so they were measured (25.11.2026, 27 routes, timings after the optimisations) and deliberately left out.
+
+1. Skip the second, wider pass when every move is tight: worst case 13.0 s → 5.4 s, Kozanów → Krzyki at 14:15 11.8 s → 1.4 s, median unchanged. All 27 maps came out the same, but in general a move with some slack, which only the second pass would have found, could go missing.
+2. A 30-minute window instead of 40 (55 for the wider pass): median 1.42 s → 0.64 s, worst case 13.0 s → 7.0 s. All 27 maps came out the same, but in general a journey with 2–3 transfers that still fits the reasonable window could drop out. A 45-minute window gains little (median 1.55 s).
+3. At most 2 vehicles instead of 3: median 0.60 s, worst case 3.7 s, but 9 of 27 maps change. Not recommended.
+4. A wider search from the start instead of two passes: slower (median 5.0 s) and 5 maps change. Not recommended.
+
+27 routes is a small sample. Before adopting idea 1 or 2, compare the maps on a much larger random set of routes and departure times.

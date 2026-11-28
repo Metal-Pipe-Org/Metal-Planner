@@ -229,15 +229,14 @@ def test_pasek_kopie_i_statystyki(w, strona):
     assert "changed" not in strona.get_attribute(wiersz, "class").split()
     assert not strona.query_selector(f'[data-kind=changed] .set-copy[data-copy-of="{w["id"]}"]')
     assert _statystyka(strona, w["id"]) == zmian + 2
-    # „Nowa mapa" chowa i pokazuje wiersze schematu, a to odświeża nagłówki jeszcze raz.
-    assert strona.evaluate("window.__odswiezenia") == (2 if w["id"] == "new-map" else 1)
+    assert strona.evaluate("window.__odswiezenia") == 1
 
 
 def test_dawne_klucze_sa_przenoszone(adres, przegladarka):
     init = """
         if (!localStorage.getItem('metal-planner:settings')) {
             localStorage.setItem('metal-planner:dev-prefs',
-                JSON.stringify({density: '5', 'car-vans': true, 'order-limit': '1d', 'fold:Rower': true}));
+                JSON.stringify({'car-count': '5', 'car-vans': true, 'order-limit': '1d', 'fold:Rower': true}));
             localStorage.setItem('metal-planner:time-prefs', JSON.stringify({ends: true}));
             localStorage.setItem('metal-planner:dot-prefs', JSON.stringify({size: 10, ttPast: false}));
             localStorage.setItem('metal-planner:look-prefs', JSON.stringify({maxWeight: 5, minOpacity: 0.5}));
@@ -245,7 +244,7 @@ def test_dawne_klucze_sa_przenoszone(adres, przegladarka):
     """
     context, page = _otworz(przegladarka, adres, init)
     try:
-        assert page.evaluate(ODCZYT_JS, "density") == 5
+        assert page.evaluate(ODCZYT_JS, "car-count") == 5
         assert page.evaluate(ODCZYT_JS, "car-vans") is True
         assert page.evaluate(ODCZYT_JS, "order-limit") == "1d"
         assert page.evaluate(ODCZYT_JS, "time-ends") is True

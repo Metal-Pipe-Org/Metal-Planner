@@ -22,6 +22,7 @@ import bikes
 import planner
 import pytest
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, dla czytelnych liczb
 # Współrzędne trzymamy w jednej kolumnie (ten sam południk), więc odległość
@@ -38,7 +39,7 @@ def _stacja(sid, name, lat, bikes_n=5, docks_n=5, renting=True, returning=True):
 @pytest.fixture(autouse=True)
 def _dzien_pytania_jest_dzisiaj(monkeypatch):
     """Rower liczy się tylko przy pytaniu o DZIŚ (stan stojaków jest żywy,
-    nie rozkładowy - patrz planner.plan_flow). Testy pytają o stałą datę,
+    nie rozkładowy - patrz planner.plan_flow_stages). Testy pytają o stałą datę,
     więc to ona musi być „dzisiaj" - inaczej cała warstwa milczałaby z
     powodu, którego żaden z tych testów nie bada."""
     class _Dzis(datetime.date):
@@ -108,7 +109,7 @@ def test_rower_w_srodku_trasy_przeskakuje_luke(install_day, install_stations):
     """
     install_day(_siec_z_luka())
     install_stations([STACJA_M, STACJA_P])
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     rower = _propozycja_z_rowerem(wynik)
     assert rower is not None, "rower miał przeskoczyć lukę M -> P"
@@ -128,14 +129,14 @@ def test_rower_na_poczatku_i_na_koncu(install_day, install_stations):
     # dowozi pod sam P na 1440, więc objazd linią 3 (na miejscu o 1800)
     # przestaje być potrzebny.
     install_stations([STACJA_M, STACJA_P])
-    wynik = planner.plan_flow("S", "P", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("S", "P", when=WHEN, use_bikes=True)
     rower = _propozycja_z_rowerem(wynik)
     assert rower is not None
     assert _kinds(rower) == ["ride", "walk", "bike", "walk"]
 
     # Na POCZĄTKU: relacja M -> E. Do stacji przy M dochodzi się wprost
     # z punktu startu, bez żadnego przejazdu przed rowerem.
-    wynik = planner.plan_flow("M", "E", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("M", "E", when=WHEN, use_bikes=True)
     rower = _propozycja_z_rowerem(wynik)
     assert rower is not None
     assert _kinds(rower) == ["walk", "bike", "walk", "ride"]
@@ -146,7 +147,7 @@ def test_sam_rower_bez_zadnego_przejazdu(install_day, install_stations):
     rower dowozi na 840. Wychodzi trasa złożona z samego dojścia i przejazdu."""
     install_day(_siec_z_luka())
     install_stations([STACJA_M, STACJA_P])
-    wynik = planner.plan_flow("M", "P", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("M", "P", when=WHEN, use_bikes=True)
 
     rower = _propozycja_z_rowerem(wynik)
     assert rower is not None
@@ -166,7 +167,7 @@ def test_godziny_skladaja_sie_z_dojscia_wypozyczenia_i_jazdy(
     """
     install_day(_siec_z_luka())
     install_stations([STACJA_M, STACJA_P])
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
     legs = _propozycja_z_rowerem(wynik)["legs"]
     dojscie, przejazd, zejscie = legs[1], legs[2], legs[3]
 
@@ -193,7 +194,7 @@ def test_margines_na_wypozyczenie_naprawde_przesuwa_godzine(
     # 1440 + TRANSFER_SEC = 1500, czyli kurs o 1600 jest do złapania z zapasem
     # 100 s. Margines dłuższy o dwie minuty ten zapas kasuje.
     monkeypatch.setattr(bikes, "MAP_OVERHEAD_SEC", bikes.MAP_OVERHEAD_SEC + 120)
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     # Kurs o 1600 przepadł, zostaje ten o 2400 - i tę PRAWDZIWĄ godzinę
     # pokazuje karta, zamiast obiecywać 1900, na które już się nie zdąży.
@@ -206,7 +207,7 @@ def test_predkosc_i_narzut_spod_zebatki_licza_sie_w_propozycji(
     913 m przy 20 km/h to 3 minuty jazdy, plus 5 minut narzutu."""
     install_day(_siec_z_luka())
     install_stations([STACJA_M, STACJA_P])
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True,
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True,
                               bike_kmh=20, bike_overhead_sec=300)
     przejazd = _propozycja_z_rowerem(wynik)["legs"][2]
 
@@ -221,7 +222,7 @@ def test_za_krotki_przejazd_nie_jest_proponowany(install_day, install_stations):
     install_day(_siec_z_luka())
     blisko = _stacja("c", "Stacja tuż obok", 51.1112)   # 33 m od stacji przy M
     install_stations([STACJA_M, blisko])
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     assert _propozycja_z_rowerem(wynik) is None
 
@@ -235,17 +236,17 @@ def test_pusta_stacja_i_pelna_stacja_sa_pomijane(install_day, install_stations):
 
     install_stations([_stacja("a", "Pusta", 51.1109, bikes_n=0), STACJA_P])
     assert _propozycja_z_rowerem(
-        planner.plan_flow("S", "E", when=WHEN, use_bikes=True)) is None
+        flow.plan_flow("S", "E", when=WHEN, use_bikes=True)) is None
 
     install_stations([STACJA_M, _stacja("b", "Pełna", 51.1191, docks_n=0)])
     assert _propozycja_z_rowerem(
-        planner.plan_flow("S", "E", when=WHEN, use_bikes=True)) is None
+        flow.plan_flow("S", "E", when=WHEN, use_bikes=True)) is None
 
     # Stacja zdjęta z ulicy (is_renting=false) tak samo - rowery w niej stoją,
     # ale nikt ich stamtąd nie wypożyczy.
     install_stations([_stacja("a", "Wyłączona", 51.1109, renting=False), STACJA_P])
     assert _propozycja_z_rowerem(
-        planner.plan_flow("S", "E", when=WHEN, use_bikes=True)) is None
+        flow.plan_flow("S", "E", when=WHEN, use_bikes=True)) is None
 
 
 def test_propozycja_niesie_stan_obu_stojakow(install_day, install_stations):
@@ -254,7 +255,7 @@ def test_propozycja_niesie_stan_obu_stojakow(install_day, install_stations):
     install_day(_siec_z_luka())
     install_stations([_stacja("a", "Stacja przy M", 51.1109, bikes_n=6),
                       _stacja("b", "Stacja przy P", 51.1191, docks_n=3)])
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
     przejazd = next(leg for leg in _propozycja_z_rowerem(wynik)["legs"]
                     if leg["kind"] == "bike")
 
@@ -274,7 +275,7 @@ def test_rodzaj_roweru_odsiewa_stacje_wsiadania(install_day, install_stations):
                       {**STACJA_P, "bikes": 0}])
 
     def rower(electric, regular):
-        return _propozycja_z_rowerem(planner.plan_flow(
+        return _propozycja_z_rowerem(flow.plan_flow(
             "S", "E", when=WHEN, use_bikes=True,
             bike_electric=electric, bike_regular=regular))
 
@@ -291,7 +292,7 @@ def test_bez_wlacznika_odpowiedz_jest_identyczna(install_day, install_stations):
     install_day(_siec_z_luka())
     install_stations([STACJA_M, STACJA_P])
 
-    bez = planner.plan_flow("S", "E", when=WHEN)
+    bez = flow.plan_flow("S", "E", when=WHEN)
     assert "bikes" not in bez
     assert all(leg["kind"] != "bike"
                for journey in bez["journeys"] for leg in journey["legs"])
@@ -303,8 +304,8 @@ def test_awaria_kanalu_gbfs_nie_psuje_wyszukiwania(install_day, install_stations
     install_day(_siec_z_luka())
     install_stations([])      # tyle oddaje bikes.stations_quiet po awarii
 
-    bez = planner.plan_flow("S", "E", when=WHEN)
-    z_rowerem = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
+    bez = flow.plan_flow("S", "E", when=WHEN)
+    z_rowerem = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     assert z_rowerem["bikes"] == {"journeys": 0, "stations": 0, "live": True}
     assert z_rowerem["journeys"] == bez["journeys"]
@@ -340,8 +341,7 @@ def test_gorszy_rower_zostaje_na_liscie_ale_na_dole(install_day, install_station
     install_day(_siec_z_szybkim_tramwajem(pozny_tramwaj=True))
     install_stations([STACJA_M, _stacja("b", "Stacja przy E", 51.1191)])
 
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True,
-                              density=planner.MAX_MAP_DENSITY)
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     rower = _propozycja_z_rowerem(wynik)
     assert rower is not None and rower["arrival_sec"] == 1440
@@ -357,7 +357,7 @@ def test_rower_poza_oknem_czasowym_nie_wchodzi(install_day, install_stations):
 
     # Przy domyślnej gęstości mapa kończy się na tramwaju (900), a rowerem
     # jest się dopiero o 1440.
-    wynik = planner.plan_flow("S", "E", when=WHEN, use_bikes=True)
+    wynik = flow.plan_flow("S", "E", when=WHEN, use_bikes=True)
 
     assert _propozycja_z_rowerem(wynik) is None
     assert wynik["bikes"]["journeys"] == 0
@@ -374,7 +374,7 @@ def test_pytanie_o_inna_dobe_nie_dostaje_roweru(install_day, install_stations):
     install_stations([STACJA_M, STACJA_P])
     jutro = WHEN + datetime.timedelta(days=1)
 
-    wynik = planner.plan_flow("S", "E", when=jutro, use_bikes=True)
+    wynik = flow.plan_flow("S", "E", when=jutro, use_bikes=True)
 
     assert wynik["bikes"] == {"journeys": 0, "stations": 0, "live": False}
     assert _propozycja_z_rowerem(wynik) is None

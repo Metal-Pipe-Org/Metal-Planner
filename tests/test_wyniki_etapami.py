@@ -16,6 +16,7 @@ import planner
 import routes
 import warmup
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime(2026, 1, 5, 0, 0, 0)
 
@@ -75,7 +76,7 @@ def test_sklejone_etapy_to_cala_odpowiedz(install_day):
     merged = {}
     for _, delta in planner.plan_flow_stages("S", "E", WHEN, use_bikes=True):
         merged.update(delta)
-    assert merged == planner.plan_flow("S", "E", WHEN, use_bikes=True)
+    assert merged == flow.plan_flow("S", "E", WHEN, use_bikes=True)
     assert {"segments", "nodes", "journeys", "cars", "bike_places",
             "fastest", "deadline", "bikes"} <= set(merged)
 
@@ -119,9 +120,9 @@ def test_przerwane_czytanie_nie_liczy_mapy(install_day, monkeypatch):
     granicy etapu, zamiast liczyć mapę, której nikt nie zobaczy."""
     install_day(_dzien())
     mapy = []
-    value_map = planner._value_map
-    monkeypatch.setattr(planner, "_value_map",
-                        lambda *a, **k: mapy.append(1) or value_map(*a, **k))
+    moves_map = planner._moves_map
+    monkeypatch.setattr(planner, "_moves_map",
+                        lambda *a, **k: mapy.append(1) or moves_map(*a, **k))
     stages = planner.plan_flow_stages("S", "E", WHEN)
     next(stages)
     stages.close()
@@ -141,17 +142,7 @@ def test_endpoint_wysyla_etapy_linijkami(install_day, monkeypatch):
     merged = {}
     for line in lines:
         merged.update({k: v for k, v in line.items() if k != "stage"})
-    assert merged == json.loads(json.dumps(planner.plan_flow("S", "E", WHEN)))
-
-
-def test_przelacznik_nowej_mapy_dochodzi_do_plannera(monkeypatch):
-    uzyte = []
-    monkeypatch.setattr(routes, "plan_flow_stages",
-                        lambda *args, **kwargs: uzyte.append(kwargs["new_map"]) or [])
-    klient = _klient(monkeypatch)
-    for query in ("", "&newmap=0", "&newmap=1"):
-        klient.get("/api/flow?start=S&end=E" + query).get_data()
-    assert uzyte == [False, False, True]
+    assert merged == json.loads(json.dumps(flow.plan_flow("S", "E", WHEN)))
 
 
 def test_blad_to_jedna_linijka(install_day, monkeypatch):
