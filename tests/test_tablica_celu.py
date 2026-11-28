@@ -16,7 +16,6 @@ import threading
 
 import pytest
 
-import gtfs
 import planner
 from tests.gtfs_builder import make_day
 from tests import flow
@@ -187,11 +186,7 @@ def _chromium(playwright):
 
 
 @pytest.fixture(scope="module")
-def adres():
-    try:
-        gtfs.all_stop_names()
-    except FileNotFoundError:
-        pytest.skip("brak bazy rozkładów (data/gtfs.sqlite) - strona pokazałaby sam błąd")
+def adres(prawdziwa_baza):
     from werkzeug.serving import make_server
     import app as aplikacja
     serwer = make_server("127.0.0.1", 0, aplikacja.app, threaded=True)
@@ -201,7 +196,7 @@ def adres():
 
 
 @pytest.fixture(scope="module")
-def przegladarka():
+def przegladarka(prawdziwa_baza):
     # Bez playwright odpadają tylko testy przeglądarkowe, nie te wyżej.
     sync_api = pytest.importorskip("playwright.sync_api")
     with sync_api.sync_playwright() as p:

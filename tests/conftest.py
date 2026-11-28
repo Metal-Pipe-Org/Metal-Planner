@@ -1,4 +1,6 @@
+import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -7,9 +9,11 @@ import pytest
 
 import bikes
 import gtfs
+import nowosci
 import pkp
 import planner
 import traficar
+import update_gtfs
 
 
 @pytest.fixture
@@ -19,6 +23,68 @@ def install_day(monkeypatch):
     def _install(day):
         monkeypatch.setattr(gtfs, "load_day", lambda d, trains=True: day)
     return _install
+
+
+@pytest.fixture(scope="session")
+def prawdziwa_baza():
+    """Testy w przeglądarce stawiają prawdziwą aplikację na data/gtfs.sqlite,
+    a bez niej strona pokazałaby sam błąd - więc się pomijają. Fixture serwera
+    i przeglądarki zależą od tego, żeby pominięcie przyszło przed
+    uruchomieniem Chromium: tam, gdzie Chromium nie wstaje, zamiast
+    pominięcia byłby błąd."""
+    if not gtfs.DB_PATH.exists():
+        pytest.skip("brak bazy rozkładów (data/gtfs.sqlite) - strona pokazałaby sam błąd")
+
+
+@pytest.fixture(scope="session")
+def _pusta_baza_plik(tmp_path_factory):
+    path = tmp_path_factory.mktemp("pusta-baza") / "gtfs.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(update_gtfs.SCHEMA)
+    db.close()
+    return path
+
+
+@pytest.fixture(autouse=True)
+def _pusta_baza(request, _pusta_baza_plik, monkeypatch):
+    """Test na syntetycznym dniu (install_day) i tak otwiera plik bazy przy
+    rysowaniu przejazdów, po kształty linii i przebiegi kursów - a bez pliku
+    pada, choć niczego z prawdziwego rozkładu nie potrzebuje. Dostaje więc
+    pustą bazę ze schematem: wynik nie zależy od tego, czy na maszynie leży
+    data/gtfs.sqlite i z którego jest dnia. Prawdziwą bazę widzą tylko testy
+    w przeglądarce (prawdziwa_baza); test z własną bazą sam nadpisuje
+    gtfs.DB_PATH."""
+    if "prawdziwa_baza" not in request.fixturenames:
+        monkeypatch.setattr(gtfs, "DB_PATH", _pusta_baza_plik)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _nowosci_widziane_poza_folderem(tmp_path_factory):
+    """Serwer zapamiętuje w folderze danych, kiedy pierwszy raz zobaczył
+    nowość (nowosci.py). Testy w przeglądarce nie mają tam pisać - inaczej
+    wynik zależałby od folderu, w którym się je puszcza, a test mógłby jako
+    pierwszy „zobaczyć" nową nowość za serwer, który stoi obok."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(nowosci, "SEEN_PATH",
+                   tmp_path_factory.mktemp("nowosci") / "nowosci-widziane.json")
+        yield
+
+
+@pytest.fixture
+def zegar_plannera(monkeypatch):
+    """zegar_plannera(chwila) zatrzymuje „teraz" plannera na `chwila`.
+
+    Auta Traficara stoją tam, gdzie stoją teraz, więc mapa pokazuje je tylko
+    do kilku godzin od teraz (ustawienie „Pokazuj auta Traficara do",
+    zgłoszenie #490). Test, który szuka o stałej godzinie i liczy na auta,
+    bez tego przechodziłby tylko o niektórych porach dnia."""
+    def _ustaw(chwila):
+        class _Zatrzymany(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return chwila
+        monkeypatch.setattr(planner, "datetime", _Zatrzymany)
+    return _ustaw
 
 
 @pytest.fixture(autouse=True)

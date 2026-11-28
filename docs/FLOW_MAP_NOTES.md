@@ -7,9 +7,7 @@ Obecny stan: kontrakt i
 
 ## Testy
 
-Uruchomienie i wymagania (część testów potrzebuje `data/gtfs.sqlite`, testy
-frontu — macOS): [README.md](../README.md#testy). Tu: który test pilnuje
-którego punktu kontraktu.
+Uruchomienie i wymagania (testy w przeglądarce potrzebują `data/gtfs.sqlite`, testy frontu — macOS): [README.md](../README.md#testy). Tu: który test pilnuje którego punktu kontraktu.
 
 Testy z tej tabeli sprawdzają wspólną maszynerię mapy (kawałki, grupki numerów, kropki przesiadek) na mapie z ruchów; sam wybór ruchów sprawdza `tests/test_mapa_ruchy.py` (patrz [ROUTING_ALGORITHM.md](ROUTING_ALGORITHM.md)).
 Testy frontu (emulator, `tests/test_flow_map_front.py` + `tests/js/`) jadą na

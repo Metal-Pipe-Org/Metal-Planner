@@ -22,7 +22,6 @@ import pytest
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
-import gtfs
 import planner
 import routes
 import traficar
@@ -66,11 +65,7 @@ class Bramki:
 
 
 @pytest.fixture(scope="module")
-def bramki():
-    try:
-        gtfs.all_stop_names()
-    except FileNotFoundError:
-        pytest.skip("brak bazy rozkładów (data/gtfs.sqlite)")
+def bramki(prawdziwa_baza):
     from werkzeug.serving import make_server
     import app as aplikacja
     bramki = Bramki()
@@ -85,8 +80,10 @@ def bramki():
 
 
 @pytest.fixture
-def etapy(bramki, monkeypatch):
-    """Prawdziwe etapy tej relacji."""
+def etapy(bramki, monkeypatch, zegar_plannera):
+    """Prawdziwe etapy tej relacji. „Teraz" stoi na godzinie pytania, bo auta
+    są na mapie tylko do kilku godzin od teraz, a test liczy na to, że etap
+    aut coś dołoży."""
     auta = {"teraz": STARE_AUTA}
     monkeypatch.setattr(traficar, "enabled", lambda: True)
     monkeypatch.setattr(traficar, "car_list", lambda: auta["teraz"])
@@ -96,6 +93,7 @@ def etapy(bramki, monkeypatch):
         return True
 
     kiedy = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    zegar_plannera(kiedy)
     bramki.etapy = list(planner.plan_flow_stages(*TRASA, kiedy, live_refreshed=odswiezone))
     assert [name for name, _ in bramki.etapy] == list(ETAPY)
     bramki.zamknij()
@@ -103,7 +101,7 @@ def etapy(bramki, monkeypatch):
 
 
 @pytest.fixture(scope="module")
-def przegladarka():
+def przegladarka(prawdziwa_baza):
     with sync_api.sync_playwright() as p:
         browser = _chromium(p)
         yield browser

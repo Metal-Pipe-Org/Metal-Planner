@@ -23,7 +23,7 @@ milczą, opisuje [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `daily-digest.yml` | Co rano na Discordzie: postęp z wczoraj po karcie na osobę, potem karta „Ogólnie” z tym, co do zrobienia, i liczbami. |
 | `pr-state.yml` | Stan każdego otwartego PR-a liczony od zera z API: wymagany status „Recenzenci konieczni” — zielony, gdy każdy login z `.github/REQUIRED_REVIEWERS` na `main` (poza autorem) ma stojące zatwierdzenie — i dokładnie jedna z etykiet `waiting for author` / `waiting for claude review` / `waiting for human review` / `waiting for other PR` (czyj ruch; „claude review” od startu oceny — przy `@claude` i ręcznym biegu daje ją job `state` w `claude-review-pr.yml` — do jej końca, potem autor decyduje, czy prosi o recenzję człowieka; gotowy PR ze stosu czeka na resztę stosu, a zmiana jednego PR-a przelicza cały stos, przy zmianie bazy także PR pod starą bazą), zakładanych na żądanie i zdejmowanych z zamkniętych PR-ów (dawne `waiting for review` też tylko zdejmujemy). Biegnie po zdarzeniach PR-a (`pull_request_target`, ten PR), po recenzjach (przez przekaźnik) i po biegach naszych workflow, których akcje nie tworzą zdarzeń (`workflow_run`, wszystkie otwarte PR-y). Logika w `.github/scripts/pr-state.sh`. |
 | `pr-review-relay.yml` | Przekaźnik bez uprawnień: po recenzji PR-a tylko kończy bieg, żeby obudzić `pr-state.yml` przez `workflow_run`. `pull_request_review` bierze workflow z PR-a, więc niczego tu nie liczymy. |
-| `tests.yml` | Testy, odpalane wyłącznie ręcznie. |
+| `tests.yml` | Testy przy pushu do `main` i `stable` i przy każdym PR-ze (także ręcznie); liczba i powody pominięć na stronie podsumowania biegu. |
 
 Progi czasowe stale, nazwy etykiet, wołanie
 `@claude`, przedrostek gałęzi solvera i słowa wskazujące zgłoszenie

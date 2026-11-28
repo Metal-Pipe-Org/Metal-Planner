@@ -7,7 +7,7 @@ Feed fioletowe.live jest tu zawsze podstawiony (patrz tests/conftest.py).
 """
 
 import traficar
-from tests.test_trafikary_na_mapie import CAR, E, _flow
+from tests.test_trafikary_na_mapie import CAR, E, _flow, _teraz_to_godzina_pytania  # noqa: F401
 
 # Prawdziwe pobieranie strefy - conftest podmienia je na "nieznana".
 _real_zone = traficar.zone

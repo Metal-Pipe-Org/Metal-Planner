@@ -482,11 +482,7 @@ def _koniec_na_pudelku(sciezka, box):
 
 
 @pytest.fixture(scope="module")
-def adres():
-    try:
-        gtfs.all_stop_names()
-    except FileNotFoundError:
-        pytest.skip("brak bazy rozkładów (data/gtfs.sqlite)")
+def adres(prawdziwa_baza):
     from werkzeug.serving import make_server
     import app as aplikacja
     serwer = make_server("127.0.0.1", 0, aplikacja.app, threaded=True)
@@ -496,7 +492,7 @@ def adres():
 
 
 @pytest.fixture(scope="module")
-def przegladarka():
+def przegladarka(prawdziwa_baza):
     sync_api = pytest.importorskip("playwright.sync_api")
     from tests.test_uklad_telefonu import _chromium
     with sync_api.sync_playwright() as p:
