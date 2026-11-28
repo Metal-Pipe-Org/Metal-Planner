@@ -102,7 +102,7 @@ TIMETABLE_MAX = 60
 
 
 def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
-                   point=None, until_sec=None, trains=True):
+                   point=None, until_sec=None, trains=True, day_offset=0):
     """Tablica odjazdów jednego przystanku - to, co widać po najechaniu na
     kropkę przesiadki na mapie.
 
@@ -114,6 +114,8 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
     bo etap trasy potrafi wypaść po północy (odjazd 24:40 to wciąż rozkład
     dnia poprzedniego) - a wtedy sama godzina "00:40" wskazywałaby dobę
     o jedną za daleko. Bez `from_sec` liczymy od godziny z `when`.
+    `day_offset` z odpowiedzi mapy przesuwa dobę tak samo jak tam (patrz
+    schedule_day) - dymek pod kropką zna wtedy te same kursy co mapa.
 
     Przystanek rozumiemy jako MIEJSCE, nie słupek (patrz gtfs.match_stop):
     najeżdżając na węzeł, pasażer pyta o wszystko, co z niego odjeżdża, a nie
@@ -127,7 +129,7 @@ def stop_timetable(stop_query, when=None, from_sec=None, limit=TIMETABLE_LIMIT,
     when = when or datetime.now()
 
     try:
-        day = gtfs.load_day(when.date(), trains)
+        day = schedule_day(when.date(), day_offset, trains)
     except FileNotFoundError as e:
         return {"error": str(e)}
 
@@ -2296,6 +2298,23 @@ def _latest_departure(day, source_stops, target_stops, dep_sec, best_arr):
 ARRIVE_LOOKBACK_SEC = 4 * 3600
 
 
+def schedule_day(asked, day_offset, trains=True):
+    """Doba rozkładowa, na której osi liczy mapa dla pytania z dnia `asked`:
+    o `day_offset` dób dalej (odpowiedź z kolejnej doby) albo bliżej (tryb
+    „być na" tuż po północy liczy na osi doby poprzedniej, z porankiem dnia
+    z pytania doklejonym za północą - patrz gtfs.with_next_morning).
+
+    Jedno miejsce dla mapy i dla tablicy pod jej kropkami: dymek pyta o tę
+    samą dobę co mapa, więc zna każdy kurs, który mapa rysuje.
+    """
+    data = gtfs.load_day(asked + timedelta(days=day_offset), trains)
+    if day_offset < 0:
+        data = gtfs.with_next_morning(
+            data, gtfs.load_day(asked + timedelta(days=day_offset + 1), trains),
+            ARRIVE_LOOKBACK_SEC)
+    return data
+
+
 def _latest_start(day, source_stops, target_stops, arrive_sec):
     """Najpóźniejsza godzina wyjścia, z której najszybsza trasa jest w celu
     nie później niż `arrive_sec` (tryb „być na"); None, gdy takiej nie ma
@@ -2504,12 +2523,7 @@ def plan_flow_stages(start_query, end_query, when=None,
                   else 0)
 
     try:
-        base = gtfs.load_day(when.date(), trains)
-        if day_offset:
-            base = gtfs.with_next_morning(
-                gtfs.load_day(when.date() + timedelta(days=day_offset), trains),
-                base, ARRIVE_LOOKBACK_SEC)
-        day = gtfs.with_pace(base, walk_pace)
+        day = gtfs.with_pace(schedule_day(when.date(), day_offset, trains), walk_pace)
         if not walking:
             day = gtfs.without_walking(day)
         day = gtfs.with_walk_radius(day, MOVES_WALK_M)
@@ -2600,8 +2614,7 @@ def plan_flow_stages(start_query, end_query, when=None,
     while best_stop is None and ride is None and day_offset < SEARCH_AHEAD_DAYS:
         day_offset += 1
         try:
-            later = gtfs.with_pace(
-                gtfs.load_day(when.date() + timedelta(days=day_offset), trains), walk_pace)
+            later = gtfs.with_pace(schedule_day(when.date(), day_offset, trains), walk_pace)
             if not walking:
                 later = gtfs.without_walking(later)
             later = gtfs.with_walk_radius(later, MOVES_WALK_M)
@@ -2707,7 +2720,7 @@ def plan_flow_stages(start_query, end_query, when=None,
             anchor = chosen_map["anchor"]
             best_legs, best_arr = _instance_legs(day, anchor, source_stops, start_reach,
                                                  _target_reach(day, target_set), geo_db)
-            best_dep = day.conns[anchor["rides"][0][0]][0]
+            best_dep = anchor["first"]
             report_dep_sec = anchor["dep"]
         fastest = _fastest_summary(best_legs, best_arr, report_dep_sec)
 

@@ -448,7 +448,8 @@ def init_routes(app):
 
         `from_sec` to godzina na osi doby rozkładowej (patrz gtfs.load_day):
         front podaje ją wprost z etapu trasy, żeby przesiadka po północy
-        pytała o właściwą dobę.
+        pytała o właściwą dobę. Dobę wskazuje `date` z formularza razem
+        z `day_offset` z odpowiedzi mapy - tak samo jak mapa ją wyznaczyła.
         """
         # `limit` z zapytania: mapa przepływów odsiewa potem linie, których
         # z tego miejsca i tak nie proponuje, więc musi dostać z zapasem.
@@ -461,6 +462,7 @@ def init_routes(app):
             point=_latlon_arg(),
             until_sec=_float_arg("until_sec"),
             trains=request.args.get("trains", "1") == "1",
+            day_offset=_int_arg("day_offset") or 0,
         ))
 
     @app.route("/api/flow")

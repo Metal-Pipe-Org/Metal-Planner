@@ -1634,6 +1634,11 @@ def with_next_morning(day, next_day, until_sec):
     data.pkp_trip_stops = {**{old: next_day.pkp_trip_stops[old] for old in renamed
                               if old in next_day.pkp_trip_stops},
                            **day.pkp_trip_stops}
+    # Peron i tor idą za kursem tej doby, więc pod jego nowym identyfikatorem.
+    data.pkp_platforms = {**day.pkp_platforms,
+                          **{(renamed[trip], stop): found
+                             for (trip, stop), found in next_day.pkp_platforms.items()
+                             if trip in renamed}}
     data.stop_names = {**next_day.stop_names, **day.stop_names}
     data.stop_coords = {**next_day.stop_coords, **day.stop_coords}
     data._reach = {}

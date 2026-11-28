@@ -3868,7 +3868,7 @@ function timetableAnchor(sec) {
 
 /** Dzień, którego dotyczy mapa: data z formularza, a przy odpowiedzi
     z kolejnej doby (punkt 13) - tamten dzień. Godziny kropek są na jego osi,
-    więc tablica z daty formularza pokazywałaby odjazdy z innego dnia. */
+    więc dopiero z nim sekunda odjazdu staje się prawdziwą chwilą. */
 function mapDate() {
     const date = $('date').value;
     const offset = (lastFlow && lastFlow.day_offset) || 0;
@@ -3879,7 +3879,12 @@ function mapDate() {
 }
 
 function loadTimetable(dot, where, sec) {
-    const date = mapDate();
+    // Doba mapy tak, jak mapa ją wyznaczyła: data z formularza i przesunięcie
+    // z odpowiedzi, a nie sam dzień z mapDate - doba poprzednia przy „być na"
+    // po północy ma doklejony poranek dnia z pytania, więc to nie ten sam
+    // rozkład, co pytanie wprost o tamten dzień.
+    const date = $('date').value;
+    const dayOffset = (lastFlow && lastFlow.day_offset) || 0;
     const from = timetableAnchor(sec);
     // Do klucza wchodzi też `flow` i `arrive`: ta sama linia raz jest ofertą
     // do wsiadania, a raz pojazdem, którym się tu przyjechało - i wtedy dymek
@@ -3888,13 +3893,13 @@ function loadTimetable(dot, where, sec) {
         ? where.lines.map(l => `${lineKey(l)}/${l.flow || ''}/${l.arrive || ''}`).join('|')
         : '';
     const key = `${where.name || where.lat + ',' + where.lon}`
-        + `@${date}@${from}@${sec}@${filtr}@${where.deadline || ''}@${trainsOn}`;
+        + `@${date}@${dayOffset}@${from}@${sec}@${filtr}@${where.deadline || ''}@${trainsOn}`;
     const cached = timetableCache.get(key);
     if (cached !== undefined) { emitTimetable(dot, cached); return; }
 
     const query = where.name
-        ? {stop: where.name, date, from_sec: from}
-        : {lat: where.lat, lon: where.lon, date, from_sec: from};
+        ? {stop: where.name, date, day_offset: dayOffset, from_sec: from}
+        : {lat: where.lat, lon: where.lon, date, day_offset: dayOffset, from_sec: from};
     // Z zapasem PRZY KAŻDEJ kropce, nie tylko przy węźle wachlarza: przy
     // węźle część odjazdów odsiewamy, a przy kropce wybranej trasy pytamy
     // o tyle, ile suwak w ogóle pozwala pokazać. Bez tego serwerowa domyślna

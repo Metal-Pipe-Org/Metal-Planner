@@ -129,6 +129,7 @@ def _dwie_doby(monkeypatch):
     days = {DZIEN.date(): make_day(PORANEK),
             datetime(2026, 1, 5).date(): make_day(WIECZOR)}
     monkeypatch.setattr(gtfs, "load_day", lambda d, trains=True: days[d])
+    return days
 
 
 def test_po_polnocy_wyjscie_poprzedniego_wieczoru(monkeypatch):
@@ -154,6 +155,22 @@ def test_po_polnocy_dowozi_tez_poranek_nowej_doby(monkeypatch):
     assert result["starts"] == "00:05"
     assert result["best_arrival"] == "00:25"
     assert {j["departure"] for j in result["journeys"]} >= {"00:05", "23:50"}
+
+
+def test_po_polnocy_tablica_przystanku_zna_poranek_nowej_doby(monkeypatch):
+    # Dymek pod kropką pyta o dobę mapy - datę z formularza i przesunięcie
+    # z odpowiedzi - więc zna kurs z poranka nowej doby, którym mapa dowozi,
+    # razem z peronem, gdy to pociąg.
+    import planner
+    days = _dwie_doby(monkeypatch)
+    days[DZIEN.date()].pkp_platforms[("r0", "S")] = ("2", "4")
+
+    result = flow.plan_flow("S", "E", DZIEN.replace(minute=30), arrive_by=True)
+    tablica = planner.stop_timetable("S", DZIEN, from_sec=24 * 3600,
+                                     day_offset=result["day_offset"])
+
+    assert [(d["time"], d.get("platform")) for d in tablica["departures"]] == [
+        ("00:05", {"platform": "2", "track": "4"})]
 
 
 def test_wieczorem_na_jutro_po_polnocy_nie_ma_wyjsc_ktore_juz_minely(monkeypatch):
