@@ -16,6 +16,7 @@ import datetime
 
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, czytelne liczby
 
@@ -98,7 +99,7 @@ def test_obie_opcje_zawsze_na_liscie(install_day):
     """Niezależnie od progu widać i jazdę bez przesiadki, i tę z przesiadką."""
     install_day(_day())
     for prog in (0, 180, 600, 1800):
-        wynik = planner.plan_flow("START", "CEL", when=WHEN, transfer_gain_sec=prog)
+        wynik = flow.plan_flow("START", "CEL", when=WHEN, transfer_gain_sec=prog)
         opcje = {(arr, przes) for arr, przes, _ in _propozycje(wynik)}
         assert opcje == {("00:40", 0), ("00:35", 1)}, f"próg {prog}: {opcje}"
 
@@ -106,9 +107,9 @@ def test_obie_opcje_zawsze_na_liscie(install_day):
 def test_prog_zmienia_tylko_kolejnosc(install_day):
     """Ta sama para propozycji, inna pierwsza - i tyle robi suwak."""
     install_day(_day())
-    z_progiem = _propozycje(planner.plan_flow("START", "CEL", when=WHEN,
+    z_progiem = _propozycje(flow.plan_flow("START", "CEL", when=WHEN,
                                               transfer_gain_sec=600))
-    bez_progu = _propozycje(planner.plan_flow("START", "CEL", when=WHEN,
+    bez_progu = _propozycje(flow.plan_flow("START", "CEL", when=WHEN,
                                               transfer_gain_sec=0))
     assert z_progiem[0][1] == 0 and z_progiem[0][0] == "00:40"   # bez przesiadki
     assert bez_progu[0][1] == 1 and bez_progu[0][0] == "00:35"   # z przesiadką

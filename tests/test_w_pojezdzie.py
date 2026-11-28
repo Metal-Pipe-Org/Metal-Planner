@@ -17,6 +17,7 @@ import datetime
 import onboard
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime.datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, czytelne liczby
 # Pytanie zadane wtedy, gdy „nasz" 146 jest według rozkładu przy WSIADAM -
@@ -47,8 +48,7 @@ def _w_pojezdzie(stop="WSIADAM", num="146", mode="bus", headsign=None):
 
 def _plan(install_day, **kwargs):
     install_day(_day())
-    return planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(**kwargs),
-                             density=planner.MAX_MAP_DENSITY)
+    return flow.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(**kwargs))
 
 
 # ----------------------------------------------------------- rozpoznanie kursu
@@ -200,9 +200,8 @@ def test_spozniony_kurs_jedzie_dalej_od_teraz(install_day):
     pięć minut po rozkładzie - aż do celu, z tymi samymi odstępami między
     przystankami. Tramwaj 7 (00:11) już odjechał i na liście go nie ma."""
     install_day(_day())
-    wynik = planner.plan_flow("", "CEL", WHEN.replace(minute=15),
-                              in_vehicle=_w_pojezdzie(),
-                              density=planner.MAX_MAP_DENSITY)
+    wynik = flow.plan_flow("", "CEL", WHEN.replace(minute=15),
+                              in_vehicle=_w_pojezdzie())
 
     assert wynik["departure"] == "00:15"
     assert wynik["onboard"]["late_sec"] == 300
@@ -227,9 +226,8 @@ def test_rozkladowego_egzemplarza_naszego_kursu_juz_nie_ma(install_day):
         {"trip_id": "skrot", "label": "Tramwaj 8", "headsign": "SRODEK",
          "stops": [("WSIADAM", 960, 960), ("SRODEK", 1080, 1080)]},
     ]))
-    wynik = planner.plan_flow("", "CEL", WHEN.replace(minute=15),
-                              in_vehicle=_w_pojezdzie(),
-                              density=planner.MAX_MAP_DENSITY)
+    wynik = flow.plan_flow("", "CEL", WHEN.replace(minute=15),
+                              in_vehicle=_w_pojezdzie())
 
     assert all(j["arrival"] == "00:45" for j in wynik["journeys"])
 
@@ -278,7 +276,7 @@ def test_bez_pojazdu_odpowiedz_sie_nie_zmienia(install_day):
     """Zwykłe wyszukiwanie ma wyglądać dokładnie tak, jak wyglądało - pole
     `onboard` pojawia się tylko wtedy, gdy ktoś o nie poprosił."""
     install_day(_day())
-    wynik = planner.plan_flow("WSIADAM", "CEL", WHEN)
+    wynik = flow.plan_flow("WSIADAM", "CEL", WHEN)
 
     assert "onboard" not in wynik
     assert all("onboard" not in j for j in wynik["journeys"])
@@ -310,27 +308,23 @@ def test_przesiadka_na_starcie_z_pokladu_wymaga_zapasu(install_day):
     bez problemu i tam ma zostać."""
     install_day(_dzien_z_tramwajem(630, 1500))
 
-    z_pokladu = planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(),
-                                  density=planner.MAX_MAP_DENSITY)
+    z_pokladu = flow.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie())
     assert _linie_na_mapie(z_pokladu) == {"146"}
 
-    z_przystanku = planner.plan_flow("WSIADAM", "CEL", WHEN.replace(minute=10))
+    z_przystanku = flow.plan_flow("WSIADAM", "CEL", WHEN.replace(minute=10))
     assert "7" in _linie_na_mapie(z_przystanku)
 
 
 def test_mapa_z_pokladu_liczy_pojazd_w_ktorym_sie_siedzi(install_day):
-    """Na mapie z wartości podróży przesiadka z naszego autobusu w tramwaj to
-    dwa pojazdy, a dalsza jazda - jeden. Wyjście jest jedno dla wszystkich:
-    pasażer już jedzie, więc późniejsze „wyjście" niczego mu nie daje."""
+    """Przesiadka z naszego autobusu w tramwaj to dwa pojazdy, a dalsza
+    jazda - jeden."""
     install_day(_dzien_z_tramwajem(700, 2100))
 
-    wynik = planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(),
-                              density=planner.MAX_MAP_DENSITY)
+    wynik = flow.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie())
 
-    podroze = {seg["num"]: seg["why"]["journeys"][0] for seg in wynik["segments"]}
+    podroze = {j["legs"][-1]["num"]: j for j in wynik["journeys"]}
     assert podroze["146"]["transfers"] == 0
     assert podroze["7"]["transfers"] == 1
-    assert podroze["146"]["dep"] == podroze["7"]["dep"] == 600
 
 
 def test_dalsza_jazda_wygrywa_z_przesiadka_ktora_malo_daje(install_day):
@@ -339,8 +333,7 @@ def test_dalsza_jazda_wygrywa_z_przesiadka_ktora_malo_daje(install_day):
     więc dalszej jazdy autobusem, w którym się siedzi."""
     install_day(_dzien_z_tramwajem(700, 2100))
 
-    wynik = planner.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie(),
-                              density=planner.MAX_MAP_DENSITY)
+    wynik = flow.plan_flow("", "CEL", NA_CZAS, in_vehicle=_w_pojezdzie())
 
     assert _linie_na_mapie(wynik) == {"146", "7"}
     assert wynik["journeys"][0]["legs"][0]["num"] == "146"
@@ -402,9 +395,8 @@ def test_petla_koncowa_poza_rozkladem_nie_kasuje_kursu(install_day):
         {"trip_id": "dalej", "label": "Tramwaj 7", "headsign": "DALEJ",
          "stops": [("CEL", 3300, 3300), ("DALEJ", 3900, 3900)]},
     ]))
-    wynik = planner.plan_flow("", "DALEJ", WHEN.replace(minute=50),
-                              in_vehicle=_w_pojezdzie(stop="CEL"),
-                              density=planner.MAX_MAP_DENSITY)
+    wynik = flow.plan_flow("", "DALEJ", WHEN.replace(minute=50),
+                              in_vehicle=_w_pojezdzie(stop="CEL"))
     assert wynik["onboard"]["late_sec"] == 600
     assert wynik["journeys"] and wynik["journeys"][0]["arrival"] == "01:05"
 

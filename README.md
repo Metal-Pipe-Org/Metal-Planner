@@ -1,9 +1,6 @@
 # Metal-Planner
 
-Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej
-wyliczonej trasy pokazuje na mapie **wszystkie sensowne dojazdy naraz**,
-a obok, w panelu, listę gotowych propozycji z godzinami, liniami
-i przesiadkami.
+Webowa wyszukiwarka połączeń komunikacji miejskiej Wrocławia. Zamiast jednej wyliczonej trasy pokazuje na mapie **kilka sensownych sposobów dojazdu naraz**, a obok, w panelu, listę gotowych propozycji z godzinami, liniami i przesiadkami.
 
 Jak pracujemy w zespole — gałęzie, pull requesty, ocena Claude'a, zgłoszenia
 i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -15,13 +12,7 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Co potrafi
 
-1. **Mapa przepływów.** Każdy dojazd to cała podróż od startu do celu,
-   opisana dwiema liczbami: o której jest się w celu i o której trzeba wyjść.
-   Na mapie jest to, co w którejś z nich jest najlepsze, plus podróże
-   najwyżej o kilka minut dłuższe. Ile tych minut, mapa dobiera sama tak,
-   żeby pozostała czytelna; przycisk **Pokaż więcej** (do trzech kliknięć)
-   zagęszcza ją, zawsze o coś nowego. Wszystkie narysowane linie wyglądają
-   tak samo — o tym, czy coś jest na mapie, rozstrzyga sam próg.
+1. **Mapa przepływów.** Mapa rysuje kilka sensownych ruchów od startu do celu, a nie wszystkie możliwe odcinki. Ruch to „stąd wsiadam i dojeżdżam tam”: pięć autobusów tą samą drogą to jeden ruch, a dwa przystanki obok siebie to dwa. Obok najszybszej podróży stają najwyżej dwa naprawdę różne ruchy, w granicach rozsądku (o ile później w celu i ile przesiadek), bez dalekich spacerów i bez linii przejeżdżających przez cudze przesiadki. Przesiadka na styk ma obok wyjście awaryjne: ten sam pojazd jedzie dalej albo ruch z zapasem. Kreska niesie kilka najlepszych linii; resztę odjazdów pokazuje kliknięcie w przystanek.
 2. **Zawsze wiadomo, co jedzie.** Linie jednego korytarza leżą na sobie,
    a numery stoją przy nich w zwartych grupkach. Najechanie kursorem
    podświetla jedną linię na całej długości i podaje godzinę w tym miejscu
@@ -58,8 +49,7 @@ i Discord: [CONTRIBUTING.md](CONTRIBUTING.md).
     samo wyszukiwanie wymaga sieci. Instalację przeglądarki proponują tylko
     po HTTPS albo na `localhost`.
 
-Ustawienia dla zespołu są pod zębatką ⚙: gęstość mapy i założenia czasowe
-(tempo marszu, prędkość roweru i auta).
+Ustawienia dla zespołu są pod zębatką ⚙, m.in. założenia czasowe (tempo marszu, prędkość roweru i auta).
 
 ## Uruchomienie lokalne
 
@@ -88,6 +78,31 @@ pobiera rozkład i buduje z niego SQLite; `planner.py` liczy mapę i trasy na
 tablicy połączeń dnia trzymanej w pamięci; `routes.py` wystawia API;
 `static/app.js` to cały front mapy. Architektura i algorytmy — w
 [docs/PROJECT.md](docs/PROJECT.md).
+
+## Claude i inne klienty MCP
+
+Pod `/mcp` stoi publiczny serwer MCP (bez tokena, tylko odczyt). Daje
+Claude'owi to samo, co pasażer może sprawdzić na stronie:
+
+- `plan_trip` — propozycje przejazdu z linkiem do mapy, też z pokładu
+  pojazdu i z ustawieniami spod ⚙ (tempo marszu, rower, Traficar,
+  „Pokaż więcej”);
+- `departures` i `stop_schedule` — najbliższe odjazdy i pełny rozkład ze
+  słupka na cały dzień;
+- `line`, `trip`, `train` — trasa linii, jeden kurs z godzinami, pociąg po
+  numerze (dziś z opóźnieniami);
+- `vehicles`, `bikes_near`, `cars_near` — pojazdy MPK, rowery WRM i auta
+  Traficara na żywo;
+- `find_stop` — jak wyszukiwarka rozumie nazwę przystanku.
+
+Dodanie do Claude Code:
+
+```bash
+claude mcp add --transport http metal-planner https://<adres-strony>/mcp
+```
+
+Na claude.ai: Ustawienia → Konektory → Dodaj własny konektor, z tym samym
+adresem. Lokalnie: `http://localhost:5001/mcp`.
 
 ## Wdrożenie
 
@@ -162,14 +177,12 @@ Cały sposób pracy opisuje [CONTRIBUTING.md](CONTRIBUTING.md).
 
 25. [docs/PROJECT.md](docs/PROJECT.md) — architektura, algorytmy,
     znane ograniczenia.
-26. [docs/FLOW_MAP_CONTRACT.md](docs/FLOW_MAP_CONTRACT.md) — gwarancje
-    zachowania mapy przepływów; zmienia się wyłącznie na wyraźne polecenie.
-27. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad
-    pojedynczymi funkcjami; też tylko na wyraźne polecenie.
-28. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu
+26. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — zasady nadrzędne nad
+    pojedynczymi funkcjami; zmienia się wyłącznie na wyraźne polecenie.
+27. [docs/FLOW_MAP_NOTES.md](docs/FLOW_MAP_NOTES.md) — testy kontraktu
     i otwarte pytania.
-29. [docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md) — jak mapa jest
+28. [docs/ROUTING_ALGORITHM.md](docs/ROUTING_ALGORITHM.md) — jak mapa jest
     liczona, krok po kroku na przykładzie (po angielsku).
-30. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład
+29. [docs/SIECHNICE_DANE.md](docs/SIECHNICE_DANE.md) — skąd wziąć rozkład
     gminy Siechnice.
-31. [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — automaty GitHuba i Discord.
+30. [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — automaty GitHuba i Discord.

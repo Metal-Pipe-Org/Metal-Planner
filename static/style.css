@@ -1817,35 +1817,6 @@ body.routes-off #results .notice.loading { display: none; }
 
 .flow-tip-row .line-chip { background: rgba(0, 0, 0, 0.07); }
 
-/* Debug "dlaczego tu jest": wiersz na podróż, powód pod nim mniejszym
-   drukiem - dymek ma się dać przeczytać, a nie rozszyfrować. */
-.flow-tip-why {
-    display: block;
-    max-width: 330px;
-    margin-top: 6px;
-    padding-top: 5px;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
-    font-size: 11.5px;
-    line-height: 1.35;
-    white-space: normal;
-}
-.flow-tip-why .why-head {
-    display: block;
-    margin: 4px 0 2px;
-    font-size: 10px;
-    color: var(--ink-soft);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-.flow-tip-why .why-journey { display: block; margin-top: 3px; }
-.flow-tip-why .why-reason,
-.flow-tip-why .why-more {
-    display: block;
-    padding-left: 10px;
-    font-size: 10.5px;
-    color: var(--ink-soft);
-}
-
 /* ------------------------------------------------- czas na mapie --- */
 
 /* Czas w dymku: liczba ma być pierwszą rzeczą, którą się tu czyta po numerze
@@ -2052,37 +2023,6 @@ body.routes-off #results .notice.loading { display: none; }
     padding: 0 3px;
     background: var(--line) content-box;
 }
-
-/* "Pokaż więcej" - przedłużenie zakresu mapy. Wygląda jak plakietka, nie
-   jak przycisk formularza; co robi, mówi dymek. */
-.headline-more {
-    flex: none;
-    margin: -2px -6px -2px 0;
-    padding: 3px 9px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--surface-alt);
-    color: var(--ink);
-    font: inherit;
-    font-size: 12px;
-    white-space: nowrap;
-    cursor: pointer;
-}
-
-.headline-more:hover { background: var(--ink); color: #fff; }
-
-/* Kręci się, aż gęstsza mapa dojdzie w całości (patrz showMore). */
-.headline-more .spinner {
-    display: none;
-    width: 9px;
-    height: 9px;
-    margin-right: 5px;
-    border-width: 1.5px;
-    vertical-align: -1px;
-}
-body.more-busy .headline-more .spinner { display: inline-block; }
-body.more-busy .headline-more { cursor: progress; }
-.headline-more:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
 /* Dymek paska - ten sam wygląd, co dymek ⓘ w ustawieniach. Nad wszystkim,
    także nad dokiem telefonu, i przepuszcza kliknięcia do mapy pod sobą. */
@@ -2388,7 +2328,7 @@ body.pushward-on .tt-times [data-dep-sec] { cursor: pointer; text-decoration: un
 
 #flow-panel[hidden] { display: none; }
 
-/* Schemat obok mapy (eksperyment „nowa mapa”, #367) - prawa część ekranu,
+/* Schemat obok mapy (#367) - prawa część ekranu,
    pod okienkiem z rozkładem: mapa i schemat mają być widoczne naraz. Rysunek
    przybliża się i przesuwa w oknie panelu, a cały panel zwija się do
    nagłówka - tak jak lista propozycji. */
@@ -2445,7 +2385,40 @@ body.dev-open .scheme-panel { right: 322px; }
 }
 
 .scheme-panel.collapsed .scheme-viewport,
+.scheme-panel.collapsed #scheme-moves,
 .scheme-panel.collapsed #scheme-fit { display: none; }
+
+/* Ile trwa każdy ruch: jedna linijka pod rysunkiem, poza nim - godzin w samym
+   schemacie nie ma. */
+.scheme-moves {
+    margin: 6px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+}
+
+.scheme-moves[hidden] { display: none; }
+
+.scheme-moves li {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px 6px;
+    padding: 2px 0;
+}
+
+.scheme-moves .scheme-moves-tight {
+    flex-basis: 100%;
+    font-size: 11.5px;
+    color: #b26a00;
+}
+
+.scheme-moves .scheme-moves-time {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+}
 
 /* Kreski i napisy nie łapią myszy: pudełko pod kreską przejeżdżającej linii
    ma dalej pokazywać swoją tablicę. */
@@ -2468,9 +2441,40 @@ body.dev-open .scheme-panel { right: 322px; }
     font: 600 13px system-ui, sans-serif; paint-order: stroke; stroke-linejoin: round;
     fill: #1c3550; stroke: #d6eaf8; stroke-width: 4px; }
 /* Plakietka z numerami jak grupka numerów na mapie (.line-cluster). */
-.scheme-badge { pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
-.scheme-badge rect { fill: #fff; stroke: rgba(0, 0, 0, 0.25); stroke-width: 1; }
-.scheme-num { text-anchor: middle; dominant-baseline: central; font: 700 11px system-ui, sans-serif; }
+/* Plakietka to ta sama grupka numerów co na mapie (clusterHtml), wyśrodkowana
+   na kresce; ramka wokół niej nie łapie kursora, numery tak. */
+.scheme-badge, .scheme-hop-badge { pointer-events: none; overflow: visible; }
+.scheme-cluster-anchor { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.scheme-cluster-anchor .line-cluster { position: static; transform: none; }
+/* Kropka auta na krótkiej odnodze - kropkowanej jak dojście do auta na mapie,
+   w fiolecie auta. */
+.scheme-car-stub { fill: none; stroke: #6a1b9a; stroke-width: 2.5; stroke-dasharray: 1 6; stroke-linecap: round; }
+/* Podświetlenie leży nad kreskami, ale kursora nie łapie: inaczej zasłania
+   kreskę, nad którą stoi kursor, ta traci najechanie, podświetlenie znika
+   i wszystko zaczyna się od nowa - miganie. */
+#scheme-pick-layer { pointer-events: none; }
+.scheme-car-hit { fill: transparent; pointer-events: all; cursor: pointer; }
+/* Kropka auta wskazana na mapie albo na schemacie. */
+.scheme-car.picked circle:first-child { stroke: #111; stroke-width: 3; }
+/* Rower jak przejście pieszo, ale w pomarańczu roweru z mapy - kropkowany,
+   żeby nie mylił się z kreskowanymi dodatkowymi przejściami; da się na niego
+   najechać. */
+.scheme-walk.scheme-walk-bike { pointer-events: all; cursor: pointer; }
+.scheme-walk.scheme-walk-bike path { stroke: #ef6c00; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
+.scheme-walk.scheme-walk-bike circle { fill: #ef6c00; }
+.scheme-walk-bike .scheme-walk-pill { fill: #fff3e0; stroke: #ef6c00; }
+.scheme-walk-bike .scheme-walk-text { fill: #bf360c; }
+.scheme-walk-brace path.scheme-hit { stroke: transparent; stroke-width: 14; stroke-dasharray: none; }
+.scheme-walk-bike.picked path:not(.scheme-hit) { stroke-width: 4.5; }
+.scheme-walk-bike.picked .scheme-walk-pill { stroke-width: 2.5; }
+/* Stacje roweru spod przystanku w rogu pudełka. */
+.scheme-bike-corner { cursor: pointer; }
+.scheme-bike-corner rect { fill: #fff3e0; stroke: #ef6c00; stroke-width: 1; }
+.scheme-bike-corner text { fill: #bf360c; font: 600 10px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.scheme-bike-corner.picked rect { stroke-width: 2.5; }
+#scheme-tip.leaflet-tooltip { position: fixed; z-index: 1100; pointer-events: none; }
+/* „Nic do wzięcia” w dymku auta - informacja, ale nie powód, żeby je brać. */
+.ogarniam-none { font-size: 0.85em; color: #888; }
 
 #scheme-canvas svg {
     display: block;
@@ -3640,6 +3644,26 @@ ul.tt-legend {
 .leaflet-tooltip-right::before {
     margin-top: calc(-6px - var(--tip-shift, 0px));
 }
+
+.scheme-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.scheme-tip .scheme-tip-row { background: #fff; border-radius: 8px; padding: 6px 10px; margin-bottom: 3px; font: 12px system-ui, sans-serif; color: #263238; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); white-space: nowrap; }
+#scheme-canvas.has-pick g.scheme-stroke:not(.scheme-pick) { opacity: 0.25; }
+#scheme-canvas.has-pick g.scheme-walk:not(.scheme-pick) { opacity: 0.25; }
+.tip-last { margin-left: 6px; color: #6b7785; font-size: 0.85em; font-weight: 400; }
+#scheme-canvas g.scheme-walk.scheme-pick path { stroke: #37474f; stroke-width: 3; }
+#scheme-canvas g.scheme-walk.scheme-pick circle { fill: #37474f; }
+#scheme-canvas g.scheme-pick .scheme-line { stroke-width: 6; }
+.move-tip { background: #fff; border-radius: 8px; padding: 6px 10px; font: 12px system-ui, sans-serif; color: #263238; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+.move-tip-row { margin: 2px 0; white-space: nowrap; }
+.move-tip-goal { font-size: 14px; }
+.move-tip-icon { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.move-tip-note { color: #e65100; font-weight: 600; }
+.scheme-walk-brace path { stroke-dasharray: 5 4; }
+.scheme-tip .scheme-tip-row { white-space: normal; max-width: 320px; }
+.leaflet-tooltip .move-tip,
+.scheme-tip .move-tip { padding: 0; box-shadow: none; background: none; border-radius: 0; }
+.move-tip .tt-rows.tt-lines { grid-template-columns: minmax(34px, max-content) max-content max-content; margin-bottom: 2px; }
+.move-tip .tt-rows.tt-lines li { border-bottom: 0; padding: 0; }
 
 .vehicle-stats {
     position: absolute;

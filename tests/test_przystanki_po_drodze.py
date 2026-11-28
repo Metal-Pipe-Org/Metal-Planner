@@ -17,6 +17,7 @@ from flask import Flask, render_template
 import gtfs
 import planner
 from tests.gtfs_builder import make_day
+from tests import flow
 
 ROOT = Path(__file__).resolve().parent.parent
 WHEN = datetime(2026, 1, 5, 0, 0, 0)
@@ -36,7 +37,7 @@ def test_etap_wypisuje_mijane_przystanki(install_day):
     day = make_day([CZWORKA], names=NAZWY)
     install_day(day)
 
-    [etap] = _przejazdy(planner.plan_flow("Start", "Koniec", WHEN))
+    [etap] = _przejazdy(flow.plan_flow("Start", "Koniec", WHEN))
 
     assert [s["name"] for s in etap["via"]] == ["Alfa", "Beta"]
     # Odjazd z przystanku, nie przyjazd - jak w kursie z rozkładu.
@@ -50,7 +51,7 @@ def test_przejazd_o_jeden_przystanek_nie_ma_czego_wypisac(install_day):
     install_day(make_day([{"trip_id": "JEDYNKA", "label": "Autobus 1",
                            "stops": [("S", 0, 0), ("E", 300, 300)]}]))
 
-    [etap] = _przejazdy(planner.plan_flow("S", "E", WHEN))
+    [etap] = _przejazdy(flow.plan_flow("S", "E", WHEN))
 
     assert etap["via"] == []
 

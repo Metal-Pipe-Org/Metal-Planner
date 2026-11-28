@@ -15,6 +15,7 @@ import gtfs
 import planner
 import polinka
 from tests.gtfs_builder import make_day
+from tests import flow
 
 WW, NG = polinka.ID_PREFIX + "WW", polinka.ID_PREFIX + "NG"
 WTOREK = date(2026, 10, 13)
@@ -172,7 +173,7 @@ def test_polinka_jako_skrot_obok_komunikacji(install_day):
     """Przypadek kontrolny: tam, gdzie Polinka naprawdę skraca drogę, stoi na
     mapie od razu - ale obok komunikacji, nie zamiast niej."""
     install_day(_dzien_kontrolny())
-    wynik = planner.plan_flow("Hydropolis", "Politechnika",
+    wynik = flow.plan_flow("Hydropolis", "Politechnika",
                               datetime(2026, 10, 19, 10, 0))
 
     assert sorted(s["num"] for s in wynik["segments"]) == ["146", "Polinka"]
@@ -185,7 +186,7 @@ def test_polinka_jako_skrot_obok_komunikacji(install_day):
 
 def test_polinka_nie_jezdzi_w_sobote(install_day):
     install_day(_dzien_kontrolny())
-    wynik = planner.plan_flow("Hydropolis", "Politechnika",
+    wynik = flow.plan_flow("Hydropolis", "Politechnika",
                               datetime(2026, 10, 17, 10, 0))
 
     assert {s["num"] for s in wynik["segments"]} == {"146"}
@@ -218,7 +219,7 @@ def test_zrzut_z_364_polinka_nie_jest_jedyna_opcja(install_day):
     później wyjścia. Teraz mapa i lista są z komunikacji, a przeprawa nie
     staje, bo po drugiej stronie nie ma w co narysowanego wsiąść."""
     install_day(_dzien_ze_zrzutu())
-    wynik = planner.plan_flow("Wybrzeże Wyspiańskiego", "Radwanice - ul. Skrajna",
+    wynik = flow.plan_flow("Wybrzeże Wyspiańskiego", "Radwanice - ul. Skrajna",
                               datetime(2026, 10, 19, 14, 35))
 
     assert {s["num"] for s in wynik["segments"]} == {"4", "810+81"}

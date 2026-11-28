@@ -1,6 +1,6 @@
 """Testy tej połowy kontraktu mapy, która mieszka WE FRONCIE.
 
-Kontrakt (docs/FLOW_MAP_CONTRACT.md) ma 10 punktów, a test_flow_map_contract.py
+Kontrakt ma 10 punktów, a test_flow_map_contract.py
 sięga wyłącznie planner.py. Trzy punkty żyją jednak w całości albo w połowie
 w static/app.js i do 2026-08-27 nie były sprawdzane niczym:
 
@@ -25,16 +25,16 @@ są macOS-owe i gdzie indziej się pominą (patrz pytest.skip niżej); gdyby
 kiedyś doszło CI na Linuksie, trzeba będzie tu dołożyć drugi silnik.
 
 Odświeżenie fixture'a po zmianie w plannerze (data - dzień powszedni
-z bieżącego rozkładu, ta sama w FIXTURE_DATE niżej; jedno „Pokaż więcej",
-bo przy domyślnej gęstości ta relacja ma za mało grupek numerów dla punktu 7;
-źródła na żywo wyłączone, żeby plik nie zależał od sieci):
+z bieżącego rozkładu; źródła na żywo wyłączone, żeby plik nie zależał od
+sieci; uruchamiać z korzenia repo, stąd `from tests import flow`):
 
     .venv/bin/python -c "
-    from datetime import datetime; import planner, json, pkp, traficar, bikes
+    from datetime import datetime; import json, pkp, traficar, bikes
+    from tests import flow
     pkp.enabled = traficar.enabled = lambda: False
     traficar.zone = lambda: None
     bikes._fetch = lambda url: (_ for _ in ()).throw(OSError(url))
-    r = planner.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 12, 1, 15, 37), more=1)
+    r = flow.plan_flow('Sosnowiecka', 'Wojszyce', datetime(2026, 12, 1, 15, 37))
     json.dump(r, open('tests/js/flow_fixture.json', 'w'),
               ensure_ascii=False, separators=(',', ':'))"
 """
@@ -49,6 +49,7 @@ import pytest
 from flask import Flask, render_template
 
 import settings_registry
+from tests import flow
 
 ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = ROOT / "tests" / "js"
@@ -221,17 +222,6 @@ def test_a_dev_toggle_actually_changes_the_drawing(front):
     numerkiem powiększa grupkę w OBU wymiarach - i musi wejść do pomiaru
     kolizji, inaczej grupki zaczęłyby na siebie wchodzić."""
     _check(front, "przelacznik_czasu_zmienia_grupki")
-
-
-# --------------------------------------------------- tryb awaryjny ---------
-
-def test_fallback_mode_shows_a_notice_on_screen(front):
-    """Gdy serwer przyśle mapę w trybie awaryjnym (samą najszybszą trasę
-    zamiast wachlarza), ekran ma to powiedzieć - takim samym małym
-    komunikatem, jak pozostałe błędy, dopisanym NAD listą, żeby pokazana
-    trasa nadal była widoczna. Bez tego rzadka mapa wygląda identycznie jak
-    "tędy naprawdę nic nie jedzie"."""
-    _check(front, "tryb_awaryjny_mowi_o_sobie_na_ekranie")
 
 
 # ------------------------------------------- tablica odjazdów przesiadki -
@@ -490,17 +480,6 @@ def test_the_corner_window_opens_on_the_start_stop(front):
     _check(front, "okienko_startuje_od_przystanku_startowego")
 
 
-# ------------------------------------------------------- grupa stacji PKP -
-
-def test_a_station_group_travels_to_the_server_under_its_canonical_name(front):
-    """Na ekranie "WROCŁAW (dowolna stacja)", w zapytaniu "WROCŁAW -".
-    Para prettyStopName/rawStopName musi się znosić: samo ładne wyświetlanie
-    posyła ładną nazwę do /api/flow, a stamtąd wraca fałszywe "nie znaleziono
-    przystanku" (błąd zgłoszony na żywo, przez który etykieta wróciła kiedyś
-    do myślnika - patrz docstring gtfs._match_city_group)."""
-    _check(front, "grupa_stacji_wraca_kanoniczna")
-
-
 # ------------------------------------------------- przedłużanie zakresu ---
 
 def test_a_full_map_without_a_list_is_not_an_error(front):
@@ -509,13 +488,6 @@ def test_a_full_map_without_a_list_is_not_an_error(front):
     każe zawężać okna czasowego: to dokładne odwrócenie tego, co użytkownik
     przed chwilą zrobił przyciskiem „+X min". Pusta mapa zostaje błędem."""
     _check(front, "pelna_mapa_bez_listy_nie_jest_bledem")
-
-
-def test_show_more_adds_one_starting_density_per_click(front):
-    """„Pokaż więcej" przy pasku nad mapą (punkt 2): kliknięcie wysyła do
-    serwera `more` razem z gęstością z suwaka, a po trzecim kliknięciu
-    przycisku nie ma - zwykły licznik, niezależny od serwera."""
-    _check(front, "pokaz_wiecej_doklada_gestosc")
 
 
 # ------------------------------------------------- pojazdy na żywo -
@@ -605,15 +577,6 @@ def test_the_drop_off_zone_shows_under_the_cursor(front):
 
 # ------------------------------------------------------ rower na mapie -
 
-def test_a_bike_shows_its_rides_only_under_the_cursor(front):
-    """Rower miejski jest miejscem, do którego mapa dowozi, i z którego da się
-    jeszcze dojechać gdzieś, gdzie zdąży się w oknie mapy. Kropka stoi sama;
-    przejazdy - kilkaset naraz na całej mapie - pojawiają się dopiero pod
-    kursorem i znikają razem z nim. Wachlarz wygląda tak samo jak bez
-    rowerów."""
-    _check(front, "rower_pokazuje_przejazdy_dopiero_pod_kursorem")
-
-
 def test_a_bike_on_another_day_does_not_pretend_to_know(front):
     """Stacja stoi w tym samym miejscu co jutro, więc kropka zostaje. Ile
     w niej będzie rowerów - nie wiadomo, bo liczba jest z tej chwili; mapa
@@ -621,12 +584,6 @@ def test_a_bike_on_another_day_does_not_pretend_to_know(front):
     jutrzejszą. Godzina „jesteś przy nim" pochodzi z rozkładu tamtego dnia,
     więc zostaje."""
     _check(front, "rower_na_inny_dzien_nie_udaje_ze_wie")
-
-
-def test_bike_rides_can_stay_on_the_map(front):
-    """Przełącznik pod zębatką: kreski wybranych przejazdów i ich stacje
-    końcowe stoją na mapie na stałe, a nie tylko pod kursorem."""
-    _check(front, "rower_przejazdy_na_stale_po_zapaleniu")
 
 
 def test_vans_are_a_switch_sent_to_the_server(front):

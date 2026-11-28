@@ -1,7 +1,7 @@
 /* Emulator frontu mapy przepływów: tyle Leafletu, DOM-u i przeglądarki, ile
    static/app.js potrzebuje, żeby dać się URUCHOMIĆ bez okna.
 
-   Po co: połowa kontraktu mapy (docs/FLOW_MAP_CONTRACT.md) mieszka we
+   Po co: połowa kontraktu mapy mieszka we
    froncie - punkt 7 (grupki numerów, wskazywanie linii), punkt 8 (progi
    jasności) i punkt 10 (godziny na mapie) nie miały jak być testowane, bo
    testy w tests/ sięgają wyłącznie planner.py. Ten plik to brakująca
@@ -627,7 +627,7 @@ const INJECTION = `
     missedTransfer, boardLiveHtml, boardDelays,
     set trainDelays(v) { trainDelays = v; },
     nodePoint, seedStartPanel,
-    prettyStopName, rawStopName, queryParams, displayValue, adoptNames,
+    queryParams, displayValue, adoptNames,
     pickEndpoint,
     get startInput() { return startInput; },
     get endInput() { return endInput; },
@@ -639,11 +639,9 @@ const INJECTION = `
     get flowBikeLayer() { return flowBikeLayer; },
     get flowBikeRideLayer() { return flowBikeRideLayer; },
     BIKE_STYLE, BIKE_UNKNOWN_STYLE,
-    showMore, MAX_MAP_MORE,
     // Etapy wyszukiwania podawane wprost, bez sieci (zgłoszenie #229).
     applyStage,
     get flowLayer() { return flowLayer; },
-    get mapMore() { return mapMore; },
     get flowPanel() { return flowPanel; },
     get flowPanelBody() { return flowPanelBody; },
     // Przystanki narysowanych linii i nazwy przy przybliżeniu (#252, #253).
@@ -695,6 +693,6 @@ app.timeOpts = settingView({hover: 'time-hover', ends: 'time-ends', chips: 'time
                             headline: 'time-show-headline', ride: 'time-ride'});
 app.dotOpts = settingView({size: 'dot-size', rows: 'dot-rows', ttPast: 'tt-past',
     center: 'dot-center', tipCursor: 'tip-cursor', tipPanel: 'tip-panel',
-    bikeTimes: 'bike-times', bikeRides: 'bike-rides', carTimes: 'car-times',
-    why: 'debug-why', whySeg: 'debug-why-seg', namesZoom: 'names-zoom'});
+    bikeTimes: 'walk-time', carTimes: 'car-times',
+    why: 'debug-why', namesZoom: 'names-zoom'});
 app.soundOpts = settingView({level: 'sound-level'});

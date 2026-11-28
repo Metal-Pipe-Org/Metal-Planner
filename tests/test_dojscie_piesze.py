@@ -15,6 +15,7 @@ import pytest
 import gtfs
 import planner
 from gtfs_builder import make_day
+from tests import flow
 
 WHEN = datetime(2026, 1, 5, 0, 0, 0)   # dep_sec = 0, dla czytelnych liczb
 
@@ -331,12 +332,12 @@ def test_the_map_draws_such_a_course_from_the_origin_stop(install_day):
     tamtędy "przejeżdża" (patrz _transfer_nodes)."""
     day = _day_z_kursem_przez_start()
     install_day(day)
-    flow = planner.plan_flow("Wojszyce", "CEL", when=WHEN)
-    assert flow["segments"], "mapa pusta"
+    wynik = flow.plan_flow("Wojszyce", "CEL", when=WHEN)
+    assert wynik["segments"], "mapa pusta"
     start_point = planner._round_path([day.stop_coords["START"]])[0]
-    assert all(seg["path"][0] == start_point for seg in flow["segments"]), \
+    assert all(seg["path"][0] == start_point for seg in wynik["segments"]), \
         "kawałek zaczyna się przed przystankiem startowym"
-    assert any(node["name"] == "Wojszyce" for node in flow["nodes"]), \
+    assert any(node["name"] == "Wojszyce" for node in wynik["nodes"]), \
         "brak kropki na przystanku startowym"
 
 
@@ -391,29 +392,11 @@ def test_the_map_anchors_such_a_course_at_the_nearer_stop(install_day):
     pójdzie, skoro ten sam autobus zaraz podjeżdża bliżej."""
     day = _day_z_dwoma_dojsciami()
     install_day(day)
-    flow = planner.plan_flow("", "CEL", when=WHEN, start_point=A)
-    assert flow["segments"], "mapa pusta"
+    wynik = flow.plan_flow("", "CEL", when=WHEN, start_point=A)
+    assert wynik["segments"], "mapa pusta"
     blisko = planner._round_path([day.stop_coords["BLISKI"]])[0]
-    assert all(seg["path"][0] == blisko for seg in flow["segments"])
-    assert [n["name"] for n in flow["nodes"] if not n.get("end")] == ["Skrajna"]
-
-
-def test_asking_again_from_the_same_point_does_not_search_again(install_day,
-                                                                 monkeypatch):
-    """Zgłoszenie #229: „pokaż więcej" przy relacji z punktu liczyło wszystko
-    od zera, bo każde zapytanie dokładało punkt do świeżej kopii dnia - z pustą
-    pamięcią wyszukiwań. To samo pytanie z tego samego punktu ma z niej brać."""
-    install_day(_day_z_dwoma_dojsciami())
-    searches = []
-    value_journeys = planner._value_journeys
-    monkeypatch.setattr(planner, "_value_journeys",
-                        lambda *args: searches.append(args) or value_journeys(*args))
-    first = planner.plan_flow("", "CEL", when=WHEN, start_point=A)
-    searched = len(searches)
-    assert searched, "mapa z wartości w ogóle nie szukała"
-    again = planner.plan_flow("", "CEL", when=WHEN, start_point=A)
-    assert len(searches) == searched
-    assert again["segments"] == first["segments"]
+    assert all(seg["path"][0] == blisko for seg in wynik["segments"])
+    assert [n["name"] for n in wynik["nodes"] if not n.get("end")] == ["Skrajna"]
 
 
 # ---- dojście musi ZDĄŻYĆ ------------------------------------------------
@@ -450,15 +433,15 @@ def test_no_journey_leaves_before_the_asked_time(install_day):
     assert planner._origin_walk(day, ["START"])["KOSCIUSZKI"][1] > 360, \
         "scenariusz: dojście ma NIE zdążyć na szesnastkę"
     install_day(day)
-    flow = planner.plan_flow("DWORZEC GŁÓWNY", "PL. GRUNWALDZKI",
+    wynik = flow.plan_flow("DWORZEC GŁÓWNY", "PL. GRUNWALDZKI",
                              when=datetime(2026, 1, 5, 8, 31))
-    assert flow["journeys"], "lista pusta"
-    for journey in flow["journeys"]:
+    assert wynik["journeys"], "lista pusta"
+    for journey in wynik["journeys"]:
         assert journey["departure_sec"] >= ODJAZD_168, \
             f"wyjście o {journey['departure']}, przed godziną z pytania"
         assert journey["wait_min"] >= 0
     assert [[leg["num"] for leg in j["legs"] if leg["kind"] == "ride"]
-            for j in flow["journeys"]] == [["2", "16"]]
+            for j in wynik["journeys"]] == [["2", "16"]]
 
 
 def test_a_point_too_far_from_everything_is_an_honest_error():
@@ -474,7 +457,7 @@ def test_a_proposal_opened_by_a_walk_leaks_no_working_fields(install_day):
     """Etap otwierający trasę czyta własne `_sec`, żeby policzyć godzinę
     wyjścia - po tym pole robocze nie może wyjść do klienta."""
     install_day(_day_z_dwoma_dojsciami())
-    flow = planner.plan_flow("", "CEL", when=WHEN, start_point=A)
-    legs = [leg for journey in flow["journeys"] for leg in journey["legs"]]
+    wynik = flow.plan_flow("", "CEL", when=WHEN, start_point=A)
+    legs = [leg for journey in wynik["journeys"] for leg in journey["legs"]]
     assert legs[0]["kind"] == "walk", "scenariusz miał otwierać się dojściem"
     assert not [key for leg in legs for key in leg if key.startswith("_")]
